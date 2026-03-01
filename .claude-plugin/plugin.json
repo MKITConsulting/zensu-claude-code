@@ -6,7 +6,7 @@
     "name": "Zensu",
     "email": "hello@zensu.dev"
   },
-  "repository": "https://github.com/MKITConsulting/zensu-plugin",
+  "repository": "https://github.com/MKITConsulting/zensu-claude-code",
   "license": "MIT",
   "keywords": ["product-lifecycle", "features", "security", "mcp"],
   "agents": "./agents/",
