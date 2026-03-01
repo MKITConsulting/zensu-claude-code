@@ -1,0 +1,25 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'LAST_MSG=$(git log -1 --pretty=%s 2>/dev/null); if echo \"$LAST_MSG\" | grep -qoE \"\\[ZEN-[0-9]+\\]\"; then echo \"zensu: feature reference detected in commit: $(echo \"$LAST_MSG\" | grep -oE \"\\[ZEN-[0-9]+\\]\" | tr \"\\n\" \" \")\"; fi'"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash -c 'HEAD=$(git rev-parse HEAD 2>/dev/null) && BRANCH=$(git branch --show-current 2>/dev/null) && echo \"zensu: pulse session ready — HEAD=$HEAD branch=$BRANCH\" || echo \"zensu: not a git repository, pulse session skipped\"'"
+          }
+        ]
+      }
+    ]
+  }
+}

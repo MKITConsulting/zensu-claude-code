@@ -1,0 +1,16 @@
+{
+  "name": "zensu",
+  "version": "1.0.0",
+  "description": "Product Lifecycle Manager — Features as First-Class Citizens",
+  "author": {
+    "name": "Zensu",
+    "email": "hello@zensu.dev"
+  },
+  "repository": "https://github.com/MKITConsulting/zensu-plugin",
+  "license": "MIT",
+  "keywords": ["product-lifecycle", "features", "security", "mcp"],
+  "agents": "./agents/",
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "mcpServers": "./.mcp.json"
+}
