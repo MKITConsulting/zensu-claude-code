@@ -10,8 +10,8 @@ Implement a tracked Zensu feature end-to-end. Loads feature context, provides se
 
 ## Prerequisites
 
-- Zensu Backend running (`make dev` in `backend/`)
-- Zensu MCP Server running (`make mcp` in `backend/`)
+- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- `ZENSU_API_KEY` environment variable set
 - A feature ID (ZEN-xxx format or UUID) to implement
 
 ## Workflow
@@ -113,7 +113,7 @@ Present a completion summary:
 
 ## Important Notes
 
-- The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) are handled via `PATCH /api/features/{id}/status` (Backend REST endpoint, not an MCP tool).
+- The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) require a separate API call, not an MCP tool.
 - Always reference the feature ID in commit messages: `feat(component): description [ZEN-xxx]`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
 

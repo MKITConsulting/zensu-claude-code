@@ -2,7 +2,7 @@
   "mcpServers": {
     "zensu": {
       "type": "http",
-      "url": "${ZENSU_MCP_URL:-http://localhost:3001}/mcp"
+      "url": "${ZENSU_MCP_URL:-https://mcp.zensu.dev}/mcp"
     }
   }
 }

@@ -1,0 +1,37 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors / IDEs
+/.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment & secrets
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.pfx
+
+# Logs
+*.log
+
+# Dependencies
+node_modules/
+vendor/
+
+# Build output
+dist/
+build/
+out/
+
+# Claude Code
+.claude/plans/
+.claude/settings.local.json
+
+# Internal
+OSS_READINESS_REPORT.md

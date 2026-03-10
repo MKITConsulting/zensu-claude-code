@@ -10,8 +10,8 @@ Scan an existing repository to discover undocumented features, then review and i
 
 ## Prerequisites
 
-- Zensu Backend running (`make dev` in `backend/`)
-- Zensu MCP Server running (`make mcp` in `backend/`)
+- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- `ZENSU_API_KEY` environment variable set
 - Product ID known (create one first with `/zensu:bootstrap` if needed)
 - Working in the repository root (or a subdirectory)
 

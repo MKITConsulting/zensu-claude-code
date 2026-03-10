@@ -10,8 +10,8 @@ Bootstrap a new Zensu product from a vision document through to a fully configur
 
 ## Prerequisites
 
-- Zensu Backend running (`make dev` in `backend/`)
-- Zensu MCP Server running (`make mcp` in `backend/`)
+- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- `ZENSU_API_KEY` environment variable set
 - A product plan or vision document (MVP spec, PRD, or idea paper)
 
 ## Workflow
