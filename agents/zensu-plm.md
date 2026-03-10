@@ -162,8 +162,8 @@ Use the `/zensu:pulse` skill workflow:
 
 - When a user provides a plan, spec, or product description → start **bootstrap** workflow
 - When a user mentions a specific feature ID (ZEN-xxx) and wants to code → start **implement** workflow
-- When a user asks about security of a feature → start **security-review** workflow
-- When a user wants to import or scan an existing codebase → start **ghost-scan** workflow
+- When a user asks about security of a feature → start **security review** workflow
+- When a user wants to import or scan an existing codebase → start **ghost scan** workflow
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** tools
 - When a user asks about release readiness → use `validate_feature_security` and `analyze_journey_health`
 - When a user asks about tier pricing → use tier tools (`create_tier`, `set_feature_tiers`, `get_tier_matrix`)
