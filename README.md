@@ -1,6 +1,9 @@
 # Zensu Plugin for Claude Code
 
-Product Lifecycle Manager — Features as First-Class Citizens.
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+
+Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin connects Claude Code to the Zensu platform, enabling you to track features from roadmap through release — with built-in security analysis, artifact linking, and developer session journaling.
 
 ## Installation
 
@@ -8,12 +11,21 @@ Product Lifecycle Manager — Features as First-Class Citizens.
 claude plugin install zensu --scope project
 ```
 
-## Prerequisites
+## Authentication
 
-- Zensu MCP Server running (default: `http://localhost:3001/mcp`)
-- `ZENSU_API_KEY` environment variable set (format: `zsk_...`)
+### OAuth Browser Login (Recommended)
 
-Optionally set `ZENSU_MCP_URL` to override the default MCP server URL.
+No configuration needed. When you first use a Zensu tool, Claude Code will automatically open your browser to sign in. Tokens are cached and refreshed automatically.
+
+### API Key (CI/CD)
+
+For headless environments where browser login isn't available:
+
+```bash
+export ZENSU_API_KEY=zsk_...
+```
+
+Optionally set `ZENSU_MCP_URL` to override the default MCP server URL (`https://mcp.zensu.dev`).
 
 ## What's Included
 
@@ -44,25 +56,26 @@ Product Lifecycle Manager agent that automatically handles Zensu-related tasks. 
 
 ## Quick Start
 
-1. Start the Zensu backend and MCP server:
-   ```bash
-   cd backend && make dev   # Backend on :8080
-   cd backend && make mcp   # MCP server on :3001
-   ```
+Typical workflow: **bootstrap** → **implement** → **security-review**
 
-2. Bootstrap a new product:
+1. Bootstrap a new product:
    ```
    /zensu:bootstrap
    ```
 
-3. Implement a feature:
+2. Implement a feature:
    ```
    /zensu:implement
    ```
 
-4. Run a security review:
+3. Run a security review:
    ```
    /zensu:security-review
+   ```
+
+4. Scan an existing repo for undocumented features:
+   ```
+   /zensu:ghost-scan
    ```
 
 ## Configuration
@@ -71,8 +84,71 @@ Product Lifecycle Manager agent that automatically handles Zensu-related tasks. 
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_MCP_URL` | `http://localhost:3001` | MCP server base URL |
-| `ZENSU_API_KEY` | (required) | API key for authentication |
+| `ZENSU_MCP_URL` | `https://mcp.zensu.dev` | MCP server base URL |
+| `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
+
+### Default Agent
+
+Installing this plugin sets `zensu-plm` as the default agent for the project scope via `settings.json`. The agent automatically delegates Zensu-related tasks (feature tracking, security reviews, product lifecycle workflows).
+
+To override or disable:
+- Edit `settings.json` in the plugin root to change the default agent
+- Remove the `"agent"` key from `settings.json` to restore the Claude Code default
+
+## Data & Privacy
+
+When using this plugin, certain data is transmitted to the Zensu MCP server.
+
+**What data is transmitted:**
+- Product names, feature titles, and descriptions
+- Security classifications and OWASP tags
+- File paths (not file contents), git SHAs, and branch names
+- Vision documents (may contain product strategy and roadmap details)
+- Pulse session metadata: tool names, durations, feature IDs, file paths
+
+**Where it goes:**
+- Default: `https://mcp.zensu.dev` (all data transmitted via HTTPS)
+- Override with `ZENSU_MCP_URL` to point to a self-hosted instance
+
+**What is NOT transmitted:**
+- Source code content
+- File contents (only paths)
+- Error messages (unless `freetext_logging` is explicitly enabled for Pulse)
+
+**Data retention:**
+- Pulse sessions: 90 days by default (configurable)
+
+**Self-hosting:**
+Set `ZENSU_MCP_URL` to your own instance to keep all data on your infrastructure.
+
+**Regulated environments:**
+If you operate under GDPR, CCPA, or similar data protection regulations, review the data transmission above and consider using a self-hosted instance to maintain full control over your data.
+
+## Platform Support
+
+Hooks use `bash -c` and require a POSIX-compatible shell. Supported platforms:
+- macOS
+- Linux
+
+Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supported for hooks.
+
+## Troubleshooting
+
+| Problem | Solution |
+|---------|----------|
+| MCP server unreachable | Check `ZENSU_MCP_URL` value and network connectivity |
+| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) |
+| Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
+| Agent triggers on non-Zensu tasks | Override the default agent (see [Default Agent](#default-agent)) |
+| OAuth login not opening | Check your default browser settings |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on reporting bugs, suggesting features, and submitting pull requests.
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for our responsible disclosure policy.
 
 ## License
 
