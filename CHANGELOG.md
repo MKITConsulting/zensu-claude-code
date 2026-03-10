@@ -24,6 +24,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Improved PostToolUse hook with graceful failure handling
 - Fixed SessionStart hook detached HEAD handling
 - Downgraded version to 0.1.0 (pre-stable API)
+- Pinned MCP server URL to v1 endpoint for forward compatibility
+- Standardized terminology in agent decision rules
 
 ## [0.1.0] - 2026-03-01
 

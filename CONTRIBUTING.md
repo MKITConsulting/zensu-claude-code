@@ -38,7 +38,7 @@ export ZENSU_API_KEY=zsk_...
 
 - **No comments in code** — code should be self-explanatory
 - **Conventional Commits** — use prefixes like `feat:`, `fix:`, `chore:`, `docs:`
-- **Skills** — follow the existing phase-based workflow pattern (see `skills/bootstrap/SKILL.md` for reference). Include `Prerequisites`, `MCP Tools Used`, and `MCP Prompts Used` sections.
+- **Skills** — follow the existing phase-based workflow pattern (see `skills/bootstrap/SKILL.md` for reference). Include `Prerequisites` and `MCP Tools Used` sections. Add `MCP Prompts Used` if the skill uses MCP prompts.
 - **Agents** — follow the structure of `agents/zensu-plm.md` (decision rules, tool references, important rules)
 - **Hooks** — use `bash -c` with proper error handling and `2>/dev/null` for optional commands
 
