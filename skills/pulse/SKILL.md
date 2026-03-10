@@ -2,6 +2,12 @@
 
 Your Developer Journal: privacy-first session tracking that helps you understand your development patterns.
 
+## Prerequisites
+
+- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- `ZENSU_API_KEY` environment variable set (or OAuth browser login)
+- Git repository (for HEAD SHA and branch context)
+
 ## When to Use
 
 Run this workflow at the start and end of each coding session. Pulse automatically tracks which MCP tools you use and which features you touch — never code content, only file paths and tool names.
@@ -61,7 +67,7 @@ Pulse is designed as "Your Developer Journal" — personal and private by defaul
 - **Team visibility**: Off by default — your sessions are only visible to you
 - **Retention**: Data auto-expires after 90 days (configurable)
 
-Manage privacy settings via the `/api/me/privacy` endpoint or the web UI.
+Manage privacy settings via the Zensu web UI or API.
 
 ## Example Session Flow
 
@@ -78,3 +84,11 @@ Manage privacy settings via the `/api/me/privacy` endpoint or the web UI.
 # Review what you accomplished
 > pulse_session_summary session_id=<id>
 ```
+
+## MCP Tools Used
+
+| Tool | Phase | Purpose |
+|------|-------|---------|
+| `pulse_start_session` | 1 | Start session with git HEAD and branch |
+| `pulse_end_session` | 3 | End session with changed file paths |
+| `pulse_session_summary` | 3 | Review session activity breakdown |
