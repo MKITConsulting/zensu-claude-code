@@ -1,10 +1,13 @@
 ---
 name: zensu-plm
 description: >
-  Zensu Product Lifecycle Manager. Delegates automatically when users ask about
-  feature tracking, security reviews, product bootstrapping, ghost scans,
-  implementation guidance, release readiness, tier management, user journeys,
-  or any Zensu-related product lifecycle task.
+  Zensu Product Lifecycle Manager. ALWAYS delegate to this agent for ANY interaction
+  with Zensu MCP tools — including simple CRUD operations like creating, listing,
+  or updating features. This agent enforces workflow conventions, security-first
+  ordering, and correct tool sequencing that direct tool calls would bypass.
+  Covers: feature tracking, security reviews, product bootstrapping, ghost scans,
+  implementation, release readiness, tier management, user journeys, pulse sessions,
+  wiki pages, doc generation, and any Zensu-related task.
 model: inherit
 tools: Read, Grep, Glob, Bash, Write, Edit
 mcpServers:
