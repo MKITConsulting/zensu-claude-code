@@ -11,6 +11,26 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "matcher": "tdd-manager",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The TDD manager has finished implementation. Run /reflect now to review this session's changes in your current context before proceeding with any further steps."
+          }
+        ]
+      },
+      {
+        "matcher": "code-reviewer",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "The code reviewer has finished. Present the review report to the user and ask if any findings should be addressed."
+          }
+        ]
+      }
+    ],
     "SessionStart": [
       {
         "hooks": [
