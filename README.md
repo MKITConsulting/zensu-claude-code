@@ -1,9 +1,61 @@
 # Zensu Plugin for Claude Code
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.1.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.2.0-green.svg)](CHANGELOG.md)
 
-Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin connects Claude Code to the Zensu platform, enabling you to track features from roadmap through release — with built-in security analysis, artifact linking, and developer session journaling.
+Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
+
+## The Three Layers
+
+```
+Planning        →  Implementation  →  Tracking
+zensu-plm          tdd-manager        Zensu Dashboard
+/zensu:bootstrap   code-reviewer      (Web UI)
+/zensu:implement   /reflect
+```
+
+**Layer 1 — Planning (WAS wird gebaut?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
+
+**Layer 2 — Implementation (WIE wird es sicher gebaut?):** Strict TDD with SubAgent role separation (test-engineer cannot write production code), followed by 5+1 parallel code reviewers.
+
+**Layer 3 — Tracking (WO steht es?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
+
+## Agent & Workflow Overview
+
+```mermaid
+flowchart TD
+    subgraph "Layer 1: Planning"
+        A["/zensu:bootstrap"] -->|"Vision → Features"| B["zensu-plm Agent"]
+        B -->|"Components, Journeys,\nSecurity Profiles, Tiers"| C["Features in Zensu\n(ZEN-001, ZEN-002, ...)"]
+    end
+
+    subgraph "Layer 2: Implementation"
+        C -->|"/zensu:implement\n+ Feature ID"| D["Load Feature Context\n+ Security Profile"]
+        D --> E["tdd-manager Agent"]
+        E -->|"RED: Test-Engineer\nSubAgent"| F["Failing Test"]
+        F -->|"GREEN: Developer\nSubAgent"| G["Implementation"]
+        G -->|"VERIFY: Test-Engineer\nSubAgent"| H{"Tests Pass?"}
+        H -->|"No (max 3x)"| F
+        H -->|"Yes"| I["Next Step"]
+        I -->|"More steps?"| E
+        I -->|"All GREEN"| J["SubagentStop Hook\n→ /reflect"]
+        J --> K["code-reviewer Agent"]
+        K -->|"5+1 Parallel\nSubAgents"| L["Review Report"]
+    end
+
+    subgraph "Layer 3: Tracking"
+        L -->|"link_test\nlink_source_files\ncreate_revision"| M["Zensu Dashboard"]
+        M --> N["Security Scores"]
+        M --> O["Tier Matrix"]
+        M --> P["Journey Health"]
+        M --> Q["Release Gate\n✅ / ❌"]
+    end
+
+    style A fill:#4a9eff,color:#fff
+    style E fill:#ff6b6b,color:#fff
+    style K fill:#ffa94d,color:#fff
+    style M fill:#51cf66,color:#fff
+```
 
 ## Installation
 
@@ -33,50 +85,99 @@ Optionally set `ZENSU_MCP_URL` to override the default MCP server URL (`https://
 
 Auto-configured connection to the Zensu MCP server providing tools for feature CRUD, security analysis, tier management, user journeys, product bootstrap, ghost scans, pulse sessions, and more.
 
-### Agent: `zensu-plm`
+### Agents (3)
 
-Product Lifecycle Manager agent that automatically handles Zensu-related tasks. Delegates when you ask about feature tracking, security reviews, release readiness, or any product lifecycle workflow.
+| Agent | Role | How It Works |
+|-------|------|--------------|
+| **zensu-plm** | Product Lifecycle Manager | Orchestrates all Zensu workflows — feature tracking, security reviews, release readiness, bootstrap, ghost scans |
+| **tdd-manager** | TDD Orchestrator | Strict RED→GREEN TDD via SubAgent role separation. Test-Engineer writes failing test, Developer implements, Test-Engineer verifies. Parallel BE/FE streams. |
+| **code-reviewer** | Quality Review | Spawns 5+1 parallel specialist SubAgents: conventions, bugs, architecture, tests, security, blind reviewer |
+
+#### TDD Manager — How It Enforces Discipline
+
+Unlike prompt-based TDD ("please write tests first"), the TDD manager **structurally prevents** violations:
+
+- **Test-Engineer SubAgent**: Can only write tests and run test commands. Cannot create production files.
+- **Developer SubAgent**: Can only write production code. Cannot run tests or modify test files.
+- **Verifier SubAgent**: Runs the test suite and reports pass/fail. Cannot modify anything.
+
+This role separation is enforced by giving each SubAgent a different prompt with explicit constraints — not by asking a single agent to self-regulate.
+
+Additional features: dependency graph for parallel execution, 3-retry escalation with progressive context, completeness audit, real-time progress log (`.zensu/logs/`).
+
+#### Code Reviewer — 5+1 Parallel Specialists
+
+| Reviewer | Scope |
+|----------|-------|
+| conventions-checker | CLAUDE.md compliance, naming, formatting |
+| bug-hunter | Logic errors, off-by-one, null checks, race conditions |
+| architecture-reviewer | Layer separation, dependency direction, patterns |
+| test-analyzer | Coverage gaps, assertion quality, missing scenarios |
+| security-reviewer | Secrets, injection, auth checks, input validation |
+| blind-reviewer | Gets ONLY the diff, zero context — catches what others miss |
+
+Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
 ### Skills (5)
 
 | Skill | Description |
 |-------|-------------|
 | `/zensu:bootstrap` | Bootstrap a product from a vision document — creates features, journeys, security profiles, tiers |
-| `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
+| `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks
+### Hooks (4)
 
 | Hook | Event | Description |
 |------|-------|-------------|
-| `[ZEN-xxx]` Linking | PostToolUse (Bash) | Detects feature references in git commit messages |
+| ZEN-xxx Linking | PostToolUse (Bash) | Detects feature references in git commit messages |
 | Auto Pulse | SessionStart | Prepares pulse session context at startup |
+| Auto Reflect | SubagentStop (tdd-manager) | Triggers `/reflect` in main context after TDD completion |
+| Review Handoff | SubagentStop (code-reviewer) | Presents review report and prompts for next steps |
 
-## Quick Start
+## Typical Workflows
 
-Typical workflow: **bootstrap** → **implement** → **security-review**
+### New Product (Planning → Implementation → Release)
 
-1. Bootstrap a new product:
-   ```
-   /zensu:bootstrap
-   ```
+```
+1. /zensu:bootstrap          → Create product, features, journeys, tiers
+2. /zensu:implement ZEN-001  → Load context, plan implementation
+3. @tdd-manager              → Strict TDD (RED→GREEN per step)
+4. /reflect                  → Self-review in full context (auto-triggered)
+5. @code-reviewer            → 5+1 parallel specialist review
+6. /zensu:security-review    → OWASP, threat model, release gate check
+```
 
-2. Implement a feature:
-   ```
-   /zensu:implement
-   ```
+### Existing Codebase
 
-3. Run a security review:
-   ```
-   /zensu:security-review
-   ```
+```
+1. /zensu:ghost-scan         → Discover undocumented features from code
+2. /zensu:security-review    → Assess security posture per feature
+3. @tdd-manager              → Add tests via TDD for untested features
+```
 
-4. Scan an existing repo for undocumented features:
-   ```
-   /zensu:ghost-scan
-   ```
+### Quick Feature (No Full TDD)
+
+```
+1. /zensu:implement ZEN-042  → Context-aware implementation with artifact linking
+2. @code-reviewer            → Quality review
+```
+
+## Graceful Degradation
+
+The TDD manager and code reviewer work **without a Zensu account**. No MCP connection needed for:
+- TDD orchestration (RED→GREEN cycles)
+- Code review (5+1 specialists)
+- Progress logging (`.zensu/logs/`)
+
+When Zensu MCP **is** connected, additional capabilities activate:
+- Automatic `link_test` and `link_source_files` after TDD completion
+- Feature status updates (`in_progress` → `testing`)
+- Revision creation with implementation summary
+- Security findings fed into `complete_security_review`
+- Release gate validation (`validate_feature_security`)
 
 ## Configuration
 
@@ -141,6 +242,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | Override the default agent (see [Default Agent](#default-agent)) |
 | OAuth login not opening | Check your default browser settings |
+| TDD manager not spawning SubAgents | Ensure `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is not blocking |
 
 ## Contributing
 
