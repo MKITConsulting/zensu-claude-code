@@ -24,31 +24,31 @@ zensu-plm          tdd-manager        Zensu Dashboard
 
 ```mermaid
 flowchart TD
-    subgraph "Layer 1: Planning"
-        A["/zensu:bootstrap"] -->|"Vision → Features"| B["zensu-plm Agent"]
-        B -->|"Components, Journeys,\nSecurity Profiles, Tiers"| C["Features in Zensu\n(ZEN-001, ZEN-002, ...)"]
+    subgraph Planning["Layer 1: Planning"]
+        A["zensu:bootstrap"] --> B["zensu-plm Agent"]
+        B --> C["Features in Zensu"]
     end
 
-    subgraph "Layer 2: Implementation"
-        C -->|"/zensu:implement\n+ Feature ID"| D["Load Feature Context\n+ Security Profile"]
+    subgraph Implementation["Layer 2: Implementation"]
+        C -->|"zensu:implement"| D["Load Feature Context"]
         D --> E["tdd-manager Agent"]
-        E -->|"RED: Test-Engineer\nSubAgent"| F["Failing Test"]
-        F -->|"GREEN: Developer\nSubAgent"| G["Implementation"]
-        G -->|"VERIFY: Test-Engineer\nSubAgent"| H{"Tests Pass?"}
-        H -->|"No (max 3x)"| F
-        H -->|"Yes"| I["Next Step"]
-        I -->|"More steps?"| E
-        I -->|"All GREEN"| J["SubagentStop Hook\n→ /reflect"]
+        E -->|"RED"| F["Test-Engineer SubAgent"]
+        F -->|"GREEN"| G["Developer SubAgent"]
+        G -->|"VERIFY"| H{"Tests Pass?"}
+        H -->|"No"| F
+        H -->|"Yes"| I{"More Steps?"}
+        I -->|"Yes"| E
+        I -->|"No"| J["/reflect"]
         J --> K["code-reviewer Agent"]
-        K -->|"5+1 Parallel\nSubAgents"| L["Review Report"]
+        K --> L["Review Report"]
     end
 
-    subgraph "Layer 3: Tracking"
-        L -->|"link_test\nlink_source_files\ncreate_revision"| M["Zensu Dashboard"]
+    subgraph Tracking["Layer 3: Tracking"]
+        L -->|"link artifacts"| M["Zensu Dashboard"]
         M --> N["Security Scores"]
         M --> O["Tier Matrix"]
         M --> P["Journey Health"]
-        M --> Q["Release Gate\n✅ / ❌"]
+        M --> Q["Release Gate"]
     end
 
     style A fill:#4a9eff,color:#fff
