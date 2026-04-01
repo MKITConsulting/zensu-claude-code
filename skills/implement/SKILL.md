@@ -1,6 +1,6 @@
 # /zensu:implement
 
-Implement a tracked Zensu feature end-to-end. Loads feature context, provides security-aware implementation guidance, then links all artifacts (tests, docs, source files) and creates a revision.
+Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then delegates to the **tdd-manager agent** for disciplined implementation (strict RED-GREEN TDD with SubAgent role separation). After TDD completes, links all artifacts and creates a revision.
 
 ## When to Use
 
@@ -41,17 +41,26 @@ If the feature's security classification is confidential or restricted, emphasiz
 - Data encryption requirements
 - Audit logging for sensitive operations
 
-### Step 3: Implement the Feature
+### Step 3: Delegate to TDD Manager
 
-Help the user write the code. During implementation:
-- Follow the security constraints identified in Step 1
-- Write tests alongside the implementation
-- Reference the feature ID (ZEN-xxx) in commit messages using `[ZEN-xxx]` format
-- Keep track of all files created or modified
+Spawn the **tdd-manager agent** with a feature specification built from Steps 1-2. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the prompt with: "Reference this feature as [ZEN-xxx] in all commit messages."
+
+If the tdd-manager fails or all steps are blocked, continue manually from Step 4.
+
+The tdd-manager will:
+- Split the work into Backend and Frontend steps
+- Create a plan document in `docs/plans/`
+- Execute strict RED-GREEN TDD cycles via SubAgents (test-engineer writes failing test, developer implements, test-engineer verifies)
+- Run a completeness audit at the end
+- Provide a progress log at `.zensu/logs/`
+
+After the tdd-manager completes, the SubagentStop hook automatically triggers `/reflect` for self-review in the main context.
+
+**For trivial changes** (single-line fix, config change, migration-only): Skip the tdd-manager and implement directly, then continue with Step 4.
 
 ### Step 4: Link Tests
 
-For each test file written, use `link_test` with:
+For each test file written (by the tdd-manager or manually), use `link_test` with:
 - `feature_id` (required)
 - `test_type` (required): unit | integration | e2e | security | performance | accessibility
 - `file_path` (required): Path to the test file
@@ -110,12 +119,14 @@ Present a completion summary:
 - Documentation linked
 - Revision created (version number)
 - Security validation status
+- TDD report: steps completed, attempts, blocked steps (if any)
 
 ## Important Notes
 
 - The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) require a separate API call, not an MCP tool.
 - Always reference the feature ID in commit messages: `feat(component): description [ZEN-xxx]`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
+- The tdd-manager creates a plan at `docs/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
 
 ## MCP Tools Used
 
@@ -135,3 +146,9 @@ Present a completion summary:
 | Prompt | When | Purpose |
 |--------|------|---------|
 | `implement_with_security` | Step 2 | Get security constraints for implementation guidance |
+
+## Agents Used
+
+| Agent | Step | Purpose |
+|-------|------|---------|
+| `tdd-manager` | Step 3 | Strict RED-GREEN TDD with SubAgent role separation |
