@@ -128,11 +128,10 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks (4)
+### Hooks (3)
 
 | Hook | Event | Description |
 |------|-------|-------------|
-| ZEN-xxx Linking | PostToolUse (Bash) | Detects feature references in git commit messages |
 | Auto Pulse | SessionStart | Prepares pulse session context at startup |
 | Auto Reflect | SubagentStop (tdd-manager) | Triggers `/reflect` in main context after TDD completion |
 | Review Handoff | SubagentStop (code-reviewer) | Presents review report and prompts for next steps |
