@@ -10,6 +10,7 @@ FAIL_COUNT=0
 TOTAL=0
 
 mkdir -p "$RESULTS_DIR"
+export RESULTS_DIR
 
 reset_project() {
   cd "$PROJECT_DIR"
@@ -325,6 +326,39 @@ check "TQ6.1 npm test passes"             "$(tests_pass)"
 check "TQ6.2 toUpperCase test has assertions" "$(tests_have_assertions "$PROJECT_DIR/src/strings.test.ts")"
 
 ai_eval "run6" "Add toUpperCase(input) to strings.ts + i18n key 'upper' in en.json and de.json"
+
+# ─── TOKEN USAGE & COST SUMMARY ──────────────────────────────────
+echo "" | tee -a "$REPORT"
+echo "── Token Usage & Cost ──" | tee -a "$REPORT"
+python3 -c "
+import json, glob, os
+results_dir = os.environ.get('RESULTS_DIR', '.')
+runs = sorted(glob.glob(os.path.join(results_dir, 'run[1-6]-*-*.json')))
+runs = [r for r in runs if 'ai-eval' not in r]
+total_cost = 0; total_turns = 0; total_duration = 0; total_output = 0; total_cache_read = 0
+print(f'  {\"Run\":<28} {\"Turns\":>5} {\"Duration\":>8} {\"Cost\":>7} {\"Output\":>8} {\"Cache Read\":>11}')
+print(f'  {\"─\"*28} {\"─\"*5} {\"─\"*8} {\"─\"*7} {\"─\"*8} {\"─\"*11}')
+for f in runs:
+    d = json.load(open(f))
+    name = os.path.basename(f).rsplit('-2026', 1)[0]
+    mu = d.get('modelUsage', {})
+    out_tok = sum(s.get('outputTokens', 0) for s in mu.values())
+    cache_r = sum(s.get('cacheReadInputTokens', 0) for s in mu.values())
+    cost = d.get('total_cost_usd', 0)
+    turns = d.get('num_turns', 0)
+    dur = d.get('duration_ms', 0) / 1000
+    total_cost += cost; total_turns += turns; total_duration += dur
+    total_output += out_tok; total_cache_read += cache_r
+    print(f'  {name:<28} {turns:>5} {dur:>7.0f}s {\"$\"+f\"{cost:.2f}\":>7} {out_tok:>8,} {cache_r:>11,}')
+print(f'  {\"─\"*28} {\"─\"*5} {\"─\"*8} {\"─\"*7} {\"─\"*8} {\"─\"*11}')
+print(f'  {\"TOTAL\":<28} {total_turns:>5} {total_duration:>7.0f}s {\"$\"+f\"{total_cost:.2f}\":>7} {total_output:>8,} {total_cache_read:>11,}')
+
+# AI judge costs
+ai_runs = sorted(glob.glob(os.path.join(results_dir, '*-ai-eval-*.json')))
+ai_cost = sum(json.load(open(f)).get('total_cost_usd', 0) for f in ai_runs)
+print(f'  AI Judge (6 runs): \${ai_cost:.2f}')
+print(f'  Grand Total: \${total_cost + ai_cost:.2f}')
+" 2>/dev/null | tee -a "$REPORT"
 
 # ─── SUMMARY ─────────────────────────────────────────────────────
 echo "" | tee -a "$REPORT"
