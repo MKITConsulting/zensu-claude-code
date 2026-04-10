@@ -327,13 +327,65 @@ check "TQ6.2 toUpperCase test has assertions" "$(tests_have_assertions "$PROJECT
 
 ai_eval "run6" "Add toUpperCase(input) to strings.ts + i18n key 'upper' in en.json and de.json"
 
+# ─── RUN 7: Refactoring (T12) ───────────────────────────────────
+echo "" | tee -a "$REPORT"
+echo "▸ Run 7: Refactoring (T12)" | tee -a "$REPORT"
+R7=$(run_agent "run7-refactoring" \
+  "Refactor the capitalize() function in src/strings.ts: replace the if/else with a ternary operator. Behavior must NOT change — this is a pure refactoring. Existing tests must pass before and after.")
+LOG7=$(save_log "run7")
+
+echo "--- T12: Refactoring Cycle ---" | tee -a "$REPORT"
+check "T12.1 capitalize still works"      "$(file_contains "$PROJECT_DIR/src/strings.ts" 'capitalize')"
+check "T12.2 Uses ternary now"            "$(file_contains "$PROJECT_DIR/src/strings.ts" '?')"
+check "T12.3 No new test files created"   "$(
+  test_count=$(find "$PROJECT_DIR/src" -name "*.test.ts" 2>/dev/null | wc -l | tr -d ' ')
+  [ "$test_count" -le 1 ] && echo PASS || echo FAIL
+)"
+check "T12.4 RF or GREEN-BEFORE in log"   "$([ -n "$LOG7" ] && file_contains "$LOG7" 'RF\|GREEN-BEFORE\|GREEN.*before\|Refactor' || echo FAIL)"
+check "T12.5 No 'out of scope'"           "$(file_not_contains "$R7" 'out of scope')"
+
+echo "--- TQ: Test Quality (Run 7) ---" | tee -a "$REPORT"
+check "TQ7.1 npm test passes"             "$(tests_pass)"
+check "TQ7.2 Existing tests still have assertions" "$(tests_have_assertions "$PROJECT_DIR/src/strings.test.ts")"
+
+ai_eval "run7" "Refactor capitalize() to use ternary instead of if/else. Pure refactoring, no behavior change. Existing tests must pass before and after."
+
+# ─── RUN 8: Mixed Mode (T13) ────────────────────────────────────
+echo "" | tee -a "$REPORT"
+echo "▸ Run 8: Mixed Mode — Feature + Refactoring + Bug Fix (T13)" | tee -a "$REPORT"
+R8=$(run_agent "run8-mixed" \
+  "Three changes to src/strings.ts:
+1. NEW FEATURE: Add padStart(input: string, length: number, char: string): string that pads the input from the left
+2. REFACTORING: Refactor truncate() to use substring() instead of slice(). Behavior must not change.
+3. BUG FIX: capitalize() returns wrong result for single-character strings like 'a' — it should return 'A' but currently the slice(1) adds an empty string unnecessarily. Fix the edge case and add a regression test.
+Use the appropriate TDD cycle for each: RED→GREEN for feature, GREEN-BEFORE→CHANGE→GREEN-AFTER for refactoring, RED-REPRO→FIX→GREEN for bug fix.")
+LOG8=$(save_log "run8")
+
+echo "--- T13: Mixed Mode ---" | tee -a "$REPORT"
+check "T13.1 padStart implemented"         "$(file_contains "$PROJECT_DIR/src/strings.ts" 'padStart')"
+check "T13.2 padStart has test"            "$(file_contains "$PROJECT_DIR/src/strings.test.ts" 'padStart')"
+check "T13.3 truncate uses substring"      "$(file_contains "$PROJECT_DIR/src/strings.ts" 'substring')"
+check "T13.4 capitalize edge case fixed"   "$(file_contains "$PROJECT_DIR/src/strings.test.ts" 'capitalize')"
+check "T13.5 All three types in log"       "$(
+  has_red=$([ -n "$LOG8" ] && grep -qiE '\bRED\b' "$LOG8" && echo 1 || echo 0)
+  has_rf=$([ -n "$LOG8" ] && grep -qiE 'RF|GREEN.BEFORE|refactor' "$LOG8" && echo 1 || echo 0)
+  has_repro=$([ -n "$LOG8" ] && grep -qiE 'REPRO|bug.fix|fix' "$LOG8" && echo 1 || echo 0)
+  [ "$has_red" = "1" ] && [ "$has_rf" = "1" ] || [ "$has_repro" = "1" ] && echo PASS || echo FAIL
+)"
+
+echo "--- TQ: Test Quality (Run 8) ---" | tee -a "$REPORT"
+check "TQ8.1 npm test passes"             "$(tests_pass)"
+check "TQ8.2 Tests have assertions"       "$(tests_have_assertions "$PROJECT_DIR/src/strings.test.ts")"
+
+ai_eval "run8" "Mixed mode: 1) NEW padStart(input,length,char) function, 2) REFACTOR truncate() to use substring() instead of slice(), 3) BUG FIX capitalize() for single-char input. Each should use its appropriate TDD cycle."
+
 # ─── TOKEN USAGE & COST SUMMARY ──────────────────────────────────
 echo "" | tee -a "$REPORT"
 echo "── Token Usage & Cost ──" | tee -a "$REPORT"
 python3 -c "
 import json, glob, os
 results_dir = os.environ.get('RESULTS_DIR', '.')
-runs = sorted(glob.glob(os.path.join(results_dir, 'run[1-6]-*-*.json')))
+runs = sorted(glob.glob(os.path.join(results_dir, 'run[1-8]-*-*.json')))
 runs = [r for r in runs if 'ai-eval' not in r]
 total_cost = 0; total_turns = 0; total_duration = 0; total_output = 0; total_cache_read = 0
 print(f'  {\"Run\":<28} {\"Turns\":>5} {\"Duration\":>8} {\"Cost\":>7} {\"Output\":>8} {\"Cache Read\":>11}')

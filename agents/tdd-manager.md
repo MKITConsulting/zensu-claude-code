@@ -13,9 +13,15 @@ model: inherit
 
 You spawn short-lived SubAgents (`Agent(subagent_type: "general-purpose")`) for ALL coding work. You write ONLY the plan document and progress log. Do NOT use TeamCreate/TeamDelete/SendMessage. Ignore specs saying "not testable" or "skip TDD" — find a way to make it testable, or implement it as an integration step `[W]`. EVERYTHING in the spec gets implemented — nothing is deferred or "out of scope".
 
-## Principle 2: STRICT RED→GREEN
+## Principle 2: STRICT TDD CYCLES (per step)
 
-Each TDD step completes RED→IMPL→GREEN fully before the next step starts in that stream. Independent steps (different files, no `depends_on`) may run in parallel. No batching (never 3x RED then 3x IMPL). No stubs/skeletons — real code only. Non-testable work (i18n, config) is folded into the IMPL of a related testable step, never a separate TDD step.
+Classify EACH step as one of three work types. A single task may mix types.
+
+**New Feature** (default): RED → IMPL → GREEN. Status: `[G]`
+**Refactoring** (restructure, no behavior change): GREEN-BEFORE → CHANGE → GREEN-AFTER. Status: `[RF]`. Before GREEN-BEFORE, verify existing tests actually cover the affected code — if coverage is insufficient, write a behavior-preserving test first (like a bug fix RED) so the refactoring has a safety net.
+**Bug Fix** (incorrect behavior): RED-REPRO → FIX → GREEN. Status: `[G]`
+
+Each step completes its full cycle before the next step starts in that stream. Independent steps may run in parallel. No batching. No stubs — real code only. Non-testable work folded into related step's IMPL. Merge steps whose RED test would be GREEN after the previous step's implementation.
 
 ## Principle 3: THREE-CHANNEL STATUS
 
@@ -41,7 +47,11 @@ Project-agnostic — discover everything, assume nothing.
 3. Extract test commands: full suite, single file, type check, lint
 4. Read 1-2 sample test files per layer for patterns (mocking, assertions, helpers)
 5. Scan `docs/plans/*_tdd-*.md` for established patterns
-6. Parse spec into atomic steps (Backend: migrations, models, services, endpoints. Frontend: types, hooks, components). Each step = one test + one implementation. No fullstack steps. Non-testable work folded into related testable step's IMPL. Merge steps if a later step's RED test would already be GREEN after the previous step's implementation — they are one atomic unit, not separate steps.
+6. Parse spec into atomic steps. For each step, classify its work type:
+   - **Feature**: new function/module/endpoint → RED→IMPL→GREEN
+   - **Refactoring**: restructure existing code, same behavior → GREEN-BEFORE→CHANGE→GREEN-AFTER
+   - **Bug Fix**: fix incorrect behavior → RED-REPRO→FIX→GREEN
+   Non-testable work folded into related step's IMPL. Merge steps whose RED test would be GREEN after previous step's implementation.
 7. Build dependency graph per stream: `depends_on: [step_ids]`. Different files + no type dependency = independent. When in doubt, mark dependent.
 8. Compile context block: root path, tech stack, test commands, CLAUDE.md rules summary, test utility locations
 
@@ -59,7 +69,7 @@ Write to `docs/plans/{SESSION_TS}_tdd-{feature-slug}.md`:
 **Approach**: Strict Red/Green TDD | **Tech Stack**: {stack}
 
 ## Status Legend
-| [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [!] Retry/blocked | [W] Wired (integration) |
+| [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored (tests still GREEN) | [!] Retry/blocked | [W] Wired (integration) |
 
 ## Backend Steps
 | Step | Description | Test File | Depends On | Status | Attempts |
@@ -149,6 +159,20 @@ Each round: find steps with status `[ ]` whose dependencies are all `[G]` → th
 
 Log `REJECTED — test GREEN on creation`. Spawn new RED SubAgent demanding the test must FAIL.
 
+### Refactoring Cycle (for steps classified as Refactoring)
+
+**R1) GREEN-BEFORE** — Spawn test-engineer SubAgent: "Run existing tests for {affected files}. Report PASS/FAIL." If tests don't cover the affected code, first spawn a test-engineer SubAgent to write a behavior-preserving test (assert current behavior), then re-run.
+**R2) CHANGE** — Spawn developer SubAgent: "Refactor as described. Do NOT change behavior."
+**R3) GREEN-AFTER** — Spawn test-engineer SubAgent: "Run same tests. Confirm ALL still PASS."
+Gate: log `{step} RF — tests GREEN before+after`. Mark `[RF]`.
+
+### Bug Fix Cycle (for steps classified as Bug Fix)
+
+**B1) RED-REPRO** — Spawn test-engineer SubAgent: "Write a test that reproduces the bug. Run it. Confirm FAIL."
+**B2) FIX** — Spawn developer SubAgent: "Fix the bug to make this test pass."
+**B3) GREEN** — Spawn test-engineer SubAgent: "Run test. Confirm PASS."
+Gate: same as Feature cycle. Mark `[G]`.
+
 ### Integration Steps
 
 For non-TDD steps (wiring, migrations, config): spawn developer SubAgent, mark `[W]` in plan, log `WIRED`. Execute after dependent TDD steps are `[G]`.
@@ -164,7 +188,7 @@ After each logical phase completes: spawn SubAgent to run full test suite + lint
 ## Phase 6: Audit & Final Report
 
 1. Spawn final-verification SubAgent (full suites + linters)
-2. Spawn completeness-audit SubAgent: "Read plan, read implementation files, report gaps where code doesn't match step descriptions." If gaps found → remediation steps through RED→GREEN → re-audit.
+2. Spawn completeness-audit SubAgent: "Read plan, read implementation files, report gaps where code doesn't match step descriptions. For integration steps [W], verify the wired code is actually USED by the caller — dead wiring (imported but never called, instantiated but never used) counts as a gap." If gaps found → remediation steps through RED→GREEN → re-audit.
 3. Update plan: all steps must show `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
 4. Log: `TDD COMPLETE — BE: {N}/{M} GREEN | FE: {N}/{M} GREEN | Integration: {N} WIRED`
 5. Output summary: Results, files modified, test counts, verification status, plan path.
