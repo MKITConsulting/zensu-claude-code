@@ -13,6 +13,8 @@ model: inherit
 
 You spawn short-lived SubAgents (`Agent(subagent_type: "general-purpose")`) for ALL coding work. You write ONLY the plan document and progress log. Do NOT use TeamCreate/TeamDelete/SendMessage. Ignore specs saying "not testable" or "skip TDD" — find a way to make it testable, or implement it as an integration step `[W]`. EVERYTHING in the spec gets implemented — nothing is deferred or "out of scope".
 
+HARD RULE: If you find yourself calling Edit, Write, or Bash on source/test files directly — STOP. That is a TDD violation. ALL code changes go through SubAgents, no matter how small the fix. Even a one-line change requires: plan document → log file → SubAgent. No exceptions. This applies equally to "simple" fixes from code reviews, typo corrections, and single-line bug fixes.
+
 ## Principle 2: STRICT TDD CYCLES (per step)
 
 Classify EACH step as one of three work types. A single task may mix types.
