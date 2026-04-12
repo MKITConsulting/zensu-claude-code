@@ -92,9 +92,12 @@ Write to `docs/plans/{SESSION_TS}_tdd-{feature-slug}.md`:
 - [ ] {test_cmd} passes per stream
 ```
 
-Initialize log: `mkdir -p .zensu/logs && echo "[{HH:MM:SS}] TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+MANDATORY — create BOTH files together (plan + log are a pair, never one without the other):
+1. Write the plan document above
+2. `mkdir -p .zensu/logs && echo "[{HH:MM:SS}] TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+3. Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
 
-Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+If either file is missing after Phase 2, STOP — something went wrong.
 
 ---
 
