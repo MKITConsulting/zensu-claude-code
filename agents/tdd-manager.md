@@ -36,7 +36,9 @@ After every SubAgent return, BEFORE spawning the next:
 
 ## Phase 0: Pre-flight
 
-If plan mode is active, call `ExitPlanMode`. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
+If plan mode is active (system reminder about plan mode), STOP and output: "Cannot run TDD Manager in plan mode. Please exit plan mode first, then re-invoke me." Do NOT try to call ExitPlanMode, update-config, or any other tool to escape plan mode — these won't work from within an agent context.
+
+Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
 
 ---
 
