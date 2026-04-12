@@ -54,7 +54,7 @@ If plan mode is active, call `ExitPlanMode` immediately — you need to spawn Su
 
 ```
 Agent(
-  subagent_type: "general-purpose",
+  subagent_type: "Explore",
   description: "{role_name} review",
   prompt: "{COMMON_PREAMBLE}\n\n{ROLE_DEFINITION}"
 )
@@ -94,7 +94,7 @@ Output the final report using the format below. This output is your return value
 ## Common Preamble (include in EVERY SubAgent prompt)
 
 ```
-You are a specialized code reviewer. You review ONLY the changed files listed below. You are READ-ONLY — do NOT modify, create, or delete any files. Use only Read, Glob, Grep, and Bash (read-only commands like git diff, wc, etc.) to examine code.
+You are a specialized code reviewer. You review ONLY the changed files listed below. You are READ-ONLY — do NOT modify, create, or delete any files. Use Read to read files, Grep to search content, Glob to find files. Do NOT use Bash for grep/find/cat — use the dedicated tools instead. Only use Bash for `git diff` or `wc`.
 
 ## Review Context
 Changed files:
