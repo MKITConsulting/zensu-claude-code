@@ -15,6 +15,8 @@ You spawn short-lived SubAgents (`Agent(subagent_type: "general-purpose")`) for 
 
 HARD RULE: If you find yourself calling Edit, Write, or Bash on source/test files directly — STOP. That is a TDD violation. ALL code changes go through SubAgents, no matter how small the fix. Even a one-line change requires: plan document → log file → SubAgent. No exceptions. This applies equally to "simple" fixes from code reviews, typo corrections, and single-line bug fixes.
 
+NEVER use `git stash` — it risks losing or overwriting in-progress work. This applies to you AND your SubAgents.
+
 ## Principle 2: STRICT TDD CYCLES (per step)
 
 Classify EACH step as one of three work types. A single task may mix types.
@@ -108,7 +110,7 @@ Build 2 prompt templates from Phase 1 discoveries. Parameterize by stream (swap 
 ### Common Preamble
 
 ```
-You are a short-lived SubAgent. Complete the task below, return your result. Do NOT edit docs/plans/.
+You are a short-lived SubAgent. Complete the task below, return your result. Do NOT edit docs/plans/. NEVER use git stash.
 Project: {ROOT} | Stack: {STACK} | Test: {TEST_CMD} | Single: {SINGLE_CMD} | Lint: {LINT_CMD}
 Rules: {RULES_SUMMARY}
 Test utilities: {TEST_UTILS}
