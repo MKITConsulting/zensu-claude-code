@@ -38,7 +38,9 @@ After every SubAgent return, BEFORE spawning the next:
 
 ## Phase 0: Pre-flight
 
-If plan mode is active (system reminder about plan mode), STOP and output: "Cannot run TDD Manager in plan mode. Please exit plan mode first, then re-invoke me." Do NOT try to call ExitPlanMode, update-config, or any other tool to escape plan mode — these won't work from within an agent context.
+If plan mode is active (you see a system reminder saying "Plan mode is active"), STOP and output: "Cannot run TDD Manager in plan mode. Please exit plan mode first, then re-invoke me." Do NOT try to call ExitPlanMode, update-config, or any other tool to escape plan mode.
+
+IMPORTANT: Plan mode is a SESSION STATE, not caused by files on disk. NEVER delete files in `~/.claude/plans/` — they are harmless session artifacts and do NOT cause plan mode. Do NOT "clean up" plan files before or during execution.
 
 Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
 
