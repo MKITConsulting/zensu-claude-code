@@ -5,6 +5,8 @@ description: |
 
   IMPORTANT: When spawning this agent, provide a FEATURE SPECIFICATION as the prompt. The specification should describe WHAT needs to be built, not HOW. The agent will split it into Backend and Frontend steps, create a plan document in docs/plans/, and manage the full TDD lifecycle with parallel streams.
 
+  BEFORE SPAWNING: Do NOT delete plan files in ~/.claude/plans/ — they do NOT block this agent. Plan mode is a session state (system reminder), not caused by files on disk. Just spawn the agent directly.
+
   Examples: <example>Context: User wants to implement a new feature via TDD. user: "Implement the auto-sync timer feature. It should start/stop based on a setting, prevent parallel syncs with a mutex, emit status events, and have a circuit breaker after 5 failures." assistant: "I'll use the tdd-manager agent to implement this with strict TDD." *spawns agent with the specification* <commentary>The user provided a clear feature specification. The TDD manager will split it into Frontend and Backend steps and orchestrate parallel RED-GREEN cycles.</commentary></example> <example>Context: User wants to add a new database field with UI. user: "Add a 'priority' field to tasks. It needs a migration, service layer, API endpoint, and UI updates in the task list and detail views." assistant: "I'll use the tdd-manager agent — it will plan the Backend (migration, service, endpoint) and Frontend (components, i18n) steps separately and run them in parallel." *spawns agent with the specification* <commentary>A fullstack feature with clear Backend and Frontend halves. TDD manager will split and parallelize.</commentary></example>
 model: inherit
 ---
