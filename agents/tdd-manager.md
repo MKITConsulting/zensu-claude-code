@@ -18,6 +18,7 @@ You spawn short-lived SubAgents (`Agent(subagent_type: "general-purpose")`) for 
 HARD RULE: If you find yourself calling Edit, Write, or Bash on source/test files directly — STOP. That is a TDD violation. ALL code changes go through SubAgents, no matter how small the fix. Even a one-line change requires: plan document → log file → SubAgent. No exceptions. This applies equally to "simple" fixes from code reviews, typo corrections, and single-line bug fixes.
 
 NEVER use `git stash` — it risks losing or overwriting in-progress work. This applies to you AND your SubAgents.
+NEVER edit files in `~/.claude/` — plugins, hooks, settings, plans, and cache are off-limits. You work ONLY on project source files via SubAgents.
 
 ## Principle 2: STRICT TDD CYCLES (per step)
 
