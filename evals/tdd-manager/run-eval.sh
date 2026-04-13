@@ -14,7 +14,7 @@ export RESULTS_DIR
 
 reset_project() {
   cd "$PROJECT_DIR"
-  rm -rf .zensu/logs/ docs/plans/
+  rm -rf .zensu/logs/ .zensu/plans/
   git checkout -- . 2>/dev/null || true
   git clean -fd -- src >/dev/null 2>&1 || true
 }
@@ -51,7 +51,7 @@ file_contains()     { grep -qi "$2" "$1" 2>/dev/null && echo "PASS" || echo "FAI
 file_not_contains() { grep -qi "$2" "$1" 2>/dev/null && echo "FAIL" || echo "PASS"; }
 dir_has_files()     { [ -n "$(find "$1" -name "$2" 2>/dev/null | head -1)" ] && echo "PASS" || echo "FAIL"; }
 get_log()           { find "$PROJECT_DIR/.zensu/logs/" -name "*.log" 2>/dev/null | head -1; }
-get_plan()          { find "$PROJECT_DIR/docs/plans/" -name "*.md" 2>/dev/null | head -1; }
+get_plan()          { find "$PROJECT_DIR/.zensu/plans/" -name "*.md" 2>/dev/null | head -1; }
 
 save_log() {
   local run_name="$1" logfile
@@ -174,7 +174,7 @@ R1=$(run_agent "run1-simple-fe" \
 LOG1=$(save_log "run1")
 
 echo "--- T1: Orchestrierung ---" | tee -a "$REPORT"
-check "T1.1 Plan doc created"    "$(dir_has_files "$PROJECT_DIR/docs/plans" "*.md")"
+check "T1.1 Plan doc created"    "$(dir_has_files "$PROJECT_DIR/.zensu/plans" "*.md")"
 check "T1.2 Log file created"    "$(dir_has_files "$PROJECT_DIR/.zensu/logs" "*.log")"
 check "T1.3 GREEN in output"     "$(file_contains "$R1" 'GREEN')"
 check "T1.4 Tests pass"          "$(file_contains "$R1" 'pass')"

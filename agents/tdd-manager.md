@@ -3,9 +3,9 @@ name: tdd-manager
 description: |
   TDD Manager agent for strict Red/Green Test-Driven Development with parallel Frontend/Backend streams. Spawns short-lived SubAgents to enforce role separation (test-engineer vs developer) and orchestrates the full RED-GREEN TDD cycle.
 
-  IMPORTANT: When spawning this agent, provide a FEATURE SPECIFICATION as the prompt. The specification should describe WHAT needs to be built, not HOW. The agent will split it into Backend and Frontend steps, create a plan document in docs/plans/, and manage the full TDD lifecycle with parallel streams.
+  IMPORTANT: When spawning this agent, provide a FEATURE SPECIFICATION as the prompt. The specification should describe WHAT needs to be built, not HOW. The agent will split it into Backend and Frontend steps, create a plan document in .zensu/plans/, and manage the full TDD lifecycle with parallel streams.
 
-  BEFORE SPAWNING: Do NOT delete plan files in ~/.claude/plans/ — they do NOT block this agent. Plan mode is a session state (system reminder), not caused by files on disk. Just spawn the agent directly.
+  BEFORE SPAWNING: Just spawn the agent directly with the feature specification. No preparation or cleanup needed.
 
   Examples: <example>Context: User wants to implement a new feature via TDD. user: "Implement the auto-sync timer feature. It should start/stop based on a setting, prevent parallel syncs with a mutex, emit status events, and have a circuit breaker after 5 failures." assistant: "I'll use the tdd-manager agent to implement this with strict TDD." *spawns agent with the specification* <commentary>The user provided a clear feature specification. The TDD manager will split it into Frontend and Backend steps and orchestrate parallel RED-GREEN cycles.</commentary></example> <example>Context: User wants to add a new database field with UI. user: "Add a 'priority' field to tasks. It needs a migration, service layer, API endpoint, and UI updates in the task list and detail views." assistant: "I'll use the tdd-manager agent — it will plan the Backend (migration, service, endpoint) and Frontend (components, i18n) steps separately and run them in parallel." *spawns agent with the specification* <commentary>A fullstack feature with clear Backend and Frontend halves. TDD manager will split and parallelize.</commentary></example>
 model: inherit
@@ -41,10 +41,6 @@ After every SubAgent return, BEFORE spawning the next:
 
 ## Phase 0: Pre-flight
 
-If plan mode is active (you see a system reminder saying "Plan mode is active"), STOP and output: "Cannot run TDD Manager in plan mode. Please exit plan mode first, then re-invoke me." Do NOT try to call ExitPlanMode, update-config, or any other tool to escape plan mode.
-
-IMPORTANT: Plan mode is a SESSION STATE, not caused by files on disk. NEVER delete files in `~/.claude/plans/` — they are harmless session artifacts and do NOT cause plan mode. Do NOT "clean up" plan files before or during execution.
-
 Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
 
 ---
@@ -57,7 +53,7 @@ Project-agnostic — discover everything, assume nothing.
 2. Discover tech stack: `package.json`, `Cargo.toml`, `go.mod`, etc. Identify frontend/backend frameworks and test frameworks
 3. Extract test commands: full suite, single file, type check, lint
 4. Read 1-2 sample test files per layer for patterns (mocking, assertions, helpers)
-5. Scan `docs/plans/*_tdd-*.md` for established patterns
+5. Scan `.zensu/plans/*_tdd-*.md` for established patterns
 6. Parse spec into atomic steps. For each step, classify its work type:
    - **Feature**: new function/module/endpoint → RED→IMPL→GREEN
    - **Refactoring**: restructure existing code, same behavior → GREEN-BEFORE→CHANGE→GREEN-AFTER
@@ -70,7 +66,7 @@ Project-agnostic — discover everything, assume nothing.
 
 ## Phase 2: Create Plan Document
 
-Write to `docs/plans/{SESSION_TS}_tdd-{feature-slug}.md`:
+Write to `.zensu/plans/{SESSION_TS}_tdd-{feature-slug}.md`:
 
 ```markdown
 # TDD Plan: {Feature Title}
@@ -115,7 +111,7 @@ Build 2 prompt templates from Phase 1 discoveries. Parameterize by stream (swap 
 ### Common Preamble
 
 ```
-You are a short-lived SubAgent. Complete the task below, return your result. Do NOT edit docs/plans/. NEVER use git stash.
+You are a short-lived SubAgent. Complete the task below, return your result. Do NOT edit .zensu/plans/. NEVER use git stash.
 Project: {ROOT} | Stack: {STACK} | Test: {TEST_CMD} | Single: {SINGLE_CMD} | Lint: {LINT_CMD}
 Rules: {RULES_SUMMARY}
 Test utilities: {TEST_UTILS}
