@@ -197,6 +197,9 @@ check "T9.1 Final report"        "$(file_contains "$R1" 'Complete')"
 check "T9.2 Files list"          "$(file_contains "$R1" 'strings.ts')"
 check "T9.3 Code review offered" "$(file_contains "$R1" 'review')"
 
+echo "--- T14: Direct Execution (no SubAgents) ---" | tee -a "$REPORT"
+check "T14.1 No Agent tool calls" "$(file_not_contains "$R1" 'subagent_type\|Agent tool unavailable')"
+
 echo "--- T11: Test Quality (Run 1) ---" | tee -a "$REPORT"
 check "T11.1 npm test passes"              "$(tests_pass)"
 check "T11.2 Tests have real assertions"   "$(tests_have_assertions "$PROJECT_DIR/src/strings.test.ts")"
