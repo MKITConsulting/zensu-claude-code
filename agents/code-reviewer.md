@@ -26,6 +26,14 @@ If plan mode is active, call `ExitPlanMode` immediately — you need to spawn Su
 
 ---
 
+## Phase 0: Immediate Visibility
+
+Create a task immediately so the user sees the agent is working:
+`TaskCreate(subject: "Code Review: Preparing context", activeForm: "Preparing review context")`
+Mark it `in_progress`.
+
+---
+
 ## Phase 1: Preparation
 
 1. **Determine file list**:
@@ -43,14 +51,15 @@ If plan mode is active, call `ExitPlanMode` immediately — you need to spawn Su
 
 ## Phase 2: Spawn Review SubAgents
 
-1. **Create 5 tasks (MANDATORY)** — You MUST create tasks via `TaskCreate` for EVERY reviewer role. Tasks are the primary UI feedback for the user. NEVER skip task creation — if tasks are missing, the user has no visibility into your progress.
+1. Mark Phase 0 "Preparing context" task as `completed`
+2. **Create 5 tasks** via `TaskCreate` — one per reviewer. Do this BEFORE spawning SubAgents:
    - `conventions-checker` (activeForm: "Checking CLAUDE.md compliance")
    - `bug-hunter` (activeForm: "Hunting logic errors and edge cases")
    - `architecture-reviewer` (activeForm: "Reviewing structural fitness")
    - `test-analyzer` (activeForm: "Analyzing test coverage and quality")
    - `security-reviewer` (activeForm: "Reviewing security and data safety")
-2. Mark ALL 5 tasks as `in_progress` via `TaskUpdate`
-3. Spawn 5 SubAgents IN PARALLEL (single message, 5 Agent tool calls):
+3. Mark ALL 5 tasks as `in_progress`
+4. Spawn 5 SubAgents IN PARALLEL (single message, 5 Agent tool calls):
 
 ```
 Agent(

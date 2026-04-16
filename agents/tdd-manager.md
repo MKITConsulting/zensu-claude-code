@@ -41,7 +41,8 @@ After every SubAgent return, BEFORE spawning the next:
 
 ## Phase 0: Pre-flight
 
-Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
+1. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
+2. Create a FIRST task immediately: `TaskCreate(subject: "TDD: Analyzing spec and creating plan", activeForm: "Analyzing specification")` — this gives the user instant visibility that the agent is working. Mark it `in_progress`.
 
 ---
 
@@ -136,9 +137,19 @@ Return: files changed, what you implemented.
 Fix procedure: read error output, fix the specific issue, report what changed.
 ```
 
-### Create Tasks (MANDATORY)
+### Create ALL Tasks NOW (before Phase 4 starts)
 
-3 tasks per step via TaskCreate with `activeForm` for spinner text. Set `blockedBy` per dependency graph.
+Immediately after building prompts, create ALL tasks for ALL steps. This is the user's progress dashboard — without it they see nothing. Do this BEFORE spawning any SubAgent.
+
+Per TDD step: 3 tasks via `TaskCreate`:
+- `{step_id} [test]` (activeForm: "Creating RED test for {step_id}")
+- `{step_id} [impl]` (activeForm: "Implementing {step_id}")
+- `{step_id} [verify]` (activeForm: "Verifying {step_id}")
+
+Per integration step: 1 task via `TaskCreate`:
+- `{step_id} [wire]` (activeForm: "Wiring {step_id}")
+
+Set `blockedBy` per dependency graph. Mark the Phase 0 "Analyzing" task as `completed`.
 
 ---
 
