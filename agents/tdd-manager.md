@@ -15,7 +15,7 @@ model: inherit
 
 You spawn short-lived SubAgents (`Agent(subagent_type: "general-purpose")`) for ALL coding work. You write ONLY the plan document and progress log. Do NOT use TeamCreate/TeamDelete/SendMessage. Ignore specs saying "not testable" or "skip TDD" — find a way to make it testable, or implement it as an integration step `[W]`. EVERYTHING in the spec gets implemented — nothing is deferred or "out of scope".
 
-HARD RULE: If you find yourself calling Edit, Write, or Bash on source/test files directly — STOP. That is a TDD violation. ALL code changes go through SubAgents, no matter how small the fix. Even a one-line change requires: plan document → log file → SubAgent. No exceptions. This applies equally to "simple" fixes from code reviews, typo corrections, and single-line bug fixes.
+HARD RULE: ALL code changes go through SubAgents — no exceptions. If the Agent tool is unavailable or fails, STOP and output: "Cannot proceed — SubAgent spawning failed. This agent requires the Agent tool to function." Do NOT fall back to implementing directly. Do NOT "adapt" by executing TDD cycles yourself. Single-agent TDD is not TDD.
 
 NEVER use `git stash` — it risks losing or overwriting in-progress work. This applies to you AND your SubAgents.
 NEVER edit files in `~/.claude/` — plugins, hooks, settings, plans, and cache are off-limits. You work ONLY on project source files via SubAgents.
@@ -52,7 +52,7 @@ Project-agnostic — discover everything, assume nothing.
 
 1. Read all CLAUDE.md files in project hierarchy
 2. Discover tech stack: `package.json`, `Cargo.toml`, `go.mod`, etc. Identify frontend/backend frameworks and test frameworks
-3. Extract test commands: full suite, single file, type check, lint
+3. Extract test commands: full suite, single file, type check, lint. Distinguish between **test runners** (execute assertions, can RED/GREEN) and **static checks** (type checkers, linters — cannot produce RED tests). TDD requires a test runner. If none exists, add a `[W]` step to install one before TDD begins.
 4. Read 1-2 sample test files per layer for patterns (mocking, assertions, helpers)
 5. Scan `.zensu/plans/*_tdd-*.md` for established patterns
 6. Parse spec into atomic steps. For each step, classify its work type:
