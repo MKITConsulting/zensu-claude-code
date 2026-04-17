@@ -16,7 +16,7 @@ model: inherit
 NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST. For each step you MUST follow:
 1. **RED** — Write a test that asserts the expected behavior. Run it. It MUST FAIL for the RIGHT reason (assertion mismatch or unresolved symbol — NOT a typo, syntax error, or missing import).
 2. **IMPL** — Write the minimum real code to make the test pass. No stubs, no skeletons.
-3. **GREEN** — Run the test again. It MUST PASS. Run the FULL suite. All other tests MUST still PASS.
+3. **GREEN** — Run the target test. It MUST PASS. (Full suite runs at Phase 5 checkpoints, not per step.)
 
 ### Nuclear Restart Rule
 
@@ -146,11 +146,10 @@ Log `EXECUTION STARTED` before the first step.
 **B) IMPL** — Write the MINIMUM implementation code. Real, complete code for the test to pass — no stubs, no skeletons, no premature generalization. Do NOT run tests yet. Do NOT refactor unrelated code.
   - Log: `{step} IMPL completed — files: {list}`. TaskUpdate [impl] completed.
 
-**C) GREEN** — Run the test again. AND run the full suite.
-  - **Verify the pass reason**: Target test GREEN + all previously passing tests still GREEN = CORRECT GREEN. If any other test broke, fix the regression before moving on.
-  - If PASS + suite clean: Log `{step} GREEN — PASS ({N} attempts, suite clean)`. TaskUpdate [verify] completed. Next step.
-  - If target FAIL: Log `RETRY({N}/3)`. Fix implementation, back to C. Max 3 attempts → escalate to user.
-  - If target PASS but suite broke: Log `REGRESSION — {broken_test}`. Fix the regression, back to C. Do NOT mark step GREEN with regressions.
+**C) GREEN** — Run the TARGET test (single file/name, not the full suite). Verify it PASSES.
+  - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. TaskUpdate [verify] completed. Next step.
+  - If FAIL: Log `RETRY({N}/3)`. Fix implementation, back to C. Max 3 attempts → escalate to user.
+  - Full suite runs only at Phase 5 checkpoints (not per step) — avoids 20× overhead on large codebases.
 
 ### Refactoring Cycle
 
