@@ -2,7 +2,7 @@
   "hooks": {
     "SubagentStop": [
       {
-        "matcher": "tdd-manager",
+        "matcher": "zensu:tdd-manager",
         "hooks": [
           {
             "type": "prompt",
@@ -11,7 +11,7 @@
         ]
       },
       {
-        "matcher": "code-reviewer",
+        "matcher": "zensu:code-reviewer",
         "hooks": [
           {
             "type": "prompt",
