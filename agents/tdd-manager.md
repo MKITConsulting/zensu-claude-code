@@ -71,11 +71,27 @@ After completing each cycle phase (RED, IMPL, GREEN):
 1. Read all CLAUDE.md files in project hierarchy
 2. Discover tech stack and test frameworks
 3. Extract test commands (full suite, single file, type check, lint). Distinguish **test runners** (assertions, can RED/GREEN) from **static checks** (type checkers, linters). TDD requires a test runner — if none exists, add a `[W]` step to install one first.
+3b. Detect coverage tooling and threshold (MUST read config files, not just probe deps):
+   - Step 1 — locate coverage config file(s):
+     - Node: vitest config (`vitest.config.{ts,js,mjs}` or `vite.config.{ts,js,mjs}`), jest config (`jest.config.*` or `jest` key in package.json), `.nycrc*`
+     - Python: `pyproject.toml`, `.coveragerc`, `setup.cfg`
+     - Go: built-in `go test -cover` (no config file)
+     - Rust: `Cargo.toml` for tarpaulin/llvm-cov metadata
+   - Step 2 — READ each located config file (Read tool, not just `ls`). Extract numeric thresholds:
+     - vitest: `test.coverage.thresholds.{lines,branches,functions,statements}`
+     - jest: `coverageThreshold.global.{lines,branches,functions,statements}`
+     - c8/nyc: `lines`, `branches`, `functions`, `statements`
+     - pytest: `[tool.coverage.report] fail_under`
+   - Step 3 — verify tool is INSTALLED (in devDeps or available on PATH). Record `{coverage_cmd}` capable of per-file output (e.g. `npm run coverage`, `npx vitest run --coverage`).
+   - Step 4 — threshold resolution:
+     - Numeric thresholds extracted from config → use those values verbatim. Set `{threshold_source}=project-config`.
+     - No thresholds in config (even if tool installed) → default 90% lines. Set `{threshold_source}=default-90%`.
+   - If a test runner exists but NO coverage tool installed → use AskUserQuestion to ask whether to install one (recommend matching tool: vitest→@vitest/coverage-v8, jest→built-in, pytest→pytest-cov). On accept: add a `[W]` step in the Phase 2 plan for install. On decline: set `{coverage_cmd}=null`, mark coverage SKIPPED in Phase 6.
 4. Read 1-2 sample test files for patterns
 5. Scan `.zensu/plans/*_tdd-*.md` for patterns
 6. Parse spec into atomic steps, classify work type per step. Non-testable work folded into related IMPL.
 7. Build dependency graph: `depends_on: [step_ids]`. Independent steps (different files, no type deps) can run sequentially without blocking.
-8. Compile context: root path, tech stack, test commands, rules, test utilities
+8. Compile context: root path, tech stack, test commands, coverage_cmd, coverage_thresholds, threshold_source, rules, test utilities
 
 ---
 
@@ -90,7 +106,7 @@ MANDATORY — create BOTH files (plan + log are a pair):
 
 ## Context
 {Spec verbatim}
-**Approach**: Strict Red/Green TDD | **Tech Stack**: {stack}
+**Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
 
 ## Status Legend
 | [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored | [!] Blocked | [W] Wired |
@@ -107,6 +123,7 @@ MANDATORY — create BOTH files (plan + log are a pair):
 
 ## Final Verification
 - [ ] All test suites pass
+- [ ] Coverage report generated for changed files (threshold: {threshold})
 ```
 
 2. `mkdir -p .zensu/logs && echo "[{HH:MM:SS}] TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
@@ -180,8 +197,33 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
 ## Phase 6: Audit & Final Report
 
 1. Run full test suites + linters
-2. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
-3. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
-4. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED`
-5. Output summary: results, files modified, test counts, verification status, plan path.
-6. Offer code review: ask user (in their language) if they want to run `@zensu:code-reviewer`.
+2. Coverage report (changed files only):
+   - If `{coverage_cmd}` is null → log `COVERAGE SKIPPED — no tool` and skip to step 3.
+   - Else:
+     a) Collect list of files modified during session from `IMPL`/`WIRED` log entries (Phase 4 Cycle B logs `files: {list}`).
+     b) Run coverage on full test suite, restricting report scope to changed files via the tool's include filter:
+        - vitest: `--coverage --coverage.include={file1} --coverage.include={file2}`
+        - jest: `--coverage --collectCoverageFrom={file}`
+        - c8/nyc: `--include={file}`
+        - pytest-cov: `--cov={module}`
+        - go: `go test -coverprofile=cover.out ./... && go tool cover -func=cover.out` (filter manually)
+     c) Parse per-file metrics: lines %, branches %, functions %.
+     d) Compare each file against `{threshold}`.
+     e) Build Coverage section for the final report (markdown table):
+
+        ```
+        ## Coverage (changed files)
+        | File | Lines | Branches | Funcs | vs {threshold} |
+        |------|-------|----------|-------|----------------|
+        | ...  | ...   | ...      | ...   | PASS / FAIL    |
+
+        Summary: {N}/{M} files PASS @ {threshold}
+        Threshold source: {threshold_source}
+        ```
+
+   - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}` and ask user (in their language) whether to run an additional TDD cycle for uncovered branches. Do NOT auto-loop (avoids scope explosion).
+3. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
+4. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
+5. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
+6. Output summary: results, files modified, test counts, verification status, **Coverage table from step 2e**, plan path.
+7. Offer code review: ask user (in their language) if they want to run `@zensu:code-reviewer`.

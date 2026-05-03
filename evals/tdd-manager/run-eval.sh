@@ -382,14 +382,74 @@ check "TQ8.2 Tests have assertions"       "$(tests_have_assertions "$PROJECT_DIR
 
 ai_eval "run8" "Mixed mode: 1) NEW padStart(input,length,char) function, 2) REFACTOR truncate() to use substring() instead of slice(), 3) BUG FIX capitalize() for single-char input. Each should use its appropriate TDD cycle."
 
+# ─── RUN 9: Coverage Default 90% (T15) ──────────────────────────
+echo "" | tee -a "$REPORT"
+echo "▸ Run 9: Coverage Default 90% (T15)" | tee -a "$REPORT"
+R9=$(run_agent "run9-coverage-default" \
+  "Add a reverseString(input: string): string function to src/strings.ts that reverses the input characters. Use strict RED/GREEN TDD.")
+LOG9=$(save_log "run9")
+PLAN9=$(get_plan); [ -n "$PLAN9" ] && cp "$PLAN9" "$RESULTS_DIR/run9-plan-${TIMESTAMP}.md"
+PLAN9="$RESULTS_DIR/run9-plan-${TIMESTAMP}.md"
+
+echo "--- T15: Coverage Report (Default 90%) ---" | tee -a "$REPORT"
+check "T15.1 Coverage section in output"  "$(file_contains "$R9" 'Coverage')"
+check "T15.2 Default threshold 90%"       "$(file_contains "$R9" '90')"
+check "T15.3 Per-file table for strings"  "$(file_contains "$R9" 'strings.ts')"
+check "T15.4 Pre-existing index excluded" "$(file_not_contains "$R9" 'index.ts.*0%\|index.ts.*100%')"
+check "T15.5 Coverage entry in log"       "$([ -n "$LOG9" ] && file_contains "$LOG9" 'COVERAGE\|coverage' || echo FAIL)"
+check "T15.6 Plan-Header threshold 90"    "$([ -f "$PLAN9" ] && file_contains "$PLAN9" '90' || echo FAIL)"
+check "T15.7 reverseString implemented"   "$(file_contains "$PROJECT_DIR/src/strings.ts" 'reverseString')"
+
+# ─── RUN 10: Coverage Project-Config Threshold (T16) ────────────
+echo "" | tee -a "$REPORT"
+echo "▸ Run 10: Coverage Project Threshold 75% (T16)" | tee -a "$REPORT"
+
+reset_project
+cat > "$PROJECT_DIR/vitest.config.ts" <<'EOF'
+import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    globals: true,
+    watch: false,
+    coverage: {
+      provider: 'v8',
+      thresholds: { lines: 75 },
+    },
+  },
+});
+EOF
+
+R10="$RESULTS_DIR/run10-coverage-threshold-${TIMESTAMP}.json"
+echo "  Running run10-coverage-threshold..." >&2
+cd "$PROJECT_DIR" && claude -p \
+  --output-format json \
+  --agent zensu:tdd-manager \
+  --dangerously-skip-permissions \
+  "Add a multiplyBy3(n: number): number function to src/math.ts (create file). Returns n * 3. Use strict RED/GREEN TDD." \
+  > "$R10" 2>"${R10%.json}.stderr" || true
+LOG10=$(save_log "run10")
+PLAN10=$(get_plan); [ -n "$PLAN10" ] && cp "$PLAN10" "$RESULTS_DIR/run10-plan-${TIMESTAMP}.md"
+PLAN10="$RESULTS_DIR/run10-plan-${TIMESTAMP}.md"
+
+echo "--- T16: Coverage Project Threshold ---" | tee -a "$REPORT"
+check "T16.1 Threshold 75 in output"      "$(file_contains "$R10" '75')"
+check "T16.2 Source = project-config"     "$(file_contains "$R10" 'project.config\|vitest.config\|project-config')"
+check "T16.3 multiplyBy3 implemented"     "$(file_contains "$PROJECT_DIR/src/math.ts" 'multiplyBy3')"
+check "T16.4 Coverage section in plan"    "$([ -f "$PLAN10" ] && file_contains "$PLAN10" 'Coverage' || echo FAIL)"
+
+# Run 11 (Coverage SKIP-Fall) — manual only:
+# Headless `AskUserQuestion` behavior with `-p --dangerously-skip-permissions` is unverified.
+# To test manually: temporarily remove @vitest/coverage-v8 from devDependencies and run agent interactively.
+
 # ─── TOKEN USAGE & COST SUMMARY ──────────────────────────────────
 echo "" | tee -a "$REPORT"
 echo "── Token Usage & Cost ──" | tee -a "$REPORT"
 python3 -c "
 import json, glob, os
 results_dir = os.environ.get('RESULTS_DIR', '.')
-runs = sorted(glob.glob(os.path.join(results_dir, 'run[1-8]-*-*.json')))
-runs = [r for r in runs if 'ai-eval' not in r]
+runs = sorted(glob.glob(os.path.join(results_dir, 'run*-*-*.json')))
+runs = [r for r in runs if 'ai-eval' not in r and 'plan' not in r]
 total_cost = 0; total_turns = 0; total_duration = 0; total_output = 0; total_cache_read = 0
 print(f'  {\"Run\":<28} {\"Turns\":>5} {\"Duration\":>8} {\"Cost\":>7} {\"Output\":>8} {\"Cache Read\":>11}')
 print(f'  {\"─\"*28} {\"─\"*5} {\"─\"*8} {\"─\"*7} {\"─\"*8} {\"─\"*11}')
