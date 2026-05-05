@@ -1,5 +1,16 @@
 {
   "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "ExitPlanMode",
+        "hooks": [
+          {
+            "type": "prompt",
+            "prompt": "Plan was just approved by the user. Default action: delegate execution to the zensu:tdd-manager subagent — pass the approved plan content as the feature specification. Skip tdd-manager ONLY if the plan is doc-only, a trivial config tweak, or otherwise not code that benefits from RED/GREEN TDD; in that case proceed normally and briefly state why TDD is being skipped. If the user's approval message explicitly requests a different approach (e.g. 'approve, no tdd'), respect that."
+          }
+        ]
+      }
+    ],
     "SubagentStop": [
       {
         "matcher": "zensu:tdd-manager",
