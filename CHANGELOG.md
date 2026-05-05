@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- PostToolUse hook on `ExitPlanMode` that auto-delegates approved plans to the `zensu:tdd-manager` subagent (with escape hatch for doc-only or trivial plans)
 - Data & Privacy disclosure in README
 - SECURITY.md with responsible disclosure policy and safe harbor
 - CONTRIBUTING.md with contributor guidelines
