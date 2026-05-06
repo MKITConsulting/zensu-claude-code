@@ -8,7 +8,10 @@ if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/plan-hook-eval-doc.log" }
 log_user 1
 exec rm -f $DEBUG_LOG
 
-spawn claude --permission-mode plan --debug-file=$DEBUG_LOG \
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
   "Plan a tiny one-line change: add an HTML comment '<!-- hook-eval-marker -->' at top of README.md. Call ExitPlanMode."
 
 expect {

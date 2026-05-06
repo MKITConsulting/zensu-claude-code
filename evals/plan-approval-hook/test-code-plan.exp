@@ -8,17 +8,15 @@ if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/plan-hook-eval-code.log" }
 log_user 1
 exec rm -f $DEBUG_LOG
 
-spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --dangerously-skip-permissions \
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
   "Write the SHORTEST possible plan to add a function isEven(n: number): boolean to evals/plan-approval-hook/fixtures/sample.ts. No exploration needed — just plan it as one RED/IMPL/GREEN cycle and call ExitPlanMode immediately."
 
 expect {
-  -re "Yes.*accept|Yes.*proceed|Yes.*approve" {
-    send_user "\n>>> Bypass-permissions consent prompt — sending 2\n"
-    send "2\r"
-    exp_continue
-  }
-  -re "1\\..*Yes|approve this plan" {
-    send_user "\n>>> Approval prompt detected, sending 1 + Enter\n"
+  -re "Yes.*proceed|Yes.*approve|Approve" {
+    send_user "\n>>> Plan approval prompt — sending 1 + Enter\n"
     send "1\r"
   }
   timeout {

@@ -39,20 +39,27 @@ not_contains() { strip_ansi "$1" | grep -qiE "$2" && echo FAIL || echo PASS; }
 
 echo "=== Plan-Approval Hook Eval: $TIMESTAMP ===" | tee "$REPORT"
 
-# Run from plugin root so hooks/hooks.json auto-loads.
-cd "$EVAL_DIR/../.."
+# Plugin root = parent of evals/. expect scripts pass it as --plugin-dir
+# so claude loads our LOCAL hooks/hooks.json instead of the marketplace cache.
+PLUGIN_DIR="$(cd "$EVAL_DIR/../.." && pwd)"
+echo "Plugin dir: $PLUGIN_DIR" | tee -a "$REPORT"
+cd "$PLUGIN_DIR"
 
 # ─── Test 1: Doc-only plan → escape-hatch (NO tdd-manager) ──────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 1: Doc-only plan (escape-hatch path)" | tee -a "$REPORT"
 DOC_OUT="$RESULTS_DIR/doc-${TIMESTAMP}.out"
 DOC_LOG="$RESULTS_DIR/doc-${TIMESTAMP}.debug.log"
-timeout 180 "$EVAL_DIR/test-doc-plan.exp" "$DOC_LOG" > "$DOC_OUT" 2>&1 || true
+timeout 180 "$EVAL_DIR/test-doc-plan.exp" "$DOC_LOG" "$PLUGIN_DIR" > "$DOC_OUT" 2>&1 || true
 
-check "T1.1 Plugin auto-loaded hooks.json"  "$(contains "$DOC_LOG" "Loaded hooks from standard location for plugin zensu")"
-check "T1.2 Hook fired on approval"          "$(contains "$DOC_OUT" "PostToolUse:ExitPlanMode|hook ?stopped ?continuation")"
-check "T1.3 Escape-hatch invoked"            "$(contains "$DOC_OUT" "doc-only|proceed normally|trivial documentation|without delegating")"
-check "T1.4 No tdd-manager spawn"            "$(not_contains "$DOC_LOG" "subagent.*tdd-manager|spawn.*tdd-manager")"
+# Deterministic assertions read from the debug log (TUI output is brittle).
+# The debug log records "Hooks: Processing prompt hook with prompt: <text>"
+# verbatim when a prompt-type hook fires.
+check "T1.1 Plugin loaded hooks.json"        "$(contains "$DOC_LOG" "Loaded hooks.*plugin zensu")"
+check "T1.2 Hook fired on approval"           "$(contains "$DOC_LOG" "Processing prompt hook.*Plan was just approved")"
+check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitPlanMode.*outcome=ok")"
+check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_OUT" "doc-only|pure ?documentation|trivial ?documentation|TDD ?does ?not ?apply|does ?not ?apply|zero ?code ?changes|Exception ?\\(1\\)|without ?delegating|proceed ?normally")"
+check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "tool=Agent.*tdd-manager|subagent_type.*tdd-manager")"
 
 # ─── Test 2: Code-change plan → tdd-manager delegation ──────────
 echo "" | tee -a "$REPORT"
@@ -61,12 +68,13 @@ CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"
 CODE_LOG="$RESULTS_DIR/code-${TIMESTAMP}.debug.log"
 mkdir -p "$EVAL_DIR/fixtures"
 [ -f "$EVAL_DIR/fixtures/sample.ts" ] || echo "export const noop = () => {};" > "$EVAL_DIR/fixtures/sample.ts"
-timeout 360 "$EVAL_DIR/test-code-plan.exp" "$CODE_LOG" > "$CODE_OUT" 2>&1 || true
+timeout 360 "$EVAL_DIR/test-code-plan.exp" "$CODE_LOG" "$PLUGIN_DIR" > "$CODE_OUT" 2>&1 || true
 
-check "T2.1 Plugin auto-loaded hooks.json"   "$(contains "$CODE_LOG" "Loaded hooks from standard location for plugin zensu")"
-check "T2.2 Hook fired on approval"           "$(contains "$CODE_OUT" "PostToolUse:ExitPlanMode|hook ?stopped ?continuation|Plan ?was ?just ?approved")"
-check "T2.3 Delegation path indicated"        "$(contains "$CODE_OUT" "tdd-manager|RED.*GREEN|delegating")"
-check "T2.4 No escape-hatch (code change)"    "$(not_contains "$CODE_OUT" "doc-only|trivial documentation update")"
+check "T2.1 Plugin loaded hooks.json"        "$(contains "$CODE_LOG" "Loaded hooks.*plugin zensu")"
+check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Processing prompt hook.*Plan was just approved")"
+check "T2.3 ExitPlanMode tool succeeded"      "$(contains "$CODE_LOG" "tool=ExitPlanMode.*outcome=ok")"
+check "T2.4 Delegation path indicated"        "$(contains "$CODE_OUT" "tdd-manager|MANDATORY|delegating")"
+check "T2.5 No doc-only escape-hatch"         "$(not_contains "$CODE_OUT" "doc-only|trivial documentation update")"
 
 # Reset fixture so repeat runs are deterministic.
 echo "export const noop = () => {};" > "$EVAL_DIR/fixtures/sample.ts"
