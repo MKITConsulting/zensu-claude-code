@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 - Plan-approval hook prompt sharpened: delegation is now mandatory for all code-related plans; override requires an EXPLICIT TDD negation phrase (e.g. "no tdd", "kein tdd-manager"); generic urgency phrases like "gleich arbeiten" or "go ahead" no longer count; Auto Mode is explicitly NOT an override
+- Plan-approval hook prompt further hardened: explicit prohibition on calling Read/Edit/Write/Bash/MultiEdit before the Agent tool; required acknowledgement line ("Delegating to zensu:tdd-manager" or "Skipping TDD: ..."); explicit instruction to set `subagent_type='zensu:tdd-manager'`
+- Plugin manifest now declares `"hooks": "./hooks/hooks.json"` explicitly to ensure loading across all Claude Code surfaces (auto-discovery via convention worked for the CLI but the Desktop App may use a stricter loader)
+- Plan-approval hook switched from `type: "prompt"` to `type: "command"` (new script `hooks/plan-approved-delegate.sh`). The prompt-type hook routed the directive through a judge LLM that summarized the instruction before it reached the main agent, which let Claude ignore the delegation requirement. The command-type hook injects the directive verbatim as `additionalContext` next to the tool result, removing the judge layer.
 - Data & Privacy disclosure in README
 - SECURITY.md with responsible disclosure policy and safe harbor
 - CONTRIBUTING.md with contributor guidelines

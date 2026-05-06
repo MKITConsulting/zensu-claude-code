@@ -27,20 +27,18 @@ expect {
 }
 
 expect {
-  -re "PostToolUse:ExitPlanMode hook" {
-    send_user "\n>>> HOOK FIRED\n"
+  -re "Delegating to zensu:tdd-manager|spawn.*tdd-manager subagent" {
+    send_user "\n>>> POSITIVE: tdd-manager delegation acknowledged\n"
   }
-  -re "delegating.*tdd-manager|zensu:tdd-manager|spawn.*tdd-manager|RED.*GREEN" {
-    send_user "\n>>> POSITIVE: tdd-manager delegation path detected\n"
-  }
-  -re "skip.*tdd|proceed normally without delegating" {
+  -re "Skipping TDD" {
     send_user "\n>>> ESCAPE-HATCH (unexpected for code change)\n"
   }
   timeout {
-    send_user "\n>>> TIMEOUT post-approval\n"
+    send_user "\n>>> TIMEOUT post-approval (Claude still processing)\n"
   }
   eof { send_user "\n>>> session ended\n" }
 }
 
+sleep 5
 send "\x03"
 expect eof

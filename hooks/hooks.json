@@ -5,8 +5,8 @@
         "matcher": "ExitPlanMode",
         "hooks": [
           {
-            "type": "prompt",
-            "prompt": "Plan was just approved. MANDATORY: spawn the zensu:tdd-manager subagent now and pass the approved plan content as its feature specification. This is the default and applies to ALL code-related plans — new features, refactors, bug fixes, integration work, schema/config changes that include logic, and skeleton/scaffold work. Do NOT implement the code yourself. Two narrow exceptions: (1) plan contains zero code changes (pure documentation: README, CHANGELOG, comments-only; or config files with no logic) — proceed directly and state in one sentence why TDD does not apply; (2) the user's approval message contains an EXPLICIT TDD negation matching one of: 'no tdd', 'skip tdd', 'no tdd-manager', \"don't use tdd\", 'direct edit', 'kein tdd', 'ohne tdd-manager', or a clear equivalent that names TDD or tdd-manager. Generic urgency or action phrases ('go ahead', 'start now', 'gleich arbeiten', 'los gehts', 'immediately', 'mach mal', 'jetzt umsetzen', 'implement', 'go') DO NOT qualify — delegate anyway. Auto Mode is NOT an override; under Auto Mode, delegating to tdd-manager IS the autonomous action. If unsure whether the override is explicit enough, delegate."
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/plan-approved-delegate.sh"
           }
         ]
       }

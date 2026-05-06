@@ -56,7 +56,7 @@ timeout 180 "$EVAL_DIR/test-doc-plan.exp" "$DOC_LOG" "$PLUGIN_DIR" > "$DOC_OUT" 
 # The debug log records "Hooks: Processing prompt hook with prompt: <text>"
 # verbatim when a prompt-type hook fires.
 check "T1.1 Plugin loaded hooks.json"        "$(contains "$DOC_LOG" "Loaded hooks.*plugin zensu")"
-check "T1.2 Hook fired on approval"           "$(contains "$DOC_LOG" "Processing prompt hook.*Plan was just approved")"
+check "T1.2 Hook fired on approval"           "$(contains "$DOC_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitPlanMode.*outcome=ok")"
 check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_OUT" "doc-only|pure ?documentation|trivial ?documentation|TDD ?does ?not ?apply|does ?not ?apply|zero ?code ?changes|Exception ?\\(1\\)|without ?delegating|proceed ?normally")"
 check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "tool=Agent.*tdd-manager|subagent_type.*tdd-manager")"
@@ -71,9 +71,9 @@ mkdir -p "$EVAL_DIR/fixtures"
 timeout 360 "$EVAL_DIR/test-code-plan.exp" "$CODE_LOG" "$PLUGIN_DIR" > "$CODE_OUT" 2>&1 || true
 
 check "T2.1 Plugin loaded hooks.json"        "$(contains "$CODE_LOG" "Loaded hooks.*plugin zensu")"
-check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Processing prompt hook.*Plan was just approved")"
+check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T2.3 ExitPlanMode tool succeeded"      "$(contains "$CODE_LOG" "tool=ExitPlanMode.*outcome=ok")"
-check "T2.4 Delegation path indicated"        "$(contains "$CODE_OUT" "tdd-manager|MANDATORY|delegating")"
+check "T2.4 Delegation path indicated"        "$(contains "$CODE_OUT" "Delegating ?to ?zensu:tdd-manager|spawn.*tdd-manager|tdd-manager.*launched")"
 check "T2.5 No doc-only escape-hatch"         "$(not_contains "$CODE_OUT" "doc-only|trivial documentation update")"
 
 # Reset fixture so repeat runs are deterministic.
