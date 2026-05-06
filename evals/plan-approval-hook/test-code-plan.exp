@@ -1,0 +1,46 @@
+#!/usr/bin/env expect -f
+# Positive test: code-change plan SHOULD trigger tdd-manager delegation.
+# Hook prompt instructs Claude to delegate execution to zensu:tdd-manager.
+
+set timeout 240
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/plan-hook-eval-code.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Write the SHORTEST possible plan to add a function isEven(n: number): boolean to evals/plan-approval-hook/fixtures/sample.ts. No exploration needed — just plan it as one RED/IMPL/GREEN cycle and call ExitPlanMode immediately."
+
+expect {
+  -re "Yes.*proceed|Yes.*approve|Approve" {
+    send_user "\n>>> Plan approval prompt — sending 1 + Enter\n"
+    send "1\r"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT waiting for approval prompt\n"
+    send "\x03"
+    exit 2
+  }
+}
+
+expect {
+  -re "PostToolUse:ExitPlanMode hook" {
+    send_user "\n>>> HOOK FIRED\n"
+  }
+  -re "delegating.*tdd-manager|zensu:tdd-manager|spawn.*tdd-manager|RED.*GREEN" {
+    send_user "\n>>> POSITIVE: tdd-manager delegation path detected\n"
+  }
+  -re "skip.*tdd|proceed normally without delegating" {
+    send_user "\n>>> ESCAPE-HATCH (unexpected for code change)\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT post-approval\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+send "\x03"
+expect eof

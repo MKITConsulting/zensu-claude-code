@@ -1,0 +1,46 @@
+#!/usr/bin/env expect -f
+# Negative test: doc-only plan should NOT trigger tdd-manager delegation.
+# Hook prompt instructs Claude to skip tdd-manager for trivial doc changes.
+
+set timeout 90
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/plan-hook-eval-doc.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Plan a tiny one-line change: add an HTML comment '<!-- hook-eval-marker -->' at top of README.md. Call ExitPlanMode."
+
+expect {
+  -re "Yes.*proceed|Yes.*approve|Approve" {
+    send_user "\n>>> Approval prompt detected, sending 1 + Enter\n"
+    send "1\r"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT waiting for approval prompt\n"
+    send "\x03"
+    exit 2
+  }
+}
+
+expect {
+  -re "PostToolUse:ExitPlanMode hook" {
+    send_user "\n>>> HOOK FIRED (PostToolUse:ExitPlanMode visible in output)\n"
+  }
+  -re "tdd-manager" {
+    send_user "\n>>> tdd-manager mention detected (delegation path)\n"
+  }
+  -re "skip.*tdd|proceed normally|doc-only|escape" {
+    send_user "\n>>> ESCAPE-HATCH: doc-only path detected\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT post-approval\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+send "\x03"
+expect eof

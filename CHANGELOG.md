@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - PostToolUse hook on `ExitPlanMode` that auto-delegates approved plans to the `zensu:tdd-manager` subagent (with escape hatch for doc-only or trivial plans)
+- E2E eval suite for the plan-approval hook in `evals/plan-approval-hook/` (expect-driven interactive test that approves a real plan and asserts hook firing)
+
+### Changed
+- Plan-approval hook prompt sharpened: delegation is now mandatory for all code-related plans; override requires an EXPLICIT TDD negation phrase (e.g. "no tdd", "kein tdd-manager"); generic urgency phrases like "gleich arbeiten" or "go ahead" no longer count; Auto Mode is explicitly NOT an override
 - Data & Privacy disclosure in README
 - SECURITY.md with responsible disclosure policy and safe harbor
 - CONTRIBUTING.md with contributor guidelines
