@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.3.9",
+  "version": "0.3.10",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -21,6 +21,5 @@
     "./skills/pulse",
     "./skills/security-review"
   ],
-  "hooks": "./hooks/hooks.json",
   "mcpServers": "./.mcp.json"
 }

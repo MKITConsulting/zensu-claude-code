@@ -9,18 +9,18 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/plan-approved-delegate.sh"
           }
         ]
+      },
+      {
+        "matcher": "Agent",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-tdd-review-delegate.sh"
+          }
+        ]
       }
     ],
     "SubagentStop": [
-      {
-        "matcher": "zensu:tdd-manager",
-        "hooks": [
-          {
-            "type": "prompt",
-            "prompt": "The TDD manager has finished implementation. Run /reflect now to review this session's changes in your current context before proceeding with any further steps."
-          }
-        ]
-      },
       {
         "matcher": "zensu:code-reviewer",
         "hooks": [

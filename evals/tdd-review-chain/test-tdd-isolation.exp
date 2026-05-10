@@ -1,0 +1,32 @@
+#!/usr/bin/env expect -f
+# Isolation test: spawning a non-tdd-manager subagent (zensu:zensu-plm) must NOT
+# trigger the review-chain. Verifies the SubagentStop matcher is scoped correctly.
+
+set timeout 240
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/tdd-review-chain-isolation.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Spawn the zensu:zensu-plm subagent via the Agent tool (subagent_type='zensu:zensu-plm'). Ask it to read evals/tdd-review-chain/fixtures/sample.ts and reply with its first line. No code changes. Do not invoke any other subagent."
+
+expect {
+  -re "zensu:code-reviewer" {
+    send_user "\n>>> NEGATIVE LEAK: code-reviewer mentioned despite non-tdd-manager subagent\n"
+  }
+  -re "first line|export const noop" {
+    send_user "\n>>> ISOLATION OK: zensu-plm responded without triggering reviewer\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT — debug log will be inspected\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+sleep 3
+send "\x03"
+expect eof

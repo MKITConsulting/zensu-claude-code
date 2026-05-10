@@ -1,0 +1,32 @@
+#!/usr/bin/env expect -f
+# Positive test: spawning zensu:tdd-manager should chain into zensu:code-reviewer
+# via the SubagentStop prompt-type hook in hooks/hooks.json.
+
+set timeout 480
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/tdd-review-chain-positive.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+spawn claude --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Spawn the zensu:tdd-manager subagent now to add an isEven(n: number): boolean function to evals/tdd-review-chain/fixtures/sample.ts via TDD. One RED/IMPL/GREEN cycle. Use the Agent tool with subagent_type='zensu:tdd-manager'. Do not implement it yourself."
+
+expect {
+  -re "zensu:code-reviewer.*finished|review.*report|code review" {
+    send_user "\n>>> POSITIVE: review-chain marker observed in output\n"
+  }
+  -re "Invoke @zensu:code-reviewer" {
+    send_user "\n>>> POSITIVE: SubagentStop prompt visible in output\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT — debug log will be inspected by run-eval.sh\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+sleep 5
+send "\x03"
+expect eof

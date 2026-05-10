@@ -33,5 +33,8 @@ out/
 .claude/plans/
 .claude/settings.local.json
 
+# tdd-manager run artifacts (per-run plans + logs)
+.zensu/
+
 # Internal
 OSS_READINESS_REPORT.md

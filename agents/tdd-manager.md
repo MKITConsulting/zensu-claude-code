@@ -226,4 +226,4 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
 4. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
 5. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
 6. Output summary: results, files modified, test counts, verification status, **Coverage table from step 2e**, plan path.
-7. Offer code review: ask user (in their language) if they want to run `@zensu:code-reviewer`.
+7. After producing the step 6 summary, return control. The plugin's SubagentStop hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
