@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/evals/tdd-review-chain/hooks-experiment/logger.sh"
+          }
+        ]
+      }
+    ]
+  }
+}

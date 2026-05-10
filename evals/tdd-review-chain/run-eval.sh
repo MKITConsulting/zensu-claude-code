@@ -1,0 +1,162 @@
+#!/bin/bash
+# E2E eval for the SubagentStop review-chain hook.
+#
+# Tests the chain: zensu:tdd-manager finishes  ->  SubagentStop prompt-type
+# hook fires  ->  main agent invokes @zensu:code-reviewer.
+#
+# Modes:
+#   ./run-eval.sh              full suite (T1-T4)
+#   ./run-eval.sh --self-check fast structural check (no Claude spawn)
+#
+# Tests:
+#   T1 positive    — tdd-manager completion triggers code-reviewer dispatch
+#   T2 isolation   — non-tdd-manager subagent does NOT trigger reviewer
+#   T3 judge-pass  — hook prompt expansion preserves the literal directive
+#   T4 posttool    — empirical: report whether PostToolUse:Task fires after subagent return
+#
+# Slow tests (T1, T2) spawn real interactive Claude sessions via expect and
+# can take 2-8 minutes each. Run T3 + structural checks via --self-check.
+
+set -u
+
+EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
+PLUGIN_DIR="$(cd "$EVAL_DIR/../.." && pwd)"
+RESULTS_DIR="$EVAL_DIR/results"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+REPORT="$RESULTS_DIR/report-$TIMESTAMP.txt"
+mkdir -p "$RESULTS_DIR"
+
+MODE="${1:-full}"
+
+PASS_COUNT=0
+FAIL_COUNT=0
+TOTAL=0
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || { echo "missing dependency: $1" >&2; exit 1; }
+}
+
+check() {
+  local label="$1" result="$2"
+  TOTAL=$((TOTAL + 1))
+  if [ "$result" = "PASS" ]; then
+    PASS_COUNT=$((PASS_COUNT + 1))
+    echo "  PASS  $label" | tee -a "$REPORT"
+  else
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    echo "  FAIL  $label" | tee -a "$REPORT"
+  fi
+}
+
+strip_ansi()   { sed -E "s/\x1b\[[0-9;]*[A-Za-z]//g; s/\[[0-9]+[A-Z]//g; s/\[[?][0-9;]+[hl]//g" "$1"; }
+contains()     { strip_ansi "$1" | grep -qiE "$2" && echo PASS || echo FAIL; }
+not_contains() { strip_ansi "$1" | grep -qiE "$2" && echo FAIL || echo PASS; }
+
+echo "=== TDD Review-Chain Hook Eval: $TIMESTAMP ($MODE) ===" | tee "$REPORT"
+echo "Plugin dir: $PLUGIN_DIR" | tee -a "$REPORT"
+cd "$PLUGIN_DIR"
+
+# ─── Structural pre-checks (always run) ────────────────────────────
+echo "" | tee -a "$REPORT"
+echo "▸ Structural checks" | tee -a "$REPORT"
+
+if node -e 'JSON.parse(require("fs").readFileSync("hooks/hooks.json","utf8"))' 2>/dev/null; then
+  check "hooks.json is valid JSON" PASS
+else
+  check "hooks.json is valid JSON" FAIL
+fi
+
+# Use the dedicated assertion helpers as authoritative checks.
+if "$EVAL_DIR/assert-config.sh"   >/dev/null 2>&1; then check "assert-config.sh"   PASS; else check "assert-config.sh"   FAIL; fi
+if "$EVAL_DIR/assert-agent.sh"    >/dev/null 2>&1; then check "assert-agent.sh"    PASS; else check "assert-agent.sh"    FAIL; fi
+if "$EVAL_DIR/assert-version.sh"  >/dev/null 2>&1; then check "assert-version.sh"  PASS; else check "assert-version.sh"  FAIL; fi
+if "$EVAL_DIR/assert-changelog.sh" >/dev/null 2>&1; then check "assert-changelog.sh" PASS; else check "assert-changelog.sh" FAIL; fi
+
+# ─── T3 directive integrity (offline: script output inspection) ────
+echo "" | tee -a "$REPORT"
+echo "▸ T3 directive integrity (offline script-output check)" | tee -a "$REPORT"
+SCRIPT="$PLUGIN_DIR/hooks/post-tdd-review-delegate.sh"
+DIRECTIVE_OUT="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:tdd-manager","prompt":"x"}}' | "$SCRIPT" 2>/dev/null)"
+
+if [ -z "$DIRECTIVE_OUT" ]; then
+  check "T3.0 script emits output for tdd-manager" FAIL
+else
+  check "T3.0 script emits output for tdd-manager" PASS
+fi
+case "$DIRECTIVE_OUT" in
+  *'"additionalContext"'*) check "T3.1 directive uses additionalContext (command-type)" PASS ;;
+  *)                        check "T3.1 directive uses additionalContext (command-type)" FAIL ;;
+esac
+case "$DIRECTIVE_OUT" in
+  *'zensu:code-reviewer'*) check "T3.2 directive names zensu:code-reviewer" PASS ;;
+  *)                        check "T3.2 directive names zensu:code-reviewer" FAIL ;;
+esac
+case "$DIRECTIVE_OUT" in
+  *"VERY NEXT TOOL CALL"*|*"STOP."*) check "T3.3 directive is imperative" PASS ;;
+  *)                                  check "T3.3 directive is imperative" FAIL ;;
+esac
+SILENT_OUT="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:zensu-plm","prompt":"x"}}' | "$SCRIPT" 2>/dev/null)"
+if [ -z "$SILENT_OUT" ]; then
+  check "T3.4 script silent for non-tdd-manager subagent" PASS
+else
+  check "T3.4 script silent for non-tdd-manager subagent" FAIL
+fi
+
+if [ "$MODE" = "--self-check" ]; then
+  echo "" | tee -a "$REPORT"
+  echo "════════════════════════════════════════" | tee -a "$REPORT"
+  echo "  SELF-CHECK: $PASS_COUNT/$TOTAL PASS ($FAIL_COUNT FAIL)" | tee -a "$REPORT"
+  echo "  Slow tests T1, T2 skipped; T4 data-probe skipped (run without --self-check for full suite)" | tee -a "$REPORT"
+  echo "  Report: $REPORT" | tee -a "$REPORT"
+  echo "════════════════════════════════════════" | tee -a "$REPORT"
+  [ "$FAIL_COUNT" -eq 0 ]
+  exit $?
+fi
+
+# ─── Slow tests need expect + claude ───────────────────────────────
+require expect
+require claude
+
+# Reset fixtures for deterministic runs (drop test file the spec creates).
+mkdir -p "$EVAL_DIR/fixtures"
+echo "export const noop = () => {};" > "$EVAL_DIR/fixtures/sample.ts"
+rm -f "$EVAL_DIR/fixtures/sample.test.ts"
+
+# ─── T1: positive review-chain ─────────────────────────────────────
+echo "" | tee -a "$REPORT"
+echo "▸ T1 positive (tdd-manager → code-reviewer chain)" | tee -a "$REPORT"
+T1_OUT="$RESULTS_DIR/t1-${TIMESTAMP}.out"
+T1_LOG="$RESULTS_DIR/t1-${TIMESTAMP}.debug.log"
+timeout 480 "$EVAL_DIR/test-tdd-positive.exp" "$T1_LOG" "$PLUGIN_DIR" > "$T1_OUT" 2>&1 || true
+
+check "T1.1 plugin loaded hooks.json"                "$(contains "$T1_LOG" "Loaded hooks.*plugin zensu")"
+check "T1.2 PostToolUse:Agent hook fired"            "$(contains "$T1_LOG" "Hook PostToolUse:Agent.*success|PostToolUse.*post-tdd-review-delegate.*provided additionalContext")"
+check "T1.3 main agent dispatched code-reviewer"     "$(contains "$T1_LOG" "subagent_type.*zensu:code-reviewer|tool_name.*Task.*code-reviewer|agent_type.*zensu:code-reviewer")"
+check "T1.4 SubagentStop fired for code-reviewer"    "$(contains "$T1_LOG" "Hook SubagentStop.*zensu:code-reviewer|SubagentStop.*matcher.*code-reviewer|agent_type.*zensu:code-reviewer")"
+check "T1.5 reviewer produced report (debug log)"    "$(contains "$T1_LOG" "Code Review Report|review.*report|Findings.*[0-9]|Verdict.*PASS|Verdict.*NEEDS")"
+
+# ─── T2: isolation (non-tdd-manager must NOT trigger chain) ────────
+echo "" | tee -a "$REPORT"
+echo "▸ T2 isolation (zensu-plm spawn must NOT trigger reviewer)" | tee -a "$REPORT"
+T2_OUT="$RESULTS_DIR/t2-${TIMESTAMP}.out"
+T2_LOG="$RESULTS_DIR/t2-${TIMESTAMP}.debug.log"
+timeout 240 "$EVAL_DIR/test-tdd-isolation.exp" "$T2_LOG" "$PLUGIN_DIR" > "$T2_OUT" 2>&1 || true
+
+check "T2.1 plugin loaded hooks.json"          "$(contains "$T2_LOG" "Loaded hooks.*plugin zensu")"
+check "T2.2 directive NOT injected for plm"    "$(not_contains "$T2_LOG" "VERY NEXT TOOL CALL.*zensu:code-reviewer")"
+check "T2.3 reviewer NOT dispatched"           "$(not_contains "$T2_LOG" "subagent_type.*zensu:code-reviewer|tool_name.*Task.*code-reviewer")"
+
+# ─── T4: empirical PostToolUse:Task probe (data report only) ───────
+echo "" | tee -a "$REPORT"
+echo "▸ T4 PostToolUse:Task empirical probe (data report)" | tee -a "$REPORT"
+echo "  SKIP: T4 implementation pending — fabricated CLAUDE_PLUGIN_ROOT_OVERRIDE"  | tee -a "$REPORT"
+echo "        env var has no Claude consumer; experiment hook never loads."         | tee -a "$REPORT"
+echo "        Re-enable once stacked --plugin-dir or temp hook injection lands."     | tee -a "$REPORT"
+
+echo "" | tee -a "$REPORT"
+echo "════════════════════════════════════════" | tee -a "$REPORT"
+echo "  TOTAL: $PASS_COUNT/$TOTAL PASS ($FAIL_COUNT FAIL)" | tee -a "$REPORT"
+echo "  Report: $REPORT" | tee -a "$REPORT"
+echo "════════════════════════════════════════" | tee -a "$REPORT"
+
+[ "$FAIL_COUNT" -eq 0 ]
