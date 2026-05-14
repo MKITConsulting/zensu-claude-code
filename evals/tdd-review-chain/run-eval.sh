@@ -9,10 +9,13 @@
 #   ./run-eval.sh --self-check fast structural check (no Claude spawn)
 #
 # Tests:
-#   T1 positive    — tdd-manager completion triggers code-reviewer dispatch
-#   T2 isolation   — non-tdd-manager subagent does NOT trigger reviewer
-#   T3 judge-pass  — hook prompt expansion preserves the literal directive
-#   T4 posttool    — empirical: report whether PostToolUse:Task fires after subagent return
+#   T1 positive          — tdd-manager completion triggers code-reviewer dispatch
+#   T2 isolation         — non-tdd-manager subagent does NOT trigger reviewer
+#   T3 judge-pass        — hook prompt expansion preserves the literal tdd-manager→reviewer directive
+#   T4 posttool          — empirical: report whether PostToolUse:Task fires after subagent return
+#   T6 severity-route(C) — reviewer findings Critical/Important → dispatch tdd-manager (offline)
+#   T7 severity-route(B) — reviewer findings Suggestions-only → no dispatch, present to user (offline)
+#   T8 severity-route(A) — reviewer PASS / no findings → no dispatch (offline)
 #
 # Slow tests (T1, T2) spawn real interactive Claude sessions via expect and
 # can take 2-8 minutes each. Run T3 + structural checks via --self-check.
@@ -67,10 +70,11 @@ else
 fi
 
 # Use the dedicated assertion helpers as authoritative checks.
-if "$EVAL_DIR/assert-config.sh"   >/dev/null 2>&1; then check "assert-config.sh"   PASS; else check "assert-config.sh"   FAIL; fi
-if "$EVAL_DIR/assert-agent.sh"    >/dev/null 2>&1; then check "assert-agent.sh"    PASS; else check "assert-agent.sh"    FAIL; fi
-if "$EVAL_DIR/assert-version.sh"  >/dev/null 2>&1; then check "assert-version.sh"  PASS; else check "assert-version.sh"  FAIL; fi
-if "$EVAL_DIR/assert-changelog.sh" >/dev/null 2>&1; then check "assert-changelog.sh" PASS; else check "assert-changelog.sh" FAIL; fi
+if "$EVAL_DIR/assert-config.sh"            >/dev/null 2>&1; then check "assert-config.sh"            PASS; else check "assert-config.sh"            FAIL; fi
+if "$EVAL_DIR/assert-agent.sh"             >/dev/null 2>&1; then check "assert-agent.sh"             PASS; else check "assert-agent.sh"             FAIL; fi
+if "$EVAL_DIR/assert-version.sh"           >/dev/null 2>&1; then check "assert-version.sh"           PASS; else check "assert-version.sh"           FAIL; fi
+if "$EVAL_DIR/assert-changelog.sh"          >/dev/null 2>&1; then check "assert-changelog.sh"          PASS; else check "assert-changelog.sh"          FAIL; fi
+if "$EVAL_DIR/assert-severity-routing.sh"  >/dev/null 2>&1; then check "assert-severity-routing.sh"  PASS; else check "assert-severity-routing.sh"  FAIL; fi
 
 # ─── T3 directive integrity (offline: script output inspection) ────
 echo "" | tee -a "$REPORT"
@@ -100,6 +104,98 @@ if [ -z "$SILENT_OUT" ]; then
   check "T3.4 script silent for non-tdd-manager subagent" PASS
 else
   check "T3.4 script silent for non-tdd-manager subagent" FAIL
+fi
+
+# ─── T6/T7/T8 severity-routing directive integrity (offline) ────────
+# These tests verify the reviewer→tdd-manager severity-routing hook
+# (hooks/post-review-tdd-delegate.sh). The script does not parse reviewer
+# findings itself — it emits a directive that tells the main agent how to
+# classify findings and choose between three response modes:
+#   T6 (case C): ANY Critical OR Important present → spawn tdd-manager
+#   T7 (case B): ONLY Suggestions / Minor / Nits → buffer for user, no spawn
+#   T8 (case A): PASS / zero findings → reply 'No fixes needed'
+# Each test asserts the trigger phrase for its case is present in the
+# directive so the main agent has unambiguous routing instructions.
+echo "" | tee -a "$REPORT"
+echo "▸ T6/T7/T8 reviewer→tdd-manager severity-routing directive (offline)" | tee -a "$REPORT"
+REVIEW_SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+REVIEW_OUT="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"}}' | "$REVIEW_SCRIPT" 2>/dev/null)"
+
+if [ -z "$REVIEW_OUT" ]; then
+  check "T6.0 severity-routing script emits output for code-reviewer" FAIL
+  check "T6.1 case C dispatches zensu:tdd-manager (Critical+Important)" FAIL
+  check "T7.1 case B presents Suggestions without spawning"            FAIL
+  check "T8.1 case A 'No fixes needed' branch present"                  FAIL
+else
+  check "T6.0 severity-routing script emits output for code-reviewer" PASS
+
+  # T6 — case C: Critical or Important → spawn tdd-manager
+  case "$REVIEW_OUT" in
+    *"Delegating critical+important findings"*"zensu:tdd-manager"*)
+      check "T6.1 case C dispatches zensu:tdd-manager (Critical+Important)" PASS ;;
+    *"zensu:tdd-manager"*"Delegating critical+important findings"*)
+      check "T6.1 case C dispatches zensu:tdd-manager (Critical+Important)" PASS ;;
+    *)
+      check "T6.1 case C dispatches zensu:tdd-manager (Critical+Important)" FAIL ;;
+  esac
+  case "$REVIEW_OUT" in
+    *"EXCLUDE all Suggestions"*|*"NOT auto-fixed"*|*"not auto-fixed"*)
+      check "T6.2 case C excludes Suggestions from spec" PASS ;;
+    *)
+      check "T6.2 case C excludes Suggestions from spec" FAIL ;;
+  esac
+
+  # T7 — case B: ONLY Suggestions → no spawn, present to user
+  case "$REVIEW_OUT" in
+    *"No critical/important findings"*"suggestions only"*)
+      check "T7.1 case B status line 'No critical/important findings — suggestions only'" PASS ;;
+    *)
+      check "T7.1 case B status line 'No critical/important findings — suggestions only'" FAIL ;;
+  esac
+  case "$REVIEW_OUT" in
+    *"### Suggestions (not auto-fixed)"*)
+      check "T7.2 case B presents Suggestions under '### Suggestions (not auto-fixed)' heading" PASS ;;
+    *)
+      check "T7.2 case B presents Suggestions under '### Suggestions (not auto-fixed)' heading" FAIL ;;
+  esac
+  case "$REVIEW_OUT" in
+    *"do NOT spawn tdd-manager"*|*"do not spawn tdd-manager"*|*"Do NOT spawn"*)
+      check "T7.3 case B explicitly forbids tdd-manager spawn for suggestions-only" PASS ;;
+    *)
+      check "T7.3 case B explicitly forbids tdd-manager spawn for suggestions-only" FAIL ;;
+  esac
+
+  # T8 — case A: PASS / zero findings → no spawn at all
+  case "$REVIEW_OUT" in
+    *"No fixes needed: review passed"*)
+      check "T8.1 case A status line 'No fixes needed: review passed'" PASS ;;
+    *)
+      check "T8.1 case A status line 'No fixes needed: review passed'" FAIL ;;
+  esac
+  case "$REVIEW_OUT" in
+    *"Do NOT spawn anything"*|*"do not spawn anything"*|*"do NOT spawn anything"*)
+      check "T8.2 case A explicitly forbids spawning anything" PASS ;;
+    *)
+      check "T8.2 case A explicitly forbids spawning anything" FAIL ;;
+  esac
+
+  # Cross-case: the directive must define ALL THREE status lines so the
+  # main agent picks the right one without ambiguity.
+  case "$REVIEW_OUT" in
+    *"Delegating critical+important findings"*"No critical/important findings"*"No fixes needed: review passed"*)
+      check "T6/T7/T8 directive defines all three status lines in order" PASS ;;
+    *)
+      check "T6/T7/T8 directive defines all three status lines in order" FAIL ;;
+  esac
+fi
+
+# Isolation: severity-routing script must stay silent for tdd-manager
+# subagent input (the other PostToolUse:Agent hook handles that case).
+REVIEW_SILENT="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:tdd-manager","prompt":"x"}}' | "$REVIEW_SCRIPT" 2>/dev/null)"
+if [ -z "$REVIEW_SILENT" ]; then
+  check "T6/T7/T8 isolation: severity-routing silent for tdd-manager input" PASS
+else
+  check "T6/T7/T8 isolation: severity-routing silent for tdd-manager input" FAIL
 fi
 
 if [ "$MODE" = "--self-check" ]; then
@@ -158,5 +254,9 @@ echo "════════════════════════�
 echo "  TOTAL: $PASS_COUNT/$TOTAL PASS ($FAIL_COUNT FAIL)" | tee -a "$REPORT"
 echo "  Report: $REPORT" | tee -a "$REPORT"
 echo "════════════════════════════════════════" | tee -a "$REPORT"
+
+# Post-run cleanup: revert fixtures so repeat runs + commits stay clean.
+echo "export const noop = () => {};" > "$EVAL_DIR/fixtures/sample.ts"
+rm -f "$EVAL_DIR/fixtures/sample.test."*
 
 [ "$FAIL_COUNT" -eq 0 ]
