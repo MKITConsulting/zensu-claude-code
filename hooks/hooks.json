@@ -16,17 +16,10 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-tdd-review-delegate.sh"
-          }
-        ]
-      }
-    ],
-    "SubagentStop": [
-      {
-        "matcher": "zensu:code-reviewer",
-        "hooks": [
+          },
           {
-            "type": "prompt",
-            "prompt": "The code reviewer has finished. Present the review report to the user and ask if any findings should be addressed."
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/post-review-tdd-delegate.sh"
           }
         ]
       }

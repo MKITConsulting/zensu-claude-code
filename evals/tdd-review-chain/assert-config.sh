@@ -17,20 +17,44 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-# 1) hooks.json declares PostToolUse:Task pointing at the delegate script.
-HOOK_CMD="$(node -e '
+# 1) hooks.json declares PostToolUse:Agent with the tdd-manager→reviewer
+#    delegate script (post-tdd-review-delegate.sh).
+HOOK_CMDS="$(node -e '
   const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
   const post = (j.hooks && j.hooks.PostToolUse) || [];
   const m = post.find(b => b.matcher === "Agent");
   if (!m) { console.log(""); process.exit(0); }
-  const c = (m.hooks || []).find(h => h.type === "command");
-  console.log(c ? c.command : "");
+  const cmds = (m.hooks || []).filter(h => h.type === "command").map(h => h.command || "");
+  console.log(cmds.join("\n"));
 ' "$HOOKS")"
 
-case "$HOOK_CMD" in
-  *post-tdd-review-delegate.sh) check "PostToolUse:Agent wired to post-tdd-review-delegate.sh" PASS ;;
-  *)                             check "PostToolUse:Agent wired to post-tdd-review-delegate.sh" FAIL ;;
-esac
+if echo "$HOOK_CMDS" | grep -q "post-tdd-review-delegate.sh"; then
+  check "PostToolUse:Agent wired to post-tdd-review-delegate.sh" PASS
+else
+  check "PostToolUse:Agent wired to post-tdd-review-delegate.sh" FAIL
+fi
+
+# 1b) hooks.json also declares the reviewer→tdd-manager severity-routing
+#     delegate script (post-review-tdd-delegate.sh) under the same matcher.
+if echo "$HOOK_CMDS" | grep -q "post-review-tdd-delegate.sh"; then
+  check "PostToolUse:Agent wired to post-review-tdd-delegate.sh (severity routing)" PASS
+else
+  check "PostToolUse:Agent wired to post-review-tdd-delegate.sh (severity routing)" FAIL
+fi
+
+# 1c) The two PostToolUse:Agent command hooks are listed under the SAME
+#     matcher block (no second matcher: "Agent" entry).
+AGENT_BLOCKS="$(node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const post = (j.hooks && j.hooks.PostToolUse) || [];
+  console.log(post.filter(b => b.matcher === "Agent").length);
+' "$HOOKS")"
+
+if [ "$AGENT_BLOCKS" = "1" ]; then
+  check "single PostToolUse:Agent matcher block (both hooks share it)" PASS
+else
+  check "single PostToolUse:Agent matcher block (both hooks share it)" FAIL
+fi
 
 # 2) The delegate script exists and is executable.
 if [ -x "$SCRIPT" ]; then
@@ -65,6 +89,22 @@ if grep -q '/reflect' "$HOOKS"; then
   check "hooks.json no longer references /reflect" FAIL
 else
   check "hooks.json no longer references /reflect" PASS
+fi
+
+# 7) SubagentStop:zensu:code-reviewer matcher removed — the new PostToolUse:Agent
+#    severity-routing hook supersedes the previous prompt-type "present findings"
+#    hook. Keeping both would race: SubagentStop fires before the main agent
+#    sees the PostToolUse additionalContext, weakening the directive.
+SS_REVIEWER="$(node -e '
+  const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const ss = (j.hooks && j.hooks.SubagentStop) || [];
+  console.log(ss.filter(b => b.matcher === "zensu:code-reviewer").length);
+' "$HOOKS")"
+
+if [ "$SS_REVIEWER" = "0" ]; then
+  check "SubagentStop:zensu:code-reviewer matcher removed" PASS
+else
+  check "SubagentStop:zensu:code-reviewer matcher removed" FAIL
 fi
 
 echo "----"

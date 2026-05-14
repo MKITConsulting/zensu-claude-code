@@ -78,7 +78,7 @@ check "T2.5 No doc-only escape-hatch"         "$(grep -v 'additionalContext' "$C
 
 # Reset fixtures + README marker so repeat runs are deterministic.
 echo "export const noop = () => {};" > "$EVAL_DIR/fixtures/sample.ts"
-rm -f "$EVAL_DIR/fixtures/sample.test.ts"
+rm -f "$EVAL_DIR/fixtures/sample.test."*
 # Doc-only test asks Claude to add an HTML comment marker to README.md.
 # Strip it back out so the repo stays clean between runs.
 if grep -q '<!-- hook-eval-marker -->' "$PLUGIN_DIR/README.md" 2>/dev/null; then
