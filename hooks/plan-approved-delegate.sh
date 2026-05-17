@@ -7,6 +7,12 @@
 # This is a command-type hook (not prompt-type) so the directive reaches
 # the main agent verbatim instead of being summarized by a judge LLM.
 
+set -u
+
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+zensu_hook_enabled autoTdd || exit 0
+
 cat <<'JSON'
 {
   "hookSpecificOutput": {

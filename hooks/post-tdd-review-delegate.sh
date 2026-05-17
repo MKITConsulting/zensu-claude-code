@@ -11,6 +11,10 @@
 
 set -u
 
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+zensu_hook_enabled autoReview || exit 0
+
 INPUT="$(cat)"
 
 # Best-effort JSON parse using node (already required by the eval harness).

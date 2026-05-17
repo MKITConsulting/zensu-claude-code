@@ -1,0 +1,44 @@
+#!/usr/bin/env expect -f
+set timeout 240
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/config-gate-e2e-default.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+if {[info exists env(ZENSU_CONFIG)]} { unset env(ZENSU_CONFIG) }
+
+spawn claude --permission-mode plan --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Write the SHORTEST possible plan to add a function isOdd(n: number): boolean to evals/plan-approval-hook/fixtures/sample.ts. No exploration needed — plan one RED/IMPL/GREEN cycle and call ExitPlanMode immediately."
+
+expect {
+  -re "Yes.*proceed|Yes.*approve|Approve" {
+    send_user "\n>>> Plan approval prompt — sending 1 + Enter\n"
+    send "1\r"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT waiting for approval prompt\n"
+    send "\x03"
+    exit 2
+  }
+}
+
+expect {
+  -re "Delegating to zensu:tdd-manager|spawn.*tdd-manager subagent" {
+    send_user "\n>>> POSITIVE: tdd-manager delegation acknowledged (default config)\n"
+  }
+  -re "Skipping TDD" {
+    send_user "\n>>> ESCAPE-HATCH (unexpected for code change with default config)\n"
+    exit 1
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT post-approval (Claude still processing)\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+sleep 5
+send "\x03"
+expect eof
