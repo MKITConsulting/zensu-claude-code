@@ -180,6 +180,51 @@ When Zensu MCP **is** connected, additional capabilities activate:
 
 ## Configuration
 
+### Hook Opt-Out
+
+Zensu ships four automatic hooks that fire across the development lifecycle. Any single hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
+
+| Flag | Hook Script | Effect when `false` |
+|------|-------------|---------------------|
+| `autoTdd` | `plan-approved-delegate.sh` | Skips auto-spawn of `zensu:tdd-manager` after Plan approval |
+| `autoReview` | `post-tdd-review-delegate.sh` | Skips auto-spawn of `zensu:code-reviewer` after tdd-manager completes |
+| `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings back to tdd-manager |
+| `pulseSession` | `session-start-pulse.sh` | Skips the HEAD/branch banner at session start |
+
+**Resolution rules:**
+
+- File missing -> all hooks active (default, backward compatible)
+- Key missing -> hook active
+- Only an explicit boolean `false` disables a hook
+- Override the config path via the `ZENSU_CONFIG` environment variable
+
+> Flag names are **case-sensitive** and must be **JSON booleans**, not strings. A misspelled key or a quoted `"false"` is silently treated as enabled.
+
+**Disable everything:**
+
+```json
+{
+  "hooks": {
+    "autoTdd": false,
+    "autoReview": false,
+    "autoFix": false,
+    "pulseSession": false
+  }
+}
+```
+
+**Selective opt-out (e.g. silence the pulse banner only):**
+
+```json
+{
+  "hooks": {
+    "pulseSession": false
+  }
+}
+```
+
+A complete reference file with all flags enabled is included as [`config.example.json`](config.example.json) at the repo root. Copy it to `~/.zensu/config.json` if you prefer an explicit baseline.
+
 ### Environment Variables
 
 | Variable | Default | Description |

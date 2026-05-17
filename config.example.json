@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "autoTdd": true,
+    "autoReview": true,
+    "autoFix": true,
+    "pulseSession": true
+  }
+}

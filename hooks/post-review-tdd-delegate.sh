@@ -13,6 +13,10 @@
 
 set -u
 
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+zensu_hook_enabled autoFix || exit 0
+
 INPUT="$(cat)"
 
 SUBAGENT_TYPE="$(node -e '
