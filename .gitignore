@@ -24,6 +24,10 @@ Thumbs.db
 node_modules/
 vendor/
 
+# E2E fixture artifacts (per-fixture deps + lockfiles)
+tests/e2e/fixtures/
+tests/e2e/results/
+
 # Build output
 dist/
 build/

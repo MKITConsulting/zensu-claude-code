@@ -1,0 +1,2 @@
+## Build [Vv]erification:.*(failed|✗)
+(broken\.ts|Type|type.*mismatch|TS2322|cannot be assigned)
