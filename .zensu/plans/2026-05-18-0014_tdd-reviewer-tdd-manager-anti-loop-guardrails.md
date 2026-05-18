@@ -56,7 +56,7 @@ This plan implements three concept-level guardrails in the two agent definition 
 | F11 | Bug Fix | `test-runner.sh`: 5 test fns now set `RESULTS_DIR="$tmp/results"` (per-fixture, named-agent, skeleton, self-check, unknown-mode) — also added `test_results_dir_isolated_per_test` guard | `test-runner.sh::test_results_dir_isolated_per_test` | — | [G] | 1 |
 | F12 | Feature | `run.sh`: detect zero-byte capture file after `invoke_reviewer`, FAIL with explicit "zero-byte capture" diagnostic instead of silent pattern-mismatch | `test-runner.sh::test_zero_byte_capture_diagnostic` | F11 | [G] | 1 |
 | F13 | RF | `run.sh`: dropped unreachable inner `*)` defensive arm — upfront allowlist at :17-24 is sole gate | inline grep+test-runner run | F12 | [RF] | 1 |
-| F14 | W | Commit harness + plan + log artifacts with conventional message covering F8+F9 (and F11-F13 follow-up); `tests/e2e/{run.sh,test-runner.sh,setup-fixtures.sh,README.md,expected/}` + `.zensu/plans/` + `.zensu/logs/` | manual `git log -1 --stat` | F11,F12,F13 | [ ] | 0 |
+| F14 | W | Commit harness + plan + log artifacts with conventional message covering F8+F9 (and F11-F13 follow-up); `tests/e2e/{run.sh,test-runner.sh,setup-fixtures.sh,README.md,expected/}` + `.zensu/plans/` + `.zensu/logs/` + agent .md + .gitignore | manual `git log -1 --stat` | F11,F12,F13 | [W] | 1 |
 
 ### Step F11 — Isolate RESULTS_DIR in test-runner.sh
 
@@ -76,7 +76,7 @@ This plan implements three concept-level guardrails in the two agent definition 
 
 ### Step F14 — Commit harness + plan + log
 
-- [ ] **WIRED**: `git add tests/e2e/{run.sh,test-runner.sh,setup-fixtures.sh,README.md,expected/}` + `git add -f .zensu/plans/2026-05-18-0014_*.md .zensu/logs/2026-05-18-0014_*.log` + conventional commit `feat(e2e): hermetic build-fails fixture + unknown-flag rejection` (covers F8 + F9 + F11-F13 follow-up). Verify with `git log -1 --stat`.
+- [x] **WIRED**: Commit `fdf1207` `feat(e2e): hermetic build-fails fixture + unknown-flag rejection` — 14 files / 1145 ins / 9 del. Includes harness (5 e2e files + 5 patterns), agent .md edits, .gitignore, plan, log. `git log -1 --stat` verified all expected paths present. NOTE: the plan + log entries describing this commit + its [W] mark land in a follow-up "docs(plan): record F11-F14" commit since they describe the commit itself.
 
 ### Step F8 — Reject unknown mode flags
 
