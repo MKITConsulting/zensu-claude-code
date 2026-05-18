@@ -10,3 +10,5 @@
 [16:00:30] CHECKPOINT — control evals: config-gate 18/18, tdd-review-chain 21/21. E2E: test-runner 13/13, run.sh --offline 5/5.
 [16:00:45] Suggestion #1 doc-drift fix: updated H9 row in companion plan 2026-05-18-1527_tdd-eval-hermetic.md from [ ] to [W], updated Final Verification entry to reference commit 60763c2.
 [16:03:01] H12 WIRED — staging script + tests + both plans + log
+[16:04:00] H12 COMMITTED — 457ddc5 fix(evals): fail-fast on missing test-project + add set -u
+[16:04:00] TDD COMPLETE — 3/3 (H10 GREEN | H11 GREEN | H12 WIRED) | Coverage: SKIPPED (shell scripts, no project coverage tooling)

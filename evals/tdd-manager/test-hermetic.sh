@@ -264,6 +264,94 @@ test_full_mode_aborts_when_project_dir_missing() {
 
 register test_full_mode_aborts_when_project_dir_missing
 
+test_full_mode_aborts_when_project_dir_malformed() {
+  local tmp out rc start_ns end_ns elapsed_ms
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/fake-project"
+  out="$tmp/out.txt"
+  start_ns=$(date +%s)
+  (
+    cd "$tmp" || exit 1
+    PROJECT_DIR="$tmp/fake-project" \
+      bash "$SCRIPT" > "$out" 2>&1
+  )
+  rc=$?
+  end_ns=$(date +%s)
+  elapsed_ms=$(( (end_ns - start_ns) * 1000 ))
+  local pass=true reasons=""
+  [ "$rc" -ne 2 ] && { pass=false; reasons+="rc=$rc(expected 2) "; }
+  grep -qiE 'malformed|missing' "$out" || { pass=false; reasons+="no-diagnostic "; }
+  grep -qi "Eval Suite\|Running run1\|claude -p" "$out" && { pass=false; reasons+="reached-claude-or-eval-body "; }
+  [ "$elapsed_ms" -gt 5000 ] && { pass=false; reasons+="elapsed=${elapsed_ms}ms(>5000) "; }
+  if $pass; then
+    check "test_full_mode_aborts_when_project_dir_malformed" PASS
+  else
+    check "test_full_mode_aborts_when_project_dir_malformed" FAIL "$reasons | out-head: $(head -5 "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+register test_full_mode_aborts_when_project_dir_malformed
+
+test_full_mode_aborts_when_default_test_project_missing() {
+  local tmp script_dir out rc
+  tmp="$(mktemp -d)"
+  script_dir="$tmp/script-dir"
+  mkdir -p "$script_dir"
+  cp "$SCRIPT" "$script_dir/run-eval.sh"
+  out="$tmp/out.txt"
+  (
+    cd "$tmp" || exit 1
+    bash "$script_dir/run-eval.sh" > "$out" 2>&1
+  )
+  rc=$?
+  local pass=true reasons=""
+  [ "$rc" -ne 2 ] && { pass=false; reasons+="rc=$rc(expected 2) "; }
+  grep -qiE 'malformed|missing' "$out" || { pass=false; reasons+="no-diagnostic "; }
+  grep -qi "Eval Suite\|Running run1\|claude -p" "$out" && { pass=false; reasons+="reached-claude-or-eval-body "; }
+  if $pass; then
+    check "test_full_mode_aborts_when_default_test_project_missing" PASS
+  else
+    check "test_full_mode_aborts_when_default_test_project_missing" FAIL "$reasons | out-head: $(head -5 "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+register test_full_mode_aborts_when_default_test_project_missing
+
+test_results_dir_no_double_slash() {
+  local tmp out rc resolved_dir resolved_report
+  tmp="$(mktemp -d)"
+  out="$tmp/out.txt"
+  (
+    cd "$tmp" || exit 1
+    unset RESULTS_DIR RESULTS_SUBDIR
+    bash -c "unset RESULTS_DIR RESULTS_SUBDIR; source '$SCRIPT' 2>/dev/null; printf '%s\n%s\n' \"\$RESULTS_DIR\" \"\$REPORT\"" \
+      > "$out" 2>&1
+  )
+  rc=$?
+  resolved_dir="$(sed -n 1p "$out")"
+  resolved_report="$(sed -n 2p "$out")"
+  local pass=true reasons=""
+  [ "$rc" -ne 0 ] && { pass=false; reasons+="rc=$rc "; }
+  [ -z "$resolved_dir" ] && { pass=false; reasons+="empty-RESULTS_DIR "; }
+  case "$resolved_dir" in
+    */) pass=false; reasons+="RESULTS_DIR-has-trailing-slash:[$resolved_dir] " ;;
+    *"//"*) pass=false; reasons+="RESULTS_DIR-has-double-slash:[$resolved_dir] " ;;
+  esac
+  case "$resolved_report" in
+    *"//"*) pass=false; reasons+="REPORT-has-double-slash:[$resolved_report] " ;;
+  esac
+  if $pass; then
+    check "test_results_dir_no_double_slash" PASS
+  else
+    check "test_results_dir_no_double_slash" FAIL "$reasons"
+  fi
+  rm -rf "$tmp"
+}
+
+register test_results_dir_no_double_slash
+
 MODE="${1:-run}"
 case "$MODE" in
   --list) list_tests; exit 0 ;;
