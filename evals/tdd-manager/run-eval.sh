@@ -3,7 +3,7 @@ set -u
 
 EVAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-$EVAL_DIR/test-project}"
-RESULTS_DIR="${RESULTS_DIR:-$EVAL_DIR/results/${RESULTS_SUBDIR:-}}"
+RESULTS_DIR="${RESULTS_DIR:-$EVAL_DIR/results${RESULTS_SUBDIR:+/$RESULTS_SUBDIR}}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REPORT="$RESULTS_DIR/report-$TIMESTAMP.txt"
 PASS_COUNT=0
@@ -208,8 +208,8 @@ main() {
       return $?
       ;;
     full|"")
-      if [ ! -d "$PROJECT_DIR" ]; then
-        echo "run-eval: test-project missing — run from root repo or set PROJECT_DIR=<path> (looked for: $PROJECT_DIR)" >&2
+      if [ ! -d "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR/src" ] || [ ! -f "$PROJECT_DIR/package.json" ]; then
+        echo "run-eval: test-project missing or malformed (expected $PROJECT_DIR/src/ + $PROJECT_DIR/package.json) — run from root repo or set PROJECT_DIR=<path>" >&2
         return 2
       fi
       ;;
