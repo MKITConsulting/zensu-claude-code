@@ -10,3 +10,5 @@
 [16:25:24] H15 GREEN — PASS (1 attempt). 12/12 hermetic, 7/7 self-check, set -u tolerated (${VAR:+...} safe under set -u).
 [16:25:59] CHECKPOINT — control evals: config-gate 18/18, tdd-review-chain 21/21. E2E: test-runner 13/13, run.sh --offline 5/5. Hermetic 12/12. Self-check 7/7.
 [16:27:53] H16 WIRED — staging script + hermetic tests + plan + log (force-add per .gitignore line 41)
+[16:28:41] H16 COMMITTED — a326101 fix(evals): tighten test-project precondition + clean RESULTS_DIR
+[16:28:41] TDD COMPLETE — 4/4 (H13 GREEN | H14 GREEN | H15 GREEN | H16 WIRED) | Coverage: SKIPPED (shell scripts, no project coverage tooling)
