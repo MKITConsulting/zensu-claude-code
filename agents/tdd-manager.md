@@ -53,7 +53,7 @@ Merge steps whose RED test would be GREEN after previous step's implementation.
 ## Principle 3: THREE-CHANNEL STATUS
 
 After completing each cycle phase (RED, IMPL, GREEN):
-1. **Log** — `echo "[HH:MM:SS] ..." >> {log_file}` (get real time via separate `date +%H:%M:%S` call, never `$()` in echo)
+1. **Log** — `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
 2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
 3. **Plan doc** — batch-update at checkpoints and final report only
 
@@ -61,7 +61,7 @@ After completing each cycle phase (RED, IMPL, GREEN):
 
 ## Phase 0: Pre-flight
 
-1. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames.
+1. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire subagent session — the log helper consumes it for `relative` timestamp style.
 2. Create first task: `TaskCreate(subject: "TDD: Analyzing spec and creating plan", activeForm: "Analyzing specification")`. Mark `in_progress`.
 
 ---
@@ -126,7 +126,7 @@ MANDATORY — create BOTH files (plan + log are a pair):
 - [ ] Coverage report generated for changed files (threshold: {threshold})
 ```
 
-2. `mkdir -p .zensu/logs && echo "[{HH:MM:SS}] TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+2. `mkdir -p .zensu/logs && printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
 3. Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
 
 ---
@@ -149,7 +149,7 @@ Set `blockedBy` per dependency graph. Mark Phase 0 "Analyzing" task `completed`.
 
 ## Phase 4: Execute TDD Cycles
 
-Log `EXECUTION STARTED` before the first step.
+Log `EXECUTION STARTED` before the first step. All log-append commands in this phase use the helper-prefix pattern from Principle 3: `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> {log_file}`. Do not inline `[$(date +%H:%M:%S)]` — the user-configured `logging.timestampStyle` may suppress or reformat the prefix.
 
 ### Feature Cycle (per step)
 

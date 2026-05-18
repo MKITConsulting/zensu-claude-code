@@ -225,6 +225,30 @@ Zensu ships four automatic hooks that fire across the development lifecycle. Any
 
 A complete reference file with all flags enabled is included as [`config.example.json`](config.example.json) at the repo root. Copy it to `~/.zensu/config.json` if you prefer an explicit baseline.
 
+### Log Timestamp Style
+
+The `zensu:tdd-manager` subagent writes a session log under `.zensu/logs/YYYY-MM-DD-HHMM_tdd-<slug>.log` with one line per RED/IMPL/GREEN phase. The wall-clock prefix on each line can be reformatted or suppressed via `~/.zensu/config.json`:
+
+| Style | Inline format | Example |
+|---|---|---|
+| `wall` (default) | `[HH:MM:SS]` | `[14:23:45] step1 RED test_isOdd — FAIL` |
+| `relative` | `[+HH:MM:SS]` from session start (< 24h); `[+Dd HH:MM:SS]` for deltas ≥ 24h | `[+00:01:23] step1 RED test_isOdd — FAIL` / `[+1d 03:45:12] step42 GREEN test_persist — PASS` |
+| `none` | no prefix | `step1 RED test_isOdd — FAIL` |
+
+Filenames retain the `YYYY-MM-DD-HHMM` session timestamp for uniqueness across multiple sessions on the same day; only the inline log-entry prefixes are affected.
+
+Example (relative timestamps):
+
+```json
+{
+  "logging": {
+    "timestampStyle": "relative"
+  }
+}
+```
+
+Invalid values, missing keys, malformed JSON, or a missing `node` binary all fall back to `wall`.
+
 ### Environment Variables
 
 | Variable | Default | Description |

@@ -88,6 +88,18 @@ run_test "$EVAL_DIR/test-helper-envoverride.sh" "test-helper-envoverride.sh"
 run_test "$EVAL_DIR/test-helper-no-node.sh"     "test-helper-no-node.sh"
 
 echo "" | tee -a "$REPORT"
+echo "▸ Log-style offline tests" | tee -a "$REPORT"
+
+run_test "$EVAL_DIR/test-log-style-wall.sh"     "test-log-style-wall.sh"
+run_test "$EVAL_DIR/test-log-style-relative.sh" "test-log-style-relative.sh"
+run_test "$EVAL_DIR/test-log-style-none.sh"     "test-log-style-none.sh"
+run_test "$EVAL_DIR/test-log-style-fallback.sh" "test-log-style-fallback.sh"
+run_test "$EVAL_DIR/test-log-style-no-node.sh"  "test-log-style-no-node.sh"
+run_test "$EVAL_DIR/test-log-style-negative-delta.sh" "test-log-style-negative-delta.sh"
+run_test "$EVAL_DIR/test-log-style-bad-epoch.sh"      "test-log-style-bad-epoch.sh"
+run_test "$EVAL_DIR/test-log-style-long-delta.sh"     "test-log-style-long-delta.sh"
+
+echo "" | tee -a "$REPORT"
 echo "▸ Hook gate offline tests" | tee -a "$REPORT"
 
 run_test "$EVAL_DIR/test-gate-plan.sh"        "test-gate-plan.sh"

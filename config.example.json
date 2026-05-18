@@ -4,5 +4,8 @@
     "autoReview": true,
     "autoFix": true,
     "pulseSession": true
+  },
+  "logging": {
+    "timestampStyle": "wall"
   }
 }
