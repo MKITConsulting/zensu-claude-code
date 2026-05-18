@@ -1,0 +1,18 @@
+[15:31:45] TDD STARTED — Hermetic tdd-manager eval | steps: 9
+[15:32:05] PHASE 3 — Task tools unavailable; tracking via log + plan only. EXECUTION STARTED.
+[15:32:30] H1 RED test-hermetic.sh missing — FAIL exit 127 (correct RED)
+[15:32:50] H1 IMPL completed — files: evals/tdd-manager/test-hermetic.sh
+[15:33:00] H1 GREEN — PASS (1 attempt)
+[15:33:30] H2 RED test_reset_project_aborts_when_project_dir_missing — FAIL rc=0 (correct RED: no guard)
+[15:34:00] H2 BUG REPRODUCED LIVE: sourcing run-eval.sh executed destructive body, wiped plan + log files. Recovered manually. Cleaned up stray results/ dirs.
+[15:37:17] H2 IMPL completed — files: evals/tdd-manager/run-eval.sh (source-gate + fail-fast cd in reset_project)
+[15:37:17] H2 GREEN — PASS (1 attempt); worktree clean post-test
+[15:39:05] H3 RED test_reset_project_aborts_when_not_own_toplevel — FAIL rc=0 (no toplevel guard)
+[15:39:25] H3 IMPL + GREEN — PASS (1 attempt); toplevel guard added
+[15:40:28] H4 RED test_self_check_runs_without_destruction — FAIL (results-listing-changed; no --self-check branch)
+[15:41:12] H4 IMPL + GREEN — PASS (1 attempt); --self-check branch + self_check function
+[15:41:56] H5 RED test_unknown_flag_rejected — FAIL rc=0 (no case-default arm)
+[15:42:15] H5 IMPL + GREEN — PASS (1 attempt); unknown-flag rejection
+[15:42:53] H6 GREEN — PASS (acceptance test for H2+H4 properties; sentinel survives --self-check)
+[15:43:13] H7 GREEN — PASS (.zensu marker survives --self-check)
+[15:43:44] H8 GREEN — PASS (--self-check works from PLUGIN_DIR + /tmp/*)
