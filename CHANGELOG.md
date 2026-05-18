@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `logging.timestampStyle` user-config flag in `~/.zensu/config.json` controlling inline timestamp prefixes in `zensu:tdd-manager` session logs (`.zensu/logs/`). Three values: `wall` (default, `[HH:MM:SS]` — backward compatible), `relative` (`[+HH:MM:SS]` under 24h, `[+Dd HH:MM:SS]` for longer sessions), `none` (no prefix). Filenames retain `YYYY-MM-DD-HHMM` for uniqueness — only inline prefixes are affected. Falls back to `wall` on missing file / missing `node` / malformed JSON / invalid value. New shared helper `hooks/lib/zensu-log.sh` (CLI wrapper) and `_zensu_log_style` function in `hooks/lib/zensu-config.sh` mirror the safe-fallback pattern from #6. Backed by 8 new offline tests in `evals/config-gate/test-log-style-*.sh` (wall, relative, none, fallback, no-node, bad-epoch with octal-parse regression, negative-delta clamp, long-delta two-tier format)
 - PostToolUse hook on `ExitPlanMode` that auto-delegates approved plans to the `zensu:tdd-manager` subagent (with escape hatch for doc-only or trivial plans)
 - E2E eval suite for the plan-approval hook in `evals/plan-approval-hook/` (expect-driven interactive test that approves a real plan and asserts hook firing)
 - E2E eval suite for the review-chain in `evals/tdd-review-chain/` (asserts that `zensu:tdd-manager` completion auto-invokes `@zensu:code-reviewer` and that other subagents do not trigger the chain)
