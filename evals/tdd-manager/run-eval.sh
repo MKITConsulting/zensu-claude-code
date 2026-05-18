@@ -1,4 +1,5 @@
 #!/bin/bash
+set -u
 
 EVAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-$EVAL_DIR/test-project}"
@@ -207,6 +208,10 @@ main() {
       return $?
       ;;
     full|"")
+      if [ ! -d "$PROJECT_DIR" ]; then
+        echo "run-eval: test-project missing — run from root repo or set PROJECT_DIR=<path> (looked for: $PROJECT_DIR)" >&2
+        return 2
+      fi
       ;;
     *)
       echo "unknown mode '$mode' — accepted: --self-check, (no arg / full)" >&2
