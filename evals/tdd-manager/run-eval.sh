@@ -1,19 +1,26 @@
 #!/bin/bash
+set -u
 
-EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$EVAL_DIR/test-project"
-RESULTS_DIR="$EVAL_DIR/results/${RESULTS_SUBDIR:-}"
+EVAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="${PROJECT_DIR:-$EVAL_DIR/test-project}"
+RESULTS_DIR="${RESULTS_DIR:-$EVAL_DIR/results${RESULTS_SUBDIR:+/$RESULTS_SUBDIR}}"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 REPORT="$RESULTS_DIR/report-$TIMESTAMP.txt"
 PASS_COUNT=0
 FAIL_COUNT=0
 TOTAL=0
 
-mkdir -p "$RESULTS_DIR"
-export RESULTS_DIR
-
 reset_project() {
-  cd "$PROJECT_DIR"
+  cd "$PROJECT_DIR" || {
+    echo "reset_project: PROJECT_DIR missing or unreadable: $PROJECT_DIR" >&2
+    return 2
+  }
+  local toplevel
+  toplevel="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+  if [ -n "$toplevel" ] && [ "$toplevel" != "$(pwd)" ]; then
+    echo "reset_project: refusing — $PROJECT_DIR is not its own git toplevel (enclosing repo: $toplevel)" >&2
+    return 3
+  fi
   rm -rf .zensu/logs/ .zensu/plans/
   git checkout -- . 2>/dev/null || true
   git clean -fd -- src >/dev/null 2>&1 || true
@@ -163,6 +170,56 @@ test_not_modified_after_impl() {
     echo "PASS"
   fi
 }
+
+self_check() {
+  local self_pass=0 self_fail=0
+  echo "=== TDD Manager Eval Self-Check: $TIMESTAMP ==="
+  if bash -n "${BASH_SOURCE[0]}" 2>/dev/null; then
+    self_pass=$((self_pass + 1)); echo "  PASS  run-eval.sh syntactically valid"
+  else
+    self_fail=$((self_fail + 1)); echo "  FAIL  run-eval.sh syntactically valid"
+  fi
+  local fn
+  for fn in reset_project run_agent check file_exists file_contains; do
+    if declare -F "$fn" >/dev/null; then
+      self_pass=$((self_pass + 1)); echo "  PASS  function defined: $fn"
+    else
+      self_fail=$((self_fail + 1)); echo "  FAIL  function defined: $fn"
+    fi
+  done
+  case "$PROJECT_DIR" in
+    "$EVAL_DIR"/*)
+      self_pass=$((self_pass + 1)); echo "  PASS  PROJECT_DIR scoped under EVAL_DIR" ;;
+    *)
+      self_fail=$((self_fail + 1)); echo "  FAIL  PROJECT_DIR ($PROJECT_DIR) not under EVAL_DIR ($EVAL_DIR)" ;;
+  esac
+  echo "════════════════════════════════════════"
+  echo "  SELF-CHECK: $self_pass/$((self_pass + self_fail)) PASS ($self_fail FAIL)"
+  echo "  Slow full eval skipped — run without --self-check for live agent suite"
+  echo "════════════════════════════════════════"
+  [ "$self_fail" -eq 0 ]
+}
+
+main() {
+  local mode="${1:-full}"
+  case "$mode" in
+    --self-check)
+      self_check
+      return $?
+      ;;
+    full|"")
+      if [ ! -d "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR/src" ] || [ ! -f "$PROJECT_DIR/package.json" ]; then
+        echo "run-eval: test-project missing or malformed (expected $PROJECT_DIR/src/ + $PROJECT_DIR/package.json) — run from root repo or set PROJECT_DIR=<path>" >&2
+        return 2
+      fi
+      ;;
+    *)
+      echo "unknown mode '$mode' — accepted: --self-check, (no arg / full)" >&2
+      return 2
+      ;;
+  esac
+  mkdir -p "$RESULTS_DIR"
+  export RESULTS_DIR
 
 echo "=== TDD Manager Eval Suite: $TIMESTAMP ===" | tee "$REPORT"
 echo "" | tee -a "$REPORT"
@@ -481,3 +538,8 @@ echo "════════════════════════�
 echo "  TOTAL: $PASS_COUNT/$TOTAL PASS ($FAIL_COUNT FAIL)" | tee -a "$REPORT"
 echo "  Report: $REPORT" | tee -a "$REPORT"
 echo "════════════════════════════════════════" | tee -a "$REPORT"
+}
+
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi
