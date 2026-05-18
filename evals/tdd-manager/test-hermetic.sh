@@ -240,6 +240,30 @@ test_self_check_works_from_multiple_cwds() {
 
 register test_self_check_works_from_multiple_cwds
 
+test_full_mode_aborts_when_project_dir_missing() {
+  local tmp out rc
+  tmp="$(mktemp -d)"
+  out="$tmp/out.txt"
+  (
+    cd "$tmp" || exit 1
+    PROJECT_DIR="$tmp/nonexistent-test-project" \
+      bash "$SCRIPT" > "$out" 2>&1
+  )
+  rc=$?
+  local pass=true reasons=""
+  [ "$rc" -ne 2 ] && { pass=false; reasons+="rc=$rc(expected 2) "; }
+  grep -qi "test-project missing" "$out" || { pass=false; reasons+="no-diagnostic "; }
+  grep -qi "claude -p\|Running run1\|Eval Suite" "$out" && { pass=false; reasons+="reached-claude-or-eval-body "; }
+  if $pass; then
+    check "test_full_mode_aborts_when_project_dir_missing" PASS
+  else
+    check "test_full_mode_aborts_when_project_dir_missing" FAIL "$reasons | out-head: $(head -5 "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+register test_full_mode_aborts_when_project_dir_missing
+
 MODE="${1:-run}"
 case "$MODE" in
   --list) list_tests; exit 0 ;;

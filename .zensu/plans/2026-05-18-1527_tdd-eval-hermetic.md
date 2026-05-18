@@ -46,7 +46,7 @@ Other eval scripts (`evals/config-gate/`, `evals/tdd-review-chain/`) operate on 
 | H6 | Bug Fix | Sentinel-line preservation: appending `# TEST_SENTINEL_<rand>` to `agents/code-reviewer.md`, running `run-eval.sh --self-check`, sentinel still present | `test-hermetic.sh::test_self_check_preserves_agents_modifications` | H4 | [G] | 1 |
 | H7 | Bug Fix | `.zensu/` preservation: creating `.zensu/test-marker-$$.txt`, running `run-eval.sh --self-check`, marker still present | `test-hermetic.sh::test_self_check_preserves_zensu` | H4 | [G] | 1 |
 | H8 | Feature | Worktree-agnostic: `--self-check` runs successfully from at least 2 working directories (PLUGIN_DIR + `/tmp`) | `test-hermetic.sh::test_self_check_works_from_multiple_cwds` | H6, H7 | [G] | 1 |
-| H9 | W | Stage + commit `evals/tdd-manager/run-eval.sh`, `evals/tdd-manager/test-hermetic.sh`, plan, log with conventional message `fix(evals): make tdd-manager run-eval.sh hermetic (self-check + project-dir guards)` | — | H1-H8 | [ ] | 0 |
+| H9 | W | Stage + commit `evals/tdd-manager/run-eval.sh`, `evals/tdd-manager/test-hermetic.sh`, plan, log with conventional message `fix(evals): make tdd-manager run-eval.sh hermetic (self-check + project-dir guards)` | — | H1-H8 | [W] | 1 |
 
 ### Step H1 — `test-hermetic.sh` skeleton (DONE)
 
@@ -93,14 +93,14 @@ Other eval scripts (`evals/config-gate/`, `evals/tdd-review-chain/`) operate on 
 
 - [x] **RED+GREEN**: Runs `bash <abs-path>/run-eval.sh --self-check` from `$PLUGIN_DIR` AND `/tmp/<mktemp>`. Both exit 0 with self-check marker in output. Path resolution uses `${BASH_SOURCE[0]}` (line 3) so EVAL_DIR is correct regardless of CWD.
 
-### Step H9 — Commit
+### Step H9 — Commit (DONE)
 
-- [ ] **WIRED**: `git add` the script + tests + plan + log; commit with conventional message.
+- [x] **WIRED**: `git add` the script + tests + plan + log; commit with conventional message. Landed as `60763c2 fix(evals): make tdd-manager run-eval.sh hermetic` plus follow-up `af6f1d4 docs(plan): record H9 commit in hermetic-eval log`.
 
 ## Final Verification
 
 - [x] All H1-H8 GREEN
-- [ ] H9 WIRED (commit)
+- [x] H9 WIRED (commit 60763c2)
 - [x] `bash evals/tdd-manager/run-eval.sh --self-check` exits 0 from worktree root (verified manually)
 - [x] `bash evals/tdd-manager/run-eval.sh --self-check` exits 0 from `/tmp` (verified manually)
 - [x] Edit `agents/code-reviewer.md` (append `# TEST_SENTINEL_acceptance_check`), run `--self-check`, marker still present (verified manually + test_self_check_preserves_agents_modifications)
