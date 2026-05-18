@@ -197,8 +197,15 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
 ## Phase 6: Audit & Final Report
 
 1. Run full test suites + linters
-2. Coverage report (changed files only):
-   - If `{coverage_cmd}` is null → log `COVERAGE SKIPPED — no tool` and skip to step 3.
+2. **Build Verification.** Tests can be green while the artifact is broken (compile errors only the build catches, env vars frozen at build-time, broken imports the test harness shims out). Verify the project actually builds.
+   - Determine the build command by reading the project's metadata: `README.md`, `CLAUDE.md`, `package.json` (`scripts.build`), `pom.xml`, `Cargo.toml`, `Makefile`, `go.mod`, `pyproject.toml`, etc. Pick the canonical command the docs name as "build".
+   - Decide applicability. If the TDD spec is genuinely non-buildable (docs-only migration, pure data fixture, etc.) AND the project metadata confirms no build step is wired, record `Build: – n/a` with the reason and proceed to step 3.
+   - If the project IS buildable, run the build. Capture exit code and the last ~30 lines of output.
+   - **Build passed** (exit 0, no critical warnings): record `Build: ✓ passed`. Proceed to step 3.
+   - **Build failed**: DO NOT mark Phase 6 complete. Treat the failure as a new requirement and return to Phase 2 to amend the plan with a new `[W]` integration step that fixes the build, then create a task for it (Phase 3 mechanics) and re-run Phase 4-6 after the fix. The Phase 6 "done" claim is only valid when the build is green.
+   - If the build can't run for ambient reasons (dependencies not installed, network down, unknown toolchain), record `Build: – skipped (reason)` and continue — do not block the audit on environment problems the developer must resolve. Surface the skip prominently in the final report so the developer notices.
+3. Coverage report (changed files only):
+   - If `{coverage_cmd}` is null → log `COVERAGE SKIPPED — no tool` and skip to step 4.
    - Else:
      a) Collect list of files modified during session from `IMPL`/`WIRED` log entries (Phase 4 Cycle B logs `files: {list}`).
      b) Run coverage on full test suite, restricting report scope to changed files via the tool's include filter:
@@ -222,8 +229,8 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
         ```
 
    - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}` and ask user (in their language) whether to run an additional TDD cycle for uncovered branches. Do NOT auto-loop (avoids scope explosion).
-3. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
-4. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
-5. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
-6. Output summary: results, files modified, test counts, verification status, **Coverage table from step 2e**, plan path.
-7. After producing the step 6 summary, return control. The plugin's SubagentStop hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
+4. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
+5. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
+6. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
+7. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
+8. After producing the step 7 summary, return control. The plugin's SubagentStop hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
