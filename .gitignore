@@ -42,3 +42,4 @@ out/
 
 # Internal
 OSS_READINESS_REPORT.md
+evals/tdd-manager/**
