@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standardized terminology in agent decision rules
 
 ### Fixed
+- `zensu:tdd-manager` and `zensu:code-reviewer` failing in Phase 0 with "no Task tool available". Both agents now declare an explicit `tools:` whitelist in frontmatter (matching the pattern already used in `zensu-plm.md`) so `TaskCreate`/`TaskUpdate`/`AskUserQuestion` are eagerly loaded instead of falling under the restricted subagent default toolset.
 - SessionStart hook detached HEAD handling
 - Pinned MCP server URL to v1 endpoint for forward compatibility
 
