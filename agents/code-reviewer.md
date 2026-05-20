@@ -9,6 +9,7 @@ description: |
 
   Examples: <example>Context: User finished implementing a feature. user: "I've finished the auth system" assistant: "I'll use the code-reviewer agent." *spawns agent with file list*</example>
 model: inherit
+tools: Read, Bash, Grep, Glob, TaskCreate, TaskUpdate
 ---
 
 ## How This Works

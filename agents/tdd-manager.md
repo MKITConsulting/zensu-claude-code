@@ -9,6 +9,7 @@ description: |
 
   Examples: <example>Context: User wants to implement a new feature via TDD. user: "Implement the auto-sync timer feature. It should start/stop based on a setting, prevent parallel syncs with a mutex, emit status events, and have a circuit breaker after 5 failures." assistant: "I'll use the tdd-manager agent to implement this with strict TDD." *spawns agent with the specification*</example> <example>Context: User wants to add a new database field with UI. user: "Add a 'priority' field to tasks. It needs a migration, service layer, API endpoint, and UI updates." assistant: "I'll use the tdd-manager agent — it will plan Backend and Frontend steps separately." *spawns agent with the specification*</example>
 model: inherit
+tools: Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, AskUserQuestion
 ---
 
 ## Principle 1: STRICT TDD DISCIPLINE
