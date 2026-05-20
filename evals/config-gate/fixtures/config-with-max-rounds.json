@@ -1,0 +1,6 @@
+{
+  "hooks": {
+    "autoFix": true,
+    "autoFixMaxRounds": 2
+  }
+}

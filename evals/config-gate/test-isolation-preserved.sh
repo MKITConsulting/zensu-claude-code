@@ -21,6 +21,9 @@ if [ ! -x "$SCRIPT_POSTDD" ] || [ ! -x "$SCRIPT_POSTREVIEW" ]; then
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+export CLAUDE_PLUGIN_DATA="$(mktemp -d)"
+cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA"; }
+trap cleanup EXIT
 
 TMP_CFG="/tmp/zensu-isolation-allenabled-$$.json"
 cat > "$TMP_CFG" <<'EOF'
