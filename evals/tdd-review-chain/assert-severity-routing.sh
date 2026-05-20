@@ -6,6 +6,10 @@
 # Test runner for TDD: bash exit 0 = PASS, non-zero = FAIL.
 set -u
 
+export CLAUDE_PLUGIN_DATA="$(mktemp -d)"
+cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA"; }
+trap cleanup EXIT
+
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOKS="$PLUGIN_DIR/hooks/hooks.json"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"

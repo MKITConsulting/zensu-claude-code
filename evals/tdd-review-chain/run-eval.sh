@@ -22,6 +22,10 @@
 
 set -u
 
+export CLAUDE_PLUGIN_DATA="$(mktemp -d)"
+cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA"; }
+trap cleanup EXIT
+
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 PLUGIN_DIR="$(cd "$EVAL_DIR/../.." && pwd)"
 RESULTS_DIR="$EVAL_DIR/results"

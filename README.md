@@ -184,11 +184,13 @@ When Zensu MCP **is** connected, additional capabilities activate:
 
 Zensu ships four automatic hooks that fire across the development lifecycle. Any single hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
 
-| Flag | Hook Script | Effect when `false` |
+| Flag | Hook Script | Effect when `false` (boolean flags) or value (numeric flags) |
 |------|-------------|---------------------|
 | `autoTdd` | `plan-approved-delegate.sh` | Skips auto-spawn of `zensu:tdd-manager` after Plan approval |
 | `autoReview` | `post-tdd-review-delegate.sh` | Skips auto-spawn of `zensu:code-reviewer` after tdd-manager completes |
 | `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings back to tdd-manager |
+| `autoFixIncludeSuggestions` | `post-review-tdd-delegate.sh` | When `true`, the auto-fix hook routes ALL severities (Critical, Important, Suggestion, Minor, Nit) to `zensu:tdd-manager` instead of only Critical+Important. Default `false` preserves legacy routing. **Requires `autoFix:true`** — if `autoFix` is `false`, the entire auto-fix hook short-circuits and this flag has no effect. |
+| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `2`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`. |
 | `pulseSession` | `session-start-pulse.sh` | Skips the HEAD/branch banner at session start |
 
 **Resolution rules:**
@@ -224,6 +226,20 @@ Zensu ships four automatic hooks that fire across the development lifecycle. Any
 ```
 
 A complete reference file with all flags enabled is included as [`config.example.json`](config.example.json) at the repo root. Copy it to `~/.zensu/config.json` if you prefer an explicit baseline.
+
+> **Auto-fix prerequisite:** `autoFix:true` is required for `autoFixIncludeSuggestions` and `autoFixMaxRounds` to have any effect. If `autoFix:false`, the entire post-review hook short-circuits and both flags are moot.
+
+### Config Resolution Order
+
+The plugin discovers `config.json` via the following resolution order. The **first matched file** is used as-is — resolution **REPLACES**, does not **MERGE** across levels.
+
+1. `$ZENSU_CONFIG` (environment override). Wins unconditionally when set.
+2. `$CLAUDE_PROJECT_DIR/.zensu/config.json` (project-local). Used when the file exists. Auto-discovered — `CLAUDE_PROJECT_DIR` is set by Claude Code for all hook subprocesses, no user setup required.
+3. `$HOME/.zensu/config.json` (global default). Used when neither of the above applies.
+
+This lets a downstream project commit a project-local `.zensu/config.json` (e.g. enabling `autoFixIncludeSuggestions:true`) without touching the developer's global config. Likewise, a developer can override the project-local file for a single shell session via `ZENSU_CONFIG=/path/to/other.json`.
+
+> If your project commits a `.zensu/config.json` and a developer also has `~/.zensu/config.json`, the project-local file wins — there is no field-level merge.
 
 ### Log Timestamp Style
 

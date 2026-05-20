@@ -110,6 +110,30 @@ run_test "$EVAL_DIR/test-isolation-preserved.sh" "test-isolation-preserved.sh"
 run_test "$EVAL_DIR/test-no-pluginroot-env.sh"   "test-no-pluginroot-env.sh"
 run_test "$EVAL_DIR/test-pluginroot-default-setu.sh" "test-pluginroot-default-setu.sh"
 
+echo "" | tee -a "$REPORT"
+echo "▸ Config resolution-order offline tests" | tee -a "$REPORT"
+
+run_test "$EVAL_DIR/test-resolution-order-env-override.sh"    "test-resolution-order-env-override.sh"
+run_test "$EVAL_DIR/test-resolution-order-project-local.sh"   "test-resolution-order-project-local.sh"
+run_test "$EVAL_DIR/test-resolution-order-global-fallback.sh" "test-resolution-order-global-fallback.sh"
+
+echo "" | tee -a "$REPORT"
+echo "▸ Auto-fix flag offline tests (Suggestions routing + loop guard)" | tee -a "$REPORT"
+
+run_test "$EVAL_DIR/test-helper-autofix-flags.sh"             "test-helper-autofix-flags.sh"
+run_test "$EVAL_DIR/test-autofix-suggestions-on.sh"           "test-autofix-suggestions-on.sh"
+run_test "$EVAL_DIR/test-autofix-suggestions-off.sh"          "test-autofix-suggestions-off.sh"
+run_test "$EVAL_DIR/test-autofix-rounds-increment.sh"         "test-autofix-rounds-increment.sh"
+run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-rounds-convergence.sh"
+run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
+run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
+
+echo "" | tee -a "$REPORT"
+echo "▸ Documentation coverage tests" | tee -a "$REPORT"
+
+run_test "$EVAL_DIR/test-readme-coverage.sh"    "test-readme-coverage.sh"
+run_test "$EVAL_DIR/test-changelog-coverage.sh" "test-changelog-coverage.sh"
+
 if [ "$MODE" = "--self-check" ]; then
   echo "" | tee -a "$REPORT"
   echo "════════════════════════════════════════" | tee -a "$REPORT"

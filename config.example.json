@@ -3,6 +3,8 @@
     "autoTdd": true,
     "autoReview": true,
     "autoFix": true,
+    "autoFixIncludeSuggestions": false,
+    "autoFixMaxRounds": 2,
     "pulseSession": true
   },
   "logging": {

@@ -1,0 +1,7 @@
+{
+  "hooks": {
+    "autoFix": true,
+    "autoFixIncludeSuggestions": true,
+    "autoFixMaxRounds": 2
+  }
+}
