@@ -36,6 +36,7 @@ out/
 # Claude Code
 .claude/plans/
 .claude/settings.local.json
+.claude/worktrees/
 
 # tdd-manager run artifacts (per-run plans + logs)
 .zensu/
