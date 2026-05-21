@@ -1,0 +1,11 @@
+MCP tools not exposed this session. Only Read/Bash/Write/Edit available. Cannot call `get_feature ZEN-999` directly.
+
+Options:
+1. User paste ZEN-999 feature details (status, security classification, components, linked tests/docs).
+2. Run Zensu CLI via Bash if installed. Check:
+
+```
+which zensu
+```
+
+Want me run check?

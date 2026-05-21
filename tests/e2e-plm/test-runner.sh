@@ -862,6 +862,70 @@ CAP
   rm -rf "$tmp"
 }
 
+test_runner_skips_live_regressions_subdir() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/fixtures/live-regressions" "$tmp/fixtures/realfx" \
+    "$tmp/expected" "$tmp/prompts" "$tmp/results"
+
+  echo "Curated live capture — should NOT be enumerated as a fixture." \
+    > "$tmp/fixtures/live-regressions/feature-id-guard-german-200525.txt"
+
+  echo "expected signal" > "$tmp/expected/realfx.pattern"
+  echo "expected signal in capture" > "$tmp/results/realfx-20260101-000000.captured.txt"
+
+  out="$tmp/out.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$tmp/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out" 2>&1
+
+  if grep -qE "PASS\s+realfx" "$out" && ! grep -qE "live-regressions" "$out"; then
+    check "test_runner_skips_live_regressions_subdir" PASS
+  else
+    check "test_runner_skips_live_regressions_subdir" FAIL "expected PASS realfx + no live-regressions mention, got:$(printf '\n')$(cat "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_live_regression_captures_pass_pattern() {
+  local tmp out failures=0 failure_details=""
+  tmp="$(mktemp -d)"
+
+  local live_regressions_dir="$TEST_DIR/fixtures/live-regressions"
+  if [ ! -d "$live_regressions_dir" ]; then
+    check "test_live_regression_captures_pass_pattern" FAIL "live-regressions fixture dir missing at $live_regressions_dir"
+    rm -rf "$tmp"
+    return
+  fi
+
+  local found=0
+  for capture in "$live_regressions_dir"/feature-id-guard-*.txt; do
+    [ -f "$capture" ] || continue
+    found=$((found + 1))
+
+    local sub="$tmp/case$found"
+    mkdir -p "$sub/fixtures/feature-id-guard" "$sub/prompts" "$sub/results"
+    cp "$capture" "$sub/results/feature-id-guard-20260101-000000.captured.txt"
+
+    out="$sub/out.txt"
+    FIXTURES_DIR="$sub/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$sub/prompts" \
+      RESULTS_DIR="$sub/results" "$RUNNER" --offline > "$out" 2>&1
+
+    if ! grep -qE "PASS\s+feature-id-guard" "$out"; then
+      failures=$((failures + 1))
+      failure_details="$failure_details$(printf '\n--- live capture %s wrongly FAILed ---\noutput:\n%s' "$(basename "$capture")" "$(cat "$out")")"
+    fi
+  done
+
+  if [ "$found" -eq 0 ]; then
+    check "test_live_regression_captures_pass_pattern" FAIL "no live-regression captures found in $live_regressions_dir"
+  elif [ "$failures" -eq 0 ]; then
+    check "test_live_regression_captures_pass_pattern" PASS
+  else
+    check "test_live_regression_captures_pass_pattern" FAIL "$failures/$found live-regression captures wrongly FAILed pattern (post-tightening regression):$failure_details"
+  fi
+  rm -rf "$tmp"
+}
+
 test_corpus_writer_guards_against_backslash_c_truncation() {
   local tmp out
   tmp="$(mktemp -d)"
@@ -942,6 +1006,8 @@ test_bootstrap_pattern_rejects_capture_without_any_component_word
 test_feature_id_guard_accepts_which_product_phrasing
 test_feature_id_guard_rejects_silent_get_feature_call
 test_feature_id_guard_accepts_paste_details_phrasing
+test_runner_skips_live_regressions_subdir
+test_live_regression_captures_pass_pattern
 test_corpus_writer_guards_against_backslash_c_truncation
 test_corpus_writer_accepts_clean_entries
 test_known_caveats_documents_same_line_juxtaposition

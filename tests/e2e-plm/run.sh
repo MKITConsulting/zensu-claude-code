@@ -110,6 +110,9 @@ if [ -d "$FIXTURES_DIR" ]; then
   for fixture in "$FIXTURES_DIR"/*/; do
     [ -d "$fixture" ] || continue
     fixture_name="$(basename "$fixture")"
+    case "$fixture_name" in
+      live-regressions) continue ;;
+    esac
     pattern_file="$EXPECTED_DIR/${fixture_name}.pattern"
     prompt_file="$PROMPTS_DIR/${fixture_name}.txt"
 
