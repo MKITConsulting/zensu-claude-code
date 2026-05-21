@@ -39,20 +39,20 @@ flowchart TD
         GREEN -->|"No (≤ 3 retries)"| IMPL
         GREEN -->|"Yes"| NEXT{"More steps?"}
         NEXT -->|"Yes"| RED
-        NEXT -->|"No"| K["code-reviewer Agent (5 sequential perspectives)"]
+        NEXT -->|"No"| K["code-reviewer Agent"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
         GATE["PreToolUse FSM gate"] -.guards.-> RED
-        GATE -.guards.-> IMPL
-        GATE -.guards.-> GREEN
+        GATE -.-> IMPL
+        GATE -.-> GREEN
     end
 
     subgraph Tracking["Layer 3: Tracking"]
         L -->|"link artifacts"| M["Zensu Dashboard"]
-        M --> N["Security Scores"]
-        M --> O["Tier Matrix"]
-        M --> P["Journey Health"]
         M --> Q["Release Gate"]
+        M --> P["Journey Health"]
+        M --> O["Tier Matrix"]
+        M --> N["Security Scores"]
     end
 
     style A fill:#4a9eff,color:#fff
