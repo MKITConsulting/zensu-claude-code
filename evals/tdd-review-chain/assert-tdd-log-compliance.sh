@@ -179,10 +179,10 @@ while IFS= read -r step; do
       tripped="RED-after-GREEN"
     fi
     if [ -n "$impl_line" ] && [ -n "$red_line" ] && [ "$impl_line" -lt "$red_line" ]; then
-      if [ -n "$tripped" ]; then tripped="${tripped},IMPL-before-RED"; else tripped="IMPL-before-RED"; fi
+      if [ -n "$tripped" ]; then tripped="${tripped}, IMPL-before-RED"; else tripped="IMPL-before-RED"; fi
     fi
     if [ -n "$impl_line" ] && [ -n "$green_line" ] && [ "$green_line" -lt "$impl_line" ]; then
-      if [ -n "$tripped" ]; then tripped="${tripped},IMPL-after-GREEN"; else tripped="IMPL-after-GREEN"; fi
+      if [ -n "$tripped" ]; then tripped="${tripped}, IMPL-after-GREEN"; else tripped="IMPL-after-GREEN"; fi
     fi
     if [ -n "$tripped" ]; then
       echo "VIOLATION: ordering violation in step ${step} (${tripped}). Per-Step Logging Contract requires RED < IMPL < GREEN (Principle 1, RED→IMPL→GREEN)." >&2

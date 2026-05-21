@@ -1,0 +1,10 @@
+[15:20:33] TDD STARTED — Tighten T5.8 content assertions, joiner spacing, strip narrative comments | steps: 3
+[15:21:26] S1 RED T5.8b/c content-assertions — FAIL: mutation regression (empty parens, no sub-rule tokens) caused all 4 new assertions to fail as expected
+[15:21:47] S1 IMPL completed — files: evals/tdd-review-chain/run-eval.sh
+[15:22:05] S1 GREEN — PASS (1 attempt) — T5.8a, T5.8b, T5.8c all PASS; total 30/31
+[15:22:21] S2 RED joiner-spacing — FAIL: stderr lacks 'RED-after-GREEN, IMPL-before-RED, IMPL-after-GREEN' (no spaces in current joiner)
+[15:22:37] S2 IMPL completed — files: evals/tdd-review-chain/assert-tdd-log-compliance.sh
+[15:23:05] S2 GREEN — PASS (1 attempt) — joiner ', ' present; T5.8a/b/c still PASS; total 30/31
+[15:25:11] S3 RF — tests GREEN before+after — 30/31 PASS (1 pre-existing FAIL); narrative comments stripped from T5.x, T6/T7/T8, T9 blocks
+[15:26:09] CHECKPOINT — ./evals/tdd-review-chain/run-eval.sh --self-check PASS 30/31 (1 pre-existing FAIL: assert-version.sh)
+[15:26:09] TDD COMPLETE — 2/3 GREEN | Integration: 0 WIRED | 1/1 RF | Build: – n/a (Claude Code plugin) | Coverage: SKIPPED (pure shell, no tool)
