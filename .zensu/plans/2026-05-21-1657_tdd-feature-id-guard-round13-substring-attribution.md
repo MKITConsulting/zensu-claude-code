@@ -55,16 +55,16 @@ applicable to bash smoke tests).
 
 | Step | Type | Description | Test File | Depends On | Status | Attempts |
 |------|------|-------------|-----------|------------|--------|----------|
-| S1 | Refactoring (doc) | README mitigation hedge (Finding #1) | n/a (grep-q smoke) | – | [ ] | 0 |
-| S2 | Feature | VERBOSE_MATCH substring extraction (Finding #2) | tests/e2e-plm/test-runner.sh::test_verbose_match_emits_matched_alt | – | [ ] | 0 |
-| S3 | Integration | Round-13 plan + log committed | n/a | S1, S2 | [ ] | 0 |
+| S1 | Refactoring (doc) | README mitigation hedge (Finding #1) | n/a (grep-q smoke) | – | [RF] | 1 |
+| S2 | Feature | VERBOSE_MATCH substring extraction (Finding #2) | tests/e2e-plm/test-runner.sh::test_verbose_match_emits_matched_alt | – | [G] | 1 |
+| S3 | Integration | Round-13 plan + log committed | n/a | S1, S2 | [W] | 1 |
 
 ### Step S1 — README mitigation hedge (Finding #1)
 
-- [ ] **CHANGE**: Replace lines 239-244 of `tests/e2e-plm/README.md` with the
+- [x] **CHANGE**: Replace lines 239-244 of `tests/e2e-plm/README.md` with the
       hedged paragraph specified by the reviewer (explicit "verified
       out-of-repo, not by this harness" language).
-- [ ] **VERIFY**: `grep -q "verified out-of-repo" tests/e2e-plm/README.md`
+- [x] **VERIFY**: `grep -q "verified out-of-repo" tests/e2e-plm/README.md`
       succeeds; `! grep -q "refuses to call get_feature with unknown IDs at
       runtime" tests/e2e-plm/README.md` (old aspirational claim gone).
 
@@ -73,16 +73,16 @@ behavior change), both `grep -q` checks pass.
 
 ### Step S2 — VERBOSE_MATCH substring extraction (Finding #2)
 
-- [ ] **RED**: Update existing test `test_verbose_match_emits_matched_alt`
+- [x] **RED**: Update existing test `test_verbose_match_emits_matched_alt`
       (line 1014) to use a 3-alt pattern `(foo|bar|expected signal)` with
       capture containing `the expected signal here`. Assert MATCH line emits
       `expected signal` (the matched substring), NOT `(foo|bar|expected
       signal)` (the whole pattern line). Current implementation emits whole
       pattern → test fails RED.
-- [ ] **IMPL**: Replace `run.sh:73` from `printf ... "$line"` to use
+- [x] **IMPL**: Replace `run.sh:73` from `printf ... "$line"` to use
       `grep -Eoi -- "$line" "$captured_file" | head -1` to extract just the
       matched substring; fall back to `$line` if extraction yields nothing.
-- [ ] **GREEN**: target test passes; broader suite remains green.
+- [x] **GREEN**: target test passes; broader suite remains green.
 
 **Checkpoint**:
 - `bash tests/e2e-plm/test-runner.sh` 100% pass (35 tests)
@@ -94,12 +94,12 @@ behavior change), both `grep -q` checks pass.
 
 ### Step S3 — Round-13 plan + log committed
 
-- [ ] **WIRE**: Stage and commit this plan + matching log under `.zensu/`.
+- [x] **WIRE**: Stage and commit this plan + matching log under `.zensu/`.
 
 ## Final Verification
 
-- [ ] All test suites pass (`tests/e2e-plm/test-runner.sh`, `tests/e2e-plm/run.sh --self-check`, `tests/e2e-plm/run.sh --offline`, `tests/e2e/run.sh --self-check`)
-- [ ] Finding #1 grep-q checks both succeed
-- [ ] Finding #2 substring smoke check passes (MATCH line lacks the union-opening `(`)
-- [ ] Three focused commits land (README hedge, VERBOSE_MATCH substring, plan+log)
-- [ ] Coverage: SKIPPED (no tool applicable to bash smoke harness)
+- [x] All test suites pass (`tests/e2e-plm/test-runner.sh`, `tests/e2e-plm/run.sh --self-check`, `tests/e2e-plm/run.sh --offline`, `tests/e2e/run.sh --self-check`)
+- [x] Finding #1 grep-q checks both succeed
+- [x] Finding #2 substring smoke check passes (MATCH line lacks the union-opening `(`)
+- [x] Three focused commits land (README hedge, VERBOSE_MATCH substring, plan+log)
+- [x] Coverage: SKIPPED (no tool applicable to bash smoke harness)

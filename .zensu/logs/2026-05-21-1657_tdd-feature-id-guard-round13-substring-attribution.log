@@ -7,3 +7,4 @@
 [17:02:53]  CHECKPOINT — all 4 suites GREEN: e2e-plm/test-runner 35/35, e2e-plm/run.sh --self-check exit 0, e2e-plm/run.sh --offline 7/7, e2e/run.sh --self-check exit 0; substring smoke check PASS (MATCH line without union-opening '(' emitted)
 [17:03:32]  S3 WIRED — round-13 plan + log staged for commit
 [17:03:32]  TDD COMPLETE — 1/1 GREEN (S2 Feature) | Refactoring: 1 (S1 doc-hedge) | Integration: 1 WIRED (S3 plan+log) | Build: – n/a (bash harness) | Coverage: SKIPPED (no tool applicable)
+[17:04:38]  AUDIT — all suites GREEN; mtime discipline OK (test-runner.sh mtime < run.sh mtime); plan statuses updated [RF]/[G]/[W]
