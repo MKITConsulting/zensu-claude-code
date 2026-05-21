@@ -1012,22 +1012,26 @@ test_corpus_writer_accepts_clean_entries() {
 }
 
 test_verbose_match_emits_matched_alt() {
-  local tmp out
+  local tmp out match_line
   tmp="$(mktemp -d)"
   mkdir -p "$tmp/fixtures/vmfx" "$tmp/expected" "$tmp/prompts" "$tmp/results"
 
   echo "the captured plm output contains the expected signal here" > "$tmp/results/vmfx-20260101-000000.captured.txt"
-  echo "expected signal" > "$tmp/expected/vmfx.pattern"
+  echo "(foo|bar|expected signal)" > "$tmp/expected/vmfx.pattern"
 
   out="$tmp/out.txt"
   VERBOSE_MATCH=1 FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$tmp/expected" \
     PROMPTS_DIR="$tmp/prompts" RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out" 2>&1
 
+  match_line="$(grep -E "^[[:space:]]+MATCH[[:space:]]+vmfx\.pattern" "$out" | head -1)"
+
   if grep -qE "PASS\s+vmfx" "$out" \
-     && grep -qE "^[[:space:]]+MATCH[[:space:]]+vmfx\.pattern[[:space:]]+<-[[:space:]]+expected signal" "$out"; then
+     && [ -n "$match_line" ] \
+     && echo "$match_line" | grep -qF "expected signal" \
+     && ! echo "$match_line" | grep -qF "foo|bar"; then
     check "test_verbose_match_emits_matched_alt" PASS
   else
-    check "test_verbose_match_emits_matched_alt" FAIL "expected MATCH diagnostic with VERBOSE_MATCH=1, got:$(printf '\n')$(cat "$out")"
+    check "test_verbose_match_emits_matched_alt" FAIL "expected MATCH diagnostic emitting matched substring 'expected signal' (not whole union '(foo|bar|expected signal)'), got match_line='$match_line' full_out:$(printf '\n')$(cat "$out")"
   fi
   rm -rf "$tmp"
 }

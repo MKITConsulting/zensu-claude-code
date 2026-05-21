@@ -70,7 +70,10 @@ match_pattern() {
           return 1
         fi
         if [ -n "${VERBOSE_MATCH:-}" ]; then
-          printf '  MATCH  %s <- %s\n' "$(basename "$pattern_file")" "$line" | tee -a "$REPORT"
+          local _match_text
+          _match_text="$(grep -Eoi -- "$line" "$captured_file" | head -1)"
+          [ -z "$_match_text" ] && _match_text="$line"
+          printf '  MATCH  %s <- %s\n' "$(basename "$pattern_file")" "$_match_text" | tee -a "$REPORT"
         fi
         ;;
     esac
