@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **License relicensed from MIT to FSL-1.1-Apache-2.0** (Functional Source License, Version 1.1, Apache 2.0 Future License). Existing users retain all rights under the FSL Permitted Purpose (internal use, modifications, forks, commercial use in their own products, professional services, education, research). New restriction: no Competing Use — i.e. you may not offer a commercial product or service that substitutes for the Zensu plugin or the Zensu SaaS, or provides substantially similar functionality. Each release auto-converts to Apache License 2.0 on the second anniversary of its public availability. Rationale: protects the plugin's substantial IP (TDD-FSM phase gate, parallel reviewer fan-out, hook orchestration) from being repackaged as a competing managed service, while keeping end-user adoption frictionless. See [LICENSE](LICENSE), [fsl.software](https://fsl.software/), and the License section of the README for details. Existing contributions made under MIT remain available under MIT; the FSL applies from this release forward.
+
 ### Security
 - **PreToolUse TDD-Gate hardening — round 1** (initial 9 findings closed across `hooks/pre-edit-tdd-reminder.sh` and `hooks/lib/zensu-tdd-phase.sh`):
   - **(1)** Bash bypass closed (round 1 approach, later reverted in round 2 — see scope reduction below): matcher extended to `Edit|Write|MultiEdit|Bash` and the hook parsed `tool_input.command` for file-mutating patterns (`>`, `>>`, `sed -i`, `tee`, `dd of=`); the official `zensu-log.sh --phase` invocation remained allowed.
