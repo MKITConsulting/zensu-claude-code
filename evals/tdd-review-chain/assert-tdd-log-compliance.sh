@@ -124,17 +124,68 @@ RED_STEPS=$(extract_steps_for "RED")
 IMPL_STEPS=$(grep -E "^${STEP_ID_RE} IMPL completed — files: " "$TMP_BODY" | awk '{print $1}' | sort -u)
 GREEN_STEPS=$(extract_steps_for "GREEN")
 
-# Every GREEN step must have a matching RED and IMPL entry earlier.
+# Grammar guard: if the log carries TDD-manager markers (TDD STARTED /
+# EXECUTION STARTED / TDD COMPLETE / CHECKPOINT) but no step-id matched
+# the uppercase grammar STEP_ID_RE, the log most likely uses a wrong prefix
+# convention (e.g. lowercase `be-1` instead of `BE-1`). Without this guard
+# the previous behavior was a silent exit 0, defeating the entire audit.
+if grep -qE '^(TDD STARTED|EXECUTION STARTED|TDD COMPLETE|CHECKPOINT)' "$TMP_BODY"; then
+  if [ -z "$RED_STEPS" ] && [ -z "$IMPL_STEPS" ] && [ -z "$GREEN_STEPS" ]; then
+    echo "VIOLATION: no step entries detected — log may use wrong prefix grammar (expected uppercase step-ids like BE-1, S1)" >&2
+    exit 1
+  fi
+fi
+
+# Return the line number (in the timestamp-stripped body) of the FIRST entry
+# matching `{step} {marker}` (where marker is RED/IMPL/GREEN). Empty string if
+# no match. Used for ordering enforcement so a log with GREEN at line 3 and RED
+# at line 5 is rejected even though both entries exist.
+step_marker_line() {
+  local step="$1" marker="$2"
+  if [ "$marker" = "IMPL" ]; then
+    awk -v step="$step" '
+      $0 ~ "^"step" IMPL completed — files: " {print NR; exit}
+    ' "$TMP_BODY"
+  else
+    awk -v step="$step" -v marker="$marker" '
+      $0 ~ "^"step" "marker" " {print NR; exit}
+    ' "$TMP_BODY"
+  fi
+}
+
+# Every GREEN step must have a matching RED and IMPL entry, AND they must
+# appear in canonical order: red_line < impl_line < green_line.
 VIOLATIONS=0
 while IFS= read -r step; do
   [ -z "$step" ] && continue
-  if ! grep -qx "$step" <<< "$RED_STEPS"; then
+  has_red=0
+  has_impl=0
+  grep -qx "$step" <<< "$RED_STEPS" && has_red=1
+  grep -qx "$step" <<< "$IMPL_STEPS" && has_impl=1
+  if [ "$has_red" -eq 0 ]; then
     echo "VIOLATION: step '$step' has GREEN entry but no matching RED entry. Per-Step Logging Contract requires {step_id} RED before {step_id} GREEN." >&2
     VIOLATIONS=$((VIOLATIONS + 1))
   fi
-  if ! grep -qx "$step" <<< "$IMPL_STEPS"; then
+  if [ "$has_impl" -eq 0 ]; then
     echo "VIOLATION: step '$step' has GREEN entry but no matching 'IMPL completed — files:' entry. Per-Step Logging Contract requires IMPL log between RED and GREEN." >&2
     VIOLATIONS=$((VIOLATIONS + 1))
+  fi
+  if [ "$has_red" -eq 1 ] && [ "$has_impl" -eq 1 ]; then
+    red_line=$(step_marker_line "$step" "RED")
+    impl_line=$(step_marker_line "$step" "IMPL")
+    green_line=$(step_marker_line "$step" "GREEN")
+    if [ -n "$red_line" ] && [ -n "$green_line" ] && [ "$red_line" -ge "$green_line" ]; then
+      echo "VIOLATION: step '$step' RED-after-GREEN ordering violation — RED entry on line $red_line appears after GREEN entry on line $green_line. RED must precede GREEN (Principle 1, RED→IMPL→GREEN)." >&2
+      VIOLATIONS=$((VIOLATIONS + 1))
+    fi
+    if [ -n "$impl_line" ] && [ -n "$red_line" ] && [ "$impl_line" -lt "$red_line" ]; then
+      echo "VIOLATION: step '$step' IMPL-before-RED ordering violation — IMPL entry on line $impl_line appears before RED entry on line $red_line. RED must precede IMPL (Principle 1, RED→IMPL→GREEN)." >&2
+      VIOLATIONS=$((VIOLATIONS + 1))
+    fi
+    if [ -n "$impl_line" ] && [ -n "$green_line" ] && [ "$impl_line" -ge "$green_line" ]; then
+      echo "VIOLATION: step '$step' IMPL-after-GREEN ordering violation — IMPL entry on line $impl_line is not before GREEN entry on line $green_line. IMPL must precede GREEN (Principle 1, RED→IMPL→GREEN)." >&2
+      VIOLATIONS=$((VIOLATIONS + 1))
+    fi
   fi
 done <<< "$GREEN_STEPS"
 
@@ -202,6 +253,29 @@ if [ -n "$IMPL_DIR" ]; then
     if [ -z "$test_path" ]; then
       continue
     fi
+
+    # Collision guard: if the heuristic resolved the test file to one of this
+    # step's IMPL files (by basename match), the mtime comparison degenerates
+    # into file-vs-itself and silently passes. Emit a visible WARN and skip
+    # the mtime check for this step rather than yielding a false-pass.
+    test_basename=$(basename "$test_path")
+    collision=0
+    OLDIFS=$IFS
+    IFS=','
+    for raw in $impl_files; do
+      f=$(echo "$raw" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//')
+      [ -z "$f" ] && continue
+      if [ "$(basename "$f")" = "$test_basename" ]; then
+        collision=1
+        break
+      fi
+    done
+    IFS=$OLDIFS
+    if [ "$collision" -eq 1 ]; then
+      echo "WARN: cannot resolve test file for step ${step} — heuristic collided with impl file ${test_path}; mtime audit skipped for this step" >&2
+      continue
+    fi
+
     test_mtime=$(file_mtime "$test_path")
 
     # iterate impl files (comma- or whitespace-separated)

@@ -117,6 +117,9 @@ fi
 #   T5.2 missing-red fixture — GREEN without prior RED → reject
 #   T5.3 bulk-shortcut fixture — collective RED for many steps → reject
 #   T5.4 test-after fixture — test mtime > impl mtime → reject (with --impl-dir)
+#   T5.5 ordering fixture — GREEN before RED → reject (line-number ordering)
+#   T5.6 grammar fixture — TDD-marker log without recognizable step entries → reject
+#   T5.7 test-collision fixture — heuristic resolves test→impl file → WARN (no hard fail)
 echo "" | tee -a "$REPORT"
 echo "▸ T5 TDD logging contract (Per-Step + mtime audit, offline)" | tee -a "$REPORT"
 COMPLIANCE_SCRIPT="$EVAL_DIR/assert-tdd-log-compliance.sh"
@@ -149,6 +152,40 @@ if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-test-after.log" \
   check "T5.4 test-after mtime fixture correctly rejected" PASS
 else
   check "T5.4 test-after mtime fixture correctly rejected" FAIL
+fi
+
+# T5.5 — ordering enforcement: GREEN appearing before RED in the log file
+# (existence-only checks would silently pass; the fix enforces line-number
+# ordering RED < IMPL < GREEN per step).
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-ordering.log" >/dev/null 2>&1; then
+  check "T5.5 ordering fixture (GREEN before RED) correctly rejected" PASS
+else
+  check "T5.5 ordering fixture (GREEN before RED) correctly rejected" FAIL
+fi
+
+# T5.6 — grammar enforcement: TDD-marker log without recognizable step entries
+# must be rejected with a clear "no step entries detected" message rather than
+# silently passing (previous behavior: empty step list → exit 0).
+T56_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-grammar.log" 2>&1 >/dev/null)
+T56_EXIT=$?
+if [ "$T56_EXIT" -ne 0 ] && echo "$T56_STDERR" | grep -q "no step entries detected"; then
+  check "T5.6 grammar fixture (no recognizable steps) correctly rejected" PASS
+else
+  check "T5.6 grammar fixture (no recognizable steps) correctly rejected" FAIL
+fi
+
+# T5.7 — test-file/IMPL collision: heuristic falls back to wildcard match
+# and resolves the "test" to the same impl file, neutralizing the mtime audit.
+# The fix emits a WARN on stderr and skips the mtime check for that step.
+# This is a positive-warning test: exit code must be 0 (no other violations)
+# AND stderr must contain "cannot resolve test file".
+T57_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-test-collision.log" \
+                                  --impl-dir "$EVAL_DIR/fixtures/test-after-tree" 2>&1 >/dev/null)
+T57_EXIT=$?
+if [ "$T57_EXIT" -eq 0 ] && echo "$T57_STDERR" | grep -q "cannot resolve test file"; then
+  check "T5.7 test-collision fixture emits WARN and exits 0" PASS
+else
+  check "T5.7 test-collision fixture emits WARN and exits 0" FAIL
 fi
 
 # ─── T6/T7/T8 severity-routing directive integrity (offline) ────────

@@ -1,0 +1,7 @@
+[14:08:31] TDD STARTED — Example feature with lowercase step-ids (grammar violation) | steps: 1
+[14:08:33] EXECUTION STARTED
+[14:10:45] be-1 RED FooTest — FAIL: class Foo does not exist
+[14:10:48] be-1 IMPL completed — files: Foo.java
+[14:10:59] be-1 GREEN — PASS (1 attempt, 2 tests)
+[14:15:01] CHECKPOINT — ./gradlew check PASS (2/2 tests)
+[14:15:47] TDD COMPLETE — 1/1 GREEN | Integration: 0 WIRED | 2/2 tests pass
