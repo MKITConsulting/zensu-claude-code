@@ -110,16 +110,83 @@ else
   check "T3.4 script silent for non-tdd-manager subagent" FAIL
 fi
 
+# ─── T5 TDD logging contract (offline fixture-based) ───────────────
+echo "" | tee -a "$REPORT"
+echo "▸ T5 TDD logging contract (Per-Step + mtime audit, offline)" | tee -a "$REPORT"
+COMPLIANCE_SCRIPT="$EVAL_DIR/assert-tdd-log-compliance.sh"
+
+if "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-good.log" >/dev/null 2>&1; then
+  check "T5.1 good fixture passes compliance" PASS
+else
+  check "T5.1 good fixture passes compliance" FAIL
+fi
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-missing-red.log" >/dev/null 2>&1; then
+  check "T5.2 missing-red fixture correctly rejected" PASS
+else
+  check "T5.2 missing-red fixture correctly rejected" FAIL
+fi
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-bulk-shortcut.log" >/dev/null 2>&1; then
+  check "T5.3 bulk-shortcut fixture correctly rejected" PASS
+else
+  check "T5.3 bulk-shortcut fixture correctly rejected" FAIL
+fi
+
+touch -t 202604171200 "$EVAL_DIR/fixtures/test-after-tree/Foo.java"
+touch -t 202604171210 "$EVAL_DIR/fixtures/test-after-tree/FooTest.java"
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-test-after.log" \
+                          --impl-dir "$EVAL_DIR/fixtures/test-after-tree" >/dev/null 2>&1; then
+  check "T5.4 test-after mtime fixture correctly rejected" PASS
+else
+  check "T5.4 test-after mtime fixture correctly rejected" FAIL
+fi
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-ordering.log" >/dev/null 2>&1; then
+  check "T5.5 ordering fixture (GREEN before RED) correctly rejected" PASS
+else
+  check "T5.5 ordering fixture (GREEN before RED) correctly rejected" FAIL
+fi
+
+T56_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-grammar.log" 2>&1 >/dev/null)
+T56_EXIT=$?
+if [ "$T56_EXIT" -ne 0 ] && echo "$T56_STDERR" | grep -q "no step entries detected"; then
+  check "T5.6 grammar fixture (no recognizable steps) correctly rejected" PASS
+else
+  check "T5.6 grammar fixture (no recognizable steps) correctly rejected" FAIL
+fi
+
+T57_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-test-collision.log" \
+                                  --impl-dir "$EVAL_DIR/fixtures/test-after-tree" 2>&1 >/dev/null)
+T57_EXIT=$?
+if [ "$T57_EXIT" -eq 0 ] && echo "$T57_STDERR" | grep -q "cannot resolve test file"; then
+  check "T5.7 test-collision fixture emits WARN and exits 0" PASS
+else
+  check "T5.7 test-collision fixture emits WARN and exits 0" FAIL
+fi
+
+T58_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-ordering.log" 2>&1 >/dev/null)
+T58_COUNT=$(echo "$T58_STDERR" | grep -c 'ordering violation in step')
+if [ "$T58_COUNT" -eq 1 ]; then
+  check "T5.8a ordering fixture emits exactly one 'ordering violation in step' line" PASS
+else
+  check "T5.8a ordering fixture emits exactly one 'ordering violation in step' line" FAIL
+fi
+if echo "$T58_STDERR" | grep -qE 'ordering violation in step BE-1 \([A-Za-z, -]+\)'; then
+  check "T5.8b ordering violation parens contain non-empty sub-rule payload" PASS
+else
+  check "T5.8b ordering violation parens contain non-empty sub-rule payload" FAIL
+fi
+if echo "$T58_STDERR" | grep -qF 'RED-after-GREEN' \
+   && echo "$T58_STDERR" | grep -qF 'IMPL-before-RED' \
+   && echo "$T58_STDERR" | grep -qF 'IMPL-after-GREEN'; then
+  check "T5.8c ordering violation lists all three sub-rule tokens" PASS
+else
+  check "T5.8c ordering violation lists all three sub-rule tokens" FAIL
+fi
+
 # ─── T6/T7/T8 severity-routing directive integrity (offline) ────────
-# These tests verify the reviewer→tdd-manager severity-routing hook
-# (hooks/post-review-tdd-delegate.sh). The script does not parse reviewer
-# findings itself — it emits a directive that tells the main agent how to
-# classify findings and choose between three response modes:
-#   T6 (case C): ANY Critical OR Important present → spawn tdd-manager
-#   T7 (case B): ONLY Suggestions / Minor / Nits → buffer for user, no spawn
-#   T8 (case A): PASS / zero findings → reply 'No fixes needed'
-# Each test asserts the trigger phrase for its case is present in the
-# directive so the main agent has unambiguous routing instructions.
 echo "" | tee -a "$REPORT"
 echo "▸ T6/T7/T8 reviewer→tdd-manager severity-routing directive (offline)" | tee -a "$REPORT"
 REVIEW_SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
@@ -133,7 +200,6 @@ if [ -z "$REVIEW_OUT" ]; then
 else
   check "T6.0 severity-routing script emits output for code-reviewer" PASS
 
-  # T6 — case C: Critical or Important → spawn tdd-manager
   case "$REVIEW_OUT" in
     *"Delegating critical+important findings"*"zensu:tdd-manager"*)
       check "T6.1 case C dispatches zensu:tdd-manager (Critical+Important)" PASS ;;
@@ -149,7 +215,6 @@ else
       check "T6.2 case C excludes Suggestions from spec" FAIL ;;
   esac
 
-  # T7 — case B: ONLY Suggestions → no spawn, present to user
   case "$REVIEW_OUT" in
     *"No critical/important findings"*"suggestions only"*)
       check "T7.1 case B status line 'No critical/important findings — suggestions only'" PASS ;;
@@ -169,7 +234,6 @@ else
       check "T7.3 case B explicitly forbids tdd-manager spawn for suggestions-only" FAIL ;;
   esac
 
-  # T8 — case A: PASS / zero findings → no spawn at all
   case "$REVIEW_OUT" in
     *"No fixes needed: review passed"*)
       check "T8.1 case A status line 'No fixes needed: review passed'" PASS ;;
@@ -183,8 +247,6 @@ else
       check "T8.2 case A explicitly forbids spawning anything" FAIL ;;
   esac
 
-  # Cross-case: the directive must define ALL THREE status lines so the
-  # main agent picks the right one without ambiguity.
   case "$REVIEW_OUT" in
     *"Delegating critical+important findings"*"No critical/important findings"*"No fixes needed: review passed"*)
       check "T6/T7/T8 directive defines all three status lines in order" PASS ;;
@@ -193,8 +255,6 @@ else
   esac
 fi
 
-# Isolation: severity-routing script must stay silent for tdd-manager
-# subagent input (the other PostToolUse:Agent hook handles that case).
 REVIEW_SILENT="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:tdd-manager","prompt":"x"}}' | "$REVIEW_SCRIPT" 2>/dev/null)"
 if [ -z "$REVIEW_SILENT" ]; then
   check "T6/T7/T8 isolation: severity-routing silent for tdd-manager input" PASS
@@ -245,6 +305,26 @@ timeout 240 "$EVAL_DIR/test-tdd-isolation.exp" "$T2_LOG" "$PLUGIN_DIR" > "$T2_OU
 check "T2.1 plugin loaded hooks.json"          "$(contains "$T2_LOG" "Loaded hooks.*plugin zensu")"
 check "T2.2 directive NOT injected for plm"    "$(not_contains "$T2_LOG" "VERY NEXT TOOL CALL.*zensu:code-reviewer")"
 check "T2.3 reviewer NOT dispatched"           "$(not_contains "$T2_LOG" "subagent_type.*zensu:code-reviewer|tool_name.*Task.*code-reviewer")"
+
+# ─── T9: TDD compliance E2E (real spawn → assert log compliance) ───
+echo "" | tee -a "$REPORT"
+echo "▸ T9 TDD compliance E2E (real spawn, asserts log compliance)" | tee -a "$REPORT"
+T9_OUT="$RESULTS_DIR/t9-${TIMESTAMP}.out"
+T9_LOG="$RESULTS_DIR/t9-${TIMESTAMP}.debug.log"
+timeout 600 "$EVAL_DIR/test-tdd-compliance.exp" "$T9_LOG" "$PLUGIN_DIR" > "$T9_OUT" 2>&1 || true
+
+GENERATED_LOG=$(ls -t "$PLUGIN_DIR"/.zensu/logs/*_tdd-*.log 2>/dev/null | head -1)
+if [ -z "$GENERATED_LOG" ]; then
+  check "T9.1 tdd-manager produced a log file"        FAIL
+  check "T9.2 generated log passes compliance check"  FAIL
+else
+  check "T9.1 tdd-manager produced a log file"        PASS
+  if "$COMPLIANCE_SCRIPT" --log "$GENERATED_LOG" --impl-dir "$EVAL_DIR/fixtures" >/dev/null 2>&1; then
+    check "T9.2 generated log passes compliance check" PASS
+  else
+    check "T9.2 generated log passes compliance check" FAIL
+  fi
+fi
 
 # ─── T4: empirical PostToolUse:Task probe (data report only) ───────
 echo "" | tee -a "$REPORT"

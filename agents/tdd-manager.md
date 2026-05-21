@@ -49,7 +49,7 @@ Classify EACH step. A single task may mix types.
 **Bug Fix**: RED-REPRO → FIX → GREEN. Status: `[G]`
 **Integration** (wiring, config, migrations): Direct implementation, no test cycle. Status: `[W]`
 
-Merge steps whose RED test would be GREEN after previous step's implementation.
+Merge steps ONLY if (a) their test files share setup code that should only be written once, or (b) they are technically inseparable (same class, same method). NEVER as a logging shortcut. Each merged step still requires its own RED log entry with that step's specific failure reason. When merging N steps you log N RED entries + 1 IMPL entry + N GREEN entries.
 
 ## Principle 3: THREE-CHANNEL STATUS
 
@@ -57,6 +57,17 @@ After completing each cycle phase (RED, IMPL, GREEN):
 1. **Log** — `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
 2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
 3. **Plan doc** — batch-update at checkpoints and final report only
+
+### Per-Step Logging Contract (MANDATORY)
+
+For each Feature/Bug-Fix step, the log file MUST contain three entries with these EXACT prefixes:
+  1. `{step_id} RED {test_name} — FAIL: {reason}` (after Phase 4 A)
+  2. `{step_id} IMPL completed — files: {file_list}` (after Phase 4 B)
+  3. `{step_id} GREEN — PASS ({attempts} attempts, {test_count} tests)` (after Phase 4 C)
+
+Integration/`[W]` steps log ONE entry: `{step_id} WIRED — {description}`.
+
+When you merge multiple Feature steps (per Principle 2), each constituent step keeps its own RED + GREEN entries — only the IMPL entry may be combined. Missing entries are a TDD compliance violation that Phase 6 audit MUST flag.
 
 ---
 
@@ -231,7 +242,13 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
 
    - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}` and ask user (in their language) whether to run an additional TDD cycle for uncovered branches. Do NOT auto-loop (avoids scope explosion).
 4. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
-5. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
-6. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
-7. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
-8. After producing the step 7 summary, return control. The plugin's SubagentStop hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
+5. **mtime Discipline Audit** (NEW). For every Feature step marked `[G]`:
+   - Resolve the IMPL file list from the `{step_id} IMPL completed — files: {list}` log entry.
+   - Resolve the test file from the step's `{step_id} RED {test_name}` log entry.
+   - Capture mtimes: `test_mtime=$(stat -f %m {test_file})` (Linux: `stat -c %Y {test_file}`); `impl_min_mtime=$(stat -f %m {impl_files} | sort -n | head -1)`.
+   - If `test_mtime > impl_min_mtime`: the step was Test-After. Mark the plan step `[!]` and append `DISCIPLINE VIOLATION: test-after detected ({test_file} mtime > {impl_file} mtime)` to the log.
+   - Aggregate: if > 20% of Feature steps carry `[!]`, the final log line MUST read `TDD DISCIPLINE VIOLATED — {N}/{M} steps test-after, audit FAIL` and Phase 6 is NOT complete. Surface this prominently in the final user-facing report so the developer notices.
+6. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
+7. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
+8. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
+9. After producing the step 8 summary, return control. The plugin's SubagentStop hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.

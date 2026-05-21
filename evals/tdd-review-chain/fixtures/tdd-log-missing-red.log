@@ -1,0 +1,9 @@
+[14:08:31] TDD STARTED — Example feature with missing RED entry | steps: 2
+[14:08:33] EXECUTION STARTED
+[14:10:45] BE-1 RED FooTest — FAIL: class Foo does not exist
+[14:10:48] BE-1 IMPL completed — files: Foo.java
+[14:10:59] BE-1 GREEN — PASS (1 attempt, 2 tests)
+[14:11:31] BE-2 IMPL completed — files: Bar.java
+[14:11:44] BE-2 GREEN — PASS (1 attempt, 4 tests)
+[14:15:01] CHECKPOINT — ./gradlew check PASS (6/6 tests)
+[14:15:47] TDD COMPLETE — 2/2 GREEN | Integration: 0 WIRED | 6/6 tests pass

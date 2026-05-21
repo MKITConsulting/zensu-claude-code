@@ -1,0 +1,14 @@
+[14:08:31] TDD STARTED — Example feature | steps: 3
+[14:08:33] EXECUTION STARTED
+[14:10:45] BE-1 RED TenantContextTest — FAIL: class TenantContext does not exist
+[14:10:48] BE-1 IMPL completed — files: TenantContext.java
+[14:10:59] BE-1 GREEN — PASS (1 attempt, 2 tests)
+[14:11:23] BE-2 RED TenantSchemaResolverTest — FAIL: constructor takes no args (needs ObjectProvider<TenantContext>)
+[14:11:31] BE-2 IMPL completed — files: TenantSchemaResolver.java
+[14:11:44] BE-2 GREEN — PASS (1 attempt, 4 tests)
+[14:12:18] BE-3 RED initializesTenantContextForRequest — FAIL: filter still uses static RequestContext.init, ObjectProvider has zero interactions
+[14:12:36] BE-3 IMPL completed — files: JwtAuthenticationFilter.java
+[14:13:02] BE-3 GREEN — PASS (1 attempt, 9 tests)
+[14:13:06] BE-4 WIRED — RequestContext.java deleted
+[14:15:01] CHECKPOINT — ./gradlew check PASS (34/34 tests, spotless OK)
+[14:15:47] TDD COMPLETE — 3/3 GREEN | Integration: 1 WIRED | 34/34 tests pass
