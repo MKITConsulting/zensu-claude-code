@@ -1011,6 +1011,47 @@ test_corpus_writer_accepts_clean_entries() {
   rm -rf "$tmp"
 }
 
+test_verbose_match_emits_matched_alt() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/fixtures/vmfx" "$tmp/expected" "$tmp/prompts" "$tmp/results"
+
+  echo "the captured plm output contains the expected signal here" > "$tmp/results/vmfx-20260101-000000.captured.txt"
+  echo "expected signal" > "$tmp/expected/vmfx.pattern"
+
+  out="$tmp/out.txt"
+  VERBOSE_MATCH=1 FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$tmp/expected" \
+    PROMPTS_DIR="$tmp/prompts" RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out" 2>&1
+
+  if grep -qE "PASS\s+vmfx" "$out" \
+     && grep -qE "^[[:space:]]+MATCH[[:space:]]+vmfx\.pattern[[:space:]]+<-[[:space:]]+expected signal" "$out"; then
+    check "test_verbose_match_emits_matched_alt" PASS
+  else
+    check "test_verbose_match_emits_matched_alt" FAIL "expected MATCH diagnostic with VERBOSE_MATCH=1, got:$(printf '\n')$(cat "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_verbose_match_silent_without_env() {
+  local tmp out
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/fixtures/vmfx" "$tmp/expected" "$tmp/prompts" "$tmp/results"
+
+  echo "the captured plm output contains the expected signal here" > "$tmp/results/vmfx-20260101-000000.captured.txt"
+  echo "expected signal" > "$tmp/expected/vmfx.pattern"
+
+  out="$tmp/out.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$tmp/expected" \
+    PROMPTS_DIR="$tmp/prompts" RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out" 2>&1
+
+  if grep -qE "PASS\s+vmfx" "$out" && ! grep -qE "^[[:space:]]+MATCH[[:space:]]+vmfx\.pattern" "$out"; then
+    check "test_verbose_match_silent_without_env" PASS
+  else
+    check "test_verbose_match_silent_without_env" FAIL "expected NO MATCH lines without VERBOSE_MATCH, got:$(printf '\n')$(cat "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
 test_known_caveats_documents_same_line_juxtaposition() {
   local readme missing=""
   readme="$TEST_DIR/README.md"
@@ -1066,6 +1107,8 @@ test_live_regression_captures_pass_pattern
 test_live_regression_enforces_expected_basenames_present
 test_corpus_writer_guards_against_backslash_c_truncation
 test_corpus_writer_accepts_clean_entries
+test_verbose_match_emits_matched_alt
+test_verbose_match_silent_without_env
 test_known_caveats_documents_same_line_juxtaposition
 
 echo ""

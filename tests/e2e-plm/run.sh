@@ -69,6 +69,9 @@ match_pattern() {
         if ! grep -Eqi -- "$line" "$captured_file"; then
           return 1
         fi
+        if [ -n "${VERBOSE_MATCH:-}" ]; then
+          printf '  MATCH  %s <- %s\n' "$(basename "$pattern_file")" "$line" | tee -a "$REPORT"
+        fi
         ;;
     esac
   done < "$pattern_file"
