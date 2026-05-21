@@ -11,6 +11,15 @@ mode — it asserts only that the agent *names* the correct tools and follows
 the Decision Rules / Important Rules in its plan. A `--live` mode that talks
 to a real Zensu backend is explicitly out of scope (Phase 2).
 
+## Language convention
+
+This is an **English only** repository. Prompts, pattern alternations,
+fixture content, shim stubs, ideal captures, violating-capture corpus
+entries, README examples, and commit messages must all be in English.
+Historical `.zensu/plans/*.md` and `.zensu/logs/*.log` from prior rounds
+are exempt — they are immutable TDD audit trail. Round-14 onward must
+produce English-only output.
+
 ## What it tests
 
 | Fixture | Asserts (signal kept tolerant — patterns use regex) |
@@ -218,7 +227,6 @@ evaluates each line independently and sees only the clean line.
 Concrete reproductions (verbatim from reviewer):
 
 - `list_features first.\nNow get_feature ZEN-999.`
-- `Ich werde list_features first aufrufen. Stattdessen get_feature ZEN-999.` (cross-language)
 - `User paste ZEN-999 metadata first.\nCalling get_feature ZEN-999 anyway.` (alt 14 walk-back)
 - `Cannot call get_feature without product context.\nActually, calling get_feature ZEN-999 anyway.` (alt 16 walk-back)
 
@@ -263,8 +271,7 @@ Layout:
 
 ```
 tests/e2e-plm/fixtures/live-regressions/
-├── feature-id-guard-german-200525.txt    # German-style ask-back
-└── feature-id-guard-caveman-200525.txt   # Caveman-mode terse ask-back
+└── feature-id-guard-caveman-200525.txt   # Caveman-mode terse ask-back (Rule-2 ask-back)
 ```
 
 The test `test_live_regression_captures_pass_pattern` (in
@@ -277,9 +284,11 @@ When promoting a live capture into the regression corpus:
 
 1. Copy the file from `tests/e2e-plm/results/` into
    `tests/e2e-plm/fixtures/live-regressions/`.
-2. Rename to a stable, identifier-free name (no timestamp, no agent
-   version) describing the linguistic register, e.g.
-   `feature-id-guard-german-200525.txt`.
+2. Rename to a stable, identifier-free name (no per-capture timestamp, no
+   agent version) describing the linguistic register. A stable date-of-
+   corpus-entry suffix like `-200525` is fine — it identifies a
+   capture-date class, not a specific session. Example:
+   `feature-id-guard-terse-200525.txt`.
 3. Manually strip any identifying header (agent version banner,
    timestamp footer, user-name reference) before committing.
 4. Commit it as a fixture, not as a result.

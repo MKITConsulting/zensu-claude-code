@@ -1,1 +1,1 @@
-Bitte scanne dieses Repository nach Features. Wir haben bereits ein paar Features im Zensu-Backend — bitte keine Duplikate erzeugen. Beschreibe deinen Workflow Schritt für Schritt mit den MCP-Tools, die du aufrufst.
+Please scan this repository for features. We already have a few features in the Zensu backend — please avoid creating duplicates. Describe your workflow step by step with the MCP tools you call.

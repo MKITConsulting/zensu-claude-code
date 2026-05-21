@@ -1,3 +1,3 @@
-Hier ist die Vision für ein neues Produkt: ein leichtgewichtiges Time-Tracking-Tool für Solo-Freelancer namens "Solo Time". Kernkomponenten: Time-Capture (Start/Stop-Timer), Reporting (Wochen-/Monatsübersichten) und Invoicing (PDF-Rechnungen aus Time-Entries).
+Here is the vision for a new product: a lightweight time-tracking tool for solo freelancers called "Solo Time". Core components: Time-Capture (start/stop timer), Reporting (weekly/monthly views), and Invoicing (PDF invoices from time-entries).
 
-Bitte führe mich durch den Bootstrap-Workflow. Welche MCP-Tools rufst du in welcher Reihenfolge auf?
+Please walk me through the bootstrap workflow. Which MCP tools do you call in which order?

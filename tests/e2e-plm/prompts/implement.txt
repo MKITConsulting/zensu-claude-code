@@ -1,1 +1,1 @@
-Ich möchte ZEN-042 implementieren — eine Login-Form mit Rate-Limit gegen Brute-Force-Angriffe. Welche Schritte musst du durchlaufen, welche MCP-Tools brauchst du, und was prüfst du vor und nach der Implementierung?
+I want to implement ZEN-042 — a login form with rate-limiting against brute-force attacks. Which steps do you go through, which MCP tools do you need, and what do you check before and after implementation?
