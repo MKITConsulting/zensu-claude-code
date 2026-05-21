@@ -31,7 +31,7 @@ flowchart TD
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAN["Plan approval (ExitPlanMode)"] -->|"plan-approved-delegate.sh"| E
+        PLAN["Plan approval (ExitPlanMode)"] -->|"auto-delegate"| E
         D --> E["tdd-manager Agent"]
         E --> RED["RED — write failing test"]
         RED --> IMPL["IMPL — minimum code"]
@@ -42,7 +42,7 @@ flowchart TD
         NEXT -->|"No"| K["code-reviewer Agent (5 sequential perspectives)"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
-        GATE["PreToolUse FSM gate<br/>pre-edit-tdd-reminder.sh"] -.guards.-> RED
+        GATE["PreToolUse FSM gate"] -.guards.-> RED
         GATE -.guards.-> IMPL
         GATE -.guards.-> GREEN
     end
