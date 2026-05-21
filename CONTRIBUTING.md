@@ -42,6 +42,16 @@ export ZENSU_API_KEY=zsk_...
 - **Agents** — follow the structure of `agents/zensu-plm.md` (decision rules, tool references, important rules)
 - **Hooks** — use `bash -c` with proper error handling and `2>/dev/null` for optional commands
 
+## Licensing of Contributions
+
+This project is licensed under the [Functional Source License, Version 1.1, Apache 2.0 Future License](LICENSE) (FSL-1.1-Apache-2.0). By submitting a pull request, issue patch, or any other contribution, you agree that:
+
+1. Your contribution is licensed under the same FSL-1.1-Apache-2.0 terms as the rest of the project (inbound = outbound).
+2. You have the right to submit the contribution under that license (it is your original work, or you have authority to license it).
+3. You grant Zensu the right to relicense your contribution under any later version of the FSL or under any OSI-approved license, should the project relicense in the future.
+
+This is an inbound-license clause, not a copyright-assignment CLA — you retain copyright in your contribution.
+
 ## Code of Conduct
 
 This project follows the [Contributor Covenant Code of Conduct](CODE_OF_CONDUCT.md). By participating, you are expected to uphold this code.
