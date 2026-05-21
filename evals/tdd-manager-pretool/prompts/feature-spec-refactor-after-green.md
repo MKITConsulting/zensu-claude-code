@@ -1,0 +1,1 @@
+Refactor the existing `reverseString` implementation at `frontend/src/utils/reverseString.ts` from `split/reverse/join` to a manual character loop. Behavior must NOT change; existing test must still pass before and after.

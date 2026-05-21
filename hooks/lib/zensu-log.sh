@@ -3,6 +3,34 @@ set -u
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
+case "${1:-}" in
+  --phase)
+    phase_val=""
+    step_val=""
+    session_val=""
+    reason_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --phase)   phase_val="${2:-}";   shift 2 ;;
+        --step)    step_val="${2:-}";    shift 2 ;;
+        --session) session_val="${2:-}"; shift 2 ;;
+        --reason)  reason_val="${2:-}";  shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$phase_val" ]; then
+      echo "zensu-log.sh --phase requires a phase value" >&2
+      exit 2
+    fi
+    if [ -z "$session_val" ]; then
+      session_val="${CLAUDE_SESSION_ID:-unknown}"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
+    exit $?
+    ;;
+esac
+
 cmd="${1:-timestamp}"
 case "$cmd" in
   timestamp)

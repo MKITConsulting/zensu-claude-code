@@ -70,6 +70,30 @@ else
   check "README mentions autoFix:true prerequisite" FAIL
 fi
 
+if contains "TDD Phase Gate"; then
+  check "README documents TDD Phase Gate hook" PASS
+else
+  check "README documents TDD Phase Gate hook" FAIL
+fi
+
+if contains "ZENSU_TDD_GATE"; then
+  check "README documents ZENSU_TDD_GATE environment variable" PASS
+else
+  check "README documents ZENSU_TDD_GATE environment variable" FAIL
+fi
+
+if contains "Edit/Write/MultiEdit"; then
+  check "README states gate scope: Edit/Write/MultiEdit (Bash explicitly out of scope)" PASS
+else
+  check "README states gate scope: Edit/Write/MultiEdit" FAIL
+fi
+
+if contains "PreToolUse"; then
+  check "README mentions PreToolUse event for the phase gate" PASS
+else
+  check "README mentions PreToolUse event" FAIL
+fi
+
 echo "----"
 echo "test-readme-coverage: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

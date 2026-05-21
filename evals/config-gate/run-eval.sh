@@ -129,10 +129,34 @@ run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
 
 echo "" | tee -a "$REPORT"
+echo "▸ Pre-Edit TDD-Gate offline tests" | tee -a "$REPORT"
+
+run_test "$EVAL_DIR/test-pre-edit-lib-paths.sh"                "test-pre-edit-lib-paths.sh"
+run_test "$EVAL_DIR/test-pre-edit-lib-state.sh"                "test-pre-edit-lib-state.sh"
+run_test "$EVAL_DIR/test-pre-edit-isolation.sh"                "test-pre-edit-isolation.sh"
+run_test "$EVAL_DIR/test-pre-edit-deny-uninitialized.sh"       "test-pre-edit-deny-uninitialized.sh"
+run_test "$EVAL_DIR/test-pre-edit-allow-red-write.sh"          "test-pre-edit-allow-red-write.sh"
+run_test "$EVAL_DIR/test-pre-edit-allow-redfail-test-only.sh"  "test-pre-edit-allow-redfail-test-only.sh"
+run_test "$EVAL_DIR/test-pre-edit-allow-impl-after-redfail.sh" "test-pre-edit-allow-impl-after-redfail.sh"
+run_test "$EVAL_DIR/test-pre-edit-allow-refactor.sh"           "test-pre-edit-allow-refactor.sh"
+run_test "$EVAL_DIR/test-pre-edit-deny-greenpass-production.sh" "test-pre-edit-deny-greenpass-production.sh"
+run_test "$EVAL_DIR/test-pre-edit-override-env.sh"             "test-pre-edit-override-env.sh"
+run_test "$EVAL_DIR/test-pre-edit-log-phase-subcmd.sh"         "test-pre-edit-log-phase-subcmd.sh"
+run_test "$EVAL_DIR/test-pre-edit-toplevel-paths.sh"           "test-pre-edit-toplevel-paths.sh"
+run_test "$EVAL_DIR/test-pre-edit-basename-boundary.sh"        "test-pre-edit-basename-boundary.sh"
+run_test "$EVAL_DIR/test-pre-edit-symlink-reject.sh"           "test-pre-edit-symlink-reject.sh"
+run_test "$EVAL_DIR/test-pre-edit-inline-header.sh"            "test-pre-edit-inline-header.sh"
+run_test "$EVAL_DIR/test-pre-edit-concurrent-write.sh"         "test-pre-edit-concurrent-write.sh"
+run_test "$EVAL_DIR/test-pre-edit-agent-trust.sh"              "test-pre-edit-agent-trust.sh"
+run_test "$EVAL_DIR/test-pre-edit-greenpass-tight.sh"          "test-pre-edit-greenpass-tight.sh"
+run_test "$EVAL_DIR/test-pre-edit-bash-bypass.sh"              "test-pre-edit-bash-bypass.sh"
+
+echo "" | tee -a "$REPORT"
 echo "▸ Documentation coverage tests" | tee -a "$REPORT"
 
-run_test "$EVAL_DIR/test-readme-coverage.sh"    "test-readme-coverage.sh"
-run_test "$EVAL_DIR/test-changelog-coverage.sh" "test-changelog-coverage.sh"
+run_test "$EVAL_DIR/test-readme-coverage.sh"             "test-readme-coverage.sh"
+run_test "$EVAL_DIR/test-changelog-coverage.sh"          "test-changelog-coverage.sh"
+run_test "$EVAL_DIR/test-changelog-round3-accuracy.sh"   "test-changelog-round3-accuracy.sh"
 
 if [ "$MODE" = "--self-check" ]; then
   echo "" | tee -a "$REPORT"

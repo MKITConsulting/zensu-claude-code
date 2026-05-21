@@ -128,13 +128,14 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks (3)
+### Hooks (4)
 
 | Hook | Event | Description |
 |------|-------|-------------|
 | Auto Pulse | SessionStart | Prepares pulse session context at startup |
 | Auto Reflect | SubagentStop (tdd-manager) | Triggers `/reflect` in main context after TDD completion |
 | Review Handoff | SubagentStop (code-reviewer) | Presents review report and prompts for next steps |
+| TDD Phase Gate | PreToolUse Edit/Write/MultiEdit | Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
 
 ## Typical Workflows
 
@@ -271,6 +272,8 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 |----------|---------|-------------|
 | `ZENSU_MCP_URL` | `https://mcp.zensu.dev` | MCP server base URL |
 | `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
+| `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits inside a `zensu:tdd-manager` subagent context. Any other value (or unset) leaves the gate active per `CLAUDE_AGENT_TYPE` resolution. |
+| `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:tdd-manager`). The TDD Phase Gate is active **only** when this is exactly `zensu:tdd-manager`; empty or any other value disables the gate (main-thread edits and other subagents are never gated). |
 
 ### Default Agent
 

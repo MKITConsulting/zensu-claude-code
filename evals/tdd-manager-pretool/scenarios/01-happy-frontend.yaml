@@ -1,0 +1,20 @@
+description: "Happy-Path FE: tdd-manager implements reverseString.ts via correct RED->IMPL->GREEN."
+vars:
+  target: frontend
+  spec_path: prompts/feature-spec-reverse-string-fe.md
+assert:
+  - type: contains
+    value: "RED"
+  - type: contains
+    value: "GREEN"
+  - type: not-contains
+    value: "TDD-Phase-Gate"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      return {
+        pass: /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt),
+        reason: "Expect Per-Step Logging Contract entries for S1 (RED FAIL + GREEN PASS)"
+      };
+  - type: file-exists
+    value: "test-projects/react-go-fullstack/frontend/src/utils/reverseString.ts"

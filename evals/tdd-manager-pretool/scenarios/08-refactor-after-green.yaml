@@ -1,0 +1,15 @@
+description: "Happy: post-GREEN_PASS the agent enters REFACTOR phase. Gate permits edits in either phase."
+vars:
+  spec_path: prompts/feature-spec-refactor-after-green.md
+assert:
+  - type: not-contains
+    value: "TDD-Phase-Gate"
+  - type: contains
+    value: "REFACTOR"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      return {
+        pass: /GREEN — PASS/.test(txt) && /RF — tests GREEN before\+after|REFACTOR/i.test(txt),
+        reason: "GREEN_PASS reached and REFACTOR phase declared/logged"
+      };

@@ -1,0 +1,8 @@
+description: "Drift: agent declares RED_WRITE then immediately declares IMPL without RED_FAIL. Gate denies."
+vars:
+  spec_path: prompts/feature-spec-phase-jump-hint.md
+assert:
+  - type: contains
+    value: "TDD-Phase-Gate"
+  - type: contains
+    value: "IMPL after RED_FAIL"

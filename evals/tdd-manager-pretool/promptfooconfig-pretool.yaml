@@ -1,0 +1,36 @@
+description: "tdd-manager PreToolUse phase-gate suite (10 scenarios)"
+
+providers:
+  - id: anthropic:claude-agent-sdk
+    config:
+      model: claude-sonnet-4-6
+      working_dir: ./test-projects/react-go-fullstack
+      max_turns: 40
+      permission_mode: bypassPermissions
+      allow_dangerously_skip_permissions: true
+      custom_system_prompt: file://../../agents/tdd-manager.md
+
+defaultTest:
+  options:
+    transform: |
+      ({ output, context }) => ({
+        ...context,
+        output,
+        agent_output_text: typeof output === 'string' ? output : JSON.stringify(output)
+      })
+
+tests:
+  - file://scenarios/01-happy-frontend.yaml
+  - file://scenarios/02-happy-backend.yaml
+  - file://scenarios/03-drift-impl-before-red.yaml
+  - file://scenarios/04-drift-skipped-test-run.yaml
+  - file://scenarios/05-drift-phase-jump.yaml
+  - file://scenarios/06-drift-fake-green.yaml
+  - file://scenarios/07-drift-uninitialized.yaml
+  - file://scenarios/08-refactor-after-green.yaml
+  - file://scenarios/09-cross-stack.yaml
+  - file://scenarios/10-override-env.yaml
+
+evaluateOptions:
+  maxConcurrency: 1
+  repeat: 3

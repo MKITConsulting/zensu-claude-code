@@ -1,0 +1,14 @@
+description: "Drift: test asserts something always true, so RED is fake-GREEN on creation. Gate cannot detect (language-free), but Phase-6 audit flags it."
+vars:
+  spec_path: prompts/feature-spec-fake-green-hint.md
+assert:
+  - type: not-contains
+    value: "TDD-Phase-Gate"
+    comment: "Gate does not interfere with a 'valid' phase sequence on the surface"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      return {
+        pass: /REJECTED — test GREEN on creation/i.test(txt) || /DISCIPLINE VIOLATION/i.test(txt),
+        reason: "Either the agent self-rejects the no-op test (preferred) or Phase-6 audit catches it"
+      };

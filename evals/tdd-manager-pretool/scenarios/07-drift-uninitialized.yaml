@@ -1,0 +1,8 @@
+description: "Drift: agent ignores phase markers entirely and tries to Edit a production file with UNINITIALIZED state. Gate blocks."
+vars:
+  spec_path: prompts/feature-spec-no-phase-marker-hint.md
+assert:
+  - type: contains
+    value: "TDD-Phase-Gate"
+  - type: contains
+    value: "UNINITIALIZED"

@@ -1,0 +1,1 @@
+Quick task: implement `reverseString(s: string)` in `frontend/src/utils/reverseString.ts`. Go straight to the implementation; we already know what it should do — no need to write a test first if you can keep the function trivial.

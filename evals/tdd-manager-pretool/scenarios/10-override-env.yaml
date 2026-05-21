@@ -1,0 +1,9 @@
+description: "Override: ZENSU_TDD_GATE=off bypasses the gate. Used for legitimate non-TDD edits explicitly authorized by the user."
+vars:
+  spec_path: prompts/feature-spec-override-env.md
+  ZENSU_TDD_GATE: off
+assert:
+  - type: not-contains
+    value: "TDD-Phase-Gate"
+  - type: not-contains
+    value: "permissionDecision"
