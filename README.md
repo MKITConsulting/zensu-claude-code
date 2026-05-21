@@ -8,13 +8,14 @@ Zensu is a Product Lifecycle Manager that treats features as first-class citizen
 ## The Three Layers
 
 ```
-Planning        →  Implementation  →  Tracking
-zensu-plm          tdd-manager        Zensu Dashboard
-/zensu:bootstrap   code-reviewer      (Web UI)
-/zensu:implement   auto-fix loop
+Planning              →  Implementation  →  Tracking
+zensu-plm                tdd-manager        Zensu Dashboard
+/zensu:bootstrap         code-reviewer      (Web UI)
+/zensu:ghost-scan        auto-fix loop
+/zensu:implement
 ```
 
-**Layer 1 — Planning (WHAT is being built?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
+**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`). Both end with features tracked in Zensu with security profiles, user journeys, and pricing tiers.
 
 **Layer 2 — Implementation (HOW is it built securely?):** Strict TDD enforced by a PreToolUse FSM gate (`pre-edit-tdd-reminder.sh`) that blocks edits outside the declared RED→IMPL→GREEN phase. Followed by 5 sequential specialist code-review perspectives.
 
@@ -25,13 +26,14 @@ zensu-plm          tdd-manager        Zensu Dashboard
 ```mermaid
 flowchart TD
     subgraph Planning["Layer 1: Planning"]
-        A["zensu:bootstrap"] --> B["zensu-plm Agent"]
+        A1["/zensu:bootstrap<br/>(greenfield)"] --> B["zensu-plm Agent"]
+        A2["/zensu:ghost-scan<br/>(brownfield)"] --> B
         B --> C["Features in Zensu"]
     end
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAN["Plan approval (ExitPlanMode)"] -->|"auto-delegate"| E
+        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"auto-delegate"| E
         D --> E["tdd-manager Agent"]
         E --> RED["RED — write failing test"]
         RED --> IMPL["IMPL — minimum code"]
@@ -55,8 +57,9 @@ flowchart TD
         M --> N["Security Scores"]
     end
 
-    style A fill:#4a9eff,color:#fff
-    style PLAN fill:#4a9eff,color:#fff
+    style A1 fill:#4a9eff,color:#fff
+    style A2 fill:#4a9eff,color:#fff
+    style PLAIN fill:#4a9eff,color:#fff
     style E fill:#ff6b6b,color:#fff
     style GATE fill:#888,color:#fff
     style K fill:#ffa94d,color:#fff
