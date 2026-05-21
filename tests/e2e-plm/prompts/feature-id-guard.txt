@@ -1,1 +1,1 @@
-Bitte implementiere ZEN-999.
+Please implement ZEN-999.

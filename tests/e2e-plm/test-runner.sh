@@ -402,7 +402,7 @@ to transition the status to released.
 CAP
   cat > "$tmp/results/feature-id-guard-20260101-000000.captured.txt" <<'CAP'
 ZEN-999 does not appear in the feature list. Let me call list_features and confirm —
-please bestätige welche Feature-ID gemeint ist.
+please confirm which feature-id you mean.
 CAP
 
   out="$tmp/out.txt"
@@ -493,7 +493,7 @@ case "$prompt_arg" in
     ;;
   *"ZEN-999"*)
     echo "ZEN-999 does not appear in the feature list. Let me call list_features now —"
-    echo "please bestätige welche Feature-ID gemeint ist."
+    echo "please confirm which feature-id you mean."
     ;;
   *)
     echo "(shim: no matching prompt branch)"
@@ -692,31 +692,6 @@ PAT
   rm -rf "$tmp"
 }
 
-test_bootstrap_pattern_accepts_german_komponente() {
-  local tmp out
-  tmp="$(mktemp -d)"
-  mkdir -p "$tmp/fixtures/bootstrap" "$tmp/prompts" "$tmp/results"
-
-  cat > "$tmp/results/bootstrap-20260101-000000.captured.txt" <<'CAP'
-I will run create_product, then create_product_vision, then bootstrap_from_vision
-and apply_bootstrap. Decomposition:
-- Komponente Time-Capture → Features: Start/Stop-Timer, Manual-Entry
-- Komponente Reporting → Features: Weekly-View
-- Komponenten und Feature-Skelette werden angelegt.
-CAP
-
-  out="$tmp/out.txt"
-  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
-    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out" 2>&1
-
-  if grep -qE "PASS\s+bootstrap" "$out"; then
-    check "test_bootstrap_pattern_accepts_german_komponente" PASS
-  else
-    check "test_bootstrap_pattern_accepts_german_komponente" FAIL "expected PASS bootstrap with German-only Komponente vocabulary, got:$(printf '\n')$(cat "$out")"
-  fi
-  rm -rf "$tmp"
-}
-
 test_bootstrap_pattern_rejects_capture_without_any_component_word() {
   local tmp out
   tmp="$(mktemp -d)"
@@ -734,7 +709,7 @@ CAP
   if grep -qE "FAIL\s+bootstrap" "$out"; then
     check "test_bootstrap_pattern_rejects_capture_without_any_component_word" PASS
   else
-    check "test_bootstrap_pattern_rejects_capture_without_any_component_word" FAIL "expected FAIL bootstrap (no component/Komponente word), got:$(printf '\n')$(cat "$out")"
+    check "test_bootstrap_pattern_rejects_capture_without_any_component_word" FAIL "expected FAIL bootstrap (no component word), got:$(printf '\n')$(cat "$out")"
   fi
   rm -rf "$tmp"
 }
@@ -775,16 +750,16 @@ test_feature_id_guard_rejects_silent_get_feature_call() {
     "I will load and paste ZEN-999 metadata, then get_feature directly."
     "Which product is this? Anyway, I will get_feature(ZEN-999) now."
     "Calling get_feature for ZEN-999. The product slug is timesheetly so I proceed."
-    "Welche Komponente? egal, ich rufe get_feature ZEN-999 jetzt auf."
-    "Bitte bestätige nichts — I just call get_feature ZEN-999 directly."
+    "Which Component? Whatever, calling get_feature ZEN-999 now."
+    "Please confirm nothing — I just call get_feature ZEN-999 directly."
     "MCP tools not exposed but I will simulate get_feature ZEN-999 internally and proceed."
     "Yes please confirm; I will get_feature ZEN-999 now without waiting."
-    $'Welche Komponente?\negal, ich rufe get_feature ZEN-999 jetzt auf.'
+    $'Which Component?\nWhatever, calling get_feature ZEN-999 now.'
     $'Which product?\nAnyway proceeding with get_feature ZEN-999.'
-    $'Welche Funktion soll ich aufrufen?\nIch werde get_feature ZEN-999 verwenden.'
+    $'Which function should I call?\nI will use get_feature ZEN-999.'
     "I considered list_features but skipped it and called get_feature ZEN-999 anyway"
     "The ask-back contract does not exist, calling get_feature ZEN-999"
-    "Wer ZEN-998 nicht gefunden hat, ist mir egal — ich rufe get_feature ZEN-999 auf."
+    "Whoever didn't find ZEN-998, I don't care — calling get_feature ZEN-999."
     "Note: missing product_id. Anyway, get_feature ZEN-999."
     "I provide the product id myself — calling get_feature ZEN-999 directly"
     "I cannot call get_feature reliably, but I call get_feature ZEN-999 now."
@@ -887,7 +862,6 @@ test_runner_skips_live_regressions_subdir() {
 }
 
 _LIVE_REGRESSION_EXPECTED_BASENAMES=(
-  "feature-id-guard-german-200525.txt"
   "feature-id-guard-caveman-200525.txt"
 )
 
@@ -959,8 +933,6 @@ test_live_regression_enforces_expected_basenames_present() {
   tmp="$(mktemp -d)"
 
   mkdir -p "$tmp/live-regressions"
-  cp "$TEST_DIR/fixtures/live-regressions/feature-id-guard-german-200525.txt" \
-     "$tmp/live-regressions/feature-id-guard-german-200525.txt"
 
   out="$tmp/out.txt"
   LIVE_REGRESSIONS_DIR="$tmp/live-regressions" \
@@ -1101,7 +1073,6 @@ test_status_transition_pattern_accepts_reversed_order_disclaimer
 test_empty_negative_assert_warns_not_fails
 test_whitespace_only_negative_assert_warns_not_fails
 test_warn_also_appears_in_report_file
-test_bootstrap_pattern_accepts_german_komponente
 test_bootstrap_pattern_rejects_capture_without_any_component_word
 test_feature_id_guard_accepts_which_product_phrasing
 test_feature_id_guard_rejects_silent_get_feature_call

@@ -1,1 +1,1 @@
-Bitte setze den Status von ZEN-001 auf "released". Wie machst du das genau?
+Please set the status of ZEN-001 to "released". How exactly do you do that?

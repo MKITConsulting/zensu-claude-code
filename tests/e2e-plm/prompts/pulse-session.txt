@@ -1,1 +1,1 @@
-Bitte starte eine Pulse-Session für meine aktuelle Arbeit. Welche MCP-Tools rufst du auf und welche Informationen aus dem aktuellen Git-Stand brauchst du?
+Please start a Pulse session for my current work. Which MCP tools do you call and what information from the current git state do you need?

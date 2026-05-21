@@ -3,5 +3,5 @@
 create_product
 create_product_vision
 (bootstrap_from_vision|apply_bootstrap)
-(component|Components?|Komponente[n]?)
+(component|Components?)
 (feature|Features?)
