@@ -14,11 +14,11 @@ zensu-plm          tdd-manager        Zensu Dashboard
 /zensu:implement   /reflect
 ```
 
-**Layer 1 — Planning (WAS wird gebaut?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
+**Layer 1 — Planning (WHAT is being built?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
 
-**Layer 2 — Implementation (WIE wird es sicher gebaut?):** Strict TDD with SubAgent role separation (test-engineer cannot write production code), followed by 5+1 parallel code reviewers.
+**Layer 2 — Implementation (HOW is it built securely?):** Strict TDD with SubAgent role separation (test-engineer cannot write production code), followed by 5+1 parallel code reviewers.
 
-**Layer 3 — Tracking (WO steht es?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
+**Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
 ## Agent & Workflow Overview
 
