@@ -392,7 +392,7 @@ Status transitions are not handled by an MCP tool. You need to call the Zensu RE
 to transition the status to released.
 CAP
   cat > "$tmp/results/feature-id-guard-20260101-000000.captured.txt" <<'CAP'
-ZEN-999 does not appear in the feature list. Let me run list_features and confirm —
+ZEN-999 does not appear in the feature list. Let me call list_features and confirm —
 please bestätige welche Feature-ID gemeint ist.
 CAP
 
@@ -483,7 +483,7 @@ case "$prompt_arg" in
     echo "to set the status to released."
     ;;
   *"ZEN-999"*)
-    echo "ZEN-999 does not appear in the feature list. Calling list_features now —"
+    echo "ZEN-999 does not appear in the feature list. Let me call list_features now —"
     echo "please bestätige welche Feature-ID gemeint ist."
     ;;
   *)
