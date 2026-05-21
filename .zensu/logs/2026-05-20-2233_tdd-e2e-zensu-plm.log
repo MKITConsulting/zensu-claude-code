@@ -1,0 +1,27 @@
+TDD STARTED — E2E-Tests fuer zensu-plm Agent | steps: 16
+[22:37:21] S1 RED test_self_check_emits_total_zero — FAIL: runner exited non-zero (run.sh missing)
+[22:37:21] S1 IMPL completed — files: tests/e2e-plm/run.sh (full skeleton: mode validation, match_pattern w/ ! negative, invoke_plm w/ prompts dir, --self-check + --offline + full branches, zero-byte + missing-prompt guards)
+[22:37:21] S1 GREEN — PASS (1 attempt)
+[22:38:16] S2 RED test_unknown_mode_rejected — verified FAIL when mode validation removed; restored
+[22:38:16] S2 GREEN — PASS
+[22:40:22] S3 RED test_pattern_positive_and_missing — verified via test logic; GREEN
+[22:40:22] S4 RED test_negative_assert_lines — strengthened test, verified FAIL when !-branch removed; GREEN
+[22:40:22] S5 RED test_hash_comments_skipped — verified FAIL when # *-branch removed; GREEN
+[22:42:11] S6 GREEN test_offline_uses_newest_no_spawn
+[22:42:11] S7 GREEN test_self_check_skips_claude
+[22:42:11] S8 RED verified FAIL with --agent code-reviewer; restored to zensu:zensu-plm. GREEN
+[22:42:11] S9 GREEN test_full_mode_passes_prompt_content
+[22:42:11] S10 GREEN test_zero_byte_capture_diagnostic
+[22:42:11] S11 GREEN test_missing_prompt_file_diagnostic
+[22:42:11] CHECKPOINT: run.sh logic tests all green (11/11)
+[22:43:29] S12 RED setup-fixtures.sh missing — confirmed FAIL with right reason
+[22:43:29] S12 IMPL — files: tests/e2e-plm/setup-fixtures.sh (7 fixtures: bootstrap, implement, security-review, ghost-scan, pulse-session, status-transition, feature-id-guard)
+[22:43:29] S12 GREEN test_setup_fixtures_idempotent
+[22:43:29] CHECKPOINT after S12: test-runner.sh 12/12 PASS
+[22:46:32] S13 WIRED — 7 prompts/*.txt (bootstrap, implement, security-review, ghost-scan, pulse-session, status-transition, feature-id-guard)
+[22:46:32] S14 WIRED — 7 expected/*.pattern (positive + ! negative for status-transition)
+[22:46:33] S15 WIRED — .gitignore tests/e2e-plm/fixtures/ + results/
+[22:46:33] S16 WIRED — tests/e2e-plm/README.md
+[22:46:33] Added end-to-end shim test verifying full pipeline TOTAL: 7/7
+[22:48:06] PHASE 5 CHECKPOINT — test-runner.sh 15/15 PASS, run.sh --self-check 0/0, setup-fixtures.sh idempotent, .gitignore excludes fixtures+results, tests/e2e/ untouched
+[22:48:06] TDD COMPLETE — 12/12 GREEN | Integration: 4 WIRED | Bonus tests: 2 GREEN (E2E pipeline + pattern discrimination) | Build: – n/a (plugin repo, no compile step) | Coverage: – skipped (no bash coverage tool)

@@ -1,0 +1,1 @@
+Ich möchte ZEN-042 implementieren — eine Login-Form mit Rate-Limit gegen Brute-Force-Angriffe. Welche Schritte musst du durchlaufen, welche MCP-Tools brauchst du, und was prüfst du vor und nach der Implementierung?

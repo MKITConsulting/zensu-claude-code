@@ -1,0 +1,7 @@
+# Bootstrap workflow — must reference product creation, vision storage, and apply_bootstrap.
+# Decision Rule (agents/zensu-plm.md:166): "plan/spec/product description → bootstrap".
+create_product
+create_product_vision
+(bootstrap_from_vision|apply_bootstrap)
+(component|Components?|Komponente[n]?)
+(feature|Features?)

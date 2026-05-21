@@ -1,0 +1,4 @@
+# Pulse workflow — must start a session and reference git HEAD or branch.
+# Decision Rule (agents/zensu-plm.md:170): "session start/end / 'what did I work on?' → pulse".
+(pulse_start_session|pulse_session_summary)
+(git|HEAD|branch|SHA)
