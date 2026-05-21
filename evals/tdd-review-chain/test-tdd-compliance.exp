@@ -1,0 +1,35 @@
+#!/usr/bin/env expect -f
+# Compliance smoke: spawn zensu:tdd-manager with a 2-function task and verify
+# the resulting log + code satisfies assert-tdd-log-compliance.sh.
+# Only used by run-eval.sh T9 in full mode (not in --self-check).
+
+set timeout 600
+set DEBUG_LOG [lindex $argv 0]
+if {$DEBUG_LOG eq ""} { set DEBUG_LOG "/tmp/tdd-compliance.log" }
+log_user 1
+exec rm -f $DEBUG_LOG
+
+set PLUGIN_DIR [lindex $argv 1]
+if {$PLUGIN_DIR eq ""} { set PLUGIN_DIR "[file dirname [file dirname [file dirname [file normalize [info script]]]]]" }
+
+# Reset fixture so the spawn implements both functions from scratch.
+exec rm -f $PLUGIN_DIR/evals/tdd-review-chain/fixtures/sample.ts
+exec rm -f $PLUGIN_DIR/evals/tdd-review-chain/fixtures/sample.test.ts
+exec sh -c "echo 'export const noop = () => {};' > $PLUGIN_DIR/evals/tdd-review-chain/fixtures/sample.ts"
+
+spawn claude --debug-file=$DEBUG_LOG --plugin-dir $PLUGIN_DIR \
+  "Spawn zensu:tdd-manager to add TWO functions to evals/tdd-review-chain/fixtures/sample.ts: isEven(n: number): boolean AND isOdd(n: number): boolean. Two SEPARATE RED-IMPL-GREEN cycles, one per function, with full per-step logging. Use subagent_type='zensu:tdd-manager'."
+
+expect {
+  -re "TDD COMPLETE|TDD DISCIPLINE VIOLATED" {
+    send_user "\n>>> tdd-manager finished\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT\n"
+  }
+  eof { send_user "\n>>> session ended\n" }
+}
+
+sleep 5
+send "\x03"
+expect eof

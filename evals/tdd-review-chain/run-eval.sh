@@ -110,6 +110,47 @@ else
   check "T3.4 script silent for non-tdd-manager subagent" FAIL
 fi
 
+# ─── T5 TDD logging contract (offline fixture-based) ───────────────
+# Asserts assert-tdd-log-compliance.sh enforces the Per-Step Logging
+# Contract and mtime Discipline Audit defined in agents/tdd-manager.md:
+#   T5.1 good fixture — proper RED/IMPL/GREEN trio per step → PASS
+#   T5.2 missing-red fixture — GREEN without prior RED → reject
+#   T5.3 bulk-shortcut fixture — collective RED for many steps → reject
+#   T5.4 test-after fixture — test mtime > impl mtime → reject (with --impl-dir)
+echo "" | tee -a "$REPORT"
+echo "▸ T5 TDD logging contract (Per-Step + mtime audit, offline)" | tee -a "$REPORT"
+COMPLIANCE_SCRIPT="$EVAL_DIR/assert-tdd-log-compliance.sh"
+
+if "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-good.log" >/dev/null 2>&1; then
+  check "T5.1 good fixture passes compliance" PASS
+else
+  check "T5.1 good fixture passes compliance" FAIL
+fi
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-missing-red.log" >/dev/null 2>&1; then
+  check "T5.2 missing-red fixture correctly rejected" PASS
+else
+  check "T5.2 missing-red fixture correctly rejected" FAIL
+fi
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-bulk-shortcut.log" >/dev/null 2>&1; then
+  check "T5.3 bulk-shortcut fixture correctly rejected" PASS
+else
+  check "T5.3 bulk-shortcut fixture correctly rejected" FAIL
+fi
+
+# Re-seed mtimes deterministically — git does not preserve them across clones.
+# Impl file must be OLDER than test file to trigger the test-after detection.
+touch -t 202604171200 "$EVAL_DIR/fixtures/test-after-tree/Foo.java"
+touch -t 202604171210 "$EVAL_DIR/fixtures/test-after-tree/FooTest.java"
+
+if ! "$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-test-after.log" \
+                          --impl-dir "$EVAL_DIR/fixtures/test-after-tree" >/dev/null 2>&1; then
+  check "T5.4 test-after mtime fixture correctly rejected" PASS
+else
+  check "T5.4 test-after mtime fixture correctly rejected" FAIL
+fi
+
 # ─── T6/T7/T8 severity-routing directive integrity (offline) ────────
 # These tests verify the reviewer→tdd-manager severity-routing hook
 # (hooks/post-review-tdd-delegate.sh). The script does not parse reviewer
@@ -245,6 +286,31 @@ timeout 240 "$EVAL_DIR/test-tdd-isolation.exp" "$T2_LOG" "$PLUGIN_DIR" > "$T2_OU
 check "T2.1 plugin loaded hooks.json"          "$(contains "$T2_LOG" "Loaded hooks.*plugin zensu")"
 check "T2.2 directive NOT injected for plm"    "$(not_contains "$T2_LOG" "VERY NEXT TOOL CALL.*zensu:code-reviewer")"
 check "T2.3 reviewer NOT dispatched"           "$(not_contains "$T2_LOG" "subagent_type.*zensu:code-reviewer|tool_name.*Task.*code-reviewer")"
+
+# ─── T9: TDD compliance E2E (real spawn → assert log compliance) ───
+# Spawns a real zensu:tdd-manager run that should add TWO functions via
+# two RED→IMPL→GREEN cycles, then validates the produced log file with
+# assert-tdd-log-compliance.sh. Slow-lane only — skipped by --self-check
+# (which already gates this above via the early exit).
+echo "" | tee -a "$REPORT"
+echo "▸ T9 TDD compliance E2E (real spawn, asserts log compliance)" | tee -a "$REPORT"
+T9_OUT="$RESULTS_DIR/t9-${TIMESTAMP}.out"
+T9_LOG="$RESULTS_DIR/t9-${TIMESTAMP}.debug.log"
+timeout 600 "$EVAL_DIR/test-tdd-compliance.exp" "$T9_LOG" "$PLUGIN_DIR" > "$T9_OUT" 2>&1 || true
+
+# Pick the most recent tdd-manager log produced during the spawn.
+GENERATED_LOG=$(ls -t "$PLUGIN_DIR"/.zensu/logs/*_tdd-*.log 2>/dev/null | head -1)
+if [ -z "$GENERATED_LOG" ]; then
+  check "T9.1 tdd-manager produced a log file"        FAIL
+  check "T9.2 generated log passes compliance check"  FAIL
+else
+  check "T9.1 tdd-manager produced a log file"        PASS
+  if "$COMPLIANCE_SCRIPT" --log "$GENERATED_LOG" --impl-dir "$EVAL_DIR/fixtures" >/dev/null 2>&1; then
+    check "T9.2 generated log passes compliance check" PASS
+  else
+    check "T9.2 generated log passes compliance check" FAIL
+  fi
+fi
 
 # ─── T4: empirical PostToolUse:Task probe (data report only) ───────
 echo "" | tee -a "$REPORT"
