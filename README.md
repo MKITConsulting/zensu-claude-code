@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.1-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.14-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -11,7 +11,7 @@ Zensu is a Product Lifecycle Manager that treats features as first-class citizen
 Planning        →  Implementation  →  Tracking
 zensu-plm          tdd-manager        Zensu Dashboard
 /zensu:bootstrap   code-reviewer      (Web UI)
-/zensu:implement   /reflect
+/zensu:implement   auto-fix loop
 ```
 
 **Layer 1 — Planning (WAS wird gebaut?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
@@ -30,7 +30,8 @@ flowchart TD
     end
 
     subgraph Implementation["Layer 2: Implementation"]
-        C -->|"zensu:implement"| D["Load Feature Context"]
+        C -->|"/zensu:implement"| D["Load Feature Context"]
+        PLAN["Plan approval (ExitPlanMode)"] -->|"plan-approved-delegate.sh"| E
         D --> E["tdd-manager Agent"]
         E -->|"RED"| F["Test-Engineer SubAgent"]
         F -->|"GREEN"| G["Developer SubAgent"]
@@ -38,9 +39,9 @@ flowchart TD
         H -->|"No"| F
         H -->|"Yes"| I{"More Steps?"}
         I -->|"Yes"| E
-        I -->|"No"| J["/reflect"]
-        J --> K["code-reviewer Agent"]
+        I -->|"No"| K["code-reviewer Agent"]
         K --> L["Review Report"]
+        L -->|"auto-fix (≤ autoFixMaxRounds)"| E
     end
 
     subgraph Tracking["Layer 3: Tracking"]
@@ -52,6 +53,7 @@ flowchart TD
     end
 
     style A fill:#4a9eff,color:#fff
+    style PLAN fill:#4a9eff,color:#fff
     style E fill:#ff6b6b,color:#fff
     style K fill:#ffa94d,color:#fff
     style M fill:#51cf66,color:#fff
@@ -128,14 +130,15 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks (4)
+### Hooks (5)
 
-| Hook | Event | Description |
-|------|-------|-------------|
-| Auto Pulse | SessionStart | Prepares pulse session context at startup |
-| Auto Reflect | SubagentStop (tdd-manager) | Triggers `/reflect` in main context after TDD completion |
-| Review Handoff | SubagentStop (code-reviewer) | Presents review report and prompts for next steps |
-| TDD Phase Gate | PreToolUse Edit/Write/MultiEdit | Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
+| Hook Script | Event | Config Flag | Description |
+|-------------|-------|-------------|-------------|
+| `session-start-pulse.sh` | SessionStart | `pulseSession` | Emits HEAD/branch banner and prepares pulse session context at startup |
+| `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
+| `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
+| `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5+1 parallel specialist review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
+| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`; emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. |
 
 ## Typical Workflows
 
@@ -145,8 +148,8 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-001  → Load context, plan implementation
 3. @tdd-manager              → Strict TDD (RED→GREEN per step)
-4. /reflect                  → Self-review in full context (auto-triggered)
-5. @code-reviewer            → 5+1 parallel specialist review
+4. @code-reviewer            → 5+1 parallel specialist review (auto-spawned by post-tdd-review-delegate.sh)
+5. auto-fix loop             → Critical/Important findings re-routed to @tdd-manager, capped at autoFixMaxRounds
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 
@@ -274,14 +277,8 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 | `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits inside a `zensu:tdd-manager` subagent context. Any other value (or unset) leaves the gate active per `CLAUDE_AGENT_TYPE` resolution. |
 | `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:tdd-manager`). The TDD Phase Gate is active **only** when this is exactly `zensu:tdd-manager`; empty or any other value disables the gate (main-thread edits and other subagents are never gated). |
-
-### Default Agent
-
-Installing this plugin sets `zensu-plm` as the default agent for the project scope via `settings.json`. The agent automatically delegates Zensu-related tasks (feature tracking, security reviews, product lifecycle workflows).
-
-To override or disable:
-- Edit `settings.json` in the plugin root to change the default agent
-- Remove the `"agent"` key from `settings.json` to restore the Claude Code default
+| `CLAUDE_PLUGIN_ROOT` | — | Set by Claude Code for hook subprocesses. Resolves to the installed plugin root and is used by `hooks.json` to reference hook scripts. No user setup required. |
+| `CLAUDE_PLUGIN_DATA` | `$HOME/.zensu/state` | Set by Claude Code; the auto-fix loop persists per-session round counters at `${CLAUDE_PLUGIN_DATA}/rounds-<session_id>.json`. Falls back to `$HOME/.zensu/state` when unset. |
 
 ## Data & Privacy
 
@@ -327,7 +324,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | MCP server unreachable | Check `ZENSU_MCP_URL` value and network connectivity |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
-| Agent triggers on non-Zensu tasks | Override the default agent (see [Default Agent](#default-agent)) |
+| Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |
 | TDD manager not spawning SubAgents | Ensure `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is not blocking |
 
