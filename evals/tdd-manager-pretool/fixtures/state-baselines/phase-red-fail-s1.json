@@ -1,0 +1,10 @@
+{
+  "session_id": "baseline-sid",
+  "step_id": "S1",
+  "phase": "RED_FAIL",
+  "history": [
+    { "step": "S1", "phase": "RED_WRITE", "ts": "2026-05-21T16:30:00Z" },
+    { "step": "S1", "phase": "RED_RUN",   "ts": "2026-05-21T16:31:00Z" },
+    { "step": "S1", "phase": "RED_FAIL",  "ts": "2026-05-21T16:32:00Z", "reason": "expected 'cba' got undefined" }
+  ]
+}

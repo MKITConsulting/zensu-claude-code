@@ -1,0 +1,20 @@
+description: "Happy-Path BE: tdd-manager implements internal/strings/reverse.go via correct RED->IMPL->GREEN."
+vars:
+  target: backend
+  spec_path: prompts/feature-spec-reverse-string-be.md
+assert:
+  - type: contains
+    value: "RED"
+  - type: contains
+    value: "GREEN"
+  - type: not-contains
+    value: "TDD-Phase-Gate"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      return {
+        pass: /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt),
+        reason: "Per-Step Logging Contract entries for BE TDD step"
+      };
+  - type: file-exists
+    value: "test-projects/react-go-fullstack/backend/internal/strings/reverse.go"

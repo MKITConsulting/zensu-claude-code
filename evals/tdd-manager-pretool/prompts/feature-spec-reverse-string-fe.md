@@ -1,0 +1,1 @@
+Add `reverseString(input: string): string` to `frontend/src/utils/reverseString.ts`. It reverses the input string. Vitest for the unit test in `frontend/src/__tests__/reverseString.test.ts`. Strict RED -> IMPL -> GREEN.

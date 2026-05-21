@@ -57,6 +57,9 @@ After completing each cycle phase (RED, IMPL, GREEN):
 1. **Log** — `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
 2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
 3. **Plan doc** — batch-update at checkpoints and final report only
+4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
+   `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
+   Valid `<PHASE>` values: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`. The marker is written to `.zensu/state/tdd-phase-<session>.json`; the log-line format above is unchanged. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) blocks edits that don't match the FSM: in particular `IMPL` requires a prior `RED_FAIL` for the same step. Set `ZENSU_TDD_GATE=off` only for legitimate non-TDD edits explicitly authorized by the user.
 
 ### Per-Step Logging Contract (MANDATORY)
 
@@ -168,22 +171,31 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
 **Self-check**: Previous step done? RED test defined?
 
 **A) RED** — Write the test file. The test MUST assert actual behavior (return values, state changes, side effects), not just function existence. Run it with the test command. Verify it FAILS.
+  - **Phase marker (before writing the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_WRITE --step {step_id}`
+  - Write the test file.
+  - **Phase marker (before running the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_RUN --step {step_id}`
+  - Run the test.
   - **Verify the failure reason**: Assertion mismatch or missing symbol = CORRECT RED. Syntax error, typo, missing import, wrong file path = WRONG RED → fix the test itself, don't proceed to IMPL.
+  - **Phase marker (on confirmed failure)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_FAIL --step {step_id} --reason "{reason}"`
   - Log: `{step} RED {test} — FAIL: {assertion or missing-symbol message}`. TaskUpdate [test] completed.
   - If test PASSES: delete it, rewrite to test something that requires the implementation. Log `REJECTED — test GREEN on creation`.
 
 **B) IMPL** — Write the MINIMUM implementation code. Real, complete code for the test to pass — no stubs, no skeletons, no premature generalization. Do NOT run tests yet. Do NOT refactor unrelated code.
+  - **Phase marker (before editing production files)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase IMPL --step {step_id}` — the PreToolUse gate verifies that step `{step_id}` is in `RED_FAIL` in history; a missing or mismatched marker blocks the Edit/Write call.
   - Log: `{step} IMPL completed — files: {list}`. TaskUpdate [impl] completed.
 
 **C) GREEN** — Run the TARGET test (single file/name, not the full suite). Verify it PASSES.
+  - **Phase marker (before running the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase GREEN_RUN --step {step_id}`
+  - Run the test.
+  - **Phase marker (on PASS)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase GREEN_PASS --step {step_id}`
   - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. TaskUpdate [verify] completed. Next step.
-  - If FAIL: Log `RETRY({N}/3)`. Fix implementation, back to C. Max 3 attempts → escalate to user.
+  - If FAIL: Log `RETRY({N}/3)`. Fix implementation (re-emit `--phase IMPL` per RETRY), back to C. Max 3 attempts → escalate to user.
   - Full suite runs only at Phase 5 checkpoints (not per step) — avoids 20× overhead on large codebases.
 
 ### Refactoring Cycle
 
 **R1)** Run existing tests for affected code. Verify ALL PASS. If coverage insufficient, write a behavior-preserving test first.
-**R2)** Refactor the code. Do NOT change behavior.
+**R2)** Phase marker: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase REFACTOR --step {step_id}`. Refactor the code. Do NOT change behavior.
 **R3)** Run same tests. Verify ALL still PASS.
 Log: `{step} RF — tests GREEN before+after`. Mark `[RF]`.
 

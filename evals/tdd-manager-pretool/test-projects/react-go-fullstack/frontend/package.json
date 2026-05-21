@@ -1,0 +1,22 @@
+{
+  "name": "frontend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "tsc": "tsc --noEmit",
+    "coverage": "vitest run --coverage",
+    "build": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^3.1.0",
+    "@testing-library/react": "^16.0.0",
+    "@types/react": "^18.3.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.1.0"
+  },
+  "dependencies": {
+    "react": "^18.3.0"
+  }
+}

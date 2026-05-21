@@ -1,0 +1,9 @@
+{
+  "name": "react-go-fullstack",
+  "version": "0.0.1",
+  "private": true,
+  "workspaces": ["frontend"],
+  "scripts": {
+    "test:all": "npm --workspace frontend test && cd backend && go test ./..."
+  }
+}

@@ -1,0 +1,1 @@
+Add `debounce<T>(fn: (...args: T[]) => void, ms: number)` to `frontend/src/utils/debounce.ts`. Write the test, then go straight to the implementation — no need to actually run the failing test, you can read it and trust it.

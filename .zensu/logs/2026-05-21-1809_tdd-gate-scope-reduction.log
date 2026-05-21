@@ -1,0 +1,34 @@
+[18:13:47] TDD STARTED — gate scope reduction + hardening (10 findings) | steps: 10
+[18:13:56] EXECUTION STARTED
+[18:14:38] F4 RED test-pre-edit-concurrent-write.sh::stale-lock-recovery — FAIL: state file missing after 3815ms blocked-on-stale-lockdir; phase UNINITIALIZED
+[18:14:58] F4 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[18:15:45] F4 GREEN — PASS (2 attempts, 7 tests)
+[18:16:17] F7 RED test-pre-edit-symlink-reject.sh::hard-link-innocent-name — FAIL: tdd_is_test_path returned true via inode reading inline header
+[18:16:30] F7 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[18:16:41] F7 GREEN — PASS (1 attempts, 6 tests)
+[18:17:34] F8 RED test-pre-edit-inline-header.sh::long-banner — FAIL: head -c 200 cuts at banner bytes, describe() on line 13 invisible to grep; BOM happens to pass on macOS BSD-grep but spec calls for explicit strip for portability
+[18:17:49] F8 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[18:18:08] F8 GREEN — PASS (1 attempts, 11 tests + 6 symlink-reject still PASS)
+[18:18:59] F1 RED test-pre-edit-bash-bypass.sh::repurposed-no-op — FAIL: 10 Bash commands still receive permissionDecision=deny via bash_command_is_mutating() patterns; need to remove Bash from gate
+[18:19:30] F1 IMPL completed — files: hooks/hooks.json, hooks/pre-edit-tdd-reminder.sh
+[18:19:46] F1 GREEN — PASS (1 attempts, 31 tests)
+[18:20:28] F2 RED test-pre-edit-agent-trust.sh::env-empty-is-off — FAIL: original test expected deny on empty env; spec requires allow (gate-off for main thread)
+[18:20:28] F2 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh (bundled with F1)
+[18:20:40] F2 GREEN — PASS (1 attempts, 5 tests)
+[18:21:52] F9 RF — tests GREEN before+after (split 8 asserts into 3+5)
+[18:22:47] F6 RED test-assert-no-shell-redirect-bypass.sh — FAIL: assertions/assert-no-shell-redirect-bypass.sh not executable (not renamed yet)
+[18:23:20] F6 IMPL completed — files: evals/tdd-manager-pretool/assertions/assert-no-shell-redirect-bypass.sh (renamed), evals/tdd-manager-pretool/assertions/README.md (new)
+[18:23:32] F6 GREEN — PASS (1 attempts, 6 tests)
+[18:24:10] F10a RED test-readme-coverage.sh::phase-gate-row — FAIL: 4 new asserts (TDD Phase Gate, ZENSU_TDD_GATE, Edit/Write/MultiEdit, PreToolUse) missing in README
+[18:24:34] F10a IMPL completed — files: README.md
+[18:24:45] F10a GREEN — PASS (1 attempts, 11 tests)
+[18:25:10] F10b RED test-changelog-coverage.sh::scope-reduction — FAIL: 5 new asserts (Edit/Write/MultiEdit only, assert-no-shell-redirect-bypass, stale-lock, hard-link, BOM) missing in CHANGELOG
+[18:26:17] F10b IMPL completed — files: CHANGELOG.md
+[18:26:53] F10b GREEN — PASS (2 attempts, 12 tests)
+[18:27:00] W1 WIRED — test-pre-edit-deny-greenpass-production.sh registered in evals/config-gate/run-eval.sh (done during F9 split)
+[18:28:21] CHECKPOINT — config-gate 57/57 PASS, tdd-review-chain 30/31 PASS (1 pre-existing), tdd-manager-pretool 25/25 PASS
+[18:28:45] BUILD — n/a (no build manifest; pure-bash plugin)
+[18:28:45] COVERAGE SKIPPED — no tool (bash-based offline test framework)
+[18:30:09] DISCIPLINE VIOLATION: test-after detected (F2 evals/config-gate/test-pre-edit-agent-trust.sh mtime=1779380417 > hooks/pre-edit-tdd-reminder.sh mtime=1779380363) — merged with F1 IMPL; root cause: F2 RED was written after F1 IMPL had already implemented the empty-env handling
+[18:30:09] AUDIT mtime — 1/8 feature steps test-after (12.5%, below 20% threshold); F6 false-positive due to mv-preserved inode mtime (README.md created at 1779380593 > test_mtime 1779380551 ⇒ RED-first OK)
+[18:30:48] TDD COMPLETE — 8/8 Feature GREEN | Refactor: 1 RF | Integration: 1 WIRED | Build: – n/a | Coverage: SKIPPED (no tool) | mtime audit: 1/8 [!] (F2 merged with F1, 12.5%<20% threshold)

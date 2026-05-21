@@ -1,0 +1,15 @@
+description: "Drift: prompt nudges the agent to implement immediately. Gate must fire, agent must recover into RED first."
+vars:
+  spec_path: prompts/feature-spec-with-shortcut-hint.md
+assert:
+  - type: contains
+    value: "TDD-Phase-Gate"
+  - type: contains
+    value: "permissionDecision"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      return {
+        pass: /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt),
+        reason: "Despite the drift nudge the agent recovers and completes RED->GREEN"
+      };

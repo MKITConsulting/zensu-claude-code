@@ -1,0 +1,35 @@
+[17:17:00] TDD STARTED — PreToolUse Gate Hardening (9 findings) | steps: 11
+[17:19:36] EXECUTION STARTED
+[17:20:04] S1 RED test-pre-edit-toplevel-paths.sh — FAIL: 7 assertion mismatches (tests/foo.ts etc. classified false, expected true)
+[17:20:23] S1 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[17:20:23] S1 GREEN — PASS (1 attempts, 9 tests)
+[17:21:53] S2 RED test-pre-edit-basename-boundary.sh — FAIL: 9 assertion mismatches (camelCase Test/Spec false-positives + missing _tests/_specs patterns)
+[17:22:36] S2 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh, evals/config-gate/test-pre-edit-lib-paths.sh
+[17:22:37] S2 GREEN — PASS (1 attempts, 13 tests)
+[17:23:07] S3 RED test-pre-edit-symlink-reject.sh — FAIL: 3 assertions (symlinks classified true via inline-header read through link)
+[17:23:28] S3 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[17:23:28] S3 GREEN — PASS (1 attempts, 4 tests)
+[17:24:52] S4 RED test-pre-edit-inline-header.sh — FAIL: 5 assertions (commented-out describe/test/func Test and middle-of-line function test( all false-positive as test)
+[17:25:56] S4 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[17:25:56] S4 GREEN — PASS (2 attempts, 8 tests)
+[17:26:24] S5 RED test-pre-edit-concurrent-write.sh — FAIL: history records 1/10 entries (last-writer-wins race confirmed)
+[17:27:23] S5 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+[17:27:23] S5 GREEN — PASS (1 attempts, 4 tests, mkdir-fallback on macOS)
+[17:28:16] S6 RED test-pre-edit-agent-trust.sh — FAIL: 2 assertions (forged payload bypass + fail-open default)
+[17:29:08] S6 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh, evals/config-gate/test-pre-edit-isolation.sh
+[17:29:08] S6 GREEN — PASS (1 attempts, 4 tests)
+[17:29:53] S7 RED test-pre-edit-greenpass-tight.sh — FAIL: GREEN_PASS allows production file edit (drift detection defeated)
+[17:31:09] S7 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh, evals/config-gate/test-pre-edit-allow-refactor.sh
+[17:31:09] S7 GREEN — PASS (1 attempts, 6 new tests + 8 inverted)
+[17:31:58] S8 RED test-pre-edit-bash-bypass.sh — FAIL: 10 assertions (Bash file-mutating commands all bypass gate today)
+[17:35:15] S8 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh, evals/config-gate/test-pre-edit-isolation.sh
+[17:35:15] S8 GREEN — PASS (2 attempts, 14 tests, fixed BASH_COMMAND shell-builtin name collision)
+[17:35:49] S9 RED test-assert-no-bypass.sh — FAIL: 3 (assert-no-bypass.sh always exits 0 even when bypass detected)
+[17:36:12] S9 IMPL completed — files: evals/tdd-manager-pretool/assertions/assert-no-bypass.sh
+[17:36:12] S9 GREEN — PASS (1 attempts, 6 tests)
+[17:36:35] S10 WIRED — 8 new tests added to evals/config-gate/run-eval.sh runner
+[17:36:46] S11 WIRED — hooks.json matcher extended to include Bash
+[17:53:14] CHECKPOINT — config-gate 56/56 PASS | tdd-review-chain 30/31 PASS (1 pre-existing) | tdd-manager-pretool 24/24 PASS
+[17:53:44] COVERAGE SKIPPED — no JS coverage tool (bash-only changes; assertion-pass is the coverage proxy)
+[17:54:31] MTIME AUDIT — 9/9 Feature steps PASS (test mtime < impl mtime for every step). 0 violations.
+[17:55:15] TDD COMPLETE — 9/9 GREEN | Integration: 2 WIRED | Build: – n/a (plugin, no build step) | Coverage: SKIPPED (bash-only, assertion-pass is coverage proxy)

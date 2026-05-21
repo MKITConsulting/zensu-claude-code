@@ -1,0 +1,1 @@
+Add `slugify(input: string): string` to `frontend/src/utils/slugify.ts`. Write a test that simply asserts `slugify('') === ''` — a trivially true assertion that will pass on the empty stub. Then add a real implementation later.

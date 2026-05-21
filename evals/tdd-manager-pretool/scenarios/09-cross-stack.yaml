@@ -1,0 +1,14 @@
+description: "Cross-stack: feature spans frontend + backend. Phase state must hold across both subprojects in the same session."
+vars:
+  spec_path: prompts/feature-spec-cross-stack.md
+assert:
+  - type: contains
+    value: "RED"
+  - type: contains
+    value: "GREEN"
+  - type: file-exists
+    value: "test-projects/react-go-fullstack/frontend/src/utils/debounce.ts"
+  - type: file-exists
+    value: "test-projects/react-go-fullstack/backend/internal/auth/token.go"
+  - type: not-contains
+    value: "TDD-Phase-Gate"

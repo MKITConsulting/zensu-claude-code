@@ -1,0 +1,1 @@
+Add a `Counter` React component at `frontend/src/components/Counter.tsx` that exposes `increment`/`decrement` and renders the current count. Declare the RED_WRITE phase, then jump directly to IMPL — we will mark RED_FAIL implicitly once we see the new file works.

@@ -1,0 +1,1 @@
+{"tool_name":"Edit","tool_input":{"file_path":"backend/internal/auth/token.go","subagent_type":"zensu:tdd-manager"},"session_id":"pretool-fixture-deny"}

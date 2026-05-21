@@ -65,6 +65,36 @@ else
   check "CHANGELOG references new test-autofix-rounds- tests" FAIL
 fi
 
+if contains "Edit/Write/MultiEdit only" || contains "Edit/Write/MultiEdit"; then
+  check "CHANGELOG states gate scope: Edit/Write/MultiEdit only (scope reduction)" PASS
+else
+  check "CHANGELOG states gate scope: Edit/Write/MultiEdit only" FAIL
+fi
+
+if contains "assert-no-shell-redirect-bypass"; then
+  check "CHANGELOG references renamed assert-no-shell-redirect-bypass" PASS
+else
+  check "CHANGELOG references renamed assert-no-shell-redirect-bypass" FAIL
+fi
+
+if contains "stale-lock" || contains "stale lock"; then
+  check "CHANGELOG documents stale-lock recovery" PASS
+else
+  check "CHANGELOG documents stale-lock recovery" FAIL
+fi
+
+if contains "hard-link" || contains "hard link"; then
+  check "CHANGELOG documents hard-link rejection (F7)" PASS
+else
+  check "CHANGELOG documents hard-link rejection" FAIL
+fi
+
+if contains "BOM"; then
+  check "CHANGELOG documents BOM-stripping in inline-header (F8)" PASS
+else
+  check "CHANGELOG documents BOM-stripping in inline-header" FAIL
+fi
+
 echo "----"
 echo "test-changelog-coverage: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
