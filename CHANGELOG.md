@@ -44,6 +44,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Standardized terminology in agent decision rules
 
 ### Fixed
+- Removed plugin-level `settings.json` that pinned every Claude Code session to `zensu-plm` as default agent. The pin forced `@zensu:tdd-manager` and `@zensu:code-reviewer` to spawn as subagents under `zensu-plm`'s restricted toolset (`Read, Grep, Glob, Bash, Write, Edit` only), so they could not access `TaskCreate`/`TaskUpdate`/`Agent`/`AskUserQuestion` and failed in Phase 0. Sessions now start with the full Claude Code toolset; `@zensu:zensu-plm` remains available for explicit invocation.
 - `zensu:tdd-manager` and `zensu:code-reviewer` failing in Phase 0 with "no Task tool available". Both agents now declare an explicit `tools:` whitelist in frontmatter (matching the pattern already used in `zensu-plm.md`) so `TaskCreate`/`TaskUpdate`/`AskUserQuestion` are eagerly loaded instead of falling under the restricted subagent default toolset.
 - SessionStart hook detached HEAD handling
 - Pinned MCP server URL to v1 endpoint for forward compatibility
