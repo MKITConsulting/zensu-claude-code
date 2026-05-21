@@ -11,3 +11,9 @@
 [16:06:07] S12 IMPL README sections — files: tests/e2e-plm/README.md (Live regression corpus + Commit hygiene)
 [16:06:07] S13 (extra) test_runner_skips_live_regressions_subdir — RED+IMPL+GREEN — files: tests/e2e-plm/test-runner.sh + tests/e2e-plm/run.sh (live-regressions/ skip in run.sh)
 [16:06:07] S13 VERIFICATION GREEN — 32/32 test-runner | --self-check exit 0 | 7/7 --offline | cross-suite --self-check exit 0
+[16:15:24] C1 bb3ebd7 fix(e2e-plm): tighten feature-id-guard pattern (S4-S8 + S3 stubs) — 28/28
+[16:15:24] C2 ac9da50 test(e2e-plm): expand violating-captures corpus 20→36 (S2) — 28/28
+[16:15:24] C3 564546c test(e2e-plm): printf %b backslash-c guard (S1) — 30/30
+[16:15:24] C4 dc156ad test(e2e-plm): live-regression fixtures + runner skip (S10+S11) — 32/32
+[16:15:24] C5 9bf0cc9 docs(e2e-plm): README + plan + log (S12) — 32/32
+[16:15:24] TDD COMPLETE — 13/13 GREEN | 5 commits | 32/32 test-runner | 7/7 offline | both --self-check exit 0
