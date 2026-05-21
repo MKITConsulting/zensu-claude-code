@@ -101,5 +101,5 @@ behavior change), both `grep -q` checks pass.
 - [x] All test suites pass (`tests/e2e-plm/test-runner.sh`, `tests/e2e-plm/run.sh --self-check`, `tests/e2e-plm/run.sh --offline`, `tests/e2e/run.sh --self-check`)
 - [x] Finding #1 grep-q checks both succeed
 - [x] Finding #2 substring smoke check passes (MATCH line lacks the union-opening `(`)
-- [x] Three focused commits land (README hedge, VERBOSE_MATCH substring, plan+log)
+- [x] Four focused commits land (README hedge, VERBOSE_MATCH substring, plan+log, audit-pass plan/log update)
 - [x] Coverage: SKIPPED (no tool applicable to bash smoke harness)
