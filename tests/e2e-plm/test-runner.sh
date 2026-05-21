@@ -23,6 +23,15 @@ check() {
   fi
 }
 
+_corpus_check_backslash_c() {
+  local cap="$1" test_name="$2"
+  if printf '%s' "$cap" | grep -qF '\c'; then
+    printf '  FAIL  %s (corpus entry contains \\c — printf %%b would truncate)\n' "$test_name" >&2
+    return 1
+  fi
+  return 0
+}
+
 test_self_check_emits_total_zero() {
   local tmp out
   tmp="$(mktemp -d)"
@@ -801,6 +810,11 @@ test_feature_id_guard_rejects_silent_get_feature_call() {
   local idx=0
   for cap in "${violating_captures[@]}"; do
     idx=$((idx + 1))
+    if ! _corpus_check_backslash_c "$cap" "test_feature_id_guard_rejects_silent_get_feature_call"; then
+      check "test_feature_id_guard_rejects_silent_get_feature_call" FAIL "corpus entry #$idx contains \\c (printf %b would truncate). Author must rewrite the capture without the literal escape sequence."
+      rm -rf "$tmp"
+      return
+    fi
     local sub="$tmp/case$idx"
     mkdir -p "$sub/fixtures/feature-id-guard" "$sub/prompts" "$sub/results"
     printf '%b\n' "$cap" > "$sub/results/feature-id-guard-20260101-000000.captured.txt"
@@ -844,6 +858,36 @@ CAP
     check "test_feature_id_guard_accepts_paste_details_phrasing" PASS
   else
     check "test_feature_id_guard_accepts_paste_details_phrasing" FAIL "expected PASS feature-id-guard (paste ZEN-XXX details is a valid Rule-2 ask-back), got:$(printf '\n')$(cat "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_corpus_writer_guards_against_backslash_c_truncation() {
+  local tmp out
+  tmp="$(mktemp -d)"
+
+  local violating_captures_with_backslash_c=('test \c truncated walk-back, calling get_feature ZEN-999 anyway')
+
+  out="$tmp/out.txt"
+  if _corpus_check_backslash_c "${violating_captures_with_backslash_c[0]}" "test_corpus_writer_guards_against_backslash_c_truncation" > "$out" 2>&1; then
+    check "test_corpus_writer_guards_against_backslash_c_truncation" FAIL "expected guard to reject \\c entry (return non-zero), but it returned 0; out:$(printf '\n')$(cat "$out")"
+  elif grep -qE 'corpus entry contains \\c .*printf %b would truncate' "$out"; then
+    check "test_corpus_writer_guards_against_backslash_c_truncation" PASS
+  else
+    check "test_corpus_writer_guards_against_backslash_c_truncation" FAIL "expected guard diagnostic 'corpus entry contains \\c — printf %b would truncate', got:$(printf '\n')$(cat "$out")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_corpus_writer_accepts_clean_entries() {
+  local tmp out
+  tmp="$(mktemp -d)"
+
+  out="$tmp/out.txt"
+  if _corpus_check_backslash_c "Calling get_feature ZEN-999 directly without ask-back" "test_corpus_writer_accepts_clean_entries" > "$out" 2>&1; then
+    check "test_corpus_writer_accepts_clean_entries" PASS
+  else
+    check "test_corpus_writer_accepts_clean_entries" FAIL "expected guard to accept clean entry (return 0), got non-zero; out:$(printf '\n')$(cat "$out")"
   fi
   rm -rf "$tmp"
 }
@@ -898,6 +942,8 @@ test_bootstrap_pattern_rejects_capture_without_any_component_word
 test_feature_id_guard_accepts_which_product_phrasing
 test_feature_id_guard_rejects_silent_get_feature_call
 test_feature_id_guard_accepts_paste_details_phrasing
+test_corpus_writer_guards_against_backslash_c_truncation
+test_corpus_writer_accepts_clean_entries
 test_known_caveats_documents_same_line_juxtaposition
 
 echo ""
