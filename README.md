@@ -16,7 +16,7 @@ zensu-plm          tdd-manager        Zensu Dashboard
 
 **Layer 1 — Planning (WAS wird gebaut?):** Bootstrap products from vision documents, decompose into features with security profiles, define user journeys and pricing tiers.
 
-**Layer 2 — Implementation (WIE wird es sicher gebaut?):** Strict TDD with SubAgent role separation (test-engineer cannot write production code), followed by 5+1 parallel code reviewers.
+**Layer 2 — Implementation (WIE wird es sicher gebaut?):** Strict TDD enforced by a PreToolUse FSM gate (`pre-edit-tdd-reminder.sh`) that blocks edits outside the declared RED→IMPL→GREEN phase. Followed by 5 sequential specialist code-review perspectives.
 
 **Layer 3 — Tracking (WO steht es?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -33,15 +33,18 @@ flowchart TD
         C -->|"/zensu:implement"| D["Load Feature Context"]
         PLAN["Plan approval (ExitPlanMode)"] -->|"plan-approved-delegate.sh"| E
         D --> E["tdd-manager Agent"]
-        E -->|"RED"| F["Test-Engineer SubAgent"]
-        F -->|"GREEN"| G["Developer SubAgent"]
-        G -->|"VERIFY"| H{"Tests Pass?"}
-        H -->|"No"| F
-        H -->|"Yes"| I{"More Steps?"}
-        I -->|"Yes"| E
-        I -->|"No"| K["code-reviewer Agent"]
+        E --> RED["RED — write failing test"]
+        RED --> IMPL["IMPL — minimum code"]
+        IMPL --> GREEN{"GREEN — test passes?"}
+        GREEN -->|"No (≤ 3 retries)"| IMPL
+        GREEN -->|"Yes"| NEXT{"More steps?"}
+        NEXT -->|"Yes"| RED
+        NEXT -->|"No"| K["code-reviewer Agent (5 sequential perspectives)"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
+        GATE["PreToolUse FSM gate<br/>pre-edit-tdd-reminder.sh"] -.guards.-> RED
+        GATE -.guards.-> IMPL
+        GATE -.guards.-> GREEN
     end
 
     subgraph Tracking["Layer 3: Tracking"]
@@ -55,6 +58,7 @@ flowchart TD
     style A fill:#4a9eff,color:#fff
     style PLAN fill:#4a9eff,color:#fff
     style E fill:#ff6b6b,color:#fff
+    style GATE fill:#888,color:#fff
     style K fill:#ffa94d,color:#fff
     style M fill:#51cf66,color:#fff
 ```
@@ -92,22 +96,23 @@ Auto-configured connection to the Zensu MCP server providing tools for feature C
 | Agent | Role | How It Works |
 |-------|------|--------------|
 | **zensu-plm** | Product Lifecycle Manager | Orchestrates all Zensu workflows — feature tracking, security reviews, release readiness, bootstrap, ghost scans |
-| **tdd-manager** | TDD Orchestrator | Strict RED→GREEN TDD via SubAgent role separation. Test-Engineer writes failing test, Developer implements, Test-Engineer verifies. Parallel BE/FE streams. |
-| **code-reviewer** | Quality Review | Spawns 5+1 parallel specialist SubAgents: conventions, bugs, architecture, tests, security, blind reviewer |
+| **tdd-manager** | TDD Orchestrator | Strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate that blocks edits outside the declared phase. Dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail, completeness audit, real-time progress log in `.zensu/logs/`. |
+| **code-reviewer** | Quality Review | Runs 5 specialist review perspectives sequentially in a single READ-ONLY agent: conventions, bugs, architecture, tests, security. |
 
 #### TDD Manager — How It Enforces Discipline
 
-Unlike prompt-based TDD ("please write tests first"), the TDD manager **structurally prevents** violations:
+Unlike prompt-based TDD ("please write tests first"), the TDD manager **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
 
-- **Test-Engineer SubAgent**: Can only write tests and run test commands. Cannot create production files.
-- **Developer SubAgent**: Can only write production code. Cannot run tests or modify test files.
-- **Verifier SubAgent**: Runs the test suite and reports pass/fail. Cannot modify anything.
+- **Phase declaration.** Before any edit, the agent declares the current TDD phase via `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id>`. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
+- **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
+- **State.** Phase markers persist at `.zensu/state/tdd-phase-<session>.json`. Each step's history is auditable from the file.
+- **Scope.** The gate is active **only** when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Main-thread edits and other subagents are never gated. Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user.
 
-This role separation is enforced by giving each SubAgent a different prompt with explicit constraints — not by asking a single agent to self-regulate.
+Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + build verification), real-time progress log at `.zensu/logs/`.
 
-Additional features: dependency graph for parallel execution, 3-retry escalation with progressive context, completeness audit, real-time progress log (`.zensu/logs/`).
+#### Code Reviewer — 5 Sequential Specialist Perspectives
 
-#### Code Reviewer — 5+1 Parallel Specialists
+The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task` tools) that walks five perspectives in order:
 
 | Reviewer | Scope |
 |----------|-------|
@@ -116,7 +121,6 @@ Additional features: dependency graph for parallel execution, 3-retry escalation
 | architecture-reviewer | Layer separation, dependency direction, patterns |
 | test-analyzer | Coverage gaps, assertion quality, missing scenarios |
 | security-reviewer | Secrets, injection, auth checks, input validation |
-| blind-reviewer | Gets ONLY the diff, zero context — catches what others miss |
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
@@ -137,7 +141,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `session-start-pulse.sh` | SessionStart | `pulseSession` | Emits HEAD/branch banner and prepares pulse session context at startup |
 | `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
-| `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5+1 parallel specialist review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
+| `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5-perspective sequential review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
 | `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`; emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. |
 
 ## Typical Workflows
@@ -148,7 +152,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-001  → Load context, plan implementation
 3. @tdd-manager              → Strict TDD (RED→GREEN per step)
-4. @code-reviewer            → 5+1 parallel specialist review (auto-spawned by post-tdd-review-delegate.sh)
+4. @code-reviewer            → 5-perspective sequential review (auto-spawned by post-tdd-review-delegate.sh)
 5. auto-fix loop             → Critical/Important findings re-routed to @tdd-manager, capped at autoFixMaxRounds
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
@@ -172,7 +176,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 
 The TDD manager and code reviewer work **without a Zensu account**. No MCP connection needed for:
 - TDD orchestration (RED→GREEN cycles)
-- Code review (5+1 specialists)
+- Code review (5 sequential specialist perspectives)
 - Progress logging (`.zensu/logs/`)
 
 When Zensu MCP **is** connected, additional capabilities activate:
@@ -326,7 +330,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |
-| TDD manager not spawning SubAgents | Ensure `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` is not blocking |
+| TDD phase gate blocking a legitimate edit | Set `ZENSU_TDD_GATE=off` for that edit only, or declare the correct phase via `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id>` first |
 
 ## Contributing
 
