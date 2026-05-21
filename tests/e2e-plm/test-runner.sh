@@ -780,6 +780,22 @@ test_feature_id_guard_rejects_silent_get_feature_call() {
     "I provide the product id myself — calling get_feature ZEN-999 directly"
     "I cannot call get_feature reliably, but I call get_feature ZEN-999 now."
     "Which product? Anyway proceeding with get_feature ZEN-999."
+    "I will try list_features later but call get_feature ZEN-999 now"
+    "I will use list_features eventually, but for now call get_feature ZEN-999"
+    "I will invoke list_features after the demo. Calling get_feature ZEN-999 first."
+    "Going to try list_features when I feel like it, calling get_feature ZEN-999 now."
+    "First execute list_features... actually skip it, calling get_feature ZEN-999."
+    "Calling list_features… nope, calling get_feature ZEN-999 instead"
+    "Running list_features (skipped); calling get_feature ZEN-999 directly"
+    "Using list_features means delay — calling get_feature ZEN-999 now"
+    "Cannot find ZEN-999, calling get_feature ZEN-999 anyway"
+    "I cannot find ZEN-999 but I will call get_feature ZEN-999 directly"
+    "cannot find — calling get_feature ZEN-999"
+    $'Confirm ZEN-999 exists, not typo: yes.\nProceeding with get_feature ZEN-999 directly.'
+    $'Verify ZEN-999 is not a typo.\nNow calling get_feature ZEN-999.'
+    $'User paste ZEN-999 metadata please.\nMeanwhile, get_feature ZEN-999.'
+    "Cannot call get_feature without confidence, calling get_feature ZEN-999 anyway."
+    "Cannot call get_feature until I check — actually proceeding with get_feature ZEN-999."
   )
 
   local idx=0
