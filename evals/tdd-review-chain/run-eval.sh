@@ -188,6 +188,22 @@ else
   check "T5.7 test-collision fixture emits WARN and exits 0" FAIL
 fi
 
+# T5.8 — single ordering violation line per step: previous implementation
+# emitted one stderr line per tripped sub-rule (RED-after-GREEN,
+# IMPL-before-RED, IMPL-after-GREEN), so a single mis-ordered trio yielded
+# three VIOLATION lines and over-counted for downstream line-counting
+# consumers. The fix collapses the three sub-rule prints into one composite
+# `ordering violation in step` line per step, regardless of how many
+# sub-rules tripped. Asserts the ordering fixture (which trips all three
+# sub-rules) now produces EXACTLY ONE such line.
+T58_STDERR=$("$COMPLIANCE_SCRIPT" --log "$EVAL_DIR/fixtures/tdd-log-ordering.log" 2>&1 >/dev/null)
+T58_COUNT=$(echo "$T58_STDERR" | grep -c 'ordering violation in step')
+if [ "$T58_COUNT" -eq 1 ]; then
+  check "T5.8 ordering fixture emits exactly one 'ordering violation in step' line" PASS
+else
+  check "T5.8 ordering fixture emits exactly one 'ordering violation in step' line" FAIL
+fi
+
 # ─── T6/T7/T8 severity-routing directive integrity (offline) ────────
 # These tests verify the reviewer→tdd-manager severity-routing hook
 # (hooks/post-review-tdd-delegate.sh). The script does not parse reviewer

@@ -174,16 +174,18 @@ while IFS= read -r step; do
     red_line=$(step_marker_line "$step" "RED")
     impl_line=$(step_marker_line "$step" "IMPL")
     green_line=$(step_marker_line "$step" "GREEN")
-    if [ -n "$red_line" ] && [ -n "$green_line" ] && [ "$red_line" -ge "$green_line" ]; then
-      echo "VIOLATION: step '$step' RED-after-GREEN ordering violation — RED entry on line $red_line appears after GREEN entry on line $green_line. RED must precede GREEN (Principle 1, RED→IMPL→GREEN)." >&2
-      VIOLATIONS=$((VIOLATIONS + 1))
+    tripped=""
+    if [ -n "$red_line" ] && [ -n "$green_line" ] && [ "$green_line" -lt "$red_line" ]; then
+      tripped="RED-after-GREEN"
     fi
     if [ -n "$impl_line" ] && [ -n "$red_line" ] && [ "$impl_line" -lt "$red_line" ]; then
-      echo "VIOLATION: step '$step' IMPL-before-RED ordering violation — IMPL entry on line $impl_line appears before RED entry on line $red_line. RED must precede IMPL (Principle 1, RED→IMPL→GREEN)." >&2
-      VIOLATIONS=$((VIOLATIONS + 1))
+      if [ -n "$tripped" ]; then tripped="${tripped},IMPL-before-RED"; else tripped="IMPL-before-RED"; fi
     fi
-    if [ -n "$impl_line" ] && [ -n "$green_line" ] && [ "$impl_line" -ge "$green_line" ]; then
-      echo "VIOLATION: step '$step' IMPL-after-GREEN ordering violation — IMPL entry on line $impl_line is not before GREEN entry on line $green_line. IMPL must precede GREEN (Principle 1, RED→IMPL→GREEN)." >&2
+    if [ -n "$impl_line" ] && [ -n "$green_line" ] && [ "$green_line" -lt "$impl_line" ]; then
+      if [ -n "$tripped" ]; then tripped="${tripped},IMPL-after-GREEN"; else tripped="IMPL-after-GREEN"; fi
+    fi
+    if [ -n "$tripped" ]; then
+      echo "VIOLATION: ordering violation in step ${step} (${tripped}). Per-Step Logging Contract requires RED < IMPL < GREEN (Principle 1, RED→IMPL→GREEN)." >&2
       VIOLATIONS=$((VIOLATIONS + 1))
     fi
   fi
