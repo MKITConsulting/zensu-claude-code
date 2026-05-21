@@ -1,0 +1,1 @@
+Bitte starte eine Pulse-Session für meine aktuelle Arbeit. Welche MCP-Tools rufst du auf und welche Informationen aus dem aktuellen Git-Stand brauchst du?

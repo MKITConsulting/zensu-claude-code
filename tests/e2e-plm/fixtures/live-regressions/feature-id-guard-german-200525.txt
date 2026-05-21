@@ -1,0 +1,11 @@
+Missing context:
+- Which product? (need `product_id` for `get_feature`)
+- ZEN-999 high number — confirm exist, not typo
+
+Give product slug/id. Then load feature, run `/zensu:implement` workflow:
+1. `get_feature` ZEN-999
+2. `analyze_feature_security` → constraints
+3. Plan + implement + tests
+4. `link_test`, `link_source_files`, `link_docs`
+5. `create_revision`
+6. `validate_feature_security`

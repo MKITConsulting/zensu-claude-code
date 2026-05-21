@@ -1,0 +1,12 @@
+[16:39:36] TDD STARTED — feature-id-guard round-12 (Option b: accept ceiling, document explicitly) | steps: 5
+[16:39:46] EXECUTION STARTED
+[16:40:43] S1 RED test_live_regression_enforces_expected_basenames_present — FAIL: _check_live_regression_basenames unresolved (rc=127 command not found)
+[16:41:17] S1 IMPL completed — files: tests/e2e-plm/test-runner.sh (added _LIVE_REGRESSION_EXPECTED_BASENAMES + _check_live_regression_basenames helper; refactored test_live_regression_captures_pass_pattern to enumerate explicit list)
+[16:42:08] S1 GREEN — PASS (1 attempt, 33 tests; rename-bak regression check confirmed FAIL names missing basename)
+[16:43:21] S2 RED test_verbose_match_emits_matched_alt — FAIL: no MATCH diagnostic emitted (VERBOSE_MATCH path not yet implemented in match_pattern)
+[16:43:35] S2 IMPL completed — files: tests/e2e-plm/run.sh (added VERBOSE_MATCH-gated MATCH diagnostic in match_pattern positive-assert branch)
+[16:44:18] S2 GREEN — PASS (1 attempt, 35 tests; visual smoke confirms VERBOSE_MATCH=1 emits per-alt MATCH lines)
+[16:45:00] S3 WIRED — README ceiling caveat section added (verbatim 9 reviewer reproductions across 2 bypass classes + architectural reason + mitigation)
+[16:45:32] S4 WIRED — feature-id-guard.pattern prefixed with SCOPE/KNOWN-GAP/README-pointer/promote-regression comment block (4 # lines, verified non-disruptive via test-runner 35/35)
+[16:47:15] S5 GREEN — final verification: test-runner 35/35, --self-check rc=0, --offline 7/7, cross-suite --self-check rc=0, README grep OK, VERBOSE_MATCH emits 25 MATCH lines
+[16:47:15] TDD COMPLETE — 2/2 GREEN | Integration: 2 WIRED | Build: – n/a (bash project) | Coverage: SKIPPED (no coverage tooling)

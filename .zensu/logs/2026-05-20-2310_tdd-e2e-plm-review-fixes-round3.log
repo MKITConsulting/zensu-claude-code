@@ -1,0 +1,12 @@
+[23:13:32]  TDD STARTED — e2e-plm code-review round-3 fixes | steps: 3 (F1S1, F2S1, F3S1)
+[23:14:50]  EXECUTION STARTED
+[23:14:50]  F1S1 RED test_status_transition_pattern_accepts_reversed_order_disclaimer — FAIL: probe 3 (!status[^)]*update_feature) matches both reversed-order FP captures, blocking expected PASS
+[23:15:35]  F1S1 IMPL — removed probe 3 (!status[^)]*update_feature) from expected/status-transition.pattern; updated README.md row + Known caveats entry to reflect 2 probes. Files: tests/e2e-plm/expected/status-transition.pattern, tests/e2e-plm/README.md, tests/e2e-plm/test-runner.sh
+[23:15:35]  F1S1 GREEN — PASS (1 attempt). 20/20 PASS, all 4 prior status-transition tests (FN#1 multi-line, FN#2 reversed-order-with-paren, forward-order benign disclaimer, reversed-order benign disclaimer) GREEN
+[23:16:24]  F2S1 RED test_whitespace_only_negative_assert_warns_not_fails — FAIL: whitespace-only needles (! / !  ) fall through current empty-check (needle=" " passes [ -z ]) → grep -E " " matches captured content → test FAILs with warn_count=0
+[23:16:50]  F2S1 IMPL — POSIX leading+trailing whitespace strip on needle in tests/e2e-plm/run.sh after needle="${line#!}". Files: tests/e2e-plm/run.sh, tests/e2e-plm/test-runner.sh
+[23:16:50]  F2S1 GREEN — PASS (1 attempt). 21/21 PASS. Whitespace-only needles now WARN+continue like bare-! does
+[23:17:12]  F3S1 RED — git check-ignore -v reports BOTH .zensu/plans/<round3>.md AND .zensu/logs/<round3>.log matched by .gitignore:43:.zensu/ (exit 0 = ignored)
+[23:20:16]  F3S1 WIRED — .gitignore line 43 changed from .zensu/ to .zensu/* + !.zensu/plans/ + !.zensu/logs/ + !.zensu/logs/*.log (the *.log rule needed to override the global *.log on line 21). Files: .gitignore
+[23:20:16]  F3S1 GREEN — git ls-files --others --exclude-standard now lists .zensu/plans/*.md AND .zensu/logs/*.log as untracked (= trackable). git check-ignore -v -n shows :: (no-match) for plans/*.md and !.zensu/logs/*.log (negation-wins) for logs/*.log. Round1/round2/round3 deliverables all trackable. Stray .zensu/<other>/ subdirs still ignored by .zensu/*.
+[23:22:19]  TDD COMPLETE — 3/3 GREEN (F1S1+F2S1 features, F3S1 integration) | Integration: 1 WIRED (.gitignore carve-out) | Build: – n/a (bash) | Coverage: SKIPPED (no bash coverage tool). 21/21 tests PASS in test-runner.sh. Cross-suite --self-check exit 0 for both e2e-plm and e2e. No edits to agents/zensu-plm.md or tests/e2e/.

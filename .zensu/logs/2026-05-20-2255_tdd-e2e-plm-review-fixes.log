@@ -1,0 +1,7 @@
+[22:59:12] TDD STARTED — e2e-plm code-review round-2 fixes | steps: 5 (F1S1, F1S2, F1S3, F2S1, F3S1)
+[22:59:18] EXECUTION STARTED
+[23:00:51] F1S1+F1S2+F1S3+F2S1 RED — 4 new tests FAIL as expected: status-transition multi-line, reversed-order, benign-disclaimer, empty-negative-assert WARN. 15 prior tests still GREEN.
+[23:01:49] F1S1+F1S2+F1S3 IMPL — status-transition.pattern: 3 tool-call-shape probes (\(, \s+with, status[^)]*update_feature) | F2S1 IMPL — empty-needle guard in run.sh:56-60 emits WARN to stderr + continue. Files: tests/e2e-plm/expected/status-transition.pattern, tests/e2e-plm/run.sh, tests/e2e-plm/test-runner.sh
+[23:01:49] F1S1+F1S2+F1S3+F2S1 GREEN — 19/19 PASS on first attempt. Cross-suite --self-check exit 0 (both e2e-plm + e2e). Adversarial probes FN#1/FN#2 now caught, FP no longer over-fires.
+[23:02:43] F3S1 RF — README.md updated (row 19 Rule-4-only framing; row 23 reflects new probes; 3 new Known caveats: Rule-2 scope, cross-line limitation, WARN behavior). Tests 19/19 GREEN before AND after.
+[23:03:53] TDD COMPLETE — 5/5 GREEN (F1S1, F1S2, F1S3, F2S1 features + F3S1 docs-refactor) | Integration: 0 WIRED | Build: – n/a (bash) | Coverage: SKIPPED (no bash coverage tool). Cross-suite --self-check exit 0. No edits to agents/zensu-plm.md or tests/e2e/.

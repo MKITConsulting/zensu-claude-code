@@ -1,0 +1,8 @@
+[15:03:40] TDD STARTED — feature-id-guard pattern tightening (round-9 review fixes) | steps: 2
+[15:03:55] EXECUTION STARTED
+[15:03:55] step1 RED — expanding violating_captures from 5 to 10
+[15:04:40] step1 RED test_feature_id_guard_rejects_silent_get_feature_call — FAIL: 5/10 silent-violation captures wrongly PASSed (pattern over-permissive). Other 27 tests PASS.
+[15:07:49] step2 IMPL completed — files: tests/e2e-plm/expected/feature-id-guard.pattern (5 alt-level tightenings: alts 6,7,8,13,16; alt 13 REMOVED; alt 8 uses welche.*\?\s*$ instead of reviewer's literal welche.*\? because reviewer's literal contradicted their own discrimination gate for capture 2 — the \s*$ end-anchor forces the question-mark to be at end-of-line, which discriminates Welche Komponente? from Welche Komponente? egal, ich rufe get_feature)
+[15:07:49] step2 GREEN — PASS (2 attempts: first applied literal reviewer spec → 1/10 wrongly PASSed via welche.*\? on case 7; second iteration added \s*$ end-anchor → all 10 correctly FAIL)
+[15:07:49] CHECKPOINT — bash tests/e2e-plm/test-runner.sh: 28 PASS / 0 FAIL | --self-check: exit 0 | --offline: 7/7 PASS | cross-suite tests/e2e/run.sh --self-check: exit 0 | live captures 141606+142927 individually PASS | all 10 adversarial captures individually FAIL
+[15:10:02] TDD COMPLETE — 2/2 GREEN | Integration: 0 WIRED | Build: – n/a (bash-only plugin; tests ARE the build) | Coverage: SKIPPED — no coverage tooling for bash

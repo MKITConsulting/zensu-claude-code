@@ -1,0 +1,1 @@
+Bitte scanne dieses Repository nach Features. Wir haben bereits ein paar Features im Zensu-Backend — bitte keine Duplikate erzeugen. Beschreibe deinen Workflow Schritt für Schritt mit den MCP-Tools, die du aufrufst.

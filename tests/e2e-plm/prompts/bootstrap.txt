@@ -1,0 +1,3 @@
+Hier ist die Vision für ein neues Produkt: ein leichtgewichtiges Time-Tracking-Tool für Solo-Freelancer namens "Solo Time". Kernkomponenten: Time-Capture (Start/Stop-Timer), Reporting (Wochen-/Monatsübersichten) und Invoicing (PDF-Rechnungen aus Time-Entries).
+
+Bitte führe mich durch den Bootstrap-Workflow. Welche MCP-Tools rufst du in welcher Reihenfolge auf?

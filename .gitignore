@@ -29,6 +29,10 @@ vendor/
 # E2E fixture artifacts (per-fixture deps + lockfiles)
 tests/e2e/fixtures/
 tests/e2e/results/
+tests/e2e-plm/fixtures/*
+!tests/e2e-plm/fixtures/live-regressions/
+!tests/e2e-plm/fixtures/live-regressions/*.txt
+tests/e2e-plm/results/
 
 # Build output
 dist/
@@ -41,7 +45,10 @@ out/
 .claude/worktrees/
 
 # tdd-manager run artifacts (per-run plans + logs)
-.zensu/
+.zensu/*
+!.zensu/plans/
+!.zensu/logs/
+!.zensu/logs/*.log
 
 # Internal
 OSS_READINESS_REPORT.md

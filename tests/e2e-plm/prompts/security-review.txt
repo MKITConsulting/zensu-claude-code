@@ -1,0 +1,1 @@
+Bitte führe einen Security-Review für ZEN-007 (Payment-Modul) durch. Beschreibe den vollständigen Workflow inklusive aller MCP-Tools, die du nacheinander aufrufst.
