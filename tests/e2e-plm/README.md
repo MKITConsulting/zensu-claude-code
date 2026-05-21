@@ -236,12 +236,13 @@ line N+M" semantics requires either:
 All three are **deliberate non-goals** for this harness. The harness is a
 regression smoke check, not a production-grade enforcer.
 
-**Mitigation.** End-to-end pattern tests are smoke-level. Production-grade
-Rule-2 enforcement happens at the agent's MCP tool boundary — the
-`zensu-plm` MCP server refuses to call `get_feature` with unknown IDs at
-runtime, regardless of what the agent's natural-language narration claims.
-The text-output assertion is a guardrail against the *narration* drifting
-away from policy, not against the *tool-call* drifting from policy.
+**Mitigation**: End-to-end pattern tests are smoke-level. The intended production guard is the
+Zensu MCP server: when the agent calls `get_feature` with an unknown ID, the server should
+return NOT_FOUND, and the agent should NOT retry. This behavior is enforced (a) by the agent
+directive in `agents/zensu-plm.md:178` ("Never guess feature IDs. Always use list_features
+or ask the user") and (b) ideally by the MCP server returning a clear error on unknown IDs —
+verified out-of-repo, not by this harness. Treat the smoke pattern as a lower-bound assertion
+that the agent EMITS Rule-2 signal; runtime correctness is owned elsewhere.
 
 If you discover a REAL agent regression in production that the existing
 pattern misses — and that regression survives the MCP-boundary check —
