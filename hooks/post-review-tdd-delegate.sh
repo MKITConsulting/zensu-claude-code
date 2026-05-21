@@ -7,7 +7,7 @@
 # project-local, global):
 #   hooks.autoFixIncludeSuggestions=true  -> route ALL severities
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
-#   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 2)
+#   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
 #
 # Counter state lives at ${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json.
 

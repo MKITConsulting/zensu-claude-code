@@ -190,7 +190,7 @@ Zensu ships four automatic hooks that fire across the development lifecycle. Any
 | `autoReview` | `post-tdd-review-delegate.sh` | Skips auto-spawn of `zensu:code-reviewer` after tdd-manager completes |
 | `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings back to tdd-manager |
 | `autoFixIncludeSuggestions` | `post-review-tdd-delegate.sh` | When `true`, the auto-fix hook routes ALL severities (Critical, Important, Suggestion, Minor, Nit) to `zensu:tdd-manager` instead of only Critical+Important. Default `false` preserves legacy routing. **Requires `autoFix:true`** — if `autoFix` is `false`, the entire auto-fix hook short-circuits and this flag has no effect. |
-| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `2`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`. |
+| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `5`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`. |
 | `pulseSession` | `session-start-pulse.sh` | Skips the HEAD/branch banner at session start |
 
 **Resolution rules:**
