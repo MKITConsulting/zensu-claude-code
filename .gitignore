@@ -49,6 +49,7 @@ out/
 !.zensu/plans/
 !.zensu/logs/
 !.zensu/logs/*.log
+!.zensu/config.json
 
 # Internal
 OSS_READINESS_REPORT.md
