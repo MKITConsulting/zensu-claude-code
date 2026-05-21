@@ -92,20 +92,20 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: absent flag echoes default 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: absent flag echoes default 5" PASS
 else
-  check "max_rounds: absent flag echoes default 2 (got '$val')" FAIL
+  check "max_rounds: absent flag echoes default 5 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFixMaxRounds": 5}}
+{"hooks": {"autoFixMaxRounds": 3}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "5" ]; then
-  check "max_rounds: explicit 5 echoes 5" PASS
+if [ "$val" = "3" ]; then
+  check "max_rounds: explicit 3 echoes 3" PASS
 else
-  check "max_rounds: explicit 5 echoes 5 (got '$val')" FAIL
+  check "max_rounds: explicit 3 echoes 3 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
@@ -132,58 +132,58 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 0}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: 0 out of range, fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: 0 out of range, fallback to 5" PASS
 else
-  check "max_rounds: 0 out of range, fallback to 2 (got '$val')" FAIL
+  check "max_rounds: 0 out of range, fallback to 5 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 100}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: 100 out of range, fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: 100 out of range, fallback to 5" PASS
 else
-  check "max_rounds: 100 out of range, fallback to 2 (got '$val')" FAIL
+  check "max_rounds: 100 out of range, fallback to 5 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": "five"}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: non-int 'five', fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: non-int 'five', fallback to 5" PASS
 else
-  check "max_rounds: non-int 'five', fallback to 2 (got '$val')" FAIL
+  check "max_rounds: non-int 'five', fallback to 5 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFixMaxRounds": 1.5}}
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: non-integer 1.5, fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: non-integer 1.5, fallback to 5" PASS
 else
-  check "max_rounds: non-integer 1.5, fallback to 2 (got '$val')" FAIL
+  check "max_rounds: non-integer 1.5, fallback to 5 (got '$val')" FAIL
 fi
 
 cat > "$TMP_CFG" <<'EOF'
 {also broken
 EOF
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: malformed JSON, fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: malformed JSON, fallback to 5" PASS
 else
-  check "max_rounds: malformed JSON, fallback to 2 (got '$val')" FAIL
+  check "max_rounds: malformed JSON, fallback to 5 (got '$val')" FAIL
 fi
 
 export ZENSU_CONFIG="$MISSING_CFG"
 val=$(zensu_autofix_max_rounds)
-if [ "$val" = "2" ]; then
-  check "max_rounds: missing config, fallback to 2" PASS
+if [ "$val" = "5" ]; then
+  check "max_rounds: missing config, fallback to 5" PASS
 else
-  check "max_rounds: missing config, fallback to 2 (got '$val')" FAIL
+  check "max_rounds: missing config, fallback to 5 (got '$val')" FAIL
 fi
 
 echo "----"

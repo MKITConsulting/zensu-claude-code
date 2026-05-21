@@ -62,7 +62,7 @@ zensu_autofix_include_suggestions() {
 }
 
 zensu_autofix_max_rounds() {
-  local default=2
+  local default=5
   local config
   config="$(_zensu_resolve_config)"
   [ ! -f "$config" ] && { echo "$default"; return 0; }

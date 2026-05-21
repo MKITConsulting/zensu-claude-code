@@ -4,7 +4,7 @@
     "autoReview": true,
     "autoFix": true,
     "autoFixIncludeSuggestions": false,
-    "autoFixMaxRounds": 2,
+    "autoFixMaxRounds": 5,
     "pulseSession": true
   },
   "logging": {
