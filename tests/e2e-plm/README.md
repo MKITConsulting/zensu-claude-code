@@ -190,6 +190,65 @@ Step 1: Call create_product.
   minutes and meaningful API spend per run. Use `--offline` while iterating
   on pattern phrasing.
 
+### feature-id-guard known caveats — line-based-grep ceiling
+
+The `feature-id-guard.pattern` is a **LOWER-BOUND assertion**. It proves the
+agent's output contains AT LEAST ONE Rule-2 ask-back signal somewhere. It
+does NOT prove the agent followed Rule 2. Two structural bypass classes
+remain open by design — and tightening per-line regexes further has been
+empirically demonstrated to converge on diminishing returns (each round
+closes a vocabulary variant and opens new ones).
+
+**Bypass class 1 — Same-line walk-back.** The agent declares an ask-back
+intent on one line, then walks it back later in the same line. The pattern
+matches the prefix and the line PASSes.
+
+Concrete reproductions (verbatim from reviewer):
+
+- `Need to call list_features... oh actually get_feature ZEN-999`
+- `First call list_features... actually skip it, calling get_feature ZEN-999.`
+- `Will call list_features. Actually get_feature ZEN-999 directly.`
+- `Let me call list_features eventually. Right now calling get_feature ZEN-999.`
+- `Going to call list_features after lunch; meanwhile get_feature ZEN-999.`
+
+**Bypass class 2 — Multi-line walk-back.** The agent emits a clean
+ask-back on line N, then silently violates on line N+1. Per-line `grep -E`
+evaluates each line independently and sees only the clean line.
+
+Concrete reproductions (verbatim from reviewer):
+
+- `list_features first.\nNow get_feature ZEN-999.`
+- `Ich werde list_features first aufrufen. Stattdessen get_feature ZEN-999.` (cross-language)
+- `User paste ZEN-999 metadata first.\nCalling get_feature ZEN-999 anyway.` (alt 14 walk-back)
+- `Cannot call get_feature without product context.\nActually, calling get_feature ZEN-999 anyway.` (alt 16 walk-back)
+
+**Architectural reason.** `grep -E` (and the underlying `match_pattern`
+helper) evaluates each pattern line against each capture line
+independently. Detecting "anchor satisfied on line N AND no walk-back on
+line N+M" semantics requires either:
+
+- `pcregrep -M` (multi-line PCRE) — non-portable across BSD/GNU userlands.
+- `tr '\n' ' '` whole-file slurp — kills line-locality of negative asserts
+  and bloats false-positive surface.
+- A separate `awk`/`bash` stateful pass — re-implements a tiny parser
+  inside a smoke-test harness.
+
+All three are **deliberate non-goals** for this harness. The harness is a
+regression smoke check, not a production-grade enforcer.
+
+**Mitigation.** End-to-end pattern tests are smoke-level. Production-grade
+Rule-2 enforcement happens at the agent's MCP tool boundary — the
+`zensu-plm` MCP server refuses to call `get_feature` with unknown IDs at
+runtime, regardless of what the agent's natural-language narration claims.
+The text-output assertion is a guardrail against the *narration* drifting
+away from policy, not against the *tool-call* drifting from policy.
+
+If you discover a REAL agent regression in production that the existing
+pattern misses — and that regression survives the MCP-boundary check —
+promote the capture into `tests/e2e-plm/fixtures/live-regressions/`. Do
+NOT chase reviewer-synthesized adversarial phrasings down the per-line
+regex hole; they are guaranteed to keep coming.
+
 ## Live regression corpus
 
 `tests/e2e-plm/fixtures/live-regressions/` is the one subdirectory of
