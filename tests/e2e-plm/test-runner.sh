@@ -886,23 +886,53 @@ test_runner_skips_live_regressions_subdir() {
   rm -rf "$tmp"
 }
 
+_LIVE_REGRESSION_EXPECTED_BASENAMES=(
+  "feature-id-guard-german-200525.txt"
+  "feature-id-guard-caveman-200525.txt"
+)
+
+_check_live_regression_basenames() {
+  local dir="${LIVE_REGRESSIONS_DIR:-$TEST_DIR/fixtures/live-regressions}"
+  if [ ! -d "$dir" ]; then
+    printf 'live-regressions fixture dir missing at %s\n' "$dir"
+    return 1
+  fi
+  local missing=()
+  local name
+  for name in "${_LIVE_REGRESSION_EXPECTED_BASENAMES[@]}"; do
+    if [ ! -f "$dir/$name" ]; then
+      missing+=("$name")
+    fi
+  done
+  if [ "${#missing[@]}" -gt 0 ]; then
+    printf 'missing required live-regression fixture(s):'
+    local m
+    for m in "${missing[@]}"; do
+      printf ' %s' "$m"
+    done
+    printf '\n'
+    return 1
+  fi
+  return 0
+}
+
 test_live_regression_captures_pass_pattern() {
-  local tmp out failures=0 failure_details=""
+  local tmp out failures=0 failure_details="" presence_out
   tmp="$(mktemp -d)"
 
-  local live_regressions_dir="$TEST_DIR/fixtures/live-regressions"
-  if [ ! -d "$live_regressions_dir" ]; then
-    check "test_live_regression_captures_pass_pattern" FAIL "live-regressions fixture dir missing at $live_regressions_dir"
+  presence_out="$tmp/presence.txt"
+  if ! _check_live_regression_basenames > "$presence_out" 2>&1; then
+    check "test_live_regression_captures_pass_pattern" FAIL "$(cat "$presence_out")"
     rm -rf "$tmp"
     return
   fi
 
-  local found=0
-  for capture in "$live_regressions_dir"/feature-id-guard-*.txt; do
-    [ -f "$capture" ] || continue
-    found=$((found + 1))
+  local live_regressions_dir="$TEST_DIR/fixtures/live-regressions"
+  local name capture
+  for name in "${_LIVE_REGRESSION_EXPECTED_BASENAMES[@]}"; do
+    capture="$live_regressions_dir/$name"
 
-    local sub="$tmp/case$found"
+    local sub="$tmp/case-$name"
     mkdir -p "$sub/fixtures/feature-id-guard" "$sub/prompts" "$sub/results"
     cp "$capture" "$sub/results/feature-id-guard-20260101-000000.captured.txt"
 
@@ -912,17 +942,42 @@ test_live_regression_captures_pass_pattern() {
 
     if ! grep -qE "PASS\s+feature-id-guard" "$out"; then
       failures=$((failures + 1))
-      failure_details="$failure_details$(printf '\n--- live capture %s wrongly FAILed ---\noutput:\n%s' "$(basename "$capture")" "$(cat "$out")")"
+      failure_details="$failure_details$(printf '\n--- live capture %s wrongly FAILed ---\noutput:\n%s' "$name" "$(cat "$out")")"
     fi
   done
 
-  if [ "$found" -eq 0 ]; then
-    check "test_live_regression_captures_pass_pattern" FAIL "no live-regression captures found in $live_regressions_dir"
-  elif [ "$failures" -eq 0 ]; then
+  if [ "$failures" -eq 0 ]; then
     check "test_live_regression_captures_pass_pattern" PASS
   else
-    check "test_live_regression_captures_pass_pattern" FAIL "$failures/$found live-regression captures wrongly FAILed pattern (post-tightening regression):$failure_details"
+    check "test_live_regression_captures_pass_pattern" FAIL "$failures/${#_LIVE_REGRESSION_EXPECTED_BASENAMES[@]} live-regression captures wrongly FAILed pattern (post-tightening regression):$failure_details"
   fi
+  rm -rf "$tmp"
+}
+
+test_live_regression_enforces_expected_basenames_present() {
+  local tmp out
+  tmp="$(mktemp -d)"
+
+  mkdir -p "$tmp/live-regressions"
+  cp "$TEST_DIR/fixtures/live-regressions/feature-id-guard-german-200525.txt" \
+     "$tmp/live-regressions/feature-id-guard-german-200525.txt"
+
+  out="$tmp/out.txt"
+  LIVE_REGRESSIONS_DIR="$tmp/live-regressions" \
+    _check_live_regression_basenames > "$out" 2>&1
+  local rc=$?
+
+  if [ "$rc" -ne 1 ]; then
+    check "test_live_regression_enforces_expected_basenames_present" FAIL "expected helper to exit 1 (missing fixture), got rc=$rc out:$(printf '\n')$(cat "$out")"
+    rm -rf "$tmp"
+    return
+  fi
+  if ! grep -qF "feature-id-guard-caveman-200525.txt" "$out"; then
+    check "test_live_regression_enforces_expected_basenames_present" FAIL "expected output to name missing basename 'feature-id-guard-caveman-200525.txt', got:$(printf '\n')$(cat "$out")"
+    rm -rf "$tmp"
+    return
+  fi
+  check "test_live_regression_enforces_expected_basenames_present" PASS
   rm -rf "$tmp"
 }
 
@@ -1008,6 +1063,7 @@ test_feature_id_guard_rejects_silent_get_feature_call
 test_feature_id_guard_accepts_paste_details_phrasing
 test_runner_skips_live_regressions_subdir
 test_live_regression_captures_pass_pattern
+test_live_regression_enforces_expected_basenames_present
 test_corpus_writer_guards_against_backslash_c_truncation
 test_corpus_writer_accepts_clean_entries
 test_known_caveats_documents_same_line_juxtaposition
