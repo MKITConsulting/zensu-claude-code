@@ -54,7 +54,7 @@ The tdd-manager will:
 - Run a completeness audit at the end
 - Provide a progress log at `.zensu/logs/`
 
-After the tdd-manager completes, the SubagentStop hook automatically triggers `/reflect` for self-review in the main context.
+After the tdd-manager completes, the PostToolUse:Agent hook (`post-tdd-review-delegate.sh`) automatically spawns `@zensu:code-reviewer` for a 5+1 parallel specialist review.
 
 **For trivial changes** (single-line fix, config change, migration-only): Skip the tdd-manager and implement directly, then continue with Step 4.
 
