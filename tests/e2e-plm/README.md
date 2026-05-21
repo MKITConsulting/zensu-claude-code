@@ -190,9 +190,62 @@ Step 1: Call create_product.
   minutes and meaningful API spend per run. Use `--offline` while iterating
   on pattern phrasing.
 
+## Live regression corpus
+
+`tests/e2e-plm/fixtures/live-regressions/` is the one subdirectory of
+`tests/e2e-plm/fixtures/` that is **tracked** (the parent is otherwise
+gitignored). Files there are curated, anonymized snapshots of live
+`claude --print` captures that previously revealed a pattern defect —
+their job is to make sure future pattern tightenings never silently
+regress against the empirical evidence that motivated the original fix.
+
+Layout:
+
+```
+tests/e2e-plm/fixtures/live-regressions/
+├── feature-id-guard-german-200525.txt    # German-style ask-back
+└── feature-id-guard-caveman-200525.txt   # Caveman-mode terse ask-back
+```
+
+The test `test_live_regression_captures_pass_pattern` (in
+`test-runner.sh`) iterates every `feature-id-guard-*.txt` in that
+directory and asserts each one PASSes the shipped pattern. A failure
+there means the most recent pattern tightening broke a previously-valid
+agent ask-back shape — relax the offending alt before merging.
+
+When promoting a live capture into the regression corpus:
+
+1. Copy the file from `tests/e2e-plm/results/` into
+   `tests/e2e-plm/fixtures/live-regressions/`.
+2. Rename to a stable, identifier-free name (no timestamp, no agent
+   version) describing the linguistic register, e.g.
+   `feature-id-guard-german-200525.txt`.
+3. Manually strip any identifying header (agent version banner,
+   timestamp footer, user-name reference) before committing.
+4. Commit it as a fixture, not as a result.
+
+## Commit hygiene
+
+Round 11 and onward make focused, reviewable commits — one logical
+change per commit — so `git bisect` lands on a meaningful diff and code
+review stays tractable. Typical TDD-round commit shape:
+
+- C1: pattern tightening (one or more `expected/*.pattern` edits)
+- C2: corpus expansion + harness stubs (`test-runner.sh`)
+- C3: harness safety guards (e.g. `printf %b` `\c` truncation guard)
+- C4: live-regression fixtures (`fixtures/live-regressions/*.txt` +
+  `.gitignore` un-ignore)
+- C5: plan + log + README (`.zensu/plans/...`, `.zensu/logs/...`,
+  `README.md`)
+
+Avoid bundling unrelated changes into a single commit. If a TDD round
+spans both a pattern fix and an unrelated harness improvement, split
+them.
+
 ## Cleanup
 
-`tests/e2e-plm/fixtures/` and `tests/e2e-plm/results/` are gitignored.
-Re-running `setup-fixtures.sh` is destructive — it removes each fixture
-directory before recreating it, so manual edits inside `fixtures/` are not
-preserved.
+`tests/e2e-plm/fixtures/` (except for `live-regressions/`) and
+`tests/e2e-plm/results/` are gitignored. Re-running `setup-fixtures.sh`
+is destructive — it removes each fixture directory before recreating
+it, so manual edits inside `fixtures/` (other than `live-regressions/`)
+are not preserved.
