@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **MCP server URL: drop `/v1` prefix from `.mcp.json`** — plugin requested `https://mcp.zensu.dev/v1/mcp` but the server only serves `/mcp`; production returned `404 page not found` on every tool call and the OAuth flow never started (auth middleware never fired). Realigned with the MCP server (`mcp-server/cmd/zensu-mcp/main.go`), backend OAuth metadata (`/.well-known/oauth-protected-resource`), and the production ingress (all on `/mcp`). After updating the plugin, the browser-based OAuth flow opens on the first tool call as designed.
+
 ## [0.3.15] - 2026-05-22
 
 ### Added
