@@ -107,4 +107,14 @@ PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$FILE_PATH" PAYLOAD_TO
   }));
 '
 echo
+
+if [ -n "${ZENSU_HOOK_LOG:-}" ]; then
+  {
+    echo "[hook: PreToolUse] TDD-Phase-Gate: $TOOL_NAME on $FILE_PATH blocked."
+    echo "[hook: PreToolUse] Current phase: $PHASE, step: $STEP."
+    echo "[hook: PreToolUse] Expected: RED_WRITE | REFACTOR | (IMPL after RED_FAIL for step $STEP) | (GREEN_PASS only on test paths)."
+    echo "[hook: PreToolUse] permissionDecision=deny"
+  } >> "$ZENSU_HOOK_LOG" 2>/dev/null || true
+fi
+
 exit 0

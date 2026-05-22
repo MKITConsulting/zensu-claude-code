@@ -77,6 +77,10 @@ cd "$ISOLATED_DIR" || {
   exit 2
 }
 
+export ZENSU_HOOK_LOG="$ISOLATED_DIR/.zensu/hook-events.log"
+mkdir -p "$(dirname "$ZENSU_HOOK_LOG")" 2>/dev/null || true
+: > "$ZENSU_HOOK_LOG" 2>/dev/null || true
+
 CLAUDE_RAW="$("${CMD[@]}" 2>/dev/null)"
 CLAUDE_RC=$?
 
@@ -96,5 +100,30 @@ printf '%s\n' "$CLAUDE_RAW" | jq -rs '
   | map(select(. != ""))
   | join("\n")
 '
+
+if [ -s "$ZENSU_HOOK_LOG" ]; then
+  echo ""
+  echo "===== hook events ====="
+  cat "$ZENSU_HOOK_LOG"
+fi
+
+SAW_STATE=0
+shopt -s nullglob
+for sf in "$ISOLATED_DIR"/.zensu/state/tdd-phase-*.json; do
+  [ -f "$sf" ] || continue
+  SAW_STATE=1
+  echo ""
+  echo "===== fsm state: $(basename "$sf") ====="
+  jq -r '
+    "[fsm-state-final] phase=\(.phase // "UNINITIALIZED") step=\(.step_id // "?")",
+    ((.history // []) | map("[fsm-history] step=\(.step // "?") phase=\(.phase // "?") ts=\(.ts // "?")") | join("\n"))
+  ' "$sf" 2>/dev/null
+done
+shopt -u nullglob
+
+if [ "$SAW_STATE" = "0" ] && [ -s "$ZENSU_HOOK_LOG" ] && grep -qE 'Current phase: UNINITIALIZED[,.]' "$ZENSU_HOOK_LOG"; then
+  echo ""
+  echo "[fsm-state-final] phase=UNINITIALIZED step=(none)"
+fi
 
 exit "$CLAUDE_RC"

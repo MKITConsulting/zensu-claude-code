@@ -170,6 +170,165 @@ else
 fi
 rm -rf "$STUB_STREAM_DIR" "$SRC_STREAM_DIR"
 
+OUT_P10S1=$(DRY_RUN=1 "$WRAPPER" 'p' '{"config":{"agent":"zensu:tdd-manager","working_dir":"/tmp"}}' 2>&1)
+if printf '%s\n' "$OUT_P10S1" | grep -q -- '===== hook events =====' \
+  || printf '%s\n' "$OUT_P10S1" | grep -q -- '===== fsm state:'; then
+  check "P10-S1 DRY_RUN omits enrichment block (no hook events / fsm state headers)" FAIL
+else
+  check "P10-S1 DRY_RUN omits enrichment block (no hook events / fsm state headers)" PASS
+fi
+
+STUB_P10S2_DIR="$(mktemp -d)"
+cat >"$STUB_P10S2_DIR/claude" <<'STUB'
+#!/bin/bash
+mkdir -p "$PWD/.zensu"
+cat >"$PWD/.zensu/hook-events.log" <<'HOOK'
+[hook: PreToolUse] TDD-Phase-Gate: Edit on /tmp/x.ts blocked.
+[hook: PreToolUse] Current phase: UNINITIALIZED, step: .
+[hook: PreToolUse] Expected: RED_WRITE | REFACTOR | (IMPL after RED_FAIL for step ) | (GREEN_PASS only on test paths).
+[hook: PreToolUse] permissionDecision=deny
+HOOK
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"hook-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P10S2_DIR/claude"
+SRC_P10S2_DIR="$(mktemp -d -t "p10s2-src-XXXXXX")"
+echo "src" >"$SRC_P10S2_DIR/marker.txt"
+OPT_P10S2="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P10S2_DIR")"
+OUT_P10S2=$(env PATH="$STUB_P10S2_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P10S2" 2>/dev/null)
+RC_P10S2=$?
+if [ "$RC_P10S2" = "0" ] && printf '%s\n' "$OUT_P10S2" | grep -q -- '===== hook events =====' \
+  && printf '%s\n' "$OUT_P10S2" | grep -q 'TDD-Phase-Gate'; then
+  check "P10-S2 shim writes hook mirror -> output contains '===== hook events ====='" PASS
+else
+  check "P10-S2 shim writes hook mirror -> output contains '===== hook events =====' (rc=$RC_P10S2, out=${OUT_P10S2:0:400})" FAIL
+fi
+rm -rf "$STUB_P10S2_DIR" "$SRC_P10S2_DIR"
+
+STUB_P10S3_DIR="$(mktemp -d)"
+cat >"$STUB_P10S3_DIR/claude" <<'STUB'
+#!/bin/bash
+mkdir -p "$PWD/.zensu/state"
+cat >"$PWD/.zensu/state/tdd-phase-test.json" <<'STATE'
+{
+  "session_id": "test",
+  "step_id": "S1",
+  "phase": "REFACTOR",
+  "history": [
+    { "step": "S1", "phase": "RED_WRITE", "ts": "2026-05-22T10:00:00Z" },
+    { "step": "S1", "phase": "RED_FAIL", "ts": "2026-05-22T10:01:00Z" },
+    { "step": "S1", "phase": "IMPL", "ts": "2026-05-22T10:02:00Z" },
+    { "step": "S1", "phase": "GREEN_PASS", "ts": "2026-05-22T10:03:00Z" },
+    { "step": "S1", "phase": "REFACTOR", "ts": "2026-05-22T10:04:00Z" }
+  ]
+}
+STATE
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"fsm-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P10S3_DIR/claude"
+SRC_P10S3_DIR="$(mktemp -d -t "p10s3-src-XXXXXX")"
+echo "src" >"$SRC_P10S3_DIR/marker.txt"
+OPT_P10S3="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P10S3_DIR")"
+OUT_P10S3=$(env PATH="$STUB_P10S3_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P10S3" 2>/dev/null)
+RC_P10S3=$?
+if [ "$RC_P10S3" = "0" ] \
+  && printf '%s\n' "$OUT_P10S3" | grep -q -- '===== fsm state: tdd-phase-test.json =====' \
+  && printf '%s\n' "$OUT_P10S3" | grep -q -- '\[fsm-state-final\] phase=REFACTOR' \
+  && printf '%s\n' "$OUT_P10S3" | grep -q -- '\[fsm-history\] step=S1 phase=RED_FAIL'; then
+  check "P10-S3 shim writes state file -> output contains fsm-state header + history lines" PASS
+else
+  check "P10-S3 shim writes state file -> fsm-state header + history (rc=$RC_P10S3, out=${OUT_P10S3:0:500})" FAIL
+fi
+rm -rf "$STUB_P10S3_DIR" "$SRC_P10S3_DIR"
+
+STUB_P10S4_DIR="$(mktemp -d)"
+cat >"$STUB_P10S4_DIR/claude" <<'STUB'
+#!/bin/bash
+mkdir -p "$PWD/.zensu"
+cat >"$PWD/.zensu/hook-events.log" <<'HOOK'
+[hook: PreToolUse] TDD-Phase-Gate: Edit on /tmp/x.ts blocked.
+[hook: PreToolUse] Current phase: UNINITIALIZED, step: .
+[hook: PreToolUse] Expected: RED_WRITE | REFACTOR | (IMPL after RED_FAIL for step ) | (GREEN_PASS only on test paths).
+[hook: PreToolUse] permissionDecision=deny
+HOOK
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"unin-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P10S4_DIR/claude"
+SRC_P10S4_DIR="$(mktemp -d -t "p10s4-src-XXXXXX")"
+echo "src" >"$SRC_P10S4_DIR/marker.txt"
+OPT_P10S4="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P10S4_DIR")"
+OUT_P10S4=$(env PATH="$STUB_P10S4_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P10S4" 2>/dev/null)
+RC_P10S4=$?
+if [ "$RC_P10S4" = "0" ] \
+  && printf '%s\n' "$OUT_P10S4" | grep -q -- '\[fsm-state-final\] phase=UNINITIALIZED'; then
+  check "P10-S4 mirror UNINITIALIZED + no state file -> synthetic [fsm-state-final] phase=UNINITIALIZED" PASS
+else
+  check "P10-S4 mirror UNINITIALIZED + no state file -> synthetic marker (rc=$RC_P10S4, out=${OUT_P10S4:0:500})" FAIL
+fi
+rm -rf "$STUB_P10S4_DIR" "$SRC_P10S4_DIR"
+
+STUB_P10S5_DIR="$(mktemp -d)"
+cat >"$STUB_P10S5_DIR/claude" <<'STUB'
+#!/bin/bash
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"silent-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P10S5_DIR/claude"
+SRC_P10S5_DIR="$(mktemp -d -t "p10s5-src-XXXXXX")"
+echo "src" >"$SRC_P10S5_DIR/marker.txt"
+OPT_P10S5="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P10S5_DIR")"
+OUT_P10S5=$(env PATH="$STUB_P10S5_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P10S5" 2>/dev/null)
+RC_P10S5=$?
+if [ "$RC_P10S5" = "0" ] \
+  && ! printf '%s\n' "$OUT_P10S5" | grep -q -- '===== hook events =====' \
+  && ! printf '%s\n' "$OUT_P10S5" | grep -q -- '===== fsm state:' \
+  && ! printf '%s\n' "$OUT_P10S5" | grep -q -- '\[fsm-state-final\]'; then
+  check "P10-S5 no mirror + no state file -> no enrichment block in output" PASS
+else
+  check "P10-S5 no mirror + no state file -> no enrichment block (rc=$RC_P10S5, out=${OUT_P10S5:0:500})" FAIL
+fi
+rm -rf "$STUB_P10S5_DIR" "$SRC_P10S5_DIR"
+
+STUB_P10S6_DIR="$(mktemp -d)"
+cat >"$STUB_P10S6_DIR/claude" <<'STUB'
+#!/bin/bash
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"unwritable-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P10S6_DIR/claude"
+SRC_P10S6_DIR="$(mktemp -d -t "p10s6-src-XXXXXX")"
+echo "src" >"$SRC_P10S6_DIR/marker.txt"
+printf 'not-a-directory' >"$SRC_P10S6_DIR/.zensu"
+OPT_P10S6="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P10S6_DIR")"
+OUT_P10S6=$(env PATH="$STUB_P10S6_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P10S6" 2>/dev/null)
+RC_P10S6=$?
+if [ "$RC_P10S6" = "0" ] \
+  && printf '%s\n' "$OUT_P10S6" | grep -qF 'unwritable-shim' \
+  && ! printf '%s\n' "$OUT_P10S6" | grep -q -- '===== hook events =====' \
+  && ! printf '%s\n' "$OUT_P10S6" | grep -q -- '===== fsm state:'; then
+  check "P10-S6 unwritable ZENSU_HOOK_LOG path (.zensu is a file) -> wrapper exits 0, no enrichment headers" PASS
+else
+  check "P10-S6 unwritable ZENSU_HOOK_LOG path -> exit 0 no enrichment (rc=$RC_P10S6, out=${OUT_P10S6:0:400})" FAIL
+fi
+rm -rf "$STUB_P10S6_DIR" "$SRC_P10S6_DIR"
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
