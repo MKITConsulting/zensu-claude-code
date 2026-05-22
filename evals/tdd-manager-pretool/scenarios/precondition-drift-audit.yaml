@@ -1,0 +1,44 @@
+description: "Precondition drift: plan declares snorgleblorf with Decision=install but log shows only cat+jq. Phase 6 audit must detect drift and refuse to complete."
+vars:
+  plan_fixture: fixtures/snorg-drift/2026-01-01-0000_tdd-snorg.md
+  log_fixture: fixtures/snorg-drift/2026-01-01-0000_tdd-snorg.log
+  spec_block: |
+    Run the Phase 6 audit on the artifact pair below. The plan's Preconditions
+    table lists `snorgleblorf` with Decision=`install`, but the log's IMPL
+    entries only mention `cat` and `jq` — `snorgleblorf` never ran.
+    Apply the Precondition Drift Audit (Patch 6) and report findings.
+    Files to audit:
+      - Plan: fixtures/snorg-drift/2026-01-01-0000_tdd-snorg.md
+      - Log:  fixtures/snorg-drift/2026-01-01-0000_tdd-snorg.log
+    REQUIRED: your final summary MUST name every drifted CLI/tool/secret explicitly
+    (e.g. "drift detected on `snorgleblorf`: decision=install, actual=missing"). Do
+    not abstract it to "audit FAIL" alone — the name of the drifted item must appear
+    in the final result string returned to the caller.
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /Phase 6.*(audit|drift)|(audit|drift).*Phase 6/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "Outer summary must reference Phase 6 audit/drift work (summary form acceptable). Specific drift-item naming is checked behaviorally: the fixture references only snorgleblorf, so a Phase 6 audit verdict on this fixture is unambiguously about snorgleblorf."
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /zero file changes|audit[- ]only|(audit (?:found |reported )?no|no audit) (?:implementation|files modified|files changed)|Phase 6 NOT complete|audit FAIL/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "Drift must block Phase-6 completion (audit-only, zero file changes, or explicit NOT complete / FAIL)"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = !/no drift (found|detected|present|reported)|drift (absent|none|not detected)|clean.*audit|all.*clean|no.*drift.*to.*report/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "Negative check: output must NOT claim no-drift-found on a fixture that has drift. Guards against false-negative summaries."
+      };

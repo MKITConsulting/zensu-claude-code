@@ -9,7 +9,9 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
+      const pass = /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt);
       return {
-        pass: /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt),
+        pass,
+        score: pass ? 1 : 0,
         reason: "Despite the drift nudge the agent recovers and completes RED->GREEN"
       };

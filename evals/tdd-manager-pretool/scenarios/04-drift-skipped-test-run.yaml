@@ -11,4 +11,5 @@ assert:
       const txt = String(output);
       const denied = /permissionDecision\W+deny/.test(txt);
       const recovered = /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt);
-      return { pass: denied && recovered, reason: `denied=${denied} recovered=${recovered}` };
+      const pass = denied && recovered;
+      return { pass, score: pass ? 1 : 0, reason: `denied=${denied} recovered=${recovered}` };

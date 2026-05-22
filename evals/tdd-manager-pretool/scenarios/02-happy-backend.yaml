@@ -1,7 +1,9 @@
-description: "Happy-Path BE: tdd-manager implements internal/strings/reverse.go via correct RED->IMPL->GREEN."
+description: "Happy-Path BE: tdd-manager implements internal/stringutil/reverse.go via correct RED->IMPL->GREEN."
 vars:
   target: backend
   spec_path: prompts/feature-spec-reverse-string-be.md
+  expected_paths:
+    - 'backend/internal/stringutil/reverse.go'
 assert:
   - type: contains
     value: "RED"
@@ -12,9 +14,11 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
+      const pass = /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt);
       return {
-        pass: /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt),
+        pass,
+        score: pass ? 1 : 0,
         reason: "Per-Step Logging Contract entries for BE TDD step"
       };
-  - type: file-exists
-    value: "test-projects/react-go-fullstack/backend/internal/strings/reverse.go"
+  - type: javascript
+    value: file://assertions/assert-file-exists.js

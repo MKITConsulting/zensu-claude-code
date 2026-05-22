@@ -1,0 +1,17 @@
+[13:00:14] TDD STARTED — Path B Hybrid Wrapper Rewrite for Isolation + Stream-JSON | steps: 7
+[13:00:24] EXECUTION STARTED
+[13:01:20] S1 RED P7-S10 — FAIL: DRY_RUN preview shows raw source dir as cwd, no cp clone line, no /tmp/claude-eval-* path
+[13:01:20] S2 RED P7-S11 — FAIL: wrapper emits raw stream-json JSON envelopes; no concatenated text+tool_use markers
+[13:01:49] S1+S2 IMPL completed — files: scripts/claude-promptfoo-wrapper.sh
+[13:02:42] S1 GREEN — PASS (2 attempts, P7-S10 + 14 total)
+[13:02:42] S2 GREEN — PASS (1 attempt, P7-S11 + 14 total)
+[13:03:23] S3 RED test-file-exists-replacement — FAIL: assert-file-exists.js absent, scenarios still contain 4 inline fs.existsSync blocks, no file:// reference
+[13:03:51] S3 IMPL completed — files: evals/tdd-manager-pretool/assertions/assert-file-exists.js, evals/tdd-manager-pretool/scenarios/01-happy-frontend.yaml, evals/tdd-manager-pretool/scenarios/02-happy-backend.yaml, evals/tdd-manager-pretool/scenarios/09-cross-stack.yaml
+[13:03:58] S3 GREEN — PASS (1 attempt, 16 tests)
+[13:04:26] S4 RED test-drift-audit-regex — FAIL: regex misses 'audit only' (space) and 'no files implemented' wording (m1=false, m2=false)
+[13:04:37] S4 IMPL completed — files: evals/tdd-manager-pretool/scenarios/precondition-drift-audit.yaml
+[13:04:42] S4 GREEN — PASS (1 attempt, 3 tests)
+[13:05:17] S5 WIRED — all structure tests PASS: wrapper 14/14, file-exists 16/16, patches 21/21, drift-audit-regex 3/3 (54 total). Manual smoke OK: isolated dir created in TMPDIR, KEEP_ISOLATED=1 honored, content copied, output concatenated.
+[13:05:41] S6 WIRED — promptfoo full suite kicked off in background. PID=88129, output=/tmp/full-suite3.json, log=/tmp/full-suite3.log, rc=/tmp/full-suite3.rc. 14 test cases reported by promptfoo (13 scenarios). Do NOT wait synchronously.
+[13:05:47] S7 WIRED — status surfaced in final report (next message)
+[13:07:06] TDD COMPLETE — 4/4 Feature/Bug-Fix steps GREEN | Integration: 3 WIRED (S5,S6,S7) | Build: passed (bash -n + node -c + module load) | Coverage: SKIPPED (no coverage tool wired) | mtime audit: 0/4 violations | Full suite: PID 88129 running, target /tmp/full-suite3.json

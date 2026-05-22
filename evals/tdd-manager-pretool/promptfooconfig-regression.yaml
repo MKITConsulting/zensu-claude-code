@@ -1,14 +1,10 @@
 description: "Backward-compat regression: existing tdd-manager scenarios with PreToolUse gate active"
 
 providers:
-  - id: anthropic:claude-agent-sdk
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
     config:
-      model: claude-sonnet-4-6
+      agent: zensu:tdd-manager
       working_dir: ../tdd-manager/test-project
-      max_turns: 40
-      permission_mode: bypassPermissions
-      allow_dangerously_skip_permissions: true
-      custom_system_prompt: file://../../agents/tdd-manager.md
 
 prompts:
   - id: regression-baseline

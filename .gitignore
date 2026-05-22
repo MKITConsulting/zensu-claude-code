@@ -21,6 +21,7 @@ Thumbs.db
 *.log
 # But keep checked-in fixture log files used by eval tests
 !evals/tdd-review-chain/fixtures/*.log
+!evals/tdd-manager-pretool/fixtures/**/*.log
 
 # Dependencies
 node_modules/
