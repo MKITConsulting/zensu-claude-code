@@ -115,15 +115,15 @@ if [ -f "$ASSERT_FILE_EXISTS" ]; then
     const wrongDir  = '[tool_use: Write] input={\"file_path\":\"backend/wrong/reverseString.ts\",\"content\":\"x\"}';
     const bashHere  = '[tool_use: Bash] input={\"command\":\"cat > frontend/src/utils/reverseString.ts <<EOF\\nx\\nEOF\"}';
     const all = [writeRel, editRel, writeAbs, multiEdit, notebook].join('\n');
-    const r1 = m({ output: writeRel,  context: { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } } });
-    const r2 = m({ output: writeAbs,  context: { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } } });
-    const r3 = m({ output: multiEdit, context: { vars: { expected_paths: ['frontend/src/utils/debounce.ts'] } } });
-    const r4 = m({ output: notebook,  context: { vars: { expected_paths: ['analysis.ipynb'] } } });
-    const r5 = m({ output: wrongDir,  context: { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } } });
-    const r6 = m({ output: bashHere,  context: { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } } });
-    const r7 = m({ output: 'no tool_use lines', context: { vars: { expected_paths: ['x.ts'] } } });
-    const r8 = m({ output: writeRel,  context: { vars: {} } });
-    const r9 = m({ output: all,       context: { vars: { expected_paths: ['frontend/src/utils/debounce.ts', 'analysis.ipynb'] } } });
+    const r1 = m(writeRel,  { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } });
+    const r2 = m(writeAbs,  { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } });
+    const r3 = m(multiEdit, { vars: { expected_paths: ['frontend/src/utils/debounce.ts'] } });
+    const r4 = m(notebook,  { vars: { expected_paths: ['analysis.ipynb'] } });
+    const r5 = m(wrongDir,  { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } });
+    const r6 = m(bashHere,  { vars: { expected_paths: ['frontend/src/utils/reverseString.ts'] } });
+    const r7 = m('no tool_use lines', { vars: { expected_paths: ['x.ts'] } });
+    const r8 = m(writeRel,  { vars: {} });
+    const r9 = m(all,       { vars: { expected_paths: ['frontend/src/utils/debounce.ts', 'analysis.ipynb'] } });
     console.log(JSON.stringify({
       writeRel:r1.pass, writeAbs:r2.pass, multiEdit:r3.pass, notebook:r4.pass,
       wrongDir:r5.pass, bashHere:r6.pass, none:r7.pass, noVars:r8.pass, batch:r9.pass

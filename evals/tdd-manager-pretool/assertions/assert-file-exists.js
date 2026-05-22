@@ -1,11 +1,16 @@
-module.exports = ({ output, context } = {}) => {
-  const paths = (context && context.vars && context.vars.expected_paths) || [];
-  if (!Array.isArray(paths) || paths.length === 0) {
+module.exports = (output, context) => {
+  const raw = context && context.vars && context.vars.expected_paths;
+  const paths = Array.isArray(raw)
+    ? raw
+    : typeof raw === 'string' && raw.length > 0
+    ? [raw]
+    : [];
+  if (paths.length === 0) {
     return {
       pass: false,
       score: 0,
       reason:
-        'expected_paths var must be set in scenario vars (array of paths relative to working_dir)'
+        'expected_paths var must be set in scenario vars (string OR array of paths relative to working_dir)'
     };
   }
 
