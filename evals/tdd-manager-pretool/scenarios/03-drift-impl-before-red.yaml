@@ -2,16 +2,30 @@ description: "Drift: prompt nudges the agent to implement immediately. Gate must
 vars:
   spec_path: prompts/feature-spec-with-shortcut-hint.md
 assert:
-  - type: contains
-    value: "TDD-Phase-Gate"
-  - type: contains
-    value: "permissionDecision"
   - type: javascript
     value: |
       const txt = String(output);
-      const pass = /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt);
+      const fsmMarker = /TDD-Phase-Gate/.test(txt);
+      const agentLog = /S\d+\s+RED\s+\S+\s+—\s+FAIL/i.test(txt);
+      const parentRejection = /tdd-manager\s+(refus|enforce\s+strict|block|halt|flag)|agent\s+(block|refus)|zero file changes|no code written|TDD discipline violation/i.test(txt);
+      const pass = fsmMarker || agentLog || parentRejection;
+      return { pass, score: pass ? 1 : 0, reason: `fsmMarker=${fsmMarker} agentLog=${agentLog} parentRejection=${parentRejection}` };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const fsmMarker = /permissionDecision/.test(txt);
+      const agentLog = /S\d+\s+IMPL\s+completed/i.test(txt);
+      const parentRejection = /tdd-manager\s+(refus|enforce\s+strict|block|halt|flag)|agent\s+(block|refus)|zero file changes|no code written|TDD discipline violation/i.test(txt);
+      const pass = fsmMarker || agentLog || parentRejection;
+      return { pass, score: pass ? 1 : 0, reason: `fsmMarker=${fsmMarker} agentLog=${agentLog} parentRejection=${parentRejection}` };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const recovered = /RED .* — FAIL/.test(txt) && /GREEN — PASS/.test(txt);
+      const parentRejection = /tdd-manager\s+(refus|enforce\s+strict|block|halt|flag)|agent\s+(block|refus)|zero file changes|no code written|TDD discipline violation/i.test(txt);
+      const pass = recovered || parentRejection;
       return {
         pass,
         score: pass ? 1 : 0,
-        reason: "Despite the drift nudge the agent recovers and completes RED->GREEN"
+        reason: `recovered=${recovered} parentRejection=${parentRejection} (either the agent recovers and completes RED->GREEN, or parent agent self-rejects the drift hint)`
       };

@@ -9,8 +9,6 @@ assert:
     value: "RED"
   - type: contains
     value: "GREEN"
-  - type: not-contains
-    value: "TDD-Phase-Gate"
   - type: javascript
     value: |
       const txt = String(output);

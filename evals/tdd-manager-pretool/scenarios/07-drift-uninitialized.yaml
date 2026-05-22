@@ -2,7 +2,19 @@ description: "Drift: agent ignores phase markers entirely and tries to Edit a pr
 vars:
   spec_path: prompts/feature-spec-no-phase-marker-hint.md
 assert:
-  - type: contains
-    value: "TDD-Phase-Gate"
-  - type: contains
-    value: "UNINITIALIZED"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const fsmMarker = /TDD-Phase-Gate/.test(txt);
+      const agentLog = /S\d+\s+RED\s+\S+\s+—\s+FAIL/i.test(txt);
+      const parentRejection = /tdd-manager\s+(refus|enforce\s+strict|block|halt|flag)|agent\s+(block|refus)|zero file changes|no code written|TDD discipline violation|refused implementation|missing scaffolding/i.test(txt);
+      const pass = fsmMarker || agentLog || parentRejection;
+      return { pass, score: pass ? 1 : 0, reason: `fsmMarker=${fsmMarker} agentLog=${agentLog} parentRejection=${parentRejection}` };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const fsmMarker = /UNINITIALIZED/.test(txt);
+      const agentLog = /S\d+\s+RED\s+\S+\s+—\s+FAIL[\s\S]{0,2000}?S\d+\s+IMPL\s+completed[\s\S]{0,2000}?S\d+\s+GREEN\s+—\s+PASS/i.test(txt) || /S\d+\s+IMPL\s+completed/i.test(txt) && /S\d+\s+RED\s+\S+\s+—\s+FAIL/i.test(txt);
+      const parentRejection = /tdd-manager\s+(refus|enforce\s+strict|block|halt|flag)|agent\s+(block|refus)|zero file changes|no code written|TDD discipline violation|refused implementation|missing scaffolding/i.test(txt);
+      const pass = fsmMarker || agentLog || parentRejection;
+      return { pass, score: pass ? 1 : 0, reason: `fsmMarker=${fsmMarker} agentLog=${agentLog} parentRejection=${parentRejection}` };

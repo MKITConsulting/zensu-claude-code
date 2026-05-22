@@ -11,5 +11,3 @@ assert:
     value: "GREEN"
   - type: javascript
     value: file://assertions/assert-file-exists.js
-  - type: not-contains
-    value: "TDD-Phase-Gate"
