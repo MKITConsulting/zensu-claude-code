@@ -42,3 +42,22 @@ Asserts the transcript shows a valid phase FSM transition pattern: `RED_WRITE �
 ## assert-backward-compat.sh
 
 Used by the regression suite to verify that the gate is silent for non-`zensu:tdd-manager` agent contexts (main thread, other subagents, plain-Edit no-context).
+
+## assert-file-exists.js
+
+Verifies that the agent issued a `Write`, `Edit`, `MultiEdit`, or `NotebookEdit` tool call for each path in `expected_paths` (scenario var). Uses transcript-grep against the wrapper's stream-json concatenated output — does NOT touch the filesystem.
+
+**Why transcript instead of `fs.existsSync`**: the wrapper isolates each test in an APFS-cloned tmp dir that gets cleaned up on exit (`scripts/claude-promptfoo-wrapper.sh` + `trap cleanup EXIT`). Post-cleanup filesystem state is gone, so an on-disk check would always fail. Tool-call evidence in the transcript survives.
+
+**Matching semantics**: for each `expected_paths` entry `p`, a transcript line `[tool_use: Write|Edit|MultiEdit|NotebookEdit] input={"file_path":"<t>",...}` (or `notebook_path` for NotebookEdit) is a match when:
+- `t === p`, OR
+- `t.endsWith('/' + p)` / `t.endsWith('\\' + p)` (claude wrote an absolute path; assertion's `p` is the relative tail), OR
+- `t.endsWith(p)` when `p` itself contains a `/` (multi-segment relative path)
+
+Basename-only matches (`reverseString.ts` alone vs same file in unrelated dir) are NOT a match — guards against false-positives where the agent writes a same-named file to the wrong location.
+
+**Does NOT catch** (intentional — out of scope):
+
+- Bash heredoc / pipe writes: `bash -c 'cat > file.ts <<EOF ... EOF'` — surfaces as `[tool_use: Bash]`, ignored by this assertion. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) and the `assert-no-shell-redirect-bypass.sh` lexical canary catch the redirect pattern; this assertion trusts those for that class.
+- Files written via interpreter exec (`python -c`, `node -e`) — same rationale.
+- File deletion / rename: only creation/edit intent is verified.

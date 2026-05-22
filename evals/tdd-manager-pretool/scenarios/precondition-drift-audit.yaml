@@ -27,7 +27,7 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
-      const pass = /zero file changes|audit-only|no.*implementation|Phase 6 NOT complete|audit FAIL/i.test(txt);
+      const pass = /zero file changes|audit[- ]only|(audit (?:found |reported )?no|no audit) (?:implementation|files modified|files changed)|Phase 6 NOT complete|audit FAIL/i.test(txt);
       return {
         pass,
         score: pass ? 1 : 0,

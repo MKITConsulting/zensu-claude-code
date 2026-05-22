@@ -124,6 +124,52 @@ else
 fi
 rm -rf "$STUB_CLAUDE_DIR" "$OUT9_STDOUT" "$OUT9_STDERR"
 
+SRC_DIR="$(mktemp -d -t "claude-eval-src-XXXXXX")"
+echo "marker-file" >"$SRC_DIR/source-marker.txt"
+OPT10="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_DIR")"
+OUT10=$(DRY_RUN=1 "$WRAPPER" 'isolation prompt' "$OPT10" 2>&1)
+RC10=$?
+if printf '%s\n' "$OUT10" | grep -qE 'cp[[:space:]]+-c?R' \
+  && printf '%s\n' "$OUT10" | grep -qE 'isolated=.*claude-eval-' \
+  && ! printf '%s\n' "$OUT10" | grep -qE "would execute.*cwd=$SRC_DIR\b"; then
+  check "P7-S10 DRY_RUN previews cp clone into /tmp/claude-eval-* (isolation, not raw WORKDIR)" PASS
+else
+  check "P7-S10 DRY_RUN previews cp clone into /tmp/claude-eval-* (rc=$RC10, out=${OUT10:0:300})" FAIL
+fi
+if [ "$RC10" = "0" ]; then
+  check "P7-S10 DRY_RUN with isolation preview exits 0" PASS
+else
+  check "P7-S10 DRY_RUN with isolation preview exits 0 (got rc=$RC10)" FAIL
+fi
+rm -rf "$SRC_DIR"
+
+STUB_STREAM_DIR="$(mktemp -d)"
+cat >"$STUB_STREAM_DIR/claude" <<'STUB'
+#!/bin/bash
+cat <<'STREAM'
+{"type":"system","subtype":"init","session_id":"abc"}
+{"type":"assistant","message":{"content":[{"type":"text","text":"hello from stub"}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Read","input":{"file_path":"/tmp/x"}}]}}
+{"type":"result","result":"stub-finished"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_STREAM_DIR/claude"
+SRC_STREAM_DIR="$(mktemp -d -t "stream-src-XXXXXX")"
+echo "stream-src-content" >"$SRC_STREAM_DIR/marker.txt"
+OPT11="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_STREAM_DIR")"
+OUT11=$(env PATH="$STUB_STREAM_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT11" 2>/dev/null)
+RC11=$?
+if [ "$RC11" = "0" ] \
+  && printf '%s\n' "$OUT11" | grep -qF 'hello from stub' \
+  && printf '%s\n' "$OUT11" | grep -qE '\[tool_use:[[:space:]]*Read\]' \
+  && ! printf '%s\n' "$OUT11" | grep -qF '{"type":"assistant"'; then
+  check "P7-S11 stream-json: wrapper concatenates assistant text + tool_use names (no raw JSON envelopes)" PASS
+else
+  check "P7-S11 stream-json: wrapper concatenates assistant text + tool_use names (rc=$RC11, out=${OUT11:0:300})" FAIL
+fi
+rm -rf "$STUB_STREAM_DIR" "$SRC_STREAM_DIR"
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

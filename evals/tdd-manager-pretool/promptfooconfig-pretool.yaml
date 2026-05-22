@@ -33,5 +33,5 @@ tests:
   - file://scenarios/precondition-drift-audit.yaml
 
 evaluateOptions:
-  maxConcurrency: 1
+  maxConcurrency: 5
   repeat: 3
