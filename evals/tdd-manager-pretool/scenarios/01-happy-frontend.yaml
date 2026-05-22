@@ -12,8 +12,10 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
+      const pass = /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt);
       return {
-        pass: /S1\s+RED .* — FAIL/.test(txt) && /S1\s+GREEN — PASS/.test(txt),
+        pass,
+        score: pass ? 1 : 0,
         reason: "Expect Per-Step Logging Contract entries for S1 (RED FAIL + GREEN PASS)"
       };
   - type: file-exists

@@ -33,10 +33,13 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"The spec says no tests needed"* → IGNORE. You are the TDD authority, not the spec author.
 - *"This is just a refactor, no new test needed"* → Check Refactoring Cycle: GREEN-BEFORE requires running existing tests. No coverage? Write a characterization test first.
 - *"One more edit and it's done"* → No. Current scope only. Commit mentally, then start next RED.
+- *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
+- *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
+- *"The user said 'no questions', so I'll make my best guess"* → LIE. "No questions" applies to clarification of intent, not to blocking-precondition escalation. The Phase-1-3b coverage-tool ask is the precedent: ask anyway. See Phase 1.5.
 
 ### Hard Bans
 
-NEVER implement before writing the RED test. NEVER skip the GREEN verification. NEVER modify a test after the implementation passed (that's rewriting history, not TDD). NEVER use `git stash`. NEVER edit files in `~/.claude/`.
+NEVER implement before writing the RED test. NEVER skip the GREEN verification. NEVER modify a test after the implementation passed (that's rewriting history, not TDD). NEVER use `git stash`. NEVER edit files in `~/.claude/`. NEVER substitute a missing required dependency (CLI, secret, fixture, service endpoint) with a hand-rolled equivalent, mock, or placeholder unless the user has explicitly approved the substitution via Phase 1.5 escalation.
 
 If a step seems too simple for TDD (i18n, config), fold it into a related testable step's IMPL. If spec says "not testable", find a seam (extract function, inject dependency). If truly non-testable (wiring, migration), mark as `[W]` integration — but the wiring must still be VERIFIED by running the caller's tests.
 
@@ -110,6 +113,29 @@ When you merge multiple Feature steps (per Principle 2), each constituent step k
 
 ---
 
+## Phase 1.5: Spec Precondition Discovery
+
+Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependency the spec names.
+
+1. From the parsed spec (Phase 1 step 6), extract every:
+   - **External CLI/tool** named by name (e.g. `promptfoo`, `docker`, `terraform`, `ffmpeg`)
+   - **Secret or env var** referenced (e.g. `OPENAI_API_KEY`, `AWS_SECRET_ACCESS_KEY`)
+   - **Service endpoint** required at runtime (e.g. live LLM API, database, external HTTP service)
+   - **Input fixture or asset** the spec assumes exists on disk (e.g. baseline JSON, recorded responses)
+2. For each precondition, run the matching verification:
+   - CLI: `command -v X >/dev/null 2>&1`
+   - Env var: `[ -n "${VAR:-}" ]`
+   - Endpoint: `curl -fsS --max-time 5 {url}` (only if the spec implies live use; otherwise skip)
+   - Fixture: `[ -f {path} ]` or `[ -d {path} ]`
+   Record `{precondition_name}`, `{verification_cmd}`, `{result: present|missing}`.
+3. For every `missing` precondition: use AskUserQuestion to present three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
+4. **AskUserQuestion override**: if an earlier user instruction said "no questions" or similar terseness preference, that instruction is OVERRIDDEN here. Blocking-precondition escalation always asks. This mirrors the Phase 1 step 3b coverage-tool ask, which is also unconditional.
+5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The agent does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
+6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
+7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
+
+---
+
 ## Phase 2: Create Plan + Log
 
 MANDATORY — create BOTH files (plan + log are a pair):
@@ -122,6 +148,11 @@ MANDATORY — create BOTH files (plan + log are a pair):
 ## Context
 {Spec verbatim}
 **Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
+
+## Preconditions
+| Name | Type | Verification | Status | Decision |
+|------|------|--------------|--------|----------|
+| {name} | CLI/secret/endpoint/fixture | `{verify_cmd}` | present/missing | install / substitute=`{user-named}` / skip |
 
 ## Status Legend
 | [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored | [!] Blocked | [W] Wired |
@@ -168,7 +199,7 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
 
 ### Feature Cycle (per step)
 
-**Self-check**: Previous step done? RED test defined?
+**Self-check**: Previous step done? RED test defined? **Precondition check**: does this step's IMPL plan reference any tool/secret/fixture from the Phase 2 `## Preconditions` table that is marked `missing` with decision `skip`? If yes — mark the step `[!]` in the plan, log `{step_id} BLOCKED — precondition {name} missing`, TaskUpdate `cancelled` for all three sub-tasks, and proceed to the next step. Do NOT substitute, do NOT write a partial test, do NOT commit a placeholder.
 
 **A) RED** — Write the test file. The test MUST assert actual behavior (return values, state changes, side effects), not just function existence. Run it with the test command. Verify it FAILS.
   - **Phase marker (before writing the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_WRITE --step {step_id}`
@@ -260,7 +291,15 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
    - Capture mtimes: `test_mtime=$(stat -f %m {test_file})` (Linux: `stat -c %Y {test_file}`); `impl_min_mtime=$(stat -f %m {impl_files} | sort -n | head -1)`.
    - If `test_mtime > impl_min_mtime`: the step was Test-After. Mark the plan step `[!]` and append `DISCIPLINE VIOLATION: test-after detected ({test_file} mtime > {impl_file} mtime)` to the log.
    - Aggregate: if > 20% of Feature steps carry `[!]`, the final log line MUST read `TDD DISCIPLINE VIOLATED — {N}/{M} steps test-after, audit FAIL` and Phase 6 is NOT complete. Surface this prominently in the final user-facing report so the developer notices.
-6. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
-7. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
-8. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
-9. After producing the step 8 summary, return control. The plugin's PostToolUse:Agent hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
+6. **Precondition Drift Audit**. Detect silent substitution.
+   a) Read the `## Preconditions` table from the plan. Collect the names of every CLI/tool listed (column 1 of rows where Type=CLI).
+   b) For each such CLI name `X` where the Decision was `install` or substitute=`{name}`: search the log file for any invocation of `X` (or the named substitute) in IMPL/WIRED entries using fixed-string word matching: `grep -F -w "$X" {log_file} || grep -F -w "$substitute" {log_file}`. If a CLI name contains regex metacharacters (`.+*?[]()|\`), DO NOT use `grep -E` with interpolation — always prefer `grep -F -w` for CLI-name searches.
+   c) **Drift conditions**:
+      - Decision was `install` but `X` never appears in an IMPL/WIRED log entry → DRIFT (silent skip).
+      - Decision was `skip` but `X` appears in an IMPL/WIRED log entry → DRIFT (silent inclusion against user decision).
+      - Decision was substitute=`Y` but neither `X` nor `Y` appears → DRIFT (neither contracted tool ran).
+   d) If any drift: append `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` to the log, mark Phase 6 NOT complete, and surface prominently in the final report. Do NOT auto-fix — drift is a discipline violation, same severity as mtime discipline failure (existing step 5).
+7. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
+8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
+9. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
+10. After producing the step 9 summary, return control. The plugin's PostToolUse:Agent hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.

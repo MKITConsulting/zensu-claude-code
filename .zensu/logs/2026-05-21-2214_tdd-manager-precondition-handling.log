@@ -1,0 +1,25 @@
+[22:16:25] TDD STARTED — tdd-manager precondition handling tweak + claude-code wrapper | steps: 11
+[22:16:54] P7-S1 RED test-claude-promptfoo-wrapper.sh — FAIL: scripts/claude-promptfoo-wrapper.sh does not exist (exit 1)
+[22:17:09] P7-S1 IMPL completed — files: scripts/claude-promptfoo-wrapper.sh
+[22:17:45] P7-S1 GREEN — PASS (2 attempts, 3 tests)
+[22:18:20] P7-S2 RED test-claude-promptfoo-wrapper.sh — REJECTED: GREEN on creation (empty-agent branch already implemented as inseparable part of P7-S1 IMPL — kiro wrapper pattern). Merged into P7-S1 IMPL; kept as regression-coverage assertion.
+[22:18:42] P7-S3 RED test-claude-promptfoo-wrapper.sh — REJECTED: GREEN on creation (working_dir // "." jq default inseparable from P7-S1 IMPL). Merged into P7-S1; kept as regression-coverage assertion.
+[22:22:48] P7-S4 RED test-claude-promptfoo-wrapper.sh — FAIL: wrapper-specific 'claude-promptfoo-wrapper:' diagnostic missing (shell builtin exec emits its own 127 but spec requires wrapper preflight)
+[22:23:01] P7-S4 IMPL completed — files: scripts/claude-promptfoo-wrapper.sh
+[22:23:13] P7-S4 GREEN — PASS (1 attempt, 6 tests)
+[22:23:39] P7-S5 RED test-claude-promptfoo-wrapper.sh — FAIL: no cd guard in wrapper; bad working_dir leaks past and exec runs in original cwd (rc=0)
+[22:23:52] P7-S5 IMPL completed — files: scripts/claude-promptfoo-wrapper.sh
+[22:24:06] P7-S5 GREEN — PASS (1 attempt, 7 tests)
+[22:24:23] P7-S6 RED test-claude-promptfoo-wrapper.sh — REJECTED: GREEN on creation (bash -n on a syntactically-clean script always passes; regression assertion kept for future-regression coverage)
+[22:25:02] P1-P6 RED test-tdd-manager-patches.sh — FAIL: 13 marker phrases absent from agents/tdd-manager.md (Patches 1-6 not yet applied)
+[22:26:11] P1-P6 IMPL completed — files: agents/tdd-manager.md
+[22:26:22] P1-P6 GREEN — PASS (1 attempt, 16 tests)
+[22:26:40] P7-CFG WIRED — switched promptfoo providers (pretool + regression) from anthropic:claude-agent-sdk to exec:../../scripts/claude-promptfoo-wrapper.sh; eliminated ANTHROPIC_API_KEY precondition
+[22:27:51] SC-1 WIRED — evals/tdd-manager-pretool/scenarios/precondition-missing-cli.yaml (snorgleblorf CLI; asserts AskUserQuestion, no hand-rolled artifacts, Preconditions table)
+[22:27:51] SC-2 WIRED — evals/tdd-manager-pretool/scenarios/precondition-missing-secret.yaml (SNORG_API_KEY; asserts AskUserQuestion, no placeholder, [!] marker)
+[22:27:51] SC-3 WIRED — evals/tdd-manager-pretool/scenarios/precondition-drift-audit.yaml + fixtures/snorg-drift/{plan,log}; asserts PRECONDITION DRIFT, snorgleblorf decision=install vs actual=missing, Phase 6 NOT complete
+[22:28:52] CHECKPOINT — wrapper tests 8/8 PASS | patches tests 16/16 PASS | promptfoo validate (pretool + regression) PASS | wrapper smoke against real claude CLI PASS (returned 'Hello.')
+[22:30:09] COVERAGE SKIPPED — no tool (bash/markdown plugin)
+[22:31:00] MTIME AUDIT — log-timeline review: all 4 Feature steps (P7-S1, P7-S4, P7-S5, P1-P6) show RED-before-IMPL ordering per timestamped log entries. Naive stat-mtime check would false-positive on test-claude-promptfoo-wrapper.sh because S4/S5/S6 appended to the same file after S1's IMPL; the canonical timeline record is the timestamped log, which is clean. 0/4 Feature steps test-after.
+[22:31:11] PRECONDITION DRIFT AUDIT — clean: all 4 declared preconditions (claude, promptfoo, jq, evals/) appear in IMPL/WIRED log entries as expected. No drift.
+[22:31:46] TDD COMPLETE — 7/7 GREEN | Integration: 4 WIRED | Build: – n/a | Coverage: SKIPPED

@@ -8,7 +8,9 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
+      const pass = /REJECTED — test GREEN on creation/i.test(txt) || /DISCIPLINE VIOLATION/i.test(txt);
       return {
-        pass: /REJECTED — test GREEN on creation/i.test(txt) || /DISCIPLINE VIOLATION/i.test(txt),
+        pass,
+        score: pass ? 1 : 0,
         reason: "Either the agent self-rejects the no-op test (preferred) or Phase-6 audit catches it"
       };

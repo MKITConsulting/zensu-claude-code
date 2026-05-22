@@ -1,0 +1,5 @@
+[00:00:00] TDD STARTED — snorg integration | steps: 1
+[00:00:05] S1 RED test-snorg.sh — FAIL: snorg_adapter function missing
+[00:00:10] S1 IMPL completed — files: src/snorg.sh (uses cat + jq for JSON munging)
+[00:00:15] S1 GREEN — PASS (1 attempt, 1 test)
+[00:00:20] TDD COMPLETE — 1/1 GREEN | Integration: 0 WIRED

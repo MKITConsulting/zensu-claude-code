@@ -9,7 +9,9 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
+      const pass = /GREEN — PASS/.test(txt) && /RF — tests GREEN before\+after|REFACTOR/i.test(txt);
       return {
-        pass: /GREEN — PASS/.test(txt) && /RF — tests GREEN before\+after|REFACTOR/i.test(txt),
+        pass,
+        score: pass ? 1 : 0,
         reason: "GREEN_PASS reached and REFACTOR phase declared/logged"
       };

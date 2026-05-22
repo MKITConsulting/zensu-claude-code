@@ -1,23 +1,21 @@
 description: "tdd-manager PreToolUse phase-gate suite (10 scenarios)"
 
 providers:
-  - id: anthropic:claude-agent-sdk
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
     config:
-      model: claude-sonnet-4-6
+      agent: zensu:tdd-manager
       working_dir: ./test-projects/react-go-fullstack
-      max_turns: 40
-      permission_mode: bypassPermissions
-      allow_dangerously_skip_permissions: true
-      custom_system_prompt: file://../../agents/tdd-manager.md
+
+prompts:
+  - id: tdd-manager-spec
+    label: "tdd-manager spec runner (universal: spec_block OR spec_path)"
+    raw: |
+      {% if spec_block %}{{spec_block}}{% else %}{% include spec_path %}{% endif %}
 
 defaultTest:
   options:
     transform: |
-      ({ output, context }) => ({
-        ...context,
-        output,
-        agent_output_text: typeof output === 'string' ? output : JSON.stringify(output)
-      })
+      return typeof output === 'string' ? output : JSON.stringify(output);
 
 tests:
   - file://scenarios/01-happy-frontend.yaml
@@ -30,6 +28,9 @@ tests:
   - file://scenarios/08-refactor-after-green.yaml
   - file://scenarios/09-cross-stack.yaml
   - file://scenarios/10-override-env.yaml
+  - file://scenarios/precondition-missing-cli.yaml
+  - file://scenarios/precondition-missing-secret.yaml
+  - file://scenarios/precondition-drift-audit.yaml
 
 evaluateOptions:
   maxConcurrency: 1
