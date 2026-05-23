@@ -1,0 +1,293 @@
+# TDD-Manager Workflow
+
+End-to-end reference for `zensu:tdd-manager` — the Zensu plugin agent that drives strict Red/Green TDD with a PreToolUse phase gate.
+
+---
+
+## 1. Overview
+
+**What it is.** A Claude Code subagent that takes a feature specification and produces working, tested code through a strict TDD discipline. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle.
+
+**When to invoke.**
+
+```
+Use the Agent tool with subagent_type='zensu:tdd-manager' and prompt: <feature spec>
+```
+
+The agent is also auto-spawned by the `ExitPlanMode` PostToolUse hook when the user approves a plan that adds executable code.
+
+**Inputs.**
+
+- A feature specification (free-form text, or a path to `evals/.../prompts/*.md` in eval context).
+- Project context — the agent discovers tech stack, test commands, coverage tooling automatically.
+
+**Outputs.**
+
+| Artifact | Path | Purpose |
+|----------|------|---------|
+| Plan | `.zensu/plans/{ts}_tdd-{slug}.md` | Design decisions, step table, preconditions, audit checklist |
+| Log | `.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
+| State | `.zensu/state/tdd-phase-{session}.json` | Runtime FSM state (per session, ephemeral) |
+| Source | test + implementation files | The actual code |
+| Audit | included in log + final report | Build, coverage, mtime discipline, precondition drift |
+
+The plan and log are durable repo artifacts. They are auto-staged and committed (see [CLAUDE.md](../CLAUDE.md) repo conventions).
+
+---
+
+## 2. Two-Level Mental Model
+
+Two distinct phase concepts share the word "phase". Keep them separate.
+
+**Workflow Phases (0-6)** — the agent's overall journey for a single task. Linear, one-shot per invocation.
+
+**TDD-FSM phases** — per-step state that the PreToolUse hook reads from the state file. Cyclical, repeated for each step inside Phase 4.
+
+Each step inside Workflow Phase 4 cycles the TDD-FSM through `RED_WRITE → RED_RUN → RED_FAIL → IMPL → GREEN_RUN → GREEN_PASS` (and optionally `REFACTOR`). When all steps complete, the agent advances to Workflow Phase 5.
+
+---
+
+## 3. High-Level Workflow
+
+```mermaid
+flowchart TD
+    Start([User invokes tdd-manager]) --> P0[Phase 0: Pre-flight<br/>SESSION_TS, first TaskCreate]
+    P0 --> P1[Phase 1: Discover Project<br/>Tech stack, test cmds, coverage tool]
+    P1 --> P15[Phase 1.5: Precondition Discovery<br/>CLIs / secrets / endpoints / fixtures]
+    P15 --> Q{Missing<br/>preconditions?}
+    Q -->|Yes| Ask[AskUserQuestion<br/>install · substitute · skip]
+    Ask --> P15
+    Q -->|All present or resolved| P2[Phase 2: Plan + Log<br/>.zensu/plans/ts_tdd-slug.md<br/>.zensu/logs/ts_tdd-slug.log]
+    P2 --> P3[Phase 3: Create ALL Tasks<br/>3 per TDD step + 1 per integration]
+    P3 --> P4[Phase 4: Execute TDD Cycles<br/>RED to IMPL to GREEN per step]
+    P4 --> P5[Phase 5: Checkpoint<br/>full suite + linter]
+    P5 --> P6[Phase 6: Audit and Final Report<br/>build · coverage · drift audit · mtime]
+    P6 --> Review[PostToolUse Hook<br/>auto-spawn zensu:code-reviewer]
+    Review --> Findings{Critical or<br/>Important findings?}
+    Findings -->|Yes| AutoFix[Auto-fix loop<br/>max 5 rounds]
+    AutoFix --> Review
+    Findings -->|None| Done([Final Report])
+
+    style P15 fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style P6 fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style Ask fill:#fee2e2,stroke:#991b1b,color:#1e293b
+```
+
+**Phases at a glance:**
+
+| Phase | Goal | Key outputs |
+|-------|------|-------------|
+| 0. Pre-flight | Capture `SESSION_TS` + `SESSION_EPOCH`, create first task | session timestamps |
+| 1. Discover Project | Read CLAUDE.md hierarchy, detect tech stack, test runners, coverage tool + threshold | tech-stack context |
+| 1.5. Precondition Discovery | Enumerate every external CLI/secret/endpoint/fixture named by the spec, verify presence, escalate misses | Preconditions table in plan |
+| 2. Plan + Log | Write plan markdown + initialize log file | plan + log on disk |
+| 3. Create ALL Tasks | 3 tasks per TDD step (test/impl/verify) + 1 per integration step | TaskList populated |
+| 4. Execute TDD Cycles | Per step: RED → IMPL → GREEN (+ REFACTOR if applicable) | source code + tests |
+| 5. Checkpoint | Run full test suite + linter, batch-update plan statuses | checkpoint log entry |
+| 6. Audit & Final Report | Build verification, coverage, mtime discipline, precondition drift audit, summary | audit log + final report |
+
+See [agents/tdd-manager.md](../agents/tdd-manager.md) for the canonical phase definitions.
+
+---
+
+## 4. Per-Step TDD-FSM
+
+Inside Phase 4, each step cycles through a small state machine. The PreToolUse hook ([hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh)) reads the current phase from the state file and allows or denies Edit/Write/MultiEdit tool calls based on it.
+
+```mermaid
+stateDiagram-v2
+    [*] --> UNINITIALIZED
+    UNINITIALIZED --> RED_WRITE: zensu-log.sh --phase RED_WRITE
+    RED_WRITE --> RED_RUN: --phase RED_RUN
+    RED_RUN --> RED_FAIL: test FAILS (correct RED)
+    RED_RUN --> RED_WRITE: test PASSES (fake-green, rewrite)
+    RED_FAIL --> IMPL: --phase IMPL
+    IMPL --> GREEN_RUN: --phase GREEN_RUN
+    GREEN_RUN --> GREEN_PASS: test PASSES
+    GREEN_RUN --> IMPL: test FAILS (retry, max 3)
+    GREEN_PASS --> REFACTOR: --phase REFACTOR (optional)
+    GREEN_PASS --> [*]: next step
+    REFACTOR --> [*]: next step
+
+    note right of UNINITIALIZED
+      Hook denies all Edit/Write
+    end note
+    note right of RED_FAIL
+      Hook allows test paths only
+    end note
+    note right of IMPL
+      Hook allows iff RED_FAIL
+      for this step in history
+    end note
+    note right of GREEN_PASS
+      Hook allows test paths only
+      (no prod edits without REFACTOR)
+    end note
+```
+
+Phase transitions are recorded by invoking the log helper:
+
+```bash
+bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "..."]
+```
+
+The helper writes both a log line and updates the state file under a `flock` (or `mkdir`-based fallback) mutex.
+
+---
+
+## 5. Hook Gate Behavior
+
+The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or denies based on `(phase, file path type)`.
+
+| Phase | Production file edit | Test file edit |
+|-------|---------------------|----------------|
+| `UNINITIALIZED` | DENY | DENY |
+| `RED_WRITE` | ALLOW | ALLOW |
+| `RED_RUN` | (transient, no edits expected) | (transient) |
+| `RED_FAIL` | DENY | ALLOW |
+| `IMPL` | ALLOW iff this step has `RED_FAIL` in history | ALLOW |
+| `GREEN_RUN` | (transient) | (transient) |
+| `GREEN_PASS` | DENY | ALLOW |
+| `REFACTOR` | ALLOW | ALLOW |
+
+**Test-path detection** ([hooks/lib/zensu-tdd-phase.sh::tdd_is_test_path](../hooks/lib/zensu-tdd-phase.sh)):
+
+1. Path prefix match: `**/test/**`, `**/tests/**`, `**/__tests__/**`, `**/spec/**`, `**/specs/**`, plus top-level variants (case-insensitive)
+2. Basename match: `_test.*`, `*_test.*`, `.test.*`, `.tests.*`, `.spec.*`, `.specs.*`, `_spec.*`, `_specs.*`
+3. Hard-link rejection: files with link count > 1 fail closed (prevents `ln target.test.ts innocent.ts` bypass)
+4. Symlink rejection: `[ -L "$path" ]` → not a test
+5. Inline-header sniff (last resort): read first 20 lines, strip BOM, match `^(func Test|describe\(|it\(|test\(|@Test|def test_|#\[test\]|#\[cfg\(test\)\])`. Comment-prefix lines like `// describe(` are NOT matched (anchored at line start, no leading comment chars).
+
+**Hook scope.** The gate is active **only** when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. For any other actor (main thread, other subagents, plain CLI) the hook exits 0 silently and lets the action through. This is a deliberate trust-boundary: the gate provides in-moment reminders for the tdd-manager subagent, not bulletproofing against malicious actors.
+
+---
+
+## 6. Environment Variables
+
+| Variable | Where set | Effect |
+|----------|-----------|--------|
+| `CLAUDE_AGENT_TYPE` | Claude-code harness sets it on subagent spawn. Eval wrapper [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) explicitly exports it for propagation. | Gate active only when value is `zensu:tdd-manager`. Anything else = pass-through. |
+| `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
+| `ZENSU_HOOK_LOG` | Eval wrapper sets per isolated test dir | Opt-in mirror of denial reasons. Hook writes 4 lines (`TDD-Phase-Gate`, `Current phase:`, `Expected:`, `permissionDecision=deny`) on denial. Empty file in production. |
+| `TDD_STATE_DIR` | Caller may override | State file location. Default `${CLAUDE_PROJECT_DIR}/.zensu/state`. |
+| `TDD_DISABLE_FLOCK` | Test fixture sets | Test-only. Forces the `mkdir`-fallback mutex path (exercises stale-lock recovery on Linux/CI where `flock` is present). |
+| `CLAUDE_PROJECT_DIR` | Claude-code harness | Root for relative state paths. |
+
+---
+
+## 7. Files Produced Per Task
+
+```mermaid
+flowchart LR
+    subgraph Inputs
+      Spec[Feature Spec]
+    end
+    subgraph Plan_Phase[Phase 2: Plan + Log]
+      Plan[.zensu/plans/<br/>ts_tdd-slug.md]
+      Log[.zensu/logs/<br/>ts_tdd-slug.log]
+    end
+    subgraph Runtime_State[Phase 4: Runtime State]
+      State[.zensu/state/<br/>tdd-phase-session.json]
+    end
+    subgraph Production[Phase 4: Production Artifacts]
+      Tests[test files]
+      Code[implementation files]
+    end
+    Spec --> Plan
+    Spec --> Log
+    Plan --> State
+    Log --> State
+    State --> Tests
+    State --> Code
+```
+
+The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
+
+---
+
+## 8. Discipline Patches — User-Visible Behaviors
+
+These are the guardrails that protect users from common TDD failure modes. Each is pinned by structure tests in [tests/structure/](../tests/structure/).
+
+| Patch | What it does | User benefit |
+|-------|--------------|--------------|
+| **1. Rationalization Counters** | Three patterns recognized as agent self-deception: "I'll just write a quick replacement", "I'll commit a placeholder fixture", "user said no questions so I'll guess". Each is labeled a LIE in the agent prompt. | Agent doesn't talk itself into corner-cutting. |
+| **2. Hard Ban on substitution** | Forbids substituting a missing required dependency with a hand-rolled equivalent without explicit user approval. | No silent `KNOWN-ISSUES.md` workarounds. No fake adapters. |
+| **3. Phase 1.5 Precondition Discovery** | Enumerates every external CLI/secret/endpoint/fixture named in the spec, verifies presence, and on missing → AskUserQuestion (install / substitute / skip). Overrides any prior "no questions" instruction. | Agent stops and asks BEFORE damaging your workspace with placeholder values. |
+| **4. Preconditions table in plan** | Plan template includes `## Preconditions` section listing every dependency + verification + user decision. | Auditable record of what was assumed present. |
+| **5. Per-step precondition gate** | If a step's IMPL plan references a precondition marked `skip`, the step gets `[!]` status and is bypassed. No partial test, no placeholder. | Skipped dependencies don't leak into half-broken implementations. |
+| **6. Phase 6 Precondition Drift Audit** | Greps the log for the contracted tool name versus the user-named substitute. Flags `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` when reality diverges from the plan. | Catches silent substitution after the fact. |
+| **7. Claude-code CLI promptfoo provider** | Wrapper [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) invokes local `claude` as promptfoo `exec:` provider. APFS `cp -cR` per-test isolation. | Eval suite runs without an API key, isolated per test, deterministic. |
+| **8. Hook event mirror** | Opt-in via `ZENSU_HOOK_LOG`. Hook writes denial reason lines into the log when the gate fires. | Eval assertions can verify gate behavior without reading hook stderr. |
+| **9. FSM state enrichment** | Wrapper appends `===== fsm state =====` block (jq-scraped from state file) to its output. | Eval assertions see the phase history. |
+| **B. CLAUDE_AGENT_TYPE export** | Wrapper explicitly `export`s the env var before exec'ing claude. | Hook fires in subagent context where the harness doesn't propagate it natively. |
+
+---
+
+## 9. Auto-Review Chain
+
+After Phase 6 completes, the `PostToolUse` hook on the `Agent` matcher ([hooks/hooks.json](../hooks/hooks.json)) automatically spawns `zensu:code-reviewer`.
+
+```mermaid
+flowchart LR
+    P6[Phase 6 complete] --> Hook[PostToolUse on Agent]
+    Hook --> Reviewer[zensu:code-reviewer<br/>5 perspectives:<br/>conventions, bugs,<br/>architecture, tests, security]
+    Reviewer --> Findings{Critical or<br/>Important?}
+    Findings -->|Yes| Fix[zensu:tdd-manager<br/>auto-fix]
+    Fix --> Reviewer
+    Findings -->|None or<br/>max rounds| Done([Final Report])
+
+    style Reviewer fill:#dbeafe,stroke:#1e40af,color:#1e293b
+    style Fix fill:#dbeafe,stroke:#1e40af,color:#1e293b
+```
+
+Reviewer returns findings in three tiers:
+
+- **Critical**: blocks ship. Auto-fix attempted.
+- **Important**: should land before merge. Auto-fix attempted.
+- **Suggestions**: nice-to-have. NOT auto-fixed.
+
+Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and stops — preventing infinite loops on intractable findings.
+
+---
+
+## 10. Three-Channel Logging Contract
+
+Every TDD-Manager task writes to three channels:
+
+| Channel | What | Lifetime | Format |
+|---------|------|----------|--------|
+| **Plan** | Design decisions, step table, Preconditions, audit checklist | Durable (git-committed) | Markdown |
+| **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Durable (git-committed) | Append-only timestamped text |
+| **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
+
+The agent appends to the log via:
+
+```bash
+printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> {log_file}
+```
+
+The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
+
+Phase transitions are atomic:
+
+```bash
+bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "{reason}"]
+```
+
+This writes a log line AND updates the state file in a single critical section (under `flock` or mkdir-mutex), preventing concurrent-write races between parallel agents.
+
+---
+
+## See Also
+
+- [agents/tdd-manager.md](../agents/tdd-manager.md) — canonical agent prompt
+- [hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh) — gate enforcement
+- [hooks/lib/zensu-tdd-phase.sh](../hooks/lib/zensu-tdd-phase.sh) — state file I/O
+- [hooks/lib/zensu-log.sh](../hooks/lib/zensu-log.sh) — log + phase helper CLI
+- [hooks/hooks.json](../hooks/hooks.json) — hook registrations
+- [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) — eval provider
+- [evals/tdd-manager-pretool/](../evals/tdd-manager-pretool/) — 13 promptfoo scenarios verifying the discipline
+- [tests/structure/](../tests/structure/) — 127 structure tests pinning the contract
+- [CLAUDE.md](../CLAUDE.md) — repo conventions (English-only, version bumps, PR workflow)
+- [CHANGELOG.md](../CHANGELOG.md) — release history

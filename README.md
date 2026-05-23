@@ -113,6 +113,8 @@ Unlike prompt-based TDD ("please write tests first"), the TDD manager **structur
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + build verification), real-time progress log at `.zensu/logs/`.
 
+**Full workflow reference:** [docs/tdd-manager-workflow.md](docs/tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-9, three-channel logging.
+
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 
 The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task` tools) that walks five perspectives in order:
