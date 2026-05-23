@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **Chain-end combined summary** — When the tdd-manager + code-reviewer auto-review chain reaches a stop branch (PASS / suggestions-only / max-rounds convergence), the main agent now produces a three-section summary block: `## Implementation Summary` (what tdd-manager built), `## Review Summary` (verdict + findings count), `## Auto-fix History` (per-round trace). Replaces the prior terse-stop behavior. Configurable via `~/.zensu/config.json` `hooks.combinedSummary` (default `true`; set `false` to restore terse stop). New helper `zensu_combined_summary_enabled` in `hooks/lib/zensu-config.sh` mirrors `zensu_autofix_include_suggestions` shape but inverts the default (only literal `false` disables). New eval `evals/config-gate/test-post-review-combined-summary.sh` (14 cases) covers all three chain-end branches with flag-on and flag-off, plus the regression case in `test-autofix-rounds-convergence.sh`.
+
 ## [0.3.17] - 2026-05-23
 
 ### Fixed
