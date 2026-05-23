@@ -61,6 +61,21 @@ zensu_autofix_include_suggestions() {
   [ "$val" = "1" ]
 }
 
+zensu_combined_summary_enabled() {
+  local config
+  config="$(_zensu_resolve_config)"
+  [ ! -f "$config" ] && return 0
+  command -v node >/dev/null 2>&1 || return 0
+  local val
+  val=$(node -e "
+    try {
+      const j = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
+      console.log(j.hooks && j.hooks.combinedSummary === false ? '0' : '1');
+    } catch (_) { console.log('1'); }
+  " "$config" 2>/dev/null)
+  [ "$val" = "1" ]
+}
+
 zensu_autofix_max_rounds() {
   local default=5
   local config

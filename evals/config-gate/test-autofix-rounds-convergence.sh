@@ -86,6 +86,13 @@ if [ -f "$COUNTER_FILE" ]; then
   fi
 fi
 
+case "$OUT" in
+  *"CHAIN-END SUMMARY"*)
+    check "max-rounds + combinedSummary default on: 'CHAIN-END SUMMARY' directive appended" PASS ;;
+  *)
+    check "max-rounds + combinedSummary default on: 'CHAIN-END SUMMARY' directive appended" FAIL ;;
+esac
+
 echo "----"
 echo "test-autofix-rounds-convergence: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

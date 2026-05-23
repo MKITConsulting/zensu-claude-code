@@ -249,6 +249,8 @@ Reviewer returns findings in three tiers:
 
 Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and stops — preventing infinite loops on intractable findings.
 
+**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a three-section summary block: `## Implementation Summary` (what tdd-manager built — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths), `## Review Summary` (final reviewer verdict, findings count by severity, files reviewed), and `## Auto-fix History` (per-round trace of findings routed to tdd-manager and what was fixed; skipped when zero rounds). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
+
 ---
 
 ## 10. Three-Channel Logging Contract

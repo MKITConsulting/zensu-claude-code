@@ -186,6 +186,76 @@ else
   check "max_rounds: missing config, fallback to 5 (got '$val')" FAIL
 fi
 
+# --- zensu_combined_summary_enabled ---
+
+rm -f "$MISSING_CFG"
+export ZENSU_CONFIG="$MISSING_CFG"
+if zensu_combined_summary_enabled; then
+  check "combined_summary: missing config returns 0 (enabled, default on)" PASS
+else
+  check "combined_summary: missing config returns 0 (enabled, default on)" FAIL
+fi
+
+export ZENSU_CONFIG="$TMP_CFG"
+cat > "$TMP_CFG" <<'EOF'
+{}
+EOF
+if zensu_combined_summary_enabled; then
+  check "combined_summary: empty {} returns 0 (enabled)" PASS
+else
+  check "combined_summary: empty {} returns 0 (enabled)" FAIL
+fi
+
+cat > "$TMP_CFG" <<'EOF'
+{"hooks": {"combinedSummary": true}}
+EOF
+if zensu_combined_summary_enabled; then
+  check "combined_summary: explicit true returns 0 (enabled)" PASS
+else
+  check "combined_summary: explicit true returns 0 (enabled)" FAIL
+fi
+
+cat > "$TMP_CFG" <<'EOF'
+{"hooks": {"combinedSummary": false}}
+EOF
+if zensu_combined_summary_enabled; then
+  check "combined_summary: explicit false returns non-zero (disabled)" FAIL
+else
+  check "combined_summary: explicit false returns non-zero (disabled)" PASS
+fi
+
+cat > "$TMP_CFG" <<'EOF'
+{"hooks": {"combinedSummary": "yes"}}
+EOF
+if zensu_combined_summary_enabled; then
+  check "combined_summary: non-bool 'yes' returns 0 (only literal false disables)" PASS
+else
+  check "combined_summary: non-bool 'yes' returns 0 (only literal false disables)" FAIL
+fi
+
+cat > "$TMP_CFG" <<'EOF'
+{"hooks": {"combinedSummary": false}}
+EOF
+ORIG_PATH="$PATH"
+HIDE_DIR="/tmp/zensu-no-node-$$"
+mkdir -p "$HIDE_DIR"
+for sysbin in /bin /usr/bin /sbin /usr/sbin; do
+  if [ -d "$sysbin" ]; then
+    for f in "$sysbin"/*; do
+      [ "$(basename "$f")" = "node" ] && continue
+      ln -sf "$f" "$HIDE_DIR/$(basename "$f")" 2>/dev/null
+    done
+  fi
+done
+export PATH="$HIDE_DIR"
+if zensu_combined_summary_enabled; then
+  check "combined_summary: node missing on PATH returns 0 (fail-open enabled)" PASS
+else
+  check "combined_summary: node missing on PATH returns 0 (fail-open enabled)" FAIL
+fi
+export PATH="$ORIG_PATH"
+rm -rf "$HIDE_DIR"
+
 echo "----"
 echo "test-helper-autofix-flags: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
