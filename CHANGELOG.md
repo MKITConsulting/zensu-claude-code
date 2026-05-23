@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.17] - 2026-05-23
+
+### Fixed
+- **Agent frontmatter: drop unused/unrecognized tools** — `agents/zensu-plm.md` and `agents/tdd-manager.md` declared `Grep` and `Glob` in their `tools:` lists, which the Claude Code agent inspector flagged with `⚠ Unrecognized: Grep, Glob` on every PR rendering. `zensu-plm` reduced from `Read, Grep, Glob, Bash, Write, Edit` to `Read, Bash` (the agent is a pure MCP orchestrator — `Grep`/`Glob`/`Write`/`Edit` were never invoked in the body). `tdd-manager` reduced from `Read, Edit, Write, Bash, Grep, Glob, TaskCreate, TaskUpdate, AskUserQuestion` to `Read, Edit, Write, Bash, TaskCreate, TaskUpdate, AskUserQuestion` (Phase 6 step 6 uses `grep -F -w` via Bash, not the `Grep` tool; no body step references the `Glob` tool). `agents/code-reviewer.md` intentionally unchanged — body lines 19–23 explicitly mandate the `Grep` and `Glob` tools and ban `Bash` grep/find, and `Grep`/`Glob` are documented Claude Code built-in tools so the inspector warning on that file is a UI false-positive.
+
 ## [0.3.16] - 2026-05-22
 
 ### Fixed
