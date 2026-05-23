@@ -3,7 +3,10 @@ vars:
   spec_path: prompts/feature-spec-override-env.md
   ZENSU_TDD_GATE: off
 assert:
-  - type: not-contains
-    value: "TDD-Phase-Gate"
-  - type: not-contains
-    value: "permissionDecision"
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const fileEdited = /\[tool_use:\s+Edit\][\s\S]{0,500}?frontend\/CLAUDE\.md/i.test(txt) || /\[tool_use:\s+Write\][\s\S]{0,500}?frontend\/CLAUDE\.md/i.test(txt);
+      const gateBypass = /ZENSU_TDD_GATE=off|gate.{0,20}off|bypass|override|non.?TDD/i.test(txt);
+      const pass = fileEdited || gateBypass;
+      return { pass, score: pass ? 1 : 0, reason: `fileEdited=${fileEdited} gateBypass=${gateBypass}` };

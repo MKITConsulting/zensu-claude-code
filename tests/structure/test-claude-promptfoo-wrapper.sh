@@ -329,6 +329,58 @@ else
 fi
 rm -rf "$STUB_P10S6_DIR" "$SRC_P10S6_DIR"
 
+STUB_P11S1_DIR="$(mktemp -d)"
+ENV_DUMP_P11S1="$(mktemp -t p11s1-env-dump-XXXXXX)"
+cat >"$STUB_P11S1_DIR/claude" <<STUB
+#!/bin/bash
+printenv > "$ENV_DUMP_P11S1"
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"env-dump-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P11S1_DIR/claude"
+SRC_P11S1_DIR="$(mktemp -d -t "p11s1-src-XXXXXX")"
+echo "src" >"$SRC_P11S1_DIR/marker.txt"
+OPT_P11S1="$(printf '{"config":{"agent":"zensu:tdd-manager","working_dir":"%s"}}' "$SRC_P11S1_DIR")"
+OUT_P11S1=$(env PATH="$STUB_P11S1_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P11S1" 2>/dev/null)
+RC_P11S1=$?
+ENV_DUMP_CONTENT="$(cat "$ENV_DUMP_P11S1" 2>/dev/null)"
+if [ "$RC_P11S1" = "0" ] \
+  && printf '%s\n' "$ENV_DUMP_CONTENT" | grep -q '^CLAUDE_AGENT_TYPE=zensu:tdd-manager$'; then
+  check "P11-S1 wrapper exports CLAUDE_AGENT_TYPE=zensu:tdd-manager when config.agent is set" PASS
+else
+  check "P11-S1 wrapper exports CLAUDE_AGENT_TYPE=zensu:tdd-manager (rc=$RC_P11S1, env_dump_grep=$(printf '%s\n' "$ENV_DUMP_CONTENT" | grep CLAUDE_AGENT_TYPE | head -1))" FAIL
+fi
+rm -rf "$STUB_P11S1_DIR" "$SRC_P11S1_DIR" "$ENV_DUMP_P11S1"
+
+STUB_P11S2_DIR="$(mktemp -d)"
+ENV_DUMP_P11S2="$(mktemp -t p11s2-env-dump-XXXXXX)"
+cat >"$STUB_P11S2_DIR/claude" <<STUB
+#!/bin/bash
+printenv > "$ENV_DUMP_P11S2"
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"no-agent-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P11S2_DIR/claude"
+SRC_P11S2_DIR="$(mktemp -d -t "p11s2-src-XXXXXX")"
+echo "src" >"$SRC_P11S2_DIR/marker.txt"
+OPT_P11S2="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P11S2_DIR")"
+OUT_P11S2=$(env -u CLAUDE_AGENT_TYPE PATH="$STUB_P11S2_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P11S2" 2>/dev/null)
+RC_P11S2=$?
+ENV_DUMP_CONTENT_2="$(cat "$ENV_DUMP_P11S2" 2>/dev/null)"
+if [ "$RC_P11S2" = "0" ] \
+  && ! printf '%s\n' "$ENV_DUMP_CONTENT_2" | grep -q '^CLAUDE_AGENT_TYPE='; then
+  check "P11-S2 wrapper does NOT export CLAUDE_AGENT_TYPE when config.agent is absent/empty" PASS
+else
+  check "P11-S2 wrapper does NOT export CLAUDE_AGENT_TYPE (rc=$RC_P11S2, env_dump_grep=$(printf '%s\n' "$ENV_DUMP_CONTENT_2" | grep CLAUDE_AGENT_TYPE | head -1))" FAIL
+fi
+rm -rf "$STUB_P11S2_DIR" "$SRC_P11S2_DIR" "$ENV_DUMP_P11S2"
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -19,6 +19,10 @@ WORKDIR="$(echo "$OPTIONS_JSON" | jq -r '.config.working_dir // "."' 2>/dev/null
 [ -z "$WORKDIR" ] && WORKDIR="."
 
 if [ -n "$AGENT" ]; then
+  export CLAUDE_AGENT_TYPE="$AGENT"
+fi
+
+if [ -n "$AGENT" ]; then
   FULL_PROMPT="Use the Agent tool with subagent_type='${AGENT}' and prompt: ${PROMPT}"
 else
   FULL_PROMPT="$PROMPT"
