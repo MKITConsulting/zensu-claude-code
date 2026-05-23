@@ -381,6 +381,93 @@ else
 fi
 rm -rf "$STUB_P11S2_DIR" "$SRC_P11S2_DIR" "$ENV_DUMP_P11S2"
 
+STUB_P12S1_DIR="$(mktemp -d)"
+cat >"$STUB_P12S1_DIR/claude" <<'STUB'
+#!/bin/bash
+mkdir -p "$PWD/.zensu/logs"
+cat >"$PWD/.zensu/logs/witness-sess1.log" <<'WIT'
+[10:00:01] BASH cmd="bash -c \"echo test-marker-001\"" exit=0 tail="test-marker-001\n"
+[10:00:02] BASH cmd="ls -la /tmp" exit=0 tail="total 0\n"
+WIT
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"witness-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P12S1_DIR/claude"
+SRC_P12S1_DIR="$(mktemp -d -t "p12s1-src-XXXXXX")"
+echo "src" >"$SRC_P12S1_DIR/marker.txt"
+OPT_P12S1="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S1_DIR")"
+OUT_P12S1=$(env PATH="$STUB_P12S1_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S1" 2>/dev/null)
+RC_P12S1=$?
+if [ "$RC_P12S1" = "0" ] \
+  && printf '%s\n' "$OUT_P12S1" | grep -q -- '===== witness: witness-sess1.log =====' \
+  && printf '%s\n' "$OUT_P12S1" | grep -qF 'cmd="bash -c \"echo test-marker-001\""' \
+  && printf '%s\n' "$OUT_P12S1" | grep -qF 'cmd="ls -la /tmp"'; then
+  check "P12-S1 wrapper appends '===== witness: ... =====' block when .zensu/logs/witness-*.log present" PASS
+else
+  check "P12-S1 wrapper appends witness block (rc=$RC_P12S1, out=${OUT_P12S1:0:500})" FAIL
+fi
+rm -rf "$STUB_P12S1_DIR" "$SRC_P12S1_DIR"
+
+STUB_P12S2_DIR="$(mktemp -d)"
+cat >"$STUB_P12S2_DIR/claude" <<'STUB'
+#!/bin/bash
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"no-witness-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P12S2_DIR/claude"
+SRC_P12S2_DIR="$(mktemp -d -t "p12s2-src-XXXXXX")"
+echo "src" >"$SRC_P12S2_DIR/marker.txt"
+OPT_P12S2="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S2_DIR")"
+OUT_P12S2=$(env PATH="$STUB_P12S2_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S2" 2>/dev/null)
+RC_P12S2=$?
+if [ "$RC_P12S2" = "0" ] \
+  && printf '%s\n' "$OUT_P12S2" | grep -qF 'no-witness-shim' \
+  && ! printf '%s\n' "$OUT_P12S2" | grep -q -- '===== witness:'; then
+  check "P12-S2 wrapper omits witness block when no witness log exists (clean output)" PASS
+else
+  check "P12-S2 wrapper omits witness block when no witness log (rc=$RC_P12S2, out=${OUT_P12S2:0:400})" FAIL
+fi
+rm -rf "$STUB_P12S2_DIR" "$SRC_P12S2_DIR"
+
+STUB_P12S3_DIR="$(mktemp -d)"
+cat >"$STUB_P12S3_DIR/claude" <<'STUB'
+#!/bin/bash
+mkdir -p "$PWD/.zensu/logs"
+cat >"$PWD/.zensu/logs/witness-multi.log" <<'WIT'
+[10:00:01] BASH cmd="cmd-one" exit=0 tail="one"
+[10:00:02] BASH cmd="cmd-two" exit=0 tail="two"
+[10:00:03] BASH cmd="cmd-three" exit=1 tail="three"
+[10:00:04] BASH cmd="cmd-four" exit=0 tail="four"
+WIT
+cat <<'STREAM'
+{"type":"assistant","message":{"content":[{"type":"text","text":"multi-shim"}]}}
+{"type":"result","result":"ok"}
+STREAM
+exit 0
+STUB
+chmod +x "$STUB_P12S3_DIR/claude"
+SRC_P12S3_DIR="$(mktemp -d -t "p12s3-src-XXXXXX")"
+echo "src" >"$SRC_P12S3_DIR/marker.txt"
+OPT_P12S3="$(printf '{"config":{"working_dir":"%s"}}' "$SRC_P12S3_DIR")"
+OUT_P12S3=$(env PATH="$STUB_P12S3_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P12S3" 2>/dev/null)
+RC_P12S3=$?
+if [ "$RC_P12S3" = "0" ] \
+  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-one"' \
+  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-two"' \
+  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-three"' \
+  && printf '%s\n' "$OUT_P12S3" | grep -qF 'cmd="cmd-four"'; then
+  check "P12-S3 multi-invocation witness log content all 4 lines appear in wrapper output" PASS
+else
+  check "P12-S3 multi-invocation witness content (rc=$RC_P12S3, out=${OUT_P12S3:0:500})" FAIL
+fi
+rm -rf "$STUB_P12S3_DIR" "$SRC_P12S3_DIR"
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

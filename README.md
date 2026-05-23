@@ -139,7 +139,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks (5)
+### Hooks (6)
 
 | Hook Script | Event | Config Flag | Description |
 |-------------|-------|-------------|-------------|
@@ -148,6 +148,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
 | `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5-perspective sequential review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
 | `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`; emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
+| `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
 
 ## Typical Workflows
 
@@ -286,6 +287,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 | `ZENSU_MCP_URL` | `https://mcp.zensu.dev` | MCP server base URL |
 | `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits inside a `zensu:tdd-manager` subagent context. Any other value (or unset) leaves the gate active per `CLAUDE_AGENT_TYPE` resolution. |
+| `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
 | `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:tdd-manager`). The TDD Phase Gate is active **only** when this is exactly `zensu:tdd-manager`; empty or any other value disables the gate (main-thread edits and other subagents are never gated). |
 | `CLAUDE_PLUGIN_ROOT` | — | Set by Claude Code for hook subprocesses. Resolves to the installed plugin root and is used by `hooks.json` to reference hook scripts. No user setup required. |
 | `CLAUDE_PLUGIN_DATA` | `$HOME/.zensu/state` | Set by Claude Code; the auto-fix loop persists per-session round counters at `${CLAUDE_PLUGIN_DATA}/rounds-<session_id>.json`. Falls back to `$HOME/.zensu/state` when unset. |

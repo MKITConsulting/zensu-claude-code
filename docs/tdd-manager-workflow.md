@@ -253,15 +253,16 @@ Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin
 
 ---
 
-## 10. Three-Channel Logging Contract
+## 10. Four-Channel Logging Contract
 
-Every TDD-Manager task writes to three channels:
+Every TDD-Manager task writes to four channels:
 
 | Channel | What | Lifetime | Format |
 |---------|------|----------|--------|
 | **Plan** | Design decisions, step table, Preconditions, audit checklist | Durable (git-committed) | Markdown |
 | **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Durable (git-committed) | Append-only timestamped text |
 | **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
+| **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail) | Ephemeral per session (per-test isolated dir under promptfoo) | Append-only timestamped text, JSON-escaped fields |
 
 The agent appends to the log via:
 
@@ -278,6 +279,20 @@ bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id}
 ```
 
 This writes a log line AND updates the state file in a single critical section (under `flock` or mkdir-mutex), preventing concurrent-write races between parallel agents.
+
+### Witness channel — anti-hallucination evidence
+
+The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook is scoped to `CLAUDE_AGENT_TYPE=zensu:tdd-manager` (no other actor records witness lines) and can be disabled with `ZENSU_TEST_WITNESS=off`.
+
+Each line has the form:
+
+```
+[HH:MM:SS] BASH cmd="<JSON-escaped command>" exit=<rc|?> tail="<JSON-escaped last 200 chars of stdout>"
+```
+
+The witness log is the source of truth for Phase 5/6 cross-checks. The agent prompt mandates that every test/lint/build run logged in Phase 5 (`CHECKPOINT — cmd="X" exit=N result="..."`) and Phase 6 (`AUDIT — cmd="X" exit=N result="..."`) use the literal command string sent to the Bash tool. Phase 6 step 1 then runs `grep -F -q 'cmd="X"' witness.log` for each claim; an unmatched claim becomes `EVIDENCE GAP — cmd="X" claimed but not in witness log` and marks Phase 6 NOT complete.
+
+Non-Bash test invocations (rare; e.g. an MCP test runner) use the `via=tool_name claim="..."` escape clause instead of `cmd="..."`. Audit treats `via=` as a known-limit (no cross-check possible) and surfaces it prominently in the final report.
 
 ---
 
