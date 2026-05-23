@@ -68,9 +68,9 @@ flowchart TD
     AutoFix --> Review
     Findings -->|None| Done([Final Report])
 
-    style P15 fill:#fef3c7,stroke:#92400e
-    style P6 fill:#fef3c7,stroke:#92400e
-    style Ask fill:#fee2e2,stroke:#991b1b
+    style P15 fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style P6 fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style Ask fill:#fee2e2,stroke:#991b1b,color:#1e293b
 ```
 
 **Phases at a glance:**
@@ -237,8 +237,8 @@ flowchart LR
     Fix --> Reviewer
     Findings -->|None or<br/>max rounds| Done([Final Report])
 
-    style Reviewer fill:#dbeafe,stroke:#1e40af
-    style Fix fill:#dbeafe,stroke:#1e40af
+    style Reviewer fill:#dbeafe,stroke:#1e40af,color:#1e293b
+    style Fix fill:#dbeafe,stroke:#1e40af,color:#1e293b
 ```
 
 Reviewer returns findings in three tiers:
