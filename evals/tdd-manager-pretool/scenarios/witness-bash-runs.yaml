@@ -1,0 +1,58 @@
+description: "Witness: tdd-manager runs 3 explicit bash commands and logs CHECKPOINT entries with cmd=\"...\" form. Witness hook records each command verbatim; wrapper appends the witness block. Verify both halves of the cross-check appear in output."
+vars:
+  spec_block: |
+    Run these 3 commands as part of a trivial setup verification, in this exact order, each via the Bash tool:
+      1. `bash -c "echo test-marker-001"`
+      2. `ls -la /tmp`
+      3. `date +%s`
+    For each command, log a CHECKPOINT entry in your final summary using the Phase 5 schema:
+      `S0 CHECKPOINT — cmd="<exact command>" exit=<rc> result="..."`
+    Do NOT fabricate any other test claims. Do NOT spawn subagents. Do NOT edit any source files. This is a trivial probe.
+    The final assistant message MUST include the exact `cmd="..."` strings for all 3 commands as logged.
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /=====\s+witness:/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "Witness block header (===== witness: ...) must appear in wrapper output"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasMarker = /cmd="bash -c \\"echo test-marker-001\\""/.test(txt)
+        || /test-marker-001/.test(txt);
+      return {
+        pass: hasMarker,
+        score: hasMarker ? 1 : 0,
+        reason: "Witness section should record the test-marker-001 echo invocation"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasLs = /cmd="ls -la \/tmp"/.test(txt) || /ls -la \/tmp/.test(txt);
+      return {
+        pass: hasLs,
+        score: hasLs ? 1 : 0,
+        reason: "Witness section should record the ls -la /tmp invocation"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasDate = /cmd="date \+%s"/.test(txt) || /date \+%s/.test(txt);
+      return {
+        pass: hasDate,
+        score: hasDate ? 1 : 0,
+        reason: "Witness section should record the date +%s invocation"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasCheckpoint = /CHECKPOINT[^\n]*cmd="/i.test(txt);
+      return {
+        pass: hasCheckpoint,
+        score: hasCheckpoint ? 1 : 0,
+        reason: "Agent must log at least one Phase 5 CHECKPOINT entry with cmd=\"...\" schema"
+      };

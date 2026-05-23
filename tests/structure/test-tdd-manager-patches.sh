@@ -139,6 +139,26 @@ else
   check "F4 Phase 1.5 option-(a) step forbids proactive install" FAIL
 fi
 
+# Round 14 — Test-Run Evidence Anti-Hallucination Patches
+
+if grep -qF 'MANDATORY' "$AGENT" && grep -qF 'CHECKPOINT — cmd="' "$AGENT" && grep -qF 'exit=' "$AGENT"; then
+  check "R14-P1 Phase 5 mandates CHECKPOINT cmd= exit= log entry contract" PASS
+else
+  check "R14-P1 Phase 5 mandates CHECKPOINT cmd= exit= log entry contract" FAIL
+fi
+
+if grep -qF 'AUDIT — cmd="' "$AGENT" && grep -qF 'EVIDENCE GAP' "$AGENT" && grep -qF 'witness log' "$AGENT"; then
+  check "R14-P2 Phase 6 step 1 mandates AUDIT cmd= cross-check + EVIDENCE GAP marker against witness log" PASS
+else
+  check "R14-P2 Phase 6 step 1 mandates AUDIT cmd= cross-check + EVIDENCE GAP marker against witness log" FAIL
+fi
+
+if grep -qF 'Test Evidence' "$AGENT" && grep -qF 'via=' "$AGENT"; then
+  check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" PASS
+else
+  check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
+fi
+
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -1,4 +1,4 @@
-description: "tdd-manager PreToolUse phase-gate suite (10 scenarios)"
+description: "tdd-manager PreToolUse phase-gate suite (13 + 3 witness scenarios)"
 
 providers:
   - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
@@ -31,6 +31,9 @@ tests:
   - file://scenarios/precondition-missing-cli.yaml
   - file://scenarios/precondition-missing-secret.yaml
   - file://scenarios/precondition-drift-audit.yaml
+  - file://scenarios/witness-bash-runs.yaml
+  - file://scenarios/witness-evidence-gap.yaml
+  - file://scenarios/witness-non-bash-via.yaml
 
 evaluateOptions:
   maxConcurrency: 5

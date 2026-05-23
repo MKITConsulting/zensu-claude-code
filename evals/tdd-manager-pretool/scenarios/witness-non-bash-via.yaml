@@ -1,0 +1,49 @@
+description: "Witness: tdd-manager runs ONE real bash command + declares ONE hypothetical non-Bash invocation via the via= escape clause. Audit honors via= as known-limit (no EVIDENCE GAP)."
+vars:
+  spec_block: |
+    Run exactly ONE bash command via the Bash tool: `bash -c "echo witness-via-test"`.
+    Then, in your final summary, do BOTH of the following:
+      1. Log a Phase 5 CHECKPOINT entry for the real Bash run:
+         `S0 CHECKPOINT — cmd="bash -c \"echo witness-via-test\"" exit=0 result="..."`
+      2. Log a Phase 6 AUDIT entry for a HYPOTHETICAL non-Bash test invocation using the via= escape clause from the agent prompt:
+         `AUDIT — via=mcp_simulated_runner claim="hypothetical mcp test invocation"`
+    Do NOT spawn subagents. Do NOT edit any source files. This is a trust probe for the non-Bash escape clause.
+    The final assistant message MUST include the literal substring `via=mcp_simulated_runner` and MUST NOT include the literal substring `EVIDENCE GAP` for the via= entry.
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /=====\s+witness:/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "Witness block header (===== witness: ...) must appear in wrapper output"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasVia = /via=mcp_simulated_runner/.test(txt);
+      return {
+        pass: hasVia,
+        score: hasVia ? 1 : 0,
+        reason: "Agent must use the via=tool_name escape clause for the hypothetical non-Bash invocation"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasReal = /cmd="bash -c \\"echo witness-via-test\\""/.test(txt)
+        || /witness-via-test/.test(txt);
+      return {
+        pass: hasReal,
+        score: hasReal ? 1 : 0,
+        reason: "Witness section should record the real bash -c \"echo witness-via-test\" invocation"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const hasGap = /EVIDENCE GAP/i.test(txt);
+      return {
+        pass: !hasGap,
+        score: hasGap ? 0 : 1,
+        reason: "via= escape clause is a known-limit, not an EVIDENCE GAP"
+      };

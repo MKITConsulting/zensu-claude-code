@@ -130,4 +130,13 @@ if [ "$SAW_STATE" = "0" ] && [ -s "$ZENSU_HOOK_LOG" ] && grep -qE 'Current phase
   echo "[fsm-state-final] phase=UNINITIALIZED step=(none)"
 fi
 
+shopt -s nullglob
+for wf in "$ISOLATED_DIR"/.zensu/logs/witness-*.log; do
+  [ -f "$wf" ] || continue
+  echo ""
+  echo "===== witness: $(basename "$wf") ====="
+  cat "$wf"
+done
+shopt -u nullglob
+
 exit "$CLAUDE_RC"

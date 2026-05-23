@@ -247,11 +247,21 @@ Implement directly (wiring, config, migrations). Log: `{step} WIRED`. Mark `[W]`
 
 After each logical phase: run full test suite + linter. Log result. Batch-update plan document statuses.
 
+**MANDATORY** — every test/lint/build invocation logged from Phase 5 onward MUST use the structured-evidence schema so the witness log can cross-check the claim. For each run, append a line of the form:
+
+```
+{step_or_phase} CHECKPOINT — cmd="<exact bash command>" exit=<rc> result="<short verdict>"
+```
+
+The `cmd="..."` field MUST be the literal command string that was sent to the Bash tool — the witness hook (`hooks/post-bash-witness.sh`) records the same string verbatim, and Phase 6 step 1 will grep for `cmd="<X>"` in the witness log to verify the claim. Mismatched or paraphrased commands break the cross-check. The witness log lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` and is written automatically by the PostToolUse Bash hook scoped to `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Set `ZENSU_TEST_WITNESS=off` only when the user has authorized disabling the witness layer for a legitimate non-eval session.
+
 ---
 
 ## Phase 6: Audit & Final Report
 
-1. Run full test suites + linters
+1. Run full test suites + linters.
+   - **MANDATORY structured-evidence form** — every test/lint/build run in Phase 6 MUST also be logged as `AUDIT — cmd="<exact bash command>" exit=<rc> result="<short verdict>"`. After all AUDIT entries are written, perform the **witness cross-check**: for each `cmd="X"` claim, run `grep -F -q 'cmd="X"' "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log"`. If no match, append `EVIDENCE GAP — cmd="X" claimed but not in witness log` to the run log AND mark Phase 6 NOT complete (surface prominently in the final report).
+   - **Non-Bash escape clause** — if a test was invoked via a non-Bash tool (rare; e.g. custom MCP test runner), declare in the AUDIT entry as `via=tool_name claim="..."` instead of `cmd="..."`. Audit treats `via=` entries as known-limitation (no witness cross-check possible) and surfaces them prominently in the final report.
 2. **Build Verification.** Tests can be green while the artifact is broken (compile errors only the build catches, env vars frozen at build-time, broken imports the test harness shims out). Verify the project actually builds.
    - Determine the build command by reading the project's metadata: `README.md`, `CLAUDE.md`, `package.json` (`scripts.build`), `pom.xml`, `Cargo.toml`, `Makefile`, `go.mod`, `pyproject.toml`, etc. Pick the canonical command the docs name as "build".
    - Decide applicability. If the TDD spec is genuinely non-buildable (docs-only migration, pure data fixture, etc.) AND the project metadata confirms no build step is wired, record `Build: – n/a` with the reason and proceed to step 3.
@@ -301,5 +311,5 @@ After each logical phase: run full test suite + linter. Log result. Batch-update
    d) If any drift: append `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` to the log, mark Phase 6 NOT complete, and surface prominently in the final report. Do NOT auto-fix — drift is a discipline violation, same severity as mtime discipline failure (existing step 5).
 7. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
-9. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, plan path.
+9. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `via=tool_name` when declared non-Bash escape), plan path.
 10. After producing the step 9 summary, return control. The plugin's PostToolUse:Agent hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
