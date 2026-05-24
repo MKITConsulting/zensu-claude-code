@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.22] - 2026-05-24
+
+### Added
+- **`/zensu:zensu-help` skill** — sixth skill, Q&A surface for Zensu PLM concepts and plugin internals. Embeds the stable glossary (Feature, ZEN-ID, Tier, Journey, Security Classification, Lifecycle Status) and three-layer architecture overview; routes volatile questions (hook flags, env vars, version, FSM details, MCP tools, CHANGELOG, data privacy) through `Read` of the canonical sources (`README.md`, `CHANGELOG.md`, `docs/tdd-manager-workflow.md`, `.claude-plugin/plugin.json`, `.mcp.json`) so answers cannot drift from reality. Read-only — does not execute workflows; points users at the appropriate action skill (`bootstrap` / `ghost-scan` / `implement` / `security-review` / `pulse`) when a workflow is requested.
+
 ## [0.3.21] - 2026-05-24
 
 ### Added
