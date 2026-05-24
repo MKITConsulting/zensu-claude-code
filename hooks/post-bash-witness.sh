@@ -21,15 +21,15 @@ FIELDS="$(printf '%s' "$INPUT" | node -e '
       const exit = (j.tool_response && typeof j.tool_response.exit_code === "number") ? String(j.tool_response.exit_code) : "?";
       const stdout = (j.tool_response && typeof j.tool_response.stdout === "string") ? j.tool_response.stdout : "";
       const tail = stdout.slice(-200);
-      const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "unknown";
+      const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "";
       process.stdout.write(JSON.stringify(cmd) + "\x01" + exit + "\x01" + JSON.stringify(tail) + "\x01" + session);
-    } catch (_) { process.stdout.write("\"\"\x01?\x01\"\"\x01unknown"); }
+    } catch (_) { process.stdout.write("\"\"\x01?\x01\"\"\x01"); }
   });
 ' 2>/dev/null)"
 
 IFS=$'\x01' read -r CMD_JSON EXIT_CODE TAIL_JSON SESSION <<<"$FIELDS"
-SANITIZED_SESSION="${SESSION//[^A-Za-z0-9_-]/_}"
-[ -z "$SANITIZED_SESSION" ] && SANITIZED_SESSION="unknown"
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 WITNESS_DIR="$PROJECT_DIR/.zensu/logs"

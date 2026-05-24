@@ -4,9 +4,16 @@ set -u
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
 tdd_state_file() {
-  local session_id="${1:-unknown}"
+  local session_id="${1:-}"
   local sanitized="${session_id//[^A-Za-z0-9_-]/_}"
-  [ -z "$sanitized" ] && sanitized="unknown"
+  if [ -z "$sanitized" ]; then
+    if [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/zensu-session.sh" ]; then
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      sanitized="fallback_$(zensu_session_key)"
+    else
+      sanitized="fallback_${PPID}"
+    fi
+  fi
   local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
   echo "${dir}/tdd-phase-${sanitized}.json"
 }

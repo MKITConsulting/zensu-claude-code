@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.14-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.20-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -139,15 +139,16 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 
-### Hooks (6)
+### Hooks (7)
 
 | Hook Script | Event | Config Flag | Description |
 |-------------|-------|-------------|-------------|
 | `session-start-pulse.sh` | SessionStart | `pulseSession` | Emits HEAD/branch banner and prepares pulse session context at startup |
+| `session-start-capture-sid.sh` | SessionStart | — | Captures the claude-code `session_id` from SessionStart stdin and persists it to `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/session-id-<PPID>_<proc_hash>.txt` so later PreToolUse/PostToolUse hooks that receive a payload without `session_id` can recover the real id via a 3-tier lookup (stdin → SessionStart cache → `claude_<PPID>_<proc_hash>` deterministic fallback). Prevents cross-session collision on a literal `unknown` bucket. Process-fingerprint key (`PPID + cksum of ps -o lstart=`) survives OS PID reuse. Skips silently when `session_id` absent, `node` missing, or cache dir unwritable. |
 | `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
 | `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5-perspective sequential review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
-| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`; emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
+| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.20, aligning with TDD-FSM state); emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
 | `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
 
 ## Typical Workflows
@@ -196,7 +197,7 @@ When Zensu MCP **is** connected, additional capabilities activate:
 
 ### Hook Opt-Out
 
-Zensu ships four automatic hooks that fire across the development lifecycle. Any single hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
+Zensu ships seven automatic hooks that fire across the development lifecycle (full enumeration in the [Hooks (7)](#hooks-7) table above). The configurable subset is listed below; `session-start-capture-sid.sh` (session-id cache) and `pre-edit-tdd-reminder.sh` (gated via the `ZENSU_TDD_GATE` env var rather than a config flag) are unconditional infrastructure. Any flagged hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
 
 | Flag | Hook Script | Effect when `false` (boolean flags) or value (numeric flags) |
 |------|-------------|---------------------|
@@ -204,7 +205,7 @@ Zensu ships four automatic hooks that fire across the development lifecycle. Any
 | `autoReview` | `post-tdd-review-delegate.sh` | Skips auto-spawn of `zensu:code-reviewer` after tdd-manager completes |
 | `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings back to tdd-manager |
 | `autoFixIncludeSuggestions` | `post-review-tdd-delegate.sh` | When `true`, the auto-fix hook routes ALL severities (Critical, Important, Suggestion, Minor, Nit) to `zensu:tdd-manager` instead of only Critical+Important. Default `false` preserves legacy routing. **Requires `autoFix:true`** — if `autoFix` is `false`, the entire auto-fix hook short-circuits and this flag has no effect. |
-| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `5`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json`. |
+| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `5`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.20). |
 | `combinedSummary` | `post-review-tdd-delegate.sh` | When `true` (default), the chain-end directive instructs the main agent to render a three-section summary (Implementation, Review, Auto-fix History) at every chain end (PASS, suggestions-only, max-rounds convergence). Set `false` to restore the terse stop behavior. Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults enabled to match user preference. |
 | `pulseSession` | `session-start-pulse.sh` | Skips the HEAD/branch banner at session start |
 
@@ -290,7 +291,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
 | `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:tdd-manager`). The TDD Phase Gate is active **only** when this is exactly `zensu:tdd-manager`; empty or any other value disables the gate (main-thread edits and other subagents are never gated). |
 | `CLAUDE_PLUGIN_ROOT` | — | Set by Claude Code for hook subprocesses. Resolves to the installed plugin root and is used by `hooks.json` to reference hook scripts. No user setup required. |
-| `CLAUDE_PLUGIN_DATA` | `$HOME/.zensu/state` | Set by Claude Code; the auto-fix loop persists per-session round counters at `${CLAUDE_PLUGIN_DATA}/rounds-<session_id>.json`. Falls back to `$HOME/.zensu/state` when unset. |
+| `CLAUDE_PLUGIN_DATA` | `${CLAUDE_PROJECT_DIR:-.}/.zensu/state` | Set by Claude Code; the auto-fix loop persists per-session round counters at `${CLAUDE_PLUGIN_DATA}/rounds-<session_id>.json`. Falls back to `${CLAUDE_PROJECT_DIR:-.}/.zensu/state` when unset, matching the TDD-FSM state convention. Set explicitly to override and route counters elsewhere (e.g. `$HOME/.zensu/state`). |
 
 ## Data & Privacy
 

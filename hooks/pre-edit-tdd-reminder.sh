@@ -42,7 +42,8 @@ if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
 fi
 
 SESSION_ID="$(parse_field session_id)"
-[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
 FILE_PATH="$(parse_field tool_input.file_path)"
 
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
