@@ -39,7 +39,7 @@ If you find yourself thinking any of the following, STOP and write the test firs
 
 ### Hard Bans
 
-NEVER implement before writing the RED test. NEVER skip the GREEN verification. NEVER modify a test after the implementation passed (that's rewriting history, not TDD). NEVER use `git stash`. NEVER edit files in `~/.claude/`. NEVER substitute a missing required dependency (CLI, secret, fixture, service endpoint) with a hand-rolled equivalent, mock, or placeholder unless the user has explicitly approved the substitution via Phase 1.5 escalation.
+NEVER implement before writing the RED test. NEVER skip the GREEN verification. NEVER modify a test after the implementation passed (that's rewriting history, not TDD). NEVER use `git stash`. NEVER edit files in `~/.claude/`. NEVER substitute a missing required dependency (CLI, secret, fixture, service endpoint) with a hand-rolled equivalent, mock, or placeholder unless the user has explicitly approved the substitution via Phase 1.5 escalation. NEVER search the filesystem to "discover" the zensu-log.sh helper — use the Phase 0 plugin-root resolution; if it fails, abort with the FATAL message.
 
 If a step seems too simple for TDD (i18n, config), fold it into a related testable step's IMPL. If spec says "not testable", find a seam (extract function, inject dependency). If truly non-testable (wiring, migration), mark as `[W]` integration — but the wiring must still be VERIFIED by running the caller's tests.
 
@@ -57,11 +57,11 @@ Merge steps ONLY if (a) their test files share setup code that should only be wr
 ## Principle 3: THREE-CHANNEL STATUS
 
 After completing each cycle phase (RED, IMPL, GREEN):
-1. **Log** — `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
+1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
 2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
 3. **Plan doc** — batch-update at checkpoints and final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
-   `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
+   `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
    Valid `<PHASE>` values: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`. The marker is written to `.zensu/state/tdd-phase-<session>.json`; the log-line format above is unchanged. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) blocks edits that don't match the FSM: in particular `IMPL` requires a prior `RED_FAIL` for the same step. Set `ZENSU_TDD_GATE=off` only for legitimate non-TDD edits explicitly authorized by the user.
 
 ### Per-Step Logging Contract (MANDATORY)
@@ -79,8 +79,9 @@ When you merge multiple Feature steps (per Principle 2), each constituent step k
 
 ## Phase 0: Pre-flight
 
-1. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire subagent session — the log helper consumes it for `relative` timestamp style.
-2. Create first task: `TaskCreate(subject: "TDD: Analyzing spec and creating plan", activeForm: "Analyzing specification")`. Mark `in_progress`.
+1. **Resolve plugin root once.** Run `bash -c 'cat "$HOME/.zensu/plugin-root"'` via the Bash tool and store its trimmed output (no trailing newline) as `{PLUGIN_ROOT}` for the entire session. Use `{PLUGIN_ROOT}` in ALL subsequent helper invocations: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh …`. If the command exits non-zero or the output is empty, abort with: `FATAL: plugin root unresolvable — run a fresh session to trigger SessionStart hook AND ensure hooks.pulseSession is not set to false in ~/.zensu/config.json`. **Never search the filesystem** for the helper; the SessionStart hook (`hooks/session-start-pulse.sh`) is the single source of truth for the plugin-root path.
+2. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire subagent session — the log helper consumes it for `relative` timestamp style.
+3. Create first task: `TaskCreate(subject: "TDD: Analyzing spec and creating plan", activeForm: "Analyzing specification")`. Mark `in_progress`.
 
 ---
 
@@ -172,7 +173,7 @@ MANDATORY — create BOTH files (plan + log are a pair):
 - [ ] Coverage report generated for changed files (threshold: {threshold})
 ```
 
-2. `mkdir -p .zensu/logs && printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+2. `mkdir -p .zensu/logs && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
 3. Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
 
 ---
@@ -195,30 +196,30 @@ Set `blockedBy` per dependency graph. Mark Phase 0 "Analyzing" task `completed`.
 
 ## Phase 4: Execute TDD Cycles
 
-Log `EXECUTION STARTED` before the first step. All log-append commands in this phase use the helper-prefix pattern from Principle 3: `printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> {log_file}`. Do not inline `[$(date +%H:%M:%S)]` — the user-configured `logging.timestampStyle` may suppress or reformat the prefix.
+Log `EXECUTION STARTED` before the first step. All log-append commands in this phase use the helper-prefix pattern from Principle 3: `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> {log_file}`. Do not inline `[$(date +%H:%M:%S)]` — the user-configured `logging.timestampStyle` may suppress or reformat the prefix.
 
 ### Feature Cycle (per step)
 
 **Self-check**: Previous step done? RED test defined? **Precondition check**: does this step's IMPL plan reference any tool/secret/fixture from the Phase 2 `## Preconditions` table that is marked `missing` with decision `skip`? If yes — mark the step `[!]` in the plan, log `{step_id} BLOCKED — precondition {name} missing`, TaskUpdate `cancelled` for all three sub-tasks, and proceed to the next step. Do NOT substitute, do NOT write a partial test, do NOT commit a placeholder.
 
 **A) RED** — Write the test file. The test MUST assert actual behavior (return values, state changes, side effects), not just function existence. Run it with the test command. Verify it FAILS.
-  - **Phase marker (before writing the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_WRITE --step {step_id}`
+  - **Phase marker (before writing the test)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase RED_WRITE --step {step_id}`
   - Write the test file.
-  - **Phase marker (before running the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_RUN --step {step_id}`
+  - **Phase marker (before running the test)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase RED_RUN --step {step_id}`
   - Run the test.
   - **Verify the failure reason**: Assertion mismatch or missing symbol = CORRECT RED. Syntax error, typo, missing import, wrong file path = WRONG RED → fix the test itself, don't proceed to IMPL.
-  - **Phase marker (on confirmed failure)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase RED_FAIL --step {step_id} --reason "{reason}"`
+  - **Phase marker (on confirmed failure)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase RED_FAIL --step {step_id} --reason "{reason}"`
   - Log: `{step} RED {test} — FAIL: {assertion or missing-symbol message}`. TaskUpdate [test] completed.
   - If test PASSES: delete it, rewrite to test something that requires the implementation. Log `REJECTED — test GREEN on creation`.
 
 **B) IMPL** — Write the MINIMUM implementation code. Real, complete code for the test to pass — no stubs, no skeletons, no premature generalization. Do NOT run tests yet. Do NOT refactor unrelated code.
-  - **Phase marker (before editing production files)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase IMPL --step {step_id}` — the PreToolUse gate verifies that step `{step_id}` is in `RED_FAIL` in history; a missing or mismatched marker blocks the Edit/Write call.
+  - **Phase marker (before editing production files)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase IMPL --step {step_id}` — the PreToolUse gate verifies that step `{step_id}` is in `RED_FAIL` in history; a missing or mismatched marker blocks the Edit/Write call.
   - Log: `{step} IMPL completed — files: {list}`. TaskUpdate [impl] completed.
 
 **C) GREEN** — Run the TARGET test (single file/name, not the full suite). Verify it PASSES.
-  - **Phase marker (before running the test)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase GREEN_RUN --step {step_id}`
+  - **Phase marker (before running the test)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase GREEN_RUN --step {step_id}`
   - Run the test.
-  - **Phase marker (on PASS)**: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase GREEN_PASS --step {step_id}`
+  - **Phase marker (on PASS)**: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase GREEN_PASS --step {step_id}`
   - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. TaskUpdate [verify] completed. Next step.
   - If FAIL: Log `RETRY({N}/3)`. Fix implementation (re-emit `--phase IMPL` per RETRY), back to C. Max 3 attempts → escalate to user.
   - Full suite runs only at Phase 5 checkpoints (not per step) — avoids 20× overhead on large codebases.
@@ -226,7 +227,7 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
 ### Refactoring Cycle
 
 **R1)** Run existing tests for affected code. Verify ALL PASS. If coverage insufficient, write a behavior-preserving test first.
-**R2)** Phase marker: `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase REFACTOR --step {step_id}`. Refactor the code. Do NOT change behavior.
+**R2)** Phase marker: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase REFACTOR --step {step_id}`. Refactor the code. Do NOT change behavior.
 **R3)** Run same tests. Verify ALL still PASS.
 Log: `{step} RF — tests GREEN before+after`. Mark `[RF]`.
 
@@ -311,5 +312,5 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
    d) If any drift: append `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` to the log, mark Phase 6 NOT complete, and surface prominently in the final report. Do NOT auto-fix — drift is a discipline violation, same severity as mtime discipline failure (existing step 5).
 7. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
-9. Output summary: results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `via=tool_name` when declared non-Bash escape), plan path.
+9. Output summary, in this order: (a) `## TL;DR` — exactly ONE sentence following the template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Cover root cause + fix mechanism + test verdict; no fluff, no hedging. Then (b) results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `via=tool_name` when declared non-Bash escape), plan path.
 10. After producing the step 9 summary, return control. The plugin's PostToolUse:Agent hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
