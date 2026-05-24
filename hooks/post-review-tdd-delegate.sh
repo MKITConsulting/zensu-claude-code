@@ -9,7 +9,7 @@
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
 #   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
 #
-# Counter state lives at ${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json.
+# Counter state lives at ${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json. claude-code's auto-set CLAUDE_PLUGIN_DATA is intentionally IGNORED (use CLAUDE_PLUGIN_DATA_OVERRIDE to relocate).
 
 set -u
 
@@ -49,9 +49,17 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
+if [ -L "$COUNTER_FILE" ]; then
+  echo "zensu post-review hook: refusing to write through symlink at $COUNTER_FILE — counter NOT updated" >&2
+  exit 0
+fi
+if [ -L "$STATE_DIR" ]; then
+  echo "zensu post-review hook: refusing to write under symlinked state dir $STATE_DIR — counter NOT updated" >&2
+  exit 0
+fi
 
 CURRENT="$(node -e '
   try {
