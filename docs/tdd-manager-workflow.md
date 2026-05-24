@@ -187,7 +187,7 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json]
+      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-PPID_prochash.txt]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -202,6 +202,8 @@ flowchart LR
 ```
 
 The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
+
+Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.20. The auto-fix rounds counter previously defaulted to `$HOME/.zensu/state` — that location remains supported via `CLAUDE_PLUGIN_DATA` env override, but is no longer the default. The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `claude_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
 
 ---
 

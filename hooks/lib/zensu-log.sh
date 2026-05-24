@@ -23,7 +23,8 @@ case "${1:-}" in
       exit 2
     fi
     if [ -z "$session_val" ]; then
-      session_val="${CLAUDE_SESSION_ID:-unknown}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"

@@ -9,7 +9,7 @@
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
 #   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
 #
-# Counter state lives at ${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}/rounds-<session_id>.json.
+# Counter state lives at ${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json.
 
 set -u
 
@@ -41,16 +41,15 @@ SESSION_ID="$(node -e '
     try {
       const j = JSON.parse(s);
       const id = j.session_id;
-      console.log((typeof id === "string" && id) ? id : "unknown");
-    } catch (_) { console.log("unknown"); }
+      console.log((typeof id === "string" && id) ? id : "");
+    } catch (_) { console.log(""); }
   });
 ' <<<"$INPUT" 2>/dev/null)"
-[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
-SESSION_ID="${SESSION_ID//[^A-Za-z0-9_-]/_}"
-[ -z "$SESSION_ID" ] && SESSION_ID="unknown"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
-STATE_DIR="${CLAUDE_PLUGIN_DATA:-$HOME/.zensu/state}"
+STATE_DIR="${CLAUDE_PLUGIN_DATA:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
 
