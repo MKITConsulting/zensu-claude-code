@@ -159,6 +159,66 @@ else
   check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
 fi
 
+# Round 15 — Plugin root resolution to eliminate helper-discovery improvisation
+
+if grep -qF '$HOME/.zensu/plugin-root' "$AGENT" && grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
+  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" PASS
+else
+  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" FAIL
+fi
+
+if grep -qF 'FATAL: plugin root unresolvable' "$AGENT"; then
+  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" PASS
+else
+  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" FAIL
+fi
+
+if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
+  check "R15-P3 Hard Bans section forbids filesystem search for zensu-log.sh" PASS
+else
+  check "R15-P3 Hard Bans section forbids filesystem search for zensu-log.sh" FAIL
+fi
+
+if grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT" | grep -qE '^0$'; then
+  check "R15-P4 zero literal '\$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' invocations remain in agent" PASS
+else
+  CNT=$(grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT")
+  check "R15-P4 expected 0 \$CLAUDE_PLUGIN_ROOT helper calls; found $CNT" FAIL
+fi
+
+PLACEHOLDER_COUNT=$(grep -cF '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT")
+if [ "$PLACEHOLDER_COUNT" -ge 10 ]; then
+  check "R15-P5 at least 10 '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' invocations present (got $PLACEHOLDER_COUNT)" PASS
+else
+  check "R15-P5 expected >=10 {PLUGIN_ROOT} helper invocations; got $PLACEHOLDER_COUNT" FAIL
+fi
+
+# Fix-round 2: finding 2 — Phase 0 Step 1 uses explicit Bash invocation, not ambiguous "Read"
+
+if grep -qF "bash -c 'cat \"\$HOME/.zensu/plugin-root\"'" "$AGENT"; then
+  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" PASS
+else
+  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" FAIL
+fi
+
+if grep -qF 'trimmed output' "$AGENT"; then
+  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" PASS
+else
+  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" FAIL
+fi
+
+if grep -qF 'hooks.pulseSession is not set to false' "$AGENT"; then
+  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" PASS
+else
+  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" FAIL
+fi
+
+if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; then
+  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" FAIL
+else
+  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
+fi
+
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

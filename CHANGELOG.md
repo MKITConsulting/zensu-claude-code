@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.21] - 2026-05-24
+
+### Added
+- **tdd-manager Phase 6 Step 9 `## TL;DR` headline** — final report now begins with a single-sentence executive summary following template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Users scan one line instead of seven sections.
+
+### Fixed
+- **tdd-manager no longer improvises filesystem-search for `zensu-log.sh`** — subagent Bash calls do not inherit `$CLAUDE_PLUGIN_ROOT` (claude-code only injects it into hook command strings), so invocations like `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh ...` expanded to `bash /hooks/lib/zensu-log.sh` and failed exit 127 before the script's own self-resolve at line 3 could run. The LLM then improvised by searching `~/.claude/plugins/cache/*/zensu/` via `find`/`ls`, triggering confusing permission prompts on user plugin-cache paths. Three-part fix: (1) `hooks/session-start-pulse.sh` persists `$CLAUDE_PLUGIN_ROOT` to `$HOME/.zensu/plugin-root` BEFORE the `pulseSession` gate (so users with `pulseSession=false` still get the file written, avoiding a FATAL-loop), with compare-before-write for idempotency; (2) `agents/tdd-manager.md` Phase 0 Step 1 reads the file via explicit `bash -c 'cat "$HOME/.zensu/plugin-root"'` (trimmed output) into a `{PLUGIN_ROOT}` placeholder used by all 12 helper invocations (migrated from `$CLAUDE_PLUGIN_ROOT/...`); (3) Hard Bans section gains a new prohibition against filesystem search for the helper, with extended FATAL message guiding users to verify `hooks.pulseSession` is not set to false. Backed by `tests/structure/test-session-start-plugin-root.sh` (10 cases: PR-S1..S5 structure + ordering, PR-F1..F4 functional incl. `pulseSession=false` via stubbed `zensu_hook_enabled`) and 9 new cases in `tests/structure/test-tdd-manager-patches.sh` (R15-P1..P5 migration + F1.a..d Phase 0 wording).
+
 ## [0.3.20] - 2026-05-24
 
 ### Changed
