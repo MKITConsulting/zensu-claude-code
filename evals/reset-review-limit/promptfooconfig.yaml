@@ -1,0 +1,25 @@
+description: "/zensu:reset-review-limit skill eval suite (2 scenarios: happy path + empty-dir idempotency)"
+
+providers:
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
+    config:
+      working_dir: ./test-projects/empty-host
+
+prompts:
+  - id: reset-review-limit-spec
+    label: "reset-review-limit invocation runner (universal: spec_block OR spec_path)"
+    raw: |
+      {% if spec_block %}{{spec_block}}{% else %}{% include spec_path %}{% endif %}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+
+tests:
+  - file://scenarios/reset-counter-happy.yaml
+  - file://scenarios/reset-counter-empty.yaml
+
+evaluateOptions:
+  maxConcurrency: 2
+  repeat: 3

@@ -98,7 +98,7 @@ if zensu_combined_summary_enabled; then
 fi
 
 if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
-  CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. Do NOT spawn zensu:tdd-manager again. Reply with remaining findings under '### Findings (max rounds reached, manual fix required)' and stop.${COMBINED_SUMMARY_DIRECTIVE}"
+  CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. Do NOT spawn zensu:tdd-manager again. Reply with remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the auto-fix chain in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}"
   node -e '
     const msg = process.argv[1];
     process.stdout.write(JSON.stringify({

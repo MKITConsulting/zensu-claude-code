@@ -57,6 +57,13 @@ case "$OUT" in
 esac
 
 case "$OUT" in
+  *"/zensu:reset-review-limit"*)
+    check "stdout surfaces /zensu:reset-review-limit escape hatch" PASS ;;
+  *)
+    check "stdout surfaces /zensu:reset-review-limit escape hatch (got: $OUT)" FAIL ;;
+esac
+
+case "$OUT" in
   *"Delegating critical+important findings"*)
     check "convergence output must NOT contain delegation status line" FAIL ;;
   *"Delegating all findings"*)

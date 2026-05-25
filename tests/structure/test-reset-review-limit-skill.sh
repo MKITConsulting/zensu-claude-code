@@ -1,0 +1,139 @@
+#!/bin/bash
+set -u
+
+PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+SKILL_DIR="$PLUGIN_DIR/skills/reset-review-limit"
+SKILL_MD="$SKILL_DIR/SKILL.md"
+PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
+MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
+README_MD="$PLUGIN_DIR/README.md"
+CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
+HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+EXPECTED_VERSION="0.3.24"
+
+PASS=0; FAIL=0
+check() {
+  local label="$1" cond="$2"
+  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
+  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+}
+
+if [ ! -f "$SKILL_MD" ]; then
+  check "R1 skills/reset-review-limit/SKILL.md exists" FAIL
+  echo "----"
+  echo "test-reset-review-limit-skill: $PASS PASS / $FAIL FAIL"
+  exit 1
+fi
+check "R1 skills/reset-review-limit/SKILL.md exists" PASS
+
+FIRST_LINE="$(head -1 "$SKILL_MD")"
+if [ "$FIRST_LINE" = "# /zensu:reset-review-limit" ]; then
+  check "R2 SKILL.md first line is exactly '# /zensu:reset-review-limit'" PASS
+else
+  check "R2 SKILL.md first line is '# /zensu:reset-review-limit' — got: $FIRST_LINE" FAIL
+fi
+
+REQUIRED_SECTIONS=(
+  "## When to Use"
+  "## Do NOT Use For"
+  "## Prerequisites"
+  "## What This Skill Does"
+  "## Phase 1: Locate"
+  "## Phase 2: Delete"
+  "## Phase 3: Verify"
+  "## Response Style"
+)
+for section in "${REQUIRED_SECTIONS[@]}"; do
+  if grep -qF "$section" "$SKILL_MD"; then
+    check "R3 SKILL.md contains section heading '$section'" PASS
+  else
+    check "R3 SKILL.md contains section heading '$section'" FAIL
+  fi
+done
+
+if grep -qF 'CLAUDE_PLUGIN_DATA_OVERRIDE' "$SKILL_MD"; then
+  check "R4 SKILL.md references CLAUDE_PLUGIN_DATA_OVERRIDE (matches hook precedence)" PASS
+else
+  check "R4 SKILL.md references CLAUDE_PLUGIN_DATA_OVERRIDE" FAIL
+fi
+
+if grep -qF 'rounds-*.json' "$SKILL_MD" || grep -qF 'rounds-' "$SKILL_MD"; then
+  check "R5 SKILL.md targets rounds-*.json files (matches hook output)" PASS
+else
+  check "R5 SKILL.md targets rounds-*.json files" FAIL
+fi
+
+if grep -qF 'symlink' "$SKILL_MD"; then
+  check "R6 SKILL.md documents symlink-traversal guard" PASS
+else
+  check "R6 SKILL.md documents symlink-traversal guard" FAIL
+fi
+
+if [ ! -f "$PLUGIN_JSON" ]; then
+  check "R7 .claude-plugin/plugin.json exists" FAIL
+  echo "----"
+  echo "test-reset-review-limit-skill: $PASS PASS / $FAIL FAIL"
+  exit 1
+fi
+check "R7 .claude-plugin/plugin.json exists" PASS
+
+if jq -e '.skills | index("./skills/reset-review-limit")' "$PLUGIN_JSON" >/dev/null 2>&1; then
+  check "R8 plugin.json skills[] contains './skills/reset-review-limit'" PASS
+else
+  check "R8 plugin.json skills[] contains './skills/reset-review-limit'" FAIL
+fi
+
+PLUGIN_VERSION="$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)"
+MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/null)"
+
+if [ "$PLUGIN_VERSION" = "$EXPECTED_VERSION" ]; then
+  check "R9 plugin.json .version == $EXPECTED_VERSION (got: $PLUGIN_VERSION)" PASS
+else
+  check "R9 plugin.json .version == $EXPECTED_VERSION (got: $PLUGIN_VERSION)" FAIL
+fi
+
+if [ "$MARKETPLACE_VERSION" = "$EXPECTED_VERSION" ]; then
+  check "R10 marketplace.json .plugins[0].version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" PASS
+else
+  check "R10 marketplace.json .plugins[0].version == $EXPECTED_VERSION (got: $MARKETPLACE_VERSION)" FAIL
+fi
+
+if [ "$PLUGIN_VERSION" = "$MARKETPLACE_VERSION" ] && [ -n "$PLUGIN_VERSION" ]; then
+  check "R11 plugin.json .version == marketplace.json .plugins[0].version (cross-file invariant)" PASS
+else
+  check "R11 plugin.json .version ($PLUGIN_VERSION) == marketplace.json .plugins[0].version ($MARKETPLACE_VERSION)" FAIL
+fi
+
+if [ -f "$README_MD" ] && grep -qF "version-${EXPECTED_VERSION}-green" "$README_MD"; then
+  check "R12 README.md version badge contains $EXPECTED_VERSION" PASS
+else
+  check "R12 README.md version badge contains $EXPECTED_VERSION" FAIL
+fi
+
+if [ -f "$README_MD" ] && grep -qF "### Skills (7)" "$README_MD"; then
+  check "R13 README.md Skills section heading reads '### Skills (7)'" PASS
+else
+  check "R13 README.md Skills section heading reads '### Skills (7)'" FAIL
+fi
+
+if [ -f "$README_MD" ] && grep -qF "/zensu:reset-review-limit" "$README_MD"; then
+  check "R14 README.md mentions /zensu:reset-review-limit in the skills table" PASS
+else
+  check "R14 README.md mentions /zensu:reset-review-limit in the skills table" FAIL
+fi
+
+if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-05-25" "$CHANGELOG_MD"; then
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-25' section" PASS
+else
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-25' section" FAIL
+fi
+
+if [ -f "$HOOK_SH" ] && grep -qF "/zensu:reset-review-limit" "$HOOK_SH"; then
+  check "R16 hooks/post-review-tdd-delegate.sh mentions /zensu:reset-review-limit in convergence directive" PASS
+else
+  check "R16 hooks/post-review-tdd-delegate.sh mentions /zensu:reset-review-limit in convergence directive" FAIL
+fi
+
+echo "----"
+echo "test-reset-review-limit-skill: $PASS PASS / $FAIL FAIL"
+[ "$FAIL" -eq 0 ]

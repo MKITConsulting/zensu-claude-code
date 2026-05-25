@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.24] - 2026-05-25
+
+### Added
+- **`/zensu:reset-review-limit` skill** — seventh skill, escape hatch for the auto-fix loop's `autoFixMaxRounds` budget. Deletes round-counter files at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-*.json` so the next `zensu:code-reviewer` completion restarts at round 1. Mirrors the hook's symlink-traversal guard (refuses to operate on symlinked state dirs or counter files). Idempotent: no-op message when the directory is empty or absent. Use when the auto-fix chain hits the convergence branch (`Auto-fix convergence: max N rounds reached`) and the user wants to continue the review/fix cycle within the same Claude Code session instead of starting a new session or hand-fixing the remaining findings.
+
+### Changed
+- **Convergence directive in `hooks/post-review-tdd-delegate.sh:101` now surfaces the `/zensu:reset-review-limit` escape hatch** — the `additionalContext` payload appended to the convergence reply tells the main agent to mention the new skill at the end of its reply so the user discovers the recovery path without consulting docs. Backward-compat: existing assertions in `evals/config-gate/test-autofix-rounds-convergence.sh` (substring `Auto-fix convergence: max 2 rounds reached` and `Do NOT spawn zensu:tdd-manager again`) remain green; new sub-assert pins the `/zensu:reset-review-limit` mention so the hint can never silently regress.
+- **`scripts/claude-promptfoo-wrapper.sh` honors `ZENSU_PLUGIN_DIR_OVERRIDE` env var** — when set to an existing directory, the wrapper appends `--plugin-dir "$ZENSU_PLUGIN_DIR_OVERRIDE"` to the `claude --print` invocation so promptfoo evals can exercise pending plugin changes from a worktree without uninstalling/reinstalling the user-scope plugin. Default unset → wrapper behavior unchanged (uses whichever zensu plugin version the user has installed via `claude plugin install`). The 25-assert `tests/structure/test-claude-promptfoo-wrapper.sh` suite remains green (DRY_RUN previews stay backward-compatible because the new `--plugin-dir` slot is only inserted when the env var resolves to an existing directory).
+
+### Tests
+- **`evals/reset-review-limit/` promptfoo eval suite** — new 2-scenario eval pinning the `/zensu:reset-review-limit` skill behavior end-to-end. `scenarios/reset-counter-happy.yaml` pre-seeds two counter files (`rounds-eval-sess-{A,B}.json`) via the Bash tool, invokes the skill, and asserts both `Removed:` literals + the `Reset complete: 2 counter file(s) deleted` summary + the post-reset listing is empty. `scenarios/reset-counter-empty.yaml` is the idempotency probe — invokes the skill against an empty `.zensu/state/`, asserts the no-op message (`No round counter files in` or `does not exist`) appears AND a must-not-match guard on `^Removed:` and `Reset complete:` so the skill never claims removal when nothing was removed. Uses the no-agent provider variant of `scripts/claude-promptfoo-wrapper.sh` (slash-command invocation, not subagent dispatch) — wrapper takes the slash command verbatim because `agent:` is omitted from the provider config. Real-claude gating: structure test `tests/structure/test-promptfoo-reset-review-limit.sh` (20 asserts: file presence, yaml shape, assertion-block presence, no-agent invariant, fixture-path correctness) runs without claude/promptfoo installed so plain CI stays green; live eval requires `npm install -g promptfoo` + `claude` CLI + zensu plugin loaded.
+
 ## [0.3.23] - 2026-05-24
 
 ### Fixed
