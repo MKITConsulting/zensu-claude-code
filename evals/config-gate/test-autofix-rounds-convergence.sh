@@ -24,12 +24,12 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA="$TMP_DIR/state"
-mkdir -p "$CLAUDE_PLUGIN_DATA"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-with-max-rounds.json"
 
 SID="sess-conv-001"
-COUNTER_FILE="$CLAUDE_PLUGIN_DATA/rounds-${SID}.json"
+COUNTER_FILE="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID}.json"
 printf '{"count":2,"ts":"2026-01-01T00:00:00Z"}\n' > "$COUNTER_FILE"
 
 STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"

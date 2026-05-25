@@ -24,7 +24,7 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA="$TMP_DIR/state"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-with-suggestions.json"
 
 STDIN='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-on-001"}'

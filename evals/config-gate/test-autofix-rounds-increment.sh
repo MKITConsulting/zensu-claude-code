@@ -24,7 +24,7 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA="$TMP_DIR/state"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 10}}
@@ -32,7 +32,7 @@ EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
 SID="sess-incr-xyz"
-COUNTER_FILE="$CLAUDE_PLUGIN_DATA/rounds-${SID}.json"
+COUNTER_FILE="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID}.json"
 STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"
 
 read_count() {
@@ -76,7 +76,7 @@ else
   check "counter file present after invocations" FAIL
 fi
 
-orphans="$(find "$CLAUDE_PLUGIN_DATA" -name 'rounds-'"${SID}"'.*' -not -name 'rounds-'"${SID}"'.json' 2>/dev/null | wc -l | tr -d ' ')"
+orphans="$(find "$CLAUDE_PLUGIN_DATA_OVERRIDE" -name 'rounds-'"${SID}"'.*' -not -name 'rounds-'"${SID}"'.json' 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$orphans" = "0" ]; then
   check "no orphaned mktemp artifacts left in state dir" PASS
 else

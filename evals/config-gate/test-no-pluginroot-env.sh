@@ -14,8 +14,8 @@ check() {
 unset CLAUDE_PLUGIN_ROOT
 unset ZENSU_CONFIG
 
-export CLAUDE_PLUGIN_DATA="$(mktemp -d)"
-cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA"; }
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
+cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
 trap cleanup EXIT
 
 OUT_POSTDD="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:tdd-manager","prompt":"x"}}' | "$PLUGIN_DIR/hooks/post-tdd-review-delegate.sh" 2>/dev/null)"

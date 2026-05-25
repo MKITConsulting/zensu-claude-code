@@ -9,6 +9,10 @@ vars:
       `S0 CHECKPOINT — cmd="<exact command>" exit=<rc> result="..."`
     Do NOT fabricate any other test claims. Do NOT spawn subagents. Do NOT edit any source files. This is a trivial probe.
     The final assistant message MUST include the exact `cmd="..."` strings for all 3 commands as logged.
+
+    **CRITICAL OUTPUT REQUIREMENTS** — your final assistant message MUST contain (literal substrings, not paraphrased):
+      - 3 distinct lines matching the form `S0 CHECKPOINT — cmd="<exact command>" exit=<N> result="..."` (one per command above)
+      - Do NOT describe the runs in narrative form. Use ONLY the schema line.
 assert:
   - type: javascript
     value: |

@@ -203,7 +203,7 @@ flowchart LR
 
 The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.20. The auto-fix rounds counter previously defaulted to `$HOME/.zensu/state` — that location remains supported via `CLAUDE_PLUGIN_DATA` env override, but is no longer the default. The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `claude_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
+Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `fallback_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
 
 ---
 
