@@ -52,7 +52,11 @@ trap cleanup EXIT INT TERM HUP
 
 CP_CMD=(cp "$CLONE_FLAGS" "$WORKDIR/." "$ISOLATED_DIR/")
 
-CMD=(claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions "$FULL_PROMPT")
+CMD=(claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions)
+if [ -n "${ZENSU_PLUGIN_DIR_OVERRIDE:-}" ] && [ -d "$ZENSU_PLUGIN_DIR_OVERRIDE" ]; then
+  CMD+=(--plugin-dir "$ZENSU_PLUGIN_DIR_OVERRIDE")
+fi
+CMD+=("$FULL_PROMPT")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "DRY_RUN: would isolate (cwd=$WORKDIR -> isolated=$ISOLATED_DIR):"

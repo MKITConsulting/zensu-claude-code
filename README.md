@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.23-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.24-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -129,7 +129,7 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (6)
+### Skills (7)
 
 | Skill | Description |
 |-------|-------------|
@@ -138,6 +138,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
+| `/zensu:reset-review-limit` | Reset the auto-fix loop round counter so the chain can resume past `autoFixMaxRounds` within the same session. Deletes `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-*.json`; idempotent and symlink-safe. |
 | `/zensu:zensu-help` | Q&A skill — explains Zensu PLM concepts and plugin internals (agents, hooks, FSM, config flags). Read-only; routes workflow requests to the appropriate action skill. |
 
 ### Hooks (7)
@@ -149,7 +150,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
 | `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5-perspective sequential review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
-| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 actually wins — claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by this hook so the round budget resets per worktree); emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
+| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 actually wins — claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by this hook so the round budget resets per worktree); emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached — the directive points the user at `/zensu:reset-review-limit` as the escape hatch to grant another budget without ending the session. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
 | `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
 
 ## Typical Workflows

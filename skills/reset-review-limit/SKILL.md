@@ -1,0 +1,79 @@
+# /zensu:reset-review-limit
+
+Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the same Claude Code session.
+
+## When to Use
+
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. Do NOT spawn zensu:tdd-manager again.` and you want to grant another budget so `zensu:code-reviewer` -> `zensu:tdd-manager` can resume.
+- You suspect the counter was inflated by a prior pre-0.3.23 run (when the counter was unintentionally user-global) and want a clean slate.
+- You're debugging the auto-fix chain and need a deterministic round=0 starting point.
+
+## Do NOT Use For
+
+- Bypassing review findings — fix them first, then reset only if budget is actually exhausted.
+- Disabling the auto-fix loop entirely — use `hooks.autoFix:false` in `~/.zensu/config.json` instead.
+- Raising the cap permanently — set `hooks.autoFixMaxRounds` in the config file.
+
+## Prerequisites
+
+None. No MCP connection, no API key, no network. Pure local file removal under the project worktree.
+
+## What This Skill Does
+
+Deletes round-counter JSON files written by `hooks/post-review-tdd-delegate.sh`. The counter path resolves to `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (since 0.3.23). Removing the file makes the hook's first read at the next `zensu:code-reviewer` completion return `0`, so `NEXT=1` and the chain resumes from round 1.
+
+## Phase 1: Locate
+
+Resolve the state directory in the same order the hook does:
+
+1. If `$CLAUDE_PLUGIN_DATA_OVERRIDE` is set -> that path.
+2. Otherwise `${CLAUDE_PROJECT_DIR:-.}/.zensu/state`.
+
+Refuse to operate when the state directory itself is a symlink (mirrors the hook's symlink-traversal guard at `hooks/post-review-tdd-delegate.sh:53`).
+
+## Phase 2: Delete
+
+Run the following bash recipe verbatim. It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches).
+
+```bash
+STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$(pwd)}/.zensu/state}"
+if [ -L "$STATE_DIR" ]; then
+  echo "Refusing: state dir is a symlink ($STATE_DIR)"; exit 1
+fi
+if [ ! -d "$STATE_DIR" ]; then
+  echo "Nothing to reset: $STATE_DIR does not exist"; exit 0
+fi
+shopt -s nullglob
+removed=0
+for f in "$STATE_DIR"/rounds-*.json; do
+  if [ -L "$f" ]; then
+    echo "Skip (symlink): $f"
+    continue
+  fi
+  rm -f -- "$f" && { echo "Removed: $f"; removed=$((removed+1)); }
+done
+if [ "$removed" -eq 0 ]; then
+  echo "No round counter files in $STATE_DIR"
+else
+  echo "Reset complete: $removed counter file(s) deleted in $STATE_DIR"
+fi
+```
+
+If `CLAUDE_PLUGIN_DATA_OVERRIDE` is NOT set, the recipe targets the project-local default. If the user reports a stale legacy counter (pre-0.3.23) at `~/.claude/plugins/data/zensu-inline/`, mention that the fix in 0.3.23 made that path inert — those files no longer affect the running hook, so manual cleanup is cosmetic and OPTIONAL.
+
+## Phase 3: Verify
+
+Confirm the next `zensu:code-reviewer` completion writes a fresh counter at `count:1`:
+
+```bash
+ls -la "$STATE_DIR"/rounds-*.json 2>/dev/null || echo "(empty, expected)"
+```
+
+After the next review round completes, re-run the same `ls` — a single new file with `{"count":1,"ts":"..."}` should appear.
+
+## Response Style
+
+- Echo the exact `STATE_DIR` value used, so the user sees which path was targeted.
+- List every removed file by absolute path; do not summarize as a count alone.
+- When the directory is empty, say so explicitly ("no counter files found") — do not silently succeed.
+- Never invent commands that touch files outside `$STATE_DIR/rounds-*.json`.
