@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.26-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.27-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 

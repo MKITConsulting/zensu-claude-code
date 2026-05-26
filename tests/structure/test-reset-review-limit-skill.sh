@@ -9,7 +9,7 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.3.26"
+EXPECTED_VERSION="0.3.27"
 
 PASS=0; FAIL=0
 check() {
@@ -183,6 +183,18 @@ if [ "$R23_DETECT" = 1 ] && [ "$R23_GATE" = 1 ]; then
   check "R23 SKILL.md Phase 2 contains .git-is-file detection idiom AND CLAUDE_PLUGIN_DATA_OVERRIDE override-gate" PASS
 else
   check "R23 SKILL.md Phase 2 contains .git-is-file detection + override-gate (detect=$R23_DETECT gate=$R23_GATE)" FAIL
+fi
+
+if grep -qF "## Strict Scope" "$SKILL_MD"; then
+  check "R24 SKILL.md contains '## Strict Scope' section heading" PASS
+else
+  check "R24 SKILL.md contains '## Strict Scope' section heading" FAIL
+fi
+
+if grep -qF 'NEVER** run `git worktree list`' "$SKILL_MD"; then
+  check "R25 SKILL.md Strict Scope section prohibits 'git worktree list' (primary cross-worktree traversal vector)" PASS
+else
+  check "R25 SKILL.md Strict Scope section prohibits 'git worktree list' (primary cross-worktree traversal vector)" FAIL
 fi
 
 echo "----"
