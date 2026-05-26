@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.26] - 2026-05-26
+
+### Added
+- **`/zensu:reset-review-limit` surfaces fresh-worktree context** — when the skill is invoked inside a git worktree that has no prior `rounds-*.json` counter file (e.g. after `mcp__ccd_session__spawn_task` branched the session, or after the user manually `git worktree add`-ed off the project), the no-op output now appends `Fresh git worktree detected — counter effectively at 0, no prior rounds recorded in this worktree.` so the user understands that the counter wasn't reset by anyone, it just never existed in this worktree. Detection uses the POSIX-portable `.git`-is-a-file idiom (primary repo has `.git/` directory; linked worktree has `.git` regular file containing `gitdir: <path>`). Gated so the hint fires only when `STATE_DIR` was resolved via the project-local default (`$CLAUDE_PROJECT_DIR`-based path) — when `CLAUDE_PLUGIN_DATA_OVERRIDE` redirects state elsewhere, the parent has no worktree semantics and detection is skipped. Inline addition to the existing two no-op branches in Phase 2; no behavior change in the populated-deletion path. Verified by `tests/structure/test-reset-review-limit-skill.sh` R22 (hint substring present) + R23 (detection idiom present + gated on override absence).
+
 ## [0.3.25] - 2026-05-25
 
 ### Fixed

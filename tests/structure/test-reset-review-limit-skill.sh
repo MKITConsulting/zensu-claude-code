@@ -9,7 +9,7 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.3.25"
+EXPECTED_VERSION="0.3.26"
 
 PASS=0; FAIL=0
 check() {
@@ -122,10 +122,10 @@ else
   check "R14 README.md mentions /zensu:reset-review-limit in the skills table" FAIL
 fi
 
-if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-05-25" "$CHANGELOG_MD"; then
-  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-25' section" PASS
+if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-05-26" "$CHANGELOG_MD"; then
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" PASS
 else
-  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-25' section" FAIL
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" FAIL
 fi
 
 if [ -f "$HOOK_SH" ] && grep -qF "/zensu:reset-review-limit" "$HOOK_SH"; then
@@ -167,6 +167,22 @@ if [ "$R21_IF" = 1 ] && [ "$R21_PRINTF" = 1 ] && [ "$R21_ELSE" = 1 ]; then
   check "R21 SKILL.md Phase 3 recipe uses if/else form (exit 0 in both branches; no && short-circuit)" PASS
 else
   check "R21 SKILL.md Phase 3 recipe uses if/else form (if=$R21_IF printf=$R21_PRINTF else=$R21_ELSE)" FAIL
+fi
+
+PHASE2_REGION="$(sed -n '/^## Phase 2: Delete/,/^## Phase 3: Verify/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE2_REGION" | grep -qF 'Fresh git worktree detected — counter effectively at 0'; then
+  check "R22 SKILL.md Phase 2 contains fresh-worktree hint substring" PASS
+else
+  check "R22 SKILL.md Phase 2 contains fresh-worktree hint substring" FAIL
+fi
+
+R23_DETECT=0; R23_GATE=0
+if printf '%s\n' "$PHASE2_REGION" | grep -qF '[ -f "$WORKTREE_ROOT/.git" ]'; then R23_DETECT=1; fi
+if printf '%s\n' "$PHASE2_REGION" | grep -qF 'if [ -z "${CLAUDE_PLUGIN_DATA_OVERRIDE:-}" ]'; then R23_GATE=1; fi
+if [ "$R23_DETECT" = 1 ] && [ "$R23_GATE" = 1 ]; then
+  check "R23 SKILL.md Phase 2 contains .git-is-file detection idiom AND CLAUDE_PLUGIN_DATA_OVERRIDE override-gate" PASS
+else
+  check "R23 SKILL.md Phase 2 contains .git-is-file detection + override-gate (detect=$R23_DETECT gate=$R23_GATE)" FAIL
 fi
 
 echo "----"

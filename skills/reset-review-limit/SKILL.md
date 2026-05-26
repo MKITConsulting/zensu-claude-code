@@ -31,17 +31,26 @@ Resolve the state directory in the same order the hook does:
 
 Refuse to operate when the state directory itself is a symlink (mirrors the hook's symlink-traversal guard at `hooks/post-review-tdd-delegate.sh:53`).
 
+When the state directory is empty or absent AND `STATE_DIR` was resolved via the project-local default (no `CLAUDE_PLUGIN_DATA_OVERRIDE`), the skill additionally probes for a fresh git worktree and surfaces a hint so the user understands whether the counter was reset or simply never existed in this worktree.
+
 ## Phase 2: Delete
 
-Run the following POSIX shell recipe verbatim (works in bash, zsh, dash, and sh — no `shopt`, no glob-in-for-loop). It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches).
+Run the following POSIX shell recipe verbatim (works in bash, zsh, dash, and sh — no `shopt`, no glob-in-for-loop). It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches). When `STATE_DIR` resolves via the project-local default and the worktree root contains a `.git` *file* — not directory — the skill appends a fresh-worktree hint to the no-op message; the populated-deletion path is unaffected and the override path skips the probe entirely (parent of `CLAUDE_PLUGIN_DATA_OVERRIDE` has no worktree semantics).
 
 ```sh
 STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$(pwd)}/.zensu/state}"
+WORKTREE_HINT=""
+if [ -z "${CLAUDE_PLUGIN_DATA_OVERRIDE:-}" ]; then
+  WORKTREE_ROOT="${STATE_DIR%/.zensu/state}"
+  if [ -f "$WORKTREE_ROOT/.git" ]; then
+    WORKTREE_HINT=" Fresh git worktree detected — counter effectively at 0, no prior rounds recorded in this worktree."
+  fi
+fi
 if [ -L "$STATE_DIR" ]; then
   echo "Refusing: state dir is a symlink ($STATE_DIR)"; exit 1
 fi
 if [ ! -d "$STATE_DIR" ]; then
-  echo "Nothing to reset: $STATE_DIR does not exist"; exit 0
+  echo "Nothing to reset: $STATE_DIR does not exist.${WORKTREE_HINT}"; exit 0
 fi
 removed=0
 for f in $(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null); do
@@ -52,7 +61,7 @@ for f in $(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null); do
   rm -f -- "$f" && { echo "Removed: $f"; removed=$((removed+1)); }
 done
 if [ "$removed" -eq 0 ]; then
-  echo "No round counter files in $STATE_DIR"
+  echo "No round counter files in $STATE_DIR.${WORKTREE_HINT}"
 else
   echo "Reset complete: $removed counter file(s) deleted in $STATE_DIR"
 fi
