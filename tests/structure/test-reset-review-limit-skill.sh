@@ -9,7 +9,7 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.3.27"
+EXPECTED_VERSION="0.3.28"
 
 PASS=0; FAIL=0
 check() {

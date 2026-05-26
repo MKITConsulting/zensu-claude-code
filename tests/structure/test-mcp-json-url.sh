@@ -22,11 +22,17 @@ check ".mcp.json exists at plugin root" PASS
 URL_LINE="$(grep -E '"url"[[:space:]]*:' "$MCP_JSON" || true)"
 URL_VALUE="$(printf '%s' "$URL_LINE" | sed -E 's/.*"url"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/')"
 
-EXPECTED='${ZENSU_MCP_URL:-https://mcp.zensu.dev}/mcp'
+EXPECTED='https://mcp.zensu.dev/mcp'
 if [ "$URL_VALUE" = "$EXPECTED" ]; then
-  check "mcpServers.zensu.url equals expected (no /v1) — got: $URL_VALUE" PASS
+  check "mcpServers.zensu.url equals expected (literal, no /v1, no env var) — got: $URL_VALUE" PASS
 else
-  check "mcpServers.zensu.url equals expected (no /v1) — got: $URL_VALUE, want: $EXPECTED" FAIL
+  check "mcpServers.zensu.url equals expected (literal, no /v1, no env var) — got: $URL_VALUE, want: $EXPECTED" FAIL
+fi
+
+if grep -qF 'ZENSU_MCP_URL' "$MCP_JSON"; then
+  check ".mcp.json contains no ZENSU_MCP_URL reference (env var removed)" FAIL
+else
+  check ".mcp.json contains no ZENSU_MCP_URL reference (env var removed)" PASS
 fi
 
 if grep -qF '/v1/mcp' "$MCP_JSON"; then
