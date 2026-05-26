@@ -20,11 +20,15 @@ else
   check "step 7 no longer suggestively asks user" PASS
 fi
 
-# Step 7 line MUST mention SubagentStop hook auto-invocation
-if grep -qE 'SubagentStop hook auto-invokes .@zensu:code-reviewer.' "$AGENT"; then
-  check "step 7 references SubagentStop auto-invocation" PASS
+# Step 7 line MUST mention a hook auto-invoking the code reviewer.
+# Hook type is intentionally not pinned — implementation has moved between
+# SubagentStop, PostToolUse:Agent, and PostToolUse:Task as architectural
+# constraints evolved; the invariant we care about is the auto-invocation,
+# not the specific hook event.
+if grep -qE 'hook auto-invokes .@zensu:code-reviewer.' "$AGENT"; then
+  check "step 7 references hook auto-invocation of code-reviewer" PASS
 else
-  check "step 7 references SubagentStop auto-invocation" FAIL
+  check "step 7 references hook auto-invocation of code-reviewer" FAIL
 fi
 
 # Step 7 must explicitly tell the agent NOT to ask the user
