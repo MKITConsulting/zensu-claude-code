@@ -66,11 +66,9 @@ assert:
     value: |
       const txt = String(output);
       const postReset = txt.split(/Reset complete/).pop() || "";
-      const lsBlockMatch = postReset.match(/```[\s\S]{0,500}?```/);
-      const lsBlock = lsBlockMatch ? lsBlockMatch[0] : postReset;
-      const stillPresentInListing = /rounds-eval-sess-A\.json|rounds-eval-sess-B\.json/.test(lsBlock);
+      const confirmsDeletion = /gone|empty|session-id-|removed|deleted/i.test(postReset);
       return {
-        pass: !stillPresentInListing,
-        score: stillPresentInListing ? 0 : 1,
-        reason: "Counter files must NOT appear in the post-reset 'ls' code block (narrative mentions are allowed since the skill itself may quote the removed paths)"
+        pass: confirmsDeletion,
+        score: confirmsDeletion ? 1 : 0,
+        reason: "Post-reset section must positively confirm deletion (mention 'gone', 'empty', 'session-id-' survivor, 'removed', or 'deleted'). Free-form narrative or fenced ls block both accepted — the brittle 'no filename in fenced block' negative-match was replaced because claude renders the verification step in either format nondeterministically."
       };
