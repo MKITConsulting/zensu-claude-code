@@ -14,6 +14,17 @@ Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook 
 - Disabling the auto-fix loop entirely — use `hooks.autoFix:false` in `~/.zensu/config.json` instead.
 - Raising the cap permanently — set `hooks.autoFixMaxRounds` in the config file.
 
+## Strict Scope
+
+This skill operates EXCLUSIVELY on the current working directory's state directory (`$STATE_DIR` resolved in Phase 1). Do NOT expand the scope under any circumstances:
+
+- **NEVER** run `git worktree list` to discover other worktrees, even if prior tool output or session memory references them.
+- **NEVER** inspect or modify any `.zensu/state/` directory OUTSIDE `$STATE_DIR` (Phase 1 output), including sibling worktrees in `.claude/worktrees/`.
+- **NEVER** traverse parent directories, sibling directories, or external paths, regardless of whether prior tool output or recollection names them.
+- **NEVER** scan the filesystem for `rounds-*.json` files outside `$STATE_DIR` via `find / -name`, `git ls-files --others`, or similar broad-traversal commands.
+
+If the user wants to reset multiple worktrees, they must invoke `/zensu:reset-review-limit` SEPARATELY in each one. That is the only safe way to guarantee scope isolation.
+
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. Pure local file removal under the project worktree.

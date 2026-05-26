@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.27] - 2026-05-26
+
+### Fixed
+- **`/zensu:reset-review-limit` scope leak — agent reached into sibling worktrees** — a user invoked the skill in worktree A and the LLM driving the skill autonomously expanded scope to clear rounds counters in sibling worktree `thirsty-elbakyan-eaba92` (where a prior 6-round TDD chain had run), even though the user only asked to reset the current worktree. Root cause: the SKILL.md prose described single-worktree mechanics but contained no explicit prohibition against cross-worktree traversal; the LLM extrapolated "be helpful, reset the related counter too" from prior tool-output recollection. The bash recipe was always scoped correctly to `$STATE_DIR` — the overreach happened entirely in LLM-driven follow-up actions OUTSIDE the recipe. Fix adds new `## Strict Scope` section between `## Do NOT Use For` and `## Prerequisites` with 4 bold-NEVER prohibitions (no `git worktree list`, no out-of-`$STATE_DIR` inspection/modification, no parent/sibling traversal, no broad `find` / `git ls-files` traversal) and a positive directive that multi-worktree resets must be invoked separately per worktree. Phrasing borrows from `agents/tdd-manager.md` "Hard Bans" idiom for consistency. Two new region-scoped asserts (R24 verifies the section heading exists; R25 pins the `NEVER run \`git worktree list\`` substring) lock the contract.
+
 ## [0.3.26] - 2026-05-26
 
 ### Added
