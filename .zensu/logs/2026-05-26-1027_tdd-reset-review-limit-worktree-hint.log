@@ -1,0 +1,27 @@
+[10:29:20] TDD STARTED — Surface fresh-worktree context in /zensu:reset-review-limit (0.3.25 -> 0.3.26) | steps: 10
+[10:29:36] EXECUTION STARTED
+[10:30:23] S1 RED R22 — FAIL: missing 'Fresh git worktree detected — counter effectively at 0' substring in Phase 2 region of skills/reset-review-limit/SKILL.md
+[10:30:23] S2 RED R23 — FAIL: missing detection idiom [ -f "$WORKTREE_ROOT/.git" ] AND override-gate if [ -z "${CLAUDE_PLUGIN_DATA_OVERRIDE:-}" ] in Phase 2 region (detect=0 gate=0)
+[10:31:00] S3 RED R9/R10/R12/R15 — FAIL: plugin.json=0.3.25 marketplace.json=0.3.25 README badge=0.3.25 CHANGELOG missing '## [0.3.26] - 2026-05-26' section
+[10:31:35] S4 RED S6/S7/S9/S12 — FAIL: plugin.json=0.3.25 marketplace.json=0.3.25 README badge=0.3.25 CHANGELOG missing '## [0.3.26] - 2026-05-26' section
+[10:32:52] S5 IMPL completed — files: skills/reset-review-limit/SKILL.md (Phase 2 recipe with WORKTREE_HINT derivation + override-gate + .git-is-file probe + appended hint on both no-op branches)
+[10:32:52] S6 IMPL completed — files: skills/reset-review-limit/SKILL.md (Phase 1 narrative extended + Phase 2 preamble adds pedagogical sentence on detection trigger)
+[10:32:52] S7 WIRED — .claude-plugin/plugin.json version 0.3.25 -> 0.3.26
+[10:32:52] S8 WIRED — .claude-plugin/marketplace.json plugins[0].version 0.3.25 -> 0.3.26
+[10:32:52] S9 WIRED — README.md version badge 0.3.25 -> 0.3.26
+[10:32:52] S10 WIRED — CHANGELOG.md inserted '## [0.3.26] - 2026-05-26' section with Added entry documenting worktree-hint
+[10:33:22] S1 GREEN — PASS (1 attempts, 30 tests; R22 substring 'Fresh git worktree detected' present in Phase 2)
+[10:33:22] S2 GREEN — PASS (1 attempts, 30 tests; R23 detection idiom + override-gate both present in Phase 2)
+[10:33:22] S3 GREEN — PASS (1 attempts, 30 tests; R9/R10/R12/R15 now satisfied by version bumps + CHANGELOG entry)
+[10:33:22] S5 GREEN — PASS (1 attempts, 30 tests; R22+R23+R17+R18+R19+R20+R21 all green)
+[10:33:22] S6 GREEN — PASS (1 attempts, 30 tests; R3 sections + R19 POSIX preamble both still green after narrative extension)
+[10:33:39] S4 GREEN — PASS (1 attempts, 17 tests; S6/S7/S9/S12 now satisfied by version bumps + CHANGELOG entry)
+[10:34:08] PHASE5 CHECKPOINT — cmd="cd /Users/marcelkarras/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/reset-review-limit-worktree-hint && for t in tests/structure/*.sh; do bash $t >/tmp/structure-out.txt 2>&1; rc=$?; tail -1 /tmp/structure-out.txt; if [ $rc -ne 0 ]; then echo FAIL: $t; fi; done" exit=0 result="all 17 structure-test suites PASS (273 asserts, 0 FAIL)"
+[10:34:19] AUDIT — cmd="bash tests/structure/test-reset-review-limit-skill.sh" exit=0 result="30 PASS / 0 FAIL"
+[10:34:19] AUDIT — cmd="bash tests/structure/test-zensu-help-skill.sh" exit=0 result="17 PASS / 0 FAIL"
+[10:34:53] WITNESS LOG ABSENT — CLAUDE_AGENT_TYPE not set in this run; witness hook scope-guarded out. AUDIT exit codes captured directly from agent's Bash tool calls. Known limitation, not EVIDENCE GAP.
+[10:35:26] AUDIT — cmd="jq -e . .claude-plugin/plugin.json && jq -e . .claude-plugin/marketplace.json" exit=0 result="both JSON manifests valid"
+[10:35:26] AUDIT — cmd="bash -n tests/structure/test-reset-review-limit-skill.sh && bash -n tests/structure/test-zensu-help-skill.sh" exit=0 result="shell syntax OK"
+[10:35:59] MTIME AUDIT — 0/6 Feature steps test-after; all test mtimes precede their IMPL/WIRED mtimes (test=1779784237 < impl_min=1779784337)
+[10:37:11] AUDIT — cmd="bash /tmp/zensu-recipe.sh under 5 scenarios x {bash,zsh}" exit=0 result="all 10 invocations match spec: scenarios 1+2 emit hint, scenarios 3+4+5 emit no hint"
+[10:38:25] TDD COMPLETE — 6/6 Feature steps GREEN | Integration: 4 WIRED | Build: – n/a (Claude plugin, no compile step; JSON + shell syntax validated) | Coverage: SKIPPED (no coverage tooling for shell scripts) | smoke test: 10/10 invocations match spec across {scenarios 1-5} x {bash, zsh} | mtime discipline: 0 violations | precondition drift: none
