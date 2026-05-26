@@ -9,7 +9,7 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.3.24"
+EXPECTED_VERSION="0.3.25"
 
 PASS=0; FAIL=0
 check() {
@@ -132,6 +132,41 @@ if [ -f "$HOOK_SH" ] && grep -qF "/zensu:reset-review-limit" "$HOOK_SH"; then
   check "R16 hooks/post-review-tdd-delegate.sh mentions /zensu:reset-review-limit in convergence directive" PASS
 else
   check "R16 hooks/post-review-tdd-delegate.sh mentions /zensu:reset-review-limit in convergence directive" FAIL
+fi
+
+if grep -qF 'shopt -s nullglob' "$SKILL_MD"; then
+  check "R17 SKILL.md does NOT contain 'shopt -s nullglob' (bash-only builtin broken under zsh)" FAIL
+else
+  check "R17 SKILL.md does NOT contain 'shopt -s nullglob' (bash-only builtin broken under zsh)" PASS
+fi
+
+if grep -qF "find \"\$STATE_DIR\" -maxdepth 1 -name 'rounds-*.json'" "$SKILL_MD"; then
+  check "R18 SKILL.md contains POSIX-portable find invocation for rounds-*.json" PASS
+else
+  check "R18 SKILL.md contains POSIX-portable find invocation for rounds-*.json" FAIL
+fi
+
+if grep -qE 'POSIX|bash, zsh|bash/zsh/dash' "$SKILL_MD"; then
+  check "R19 SKILL.md Phase 2 preamble declares POSIX/bash-zsh-dash portability" PASS
+else
+  check "R19 SKILL.md Phase 2 preamble declares POSIX/bash-zsh-dash portability" FAIL
+fi
+
+PHASE3_REGION="$(sed -n '/^## Phase 3: Verify/,/^## Response Style/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE3_REGION" | grep -qF "find \"\$STATE_DIR\" -maxdepth 1 -name 'rounds-*.json'"; then
+  check "R20 SKILL.md Phase 3 verify recipe uses POSIX-portable find (mirrors R18 for Phase 2)" PASS
+else
+  check "R20 SKILL.md Phase 3 verify recipe uses POSIX-portable find (mirrors R18 for Phase 2)" FAIL
+fi
+
+R21_IF=0; R21_PRINTF=0; R21_ELSE=0
+if printf '%s\n' "$PHASE3_REGION" | grep -qF 'if [ -n "$out" ]'; then R21_IF=1; fi
+if printf '%s\n' "$PHASE3_REGION" | grep -qF "printf '%s\\n' \"\$out\""; then R21_PRINTF=1; fi
+if printf '%s\n' "$PHASE3_REGION" | grep -qF 'else echo "(empty, expected)"'; then R21_ELSE=1; fi
+if [ "$R21_IF" = 1 ] && [ "$R21_PRINTF" = 1 ] && [ "$R21_ELSE" = 1 ]; then
+  check "R21 SKILL.md Phase 3 recipe uses if/else form (exit 0 in both branches; no && short-circuit)" PASS
+else
+  check "R21 SKILL.md Phase 3 recipe uses if/else form (if=$R21_IF printf=$R21_PRINTF else=$R21_ELSE)" FAIL
 fi
 
 echo "----"

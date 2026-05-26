@@ -33,9 +33,9 @@ Refuse to operate when the state directory itself is a symlink (mirrors the hook
 
 ## Phase 2: Delete
 
-Run the following bash recipe verbatim. It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches).
+Run the following POSIX shell recipe verbatim (works in bash, zsh, dash, and sh — no `shopt`, no glob-in-for-loop). It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches).
 
-```bash
+```sh
 STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$(pwd)}/.zensu/state}"
 if [ -L "$STATE_DIR" ]; then
   echo "Refusing: state dir is a symlink ($STATE_DIR)"; exit 1
@@ -43,9 +43,8 @@ fi
 if [ ! -d "$STATE_DIR" ]; then
   echo "Nothing to reset: $STATE_DIR does not exist"; exit 0
 fi
-shopt -s nullglob
 removed=0
-for f in "$STATE_DIR"/rounds-*.json; do
+for f in $(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null); do
   if [ -L "$f" ]; then
     echo "Skip (symlink): $f"
     continue
@@ -63,13 +62,14 @@ If `CLAUDE_PLUGIN_DATA_OVERRIDE` is NOT set, the recipe targets the project-loca
 
 ## Phase 3: Verify
 
-Confirm the next `zensu:code-reviewer` completion writes a fresh counter at `count:1`:
+Confirm the next `zensu:code-reviewer` completion writes a fresh counter at `count:1`. The recipe below uses the same POSIX-portable `find` pattern as Phase 2 so zsh's strict-glob `nomatch` never fires (the bare `"$STATE_DIR"/rounds-*.json` glob would emit a noisy `zsh:1: no matches found` to stderr at expansion time, before `ls` could be invoked, contradicting the "exits 0 with a clear message when nothing matches" promise). The if/else form is deliberate: the obvious shortcut `[ -z "$(find …)" ] && echo "(empty, expected)"` leaves `[` as the last evaluated command when files are present, and `[` exits 1, so the whole recipe would return 1 in the populated branch — a silent contract violation. The if/else form runs `find` once, captures the output in `$out`, and exits 0 in BOTH branches:
 
-```bash
-ls -la "$STATE_DIR"/rounds-*.json 2>/dev/null || echo "(empty, expected)"
+```sh
+out="$(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null)"
+if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "(empty, expected)"; fi
 ```
 
-After the next review round completes, re-run the same `ls` — a single new file with `{"count":1,"ts":"..."}` should appear.
+After the next review round completes, re-run the same recipe — a single new file with `{"count":1,"ts":"..."}` should appear in the printed output and the `(empty, expected)` branch will be skipped.
 
 ## Response Style
 
