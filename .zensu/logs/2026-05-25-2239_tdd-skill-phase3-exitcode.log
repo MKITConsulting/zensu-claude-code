@@ -1,0 +1,16 @@
+[22:40:21] TDD STARTED — Phase 3 Verify recipe exit-code regression fix | steps: 3
+[22:40:58] S1 RED R21 — FAIL: assertion mismatch (if=0 printf=0 else=0 — Phase 3 still has broken && short-circuit form)
+[22:41:23] S1+S2 IMPL completed — files: tests/structure/test-reset-review-limit-skill.sh, skills/reset-review-limit/SKILL.md
+[22:41:41] S1 GREEN — PASS (1 attempts, 28 tests)
+[22:41:41] S2 RED R21 — FAIL: assertion mismatch (Phase 3 region missing if/else triple)
+[22:41:41] S2 GREEN — PASS (1 attempts, 28 tests)
+[22:42:02] S3 WIRED — CHANGELOG 0.3.25 Fixed bullet extended in place with exit-code-preservation contract and R21 mention
+[22:42:34] Phase5 CHECKPOINT — cmd="bash tests/structure/test-reset-review-limit-skill.sh" exit=0 result="28 PASS / 0 FAIL"
+[22:42:34] Phase5 CHECKPOINT — cmd="bash tests/structure/test-promptfoo-reset-review-limit.sh" exit=0 result="20 PASS / 0 FAIL"
+[22:42:34] Phase5 CHECKPOINT — cmd="bash tests/structure/test-zensu-help-skill.sh" exit=0 result="17 PASS / 0 FAIL"
+[22:42:34] Phase5 CHECKPOINT — recipe extracted from SKILL.md and run under bash+empty / bash+populated / zsh+empty / zsh+populated — all four exit 0
+[22:43:36] AUDIT — cmd="bash tests/structure/test-reset-review-limit-skill.sh" exit=0 result="28 PASS / 0 FAIL"
+[22:43:36] AUDIT — cmd="bash tests/structure/test-promptfoo-reset-review-limit.sh" exit=0 result="20 PASS / 0 FAIL"
+[22:43:36] AUDIT — cmd="bash tests/structure/test-zensu-help-skill.sh" exit=0 result="17 PASS / 0 FAIL"
+[22:43:37] TDD COMPLETE — 2/2 GREEN | Integration: 1 WIRED | Build: – n/a | Coverage: SKIPPED
+[22:44:05] EVIDENCE GAP — witness-<session>.log not present for this subagent session (witness hook did not fire; ZENSU_TEST_WITNESS or CLAUDE_AGENT_TYPE scope condition not met). AUDIT cmds were genuinely re-executed during Phase 6 (see Bash tool transcripts), but cannot be programmatically cross-checked here.

@@ -12,7 +12,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 
 ## Do NOT Use For
 
-- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:security-review`, `/zensu:pulse`
+- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`
 - Modifying Zensu data — this skill is read-only Q&A
 
 ## Prerequisites
@@ -57,6 +57,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook scripts (what each does, when it fires) | `README.md` § Hooks (7) table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
+| Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
 | Workflow step order (new product / existing codebase / quick feature) | `README.md` § Typical Workflows |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |

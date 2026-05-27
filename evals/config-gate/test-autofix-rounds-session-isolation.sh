@@ -23,7 +23,7 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA="$TMP_DIR/state"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5}}
@@ -36,8 +36,8 @@ STDIN_B='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer"
 printf '%s' "$STDIN_A" | "$SCRIPT" >/dev/null 2>&1
 printf '%s' "$STDIN_B" | "$SCRIPT" >/dev/null 2>&1
 
-COUNTER_A="$CLAUDE_PLUGIN_DATA/rounds-sess-A.json"
-COUNTER_B="$CLAUDE_PLUGIN_DATA/rounds-sess-B.json"
+COUNTER_A="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-sess-A.json"
+COUNTER_B="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-sess-B.json"
 
 if [ -f "$COUNTER_A" ] && [ -f "$COUNTER_B" ]; then
   check "two distinct counter files exist after two sessions" PASS

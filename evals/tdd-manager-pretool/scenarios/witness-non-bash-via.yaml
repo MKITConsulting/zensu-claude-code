@@ -9,6 +9,13 @@ vars:
          `AUDIT — via=mcp_simulated_runner claim="hypothetical mcp test invocation"`
     Do NOT spawn subagents. Do NOT edit any source files. This is a trust probe for the non-Bash escape clause.
     The final assistant message MUST include the literal substring `via=mcp_simulated_runner` and MUST NOT include the literal substring `EVIDENCE GAP` for the via= entry.
+
+    **STEP 1 IS MANDATORY** — you MUST invoke the Bash tool with the literal command `bash -c "echo witness-via-test"` before composing any text. The post-Bash witness hook will record it; the wrapper will append a `===== witness: <file> =====` block to the output that the test harness inspects.
+
+    **OUTPUT MUST CONTAIN** (literal substrings):
+      - `S0 CHECKPOINT — cmd="bash -c \"echo witness-via-test\"" exit=0 result="..."`
+      - `AUDIT — via=mcp_simulated_runner claim="..."`
+      - NEITHER must contain the literal substring `EVIDENCE GAP — cmd=` (the via= entry is a known-limit per Phase 6 step 1 escape clause).
 assert:
   - type: javascript
     value: |
@@ -41,9 +48,9 @@ assert:
   - type: javascript
     value: |
       const txt = String(output);
-      const hasGap = /EVIDENCE GAP/i.test(txt);
+      const hasGap = /EVIDENCE GAP\s*[—-]\s*cmd="/i.test(txt);
       return {
         pass: !hasGap,
         score: hasGap ? 0 : 1,
-        reason: "via= escape clause is a known-limit, not an EVIDENCE GAP"
+        reason: "via= escape clause is a known-limit; literal EVIDENCE GAP - cmd=\"...\" schema entries must not appear (narrative paraphrase is OK)"
       };

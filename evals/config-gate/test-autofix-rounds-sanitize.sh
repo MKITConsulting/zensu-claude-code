@@ -27,8 +27,8 @@ cleanup() {
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA="$TMP_DIR/state"
-mkdir -p "$CLAUDE_PLUGIN_DATA"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 10}}
@@ -54,21 +54,21 @@ else
   check "hook exits 0 with malicious session_id (got $EXIT_CODE)" FAIL
 fi
 
-INSIDE_COUNT="$(find "$CLAUDE_PLUGIN_DATA" -name 'rounds-*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+INSIDE_COUNT="$(find "$CLAUDE_PLUGIN_DATA_OVERRIDE" -name 'rounds-*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$INSIDE_COUNT" = "1" ]; then
-  check "exactly 1 counter file created inside CLAUDE_PLUGIN_DATA" PASS
+  check "exactly 1 counter file created inside CLAUDE_PLUGIN_DATA_OVERRIDE" PASS
 else
-  check "exactly 1 counter file inside CLAUDE_PLUGIN_DATA (got $INSIDE_COUNT)" FAIL
+  check "exactly 1 counter file inside CLAUDE_PLUGIN_DATA_OVERRIDE (got $INSIDE_COUNT)" FAIL
 fi
 
 OUTSIDE_COUNT="$(find "$ESCAPE_PROBE" -name 'escape-XYZ*' -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$OUTSIDE_COUNT" = "0" ]; then
-  check "no counter file escaped to ESCAPE_PROBE outside CLAUDE_PLUGIN_DATA" PASS
+  check "no counter file escaped to ESCAPE_PROBE outside CLAUDE_PLUGIN_DATA_OVERRIDE" PASS
 else
-  check "counter file escaped outside CLAUDE_PLUGIN_DATA (found $OUTSIDE_COUNT in $ESCAPE_PROBE)" FAIL
+  check "counter file escaped outside CLAUDE_PLUGIN_DATA_OVERRIDE (found $OUTSIDE_COUNT in $ESCAPE_PROBE)" FAIL
 fi
 
-ORPHAN_COUNT="$(find "$CLAUDE_PLUGIN_DATA" -name 'rounds-*' -not -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
+ORPHAN_COUNT="$(find "$CLAUDE_PLUGIN_DATA_OVERRIDE" -name 'rounds-*' -not -name '*.json' -type f 2>/dev/null | wc -l | tr -d ' ')"
 if [ "$ORPHAN_COUNT" = "0" ]; then
   check "no orphan mktemp artifacts left in state dir" PASS
 else
