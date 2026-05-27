@@ -1,0 +1,11 @@
+[16:36:29] TDD STARTED — CHANGELOG [Unreleased] heading regex single source of truth | steps: 1
+[16:37:50] S1 RED M2 awk extractor reads regex from shared HEADING_RE source — FAIL: HEADING_RE shell variable not yet defined, guard returns false, awk inlines independent regex literal
+[16:38:17] S1 IMPL completed — files: tests/structure/test-changelog-unreleased-resolver-entries.sh (HEADING_RE hoisted, helper and awk both reference it via -v re=)
+[16:39:42] S1 GREEN — PASS (1 attempt after IMPL retry due to awk -v backslash processing, 11 tests)
+[16:42:19] CHECKPOINT — cmd="bash tests/structure/test-changelog-unreleased-resolver-entries.sh" exit=0 result="11 PASS / 0 FAIL"
+[16:42:19] CHECKPOINT — cmd="for t in tests/structure/*.sh; do bash $t; done" exit=0 result="16/16 files OK, 239 PASS / 0 FAIL"
+[16:42:19] MUTATION VERIFY — awk-only loose: M1=PASS M2=FAIL | helper-only loose: M1=FAIL M2=PASS | HEADING_RE loose (both): M1=FAIL M2=FAIL — independent coverage confirmed
+[16:42:29] AUDIT — cmd="bash tests/structure/test-changelog-unreleased-resolver-entries.sh" exit=0 result="11 PASS / 0 FAIL"
+[16:42:29] AUDIT — cmd="for t in tests/structure/*.sh; do bash $t; done" exit=0 result="16/16 files OK, 239 PASS / 0 FAIL"
+[16:42:43] EVIDENCE GAP — witness log not present for this session (hook inactive); AUDIT cmd strings recorded verbatim and re-runnable for manual verification
+[16:43:07] TDD COMPLETE — 1/1 GREEN | Integration: 0 WIRED | Build: – n/a (bash plugin, no build step) | Coverage: SKIPPED (no tool wired for bash structure tests)

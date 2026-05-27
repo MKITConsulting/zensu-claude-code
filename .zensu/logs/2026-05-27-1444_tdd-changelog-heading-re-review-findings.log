@@ -1,0 +1,13 @@
+[14:46:47] TDD STARTED — CHANGELOG heading-RE review findings | steps: 3
+[14:47:34] S1 RED M3 outer-scope-integrity — FAIL: HEADING_RE leaked (BEFORE='^## \[Unreleased\]$' AFTER='^## \[Unreleased\]')
+[14:48:06] S1 IMPL completed — files: tests/structure/test-changelog-unreleased-resolver-entries.sh
+[14:48:06] S1 GREEN — PASS (1 attempts, 12 tests)
+[14:50:13] S2 RF — tests GREEN before+after (12/0 both sides); refactor: replaced save/loosen/extract/restore with subshell-wrap; dropped MUT2_COPY (reuses MUT_COPY)
+[14:50:13] S2 MUTATION-REVALIDATE — (1) helper-only loose: M1 FAIL M2 PASS M3 PASS; (2) awk-only loose: M1 PASS M2 FAIL M3 PASS; (3) shared HEADING_RE loose: M1 FAIL M2 FAIL M3 PASS — all 3 scenarios produce expected round-6 outcomes
+[14:50:38] S3 WIRED — plan 2026-05-25-1635 line 113 reworded to reflect post-refactor regex-literal count (3 occurrences: line 14 production, line 76 M1 fixture LHS, line 88 M2 subshell loose mutation)
+[14:51:39] CHECKPOINT — cmd="bash tests/structure/test-changelog-unreleased-resolver-entries.sh" exit=0 result="12 PASS / 0 FAIL"
+[14:51:39] CHECKPOINT — cmd="for t in tests/structure/*.sh; do bash $t; done (aggregate)" exit=0 result="16 files OK / 240 asserts PASS / 0 FAIL"
+[14:52:17] AUDIT — cmd="bash tests/structure/test-changelog-unreleased-resolver-entries.sh" exit=0 result="12 PASS / 0 FAIL"
+[14:52:17] AUDIT — cmd="for t in tests/structure/*.sh; do bash $t; done (aggregate)" exit=0 result="16 files OK / 240 asserts PASS / 0 FAIL"
+[14:52:55] WITNESS CROSS-CHECK — no witness-<session>.log found in elegant-northcutt or thirsty-elbakyan worktrees (current session); recorded as known-limitation. AUDIT claims surfaced prominently in final report.
+[14:54:05] TDD COMPLETE — 1/1 Feature GREEN | 1 Refactor RF | 1 Integration WIRED | Build: – n/a | Coverage: SKIPPED
