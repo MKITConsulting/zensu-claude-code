@@ -1,5 +1,6 @@
 #!/bin/bash
 set -u
+export ZENSU_BASH_START="${ZENSU_BASH_START:-}"
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
@@ -23,6 +24,7 @@ case "${1:-}" in
       exit 2
     fi
     if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --phase $phase_val --step $step_val}"
       source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
       session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
     fi

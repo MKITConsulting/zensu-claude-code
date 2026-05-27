@@ -1,0 +1,14 @@
+[15:22:40] TDD STARTED — resolve-session-id fixes (3 findings) | steps: 3
+[15:22:48] EXECUTION STARTED — F1, F2, F3
+[15:23:26] F1 RED S7B dotted-path-sanitization — FAIL: got '' expected 'eeeeeeee-dddd-dddd-dddd-eeeeeeeeeeee' (helper returned empty because regex preserves '.')
+[15:23:41] F1 IMPL completed — files: hooks/lib/resolve-session-id.js
+[15:25:24] F1 GREEN — PASS (1 attempt, 13 tests, smoke=a01473c3-c9cb-45ed-8d12-e00a548866ca matches real .jsonl)
+[15:26:16] F2 RED S8/S8B helper-self-init — FAIL: missing/invalid argv[2] returns future-mtime UUID instead of older — Layer-1 cutoff skipped
+[15:26:41] F2 IMPL completed — files: hooks/lib/resolve-session-id.js
+[15:26:57] F2 GREEN — PASS (1 attempt, 15 tests, S8 + S8B both green)
+[15:28:21] F3 RF — tests GREEN before+after (15/15) — hooks/lib/zensu-log.sh line 3 dropped date+%s%N dependency, helper self-inits Date.now()
+[15:28:56] CHECKPOINT — cmd="for t in tests/structure/test-*.sh; do bash $t; done" exit=0 result="15/15 files green, 221 PASS, 0 FAIL"
+[15:29:17] AUDIT — cmd="bash tests/structure/test-resolve-session-id.sh" exit=0 result="15/15 PASS"
+[15:29:27] BUILD — n/a (no package.json, Makefile, or build manifest — bash/node plugin runs source files directly)
+[15:29:35] COVERAGE SKIPPED — no tool
+[15:30:46] TDD COMPLETE — 2/3 GREEN | Refactor: 1 RF | Integration: 0 WIRED | Build: – n/a | Coverage: SKIPPED — no tool
