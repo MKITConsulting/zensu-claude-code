@@ -10,7 +10,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set
 - A feature ID (ZEN-xxx format or UUID) to implement
 

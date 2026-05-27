@@ -4,7 +4,7 @@ Your Developer Journal: privacy-first session tracking that helps you understand
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set (or OAuth browser login)
 - Git repository (for HEAD SHA and branch context)
 

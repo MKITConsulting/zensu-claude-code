@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.27-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.28-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -86,7 +86,7 @@ For headless environments where browser login isn't available:
 export ZENSU_API_KEY=zsk_...
 ```
 
-Optionally set `ZENSU_MCP_URL` to override the default MCP server URL (`https://mcp.zensu.dev`).
+To point Claude Code at a self-hosted Zensu MCP server, see [Self-hosting](#data--privacy) below.
 
 ## What's Included
 
@@ -287,7 +287,6 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_MCP_URL` | `https://mcp.zensu.dev` | MCP server base URL |
 | `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits inside a `zensu:tdd-manager` subagent context. Any other value (or unset) leaves the gate active per `CLAUDE_AGENT_TYPE` resolution. |
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
@@ -308,7 +307,7 @@ When using this plugin, certain data is transmitted to the Zensu MCP server.
 
 **Where it goes:**
 - Default: `https://mcp.zensu.dev` (all data transmitted via HTTPS)
-- Override with `ZENSU_MCP_URL` to point to a self-hosted instance
+- Self-hosted Zensu MCP deployments — see [Self-hosting](#self-hosting) below
 
 **What is NOT transmitted:**
 - Source code content
@@ -318,8 +317,17 @@ When using this plugin, certain data is transmitted to the Zensu MCP server.
 **Data retention:**
 - Pulse sessions: 90 days by default (configurable)
 
-**Self-hosting:**
-Set `ZENSU_MCP_URL` to your own instance to keep all data on your infrastructure.
+### Self-hosting
+
+The plugin ships pointing at the SaaS default `https://mcp.zensu.dev/mcp`. To redirect Claude Code at your own Zensu MCP instance, register a user-scope MCP entry — it takes precedence over the plugin's project-scope `.mcp.json` and survives plugin upgrades:
+
+```bash
+claude mcp add zensu --transport http --url https://mcp.example.internal/mcp --scope user
+```
+
+User-scope entries persist in `~/.claude.json` and apply to every project on the machine. Remove with `claude mcp remove zensu --scope user` to fall back to the SaaS default.
+
+Why not a `ZENSU_MCP_URL` env var? Variable expansion in `.mcp.json` only reads the shell environment at Claude Code startup — Claude Desktop's Custom Connector dialog rejects `${VAR:-default}` syntax outright, and `settings.json` `env` blocks do not reliably propagate to MCP HTTP URL expansion ([issue #1254](https://github.com/anthropics/claude-code/issues/1254)). `claude mcp add --scope user` is deterministic and portable.
 
 **Regulated environments:**
 If you operate under GDPR, CCPA, or similar data protection regulations, review the data transmission above and consider using a self-hosted instance to maintain full control over your data.
@@ -336,7 +344,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 
 | Problem | Solution |
 |---------|----------|
-| MCP server unreachable | Check `ZENSU_MCP_URL` value and network connectivity |
+| MCP server unreachable | Verify network connectivity to `https://mcp.zensu.dev/mcp` (or your self-hosted URL — see [Self-hosting](#self-hosting)) |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |

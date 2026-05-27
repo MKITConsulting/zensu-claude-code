@@ -10,7 +10,7 @@ Scan an existing repository to discover undocumented features, then review and i
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set
 - Product ID known (create one first with `/zensu:bootstrap` if needed)
 - Working in the repository root (or a subdirectory)

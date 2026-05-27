@@ -11,7 +11,7 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 ## Prerequisites
 
-- Zensu MCP Server connected (plugin auto-configures via `ZENSU_MCP_URL`)
+- Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set
 - A feature ID (ZEN-xxx format or UUID) to review
 
