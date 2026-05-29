@@ -1,0 +1,16 @@
+[21:10:20] TDD STARTED — autofix-rounds-reset-on-fresh-task | steps: 4 (1 Feature + 3 Integration)
+[21:10:30] EXECUTION STARTED
+[21:11:30] S1 RED test-autofix-rounds-reset-on-fresh-tdd — FAIL: fresh-task prompt does not delete counter (count stays 4); symlink-guard stderr warning absent (2/7 assertions fail, correct reason)
+[21:12:19] S1 IMPL completed — files: hooks/post-tdd-review-delegate.sh
+[21:12:28] S1 GREEN — PASS (1 attempts, 7 tests)
+[21:12:48] S2 WIRED — registered test-autofix-rounds-reset-on-fresh-tdd.sh in run-eval.sh Auto-fix block
+[21:13:35] S3 WIRED — SKILL.md When-to-Use narrowed to within-task resume (per-task auto-reset documented)
+[21:13:35] S4 WIRED — version 0.3.28 -> 0.3.29 in plugin.json + marketplace.json; CHANGELOG [0.3.29] section added
+[21:16:44] PHASE5 CHECKPOINT — cmd="bash evals/config-gate/run-eval.sh --self-check" exit=0 result="59/59 PASS (new test registered, no regressions)"
+[21:16:44] AUDIT — cmd="bash evals/config-gate/run-eval.sh --self-check" exit=0 result="59/59 PASS"
+[21:16:44] AUDIT — cmd="bash evals/config-gate/test-autofix-rounds-convergence.sh" exit=0 result="max-rounds guard still fires mid-chain"
+[21:16:44] AUDIT — via=manual-hook-sim claim="fresh payload deletes rounds-sess-x.json; fix-round payload preserves it"
+[21:17:41] WITNESS CROSS-CHECK — SKIPPED: no witness log present for this session (PostToolUse witness hook inactive); AUDIT cmd claims unverifiable, surfaced as known limitation
+[21:17:41] MTIME AUDIT — S1 test-first OK (test 21:11:09 < impl 21:12:11); 0/1 Feature steps test-after
+[21:17:41] PRECONDITION DRIFT AUDIT — no install/substitute decisions in plan; no drift possible
+[21:17:41] TDD COMPLETE — 1/1 GREEN | Integration: 3 WIRED | Build: – n/a (plugin repo) | Coverage: SKIPPED (shell/JSON/markdown)

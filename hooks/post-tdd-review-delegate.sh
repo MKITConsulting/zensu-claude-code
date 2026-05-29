@@ -8,6 +8,18 @@
 # main agent to spawn @zensu:code-reviewer as the next tool call. The
 # additionalContext is injected verbatim next to the tool result, bypassing
 # the prompt-type judge LLM.
+#
+# Also owns auto-fix-rounds RESET on a fresh task boundary. Every auto-fix
+# chain begins with a tdd-manager run whose prompt is a FEATURE SPECIFICATION
+# (plan markdown or direct spec) — never the fix-delegation sentinel
+# "findings from code review". That sentinel-free, non-empty prompt is the
+# task boundary: this hook deletes the round counter
+# (${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json)
+# so the new task's review chain restarts at round 1. Safe polarity protects
+# the max-rounds guard above all: reset ONLY when the sentinel is ABSENT and
+# the prompt is non-empty. Sentinel present (fix round) or empty/unreadable
+# prompt -> do NOT reset (counter keeps climbing; guard intact). Reset
+# diagnostics go to stderr only; the stdout JSON directive is unchanged.
 
 set -u
 
@@ -32,6 +44,61 @@ SUBAGENT_TYPE="$(node -e '
 if [ "$SUBAGENT_TYPE" != "zensu:tdd-manager" ]; then
   exit 0
 fi
+
+# --- Auto-fix-rounds reset at fresh task boundary -------------------------
+# Inspect the tdd-manager prompt: a fix round starts with the load-bearing
+# sentinel "Fix the following findings from code review:" (matched here on
+# the stable "findings from code review" substring). A fresh task's prompt is
+# the approved plan or a direct feature spec and never contains it.
+PROMPT="$(node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s);
+      const p = j.tool_input && j.tool_input.prompt;
+      process.stdout.write(typeof p === "string" ? p : "");
+    } catch (_) { /* leave empty */ }
+  });
+' <<<"$INPUT" 2>/dev/null)"
+
+PROMPT_EMPTY=1
+[ -n "$PROMPT" ] && PROMPT_EMPTY=0
+
+IS_FIX=0
+case "$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]')" in
+  *"findings from code review"*) IS_FIX=1 ;;
+esac
+
+# Reset only on a fresh task (sentinel absent AND prompt non-empty). Sentinel
+# present (fix round) or empty/unreadable prompt -> keep the counter so the
+# max-rounds guard stays intact.
+if [ "$IS_FIX" -eq 0 ] && [ "$PROMPT_EMPTY" -eq 0 ]; then
+  RESET_SESSION_ID="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const id = j.session_id;
+        console.log((typeof id === "string" && id) ? id : "");
+      } catch (_) { console.log(""); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  RESET_SESSION_ID="$(zensu_resolve_session_id "$RESET_SESSION_ID")"
+
+  RESET_STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  RESET_COUNTER_FILE="$RESET_STATE_DIR/rounds-${RESET_SESSION_ID}.json"
+  if [ -L "$RESET_COUNTER_FILE" ]; then
+    echo "zensu post-tdd hook: refusing to delete through symlink at $RESET_COUNTER_FILE — counter NOT reset" >&2
+  elif [ -L "$RESET_STATE_DIR" ]; then
+    echo "zensu post-tdd hook: refusing to reset under symlinked state dir $RESET_STATE_DIR — counter NOT reset" >&2
+  else
+    rm -f -- "$RESET_COUNTER_FILE"
+  fi
+fi
+# ------------------------------------------------------------------------
 
 cat <<'JSON'
 {

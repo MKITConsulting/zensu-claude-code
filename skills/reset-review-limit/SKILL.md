@@ -4,7 +4,9 @@ Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook 
 
 ## When to Use
 
-- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. Do NOT spawn zensu:tdd-manager again.` and you want to grant another budget so `zensu:code-reviewer` -> `zensu:tdd-manager` can resume.
+Since 0.3.29 the counter **auto-resets at the start of every new task** — the first `zensu:tdd-manager` run of a fresh task (a feature-spec prompt, not a `findings from code review` fix delegation) deletes the counter via `hooks/post-tdd-review-delegate.sh`, so each task's review chain starts at round 1 on its own. This skill is therefore no longer needed *between* tasks; its role narrows to resuming the fix loop **within a single task** once that task has burned through its `autoFixMaxRounds` budget.
+
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. Do NOT spawn zensu:tdd-manager again.` **within the current task** and you want to grant another budget so `zensu:code-reviewer` -> `zensu:tdd-manager` can resume on that same task.
 - You suspect the counter was inflated by a prior pre-0.3.23 run (when the counter was unintentionally user-global) and want a clean slate.
 - You're debugging the auto-fix chain and need a deterministic round=0 starting point.
 
