@@ -48,7 +48,20 @@ case "${1:-}" in
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
-      --tdd-begin)    tdd_set_flag "$session_val" active true ;;
+      --tdd-begin)
+        tdd_set_flag "$session_val" active true
+        tdd_begin_rc=$?
+        rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+        rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
+        if [ -L "$rounds_counter_file" ]; then
+          echo "zensu-log --tdd-begin: refusing to delete through symlink at $rounds_counter_file — rounds counter NOT reset" >&2
+        elif [ -L "$rounds_state_dir" ]; then
+          echo "zensu-log --tdd-begin: refusing to reset under symlinked state dir $rounds_state_dir — rounds counter NOT reset" >&2
+        else
+          rm -f -- "$rounds_counter_file"
+        fi
+        exit "$tdd_begin_rc"
+        ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
       --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
       --tdd-reset)    tdd_clear_session "$session_val" ;;

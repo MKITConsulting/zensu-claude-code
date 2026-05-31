@@ -1,10 +1,12 @@
 # /zensu:reset-review-limit
 
-Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the same Claude Code session.
+Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the **current task**.
+
+Since 0.4.1 the counter auto-resets at every fresh task: `zensu-log.sh --tdd-begin` (run once in `/zensu:tdd` Phase 0, before any edit) deletes the `rounds-<session_id>.json` file, so each new task's review chain always starts at round 1 on its own. This manual skill is therefore only needed to grant *additional* budget **within a single task** that exhausted its rounds mid-chain — it is no longer needed between tasks in the same session.
 
 ## When to Use
 
-- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. The review chain is now marked complete (chainDone)...` and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. The review chain is now marked complete (chainDone)...` for the task you are STILL working on, and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
 - You suspect the counter was inflated by a prior pre-0.3.23 run (when the counter was unintentionally user-global) and want a clean slate.
 - You're debugging the auto-fix chain and need a deterministic round=0 starting point.
 
