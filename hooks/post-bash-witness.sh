@@ -3,8 +3,6 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 
-if [ -z "${CLAUDE_AGENT_TYPE:-}" ]; then exit 0; fi
-if [ "$CLAUDE_AGENT_TYPE" != "zensu:tdd-manager" ]; then exit 0; fi
 if [ "${ZENSU_TEST_WITNESS:-}" = "off" ]; then exit 0; fi
 
 if ! command -v node >/dev/null 2>&1; then exit 0; fi
@@ -30,6 +28,14 @@ FIELDS="$(printf '%s' "$INPUT" | node -e '
 IFS=$'\x01' read -r CMD_JSON EXIT_CODE TAIL_JSON SESSION <<<"$FIELDS"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
+
+# Activation: record witness lines only while a main-thread TDD session is active
+# for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). Replaces
+# the legacy CLAUDE_AGENT_TYPE=zensu:tdd-manager subagent scoping.
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+if [ "$(tdd_session_active "$(tdd_state_file "$SANITIZED_SESSION")")" != "true" ]; then
+  exit 0
+fi
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
 WITNESS_DIR="$PROJECT_DIR/.zensu/logs"

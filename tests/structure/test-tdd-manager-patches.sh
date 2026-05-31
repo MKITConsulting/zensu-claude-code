@@ -1,8 +1,11 @@
 #!/bin/bash
 set -u
 
+# NOTE (0.4.0): the TDD discipline patches migrated from the deleted
+# agents/tdd-manager.md subagent into the main-thread skill skills/tdd/SKILL.md.
+# This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-AGENT="$PLUGIN_DIR/agents/tdd-manager.md"
+AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
 
 PASS=0; FAIL=0
 check() {
@@ -12,18 +15,18 @@ check() {
 }
 
 if [ ! -f "$AGENT" ]; then
-  check "agents/tdd-manager.md exists" FAIL
+  check "skills/tdd/SKILL.md exists" FAIL
   echo "----"
   echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
   exit 1
 fi
-check "agents/tdd-manager.md exists" PASS
+check "skills/tdd/SKILL.md exists" PASS
 
 LINES=$(wc -l <"$AGENT")
-if [ "$LINES" -le 320 ]; then
-  check "agent line count <= 320 (actual: $LINES)" PASS
+if [ "$LINES" -le 360 ]; then
+  check "skill line count <= 360 (actual: $LINES)" PASS
 else
-  check "agent line count <= 320 (actual: $LINES)" FAIL
+  check "skill line count <= 360 (actual: $LINES)" FAIL
 fi
 
 # Patch 1 — 3 new Rationalization Counters
@@ -217,6 +220,33 @@ if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; t
   check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" FAIL
 else
   check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
+fi
+
+# 0.4.0 — main-thread deferred-tool loading + correct TaskCreate signature
+if grep -qF 'select:TaskCreate,TaskUpdate' "$AGENT"; then
+  check "MT1 skill instructs ToolSearch load of deferred task tools (main-thread)" PASS
+else
+  check "MT1 skill instructs ToolSearch load of deferred task tools (main-thread)" FAIL
+fi
+if grep -qF 'requires BOTH `subject` and `description`' "$AGENT" && grep -qF 'description:' "$AGENT"; then
+  check "MT2 skill TaskCreate includes required description + states the contract" PASS
+else
+  check "MT2 skill TaskCreate includes required description + states the contract" FAIL
+fi
+if grep -qF 'never `run_in_background`' "$AGENT" && grep -qF 'one tool call at a time' "$AGENT"; then
+  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" PASS
+else
+  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" FAIL
+fi
+if grep -qF 'EXCLUSIVELY the chain-terminus' "$AGENT"; then
+  check "MT4 skill guards --chain-done against early/parallel firing" PASS
+else
+  check "MT4 skill guards --chain-done against early/parallel firing" FAIL
+fi
+if grep -qF 'cat > .zensu/plans' "$AGENT"; then
+  check "MT5 Phase 2 writes the plan via Bash heredoc (phase-gate blocks Write in UNINITIALIZED)" PASS
+else
+  check "MT5 Phase 2 writes the plan via Bash heredoc (phase-gate blocks Write in UNINITIALIZED)" FAIL
 fi
 
 echo "----"

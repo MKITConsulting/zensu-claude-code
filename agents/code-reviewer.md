@@ -28,7 +28,7 @@ TOOL RULES:
 
 ## Phase 0: Pre-flight
 
-Create a task immediately: `TaskCreate(subject: "Code Review: Analyzing files", activeForm: "Analyzing files")`. Mark `in_progress`.
+Create a task immediately: `TaskCreate(subject: "Code Review: Analyzing files", description: "Analyze the changed files across 5 review perspectives", activeForm: "Analyzing files")`. Mark `in_progress` via `TaskUpdate`. (`TaskCreate` requires both `subject` and `description`; it has no `status` field.)
 
 ---
 
