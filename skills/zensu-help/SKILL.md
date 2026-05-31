@@ -33,14 +33,15 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 ## Three Layers (embedded — architecture overview)
 
 1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield) or `/zensu:ghost-scan` (brownfield) produce tracked features.
-2. **Implementation** (`zensu:tdd-manager` + `zensu:code-reviewer` agents) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop.
+2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + `zensu:code-reviewer` subagent) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop guaranteed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 the TDD workflow runs in the main agent (was a `tdd-manager` subagent); `zensu:code-reviewer` is the only remaining subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
 - `zensu-plm` — orchestrates planning workflows (bootstrap, ghost-scan, security review, release readiness).
-- `tdd-manager` — RED→IMPL→GREEN TDD discipline, FSM-gated edits, 3-retry IMPL escalation, completeness audit.
-- `code-reviewer` — single READ-ONLY agent running 5 sequential perspectives: conventions, bugs, architecture, tests, security.
+- `code-reviewer` — single READ-ONLY subagent running 5 sequential perspectives: conventions, bugs, architecture, tests, security.
+
+TDD discipline (RED→IMPL→GREEN, FSM-gated edits, 3-retry IMPL escalation, completeness audit) is NOT a subagent — it runs in the main thread via the `/zensu:tdd` skill (migrated from the `tdd-manager` subagent in 0.4.0).
 
 ## Topic Routing (live read for volatile facts)
 
@@ -50,11 +51,11 @@ Before answering questions in the right column, `Read` the source file in the le
 |---|---|
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
 | MCP server URL, MCP tool surface | `.mcp.json` + `.claude-plugin/plugin.json` |
-| Hook flags (`autoTdd`, `autoReview`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`) | `README.md` § Configuration → Hook Opt-Out table |
+| Hook flags (`autoTdd`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
-| Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
+| Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
 | TDD FSM details, phase transitions, gate logic, three-channel logging | `docs/tdd-manager-workflow.md` |
-| Hook scripts (what each does, when it fires) | `README.md` § Hooks (7) table + `hooks/<script>.sh` source |
+| Hook scripts (what each does, when it fires) | `README.md` § Hooks (9) table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |

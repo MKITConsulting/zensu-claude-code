@@ -50,6 +50,9 @@ out/
 !.zensu/plans/
 !.zensu/logs/
 !.zensu/logs/*.log
+# Witness logs are ephemeral per-session anti-hallucination evidence (consumed
+# only by the in-session Phase 6 cross-check). Keep them local; never commit.
+.zensu/logs/witness-*.log
 !.zensu/config.json
 
 # Internal

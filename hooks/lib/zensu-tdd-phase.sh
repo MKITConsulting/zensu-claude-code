@@ -97,6 +97,9 @@ _tdd_write_phase_critical() {
           if (prev && typeof prev === "object") {
             state.history = Array.isArray(prev.history) ? prev.history : [];
             state.session_id = prev.session_id || state.session_id;
+            if (typeof prev.active === "boolean") state.active = prev.active;
+            if (typeof prev.implComplete === "boolean") state.implComplete = prev.implComplete;
+            if (typeof prev.chainDone === "boolean") state.chainDone = prev.chainDone;
           }
         }
       } catch (_) {}
@@ -117,22 +120,9 @@ _tdd_write_phase_critical() {
   return 0
 }
 
-tdd_write_phase() {
-  local session_id="${1:-unknown}"
-  local step_id="${2:-}"
-  local phase="${3:-}"
-  local reason="${4:-}"
-
-  local state_file
-  state_file=$(tdd_state_file "$session_id")
-  local state_dir
-  state_dir=$(dirname "$state_file")
-  mkdir -p "$state_dir" 2>/dev/null || true
-
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-
-  command -v node >/dev/null 2>&1 || return 1
+_tdd_locked_run() {
+  local state_file="$1"
+  shift
 
   local lock_file="${state_file}.lock"
 
@@ -140,7 +130,7 @@ tdd_write_phase() {
     (
       exec 9>>"$lock_file" 2>/dev/null || exit 1
       flock -x 9 2>/dev/null || exit 1
-      _tdd_write_phase_critical "$state_file" "$session_id" "$step_id" "$phase" "$reason" "$ts"
+      "$@"
     )
     return $?
   fi
@@ -177,11 +167,144 @@ tdd_write_phase() {
     sleep 0.01 2>/dev/null || sleep 1
   done
   echo "$$" > "$lock_dir/owner" 2>/dev/null || true
-  _tdd_write_phase_critical "$state_file" "$session_id" "$step_id" "$phase" "$reason" "$ts"
+  "$@"
   local rc=$?
   rm -rf "$lock_dir" 2>/dev/null || true
   return $rc
 }
+
+tdd_write_phase() {
+  local session_id="${1:-unknown}"
+  local step_id="${2:-}"
+  local phase="${3:-}"
+  local reason="${4:-}"
+
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  local state_dir
+  state_dir=$(dirname "$state_file")
+  mkdir -p "$state_dir" 2>/dev/null || true
+
+  local ts
+  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+  command -v node >/dev/null 2>&1 || return 1
+
+  _tdd_locked_run "$state_file" \
+    _tdd_write_phase_critical "$state_file" "$session_id" "$step_id" "$phase" "$reason" "$ts"
+}
+
+# --- Chain-state flags (active / implComplete / chainDone) ----------------
+# These live in the SAME per-session state file as the FSM phase. They drive
+# main-thread hook activation (active), the Stop-hook review gate
+# (implComplete), and chain termination (chainDone). All writes go through the
+# shared mutex so a flag-write never clobbers a concurrent phase-write.
+
+_tdd_write_flag_critical() {
+  local state_file="$1"
+  local session_id="$2"
+  local key="$3"
+  local val="$4"
+
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  STATE_FILE="$state_file" SID="$session_id" KEY="$key" VAL="$val" \
+    node -e '
+      const fs = require("fs");
+      const sf = process.env.STATE_FILE;
+      let state = {};
+      try {
+        if (fs.existsSync(sf)) {
+          const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+          if (prev && typeof prev === "object") state = prev;
+        }
+      } catch (_) {}
+      if (!state.session_id) state.session_id = process.env.SID;
+      if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
+      if (!Array.isArray(state.history)) state.history = [];
+      state[process.env.KEY] = (process.env.VAL === "true");
+      fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_set_flag() {
+  local session_id="${1:-unknown}"
+  local key="${2:-}"
+  local val="${3:-true}"
+  [ -z "$key" ] && return 1
+  case "$val" in true|false) ;; *) val="true" ;; esac
+
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+
+  _tdd_locked_run "$state_file" \
+    _tdd_write_flag_critical "$state_file" "$session_id" "$key" "$val"
+}
+
+_tdd_write_clear_critical() {
+  local state_file="$1"
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+  STATE_FILE="$state_file" node -e '
+    const fs = require("fs");
+    const sf = process.env.STATE_FILE;
+    let s = {};
+    try { s = JSON.parse(fs.readFileSync(sf, "utf8")) || {}; } catch (_) {}
+    s.active = false; s.implComplete = false; s.chainDone = false;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_clear_session() {
+  local session_id="${1:-unknown}"
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  [ -f "$state_file" ] || return 0
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" _tdd_write_clear_critical "$state_file"
+}
+
+tdd_get_flag() {
+  local state_file="${1:-}"
+  local key="${2:-}"
+  if [ -z "$state_file" ] || [ ! -f "$state_file" ] || [ -z "$key" ]; then
+    echo "false"; return 0
+  fi
+  command -v node >/dev/null 2>&1 || { echo "false"; return 0; }
+  local val
+  val=$(KEY="$key" node -e '
+    try {
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      console.log(j[process.env.KEY] === true ? "true" : "false");
+    } catch (_) { console.log("false"); }
+  ' "$state_file" 2>/dev/null)
+  [ "$val" = "true" ] && echo "true" || echo "false"
+}
+
+tdd_session_active() { tdd_get_flag "${1:-}" active; }
+tdd_impl_complete()  { tdd_get_flag "${1:-}" implComplete; }
+tdd_chain_done()     { tdd_get_flag "${1:-}" chainDone; }
 
 tdd_phase() {
   local state_file="${1:-}"
@@ -239,4 +362,4 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail 2>/dev/null || true
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_impl_complete tdd_chain_done 2>/dev/null || true

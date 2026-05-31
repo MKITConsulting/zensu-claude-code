@@ -158,6 +158,11 @@ run_test "$EVAL_DIR/test-readme-coverage.sh"             "test-readme-coverage.s
 run_test "$EVAL_DIR/test-changelog-coverage.sh"          "test-changelog-coverage.sh"
 run_test "$EVAL_DIR/test-changelog-round3-accuracy.sh"   "test-changelog-round3-accuracy.sh"
 
+echo "" | tee -a "$REPORT"
+echo "▸ Main-thread TDD chain smoke test (0.4.0 migration)" | tee -a "$REPORT"
+
+run_test "$PLUGIN_DIR/tests/structure/test-smoke-main-thread-chain.sh" "test-smoke-main-thread-chain.sh"
+
 if [ "$MODE" = "--self-check" ]; then
   echo "" | tee -a "$REPORT"
   echo "════════════════════════════════════════" | tee -a "$REPORT"

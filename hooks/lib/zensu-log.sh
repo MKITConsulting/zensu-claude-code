@@ -32,6 +32,29 @@ case "${1:-}" in
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
     exit $?
     ;;
+  --tdd-begin|--tdd-complete|--chain-done|--tdd-reset)
+    verb="$1"
+    session_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --session) session_val="${2:-}"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    case "$verb" in
+      --tdd-begin)    tdd_set_flag "$session_val" active true ;;
+      --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
+      --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
+      --tdd-reset)    tdd_clear_session "$session_val" ;;
+    esac
+    exit $?
+    ;;
 esac
 
 cmd="${1:-timestamp}"
