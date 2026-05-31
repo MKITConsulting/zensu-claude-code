@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-05-31
+
+### Fixed
+- **Auto-fix rounds counter now resets at each fresh task — subsequent tasks in the same session no longer inherit a stale round count.** The auto-fix loop guard keys its counter by the Claude Code session id (`rounds-<session_id>.json`), and `hooks/post-review-tdd-delegate.sh` increments it on every `zensu:code-reviewer` completion. Before this fix the counter was only ever cleared by the manual `/zensu:reset-review-limit` skill — never on a new task — so a second (or later) task in the same session started its review chain at the first task's final round. If task 1 ended at or near `autoFixMaxRounds`, task 2 emitted `Auto-fix convergence: max N rounds reached` on its very first review (or after one fix round), short-circuiting the auto-fix loop. The fix resets the counter at the fresh-task boundary: `hooks/lib/zensu-log.sh --tdd-begin` — which `/zensu:tdd` Phase 0 runs exactly once per task, before any edit — now deletes `rounds-<session_id>.json` after setting the chain-state `active` flag, mirroring the counter owner's path resolution (`${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}`) and symlink-traversal guards. Fix rounds re-enter Phase 4 (never Phase 0), so the max-rounds guard still works WITHIN a single task's fix loop; only the cross-task carry-over is removed. `skills/reset-review-limit/SKILL.md` reworded: the manual skill is now only needed to grant *additional* budget within a single task, not between tasks. New `evals/config-gate/test-autofix-rounds-reset-on-fresh-tdd.sh` (registered in `run-eval.sh`) pins the behavior: `--tdd-begin` deletes a pre-seeded counter and still sets `active=true`; `--tdd-complete`/`--chain-done` preserve it; reset is idempotent when the counter is absent; and the symlink guard refuses to delete through a symlinked counter file or state dir.
+
 ## [0.4.0] - 2026-05-30
 
 ### Changed
