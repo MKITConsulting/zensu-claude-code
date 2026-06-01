@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-01
+
+### Added
+- **Parallel review fan-out in the `/zensu:tdd` post-implementation review chain.** Phase 6.10 previously spawned a single `zensu:code-reviewer` subagent that walked its five specialist perspectives (conventions, bugs, architecture, tests, security) sequentially — the slowest part of the chain. It now fans them out to five read-only `zensu:review-aspect` subagents spawned in ONE parallel batch (the single sanctioned exception to the skill's "no parallel tool batches" rule, carved out explicitly in `skills/tdd/SKILL.md`) and merges their `## Aspect:` findings in the main thread (deduplicate by `file:line`, sort CRITICAL → IMPORTANT → SUGGESTION). A new `agents/review-aspect.md` defines the single-perspective reviewer: `tools: Read, Grep, Glob, Bash` with Bash prose-restricted to `git diff HEAD -- <file>` and a hard prohibition on build/test execution, so the five parallel reviewers never re-run the suite — it already ran once in the Phase 6 audit. The merged findings re-enter the existing hook machinery unchanged through a thin **fan-out consume mode** added to `agents/code-reviewer.md`: when its spawn prompt carries the marker `PRE-MERGED FINDINGS (fan-out)`, the reviewer skips its Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from the supplied pre-merged findings. Because that single `zensu:code-reviewer` completion is the only event `hooks/post-review-tdd-delegate.sh` keys on (the hook reads no findings content), the round counter, `autoFixMaxRounds` auto-fix loop, `stop-chain-enforcer.sh` Stop-hook guarantee, and `/zensu:self-review` hand-off are all byte-for-byte unchanged. Auto-fix rounds re-run the fan-out (re-fan-out → re-merge → thin spawn), one reviewer completion per round, so round-counter semantics are identical. `review-aspect` is registered in `.claude-plugin/plugin.json`; the README Agents section is updated to (3). Pinned by `tests/structure/test-review-aspect-agent.sh` and `tests/structure/test-tdd-skill-review-fanout.sh`.
+
 ## [0.5.0] - 2026-06-01
 
 ### Added
