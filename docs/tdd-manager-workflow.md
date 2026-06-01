@@ -68,11 +68,13 @@ flowchart TD
     Review --> Findings{Critical or<br/>Important findings?}
     Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 5 rounds]
     AutoFix --> Review
-    Findings -->|None| Done([Final Report])
+    Findings -->|None or max rounds| SelfRev["/zensu:self-review<br/>terminal · ≤ 1 fix round"]
+    SelfRev --> Done([Final Report])
 
     style P15 fill:#fef3c7,stroke:#92400e,color:#1e293b
     style P6 fill:#fef3c7,stroke:#92400e,color:#1e293b
     style Ask fill:#fee2e2,stroke:#991b1b,color:#1e293b
+    style SelfRev fill:#dcfce7,stroke:#166534,color:#1e293b
 ```
 
 **Phases at a glance:**
@@ -242,7 +244,7 @@ flowchart LR
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
     Fix --> Spawn
     Findings -->|None or<br/>max rounds| CRD[--code-review-done]
-    CRD --> SelfRev[/zensu:self-review<br/>terminal stage:<br/>7-dim self-reflection]
+    CRD --> SelfRev["/zensu:self-review<br/>terminal stage:<br/>7-dim self-reflection"]
     SelfRev --> MustFix{must-fix and<br/>not yet fixed?}
     MustFix -->|yes| SRFix[1 fix round<br/>RED→GREEN gate active<br/>set selfReviewFixed]
     SRFix --> SelfRev
