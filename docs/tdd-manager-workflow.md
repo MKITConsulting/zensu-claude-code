@@ -231,7 +231,7 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 
 ## 9. Auto-Review Chain
 
-At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) guarantees the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds.
+At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) guarantees the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below).
 
 ```mermaid
 flowchart LR
@@ -241,9 +241,15 @@ flowchart LR
     Reviewer --> Findings{Critical or<br/>Important?}
     Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
     Fix --> Spawn
-    Findings -->|None or<br/>max rounds| Done([chainDone · Final Report])
+    Findings -->|None or<br/>max rounds| CRD[--code-review-done]
+    CRD --> SelfRev[/zensu:self-review<br/>terminal stage:<br/>7-dim self-reflection]
+    SelfRev --> MustFix{must-fix and<br/>not yet fixed?}
+    MustFix -->|yes| SRFix[1 fix round<br/>RED→GREEN gate active<br/>set selfReviewFixed]
+    SRFix --> SelfRev
+    MustFix -->|no / latch set| Done([self-review runs<br/>chainDone · Final Report])
 
     style Reviewer fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style SelfRev fill:#dcfce7,stroke:#166534,color:#1e293b
     style Fix fill:#dbeafe,stroke:#1e40af,color:#1e293b
     style Stop fill:#fee2e2,stroke:#991b1b,color:#1e293b
 ```
@@ -254,9 +260,11 @@ Reviewer returns findings in three tiers:
 - **Important**: should land before merge. Auto-fix attempted.
 - **Suggestions**: nice-to-have. NOT auto-fixed.
 
-Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and stops — preventing infinite loops on intractable findings.
+Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and hands off to the terminal self-review stage (below) instead of stopping — preventing infinite loops on intractable findings.
 
-**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a three-section summary block: `## Implementation Summary` (what tdd-manager built — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths), `## Review Summary` (final reviewer verdict, findings count by severity, files reviewed), and `## Auto-fix History` (per-round trace of findings routed to tdd-manager and what was fixed; skipped when zero rounds). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
+**Terminal self-review stage (0.5.0+).** When `hooks.selfReview` is enabled (default), the code-reviewer chain does NOT close at convergence. On PASS, suggestions-only, or max-rounds, [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) marks `--code-review-done` and hands off to the `/zensu:self-review` skill ([skills/self-review/SKILL.md](../skills/self-review/SKILL.md)) — a main-thread terminal stage ported from `/reflect`. It re-reads the session's own changes across seven dimensions (architecture, consistency, edge-cases, test coverage, security, simplification, conventions), takes at most ONE fix round under the still-active phase-gate if a must-fix surfaces (latched by `selfReviewFixed`; it never re-spawns the code-reviewer), then owns the chain terminus: it runs `--chain-done` and renders the final report including a `## Self-Review Summary`. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) routes to self-review while `codeReviewDone && !chainDone`. Set `hooks.selfReview=false` to restore the pre-0.5.0 behavior where code-reviewer convergence closes the chain directly.
+
+**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a three-section summary block: `## Implementation Summary` (what tdd-manager built — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths), `## Review Summary` (final reviewer verdict, findings count by severity, files reviewed), and `## Auto-fix History` (per-round trace of findings routed to tdd-manager and what was fixed; skipped when zero rounds). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. When `hooks.selfReview` is enabled (default), the terminal `/zensu:self-review` stage renders this summary and adds a fourth `## Self-Review Summary` section. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
 
 ---
 

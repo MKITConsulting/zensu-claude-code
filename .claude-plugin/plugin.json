@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.4.2",
+  "version": "0.5.0",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -19,6 +19,7 @@
     "./skills/implement",
     "./skills/pulse",
     "./skills/reset-review-limit",
+    "./skills/self-review",
     "./skills/security-review",
     "./skills/tdd",
     "./skills/zensu-help"

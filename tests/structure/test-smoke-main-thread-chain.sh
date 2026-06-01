@@ -131,11 +131,16 @@ echo "$CTX" | grep -q "subagent_type='zensu:code-reviewer'" && check "4c re-veri
 RCOUNT="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).count)}catch(_){console.log("?")}' "$PROJ/.zensu/state/rounds-${SID_R}.json")"
 [ "$RCOUNT" = "1" ] && check "4d round counter increments (1)" PASS || check "4d counter=1 (got $RCOUNT)" FAIL
 [ "$(flag chainDone)" = "false" ] && check "4e chainDone stays false under max" PASS || check "4e chainDone false" FAIL
-# force max rounds (default 5): seed count=5 -> NEXT=6 -> convergence
+# force max rounds (default 5): seed count=5 -> NEXT=6 -> convergence -> hand off to terminal self-review
+# (selfReview is on by default; the code-reviewer chain converges via codeReviewDone, and
+# /zensu:self-review owns the final --chain-done. Set hooks.selfReview=false to restore the
+# legacy chainDone-at-max-rounds behavior.)
 printf '{"count":5,"ts":"x"}' > "$PROJ/.zensu/state/rounds-${SID_R}.json"
 CTX2="$(postrev_ctx)"
 echo "$CTX2" | grep -q "max 5 rounds reached" && check "4f max rounds -> convergence directive" PASS || check "4f convergence msg" FAIL
-[ "$(flag chainDone)" = "true" ] && check "4g max rounds -> hook sets chainDone (releases Stop hook)" PASS || check "4g chainDone true" FAIL
+echo "$CTX2" | grep -qF "skill='zensu:self-review'" && check "4g max rounds -> hands off to terminal self-review" PASS || check "4g self-review handoff" FAIL
+[ "$(flag codeReviewDone)" = "true" ] && check "4h max rounds -> hook sets codeReviewDone (code-review chain converged)" PASS || check "4h codeReviewDone true" FAIL
+[ "$(flag chainDone)" = "false" ] && check "4i max rounds -> chainDone deferred to self-review (stays false)" PASS || check "4i chainDone deferred" FAIL
 
 echo "== 5. Wiring =="
 node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(h.hooks.Stop&&h.hooks.Stop[0].hooks.some(x=>/stop-chain-enforcer/.test(x.command))?0:1)' "$HOOKS_JSON" \

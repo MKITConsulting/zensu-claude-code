@@ -32,7 +32,7 @@ case "${1:-}" in
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
     exit $?
     ;;
-  --tdd-begin|--tdd-complete|--chain-done|--tdd-reset)
+  --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset)
     verb="$1"
     session_val=""
     while [ $# -gt 0 ]; do
@@ -64,6 +64,8 @@ case "${1:-}" in
         ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
       --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
+      --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
+      --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
       --tdd-reset)    tdd_clear_session "$session_val" ;;
     esac
     exit $?
