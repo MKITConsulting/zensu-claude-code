@@ -8,7 +8,8 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
-EXPECTED_VERSION="0.5.0"
+EXPECTED_VERSION="$(jq -r '.version' "$PLUGIN_JSON")"
+EXPECTED_VERSION_RE="$(printf '%s' "$EXPECTED_VERSION" | sed 's/[.]/\\./g')"
 
 PASS=0; FAIL=0
 check() {
@@ -101,10 +102,10 @@ else
   check "S11 README.md mentions /zensu:zensu-help in the skills table" FAIL
 fi
 
-if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-06-01" "$CHANGELOG_MD"; then
-  check "S12 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-30' section" PASS
+if [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION_RE}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" "$CHANGELOG_MD"; then
+  check "S12 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS
 else
-  check "S12 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-30' section" FAIL
+  check "S12 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" FAIL
 fi
 
 echo "----"

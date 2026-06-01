@@ -25,8 +25,9 @@ Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and nev
 
 1. `.claude-plugin/plugin.json` — `"version": "X.Y.Z"`
 2. `.claude-plugin/marketplace.json` — `plugins[0].version: "X.Y.Z"` (same value)
-3. `CHANGELOG.md` — new `## [X.Y.Z] - YYYY-MM-DD` section, move applicable Unreleased entries down
-4. Commit subject: `chore(release): bump version to X.Y.Z`
+3. `README.md` — version badge `version-X.Y.Z-green` (same value). Enforced by `tests/structure/test-zensu-help-skill.sh` and `tests/structure/test-reset-review-limit-skill.sh`, which derive the expected version from `plugin.json` and assert the badge matches.
+4. `CHANGELOG.md` — new `## [X.Y.Z] - YYYY-MM-DD` section, move applicable Unreleased entries down
+5. Commit subject: `chore(release): bump version to X.Y.Z`
 
 If `marketplace.json` cannot be bumped in the same commit (e.g. forgotten and the release already shipped), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
 

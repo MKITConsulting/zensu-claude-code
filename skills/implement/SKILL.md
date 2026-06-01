@@ -126,7 +126,7 @@ Present a completion summary:
 - The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) require a separate API call, not an MCP tool.
 - Always reference the feature ID in commit messages: `feat(component): description [ZEN-xxx]`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
-- The /zensu:tdd workflow creates a plan at `.zensu/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
+- The /zensu:tdd workflow creates a plan at `.zensu/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
 
 ## MCP Tools Used
 
