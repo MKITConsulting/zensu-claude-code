@@ -155,9 +155,9 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
 
 MANDATORY — create BOTH files (plan + log are a pair).
 
-> **Gate note (read before writing):** Phase 0's `--tdd-begin` armed the phase-gate, but you have NOT declared a TDD phase yet, so `phase = UNINITIALIZED` and the Edit/Write/MultiEdit tools are DENIED here. The plan and log are documentation artifacts — write BOTH via **Bash** (heredoc / `printf`), which is intentionally NOT gated. Do NOT use the Write/Edit tool for them (it will be blocked). And never use Bash to write *production code* to bypass the gate — production source goes through Edit/Write under a declared phase in Phase 4; Bash is only for these `.zensu/` docs.
+> **Gate note (read before writing):** Phase 0's `--tdd-begin` armed the phase-gate. Paths under `.zensu/` (the plan + log artifacts) are exempt from the gate, so write the **plan** with the **Write tool** — its full body must NOT go through Bash, or the witness log would record the entire plan in one `cmd=` entry. The **log** is an append-only trace: write and grow it with **Bash** (`printf >> {log_file}`), never the Write tool (which would overwrite it). Never use Bash to write *production code* to bypass the gate — production source goes through Edit/Write under a declared phase in Phase 4.
 
-1. Create the plan file via a Bash heredoc: `mkdir -p .zensu/plans && cat > .zensu/plans/{SESSION_TS}_tdd-{slug}.md <<'EOF'` … `EOF`, with this content:
+1. Create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate), with this content:
 
 ```markdown
 # TDD Plan: {Feature Title}

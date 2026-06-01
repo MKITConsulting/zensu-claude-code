@@ -243,10 +243,10 @@ if grep -qF 'in the same turn or batch as' "$AGENT"; then
 else
   check "MT4 skill guards --chain-done against early/parallel firing" FAIL
 fi
-if grep -qF 'cat > .zensu/plans' "$AGENT"; then
-  check "MT5 Phase 2 writes the plan via Bash heredoc (phase-gate blocks Write in UNINITIALIZED)" PASS
+if grep -qF 'plan file with the **Write tool**' "$AGENT" && ! grep -qF 'cat > .zensu/plans' "$AGENT"; then
+  check "MT5 Phase 2 writes the plan via the Write tool (.zensu/ paths bypass the gate)" PASS
 else
-  check "MT5 Phase 2 writes the plan via Bash heredoc (phase-gate blocks Write in UNINITIALIZED)" FAIL
+  check "MT5 Phase 2 writes the plan via the Write tool (.zensu/ paths bypass the gate)" FAIL
 fi
 
 # 0.5.1 — task usage hardened from soft prose to a mandatory contract + rationalization counter
