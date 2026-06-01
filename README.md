@@ -44,13 +44,15 @@ flowchart TD
         NEXT -->|"No"| K["code-reviewer Agent"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
+        L -->|"converged (PASS / max rounds)"| SR["/zensu:self-review<br/>(terminal · ≤ 1 fix round)"]
+        SR --> FR(["Final Report"])
         GATE["PreToolUse FSM gate"] -.guards.-> RED
         GATE -.-> IMPL
         GATE -.-> GREEN
     end
 
     subgraph Tracking["Layer 3: Tracking"]
-        L -->|"link artifacts"| M["Zensu Dashboard"]
+        FR -->|"link artifacts"| M["Zensu Dashboard"]
         M --> Q["Release Gate"]
         M --> P["Journey Health"]
         M --> O["Tier Matrix"]
@@ -63,6 +65,7 @@ flowchart TD
     style E fill:#ff6b6b,color:#fff
     style GATE fill:#888,color:#fff
     style K fill:#ffa94d,color:#fff
+    style SR fill:#dcfce7,stroke:#166534,color:#1e293b
     style M fill:#51cf66,color:#fff
 ```
 
