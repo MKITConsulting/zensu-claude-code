@@ -64,7 +64,7 @@ Merge steps ONLY if (a) their test files share setup code that should only be wr
 ## Principle 3: THREE-CHANNEL STATUS
 
 After completing each cycle phase (RED, IMPL, GREEN):
-1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
+1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper. Throughout this skill `{log_file}` denotes the **cwd-independent** path `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` — always anchored to `${CLAUDE_PROJECT_DIR:-.}` (never bare-relative) so every `>> {log_file}` append succeeds regardless of the current working directory.
 2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
 3. **Plan doc** — batch-update at checkpoints and final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
@@ -184,8 +184,8 @@ MANDATORY — create BOTH files (plan + log are a pair).
 - [ ] Coverage report generated for changed files (threshold: {threshold})
 ```
 
-2. `mkdir -p .zensu/logs && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
-3. Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
+3. Tell user: `tail -f {log_file}`
 
 ---
 

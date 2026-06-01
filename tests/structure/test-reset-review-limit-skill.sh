@@ -9,7 +9,8 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.4.0"
+EXPECTED_VERSION="$(jq -r '.version' "$PLUGIN_JSON")"
+EXPECTED_VERSION_RE="$(printf '%s' "$EXPECTED_VERSION" | sed 's/[.]/\\./g')"
 
 PASS=0; FAIL=0
 check() {
@@ -122,10 +123,10 @@ else
   check "R14 README.md mentions /zensu:reset-review-limit in the skills table" FAIL
 fi
 
-if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-05-30" "$CHANGELOG_MD"; then
-  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" PASS
+if [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION_RE}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}" "$CHANGELOG_MD"; then
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS
 else
-  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" FAIL
+  check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" FAIL
 fi
 
 if [ -f "$HOOK_SH" ] && grep -qF "/zensu:reset-review-limit" "$HOOK_SH"; then

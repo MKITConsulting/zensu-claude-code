@@ -1,0 +1,18 @@
+[22:50:59] TDD STARTED — Anchor narrative log path to CLAUDE_PROJECT_DIR | steps: 3
+[22:51:36] EXECUTION STARTED
+[22:54:09] S1 RED test-tdd-log-path-anchor.sh — FAIL: L1/L2/L3 (relative .zensu/logs, anchored {log_file} absent), exit=1, 1 PASS / 3 FAIL
+[22:55:30] S1 IMPL completed — files: skills/tdd/SKILL.md (anchored {log_file} def in Principle 3, anchored Phase-0 mkdir+create, anchored tail hint)
+[22:56:19] S1 GREEN — PASS (1 attempts, 4 tests)
+[22:58:46] S2 WIRED — docs anchored: docs/tdd-manager-workflow.md (command example :277, table path :31), skills/implement/SKILL.md (:129)
+[22:59:51] S3 WIRED — version bump 0.4.1->0.4.2: .claude-plugin/plugin.json, .claude-plugin/marketplace.json, CHANGELOG.md [0.4.2] section
+[23:09:14] AUDIT — cmd="bash tests/structure/test-tdd-log-path-anchor.sh" exit=0 result="4/4 pass — anchored convention pinned (L1 mkdir, L2 {log_file} def, L3 no relative redirect)"
+[23:09:14] AUDIT — cmd="bash tests/structure/test-gitignore-zensu.sh" exit=0 result="5/5 pass — narrative .zensu/logs/*.log stays git-tracked, no regression"
+[23:09:15] WITNESS CROSS-CHECK — both AUDIT cmds VERIFIED present in witness-cc383fef-...log (no evidence gap)
+[23:09:15] STRUCTURE SUITE — 19 pass / 4 fail. The 4 fails are PRE-EXISTING + unrelated: test-post-bash-witness.sh & test-pre-edit-hook-mirror.sh (test untouched hooks; ambient/env), test-reset-review-limit-skill.sh & test-zensu-help-skill.sh (stale EXPECTED_VERSION=0.4.0 release-sync pin — already red at 0.4.1). Zero NEW failures; +1 new passing test.
+[23:09:15] BUILD — n/a (plugin = bash/markdown/json; no build step in repo metadata)
+[23:09:15] COVERAGE SKIPPED — shell scripts, no per-file coverage tool wired (repo precedent)
+[23:09:15] MTIME AUDIT — S1: test (1780260819) < impl (1780260920) — RED-before-IMPL order preserved, no test-after
+[23:09:15] PRECONDITION DRIFT — n/a (no CLI/secret/endpoint/fixture preconditions)
+[23:09:15] RUNTIME REPRO — anchored append from a subdir lands log at project root (OK); relative form reproduced exact screenshot error: no such file or directory: .zensu/logs/..._tdd-....log
+[23:09:15] TDD COMPLETE — 1/1 GREEN (S1) | Integration: 2 WIRED (S2 docs, S3 version 0.4.2) | Build: – n/a | Coverage: SKIPPED
+[23:14:14] CHAIN DONE — zensu:code-reviewer verdict PASS WITH SUGGESTIONS (0 critical, 0 important, 4 suggestions); no auto-fix
