@@ -20,3 +20,12 @@ assert:
       };
   - type: javascript
     value: file://assertions/assert-file-exists.js
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const n = (txt.match(/\[tool_use: TaskCreate\]/g) || []).length;
+      return {
+        pass: n >= 1,
+        score: Math.min(n / 3, 1),
+        reason: `TaskCreate calls surfaced in transcript: ${n} (>=1 to pass, 3 for full score — user progress dashboard)`
+      };

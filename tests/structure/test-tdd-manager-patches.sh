@@ -249,6 +249,18 @@ else
   check "MT5 Phase 2 writes the plan via Bash heredoc (phase-gate blocks Write in UNINITIALIZED)" FAIL
 fi
 
+# 0.5.1 — task usage hardened from soft prose to a mandatory contract + rationalization counter
+if grep -qF 'Task Contract (MANDATORY)' "$AGENT"; then
+  check "MT6 skill pins a mandatory per-step Task Contract (tasks = live dashboard)" PASS
+else
+  check "MT6 skill pins a mandatory per-step Task Contract (tasks = live dashboard)" FAIL
+fi
+if grep -qF 'Tasks are just UI noise' "$AGENT"; then
+  check "MT7 Rationalization Counter: skipping tasks because the log tracks progress" PASS
+else
+  check "MT7 Rationalization Counter: skipping tasks because the log tracks progress" FAIL
+fi
+
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
