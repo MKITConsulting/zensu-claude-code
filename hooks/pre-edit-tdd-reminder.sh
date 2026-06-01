@@ -51,6 +51,11 @@ if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
   exit 0
 fi
 
+case "$FILE_PATH" in
+  *..*) ;;
+  */.zensu/*|.zensu/*) exit 0 ;;
+esac
+
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
 IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH")

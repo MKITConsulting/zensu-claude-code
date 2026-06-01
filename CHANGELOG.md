@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.2] - 2026-06-01
+
+### Fixed
+- **Witness log corruption under Apple bash 3.2 (`hooks/post-bash-witness.sh`).** The `#!/bin/bash` shebang resolves to macOS's system bash 3.2.57 (also what `/bin/sh` is), which does NOT honor `IFS=$'\x01' read <<<` — it collapsed every field into `cmd`, leaving `exit=` empty and bleeding the session id into the command on every line. The parse now writes node's fields as newline-delimited records to a temp file and reads them with plain `read` (works identically under bash 3.2, bash 5, and dash). Pinned by `tests/structure/test-post-bash-witness.sh` P12-H10 (invokes the hook under `/bin/sh`).
+
+### Changed
+- **Witness line drops the `tail=` field (`hooks/post-bash-witness.sh`).** The Phase 6 cross-check only greps `cmd=`; the last-200-char stdout tail was pure verbosity. Lines are now `[ts] BASH cmd=… exit=…`.
+- **`.zensu/` paths bypass the TDD phase-gate (`hooks/pre-edit-tdd-reminder.sh`).** Plan + log artifacts carry no production code, so they are editable during any TDD phase. This lets `/zensu:tdd` Phase 2 write the plan with the **Write tool** instead of a Bash heredoc — keeping the full plan body out of the witness log (`skills/tdd/SKILL.md` updated). A `..` traversal guard keeps paths that merely contain `/.zensu/` but escape it (e.g. `…/.zensu/../src/x.ts`) gated. Pinned by `tests/structure/test-pre-edit-hook-mirror.sh` C8/C9 and `test-tdd-manager-patches.sh` MT5.
+
+### Internal
+- Repaired stale activation seeding in `tests/structure/test-post-bash-witness.sh` and `test-pre-edit-hook-mirror.sh`: both still seeded the obsolete `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping (dead since the 0.4.0 chain-state migration) and had been red; they now seed the chain-state `active` flag.
+
 ## [0.6.1] - 2026-06-01
 
 ### Changed
