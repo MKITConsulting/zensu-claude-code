@@ -1,6 +1,6 @@
 #!/bin/bash
 # Pins skills/self-review/SKILL.md (ported from /reflect, English-only) plus its
-# registration + the 0.5.0 release bump (plugin.json, marketplace.json, README,
+# registration + cross-file version consistency (plugin.json, marketplace.json, README,
 # CHANGELOG). self-review is the terminal review-chain stage and owns --chain-done.
 set -u
 
@@ -10,7 +10,7 @@ PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
-EXPECTED_VERSION="0.6.0"
+EXPECTED_VERSION="$(jq -r '.version' "$PLUGIN_JSON")"
 
 PASS=0; FAIL=0
 check() {
@@ -83,7 +83,7 @@ grep -qF '## Self-Review Summary' "$SKILL_MD" && check "V11 renders ## Self-Revi
 grep -qiE 'exactly one|one fix round|a single fix round' "$SKILL_MD" && check "V12 documents the exactly-one fix round" PASS || check "V12 one fix round" FAIL
 grep -qiF 'do not spawn' "$SKILL_MD" && check "V13 forbids spawning the code-reviewer (terminal)" PASS || check "V13 no reviewer respawn" FAIL
 
-# Registration + 0.5.0 release bump.
+# Registration + cross-file version consistency (expected version derived from plugin.json).
 jq -e '.skills | index("./skills/self-review")' "$PLUGIN_JSON" >/dev/null 2>&1 && check "V14 plugin.json skills[] contains './skills/self-review'" PASS || check "V14 plugin.json registration" FAIL
 
 PLUGIN_VERSION="$(jq -r '.version' "$PLUGIN_JSON" 2>/dev/null)"

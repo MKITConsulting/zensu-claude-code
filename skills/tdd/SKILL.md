@@ -43,6 +43,7 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
 - *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
 - *"The user said 'no questions', so I'll make my best guess"* → LIE. "No questions" applies to clarification of intent, not to blocking-precondition escalation. The Phase-1-3b coverage-tool ask is the precedent: ask anyway. See Phase 1.5.
+- *"Tasks are just UI noise — the log already tracks progress"* → LIE. The Task list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `TaskCreate`/`TaskUpdate` leaves the user blind to where you are. Create the step tasks in Phase 3, flip their status in Phase 4 — same discipline as the log.
 
 ### Hard Bans
 
@@ -65,7 +66,7 @@ Merge steps ONLY if (a) their test files share setup code that should only be wr
 
 After completing each cycle phase (RED, IMPL, GREEN):
 1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper. Throughout this skill `{log_file}` denotes the **cwd-independent** path `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` — always anchored to `${CLAUDE_PROJECT_DIR:-.}` (never bare-relative) so every `>> {log_file}` append succeeds regardless of the current working directory.
-2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
+2. **Tasks (MANDATORY)** — the user's live progress dashboard. TaskUpdate: `in_progress` when starting a cycle phase, `completed` when done. Every step created in Phase 3 must reach `completed`. See the Per-Step Task Contract below.
 3. **Plan doc** — batch-update at checkpoints and final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
    `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
@@ -82,6 +83,10 @@ Integration/`[W]` steps log ONE entry: `{step_id} WIRED — {description}`.
 
 When you merge multiple Feature steps (per Principle 2), each constituent step keeps its own RED + GREEN entries — only the IMPL entry may be combined. Missing entries are a TDD compliance violation that Phase 6 audit MUST flag.
 
+### Per-Step Task Contract (MANDATORY)
+
+Tasks are not optional decoration — they are the only channel the user watches in real time, so treat them with the same discipline as the log. Each Feature/Bug-Fix step has THREE tasks (`[test]`/`[impl]`/`[verify]`, created in Phase 3); each integration step has ONE (`[wire]`). As you execute a step, flip its tasks `in_progress` → `completed` in lockstep with the cycle phases (RED→[test], IMPL→[impl], GREEN→[verify]). Running a Phase 4 cycle with no corresponding `in_progress` task is a discipline violation of the same class as a missing log entry. If you reach Phase 4 and the step's tasks do not exist, STOP and create them (Phase 3) before editing.
+
 ---
 
 ## Phase 0: Pre-flight
@@ -89,7 +94,7 @@ When you merge multiple Feature steps (per Principle 2), each constituent step k
 1. **Resolve plugin root once.** Run `bash -c 'cat "$HOME/.zensu/plugin-root"'` via the Bash tool and store its trimmed output (no trailing newline) as `{PLUGIN_ROOT}` for the entire session. Use `{PLUGIN_ROOT}` in ALL subsequent helper invocations: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh …`. If the command exits non-zero or the output is empty, abort with: `FATAL: plugin root unresolvable — run a fresh session to trigger SessionStart hook AND ensure hooks.pulseSession is not set to false in ~/.zensu/config.json`. **Never search the filesystem** for the helper; the SessionStart hook (`hooks/session-start-pulse.sh`) is the single source of truth for the plugin-root path.
 2. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire TDD session — the log helper consumes it for `relative` timestamp style.
 3. **Activate the TDD session.** Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-begin`. This sets the per-session chain-state `active` flag, which turns on the PreToolUse phase-gate and the Bash witness for THIS main-thread session (they were silent until now). Without this call, your edits are NOT gated and the witness records nothing — so do it before any test/production edit.
-4. **Load the task-tracking tools.** In the main thread `TaskCreate`/`TaskUpdate` are deferred — their schemas are NOT preloaded (the deleted subagent got them for free via its `tools:` frontmatter; a main-thread skill does not). Before the first `TaskCreate`, load them: call `ToolSearch` with query `select:TaskCreate,TaskUpdate`. If your harness already exposes them, this is a harmless no-op.
+4. **Load the task-tracking tools.** In the main thread `TaskCreate`/`TaskUpdate` are deferred — their schemas are NOT preloaded (the deleted subagent got them for free via its `tools:` frontmatter; a main-thread skill does not). Before the first `TaskCreate`, load them: call `ToolSearch` with query `select:TaskCreate,TaskUpdate`. If your harness already exposes them, this is a harmless no-op — but never let a load hiccup become an excuse to skip tasks: they are the user's live dashboard (Principle 3, Per-Step Task Contract), not optional.
 5. Create the first task with `TaskCreate(subject: "TDD: Analyzing spec and creating plan", description: "Parse the feature spec and produce the TDD plan", activeForm: "Analyzing specification")`, then set it `in_progress` with `TaskUpdate`. **Contract:** `TaskCreate` requires BOTH `subject` and `description` (a one-liner is fine) and accepts an optional `activeForm`; it has NO `status` field (new tasks are always `pending`) and NO `blockedBy` — set status via `TaskUpdate(status: ...)` and dependencies via `TaskUpdate(addBlockedBy: [...])`.
 
 ---
@@ -191,7 +196,7 @@ MANDATORY — create BOTH files (plan + log are a pair).
 
 ## Phase 3: Create ALL Tasks
 
-Create tasks for ALL steps BEFORE starting execution. This is the user's progress dashboard.
+Create tasks for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its tasks.
 
 Per TDD step — 3 tasks:
 - `{step_id} [test]` (activeForm: "Creating RED test for {step_id}")
