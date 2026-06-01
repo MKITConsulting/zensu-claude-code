@@ -9,7 +9,7 @@ MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
 CHANGELOG_MD="$PLUGIN_DIR/CHANGELOG.md"
 HOOK_SH="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
-EXPECTED_VERSION="0.4.0"
+EXPECTED_VERSION="0.5.0"
 
 PASS=0; FAIL=0
 check() {
@@ -110,10 +110,10 @@ else
   check "R12 README.md version badge contains $EXPECTED_VERSION" FAIL
 fi
 
-if [ -f "$README_MD" ] && grep -qF "### Skills (8)" "$README_MD"; then
-  check "R13 README.md Skills section heading reads '### Skills (8)'" PASS
+if [ -f "$README_MD" ] && grep -qF "### Skills (9)" "$README_MD"; then
+  check "R13 README.md Skills section heading reads '### Skills (9)'" PASS
 else
-  check "R13 README.md Skills section heading reads '### Skills (8)'" FAIL
+  check "R13 README.md Skills section heading reads '### Skills (9)'" FAIL
 fi
 
 if [ -f "$README_MD" ] && grep -qF "/zensu:reset-review-limit" "$README_MD"; then
@@ -122,7 +122,7 @@ else
   check "R14 README.md mentions /zensu:reset-review-limit in the skills table" FAIL
 fi
 
-if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-05-30" "$CHANGELOG_MD"; then
+if [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-06-01" "$CHANGELOG_MD"; then
   check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" PASS
 else
   check "R15 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-05-26' section" FAIL

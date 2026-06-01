@@ -238,7 +238,7 @@ if grep -qF 'never `run_in_background`' "$AGENT" && grep -qF 'one tool call at a
 else
   check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" FAIL
 fi
-if grep -qF 'EXCLUSIVELY the chain-terminus' "$AGENT"; then
+if grep -qF 'in the same turn or batch as' "$AGENT"; then
   check "MT4 skill guards --chain-done against early/parallel firing" PASS
 else
   check "MT4 skill guards --chain-done against early/parallel firing" FAIL

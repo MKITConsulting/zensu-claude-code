@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-06-01
+
+### Added
+- **`/zensu:self-review` — terminal self-reflection stage of the post-implementation review chain.** Ported from the user-level `/reflect` skill and translated to English. After the `zensu:code-reviewer` chain converges (PASS, suggestions-only, or max-rounds), the chain no longer terminates immediately; instead it hands off to `/zensu:self-review`, which re-reads this session's own changes as a senior engineer across seven dimensions (architecture, consistency, edge-cases, test coverage, security, simplification, conventions), emits a Positive / Improvements / Risks reflection, takes **at most one** fix round under the still-active TDD phase-gate if a must-fix surfaces — **without** re-running the code-reviewer — and then owns the chain terminus (`--chain-done`) and renders the final report with a new `## Self-Review Summary` section. Hard hook-enforced: a new `codeReviewDone` chain-state flag plus a `selfReviewFixed` one-fix-round latch (`hooks/lib/zensu-tdd-phase.sh`, both preserved across phase writes), two new `zensu-log.sh` markers (`--code-review-done`, `--self-review-fixed`), Stop-hook routing (`stop-chain-enforcer.sh`: `codeReviewDone && !chainDone` forces the Skill), and post-review hand-off (`post-review-tdd-delegate.sh`: PASS / suggestions-only / max-rounds all route to self-review instead of closing). Gated by the new `hooks.selfReview` config flag (default true); set `hooks.selfReview=false` to restore the previous behavior where the code-reviewer convergence closes the chain directly.
+
 ## [0.4.1] - 2026-05-31
 
 ### Fixed
