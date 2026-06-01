@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-05-31
+
+### Fixed
+- **The `/zensu:tdd` narrative log path is now anchored to `${CLAUDE_PROJECT_DIR:-.}` so per-phase appends are working-directory-independent.** The narrative log was the only zensu artifact whose path was relative and unanchored: `skills/tdd/SKILL.md` created the directory with `mkdir -p .zensu/logs` exactly once in Phase 0, while every later per-phase append (Principle 3, Phase 4) emitted a bare `>> .zensu/logs/{SESSION_TS}_tdd-{slug}.log` that assumed the directory still existed *relative to the current working directory*. In a multi-directory project (e.g. a worktree root plus a nested build subdir such as `src-tauri`) an append issued after the shell's cwd had moved resolved the relative path against the wrong base and failed with `no such file or directory: .zensu/logs/..._tdd-....log`, aborting the log write mid-run. By contrast the witness log and all FSM state files already anchored with `${CLAUDE_PROJECT_DIR:-.}` (`hooks/lib/zensu-log.sh`, the Phase 5 witness path). The fix makes the narrative log consistent with that convention: `skills/tdd/SKILL.md` now defines `{log_file}` as the cwd-independent `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` in Principle 3, anchors the Phase 0 `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs"` + create redirect, and routes the tail hint through `{log_file}` — so no `>`/`>>` redirect targets a bare relative `.zensu/logs/` path anymore. When `CLAUDE_PROJECT_DIR` is set (the normal claude-code case) the cwd-drift failure class is eliminated; when unset the `:-.` fallback preserves today's relative behavior, making the change a strict improvement with no regression. Doc references in `docs/tdd-manager-workflow.md` (the append example + the channel table) and `skills/implement/SKILL.md` were updated to the anchored form for consistency. Pinned by the new `tests/structure/test-tdd-log-path-anchor.sh` (asserts the anchored `mkdir`, the anchored `{log_file}` definition, and the absence of any bare-relative `.zensu/logs/` redirect).
+
 ## [0.4.1] - 2026-05-31
 
 ### Fixed
