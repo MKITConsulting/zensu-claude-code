@@ -1,0 +1,20 @@
+[19:46:24] TDD STARTED — Move plan-review skill into plugin | steps: 2
+[19:48:28] EXECUTION STARTED
+[19:49:12] S1 RED test-plan-review-skill.sh — FAIL: skills/plan-review/SKILL.md does not exist (P1)
+[19:54:06] S1 IMPL completed — files: skills/plan-review/SKILL.md, .claude-plugin/plugin.json, .claude-plugin/marketplace.json, README.md, CHANGELOG.md
+[19:54:31] S1 GREEN — PASS (1 attempts, 16 tests)
+[19:57:44] S1 AUDIT GAP — sibling tests pin '### Skills (9)'; bumping count assertions to (10) in test-self-review/zensu-help/reset-review-limit
+[19:58:43] S1 IMPL completed (count-sync) — files: tests/structure/test-self-review-skill.sh, test-zensu-help-skill.sh, test-reset-review-limit-skill.sh
+[20:00:52] S1 IMPL completed (V21 date-agnostic) — files: tests/structure/test-self-review-skill.sh (was brittle: dynamic version + hard-coded 2026-06-01 date)
+[20:02:18] AUDIT — cmd="bash tests/structure/test-plan-review-skill.sh" exit=0 result="16/16 PASS (witness: VERIFIED)"
+[20:02:18] AUDIT — cmd="bash tests/structure/test-zensu-help-skill.sh" exit=0 result="17/17 PASS after count sync (witness: VERIFIED)"
+[20:02:18] AUDIT — cmd="bash tests/structure/test-self-review-skill.sh" exit=0 result="37/37 PASS after count+V21 fix (witness: VERIFIED)"
+[20:02:18] AUDIT — cmd="bash tests/structure/test-reset-review-limit-skill.sh" exit=0 result="32/32 PASS after count sync (witness: VERIFIED)"
+[20:02:18] AUDIT NOTE — witness records exit=? (env exit-capture limitation); all cmd= strings cross-checked present; exit codes observed directly from tool output
+[20:02:18] AUDIT — Build: – n/a (markdown+bash plugin, no build step) | Coverage: SKIPPED (no coverage tooling in the bash structure suite)
+[20:03:24] S2 WIRED — removed user-space ~/.claude/skills/plan-review (migrated to plugin skills/plan-review)
+[20:05:09] TDD COMPLETE — 1/1 GREEN | Integration: 1 WIRED | Build: – n/a | Coverage: SKIPPED (no tool)
+[20:13:53] S3 RED P8 — FAIL: SKILL.md has bare backticked /plan-review command refs (lines 11,21)
+[20:13:53] S3 RED P9 — FAIL: SKILL.md uses predictable /tmp/plan-review-$SLUG (no mktemp -d)
+[20:14:58] S3 IMPL completed — files: skills/plan-review/SKILL.md (namespaced /zensu:plan-review command refs; mktemp -d working dir)
+[20:15:43] S3 GREEN — PASS (1 attempts, 18 tests)

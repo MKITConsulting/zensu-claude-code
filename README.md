@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.3-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.4-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -83,11 +83,15 @@ No configuration needed. When you first use a Zensu tool, Claude Code will autom
 
 ### API Key (CI/CD)
 
-For headless environments where browser login isn't available:
+For headless environments where browser login isn't available, authenticate with an API key. Exporting the key alone is **not** enough — the bundled `.mcp.json` carries no `Authorization` header (the absence of one is exactly what lets interactive users get the OAuth flow above), so nothing forwards the key. Register a user-scope MCP entry that sends it:
 
 ```bash
 export ZENSU_API_KEY=zsk_...
+claude mcp add zensu --transport http --url https://mcp.zensu.dev/mcp \
+  --header "Authorization: Bearer ${ZENSU_API_KEY}" --scope user
 ```
+
+The user-scope entry takes precedence over the plugin's project-scope `.mcp.json` and survives plugin upgrades. With double quotes the shell expands `${ZENSU_API_KEY}` at add time, baking the key into `~/.claude.json` — fine for an ephemeral CI runner. On a persistent machine, single-quote the header (`'Authorization: Bearer ${ZENSU_API_KEY}'`) to store the placeholder instead and let Claude Code expand it from the environment at startup. Remove with `claude mcp remove zensu --scope user`.
 
 To point Claude Code at a self-hosted Zensu MCP server, see [Self-hosting](#self-hosting) below.
 
@@ -136,13 +140,14 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (9)
+### Skills (10)
 
 | Skill | Description |
 |-------|-------------|
 | `/zensu:bootstrap` | Bootstrap a product from a vision document — creates features, journeys, security profiles, tiers |
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval, `/zensu:implement`, or directly. |
+| `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
@@ -300,7 +305,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
+| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — must be wired via a user-scope MCP header to take effect (see [Authentication](#authentication)); not needed when using OAuth |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits during a main-thread `/zensu:tdd` session. Any other value (or unset) leaves the gate active while the session's chain-state `active` flag is set. |
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the session's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
 | `ZENSU_CHAIN` | — | Set to `off` to disable the Stop-hook review-chain backstop (`stop-chain-enforcer.sh`) so the main agent may end its turn without completing the `zensu:code-reviewer` chain. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell. |
@@ -359,7 +364,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Problem | Solution |
 |---------|----------|
 | MCP server unreachable | Verify network connectivity to `https://mcp.zensu.dev/mcp` (or your self-hosted URL — see [Self-hosting](#self-hosting)) |
-| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) |
+| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and that the user-scope MCP header is registered — see [API Key (CI/CD)](#api-key-cicd) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |
