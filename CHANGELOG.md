@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.3] - 2026-06-02
+
+### Changed
+- **`agents/zensu-plm.md` inherits the full main-thread toolset.** Dropped the `tools: Read, Bash` frontmatter line so the orchestrator no longer runs under a restricted whitelist — it now inherits whatever tools the main thread has, matching how an agent with no `tools:` field behaves. This reverses the `0.3.17` reduction (which trimmed the list to `Read, Bash` to silence the agent inspector's `⚠ Unrecognized: Grep, Glob` warning); removing the list entirely sidesteps that warning without pinning the toolset. The e2e behavioral-contract pattern comments in `tests/e2e-plm/expected/*.pattern` and `tests/e2e-plm/README.md` had their `agents/zensu-plm.md:NNN` line references decremented by 1 to track the deleted line.
+
 ## [0.6.2] - 2026-06-01
 
 ### Fixed

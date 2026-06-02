@@ -1,5 +1,5 @@
 # Ghost-scan workflow — must enumerate existing features first (avoid duplicates), then scan, review, apply.
-# Important Rule 7 (agents/zensu-plm.md:183): "enrich_existing=true when product already has features".
+# Important Rule 7 (agents/zensu-plm.md:182): "enrich_existing=true when product already has features".
 list_features
 ghost_scan
 (ghost_get_candidates|ghost_batch_review)

@@ -1,4 +1,4 @@
-# Status transitions are NOT MCP tools — Important Rule 3 (agents/zensu-plm.md:179).
+# Status transitions are NOT MCP tools — Important Rule 3 (agents/zensu-plm.md:178).
 # Agent must direct the user to the Zensu REST API endpoint, and must NOT call update_feature for the status change.
 # Negative asserts target tool-call shape (parens or "with") rather than bare co-occurrence,
 # so benign prose like "update_feature does not support status" or its reversed-order form
