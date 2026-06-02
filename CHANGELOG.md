@@ -10,6 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **README "API Key (CI/CD)" section now documents the working headless-auth setup.** The section told CI/CD users to `export ZENSU_API_KEY=zsk_...` and stop there, but the bundled `.mcp.json` carries no `Authorization` header and nothing wires the env var into one — so the exported key was never sent, and headless auth failed (`invalid api key` / 401) while Claude Code fell back to an OAuth flow that has no browser in CI. Interactive users were never affected: the missing header is precisely what lets the OAuth browser login run, and that path works (`claude mcp list` shows `plugin:zensu:zensu … ✓ Connected`). The section now instructs registering a user-scope MCP entry that forwards the key as `Authorization: Bearer ${ZENSU_API_KEY}` (`claude mcp add zensu … --header … --scope user`), mirroring the existing Self-hosting pattern and the 0.5.0 decision to keep `.mcp.json` free of environment-variable magic; the precedence and secret-on-disk trade-offs (double- vs single-quoted header) are spelled out. The Environment Variables table row and the "Invalid API key" troubleshooting row gain cross-references to the corrected section. Docs-only; no runtime change.
 
+## [0.6.3] - 2026-06-02
+
+### Changed
+- **`agents/zensu-plm.md` inherits the full main-thread toolset.** Dropped the `tools: Read, Bash` frontmatter line so the orchestrator no longer runs under a restricted whitelist — it now inherits whatever tools the main thread has, matching how an agent with no `tools:` field behaves. This reverses the `0.3.17` reduction (which trimmed the list to `Read, Bash` to silence the agent inspector's `⚠ Unrecognized: Grep, Glob` warning); removing the list entirely sidesteps that warning without pinning the toolset. The e2e behavioral-contract pattern comments in `tests/e2e-plm/expected/*.pattern` and `tests/e2e-plm/README.md` had their `agents/zensu-plm.md:NNN` line references decremented by 1 to track the deleted line.
+
 ## [0.6.2] - 2026-06-01
 
 ### Fixed

@@ -247,7 +247,7 @@ regression smoke check, not a production-grade enforcer.
 **Mitigation**: End-to-end pattern tests are smoke-level. The intended production guard is the
 Zensu MCP server: when the agent calls `get_feature` with an unknown ID, the server should
 return NOT_FOUND, and the agent should NOT retry. This behavior is enforced (a) by the agent
-directive in `agents/zensu-plm.md:178` ("Never guess feature IDs. Always use list_features
+directive in `agents/zensu-plm.md:177` ("Never guess feature IDs. Always use list_features
 or ask the user") and (b) ideally by the MCP server returning a clear error on unknown IDs —
 verified out-of-repo, not by this harness. Treat the smoke pattern as a lower-bound assertion
 that the agent EMITS Rule-2 signal; runtime correctness is owned elsewhere.

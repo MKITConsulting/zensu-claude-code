@@ -9,7 +9,6 @@ description: >
   implementation, release readiness, tier management, user journeys, pulse sessions,
   wiki pages, doc generation, and any Zensu-related task.
 model: inherit
-tools: Read, Bash
 mcpServers:
   zensu: {}
 ---
