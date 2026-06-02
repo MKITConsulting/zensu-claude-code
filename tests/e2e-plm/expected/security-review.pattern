@@ -1,5 +1,5 @@
 # Security-review workflow — must run the full sequence: classify, analyze, test-suggest, threat-model, complete.
-# Decision Rule (agents/zensu-plm.md:168): "security question → security review".
+# Decision Rule (agents/zensu-plm.md:167): "security question → security review".
 set_security_classification
 analyze_feature_security
 (suggest_security_tests|add_security_test)
