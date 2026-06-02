@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.6.3-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.4-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -140,13 +140,14 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (9)
+### Skills (10)
 
 | Skill | Description |
 |-------|-------------|
 | `/zensu:bootstrap` | Bootstrap a product from a vision document — creates features, journeys, security profiles, tiers |
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval, `/zensu:implement`, or directly. |
+| `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
