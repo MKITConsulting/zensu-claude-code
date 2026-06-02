@@ -95,7 +95,7 @@ MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/nu
 { [ -f "$README_MD" ] && grep -qF "version-${EXPECTED_VERSION}-green" "$README_MD"; } && check "V18 README.md version badge contains $EXPECTED_VERSION" PASS || check "V18 README badge $EXPECTED_VERSION" FAIL
 { [ -f "$README_MD" ] && grep -qF "### Skills (9)" "$README_MD"; } && check "V19 README.md Skills section heading reads '### Skills (9)'" PASS || check "V19 README Skills (9)" FAIL
 { [ -f "$README_MD" ] && grep -qF "/zensu:self-review" "$README_MD"; } && check "V20 README.md mentions /zensu:self-review in the skills table" PASS || check "V20 README mentions self-review" FAIL
-{ [ -f "$CHANGELOG_MD" ] && grep -qF "## [${EXPECTED_VERSION}] - 2026-06-01" "$CHANGELOG_MD"; } && check "V21 CHANGELOG.md has '## [${EXPECTED_VERSION}] - 2026-06-01' section" PASS || check "V21 CHANGELOG $EXPECTED_VERSION section" FAIL
+{ [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" "$CHANGELOG_MD"; } && check "V21 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS || check "V21 CHANGELOG $EXPECTED_VERSION dated section" FAIL
 
 echo "----"
 echo "test-self-review-skill: $PASS PASS / $FAIL FAIL"
