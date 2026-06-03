@@ -80,16 +80,34 @@ Use `link_source_files` to map implementation files to the feature:
 
 For cross-feature file mapping, use `bulk_link_source_files` with a `mappings` array containing `feature_id`, `file_path`, `file_type`, and `language` per entry.
 
-### Step 6: Link Documentation
+### Step 6: Documentation
 
-For any documentation created, use `link_docs` with:
+Documentation must be **code-grounded** — written from the real source you just
+implemented, not a restatement of the feature record.
+**Read `docs/documentation-guide.md`** first, then follow it:
+
+1. Call `get_doc_generation_context` for the feature + target `doc_type` — the
+   context *map* (source-file paths, symbols, security posture), not the source.
+2. **Read the real source files it names** (the files linked in Step 5). The map
+   is not the territory.
+3. Author Markdown grounded in real signatures, endpoints, and behavior, matched
+   to the doc type's focus and audience. Do NOT condense the context metadata
+   into `## Purpose / ## Source files / ## Security / ## Notes` sections — that
+   metadata dump is the exact failure this step prevents.
+4. Publish with `create_wiki_page` (full markdown `content`, plus `entity_type`,
+   `entity_id`, `doc_type`, `audience`).
+
+Then register the doc with `link_docs` (updates the feature's docs score):
 - `feature_id` (required)
-- `doc_type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide
+- `doc_type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
 - `title` (optional): Document title
 - `file_path` (optional): Path to the doc file
 - `external_url` (optional): External URL
 - `audience` (optional): end_user | developer | admin | internal
 - `publication_status` (optional): draft | published | archived
+
+Use `link_docs` alone (no wiki page) only for docs that already live in the repo
+or at an external URL.
 
 ### Step 7: Create Revision
 
@@ -139,7 +157,9 @@ Present a completion summary:
 | `link_test` | 4 | Link test files |
 | `link_source_files` | 5 | Map source files to feature |
 | `bulk_link_source_files` | 5 | Bulk map across features |
-| `link_docs` | 6 | Link documentation |
+| `get_doc_generation_context` | 6 | Get the context map to read source before writing docs |
+| `create_wiki_page` | 6 | Publish authored markdown to the wiki |
+| `link_docs` | 6 | Register the doc; updates docs score |
 | `create_revision` | 7 | Create feature revision |
 | `validate_feature_security` | 8 | Check release readiness |
 

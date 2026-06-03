@@ -98,7 +98,7 @@ Status transitions are gated by:
 - `generate_claude_md` — Generate a CLAUDE.md template (full|minimal|ci-only)
 
 ### Source Files & Docs
-- `get_doc_generation_context` — Get context for documentation generation
+- `get_doc_generation_context` — Get the *context map* (source-file paths, symbols, security posture) to read the real source before writing docs — NOT a doc generator. See `docs/documentation-guide.md`.
 
 ### Wiki
 - `create_wiki_page` — Create a wiki page
@@ -169,6 +169,15 @@ Use the `/zensu:pulse` skill workflow:
 3. End session with changed files
 4. Review session summary
 
+### When the user wants documentation
+**Read `docs/documentation-guide.md`** first, then follow its read-source-first procedure:
+1. Call `get_doc_generation_context` for the feature + target `doc_type` — this is the context *map* (source-file paths, symbols, security posture), not the source itself
+2. **Read the real source files it names** (Read/Grep) — the map is not the territory
+3. Author code-grounded Markdown matched to the doc type's focus and audience (8 types: `user_facing`, `api_reference`, `tutorial`, `adr`, `release_notes`, `internal`, `migration_guide`, `overview`)
+4. Publish with `create_wiki_page`, then `link_docs` to update the docs score
+
+Never condense the context metadata straight into a wiki page — that is the forbidden metadata-dump anti-pattern (see Important Rule 10).
+
 ## Decision Rules
 
 - When a user provides a plan, spec, or product description → start **bootstrap** workflow
@@ -179,6 +188,7 @@ Use the `/zensu:pulse` skill workflow:
 - When a user asks about release readiness → use `validate_feature_security` and `analyze_journey_health`
 - When a user asks about tier pricing → use tier tools (`create_tier`, `set_feature_tiers`, `get_tier_matrix`)
 - Before planning or implementing a feature, or when the user asks what the org already knows about a topic → `search_knowledge` for related context
+- When a user wants to document a feature or generate a wiki page → follow the **documentation** procedure (`docs/documentation-guide.md`): get context, **read the source**, author, publish
 - For any Zensu question not matching a specific workflow → use the appropriate individual MCP tools
 
 ## Important Rules
@@ -192,3 +202,4 @@ Use the `/zensu:pulse` skill workflow:
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `enrich_existing=true`.
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.
 9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `search_knowledge` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge tools are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
+10. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
