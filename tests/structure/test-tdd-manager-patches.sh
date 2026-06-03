@@ -20,10 +20,10 @@ fi
 check "agents/tdd-manager.md exists" PASS
 
 LINES=$(wc -l <"$AGENT")
-if [ "$LINES" -le 320 ]; then
-  check "agent line count <= 320 (actual: $LINES)" PASS
+if [ "$LINES" -le 360 ]; then
+  check "agent line count <= 360 (actual: $LINES)" PASS
 else
-  check "agent line count <= 320 (actual: $LINES)" FAIL
+  check "agent line count <= 360 (actual: $LINES)" FAIL
 fi
 
 # Patch 1 — 3 new Rationalization Counters
@@ -217,6 +217,54 @@ if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; t
   check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" FAIL
 else
   check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
+fi
+
+if grep -qF 'Cross-Layer Value Flow Pairing' "$AGENT"; then
+  check "X1 Principle 2 Cross-Layer Value Flow Pairing rule present" PASS
+else
+  check "X1 Principle 2 Cross-Layer Value Flow Pairing rule present" FAIL
+fi
+
+if grep -qF "Backend code didn't change, no test needed" "$AGENT"; then
+  check "X2 Rationalization Counter: backend unchanged -> no test" PASS
+else
+  check "X2 Rationalization Counter: backend unchanged -> no test" FAIL
+fi
+
+if grep -qF 'Cross-layer detection (Principle 2):' "$AGENT"; then
+  check "X3 Phase 1 step 6 Cross-layer detection instruction" PASS
+else
+  check "X3 Phase 1 step 6 Cross-layer detection instruction" FAIL
+fi
+
+if grep -qF '## Cross-Layer Value Flow Pairings' "$AGENT"; then
+  check "X4 Phase 2 plan template Cross-Layer Value Flow Pairings table" PASS
+else
+  check "X4 Phase 2 plan template Cross-Layer Value Flow Pairings table" FAIL
+fi
+
+if grep -qF '6b. **Cross-Layer Value Flow Audit**' "$AGENT"; then
+  check "X5 Phase 6 step 6b Cross-Layer Value Flow Audit" PASS
+else
+  check "X5 Phase 6 step 6b Cross-Layer Value Flow Audit" FAIL
+fi
+
+if grep -qF 'CROSS-LAYER PAIRING MISSING' "$AGENT"; then
+  check "X6 Phase 6 step 6b emits CROSS-LAYER PAIRING MISSING marker" PASS
+else
+  check "X6 Phase 6 step 6b emits CROSS-LAYER PAIRING MISSING marker" FAIL
+fi
+
+if grep -qF 'CROSS-LAYER PAIRING TEST-AFTER' "$AGENT"; then
+  check "X7 Phase 6 step 6b emits CROSS-LAYER PAIRING TEST-AFTER marker" PASS
+else
+  check "X7 Phase 6 step 6b emits CROSS-LAYER PAIRING TEST-AFTER marker" FAIL
+fi
+
+if grep -qF 'CROSS-LAYER PAIRING MOCK-ONLY' "$AGENT"; then
+  check "X8 Phase 6 step 6b emits CROSS-LAYER PAIRING MOCK-ONLY marker" PASS
+else
+  check "X8 Phase 6 step 6b emits CROSS-LAYER PAIRING MOCK-ONLY marker" FAIL
 fi
 
 echo "----"
