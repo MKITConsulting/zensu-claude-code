@@ -165,7 +165,7 @@ Use the `/zensu:pulse` skill workflow:
 4. Review session summary
 
 ### When the user wants documentation
-Follow the read-source-first procedure in `docs/documentation-guide.md`:
+**Read `docs/documentation-guide.md`** first, then follow its read-source-first procedure:
 1. Call `get_doc_generation_context` for the feature + target `doc_type` — this is the context *map* (source-file paths, symbols, security posture), not the source itself
 2. **Read the real source files it names** (Read/Grep) — the map is not the territory
 3. Author code-grounded Markdown matched to the doc type's focus and audience (8 types: `user_facing`, `api_reference`, `tutorial`, `adr`, `release_notes`, `internal`, `migration_guide`, `overview`)
@@ -195,4 +195,4 @@ Never condense the context metadata straight into a wiki page — that is the fo
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `enrich_existing=true`.
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.
-9. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. Full procedure: `docs/documentation-guide.md`.
+9. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.

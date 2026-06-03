@@ -6,13 +6,16 @@ set -u
 # get_doc_generation_context METADATA straight into wiki pages (a generic
 # "metadata dump") instead of reading the real source and writing
 # code-grounded docs. Pins the shared guide + the zensu-plm rule/workflow +
-# the implement Step 6 + the ghost-scan note that reference it.
+# the implement Step 6 + the ghost-scan note + the zensu-help routing that
+# reference it, plus the explicit Read imperative in implement + zensu-plm.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 GUIDE="$PLUGIN_DIR/docs/documentation-guide.md"
 PLM="$PLUGIN_DIR/agents/zensu-plm.md"
 IMPLEMENT="$PLUGIN_DIR/skills/implement/SKILL.md"
 GHOST="$PLUGIN_DIR/skills/ghost-scan/SKILL.md"
+ZENSUHELP="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
+READ_REF='Read `docs/documentation-guide.md`'
 
 PASS=0; FAIL=0
 check() {
@@ -70,6 +73,14 @@ check "D13 implement Step 6 references the shared guide" \
 # --- ghost-scan skill ---------------------------------------------------------
 check "D14 ghost-scan references the shared guide for authoring docs" \
   "$(has "$GHOST" "docs/documentation-guide.md")"
+
+# --- explicit Read imperative + zensu-help routing ----------------------------
+check "D15 implement Step 6 has explicit Read imperative" \
+  "$(has "$IMPLEMENT" "$READ_REF")"
+check "D16 zensu-plm has explicit Read imperative" \
+  "$(has "$PLM" "$READ_REF")"
+check "D17 zensu-help routes documentation questions to the guide" \
+  "$(has "$ZENSUHELP" "docs/documentation-guide.md")"
 
 echo "----"
 echo "test-doc-generation-guidance: $PASS PASS / $FAIL FAIL"

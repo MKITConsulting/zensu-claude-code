@@ -82,8 +82,8 @@ For cross-feature file mapping, use `bulk_link_source_files` with a `mappings` a
 ### Step 6: Documentation
 
 Documentation must be **code-grounded** — written from the real source you just
-implemented, not a restatement of the feature record. Follow
-`docs/documentation-guide.md`:
+implemented, not a restatement of the feature record.
+**Read `docs/documentation-guide.md`** first, then follow it:
 
 1. Call `get_doc_generation_context` for the feature + target `doc_type` — the
    context *map* (source-file paths, symbols, security posture), not the source.
