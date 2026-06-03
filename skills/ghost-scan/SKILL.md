@@ -36,11 +36,13 @@ Execute these phases in order. Present results to the user after each phase and 
    - **Source files:** `*.go`, `*.ts`, `*.tsx`, `*.py`, `*.java`, `*.rs` (excluding test files)
    - **Doc files:** `README*`, `docs/**/*.md`, `*.rst`, `CHANGELOG*`
 4. Group files by module/package and extract feature candidates
-5. **For large repos (>500 files):** Scan only top-level modules, max 3 directory levels deep. Ask the user if a deeper subdirectory scan is desired.
-6. Filter candidates against existing features from Phase 1 to avoid duplicates
-7. If a candidate matches an existing feature slug, **reuse the exact existing slug** — this enables enrichment during apply
-8. Present candidates to the user as a table — do NOT submit yet, let the user review first
-9. The user can edit, remove, or add candidates before submission
+5. **Populate each candidate's three detection arrays — `detectedSourceFiles`, `detectedTestFiles`, `detectedDocFiles`.** These arrays are the *only* data `ghost_apply` uses to link artifacts — it links exactly what you pass, so an empty array links zero. Never leave `detectedTestFiles` empty by omission: an empty array must mean "globbed and found none," not "skipped."
+6. **Tests are co-located — glob them per candidate.** Tests live in the same directories as a feature's source files. For each candidate, after collecting `detectedSourceFiles`, glob the test-file patterns from step 3 within those same directories *and* their sibling test dirs (`test/`, `tests/`, `__tests__/`, `spec/`, `specs/`), and assign every match to that candidate's `detectedTestFiles`. A capability feature spanning multiple modules collects tests from all of its source dirs.
+7. **For large repos (>500 files):** Scan only top-level modules, max 3 directory levels deep. Ask the user if a deeper subdirectory scan is desired. Still glob the test dirs at each scanned level — capping breadth must not silently drop tests.
+8. Filter candidates against existing features from Phase 1 to avoid duplicates
+9. If a candidate matches an existing feature slug, **reuse the exact existing slug** — this enables enrichment during apply
+10. Present candidates to the user as a table — do NOT submit yet, let the user review first
+11. The user can edit, remove, or add candidates before submission
 
 #### Candidate Quality Rules
 
@@ -49,6 +51,11 @@ Execute these phases in order. Present results to the user after each phase and 
 - If multiple packages share a domain concept, propose one feature, not several
 - Minimum 3 source files for a feature (otherwise likely a utility)
 - When in doubt, fewer and broader features — the user can split later with `split_feature`
+
+**Test-file completeness (treat like the source-file rule, not a bonus):**
+- Every candidate that has source files MUST have its co-located tests detected (Phase 2, step 6). Populate `detectedTestFiles` with the same rigor as `detectedSourceFiles`.
+- An empty `detectedTestFiles` is acceptable ONLY after globbing the candidate's source dirs confirms genuinely zero tests — never as a default for "didn't look."
+- Shared/helper tests that map to no single feature (e.g. `app.controller.spec.ts`, `helpers/*.spec.ts`) may stay unlinked or attach to a shell/account feature — do not force them onto an unrelated candidate.
 
 **Never create candidates for:**
 - CI/CD configuration (`.github/`, `.gitlab-ci.yml`, `Jenkinsfile`)
@@ -86,8 +93,23 @@ Suggest a classification for each candidate (user verifies):
 
 ### Phase 3: Create Ghost Scan
 
-1. Call `ghost_scan` with product_id, candidates array, repo_url, and branch
-2. Output: "Scan created with {n} candidates ({x} high, {y} medium, {z} low confidence). Ready for review."
+1. Call `ghost_scan` with `product_id`, the `candidates` array, `repo_url`, and `branch`. Each candidate carries its three detection arrays — populate all of them, and never omit `detectedTestFiles`:
+
+   ```json
+   {
+     "slug": "authentication",
+     "title": "Authentication",
+     "componentSlug": "auth",
+     "confidenceScore": 0.8,
+     "detectedSourceFiles": ["src/auth/login.ts", "src/auth/session.ts"],
+     "detectedTestFiles": ["src/auth/login.test.ts", "src/auth/session.spec.ts"],
+     "detectedDocFiles": ["docs/auth.md"],
+     "securityClassification": "restricted"
+   }
+   ```
+
+2. **Pre-submit self-check.** Sum `detectedTestFiles` across all candidates. If the Phase 2 walk surfaced test files but the sum is 0 — or far below what you saw — the per-candidate mapping is broken: STOP and re-glob each candidate's source dirs (step 6) before submitting. Importing source without its tests understates real test maturity and skews release gates.
+3. Output: "Scan created with {n} candidates ({x} high, {y} medium, {z} low confidence), {t} tests mapped across candidates. Ready for review."
 
 ### Phase 4: Batch Review & Apply
 
@@ -107,6 +129,8 @@ Suggest a classification for each candidate (user verifies):
 18 | config-loader     | infra      | 0     | 0    | 1
 ```
 
+   **Scan the Tests column before approving.** If it reads 0 for candidates that clearly own source files, the scan missed test detection — do not approve blindly. Return to Phase 2 step 6, re-glob, and re-create the scan. An all-zero Tests column on a repo that has tests is a detection bug, not a property of the code.
+
 3. Offer batch operations:
    - "Approve all high confidence" — approve all >= 0.7
    - "Reject all low confidence" — reject all < 0.4
@@ -116,6 +140,7 @@ Suggest a classification for each candidate (user verifies):
 4. Execute `ghost_batch_review` with `approve_ids` and `reject_ids` arrays to process all decisions in a single call. Optionally provide `reject_reason` for rejected candidates.
 5. If at least 1 approved: call `ghost_apply` with `enrich_existing=true` if the product already has features (check Phase 1 feature list). Use `enrich_existing=false` only for the very first scan on an empty product.
 6. Summary: "{n} features created, {e} features enriched, {m} components created, {t} tests linked, {d} docs linked, {s} source files linked"
+7. **Backfilling a scan that missed tests.** If features were already created with zero linked tests, do NOT re-create them. Re-run Phase 2 with co-located test globbing, create a fresh scan that **reuses the exact existing slugs**, approve, and call `ghost_apply` with `enrich_existing=true` — apply matches by slug and attaches the newly detected tests to the existing features, no duplicates. This costs ~2 calls per module (scan + apply) instead of one `link_test` per test file.
 
 ### Phase 5: Summary & Next Steps
 

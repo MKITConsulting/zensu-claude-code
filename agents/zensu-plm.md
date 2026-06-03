@@ -152,10 +152,10 @@ Use the `/zensu:security-review` skill workflow:
 ### When the user wants to scan a repo for features
 Use the `/zensu:ghost-scan` skill workflow:
 1. Load existing features to avoid duplicates
-2. Walk the file tree, extract feature candidates
+2. Walk the file tree; for each candidate populate `detectedSourceFiles` AND `detectedTestFiles` — tests are co-located with source, so glob the test patterns inside each candidate's source dirs. Never submit an empty `detectedTestFiles` when the repo has tests.
 3. Create ghost scan with candidates
 4. Batch review (approve/reject)
-5. Apply approved candidates as features
+5. Apply approved candidates as features (`enrich_existing=true` when the product already has features)
 
 ### When the user asks about their dev session
 Use the `/zensu:pulse` skill workflow:
@@ -184,3 +184,4 @@ Use the `/zensu:pulse` skill workflow:
 5. **Reference features in commits.** Use `[ZEN-xxx]` format in commit messages.
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `enrich_existing=true`.
+8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.
