@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`skills/tdd/SKILL.md` — Principle 2 Cross-Layer Value Flow Pairing rule.** New mandatory pairing: when a Feature/Bug-Fix step routes a NEW value, field, payload key, or query parameter through an UNCHANGED adjacent layer (e.g. a frontend payload field consumed by an existing backend persistence command, a new column written by an existing repository call, a new query parameter read by an existing HTTP handler), the plan MUST include a paired Characterization step `[G]` in the unchanged layer that runs BEFORE the originating step and asserts the value at the unchanged layer's OWN seam (DB row, response body, persisted file, returned struct) — never at a caller-side mock. Closes the silent-contract-regression gap where a caller-side mock (e.g. an `onUpdate` spy in a UI test) certifies the wire but the unchanged consumer's contract handling is never asserted, so a regression that drops the value silently passes the per-step RED→GREEN AND the Phase-5 full-suite safety net (nothing to regress when no assertion ever existed). Trigger detection lives in Phase 1 step 6 (planning); a new `## Cross-Layer Value Flow Pairings` table in the Phase 2 plan template records the pairings; audit enforcement in new Phase 6 step 6b verifies the pairing exists, runs before the originating step (mtime check), asserts at the unchanged layer's seam (not a mock), and grep-detects added field/payload literals that lack a paired characterization. A new rationalization counter under Principle 1 (`"Backend code didn't change, no test needed"`) calls out the most common bypass thought.
+
 ## [0.6.5] - 2026-06-03
 
 ### Changed
