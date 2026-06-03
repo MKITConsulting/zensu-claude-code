@@ -103,7 +103,6 @@ echo "" | tee -a "$REPORT"
 echo "▸ Hook gate offline tests" | tee -a "$REPORT"
 
 run_test "$EVAL_DIR/test-gate-plan.sh"        "test-gate-plan.sh"
-run_test "$EVAL_DIR/test-gate-postdd.sh"      "test-gate-postdd.sh"
 run_test "$EVAL_DIR/test-gate-postreview.sh"  "test-gate-postreview.sh"
 run_test "$EVAL_DIR/test-gate-session.sh"     "test-gate-session.sh"
 run_test "$EVAL_DIR/test-isolation-preserved.sh" "test-isolation-preserved.sh"

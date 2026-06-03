@@ -75,7 +75,12 @@ invoke_reviewer() {
     claim_context=" Context: $(cat "$fixture_dir/tdd-claim.txt")"
   fi
 
-  local prompt="Files changed: [${changed}].${claim_context}"
+  # Hermetic against the user's personal output-style plugins (e.g. caveman):
+  # prepend a normal-mode directive so the review's structured headings survive.
+  local preamble="${ZENSU_E2E_NORMAL_PREAMBLE:-Normal mode — respond in full prose (NOT caveman/compressed/ultra), with all standard review section headings.}"
+  local prompt="${preamble}
+
+Files changed: [${changed}].${claim_context}"
 
   (
     cd "$fixture_dir" 2>/dev/null || cd "$EVAL_DIR" || exit 1

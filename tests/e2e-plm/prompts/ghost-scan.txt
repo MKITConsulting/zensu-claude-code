@@ -1,1 +1,1 @@
-Please scan this repository for features. We already have a few features in the Zensu backend — please avoid creating duplicates. Describe your workflow step by step with the MCP tools you call.
+Please scan this repository for features. We already have a few features in the Zensu backend — please avoid creating duplicates. Describe your workflow step by step with the MCP tools you call. Be explicit about how discovered test files are detected and linked to the features you find.

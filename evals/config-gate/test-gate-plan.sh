@@ -46,8 +46,8 @@ export ZENSU_CONFIG="$TMP_CFG"
 OUT_ENABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
 
 case "$OUT_ENABLED" in
-  *"zensu:tdd-manager"*) check "autoTdd=true: stdout contains zensu:tdd-manager" PASS ;;
-  *)                     check "autoTdd=true: stdout contains zensu:tdd-manager" FAIL ;;
+  *"skill='zensu:tdd'"*) check "autoTdd=true: routes to skill='zensu:tdd' (main thread)" PASS ;;
+  *)                     check "autoTdd=true: routes to skill='zensu:tdd' (main thread)" FAIL ;;
 esac
 
 case "$OUT_ENABLED" in
@@ -62,8 +62,8 @@ export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
 
 case "$OUT_DEFAULT" in
-  *"zensu:tdd-manager"*) check "no config (default): stdout contains zensu:tdd-manager (enabled)" PASS ;;
-  *)                     check "no config (default): stdout contains zensu:tdd-manager (enabled)" FAIL ;;
+  *"skill='zensu:tdd'"*) check "no config (default): routes to skill='zensu:tdd' (enabled)" PASS ;;
+  *)                     check "no config (default): routes to skill='zensu:tdd' (enabled)" FAIL ;;
 esac
 
 rm -f "$TMP_CFG"

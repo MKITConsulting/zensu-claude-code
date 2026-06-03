@@ -5,3 +5,6 @@ ghost_scan
 (ghost_get_candidates|ghost_batch_review)
 ghost_apply
 enrich_existing
+# 0.6.5 (Important Rule #8): tests are first-class scan data — the agent must
+# detect and carry test files into the scan, not drop them.
+(detectedTestFiles|detected test files|test.files? detect|link_test|test.{0,8}link)

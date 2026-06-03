@@ -1,0 +1,8 @@
+# self-review reflects across its 7 senior-engineer dimensions over the diff.
+(architecture|consistency|edge.case|coverage|security|simplif|convention)
+# the terminal self-review stage ran (renders a Self-Review Summary / 7-dim findings).
+(self.?review|reflection|seven.dimension|7.dimension)
+# critical feedback surfaced: a must-fix and/or advisory/buffered findings.
+(must.?fix|advisory|buffered|finding)
+# self-review owns the chain terminus.
+(chain.?done|chain terminated|--chain-done)

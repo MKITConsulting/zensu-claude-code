@@ -14,10 +14,14 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 TDD_STATE_DIR="$(mktemp -d)"
 export TDD_STATE_DIR
-export CLAUDE_AGENT_TYPE="zensu:tdd-manager"
-
 cleanup() { rm -rf "$TDD_STATE_DIR"; }
 trap cleanup EXIT
+
+# 0.4.0+: the gate activates on chain-state (active=true), not CLAUDE_AGENT_TYPE.
+# Mark the session active (UNINITIALIZED phase) so the ZENSU_TDD_GATE override
+# cases below exercise a genuinely-active gate — as /zensu:tdd --tdd-begin would.
+source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+tdd_set_flag "s-override-1" active true >/dev/null 2>&1
 
 PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-override-1"}'
 

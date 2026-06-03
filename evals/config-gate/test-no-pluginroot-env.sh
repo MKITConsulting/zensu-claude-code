@@ -18,21 +18,17 @@ export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
 cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
 trap cleanup EXIT
 
-OUT_POSTDD="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:tdd-manager","prompt":"x"}}' | "$PLUGIN_DIR/hooks/post-tdd-review-delegate.sh" 2>/dev/null)"
-case "$OUT_POSTDD" in
-  *"zensu:code-reviewer"*) check "post-tdd-review-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
-  *)                       check "post-tdd-review-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" FAIL ;;
-esac
-
+# (post-tdd-review-delegate.sh was removed in the 0.4.0 main-thread migration;
+#  only post-review-tdd-delegate.sh remains.)
 OUT_POSTREVIEW="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"}}' | "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
 case "$OUT_POSTREVIEW" in
-  *"zensu:tdd-manager"*) check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
-  *)                     check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" FAIL ;;
+  *"zensu:code-reviewer"*) check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
+  *)                       check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" FAIL ;;
 esac
 
 OUT_PLAN="$(echo '{"tool_name":"ExitPlanMode","tool_input":{"plan":"x"}}' | "$PLUGIN_DIR/hooks/plan-approved-delegate.sh" 2>/dev/null)"
 case "$OUT_PLAN" in
-  *"zensu:tdd-manager"*) check "plan-approved-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
+  *"skill='zensu:tdd'"*) check "plan-approved-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
   *)                     check "plan-approved-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" FAIL ;;
 esac
 

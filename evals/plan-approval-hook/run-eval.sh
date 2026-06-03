@@ -61,7 +61,7 @@ check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitP
 check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping TDD|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
 check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "source=agent:custom:zensu:tdd-manager")"
 
-# ─── Test 2: Code-change plan → tdd-manager delegation ──────────
+# ─── Test 2: Code-change plan → /zensu:tdd skill delegation ─────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 2: Code-change plan (delegation path)" | tee -a "$REPORT"
 CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"
@@ -73,7 +73,7 @@ timeout 360 "$EVAL_DIR/test-code-plan.exp" "$CODE_LOG" "$PLUGIN_DIR" > "$CODE_OU
 check "T2.1 Plugin loaded hooks.json"        "$(contains "$CODE_LOG" "Loaded hooks.*plugin zensu")"
 check "T2.2 Hook fired on approval"           "$(contains "$CODE_LOG" "Hook PostToolUse:ExitPlanMode|provided additionalContext")"
 check "T2.3 ExitPlanMode tool succeeded"      "$(contains "$CODE_LOG" "tool=ExitPlanMode.*outcome=ok")"
-check "T2.4 Delegation path indicated"        "$(contains "$CODE_LOG" "source=agent:custom:zensu:tdd-manager")"
+check "T2.4 /zensu:tdd skill execution indicated" "$(contains "$CODE_OUT" "Executing via /zensu:tdd")"
 check "T2.5 No doc-only escape-hatch"         "$(grep -v 'additionalContext' "$CODE_LOG" | grep -qiE 'Skipping TDD' && echo FAIL || echo PASS)"
 
 # Reset fixtures + README marker so repeat runs are deterministic.
