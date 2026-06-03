@@ -5,6 +5,8 @@
     "autoFix": true,
     "autoFixIncludeSuggestions": false,
     "autoFixMaxRounds": 5,
+    "combinedSummary": true,
+    "selfReview": true,
     "pulseSession": true,
     "sessionBanner": true
   },

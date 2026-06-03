@@ -31,7 +31,7 @@ Status transitions are gated by:
 - **Docs Completeness**: Required documentation must exist
 - **Journey Health**: Critical user journeys must have healthy coverage
 
-## Available MCP Tools (49)
+## Available MCP Tools (60)
 
 ### Feature CRUD
 - `list_features` — List features (supports `view=compact`)
@@ -113,11 +113,15 @@ Status transitions are gated by:
 ### Ghost Scan
 - `ghost_scan` — Create a scan with feature candidates
 - `ghost_get_candidates` — Load candidates for review
+- `ghost_approve_candidate` — Approve a single scan candidate
+- `ghost_reject_candidate` — Reject a single scan candidate
 - `ghost_batch_review` — Batch approve/reject candidates
 - `ghost_apply` — Apply approved candidates as features
 
 ### Agent & Workflow
 - `scaffold_agent` — Generate CLI adapter files for Claude Code, Kiro, Cursor, Copilot
+- `suggest_workflow` — Get proactive workflow recommendations for a product
+- `get_workflow_guide` — Get a structured step-by-step workflow guide
 
 ## Workflow Patterns
 
