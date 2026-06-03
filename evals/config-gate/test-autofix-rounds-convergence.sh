@@ -43,10 +43,10 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"Do NOT spawn zensu:tdd-manager again"*)
-    check "stdout instructs to NOT spawn zensu:tdd-manager" PASS ;;
+  *"Do NOT spawn zensu:code-reviewer again"*)
+    check "stdout instructs to NOT spawn zensu:code-reviewer" PASS ;;
   *)
-    check "stdout instructs to NOT spawn zensu:tdd-manager" FAIL ;;
+    check "stdout instructs to NOT spawn zensu:code-reviewer" FAIL ;;
 esac
 
 case "$OUT" in
@@ -94,10 +94,10 @@ if [ -f "$COUNTER_FILE" ]; then
 fi
 
 case "$OUT" in
-  *"CHAIN-END SUMMARY"*)
-    check "max-rounds + combinedSummary default on: 'CHAIN-END SUMMARY' directive appended" PASS ;;
+  *"skill='zensu:self-review'"*)
+    check "max-rounds + selfReview default on: hands off to skill='zensu:self-review' (owns terminus)" PASS ;;
   *)
-    check "max-rounds + combinedSummary default on: 'CHAIN-END SUMMARY' directive appended" FAIL ;;
+    check "max-rounds + selfReview default on: hands off to skill='zensu:self-review' (owns terminus)" FAIL ;;
 esac
 
 echo "----"

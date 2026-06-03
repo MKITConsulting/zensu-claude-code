@@ -34,6 +34,11 @@ tests/e2e-plm/fixtures/*
 !tests/e2e-plm/fixtures/live-regressions/
 !tests/e2e-plm/fixtures/live-regressions/*.txt
 tests/e2e-plm/results/
+tests/e2e-skills/fixtures/
+tests/e2e-skills/results/
+tests/e2e-tdd/fixtures/
+tests/e2e-tdd/results/
+tests/results/
 
 # Build output
 dist/

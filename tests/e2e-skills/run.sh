@@ -1,4 +1,24 @@
 #!/bin/bash
+# Live E2E for the plugin's LLM surfaces that only had structure tests before:
+#   zensu-help    (skill)  — read-only Q&A glossary
+#   plan-review   (skill)  — multi-agent plan revalidation (TeamCreate)
+#   self-review   (skill)  — terminal 7-dimension reflection over a diff
+#   review-aspect (agent)  — single-perspective code reviewer
+#
+# Each fixture provides a prompt (prompts/<name>.txt) and a tolerant regex pattern
+# (expected/<name>.pattern). Skills are invoked via their /slash form in the prompt
+# (claude resolves skills via /skill-name under --print); a fixture that names an
+# agent in prompts/<name>.agent is invoked with `--agent <name>` instead.
+#
+# Patterns are TOLERANT regexes (LLM output is non-deterministic). A line starting
+# with `!` is a NEGATIVE assert (must NOT appear). `# ` lines are comments.
+#
+# Modes:
+#   (no arg)/full   live run — calls `claude --print` per fixture (COSTS API CREDITS)
+#   --offline       re-match the newest prior capture in results/ (no API)
+#   --self-check    parse + skeleton only, no claude spawn (CI-safe, no API)
+#
+# Prereq for full/offline: run ./setup-fixtures.sh once to build the git fixtures.
 set -u
 
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -44,6 +64,7 @@ check() {
   fi
 }
 
+# Positive asserts must match; `!`-prefixed asserts must NOT match; `# ` are comments.
 match_pattern() {
   local pattern_file="$1" captured_file="$2"
   [ -f "$pattern_file" ] || return 1
@@ -69,50 +90,50 @@ match_pattern() {
         if ! grep -Eqi -- "$line" "$captured_file"; then
           return 1
         fi
-        if [ -n "${VERBOSE_MATCH:-}" ]; then
-          local _match_text
-          _match_text="$(grep -Eoi -- "$line" "$captured_file" | head -1)"
-          [ -z "$_match_text" ] && _match_text="$line"
-          printf '  MATCH  %s <- %s\n' "$(basename "$pattern_file")" "$_match_text" | tee -a "$REPORT"
-        fi
         ;;
     esac
   done < "$pattern_file"
   return 0
 }
 
-invoke_plm() {
+# Invoke a skill (via /slash prompt) or an agent (prompts/<name>.agent present).
+invoke_target() {
   local fixture_dir="$1" captured_file="$2"
-  local fixture_name
-  fixture_name="$(basename "$fixture_dir")"
-  local prompt_file="$PROMPTS_DIR/${fixture_name}.txt"
-
-  if [ ! -f "$prompt_file" ]; then
-    return 64
-  fi
+  local name
+  name="$(basename "$fixture_dir")"
+  local prompt_file="$PROMPTS_DIR/${name}.txt"
+  [ -f "$prompt_file" ] || return 64
 
   local prompt
   prompt="$(cat "$prompt_file")"
-  # Hermetic against the user's personal output-style plugins (e.g. caveman):
-  # tests assert the agent NAMES its tools/sections, which a compressed style can
-  # drop. Prepend a normal-mode directive so the run measures plugin behavior.
-  prompt="${ZENSU_E2E_NORMAL_PREAMBLE:-Normal mode — respond in full prose (NOT caveman/compressed/ultra). Name every MCP tool you would call by its exact name.}
+  # Hermetic against the user's personal output-style plugins (e.g. caveman),
+  # which compress section headings the patterns assert. APPEND (the skill
+  # /slash must stay the first token) a normal-mode directive.
+  prompt="$prompt
 
-$prompt"
+(${ZENSU_E2E_NORMAL_PREAMBLE:-Normal mode — respond in full prose, NOT caveman/compressed/ultra. Use all standard section headings and name tools explicitly.})"
+
+  local agent_file="$PROMPTS_DIR/${name}.agent"
+  local agent=""
+  [ -f "$agent_file" ] && agent="$(tr -d '[:space:]' < "$agent_file")"
 
   (
     cd "$fixture_dir" 2>/dev/null || cd "$EVAL_DIR" || exit 1
-    claude --print --plugin-dir "$PLUGIN_DIR" --agent zensu:zensu-plm --permission-mode bypassPermissions "$prompt"
+    if [ -n "$agent" ]; then
+      claude --print --plugin-dir "$PLUGIN_DIR" --agent "$agent" --permission-mode bypassPermissions "$prompt"
+    else
+      claude --print --plugin-dir "$PLUGIN_DIR" --permission-mode bypassPermissions "$prompt"
+    fi
   ) > "$captured_file" 2>&1
 }
 
-log "=== zensu-plm Agent E2E: $TIMESTAMP ($MODE) ==="
+log "=== Skill/Agent LLM E2E: $TIMESTAMP ($MODE) ==="
 log "Plugin dir: $PLUGIN_DIR"
 log "Fixtures:   $FIXTURES_DIR"
 log "Prompts:    $PROMPTS_DIR"
 
 if [ ! -d "$FIXTURES_DIR" ]; then
-  log "  (no fixtures directory at $FIXTURES_DIR — treating as empty)"
+  log "  (no fixtures directory at $FIXTURES_DIR — run ./setup-fixtures.sh first)"
 fi
 
 log ""
@@ -122,9 +143,6 @@ if [ -d "$FIXTURES_DIR" ]; then
   for fixture in "$FIXTURES_DIR"/*/; do
     [ -d "$fixture" ] || continue
     fixture_name="$(basename "$fixture")"
-    case "$fixture_name" in
-      live-regressions) continue ;;
-    esac
     pattern_file="$EXPECTED_DIR/${fixture_name}.pattern"
     prompt_file="$PROMPTS_DIR/${fixture_name}.txt"
 
@@ -146,7 +164,7 @@ if [ -d "$FIXTURES_DIR" ]; then
           continue
         fi
         captured_file="$RESULTS_DIR/${fixture_name}-${TIMESTAMP}.captured.txt"
-        invoke_plm "$fixture" "$captured_file"
+        invoke_target "$fixture" "$captured_file"
         ;;
     esac
 

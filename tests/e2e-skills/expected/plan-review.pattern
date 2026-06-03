@@ -1,0 +1,10 @@
+# plan-review casts a reviewer team and returns ONE consolidated verdict.
+# The plan is flawed (references a non-existent helper, skips required tests) so
+# the team should not return a clean go — assert a verdict token is present.
+(go-with-changes|go with changes|no.go|revise|verdict)
+# Multi-aspect cast happened (personas / reviewers / core seats).
+(persona|reviewer|aspect|feasibility|requirements|devil)
+# It is a report/gate, not an executor.
+(plan|amendment|finding|blocker|recommend)
+# plan-review must NEVER trigger the TDD implementation workflow.
+!Executing via /zensu:tdd

@@ -31,10 +31,10 @@ STDIN='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
-  *"ALL findings regardless of severity"*)
-    check "stdout contains 'ALL findings regardless of severity'" PASS ;;
+  *"Include EVERY finding the reviewer raised"*)
+    check "stdout contains 'Include EVERY finding the reviewer raised' (all severities)" PASS ;;
   *)
-    check "stdout contains 'ALL findings regardless of severity'" FAIL ;;
+    check "stdout contains 'Include EVERY finding the reviewer raised' (all severities)" FAIL ;;
 esac
 
 case "$OUT" in
@@ -45,17 +45,17 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"zensu:tdd-manager"*)
-    check "stdout still references zensu:tdd-manager target subagent" PASS ;;
+  *"IN THIS MAIN THREAD"*)
+    check "stdout routes the fixes to the MAIN THREAD (not a tdd-manager subagent)" PASS ;;
   *)
-    check "stdout still references zensu:tdd-manager target subagent" FAIL ;;
+    check "stdout routes the fixes to the MAIN THREAD (not a tdd-manager subagent)" FAIL ;;
 esac
 
 case "$OUT" in
-  *"Delegating all findings to zensu:tdd-manager"*)
-    check "stdout contains 'Delegating all findings to zensu:tdd-manager' status line" PASS ;;
+  *"Fixing all findings in-thread, then re-reviewing"*)
+    check "stdout contains 'Fixing all findings in-thread, then re-reviewing' status line" PASS ;;
   *)
-    check "stdout contains 'Delegating all findings to zensu:tdd-manager' status line" FAIL ;;
+    check "stdout contains 'Fixing all findings in-thread, then re-reviewing' status line" FAIL ;;
 esac
 
 case "$OUT" in

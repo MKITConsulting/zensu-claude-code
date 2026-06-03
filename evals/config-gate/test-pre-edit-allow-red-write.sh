@@ -15,13 +15,18 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 TDD_STATE_DIR="$(mktemp -d)"
 export TDD_STATE_DIR
-export CLAUDE_AGENT_TYPE="zensu:tdd-manager"
 unset ZENSU_TDD_GATE
 
 cleanup() { rm -rf "$TDD_STATE_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
+
+# 0.4.0+: the gate activates on chain-state (active=true), set by /zensu:tdd
+# --tdd-begin. Shim phase setup to also mark each session active (the legacy
+# CLAUDE_AGENT_TYPE=zensu:tdd-manager activation was removed).
+eval "$(declare -f tdd_write_phase | sed '1s/^tdd_write_phase/_zensu_orig_write_phase/')"
+tdd_write_phase() { tdd_set_flag "$1" active true >/dev/null 2>&1; _zensu_orig_write_phase "$@"; }
 
 SID="s-red-write-1"
 tdd_write_phase "$SID" "S1" "RED_WRITE" "" >/dev/null

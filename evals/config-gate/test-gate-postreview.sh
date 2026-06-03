@@ -52,8 +52,8 @@ EOF
 OUT_ENABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
 
 case "$OUT_ENABLED" in
-  *"zensu:tdd-manager"*) check "autoFix=true + code-reviewer: stdout contains zensu:tdd-manager" PASS ;;
-  *)                     check "autoFix=true + code-reviewer: stdout contains zensu:tdd-manager" FAIL ;;
+  *"zensu:code-reviewer"*) check "autoFix=true + code-reviewer: re-verify directive names zensu:code-reviewer" PASS ;;
+  *)                       check "autoFix=true + code-reviewer: re-verify directive names zensu:code-reviewer" FAIL ;;
 esac
 
 OUT_OTHER="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-other-agent.json" 2>/dev/null)"
@@ -69,8 +69,8 @@ rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
 case "$OUT_DEFAULT" in
-  *"zensu:tdd-manager"*) check "no config (default): stdout contains zensu:tdd-manager (enabled)" PASS ;;
-  *)                     check "no config (default): stdout contains zensu:tdd-manager (enabled)" FAIL ;;
+  *"zensu:code-reviewer"*) check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" PASS ;;
+  *)                       check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" FAIL ;;
 esac
 
 rm -f "$TMP_CFG"

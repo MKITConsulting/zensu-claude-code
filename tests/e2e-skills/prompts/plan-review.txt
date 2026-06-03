@@ -1,0 +1,6 @@
+/zensu:plan-review --agents=3
+
+Plan: add a discount calculator to this project.
+Step 1: reuse the existing helper calc.applyTax(price) to get the taxed price.
+Step 2: add applyDiscount(price, pct) returning price - price * pct.
+Step 3: wire it into the checkout module and ship. No tests needed — it's trivial.

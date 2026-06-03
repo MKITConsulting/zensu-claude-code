@@ -43,10 +43,10 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"Delegating critical+important findings to zensu:tdd-manager"*)
-    check "flag absent: legacy 'Delegating critical+important findings' status line preserved" PASS ;;
+  *"Fixing critical+important findings in-thread, then re-reviewing"*)
+    check "flag absent: 'Fixing critical+important findings in-thread' status line (main thread)" PASS ;;
   *)
-    check "flag absent: legacy 'Delegating critical+important findings' status line preserved" FAIL ;;
+    check "flag absent: 'Fixing critical+important findings in-thread' status line (main thread)" FAIL ;;
 esac
 
 case "$OUT" in

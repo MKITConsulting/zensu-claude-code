@@ -1,0 +1,7 @@
+# review-aspect (bugs perspective) inspects the uncommitted diff and flags the
+# planted defects: removed divide-by-zero guard and off-by-one array indexing.
+(zero|division|divide|off.by.one|length|bound|index|undefined)
+# It identifies a concrete problem.
+(bug|issue|error|incorrect|missing|risk)
+# Single-perspective reviewer runs zero build/test -> no build-verification section.
+!Build [Vv]erification
