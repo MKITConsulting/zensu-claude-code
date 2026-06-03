@@ -18,13 +18,16 @@ printf '%s' "$INPUT" | node -e '
       const j = JSON.parse(s);
       const cmd = (j.tool_input && typeof j.tool_input.command === "string") ? j.tool_input.command : "";
       const exit = (j.tool_response && typeof j.tool_response.exit_code === "number") ? String(j.tool_response.exit_code) : "?";
+      const stdout = (j.tool_response && typeof j.tool_response.stdout === "string") ? j.tool_response.stdout : "";
+      const tail = stdout.slice(-200);
+      const interrupted = (j.tool_response && j.tool_response.interrupted === true) ? "true" : "false";
       const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "";
-      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + session + "\n");
-    } catch (_) { process.stdout.write("\"\"\n?\n\n"); }
+      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n");
+    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n"); }
   });
 ' > "$TMP_FIELDS" 2>/dev/null
 
-{ read -r CMD_JSON; read -r EXIT_CODE; read -r SESSION; } < "$TMP_FIELDS"
+{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
@@ -43,6 +46,6 @@ WITNESS_LOG="$WITNESS_DIR/witness-${SANITIZED_SESSION}.log"
 mkdir -p "$WITNESS_DIR" 2>/dev/null || exit 0
 
 TS="$(date +%H:%M:%S)"
-printf '[%s] BASH cmd=%s exit=%s\n' "$TS" "$CMD_JSON" "$EXIT_CODE" >> "$WITNESS_LOG" 2>/dev/null || true
+printf '[%s] BASH cmd=%s exit=%s tail=%s interrupted=%s\n' "$TS" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" >> "$WITNESS_LOG" 2>/dev/null || true
 
 exit 0

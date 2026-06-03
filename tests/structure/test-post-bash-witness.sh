@@ -32,14 +32,14 @@ activate() {
 }
 
 make_payload() {
-  local cmd="$1" exit_code="$2" stdout="$3" session_id="$4"
+  local cmd="$1" exit_code="$2" stdout="$3" session_id="$4" interrupted="${5:-false}"
   local cmd_json exit_json stdout_json session_json
   cmd_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$cmd")"
   stdout_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$stdout")"
   session_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$session_id")"
   if [ "$exit_code" = "null" ]; then exit_json="null"; else exit_json="$exit_code"; fi
-  printf '{"tool_input":{"command":%s},"tool_response":{"exit_code":%s,"stdout":%s},"session_id":%s}' \
-    "$cmd_json" "$exit_json" "$stdout_json" "$session_json"
+  printf '{"tool_input":{"command":%s},"tool_response":{"exit_code":%s,"stdout":%s,"interrupted":%s},"session_id":%s}' \
+    "$cmd_json" "$exit_json" "$stdout_json" "$interrupted" "$session_json"
 }
 
 PROJECT_TMP="$(mktemp -d -t "witness-proj-XXXXXX")"
@@ -124,7 +124,7 @@ SESSION_H7="sess-h7-$$"
 activate "$PROJECT_TMP_H7" "$SESSION_H7"
 TRICKY_CMD='echo "hello \"world\"" && printf "a\nb"'
 P_H7=$(make_payload "$TRICKY_CMD" 0 "ok" "$SESSION_H7")
-echo "$P_H7" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H7" TDD_STATE_DIR="$PROJECT_TMP_H7/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+printf '%s\n' "$P_H7" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H7" TDD_STATE_DIR="$PROJECT_TMP_H7/.zensu/state" bash "$HOOK" >/dev/null 2>&1
 WITNESS_H7="$PROJECT_TMP_H7/.zensu/logs/witness-${SESSION_H7}.log"
 EXTRACTED_CMD=$(node -e '
   const fs = require("fs");
@@ -184,8 +184,9 @@ echo "$P_H10" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H10" TDD_STATE_DIR="$PROJEC
 WITNESS_H10="$PROJECT_TMP_H10/.zensu/logs/witness-${SESSION_H10}.log"
 H10_LINE="$(head -n1 "$WITNESS_H10" 2>/dev/null)"
 if printf '%s' "$H10_LINE" | grep -qE 'cmd="npm test" exit=0' \
+   && printf '%s' "$H10_LINE" | grep -qF 'tail="PASS root/test.js"' \
    && ! printf '%s' "$H10_LINE" | grep -qF "$SESSION_H10"; then
-  check "P12-H10 hook under /bin/sh (bash 3.2) -> correct exit=0 and no session-id leak" PASS
+  check "P12-H10 hook under /bin/sh (bash 3.2) -> correct exit=0, tail= present, no session-id leak" PASS
 else
   check "P12-H10 /bin/sh field-split (line='${H10_LINE}')" FAIL
 fi
@@ -200,12 +201,139 @@ WITNESS_H11="$PROJECT_TMP_H11/.zensu/logs/witness-${SESSION_H11}.log"
 H11_LINE="$(head -n1 "$WITNESS_H11" 2>/dev/null)"
 if printf '%s' "$H11_LINE" | grep -qF 'cmd="npm test"' \
    && printf '%s' "$H11_LINE" | grep -qE 'exit=0' \
-   && ! printf '%s' "$H11_LINE" | grep -qF ' tail='; then
-  check "P12-H11 witness line drops the tail= field (cmd= + exit= only)" PASS
+   && printf '%s' "$H11_LINE" | grep -qF 'tail="PASS root/test.js"' \
+   && printf '%s' "$H11_LINE" | grep -qF 'interrupted=false'; then
+  check "P12-H11 witness line carries tail= (stdout) + interrupted= fields" PASS
 else
-  check "P12-H11 tail-field dropped (line='${H11_LINE}')" FAIL
+  check "P12-H11 tail+interrupted present (line='${H11_LINE}')" FAIL
 fi
 rm -rf "$PROJECT_TMP_H11"
+
+PROJECT_TMP_H12="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H12="sess-h12-$$"
+activate "$PROJECT_TMP_H12" "$SESSION_H12"
+# Production-shaped Bash tool_response: stdout/stderr/interrupted/isImage, NO exit_code key
+# (mirrors the real Claude Code payload, where exit_code is never present -> exit=?). Built
+# with node so the JSON is guaranteed valid and omits exit_code exactly as production does.
+H12_PAYLOAD=$(node -e 'process.stdout.write(JSON.stringify({tool_input:{command:"node --test"},tool_response:{stdout:"tests 1\npass 1\nfail 0",stderr:"",interrupted:false,isImage:false},session_id:process.argv[1]}))' "$SESSION_H12")
+printf '%s\n' "$H12_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H12" TDD_STATE_DIR="$PROJECT_TMP_H12/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+WITNESS_H12="$PROJECT_TMP_H12/.zensu/logs/witness-${SESSION_H12}.log"
+H12_LINE="$(head -n1 "$WITNESS_H12" 2>/dev/null)"
+if printf '%s' "$H12_LINE" | grep -qF 'cmd="node --test"' \
+   && printf '%s' "$H12_LINE" | grep -qF 'exit=?' \
+   && printf '%s' "$H12_LINE" | grep -qF 'tail="' \
+   && printf '%s' "$H12_LINE" | grep -qF 'pass 1' \
+   && printf '%s' "$H12_LINE" | grep -qF 'interrupted=false'; then
+  check "P12-H12 production payload (no exit_code) -> exit=? AND tail= captured from real stdout" PASS
+else
+  check "P12-H12 production-shape tail capture (line='${H12_LINE}')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H12"
+
+PROJECT_TMP_H13="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H13="sess-h13-$$"
+activate "$PROJECT_TMP_H13" "$SESSION_H13"
+# Long multiline stdout (>200 chars). tail= must be the JSON-escaped last 200 chars on
+# ONE physical line — proves the newline-delimited 5-field read never desyncs (bash 3.2 safe).
+BIG_STDOUT="$(node -e 'let s="";for(let i=0;i<60;i++)s+="L"+i+"\n";process.stdout.write(s+"END-MARKER-ZZZ")')"
+H13_PAYLOAD=$(make_payload "long-cmd" 0 "$BIG_STDOUT" "$SESSION_H13")
+printf '%s\n' "$H13_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H13" TDD_STATE_DIR="$PROJECT_TMP_H13/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+WITNESS_H13="$PROJECT_TMP_H13/.zensu/logs/witness-${SESSION_H13}.log"
+H13_PHYS_LINES=$(wc -l <"$WITNESS_H13" 2>/dev/null | tr -d ' ')
+H13_LINE="$(head -n1 "$WITNESS_H13" 2>/dev/null)"
+if [ "$H13_PHYS_LINES" = "1" ] \
+   && printf '%s' "$H13_LINE" | grep -qF 'cmd="long-cmd"' \
+   && printf '%s' "$H13_LINE" | grep -qF 'END-MARKER-ZZZ'; then
+  check "P12-H13 long multiline stdout -> tail JSON-escaped onto ONE physical line (last-200 retained)" PASS
+else
+  check "P12-H13 long-stdout one-line tail (phys_lines=$H13_PHYS_LINES line='${H13_LINE}')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H13"
+
+PROJECT_TMP_H13B="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H13B="sess-h13b-$$"
+activate "$PROJECT_TMP_H13B" "$SESSION_H13B"
+# Multiline stdout fed to the hook running under /bin/sh (Apple bash 3.2 posix). Proves the
+# newline-delimited 5-field read keeps the whole record on ONE physical line under bash 3.2 —
+# the desync the old IFS=$'\x01' parser caused. printf '%s\n' feed avoids /bin/sh echo mangling.
+H13B_PAYLOAD=$(make_payload "ml-cmd" 0 "$BIG_STDOUT" "$SESSION_H13B")
+printf '%s\n' "$H13B_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H13B" TDD_STATE_DIR="$PROJECT_TMP_H13B/.zensu/state" /bin/sh "$HOOK" >/dev/null 2>&1
+WITNESS_H13B="$PROJECT_TMP_H13B/.zensu/logs/witness-${SESSION_H13B}.log"
+H13B_PHYS_LINES=$(wc -l <"$WITNESS_H13B" 2>/dev/null | tr -d ' ')
+H13B_LINE="$(head -n1 "$WITNESS_H13B" 2>/dev/null)"
+if [ "$H13B_PHYS_LINES" = "1" ] \
+   && printf '%s' "$H13B_LINE" | grep -qF 'cmd="ml-cmd"' \
+   && printf '%s' "$H13B_LINE" | grep -qF 'END-MARKER-ZZZ' \
+   && printf '%s' "$H13B_LINE" | grep -qF 'interrupted=false'; then
+  check "P12-H13b multiline stdout, hook under /bin/sh (bash 3.2) -> tail= on ONE physical line, no desync" PASS
+else
+  check "P12-H13b /bin/sh multiline tail (phys_lines=$H13B_PHYS_LINES line='${H13B_LINE}')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H13B"
+
+PROJECT_TMP_H13C="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H13C="sess-h13c-$$"
+activate "$PROJECT_TMP_H13C" "$SESSION_H13C"
+# Characterization: stdout.slice(-200) must DROP the head. HEAD-MARKER sits at the very start
+# (well beyond 200 chars from the end), END-MARKER at the very end (within the last 200). The
+# JSON-decoded tail= value must be <=200 chars, exclude the head, and retain END.
+BIG2="$(node -e 'let s="HEAD-MARKER-AAA";for(let i=0;i<80;i++)s+="L"+i+"\n";process.stdout.write(s+"END-MARKER-ZZZ")')"
+H13C_PAYLOAD=$(make_payload "trunc-cmd" 0 "$BIG2" "$SESSION_H13C")
+printf '%s\n' "$H13C_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H13C" TDD_STATE_DIR="$PROJECT_TMP_H13C/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+WITNESS_H13C="$PROJECT_TMP_H13C/.zensu/logs/witness-${SESSION_H13C}.log"
+H13C_CHECK=$(node -e '
+  const fs=require("fs");
+  const line=(fs.readFileSync(process.argv[1],"utf8").split("\n")[0])||"";
+  const m=line.match(/ tail=(".*?(?<!\\)") interrupted=/);
+  if(!m){process.stdout.write("NOMATCH");process.exit()}
+  const tail=JSON.parse(m[1]);
+  process.stdout.write(tail.length+"|"+(tail.includes("HEAD-MARKER-AAA")?"HEAD":"nohead")+"|"+(tail.includes("END-MARKER-ZZZ")?"END":"noend"));
+' "$WITNESS_H13C" 2>/dev/null)
+if [ "${H13C_CHECK%%|*}" -le 200 ] 2>/dev/null \
+   && printf '%s' "$H13C_CHECK" | grep -qF '|nohead|' \
+   && printf '%s' "$H13C_CHECK" | grep -qF '|END'; then
+  check "P12-H13c stdout>200 -> tail= is last-200 only (head dropped, length<=200, END retained)" PASS
+else
+  check "P12-H13c truncation (got '$H13C_CHECK')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H13C"
+
+PROJECT_TMP_H14="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H14="sess-h14-$$"
+activate "$PROJECT_TMP_H14" "$SESSION_H14"
+# Positive interrupted=true case (the hook's interrupted===true true-branch).
+P_H14=$(make_payload "cmd-int" 0 "out" "$SESSION_H14" true)
+printf '%s\n' "$P_H14" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H14" TDD_STATE_DIR="$PROJECT_TMP_H14/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+WITNESS_H14="$PROJECT_TMP_H14/.zensu/logs/witness-${SESSION_H14}.log"
+H14_LINE="$(head -n1 "$WITNESS_H14" 2>/dev/null)"
+if printf '%s' "$H14_LINE" | grep -qF 'cmd="cmd-int"' \
+   && printf '%s' "$H14_LINE" | grep -qF 'interrupted=true'; then
+  check "P12-H14 tool_response.interrupted=true -> witness records interrupted=true (true-branch)" PASS
+else
+  check "P12-H14 interrupted=true (line='${H14_LINE}')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H14"
+
+PROJECT_TMP_H15="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H15="sess-h15-$$"
+activate "$PROJECT_TMP_H15" "$SESSION_H15"
+# tail= round-trip when stdout itself contains literal double-quotes (H7 covers cmd= only).
+QUOTE_STDOUT='he said "hi" and left'
+P_H15=$(make_payload "cmd-q" 0 "$QUOTE_STDOUT" "$SESSION_H15")
+printf '%s\n' "$P_H15" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H15" TDD_STATE_DIR="$PROJECT_TMP_H15/.zensu/state" bash "$HOOK" >/dev/null 2>&1
+WITNESS_H15="$PROJECT_TMP_H15/.zensu/logs/witness-${SESSION_H15}.log"
+EXTRACTED_TAIL=$(node -e '
+  const fs=require("fs");
+  const line=(fs.readFileSync(process.argv[1],"utf8").split("\n")[0])||"";
+  const m=line.match(/ tail=(".*?(?<!\\)") interrupted=/);
+  if(m) process.stdout.write(JSON.parse(m[1])); else process.stdout.write("UNPARSEABLE");
+' "$WITNESS_H15" 2>/dev/null)
+if [ "$EXTRACTED_TAIL" = "$QUOTE_STDOUT" ]; then
+  check "P12-H15 tail= round-trips stdout containing literal double-quotes through JSON.parse" PASS
+else
+  check "P12-H15 tail round-trip (expected='$QUOTE_STDOUT' got='$EXTRACTED_TAIL')" FAIL
+fi
+rm -rf "$PROJECT_TMP_H15"
 
 echo "----"
 echo "test-post-bash-witness: $PASS PASS / $FAIL FAIL"

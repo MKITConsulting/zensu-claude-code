@@ -310,6 +310,20 @@ else
   check "X8 Phase 6 step 6b emits CROSS-LAYER PAIRING MOCK-ONLY marker" FAIL
 fi
 
+# Round 16 — witness tail corroboration (Bash tool_response has no exit_code; corroborate result= via tail=)
+if grep -qF 'EVIDENCE CONTRADICTION' "$AGENT" && grep -qF 'witness tail' "$AGENT" && grep -qF 'not by exit code' "$AGENT"; then
+  check "R16-P1 Phase 6 corroborates result= against witness tail= + corrected exit-code contract (EVIDENCE CONTRADICTION)" PASS
+else
+  check "R16-P1 Phase 6 corroborates result= against witness tail= + corrected exit-code contract (EVIDENCE CONTRADICTION)" FAIL
+fi
+
+# R16-P2 — the marker scan must be field-scoped to the tail= value (no cmd= bleed -> no false EVIDENCE CONTRADICTION)
+if grep -qF 'substring after' "$AGENT" && grep -qF 'not the whole line' "$AGENT"; then
+  check "R16-P2 Phase 6 corroboration extracts only the tail= field value (substring after tail=, not the whole line)" PASS
+else
+  check "R16-P2 Phase 6 corroboration extracts only the tail= field value (substring after tail=, not the whole line)" FAIL
+fi
+
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

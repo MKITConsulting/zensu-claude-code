@@ -105,7 +105,16 @@ phase_step REFACTOR S2
 echo "== Witness mid-cycle (active session) =="
 echo '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS" >/dev/null 2>&1
 WLOG="$PROJ/.zensu/logs/witness-${SID}.log"
-{ [ -f "$WLOG" ] && grep -qF 'cmd="npm test"' "$WLOG"; } && check "W1 active session records witness line" PASS || check "W1 witness line" FAIL
+W1_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
+{ [ -f "$WLOG" ] && printf '%s' "$W1_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W1_LINE" | grep -qF 'tail="ok"'; } \
+  && check "W1 active session records witness line with cmd= + tail=" PASS || check "W1 witness line (tail) got='${W1_LINE}'" FAIL
+
+# W1b: production-shaped tool_response (NO exit_code, as the real Claude Code Bash payload) ->
+# exit=? but tail= still captured from real stdout. The reality the exit_code mocks can't show.
+echo '{"tool_input":{"command":"node --test"},"tool_response":{"stdout":"pass 1","stderr":"","interrupted":false,"isImage":false},"session_id":"'"$SID"'"}' | bash "$WITNESS" >/dev/null 2>&1
+W1B_LINE="$(grep -F 'cmd="node --test"' "$WLOG" 2>/dev/null | head -n1)"
+{ printf '%s' "$W1B_LINE" | grep -qF 'exit=?' && printf '%s' "$W1B_LINE" | grep -qF 'tail="' && printf '%s' "$W1B_LINE" | grep -qF 'pass 1'; } \
+  && check "W1b production payload (no exit_code) -> exit=? + tail= captured" PASS || check "W1b reality-shape tail got='${W1B_LINE}'" FAIL
 
 echo "== Terminus: implComplete -> review -> self-review -> done =="
 # Mid-TDD (not yet complete): Stop must allow.
