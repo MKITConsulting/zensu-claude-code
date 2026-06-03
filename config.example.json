@@ -1,11 +1,14 @@
 {
   "hooks": {
     "autoTdd": true,
-    "autoReview": true,
+    "chainEnforcer": true,
     "autoFix": true,
     "autoFixIncludeSuggestions": false,
     "autoFixMaxRounds": 5,
-    "pulseSession": true
+    "combinedSummary": true,
+    "selfReview": true,
+    "pulseSession": true,
+    "sessionBanner": true
   },
   "logging": {
     "timestampStyle": "wall"

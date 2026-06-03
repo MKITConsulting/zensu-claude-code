@@ -1,6 +1,6 @@
 # /zensu:implement
 
-Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then delegates to the **tdd-manager agent** for disciplined implementation (strict RED-GREEN TDD with SubAgent role separation). After TDD completes, links all artifacts and creates a revision.
+Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then runs disciplined implementation via the **`/zensu:tdd` skill** in the main thread (strict RED-GREEN TDD, PreToolUse phase-gate, guaranteed code-review chain). After TDD completes, links all artifacts and creates a revision.
 
 ## When to Use
 
@@ -41,26 +41,26 @@ If the feature's security classification is confidential or restricted, emphasiz
 - Data encryption requirements
 - Audit logging for sensitive operations
 
-### Step 3: Delegate to TDD Manager
+### Step 3: Implement via the /zensu:tdd skill
 
-Spawn the **tdd-manager agent** with a feature specification built from Steps 1-2. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the prompt with: "Reference this feature as [ZEN-xxx] in all commit messages."
+Invoke the **`/zensu:tdd` skill** (Skill tool, `skill='zensu:tdd'`) with a feature specification built from Steps 1-2 as the input. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the spec with: "Reference this feature as [ZEN-xxx] in all commit messages." You run the TDD workflow yourself in THIS main thread — do not spawn a subagent.
 
-If the tdd-manager fails or all steps are blocked, continue manually from Step 4.
+If the TDD workflow cannot proceed or all steps are blocked, continue manually from Step 4.
 
-The tdd-manager will:
-- Split the work into Backend and Frontend steps
-- Create a plan document in `docs/plans/`
-- Execute strict RED-GREEN TDD cycles via SubAgents (test-engineer writes failing test, developer implements, test-engineer verifies)
-- Run a completeness audit at the end
+The /zensu:tdd workflow will:
+- Split the work into atomic steps and classify each (Feature / Refactor / Bug-fix / Integration)
+- Create a plan document in `.zensu/plans/`
+- Execute strict RED-GREEN TDD cycles in-thread, enforced by the PreToolUse phase-gate
+- Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
-After the tdd-manager completes, the PostToolUse:Agent hook (`post-tdd-review-delegate.sh`) automatically spawns `@zensu:code-reviewer` for a 5+1 parallel specialist review.
+At the end of the workflow (Phase 6) it marks implementation complete and spawns `@zensu:code-reviewer` for the 5-perspective review. The `Stop` hook (`stop-chain-enforcer.sh`) guarantees the review chain runs, and `post-review-tdd-delegate.sh` routes any findings back for in-thread fixing until PASS or max rounds.
 
-**For trivial changes** (single-line fix, config change, migration-only): Skip the tdd-manager and implement directly, then continue with Step 4.
+**For trivial changes** (single-line fix, config change, migration-only): Skip the /zensu:tdd skill and implement directly, then continue with Step 4.
 
 ### Step 4: Link Tests
 
-For each test file written (by the tdd-manager or manually), use `link_test` with:
+For each test file written (by the /zensu:tdd workflow or manually), use `link_test` with:
 - `feature_id` (required)
 - `test_type` (required): unit | integration | e2e | security | performance | accessibility
 - `file_path` (required): Path to the test file
@@ -126,7 +126,7 @@ Present a completion summary:
 - The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) require a separate API call, not an MCP tool.
 - Always reference the feature ID in commit messages: `feat(component): description [ZEN-xxx]`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
-- The tdd-manager creates a plan at `docs/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
+- The /zensu:tdd workflow creates a plan at `.zensu/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
 
 ## MCP Tools Used
 
@@ -147,8 +147,9 @@ Present a completion summary:
 |--------|------|---------|
 | `implement_with_security` | Step 2 | Get security constraints for implementation guidance |
 
-## Agents Used
+## Agents & Skills Used
 
-| Agent | Step | Purpose |
-|-------|------|---------|
-| `tdd-manager` | Step 3 | Strict RED-GREEN TDD with SubAgent role separation |
+| Component | Type | Step | Purpose |
+|-----------|------|------|---------|
+| `/zensu:tdd` | skill (main thread) | Step 3 | Strict RED-GREEN TDD, phase-gated, guaranteed review chain |
+| `zensu:code-reviewer` | subagent | Step 3 (Phase 6) | 5-perspective code review + auto-fix routing |

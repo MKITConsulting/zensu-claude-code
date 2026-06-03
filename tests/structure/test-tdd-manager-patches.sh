@@ -1,8 +1,11 @@
 #!/bin/bash
 set -u
 
+# NOTE (0.4.0): the TDD discipline patches migrated from the deleted
+# agents/tdd-manager.md subagent into the main-thread skill skills/tdd/SKILL.md.
+# This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-AGENT="$PLUGIN_DIR/agents/tdd-manager.md"
+AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
 
 PASS=0; FAIL=0
 check() {
@@ -12,18 +15,18 @@ check() {
 }
 
 if [ ! -f "$AGENT" ]; then
-  check "agents/tdd-manager.md exists" FAIL
+  check "skills/tdd/SKILL.md exists" FAIL
   echo "----"
   echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
   exit 1
 fi
-check "agents/tdd-manager.md exists" PASS
+check "skills/tdd/SKILL.md exists" PASS
 
 LINES=$(wc -l <"$AGENT")
-if [ "$LINES" -le 360 ]; then
-  check "agent line count <= 360 (actual: $LINES)" PASS
+if [ "$LINES" -le 400 ]; then
+  check "skill line count <= 400 (actual: $LINES)" PASS
 else
-  check "agent line count <= 360 (actual: $LINES)" FAIL
+  check "skill line count <= 400 (actual: $LINES)" FAIL
 fi
 
 # Patch 1 — 3 new Rationalization Counters
@@ -219,6 +222,46 @@ else
   check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
 fi
 
+# 0.4.0 — main-thread deferred-tool loading + correct TaskCreate signature
+if grep -qF 'select:TaskCreate,TaskUpdate' "$AGENT"; then
+  check "MT1 skill instructs ToolSearch load of deferred task tools (main-thread)" PASS
+else
+  check "MT1 skill instructs ToolSearch load of deferred task tools (main-thread)" FAIL
+fi
+if grep -qF 'requires BOTH `subject` and `description`' "$AGENT" && grep -qF 'description:' "$AGENT"; then
+  check "MT2 skill TaskCreate includes required description + states the contract" PASS
+else
+  check "MT2 skill TaskCreate includes required description + states the contract" FAIL
+fi
+if grep -qF 'never `run_in_background`' "$AGENT" && grep -qF 'one tool call at a time' "$AGENT"; then
+  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" PASS
+else
+  check "MT3 skill mandates foreground, serial evidence runs (no parallel/background)" FAIL
+fi
+if grep -qF 'in the same turn or batch as' "$AGENT"; then
+  check "MT4 skill guards --chain-done against early/parallel firing" PASS
+else
+  check "MT4 skill guards --chain-done against early/parallel firing" FAIL
+fi
+if grep -qF 'plan file with the **Write tool**' "$AGENT" && ! grep -qF 'cat > .zensu/plans' "$AGENT"; then
+  check "MT5 Phase 2 writes the plan via the Write tool (.zensu/ paths bypass the gate)" PASS
+else
+  check "MT5 Phase 2 writes the plan via the Write tool (.zensu/ paths bypass the gate)" FAIL
+fi
+
+# 0.5.1 — task usage hardened from soft prose to a mandatory contract + rationalization counter
+if grep -qF 'Task Contract (MANDATORY)' "$AGENT"; then
+  check "MT6 skill pins a mandatory per-step Task Contract (tasks = live dashboard)" PASS
+else
+  check "MT6 skill pins a mandatory per-step Task Contract (tasks = live dashboard)" FAIL
+fi
+if grep -qF 'Tasks are just UI noise' "$AGENT"; then
+  check "MT7 Rationalization Counter: skipping tasks because the log tracks progress" PASS
+else
+  check "MT7 Rationalization Counter: skipping tasks because the log tracks progress" FAIL
+fi
+
+# Cross-Layer Value Flow Pairing rule (Principle 2)
 if grep -qF 'Cross-Layer Value Flow Pairing' "$AGENT"; then
   check "X1 Principle 2 Cross-Layer Value Flow Pairing rule present" PASS
 else

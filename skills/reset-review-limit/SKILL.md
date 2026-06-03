@@ -1,10 +1,12 @@
 # /zensu:reset-review-limit
 
-Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the same Claude Code session.
+Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the **current task**.
+
+Since 0.4.1 the counter auto-resets at every fresh task: `zensu-log.sh --tdd-begin` (run once in `/zensu:tdd` Phase 0, before any edit) deletes the `rounds-<session_id>.json` file, so each new task's review chain always starts at round 1 on its own. This manual skill is therefore only needed to grant *additional* budget **within a single task** that exhausted its rounds mid-chain — it is no longer needed between tasks in the same session.
 
 ## When to Use
 
-- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. Do NOT spawn zensu:tdd-manager again.` and you want to grant another budget so `zensu:code-reviewer` -> `zensu:tdd-manager` can resume.
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. The review chain is now marked complete (chainDone)...` for the task you are STILL working on, and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
 - You suspect the counter was inflated by a prior pre-0.3.23 run (when the counter was unintentionally user-global) and want a clean slate.
 - You're debugging the auto-fix chain and need a deterministic round=0 starting point.
 
@@ -79,6 +81,23 @@ fi
 ```
 
 If `CLAUDE_PLUGIN_DATA_OVERRIDE` is NOT set, the recipe targets the project-local default. If the user reports a stale legacy counter (pre-0.3.23) at `~/.claude/plugins/data/zensu-inline/`, mention that the fix in 0.3.23 made that path inert — those files no longer affect the running hook, so manual cleanup is cosmetic and OPTIONAL.
+
+### Re-arm the main-thread review chain (0.4.0+)
+
+Since 0.4.0 the TDD workflow runs in the main thread and the review chain is backstopped by `hooks/stop-chain-enforcer.sh`. Resetting only the round counter does NOT resume the chain past `autoFixMaxRounds`: the convergence branch also set the per-session `chainDone` terminal flag, and the Stop hook tracks a `*.stopblocks` budget. Clear both — strictly within `$STATE_DIR`, same symlink guard as above:
+
+```sh
+for f in $(find "$STATE_DIR" -maxdepth 1 -name '*.stopblocks' 2>/dev/null); do
+  [ -L "$f" ] && { echo "Skip (symlink): $f"; continue; }
+  rm -f -- "$f" && echo "Removed stop-block budget: $f"
+done
+for f in $(find "$STATE_DIR" -maxdepth 1 -name 'tdd-phase-*.json' 2>/dev/null); do
+  [ -L "$f" ] && { echo "Skip (symlink): $f"; continue; }
+  node -e 'const fs=require("fs"),p=process.argv[1];try{const j=JSON.parse(fs.readFileSync(p,"utf8"));if(j.chainDone===true){j.chainDone=false;fs.writeFileSync(p,JSON.stringify(j,null,2));console.log("Re-armed (chainDone=false): "+p);}}catch(_){}' "$f"
+done
+```
+
+After this, the next time you end your turn the Stop hook re-fires (`implComplete=true`, `chainDone=false`) and forces a fresh `zensu:code-reviewer` round, resuming the chain from round 1 (counter deleted above).
 
 ## Phase 3: Verify
 

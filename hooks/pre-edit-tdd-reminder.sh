@@ -28,15 +28,6 @@ case "$TOOL_NAME" in
   *) exit 0 ;;
 esac
 
-AGENT_CONTEXT="${CLAUDE_AGENT_TYPE:-}"
-if [ -z "$AGENT_CONTEXT" ]; then
-  exit 0
-fi
-
-if [ "$AGENT_CONTEXT" != "zensu:tdd-manager" ]; then
-  exit 0
-fi
-
 if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
   exit 0
 fi
@@ -49,6 +40,22 @@ FILE_PATH="$(parse_field tool_input.file_path)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
 
 STATE_FILE=$(tdd_state_file "$SESSION_ID")
+
+# Activation: the gate enforces only while a main-thread TDD session is active
+# for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). When no
+# active chain-state exists the hook is a silent pass-through — normal editing in
+# the main thread, other subagents, and plain CLI are never gated. This replaces
+# the legacy CLAUDE_AGENT_TYPE=zensu:tdd-manager scoping that only worked while
+# TDD ran in a subagent.
+if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
+  exit 0
+fi
+
+case "$FILE_PATH" in
+  *..*) ;;
+  */.zensu/*|.zensu/*) exit 0 ;;
+esac
+
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
 IS_TEST_PATH=$(tdd_is_test_path "$FILE_PATH")

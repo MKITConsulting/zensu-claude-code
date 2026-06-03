@@ -26,9 +26,21 @@ TOOL RULES:
 
 ---
 
+## Fan-out Consume Mode (check this FIRST)
+
+If your spawn prompt contains the marker `PRE-MERGED FINDINGS (fan-out)`, you were spawned by the `/zensu:tdd` review chain only to surface findings that five parallel `zensu:review-aspect` agents already produced and the main thread already merged (deduped + sorted by severity). In that case do NOT run the standalone review below:
+
+- **SKIP Phases 1-4 entirely** — do NOT re-read the changed files, do NOT run Phase 3 Build Verification, do NOT run Phase 4 Test Reproduce. The five read-only aspect reviewers already covered every perspective, and the suite + build already ran once in the `/zensu:tdd` Phase 6 audit. Running them again here would re-execute the suite for no reason.
+- Read the build / test / coverage status from the status lines the main thread carries in your spawn prompt (it passes them from the Phase 6 audit) — never execute build or test commands in consume mode. You are a fresh subagent and cannot resolve the session id, so do not try to read the witness log yourself.
+- Jump straight to **Phase 5** and emit the consolidated report from the supplied pre-merged findings verbatim. Your single completion is the event the `post-review-tdd-delegate.sh` hook fires on, so the round counter and downstream chain behave exactly as for a standalone review.
+
+Without that marker, run the full standalone review (Phases 0-5) below.
+
+---
+
 ## Phase 0: Pre-flight
 
-Create a task immediately: `TaskCreate(subject: "Code Review: Analyzing files", activeForm: "Analyzing files")`. Mark `in_progress`.
+Create a task immediately: `TaskCreate(subject: "Code Review: Analyzing files", description: "Analyze the changed files across 5 review perspectives", activeForm: "Analyzing files")`. Mark `in_progress` via `TaskUpdate`. (`TaskCreate` requires both `subject` and `description`; it has no `status` field.)
 
 ---
 

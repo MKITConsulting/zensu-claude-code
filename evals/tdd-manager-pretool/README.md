@@ -1,35 +1,35 @@
 # evals/tdd-manager-pretool
 
-Wasserfeste promptfoo-Test-Suite für den PreToolUse-Phase-Gate.
+Watertight promptfoo test suite for the PreToolUse phase-gate.
 
-## Was hier liegt
+## What lives here
 
-| Path | Rolle |
+| Path | Role |
 |---|---|
-| `run-eval.sh` | 6-Phasen-Orchestrator (Regression -> Hook-Unit-Tests -> Promptfoo). `--self-check` skipt Live-Agent-Runs. |
-| `promptfooconfig-pretool.yaml` | Haupt-Suite, 10 Szenarien. |
-| `promptfooconfig-regression.yaml` | Bestehende `evals/tdd-manager/`-Szenarien mit aktiviertem Gate. Erwartung: keine Verhaltensänderung. |
-| `scenarios/01-happy-frontend.yaml`..`10-override-env.yaml` | Drei Happy-Paths (FE/BE/Cross) + sechs Drift-Szenarien + ein Override-Szenario. |
-| `assertions/assert-*.{sh,js}` | Phasensequenz-, Gate-fired-, No-Bypass-, Backward-Compat-Assertions. |
-| `baselines/*.expected.json` | Erwartete State-Sequenz pro Szenario (für Baseline-Diff in Phase 6). |
-| `fixtures/stdin-pre-edit-{allow,deny}.json` | Synthetische Hook-Stdin-Inputs (parallel zu `evals/config-gate/fixtures/`). |
-| `fixtures/state-baselines/phase-{red-write,red-fail-s1,impl-no-red,green-pass}.json` | Vorgefertigte `.zensu/state/`-Baselines fuer Hook-Unit-Tests. |
-| `test-projects/react-go-fullstack/` | Fixture-Monorepo mit React/TS-Frontend + Go-Backend; npm workspaces. |
-| `prompts/*.md` | Feature-Spezifikationen die promptfoo dem Agenten reicht (Happy + Drift-Hint-Varianten). |
-| `test-hermetic.sh` | Wrapper fuer Mehrfach-Runs (3x je Szenario gegen Nondeterminismus). |
+| `run-eval.sh` | 6-phase orchestrator (regression -> hook unit tests -> promptfoo). `--self-check` skips live-agent runs. |
+| `promptfooconfig-pretool.yaml` | Main suite, 10 scenarios. |
+| `promptfooconfig-regression.yaml` | Existing `evals/tdd-manager/` scenarios with the gate enabled. Expectation: no behavior change. |
+| `scenarios/01-happy-frontend.yaml`..`10-override-env.yaml` | Three happy paths (FE/BE/Cross) + six drift scenarios + one override scenario. |
+| `assertions/assert-*.{sh,js}` | Phase-sequence, gate-fired, no-bypass, backward-compat assertions. |
+| `baselines/*.expected.json` | Expected state sequence per scenario (for baseline diff in Phase 6). |
+| `fixtures/stdin-pre-edit-{allow,deny}.json` | Synthetic hook stdin inputs (parallel to `evals/config-gate/fixtures/`). |
+| `fixtures/state-baselines/phase-{red-write,red-fail-s1,impl-no-red,green-pass}.json` | Prebuilt `.zensu/state/` baselines for hook unit tests. |
+| `test-projects/react-go-fullstack/` | Fixture monorepo with React/TS frontend + Go backend; npm workspaces. |
+| `prompts/*.md` | Feature specifications that promptfoo hands to the agent (happy + drift-hint variants). |
+| `test-hermetic.sh` | Wrapper for multiple runs (3x per scenario against nondeterminism). |
 
 ## Gating
 
-Real-Claude-Runs benoetigen:
+Real Claude runs require:
 
-- `promptfoo` (npm install -g promptfoo) — aktuell nicht im Setup-Env enthalten.
-- `claude` CLI mit gueltigem API-Key.
-- `node`, `npm`, `go` (>= 1.20) im PATH.
+- `promptfoo` (npm install -g promptfoo) — currently not included in the setup env.
+- `claude` CLI with a valid API key.
+- `node`, `npm`, `go` (>= 1.20) on PATH.
 
-Ohne diese Tools laeuft `run-eval.sh --self-check` weiter (Struktur + Hook-Unit-Tests + bestehende Regression-Suiten).
+Without these tools, `run-eval.sh --self-check` still runs (structure + hook unit tests + existing regression suites).
 
-## Naechste Schritte
+## Next steps
 
-1. `npm install -g promptfoo` einmalig auf dem CI-Runner.
-2. `bash run-eval.sh` vollstaendig durchlaufen (~ 10-15 min bei Sonnet 4.6).
-3. Resultat-JSONs unter `results/` mit `baselines/`-Erwartungen vergleichen.
+1. `npm install -g promptfoo` once on the CI runner.
+2. Run `bash run-eval.sh` fully (~ 10-15 min on Sonnet 4.6).
+3. Compare result JSONs under `results/` against the `baselines/` expectations.

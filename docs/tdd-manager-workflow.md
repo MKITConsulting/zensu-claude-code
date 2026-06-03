@@ -1,20 +1,22 @@
-# TDD-Manager Workflow
+# TDD Workflow (`/zensu:tdd`)
 
-End-to-end reference for `zensu:tdd-manager` — the Zensu plugin agent that drives strict Red/Green TDD with a PreToolUse phase gate.
+End-to-end reference for the Zensu main-thread TDD workflow that drives strict Red/Green TDD with a PreToolUse phase gate.
+
+> **0.4.0 migration.** TDD execution moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in the `skills/tdd/SKILL.md` skill. `zensu:code-reviewer` is the only remaining subagent. Sections 7–8 below describe the eval harness, whose port to the main-thread model is tracked as a follow-up.
 
 ---
 
 ## 1. Overview
 
-**What it is.** A Claude Code subagent that takes a feature specification and produces working, tested code through a strict TDD discipline. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle.
+**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle.
 
 **When to invoke.**
 
 ```
-Use the Agent tool with subagent_type='zensu:tdd-manager' and prompt: <feature spec>
+Use the Skill tool with skill='zensu:tdd' and the feature spec as input
 ```
 
-The agent is also auto-spawned by the `ExitPlanMode` PostToolUse hook when the user approves a plan that adds executable code.
+The skill is also auto-invoked by the `ExitPlanMode` PostToolUse hook when the user approves a plan that adds executable code, and by `/zensu:implement` Step 3.
 
 **Inputs.**
 
@@ -26,7 +28,7 @@ The agent is also auto-spawned by the `ExitPlanMode` PostToolUse hook when the u
 | Artifact | Path | Purpose |
 |----------|------|---------|
 | Plan | `.zensu/plans/{ts}_tdd-{slug}.md` | Design decisions, step table, preconditions, audit checklist |
-| Log | `.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
+| Log | `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
 | State | `.zensu/state/tdd-phase-{session}.json` | Runtime FSM state (per session, ephemeral) |
 | Source | test + implementation files | The actual code |
 | Audit | included in log + final report | Build, coverage, mtime discipline, precondition drift |
@@ -51,7 +53,7 @@ Each step inside Workflow Phase 4 cycles the TDD-FSM through `RED_WRITE → RED_
 
 ```mermaid
 flowchart TD
-    Start([User invokes tdd-manager]) --> P0[Phase 0: Pre-flight<br/>SESSION_TS, first TaskCreate]
+    Start([Main agent invokes /zensu:tdd skill]) --> P0[Phase 0: Pre-flight<br/>--tdd-begin, SESSION_TS, first TaskCreate]
     P0 --> P1[Phase 1: Discover Project<br/>Tech stack, test cmds, coverage tool]
     P1 --> P15[Phase 1.5: Precondition Discovery<br/>CLIs / secrets / endpoints / fixtures]
     P15 --> Q{Missing<br/>preconditions?}
@@ -62,15 +64,17 @@ flowchart TD
     P3 --> P4[Phase 4: Execute TDD Cycles<br/>RED to IMPL to GREEN per step]
     P4 --> P5[Phase 5: Checkpoint<br/>full suite + linter]
     P5 --> P6[Phase 6: Audit and Final Report<br/>build · coverage · drift audit · mtime]
-    P6 --> Review[PostToolUse Hook<br/>auto-spawn zensu:code-reviewer]
+    P6 --> Review[Phase 6: --tdd-complete<br/>skill spawns zensu:code-reviewer<br/>Stop hook guarantees it]
     Review --> Findings{Critical or<br/>Important findings?}
-    Findings -->|Yes| AutoFix[Auto-fix loop<br/>max 5 rounds]
+    Findings -->|Yes| AutoFix[Fix in-thread RED→GREEN<br/>gate active · max 5 rounds]
     AutoFix --> Review
-    Findings -->|None| Done([Final Report])
+    Findings -->|None or max rounds| SelfRev["/zensu:self-review<br/>terminal · ≤ 1 fix round"]
+    SelfRev --> Done([Final Report])
 
     style P15 fill:#fef3c7,stroke:#92400e,color:#1e293b
     style P6 fill:#fef3c7,stroke:#92400e,color:#1e293b
     style Ask fill:#fee2e2,stroke:#991b1b,color:#1e293b
+    style SelfRev fill:#dcfce7,stroke:#166534,color:#1e293b
 ```
 
 **Phases at a glance:**
@@ -158,7 +162,7 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 4. Symlink rejection: `[ -L "$path" ]` → not a test
 5. Inline-header sniff (last resort): read first 20 lines, strip BOM, match `^(func Test|describe\(|it\(|test\(|@Test|def test_|#\[test\]|#\[cfg\(test\)\])`. Comment-prefix lines like `// describe(` are NOT matched (anchored at line start, no leading comment chars).
 
-**Hook scope.** The gate is active **only** when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. For any other actor (main thread, other subagents, plain CLI) the hook exits 0 silently and lets the action through. This is a deliberate trust-boundary: the gate provides in-moment reminders for the tdd-manager subagent, not bulletproofing against malicious actors.
+**Hook scope.** The gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. Before `--tdd-begin`, and for any session with no active TDD chain-state (other main-thread work, other subagents, plain CLI), the hook exits 0 silently and lets the action through. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary: in-moment reminders for the main-thread TDD session, not bulletproofing against malicious actors.
 
 ---
 
@@ -166,8 +170,9 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 
 | Variable | Where set | Effect |
 |----------|-----------|--------|
-| `CLAUDE_AGENT_TYPE` | Claude-code harness sets it on subagent spawn. Eval wrapper [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) explicitly exports it for propagation. | Gate active only when value is `zensu:tdd-manager`. Anything else = pass-through. |
-| `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
+| `CLAUDE_AGENT_TYPE` | Claude-code harness sets it on subagent spawn (e.g. `zensu:code-reviewer`). | Since 0.4.0 it no longer gates the TDD phase-gate/witness — activation moved to the chain-state `active` flag. Retained for other introspection and the eval harness. |
+| `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the phase-gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
+| `ZENSU_CHAIN` | User sets in shell | Set to `off` to disable the `Stop`-hook review-chain backstop ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) so the main agent may end its turn without completing the review chain. |
 | `ZENSU_HOOK_LOG` | Eval wrapper sets per isolated test dir | Opt-in mirror of denial reasons. Hook writes 4 lines (`TDD-Phase-Gate`, `Current phase:`, `Expected:`, `permissionDecision=deny`) on denial. Empty file in production. |
 | `TDD_STATE_DIR` | Caller may override | State file location. Default `${CLAUDE_PROJECT_DIR}/.zensu/state`. |
 | `TDD_DISABLE_FLOCK` | Test fixture sets | Test-only. Forces the `mkdir`-fallback mutex path (exercises stale-lock recovery on Linux/CI where `flock` is present). |
@@ -228,19 +233,27 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 
 ## 9. Auto-Review Chain
 
-After Phase 6 completes, the `PostToolUse` hook on the `Agent` matcher ([hooks/hooks.json](../hooks/hooks.json)) automatically spawns `zensu:code-reviewer`.
+At Phase 6 the `/zensu:tdd` skill marks `--tdd-complete` and spawns `zensu:code-reviewer` itself. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh), registered on the `Stop` matcher in [hooks/hooks.json](../hooks/hooks.json)) guarantees the chain even if that spawn is skipped: it blocks the main agent from ending its turn while `implComplete && !chainDone`. Reviewer findings are routed back into the main thread by [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) to be fixed in-thread under the still-active phase-gate, then the reviewer is re-spawned — looping until PASS or max rounds, after which the terminal `/zensu:self-review` stage runs (see below).
 
 ```mermaid
 flowchart LR
-    P6[Phase 6 complete] --> Hook[PostToolUse on Agent]
-    Hook --> Reviewer[zensu:code-reviewer<br/>5 perspectives:<br/>conventions, bugs,<br/>architecture, tests, security]
+    P6[Phase 6 complete<br/>--tdd-complete] --> Spawn[skill spawns<br/>zensu:code-reviewer]
+    Stop[/Stop hook backstop:<br/>block until chainDone/] -.guarantees.-> Spawn
+    Spawn --> Reviewer[zensu:code-reviewer<br/>5 perspectives:<br/>conventions, bugs,<br/>architecture, tests, security]
     Reviewer --> Findings{Critical or<br/>Important?}
-    Findings -->|Yes| Fix[zensu:tdd-manager<br/>auto-fix]
-    Fix --> Reviewer
-    Findings -->|None or<br/>max rounds| Done([Final Report])
+    Findings -->|Yes| Fix[main agent fixes<br/>in-thread RED→GREEN<br/>gate active]
+    Fix --> Spawn
+    Findings -->|None or<br/>max rounds| CRD[--code-review-done]
+    CRD --> SelfRev["/zensu:self-review<br/>terminal stage:<br/>7-dim self-reflection"]
+    SelfRev --> MustFix{must-fix and<br/>not yet fixed?}
+    MustFix -->|yes| SRFix[1 fix round<br/>RED→GREEN gate active<br/>set selfReviewFixed]
+    SRFix --> SelfRev
+    MustFix -->|no / latch set| Done([self-review runs<br/>chainDone · Final Report])
 
-    style Reviewer fill:#dbeafe,stroke:#1e40af,color:#1e293b
+    style Reviewer fill:#fef3c7,stroke:#92400e,color:#1e293b
+    style SelfRev fill:#dcfce7,stroke:#166534,color:#1e293b
     style Fix fill:#dbeafe,stroke:#1e40af,color:#1e293b
+    style Stop fill:#fee2e2,stroke:#991b1b,color:#1e293b
 ```
 
 Reviewer returns findings in three tiers:
@@ -249,9 +262,11 @@ Reviewer returns findings in three tiers:
 - **Important**: should land before merge. Auto-fix attempted.
 - **Suggestions**: nice-to-have. NOT auto-fixed.
 
-Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and stops — preventing infinite loops on intractable findings.
+Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin settings). On the 5th round, the harness emits "max rounds reached, manual fix required" and hands off to the terminal self-review stage (below) instead of stopping — preventing infinite loops on intractable findings.
 
-**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a three-section summary block: `## Implementation Summary` (what tdd-manager built — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths), `## Review Summary` (final reviewer verdict, findings count by severity, files reviewed), and `## Auto-fix History` (per-round trace of findings routed to tdd-manager and what was fixed; skipped when zero rounds). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
+**Terminal self-review stage (0.5.0+).** When `hooks.selfReview` is enabled (default), the code-reviewer chain does NOT close at convergence. On PASS, suggestions-only, or max-rounds, [hooks/post-review-tdd-delegate.sh](../hooks/post-review-tdd-delegate.sh) marks `--code-review-done` and hands off to the `/zensu:self-review` skill ([skills/self-review/SKILL.md](../skills/self-review/SKILL.md)) — a main-thread terminal stage ported from `/reflect`. It re-reads the session's own changes across seven dimensions (architecture, consistency, edge-cases, test coverage, security, simplification, conventions), takes at most ONE fix round under the still-active phase-gate if a must-fix surfaces (latched by `selfReviewFixed`; it never re-spawns the code-reviewer), then owns the chain terminus: it runs `--chain-done` and renders the final report including a `## Self-Review Summary`. The `Stop` hook ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) routes to self-review while `codeReviewDone && !chainDone`. Set `hooks.selfReview=false` to restore the pre-0.5.0 behavior where code-reviewer convergence closes the chain directly.
+
+**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a three-section summary block: `## Implementation Summary` (what tdd-manager built — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths), `## Review Summary` (final reviewer verdict, findings count by severity, files reviewed), and `## Auto-fix History` (per-round trace of findings routed to tdd-manager and what was fixed; skipped when zero rounds). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. When `hooks.selfReview` is enabled (default), the terminal `/zensu:self-review` stage renders this summary and adds a fourth `## Self-Review Summary` section. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
 
 ---
 
@@ -264,12 +279,12 @@ Every TDD-Manager task writes to four channels:
 | **Plan** | Design decisions, step table, Preconditions, audit checklist | Durable (git-committed) | Markdown |
 | **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Durable (git-committed) | Append-only timestamped text |
 | **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
-| **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail) | Ephemeral per session (per-test isolated dir under promptfoo) | Append-only timestamped text, JSON-escaped fields |
+| **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail) | Ephemeral per session — **local only, gitignored, never committed** (consumed solely by the in-session Phase 6 cross-check); under promptfoo it lives in the per-test isolated dir | Append-only timestamped text, JSON-escaped fields |
 
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> {log_file}
+printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
 ```
 
 The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
@@ -284,7 +299,7 @@ This writes a log line AND updates the state file in a single critical section (
 
 ### Witness channel — anti-hallucination evidence
 
-The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook is scoped to `CLAUDE_AGENT_TYPE=zensu:tdd-manager` (no other actor records witness lines) and can be disabled with `ZENSU_TEST_WITNESS=off`.
+The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook records lines only while the session's chain-state `active` flag is set (set by `zensu-log.sh --tdd-begin` in Phase 0; no other actor records witness lines) and can be disabled with `ZENSU_TEST_WITNESS=off`. The witness log is **gitignored and never committed** — it is ephemeral, single-session evidence; only the narrative `.log` and the plan are durable git-tracked artifacts.
 
 Each line has the form:
 

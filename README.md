@@ -1,7 +1,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.3.28-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.5-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -9,10 +9,10 @@ Zensu is a Product Lifecycle Manager that treats features as first-class citizen
 
 ```
 Planning              →  Implementation  →  Tracking
-zensu-plm                tdd-manager        Zensu Dashboard
+zensu-plm                /zensu:tdd         Zensu Dashboard
 /zensu:bootstrap         code-reviewer      (Web UI)
 /zensu:ghost-scan        auto-fix loop
-/zensu:implement
+/zensu:implement         (main thread)
 ```
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`). Both end with features tracked in Zensu with security profiles, user journeys, and pricing tiers.
@@ -33,8 +33,8 @@ flowchart TD
 
     subgraph Implementation["Layer 2: Implementation"]
         C -->|"/zensu:implement"| D["Load Feature Context"]
-        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"auto-delegate"| E
-        D --> E["tdd-manager Agent"]
+        PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"auto-invoke skill"| E
+        D --> E["/zensu:tdd skill<br/>(main thread)"]
         E --> RED["RED — write failing test"]
         RED --> IMPL["IMPL — minimum code"]
         IMPL --> GREEN{"GREEN — test passes?"}
@@ -44,13 +44,15 @@ flowchart TD
         NEXT -->|"No"| K["code-reviewer Agent"]
         K --> L["Review Report"]
         L -->|"auto-fix (≤ autoFixMaxRounds)"| E
+        L -->|"converged (PASS / max rounds)"| SR["/zensu:self-review<br/>(terminal · ≤ 1 fix round)"]
+        SR --> FR(["Final Report"])
         GATE["PreToolUse FSM gate"] -.guards.-> RED
         GATE -.-> IMPL
         GATE -.-> GREEN
     end
 
     subgraph Tracking["Layer 3: Tracking"]
-        L -->|"link artifacts"| M["Zensu Dashboard"]
+        FR -->|"link artifacts"| M["Zensu Dashboard"]
         M --> Q["Release Gate"]
         M --> P["Journey Health"]
         M --> O["Tier Matrix"]
@@ -63,6 +65,7 @@ flowchart TD
     style E fill:#ff6b6b,color:#fff
     style GATE fill:#888,color:#fff
     style K fill:#ffa94d,color:#fff
+    style SR fill:#dcfce7,stroke:#166534,color:#1e293b
     style M fill:#51cf66,color:#fff
 ```
 
@@ -80,17 +83,21 @@ No configuration needed. When you first use a Zensu tool, Claude Code will autom
 
 ### API Key (CI/CD)
 
-For headless environments where browser login isn't available:
+For headless environments where browser login isn't available, authenticate with an API key. Exporting the key alone is **not** enough — the bundled `.mcp.json` carries no `Authorization` header (the absence of one is exactly what lets interactive users get the OAuth flow above), so nothing forwards the key. Register a user-scope MCP entry that sends it:
 
 ```bash
 export ZENSU_API_KEY=zsk_...
+claude mcp add zensu --transport http --url https://mcp.zensu.dev/mcp \
+  --header "Authorization: Bearer ${ZENSU_API_KEY}" --scope user
 ```
 
-To point Claude Code at a self-hosted Zensu MCP server, see [Self-hosting](#data--privacy) below.
+The user-scope entry takes precedence over the plugin's project-scope `.mcp.json` and survives plugin upgrades. With double quotes the shell expands `${ZENSU_API_KEY}` at add time, baking the key into `~/.claude.json` — fine for an ephemeral CI runner. On a persistent machine, single-quote the header (`'Authorization: Bearer ${ZENSU_API_KEY}'`) to store the placeholder instead and let Claude Code expand it from the environment at startup. Remove with `claude mcp remove zensu --scope user`.
+
+To point Claude Code at a self-hosted Zensu MCP server, see [Self-hosting](#self-hosting) below.
 
 ## What's Included
 
-### MCP Server (49 Tools)
+### MCP Server (60 Tools)
 
 Auto-configured connection to the Zensu MCP server providing tools for feature CRUD, security analysis, tier management, user journeys, product bootstrap, ghost scans, pulse sessions, and more.
 
@@ -99,17 +106,19 @@ Auto-configured connection to the Zensu MCP server providing tools for feature C
 | Agent | Role | How It Works |
 |-------|------|--------------|
 | **zensu-plm** | Product Lifecycle Manager | Orchestrates all Zensu workflows — feature tracking, security reviews, release readiness, bootstrap, ghost scans |
-| **tdd-manager** | TDD Orchestrator | Strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate that blocks edits outside the declared phase. Dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail, completeness audit, real-time progress log in `.zensu/logs/`. |
-| **code-reviewer** | Quality Review | Runs 5 specialist review perspectives sequentially in a single READ-ONLY agent: conventions, bugs, architecture, tests, security. |
+| **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from five parallel `review-aspect` agents (no re-read, no build/test). |
+| **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns five in a single parallel batch (one per perspective), then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
 
-#### TDD Manager — How It Enforces Discipline
+> **TDD is no longer an agent.** Since 0.4.0 the strict RED→GREEN TDD workflow runs in the **main thread** via the `/zensu:tdd` skill (see Skills below) — the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to five parallel `review-aspect` subagents and consolidates through a single `code-reviewer` spawn, so the existing hook chain (round counter, auto-fix loop, self-review) is unchanged.
 
-Unlike prompt-based TDD ("please write tests first"), the TDD manager **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
+#### /zensu:tdd — How It Enforces Discipline
 
-- **Phase declaration.** Before any edit, the agent declares the current TDD phase via `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id>`. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
+Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
+
+- **Phase declaration.** Before any edit, the main agent declares the current TDD phase via `bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id>`. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
 - **State.** Phase markers persist at `.zensu/state/tdd-phase-<session>.json`. Each step's history is auditable from the file.
-- **Scope.** The gate is active **only** when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Main-thread edits and other subagents are never gated. Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user.
+- **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. The gate (and the Bash witness) enforce **only** while that flag is set; sessions with no active TDD chain-state — other main-thread work, other subagents, plain CLI — are never gated. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user.
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + build verification), real-time progress log at `.zensu/logs/`.
 
@@ -118,6 +127,8 @@ Additional features: dependency graph for independent-step sequencing, 3-retry I
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 
 The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task` tools) that walks five perspectives in order:
+
+> In the `/zensu:tdd` review chain (since 0.6.0) these five perspectives are fanned out to parallel `review-aspect` subagents and merged in the main thread; the sequential walk described here is what a direct standalone `code-reviewer` invocation does.
 
 | Reviewer | Scope |
 |----------|-------|
@@ -129,29 +140,34 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (7)
+### Skills (10)
 
 | Skill | Description |
 |-------|-------------|
 | `/zensu:bootstrap` | Bootstrap a product from a vision document — creates features, journeys, security profiles, tiers |
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
+| `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval, `/zensu:implement`, or directly. |
+| `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository to discover undocumented features and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
-| `/zensu:reset-review-limit` | Reset the auto-fix loop round counter so the chain can resume past `autoFixMaxRounds` within the same session. Deletes `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-*.json`; idempotent and symlink-safe. |
+| `/zensu:reset-review-limit` | Reset the auto-fix loop round counter so the chain can resume past `autoFixMaxRounds` within the same session. Deletes `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-*.json` and re-arms the Stop-hook chain (clears `chainDone` + `*.stopblocks`); idempotent and symlink-safe. |
+| `/zensu:self-review` | Terminal self-reflection stage of the review chain. After `zensu:code-reviewer` converges, re-reads this session's own changes across 7 dimensions, takes at most one fix round under the phase-gate (never re-running the reviewer), then owns the chain terminus (`--chain-done`) and renders the final report with a `## Self-Review Summary`. Hard-enforced via `codeReviewDone`/`selfReviewFixed`; gated by `hooks.selfReview`. |
 | `/zensu:zensu-help` | Q&A skill — explains Zensu PLM concepts and plugin internals (agents, hooks, FSM, config flags). Read-only; routes workflow requests to the appropriate action skill. |
 
-### Hooks (7)
+### Hooks (9)
 
 | Hook Script | Event | Config Flag | Description |
 |-------------|-------|-------------|-------------|
 | `session-start-pulse.sh` | SessionStart | `pulseSession` | Emits HEAD/branch banner and prepares pulse session context at startup |
 | `session-start-capture-sid.sh` | SessionStart | — | Captures the claude-code `session_id` from SessionStart stdin and persists it to `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/session-id-<PPID>_<proc_hash>.txt` so later PreToolUse/PostToolUse hooks that receive a payload without `session_id` can recover the real id via a 3-tier lookup (stdin → SessionStart cache → `claude_<PPID>_<proc_hash>` deterministic fallback). Prevents cross-session collision on a literal `unknown` bucket. Process-fingerprint key (`PPID + cksum of ps -o lstart=`) survives OS PID reuse. Skips silently when `session_id` absent, `node` missing, or cache dir unwritable. |
-| `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the tdd-manager prompt discipline + PostToolUse code-reviewer chain. |
-| `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | Auto-spawns `@zensu:tdd-manager` in the main context after the user approves a Plan-mode plan. Skipped when `autoTdd:false`. |
-| `post-tdd-review-delegate.sh` | PostToolUse Agent | `autoReview` | After `zensu:tdd-manager` completes, auto-spawns `@zensu:code-reviewer` for the 5-perspective sequential review. Filters on `subagent_type == "zensu:tdd-manager"`; other subagents bypass. Skipped when `autoReview:false`. |
-| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to `@zensu:tdd-manager` for remediation (or ALL severities when `autoFixIncludeSuggestions:true`). Round counter persisted at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 actually wins — claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by this hook so the round budget resets per worktree); emits a convergence directive instead of re-spawning once `autoFixMaxRounds` (default 5) is reached — the directive points the user at `/zensu:reset-review-limit` as the escape hatch to grant another budget without ending the session. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) the hook appends a `CHAIN-END SUMMARY` directive instructing the main agent to render a three-section summary (Implementation Summary / Review Summary / Auto-fix History). Disable with `combinedSummary:false`. |
-| `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
+| `session-start-banner.sh` | SessionStart | `sessionBanner` | User-facing "Zensu PLM vX active" banner + usage hints (Plan mode → `/zensu:tdd` auto-trigger, gate-enforced edits, skills list). Plain stdout, shown to the user. Fires only on fresh starts (`source=startup`/`clear`), silent on `resume`/`compact`. Skipped when `sessionBanner:false`. |
+| `session-start-primer.sh` | SessionStart | `sessionBanner` | Model-facing orientation: injects a short `additionalContext` primer so the agent proactively uses Plan mode → `/zensu:tdd`. Same fresh-start filter + `sessionBanner` gate as the banner. |
+| `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only while the session's chain-state `active` flag is set (by `zensu-log.sh --tdd-begin`); pre-0.4.0 it keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the `/zensu:tdd` prompt discipline + PostToolUse code-reviewer chain. |
+| `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | After the user approves a Plan-mode plan that adds executable code, directs the main agent to execute it via the `/zensu:tdd` skill (in-thread, no subagent). Skipped when `autoTdd:false`. |
+| `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to the **main thread** to be fixed in-thread under the phase-gate (or ALL severities when `autoFixIncludeSuggestions:true`), then the main agent re-spawns the reviewer. Round counter persisted at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 — claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED so the round budget resets per worktree); on reaching `autoFixMaxRounds` (default 5) it converges — with `hooks.selfReview` enabled (the 0.5.0 default) it marks `codeReviewDone` and hands off to the terminal `/zensu:self-review` stage, which owns `--chain-done`; otherwise it sets `chainDone` directly — and emits a convergence directive instead of routing again — pointing the user at `/zensu:reset-review-limit` to grant another budget without ending the session. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) it appends a `CHAIN-END SUMMARY` directive (Implementation / Review / Auto-fix History). Disable summary with `combinedSummary:false`. |
+| `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only while the session's chain-state `active` flag is set. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
+| `stop-chain-enforcer.sh` | Stop | `chainEnforcer` (+ `ZENSU_CHAIN` env) | Review-chain backstop. Blocks the main agent from ending its turn while a TDD session has finished implementation (`implComplete`) but the review chain has not terminated (`chainDone`) — forcing the `zensu:code-reviewer` spawn after implementation and after each in-thread fix round (this replaces the deleted `post-tdd-review-delegate.sh` Agent-completion trigger; since 0.5.0, once `codeReviewDone` is set with `hooks.selfReview` enabled it instead forces the terminal `/zensu:self-review` Skill until `chainDone`). Activation scoped to chain-state `active`; anti-deadlock stop-block budget = `autoFixMaxRounds + 3`. Disable with `chainEnforcer:false` or `ZENSU_CHAIN=off`. |
 
 ## Typical Workflows
 
@@ -160,9 +176,9 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-001  → Load context, plan implementation
-3. @tdd-manager              → Strict TDD (RED→GREEN per step)
-4. @code-reviewer            → 5-perspective sequential review (auto-spawned by post-tdd-review-delegate.sh)
-5. auto-fix loop             → Critical/Important findings re-routed to @tdd-manager, capped at autoFixMaxRounds
+3. /zensu:tdd                → Strict TDD in the main thread (RED→GREEN per step)
+4. @code-reviewer            → 5-perspective sequential review (spawned by /zensu:tdd Phase 6, Stop-hook guaranteed)
+5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
 
@@ -171,7 +187,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 ```
 1. /zensu:ghost-scan         → Discover undocumented features from code
 2. /zensu:security-review    → Assess security posture per feature
-3. @tdd-manager              → Add tests via TDD for untested features
+3. /zensu:tdd                → Add tests via TDD for untested features
 ```
 
 ### Quick Feature (No Full TDD)
@@ -199,17 +215,19 @@ When Zensu MCP **is** connected, additional capabilities activate:
 
 ### Hook Opt-Out
 
-Zensu ships seven automatic hooks that fire across the development lifecycle (full enumeration in the [Hooks (7)](#hooks-7) table above). The configurable subset is listed below; `session-start-capture-sid.sh` (session-id cache) and `pre-edit-tdd-reminder.sh` (gated via the `ZENSU_TDD_GATE` env var rather than a config flag) are unconditional infrastructure. Any flagged hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
+Zensu ships nine automatic hooks that fire across the development lifecycle (full enumeration in the [Hooks (9)](#hooks-9) table above). The configurable subset is listed below; `session-start-capture-sid.sh` (session-id cache) and `pre-edit-tdd-reminder.sh` (gated via the `ZENSU_TDD_GATE` env var rather than a config flag) are unconditional infrastructure. Any flagged hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
 
 | Flag | Hook Script | Effect when `false` (boolean flags) or value (numeric flags) |
 |------|-------------|---------------------|
-| `autoTdd` | `plan-approved-delegate.sh` | Skips auto-spawn of `zensu:tdd-manager` after Plan approval |
-| `autoReview` | `post-tdd-review-delegate.sh` | Skips auto-spawn of `zensu:code-reviewer` after tdd-manager completes |
-| `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings back to tdd-manager |
-| `autoFixIncludeSuggestions` | `post-review-tdd-delegate.sh` | When `true`, the auto-fix hook routes ALL severities (Critical, Important, Suggestion, Minor, Nit) to `zensu:tdd-manager` instead of only Critical+Important. Default `false` preserves legacy routing. **Requires `autoFix:true`** — if `autoFix` is `false`, the entire auto-fix hook short-circuits and this flag has no effect. |
-| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `5`, valid range `1..99`). Caps the number of code-reviewer → tdd-manager cycles per session. When the cap is reached the hook emits a convergence directive instead of spawning `zensu:tdd-manager` again. State persists per session at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 — 0.3.20 misshipped because the fallback was unreachable; claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by this hook). |
+| `autoTdd` | `plan-approved-delegate.sh` | Skips directing the main agent to the `/zensu:tdd` skill after Plan approval |
+| `chainEnforcer` | `stop-chain-enforcer.sh` | Disables the Stop-hook review-chain backstop. When `false`, the main agent may end its turn without completing the `zensu:code-reviewer` chain (the skill still spawns the reviewer once at Phase 6; only the hard guarantee is dropped). Replaces the retired `autoReview` flag. |
+| `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings into the main-thread fix loop |
+| `autoFixIncludeSuggestions` | `post-review-tdd-delegate.sh` | When `true`, the auto-fix hook routes ALL severities (Critical, Important, Suggestion, Minor, Nit) into the main-thread fix loop instead of only Critical+Important. Default `false` preserves legacy routing. **Requires `autoFix:true`** — if `autoFix` is `false`, the entire auto-fix hook short-circuits and this flag has no effect. |
+| `autoFixMaxRounds` | `post-review-tdd-delegate.sh` | Integer loop guard (default `5`, valid range `1..99`). Caps the number of code-reviewer → in-thread-fix cycles per session. When the cap is reached the hook sets `chainDone` and emits a convergence directive instead of routing again. State persists per session at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23; claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by this hook). |
 | `combinedSummary` | `post-review-tdd-delegate.sh` | When `true` (default), the chain-end directive instructs the main agent to render a three-section summary (Implementation, Review, Auto-fix History) at every chain end (PASS, suggestions-only, max-rounds convergence). Set `false` to restore the terse stop behavior. Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults enabled to match user preference. |
+| `selfReview` | `post-review-tdd-delegate.sh` + `stop-chain-enforcer.sh` | When `false`, disables the terminal `/zensu:self-review` hand-off — the review chain terminates at `zensu:code-reviewer` convergence (`chainDone`) instead of running the self-review stage. Default `true` (since 0.5.0). |
 | `pulseSession` | `session-start-pulse.sh` | Skips the HEAD/branch banner at session start |
+| `sessionBanner` | `session-start-banner.sh` + `session-start-primer.sh` | Skips the "Zensu active" user banner AND the agent-orientation primer at fresh session starts (startup/clear) |
 
 **Resolution rules:**
 
@@ -226,7 +244,7 @@ Zensu ships seven automatic hooks that fire across the development lifecycle (fu
 {
   "hooks": {
     "autoTdd": false,
-    "autoReview": false,
+    "chainEnforcer": false,
     "autoFix": false,
     "pulseSession": false
   }
@@ -261,7 +279,7 @@ This lets a downstream project commit a project-local `.zensu/config.json` (e.g.
 
 ### Log Timestamp Style
 
-The `zensu:tdd-manager` subagent writes a session log under `.zensu/logs/YYYY-MM-DD-HHMM_tdd-<slug>.log` with one line per RED/IMPL/GREEN phase. The wall-clock prefix on each line can be reformatted or suppressed via `~/.zensu/config.json`:
+The `/zensu:tdd` workflow writes a session log under `.zensu/logs/YYYY-MM-DD-HHMM_tdd-<slug>.log` with one line per RED/IMPL/GREEN phase. The wall-clock prefix on each line can be reformatted or suppressed via `~/.zensu/config.json`:
 
 | Style | Inline format | Example |
 |---|---|---|
@@ -287,10 +305,11 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_API_KEY` | — | API key for CI/CD (optional if using OAuth) |
-| `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits inside a `zensu:tdd-manager` subagent context. Any other value (or unset) leaves the gate active per `CLAUDE_AGENT_TYPE` resolution. |
-| `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active when `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
-| `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:tdd-manager`). The TDD Phase Gate is active **only** when this is exactly `zensu:tdd-manager`; empty or any other value disables the gate (main-thread edits and other subagents are never gated). |
+| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — must be wired via a user-scope MCP header to take effect (see [Authentication](#authentication)); not needed when using OAuth |
+| `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits during a main-thread `/zensu:tdd` session. Any other value (or unset) leaves the gate active while the session's chain-state `active` flag is set. |
+| `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the session's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
+| `ZENSU_CHAIN` | — | Set to `off` to disable the Stop-hook review-chain backstop (`stop-chain-enforcer.sh`) so the main agent may end its turn without completing the `zensu:code-reviewer` chain. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell. |
+| `CLAUDE_AGENT_TYPE` | — | Set by Claude Code's harness to identify the active subagent (e.g. `zensu:code-reviewer`). Since 0.4.0 the TDD Phase Gate and witness no longer key on this — activation moved to the per-session chain-state `active` flag. Retained for subagent introspection and the eval harness. |
 | `CLAUDE_PLUGIN_ROOT` | — | Set by Claude Code for hook subprocesses. Resolves to the installed plugin root and is used by `hooks.json` to reference hook scripts. No user setup required. |
 | `CLAUDE_PLUGIN_DATA_OVERRIDE` | — | Opt-in override for the auto-fix rounds counter location. When set, the post-review hook (`post-review-tdd-delegate.sh`) writes per-session counters to `${CLAUDE_PLUGIN_DATA_OVERRIDE}/rounds-<session_id>.json` instead of the project-local default `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/rounds-<session_id>.json`. Power-user knob for centralizing the round budget across worktrees (e.g. `$HOME/.zensu/state`); leave unset for normal per-worktree behavior. Note: claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED by the rounds counter (0.3.20 used it as a fallback but the fallback was unreachable in claude-code; 0.3.23 inverts the precedence so project-local wins by default). No other Zensu hook currently reads `CLAUDE_PLUGIN_DATA` — every per-session state file (`tdd-phase-*.json`, `session-id-*.txt`, `witness-*.log`) already defaults to `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` directly. |
 
@@ -345,7 +364,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Problem | Solution |
 |---------|----------|
 | MCP server unreachable | Verify network connectivity to `https://mcp.zensu.dev/mcp` (or your self-hosted URL — see [Self-hosting](#self-hosting)) |
-| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) |
+| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and that the user-scope MCP header is registered — see [API Key (CI/CD)](#api-key-cicd) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |

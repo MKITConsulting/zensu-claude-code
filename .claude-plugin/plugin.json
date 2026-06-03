@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.3.28",
+  "version": "0.6.5",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -11,16 +11,19 @@
   "keywords": ["product-lifecycle", "features", "security", "mcp"],
   "agents": [
     "./agents/zensu-plm.md",
-    "./agents/tdd-manager.md",
-    "./agents/code-reviewer.md"
+    "./agents/code-reviewer.md",
+    "./agents/review-aspect.md"
   ],
   "skills": [
     "./skills/bootstrap",
     "./skills/ghost-scan",
     "./skills/implement",
+    "./skills/plan-review",
     "./skills/pulse",
     "./skills/reset-review-limit",
+    "./skills/self-review",
     "./skills/security-review",
+    "./skills/tdd",
     "./skills/zensu-help"
   ],
   "mcpServers": "./.mcp.json"

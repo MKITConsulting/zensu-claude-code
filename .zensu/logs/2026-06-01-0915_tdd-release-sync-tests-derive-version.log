@@ -1,0 +1,18 @@
+[09:16:01] TDD STARTED — De-stale release-sync structure tests | steps: 2
+[09:16:31] EXECUTION STARTED
+[09:17:17] T1 RED test-reset-review-limit-skill.sh + test-zensu-help-skill.sh — FAIL: stale EXPECTED_VERSION=0.4.0 != 0.4.2 (R9/R10, S6/S7), both exit=1
+[09:19:47] T1 IMPL completed — files: tests/structure/test-reset-review-limit-skill.sh, tests/structure/test-zensu-help-skill.sh (EXPECTED_VERSION derived from plugin.json + version-aware CHANGELOG-date regex), README.md (badge -> 0.4.2)
+[09:20:24] T1 GREEN — PASS (1 attempts, reset-review-limit 32 tests + zensu-help 17 tests, both 0 FAIL)
+[09:21:25] T2 WIRED — CLAUDE.md Release commit checklist: added README badge as step 3 (renumbered CHANGELOG->4, commit subject->5), with reference to the enforcing tests
+[09:23:14] AUDIT — cmd="bash tests/structure/test-reset-review-limit-skill.sh" exit=0 result="32/0 pass (was 30/2) — EXPECTED_VERSION now derived, badge+date green"
+[09:23:14] AUDIT — cmd="bash tests/structure/test-zensu-help-skill.sh" exit=0 result="17/0 pass (was 15/2)"
+[09:23:14] AUDIT — cmd="bash tests/structure/test-tdd-log-path-anchor.sh" exit=0 result="4/0 pass — bundled log-anchor undisturbed"
+[09:23:14] AUDIT — cmd="bash tests/structure/test-gitignore-zensu.sh" exit=0 result="5/0 pass — undisturbed"
+[09:23:14] WITNESS CROSS-CHECK — all 4 AUDIT test scripts present in witness-3f9d0e05-...log (no evidence gap)
+[09:23:14] STRUCTURE SUITE — 21 pass / 2 fail (improved from 19/4). Remaining 2 = pre-existing ambient: test-post-bash-witness.sh + test-pre-edit-hook-mirror.sh (untouched hooks). Both release-sync tests flipped red->green.
+[09:23:14] BUILD — n/a (bash tests + markdown docs; no build step)
+[09:23:14] COVERAGE SKIPPED — shell scripts, no per-file tool
+[09:23:14] MTIME AUDIT — n/a: T1 is a Bug Fix whose test artifacts ARE the fixed files (structure tests); RED = run of pre-existing failing tests BEFORE edits, GREEN = re-run after. No test-after retrofitting.
+[09:23:14] PRECONDITION DRIFT — none: jq (sole CLI precondition, present) is USED in the derived EXPECTED_VERSION (jq -r .version) — contracted tool actually ran
+[09:23:14] TDD COMPLETE — 1/1 GREEN (T1) | Integration: 1 WIRED (T2 CLAUDE.md checklist) | Build: – n/a | Coverage: SKIPPED
+[09:27:46] CHAIN DONE — zensu:code-reviewer PASS WITH SUGGESTIONS (0 critical, 0 important, 1 suggestion); no auto-fix

@@ -32,6 +32,44 @@ case "${1:-}" in
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
     exit $?
     ;;
+  --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset)
+    verb="$1"
+    session_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --session) session_val="${2:-}"; shift 2 ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    case "$verb" in
+      --tdd-begin)
+        tdd_set_flag "$session_val" active true
+        tdd_begin_rc=$?
+        rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+        rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
+        if [ -L "$rounds_counter_file" ]; then
+          echo "zensu-log --tdd-begin: refusing to delete through symlink at $rounds_counter_file — rounds counter NOT reset" >&2
+        elif [ -L "$rounds_state_dir" ]; then
+          echo "zensu-log --tdd-begin: refusing to reset under symlinked state dir $rounds_state_dir — rounds counter NOT reset" >&2
+        else
+          rm -f -- "$rounds_counter_file"
+        fi
+        exit "$tdd_begin_rc"
+        ;;
+      --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
+      --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
+      --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
+      --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
+      --tdd-reset)    tdd_clear_session "$session_val" ;;
+    esac
+    exit $?
+    ;;
 esac
 
 cmd="${1:-timestamp}"

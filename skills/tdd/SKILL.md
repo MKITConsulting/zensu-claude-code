@@ -1,15 +1,22 @@
----
-name: tdd-manager
-description: |
-  TDD Manager agent for strict Red/Green Test-Driven Development. Executes the full RED→GREEN TDD cycle directly — writes tests, runs them, implements, verifies.
+# /zensu:tdd
 
-  IMPORTANT: Provide a FEATURE SPECIFICATION as the prompt. Describe WHAT needs to be built, not HOW.
+Execute a feature specification with strict Red/Green Test-Driven Development **in the main thread**. You write the tests, run them, implement, and verify yourself — the work is NOT delegated to a subagent (that lost too much implementation context). After implementation the auto-review chain fans out five read-only `zensu:review-aspect` subagents (one per perspective), merges their findings in this thread, and consolidates through a single `zensu:code-reviewer` spawn that routes the findings back to you to fix in-thread.
 
-  BEFORE SPAWNING: Just spawn the agent directly. No preparation or cleanup needed.
+## When to Use
 
-  Examples: <example>Context: User wants to implement a new feature via TDD. user: "Implement the auto-sync timer feature. It should start/stop based on a setting, prevent parallel syncs with a mutex, emit status events, and have a circuit breaker after 5 failures." assistant: "I'll use the tdd-manager agent to implement this with strict TDD." *spawns agent with the specification*</example> <example>Context: User wants to add a new database field with UI. user: "Add a 'priority' field to tasks. It needs a migration, service layer, API endpoint, and UI updates." assistant: "I'll use the tdd-manager agent — it will plan Backend and Frontend steps separately." *spawns agent with the specification*</example>
-model: inherit
-tools: Read, Edit, Write, Bash, TaskCreate, TaskUpdate, AskUserQuestion
+- The plan-approval hook (`plan-approved-delegate.sh`) directs you here after the user approves a plan that adds executable code.
+- `/zensu:implement` Step 3 hands you a feature specification built from the Zensu feature + security context.
+- A user invokes `/zensu:tdd` directly with a feature spec.
+
+Provide a FEATURE SPECIFICATION as the input. Describe WHAT needs to be built, not HOW.
+
+## Main-thread model (read first)
+
+- **You are the implementer.** Run Phases 0–6 below in this conversation. Do NOT spawn a `tdd-manager` subagent — that agent no longer exists.
+- **The discipline hooks enforce YOU.** The PreToolUse phase-gate (`pre-edit-tdd-reminder.sh`) and the Bash witness (`post-bash-witness.sh`) activate on a per-session chain-state flag, set by `--tdd-begin` in Phase 0. Until you call `--tdd-begin` they are silent; after it, edits are gated to the declared TDD phase exactly as a subagent would have been.
+- **The review chain is guaranteed.** When you finish Phase 6 you mark `--tdd-complete` and spawn `zensu:code-reviewer`. A Stop hook (`stop-chain-enforcer.sh`) refuses to let you end your turn while implementation is complete but the review chain has not terminated — so the review cannot be silently skipped. Findings come back to you; you fix them in-thread under the same TDD discipline and re-spawn the reviewer until PASS or max rounds.
+- **Work sequentially — NO parallel tool batches.** TDD is inherently linear: RED → IMPL → GREEN, then evidence, then review. Throughout Phases 4–6 issue **one tool call at a time** and wait for its result before the next. Do NOT emit a parallel batch of tool calls. The phase-gate, the Bash witness evidence, and the Stop-hook chain all assume a single ordered sequence — parallel batches duplicate work, pollute `witness-<session>.log`, and can race the chain terminus (e.g. a `--chain-done` landing before the reviewer runs). The ONE sanctioned parallel batch is the Phase 6.10 review fan-out: spawning the five read-only `zensu:review-aspect` agents at once is allowed because it runs post-implementation, is strictly read-only, writes no witness evidence, and never touches the phase-gate.
+
 ---
 
 ## Principle 1: STRICT TDD DISCIPLINE
@@ -37,6 +44,7 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
 - *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
 - *"The user said 'no questions', so I'll make my best guess"* → LIE. "No questions" applies to clarification of intent, not to blocking-precondition escalation. The Phase-1-3b coverage-tool ask is the precedent: ask anyway. See Phase 1.5.
+- *"Tasks are just UI noise — the log already tracks progress"* → LIE. The Task list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `TaskCreate`/`TaskUpdate` leaves the user blind to where you are. Create the step tasks in Phase 3, flip their status in Phase 4 — same discipline as the log.
 
 ### Hard Bans
 
@@ -80,12 +88,12 @@ Detection happens in Phase 1 step 6 (planning) and is audited in Phase 6 step 6b
 ## Principle 3: THREE-CHANNEL STATUS
 
 After completing each cycle phase (RED, IMPL, GREEN):
-1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper.
-2. **Tasks** — TaskUpdate: `in_progress` when starting, `completed` when done
+1. **Log** — `printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "..." >> {log_file}` — the helper resolves `~/.zensu/config.json`'s `logging.timestampStyle` to the inline prefix (`wall` default, `relative`, or `none`). Never inline `$()` for the timestamp itself; always call the helper. Throughout this skill `{log_file}` denotes the **cwd-independent** path `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{SESSION_TS}_tdd-{slug}.log"` — always anchored to `${CLAUDE_PROJECT_DIR:-.}` (never bare-relative) so every `>> {log_file}` append succeeds regardless of the current working directory.
+2. **Tasks (MANDATORY)** — the user's live progress dashboard. TaskUpdate: `in_progress` when starting a cycle phase, `completed` when done. Every step created in Phase 3 must reach `completed`. See the Per-Step Task Contract below.
 3. **Plan doc** — batch-update at checkpoints and final report only
 4. **Phase-marker** (FSM, enforced by PreToolUse gate) — before any Edit/Write/MultiEdit, declare the current TDD phase via:
    `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --phase <PHASE> --step <step_id> [--reason "..."]`
-   Valid `<PHASE>` values: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`. The marker is written to `.zensu/state/tdd-phase-<session>.json`; the log-line format above is unchanged. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) blocks edits that don't match the FSM: in particular `IMPL` requires a prior `RED_FAIL` for the same step. Set `ZENSU_TDD_GATE=off` only for legitimate non-TDD edits explicitly authorized by the user.
+   Valid `<PHASE>` values: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`. The marker is written to `.zensu/state/tdd-phase-<session>.json`; the log-line format above is unchanged. The PreToolUse gate (`hooks/pre-edit-tdd-reminder.sh`) blocks edits that don't match the FSM: in particular `IMPL` requires a prior `RED_FAIL` for the same step. The gate is active because Phase 0 set the chain-state `active` flag for this session. Set `ZENSU_TDD_GATE=off` only for legitimate non-TDD edits explicitly authorized by the user.
 
 ### Per-Step Logging Contract (MANDATORY)
 
@@ -98,13 +106,19 @@ Integration/`[W]` steps log ONE entry: `{step_id} WIRED — {description}`.
 
 When you merge multiple Feature steps (per Principle 2), each constituent step keeps its own RED + GREEN entries — only the IMPL entry may be combined. Missing entries are a TDD compliance violation that Phase 6 audit MUST flag.
 
+### Per-Step Task Contract (MANDATORY)
+
+Tasks are not optional decoration — they are the only channel the user watches in real time, so treat them with the same discipline as the log. Each Feature/Bug-Fix step has THREE tasks (`[test]`/`[impl]`/`[verify]`, created in Phase 3); each integration step has ONE (`[wire]`). As you execute a step, flip its tasks `in_progress` → `completed` in lockstep with the cycle phases (RED→[test], IMPL→[impl], GREEN→[verify]). Running a Phase 4 cycle with no corresponding `in_progress` task is a discipline violation of the same class as a missing log entry. If you reach Phase 4 and the step's tasks do not exist, STOP and create them (Phase 3) before editing.
+
 ---
 
 ## Phase 0: Pre-flight
 
 1. **Resolve plugin root once.** Run `bash -c 'cat "$HOME/.zensu/plugin-root"'` via the Bash tool and store its trimmed output (no trailing newline) as `{PLUGIN_ROOT}` for the entire session. Use `{PLUGIN_ROOT}` in ALL subsequent helper invocations: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh …`. If the command exits non-zero or the output is empty, abort with: `FATAL: plugin root unresolvable — run a fresh session to trigger SessionStart hook AND ensure hooks.pulseSession is not set to false in ~/.zensu/config.json`. **Never search the filesystem** for the helper; the SessionStart hook (`hooks/session-start-pulse.sh`) is the single source of truth for the plugin-root path.
-2. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire subagent session — the log helper consumes it for `relative` timestamp style.
-3. Create first task: `TaskCreate(subject: "TDD: Analyzing spec and creating plan", activeForm: "Analyzing specification")`. Mark `in_progress`.
+2. Run `date +%Y-%m-%d-%H%M` → store as `{SESSION_TS}` for all filenames. Additionally capture `SESSION_EPOCH=$(date +%s)` and keep it for the entire TDD session — the log helper consumes it for `relative` timestamp style.
+3. **Activate the TDD session.** Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-begin`. This sets the per-session chain-state `active` flag, which turns on the PreToolUse phase-gate and the Bash witness for THIS main-thread session (they were silent until now). Without this call, your edits are NOT gated and the witness records nothing — so do it before any test/production edit.
+4. **Load the task-tracking tools.** In the main thread `TaskCreate`/`TaskUpdate` are deferred — their schemas are NOT preloaded (the deleted subagent got them for free via its `tools:` frontmatter; a main-thread skill does not). Before the first `TaskCreate`, load them: call `ToolSearch` with query `select:TaskCreate,TaskUpdate`. If your harness already exposes them, this is a harmless no-op — but never let a load hiccup become an excuse to skip tasks: they are the user's live dashboard (Principle 3, Per-Step Task Contract), not optional.
+5. Create the first task with `TaskCreate(subject: "TDD: Analyzing spec and creating plan", description: "Parse the feature spec and produce the TDD plan", activeForm: "Analyzing specification")`, then set it `in_progress` with `TaskUpdate`. **Contract:** `TaskCreate` requires BOTH `subject` and `description` (a one-liner is fine) and accepts an optional `activeForm`; it has NO `status` field (new tasks are always `pending`) and NO `blockedBy` — set status via `TaskUpdate(status: ...)` and dependencies via `TaskUpdate(addBlockedBy: [...])`.
 
 ---
 
@@ -154,7 +168,7 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
    Record `{precondition_name}`, `{verification_cmd}`, `{result: present|missing}`.
 3. For every `missing` precondition: use AskUserQuestion to present three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
 4. **AskUserQuestion override**: if an earlier user instruction said "no questions" or similar terseness preference, that instruction is OVERRIDDEN here. Blocking-precondition escalation always asks. This mirrors the Phase 1 step 3b coverage-tool ask, which is also unconditional.
-5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The agent does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
+5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
 6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
 7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
 
@@ -162,9 +176,11 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
 
 ## Phase 2: Create Plan + Log
 
-MANDATORY — create BOTH files (plan + log are a pair):
+MANDATORY — create BOTH files (plan + log are a pair).
 
-1. Write `.zensu/plans/{SESSION_TS}_tdd-{slug}.md`:
+> **Gate note (read before writing):** Phase 0's `--tdd-begin` armed the phase-gate. Paths under `.zensu/` (the plan + log artifacts) are exempt from the gate, so write the **plan** with the **Write tool** — its full body must NOT go through Bash, or the witness log would record the entire plan in one `cmd=` entry. The **log** is an append-only trace: write and grow it with **Bash** (`printf >> {log_file}`), never the Write tool (which would overwrite it). Never use Bash to write *production code* to bypass the gate — production source goes through Edit/Write under a declared phase in Phase 4.
+
+1. Create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate), with this content:
 
 ```markdown
 # TDD Plan: {Feature Title}
@@ -203,14 +219,14 @@ MANDATORY — create BOTH files (plan + log are a pair):
 - [ ] Coverage report generated for changed files (threshold: {threshold})
 ```
 
-2. `mkdir -p .zensu/logs && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
-3. Tell user: `tail -f .zensu/logs/{SESSION_TS}_tdd-{slug}.log`
+2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
+3. Tell user: `tail -f {log_file}`
 
 ---
 
 ## Phase 3: Create ALL Tasks
 
-Create tasks for ALL steps BEFORE starting execution. This is the user's progress dashboard.
+Create tasks for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its tasks.
 
 Per TDD step — 3 tasks:
 - `{step_id} [test]` (activeForm: "Creating RED test for {step_id}")
@@ -220,7 +236,7 @@ Per TDD step — 3 tasks:
 Per integration step — 1 task:
 - `{step_id} [wire]` (activeForm: "Wiring {step_id}")
 
-Set `blockedBy` per dependency graph. Mark Phase 0 "Analyzing" task `completed`.
+Create each via `TaskCreate` with `subject` (the `{step_id} [test]` label), a one-line `description`, and the `activeForm` shown above. Set dependencies with `TaskUpdate(addBlockedBy: [...])` per the dependency graph (not on `TaskCreate`). Mark the Phase 0 "Analyzing" task `completed` with `TaskUpdate`.
 
 ---
 
@@ -278,13 +294,15 @@ Implement directly (wiring, config, migrations). Log: `{step} WIRED`. Mark `[W]`
 
 After each logical phase: run full test suite + linter. Log result. Batch-update plan document statuses.
 
+**Run every test / lint / build / coverage command in the FOREGROUND and one at a time — never `run_in_background`, never two at once.** The witness cross-check needs the real exit code; a backgrounded run records `exit=?` in `witness-<session>.log` and breaks the Phase 6 cross-check, while concurrent runs duplicate the suite and leave orphaned shells. Run the full suite once here (checkpoint) and once in Phase 6 (audit) plus the scoped coverage run — serially, not in parallel.
+
 **MANDATORY** — every test/lint/build invocation logged from Phase 5 onward MUST use the structured-evidence schema so the witness log can cross-check the claim. For each run, append a line of the form:
 
 ```
 {step_or_phase} CHECKPOINT — cmd="<exact bash command>" exit=<rc> result="<short verdict>"
 ```
 
-The `cmd="..."` field MUST be the literal command string that was sent to the Bash tool — the witness hook (`hooks/post-bash-witness.sh`) records the same string verbatim, and Phase 6 step 1 will grep for `cmd="<X>"` in the witness log to verify the claim. Mismatched or paraphrased commands break the cross-check. The witness log lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` and is written automatically by the PostToolUse Bash hook scoped to `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Set `ZENSU_TEST_WITNESS=off` only when the user has authorized disabling the witness layer for a legitimate non-eval session.
+The `cmd="..."` field MUST be the literal command string that was sent to the Bash tool — the witness hook (`hooks/post-bash-witness.sh`) records the same string verbatim, and Phase 6 step 1 will grep for `cmd="<X>"` in the witness log to verify the claim. Mismatched or paraphrased commands break the cross-check. The witness log lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` and is written automatically by the PostToolUse Bash hook while this TDD session's chain-state `active` flag is set (Phase 0). Set `ZENSU_TEST_WITNESS=off` only when the user has authorized disabling the witness layer for a legitimate non-eval session.
 
 ---
 
@@ -326,7 +344,7 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
 
    - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}` and ask user (in their language) whether to run an additional TDD cycle for uncovered branches. Do NOT auto-loop (avoids scope explosion).
 4. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
-5. **mtime Discipline Audit** (NEW). For every Feature step marked `[G]`:
+5. **mtime Discipline Audit**. For every Feature step marked `[G]`:
    - Resolve the IMPL file list from the `{step_id} IMPL completed — files: {list}` log entry.
    - Resolve the test file from the step's `{step_id} RED {test_name}` log entry.
    - Capture mtimes: `test_mtime=$(stat -f %m {test_file})` (Linux: `stat -c %Y {test_file}`); `impl_min_mtime=$(stat -f %m {impl_files} | sort -n | head -1)`.
@@ -350,4 +368,11 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
 7. Update plan: all steps `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` remaining.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
 9. Output summary, in this order: (a) `## TL;DR` — exactly ONE sentence following the template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Cover root cause + fix mechanism + test verdict; no fluff, no hedging. Then (b) results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `via=tool_name` when declared non-Bash escape), plan path.
-10. After producing the step 9 summary, return control. The plugin's PostToolUse:Agent hook auto-invokes `@zensu:code-reviewer` — do not ask the user about review.
+10. **Close implementation and trigger the review chain.** This replaces the old subagent auto-review hook — the chain is now driven from this main thread. Execute these steps STRICTLY ONE AT A TIME (single tool call per step, wait for each result), never as a parallel batch and never bundled with the Phase 6 audit writes above:
+    1. Mark implementation complete: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-complete`. This arms the Stop-hook backstop (`stop-chain-enforcer.sh`): you will NOT be allowed to end your turn until the review chain terminates.
+    2. Enumerate changed files: `git diff --name-only HEAD`.
+    3. **Review fan-out (read-only, parallel).** Spawn FIVE `zensu:review-aspect` agents in ONE parallel batch (the single sanctioned parallel batch noted in the main-thread model above) — one per perspective: `conventions`, `bugs`, `architecture`, `tests`, `security`. Give each the same one-paragraph implementation summary + the changed-file list from step 2, and name its perspective in the prompt. They are strictly read-only and run NO build/test commands — the suite and build already ran in the Phase 6 audit above, so the aspects must not re-run them.
+    4. **Merge in-thread.** Collect the five `## Aspect:` findings lists, deduplicate (same `file:line` raised by multiple perspectives → keep the highest confidence), and sort CRITICAL → IMPORTANT → SUGGESTION → by file path. This is the synthesis the standalone reviewer used to perform in its own Phase 5; you now do it here.
+    5. **Thin consume-mode spawn (the single hook trigger).** Spawn ONE `zensu:code-reviewer` with the Agent tool (`subagent_type='zensu:code-reviewer'`). Its prompt MUST begin with the marker line `PRE-MERGED FINDINGS (fan-out)` followed by the merged findings from step 4 and the build/test/coverage status lines from the Phase 6 audit. It runs in consume mode — it skips its own Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from your pre-merged findings. Its single completion is what fires `post-review-tdd-delegate.sh`, so the round counter and the entire downstream chain behave exactly as before. Do NOT ask the user about review — running the fan-out IS the autonomous action.
+    - **`--chain-done` is the chain-terminus marker, now owned by the `/zensu:self-review` stage.** Run it yourself ONLY when (a) implementation produced ZERO file changes (every step blocked `[!]`) — then run it INSTEAD of spawning the reviewer and stop; or (b) `hooks.selfReview` is disabled and the reviewer returned PASS / suggestions-only. When self-review is enabled (the default), the reviewer convergence routes to `--code-review-done` + `/zensu:self-review`, which issues `--chain-done` itself. **NEVER** issue `--chain-done` in the same turn or batch as `--tdd-complete`, the reviewer spawn, a plan write, or the audit — landing it early releases the Stop gate before review and silently defeats the guarantee.
+    - The `post-review-tdd-delegate.sh` hook routes the reviewer's findings back to you. On Critical/Important findings: fix them in THIS thread under the same TDD discipline (re-enter Phase 4 cycles — the gate is still active), then re-run the review fan-out (steps 3-5 above: re-fan-out the five aspects, re-merge, re-spawn the thin consume-mode `zensu:code-reviewer`) to re-verify — one reviewer completion per round, so round-counter semantics are unchanged. On PASS / suggestions-only (and on `autoFixMaxRounds` convergence): run `--code-review-done`, then invoke the `/zensu:self-review` skill (Skill tool, `skill='zensu:self-review'`) — the terminal self-review stage. **The self-review stage owns `--chain-done`**: it re-reads this session's changes, takes at most one fix round (never re-running the reviewer), then runs `--chain-done` and renders the final CHAIN-END SUMMARY (with a `## Self-Review Summary` section). Do NOT run `--chain-done` or render the summary yourself when self-review is enabled (the default). The loop ends at PASS or `autoFixMaxRounds`, then self-review finalizes.

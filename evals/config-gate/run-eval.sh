@@ -127,6 +127,7 @@ run_test "$EVAL_DIR/test-autofix-rounds-increment.sh"         "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-rounds-convergence.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
+run_test "$EVAL_DIR/test-autofix-rounds-reset-on-fresh-tdd.sh" "test-autofix-rounds-reset-on-fresh-tdd.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Pre-Edit TDD-Gate offline tests" | tee -a "$REPORT"
@@ -157,6 +158,11 @@ echo "▸ Documentation coverage tests" | tee -a "$REPORT"
 run_test "$EVAL_DIR/test-readme-coverage.sh"             "test-readme-coverage.sh"
 run_test "$EVAL_DIR/test-changelog-coverage.sh"          "test-changelog-coverage.sh"
 run_test "$EVAL_DIR/test-changelog-round3-accuracy.sh"   "test-changelog-round3-accuracy.sh"
+
+echo "" | tee -a "$REPORT"
+echo "▸ Main-thread TDD chain smoke test (0.4.0 migration)" | tee -a "$REPORT"
+
+run_test "$PLUGIN_DIR/tests/structure/test-smoke-main-thread-chain.sh" "test-smoke-main-thread-chain.sh"
 
 if [ "$MODE" = "--self-check" ]; then
   echo "" | tee -a "$REPORT"
