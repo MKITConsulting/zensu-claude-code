@@ -1,14 +1,24 @@
 {
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
   "name": "zensu",
+  "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "owner": {
     "name": "Zensu",
-    "email": "contact@zensu.dev"
+    "email": "contact@zensu.dev",
+    "url": "https://github.com/MKITConsulting/zensu-claude-code"
   },
   "plugins": [
     {
       "name": "zensu",
+      "displayName": "Zensu",
+      "description": "Product Lifecycle Manager — Features as First-Class Citizens. Track features, run strict RED→GREEN TDD, security reviews, and release readiness.",
+      "author": {
+        "name": "Zensu",
+        "url": "https://github.com/MKITConsulting/zensu-claude-code"
+      },
+      "category": "productivity",
+      "homepage": "https://github.com/MKITConsulting/zensu-claude-code",
       "source": "./",
-      "description": "Product Lifecycle Manager — Features as First-Class Citizens",
       "version": "0.6.5"
     }
   ]
