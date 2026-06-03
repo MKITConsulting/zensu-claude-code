@@ -11,7 +11,10 @@
 #
 # This is the HEAVIEST suite: one long agent run (RED->GREEN->review->self-review).
 # COSTS API CREDITS and can take several minutes. Build the fixture first with
-# ./setup-fixtures.sh. Timeout via ZENSU_TDD_E2E_TIMEOUT (default 600s).
+# ./setup-fixtures.sh. Timeout via ZENSU_TDD_E2E_TIMEOUT (default 1200s — a full
+# RED->GREEN cycle plus the 5-aspect review fan-out + code-reviewer + self-review
+# routinely exceeds 600s; too low a timeout SIGTERMs claude mid-chain, leaving a
+# zero-byte capture and an unfinished chain that fail assertions 1/3/8 spuriously).
 #
 # Modes: (full) live run | --offline (re-assert last run's fixture state + capture)
 #        | --self-check (skeleton only, no claude, no API).
@@ -26,7 +29,7 @@ mkdir -p "$RESULTS_DIR"
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 REPORT="$RESULTS_DIR/report-$TIMESTAMP.txt"
-TIMEOUT="${ZENSU_TDD_E2E_TIMEOUT:-600}"
+TIMEOUT="${ZENSU_TDD_E2E_TIMEOUT:-1200}"
 FIXTURE="$FIXTURES_DIR/add-feature"
 
 MODE="${1:-full}"
