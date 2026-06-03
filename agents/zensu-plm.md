@@ -31,7 +31,7 @@ Status transitions are gated by:
 - **Docs Completeness**: Required documentation must exist
 - **Journey Health**: Critical user journeys must have healthy coverage
 
-## Available MCP Tools (60)
+## Available MCP Tools (63)
 
 ### Feature CRUD
 - `list_features` — List features (supports `view=compact`)
@@ -105,6 +105,11 @@ Status transitions are gated by:
 - `update_wiki_page` — Update a wiki page
 - `list_wiki_pages` — List wiki pages
 
+### Knowledge (Second-Brain)
+- `search_knowledge` — Hybrid (semantic + keyword) search over the organization's knowledge pool (features, visions, journeys, and connected sources); returns ranked passages with provenance
+- `get_knowledge_item` — Fetch a full knowledge item by id (complete content, excerpt, trust level, provenance)
+- `list_knowledge_sources` — List indexed knowledge sources with type and sync status
+
 ### Pulse (Developer Journal)
 - `pulse_start_session` — Start a dev session (with git HEAD SHA and branch)
 - `pulse_end_session` — End a session (with changed file paths)
@@ -171,7 +176,7 @@ Use the `/zensu:pulse` skill workflow:
 3. Author code-grounded Markdown matched to the doc type's focus and audience (8 types: `user_facing`, `api_reference`, `tutorial`, `adr`, `release_notes`, `internal`, `migration_guide`, `overview`)
 4. Publish with `create_wiki_page`, then `link_docs` to update the docs score
 
-Never condense the context metadata straight into a wiki page — that is the forbidden metadata-dump anti-pattern (see Important Rule 9).
+Never condense the context metadata straight into a wiki page — that is the forbidden metadata-dump anti-pattern (see Important Rule 10).
 
 ## Decision Rules
 
@@ -182,6 +187,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** tools
 - When a user asks about release readiness → use `validate_feature_security` and `analyze_journey_health`
 - When a user asks about tier pricing → use tier tools (`create_tier`, `set_feature_tiers`, `get_tier_matrix`)
+- Before planning or implementing a feature, or when the user asks what the org already knows about a topic → `search_knowledge` for related context
 - When a user wants to document a feature or generate a wiki page → follow the **documentation** procedure (`docs/documentation-guide.md`): get context, **read the source**, author, publish
 - For any Zensu question not matching a specific workflow → use the appropriate individual MCP tools
 
@@ -195,4 +201,5 @@ Never condense the context metadata straight into a wiki page — that is the fo
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `enrich_existing=true`.
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.
-9. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
+9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `search_knowledge` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge tools are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
+10. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.

@@ -21,7 +21,8 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 1. Ask the user for the feature ID
 2. Use `get_feature` to load the full feature details (title, description, status, priority, component, security classification)
 3. Use `analyze_feature_security` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
-4. Present a summary to the user:
+4. Use `search_knowledge` (query the feature title + key terms) to surface related org context — existing features, visions, journeys, and connected sources — so the implementation builds on what the org already knows. It is retrieval-only: synthesize from the returned passages and cite their provenance.
+5. Present a summary to the user:
    - Feature title and description
    - Current status and priority
    - Security classification and constraints
@@ -152,6 +153,7 @@ Present a completion summary:
 |------|------|---------|
 | `get_feature` | 1 | Load feature details |
 | `analyze_feature_security` | 1 | Load security context |
+| `search_knowledge` | 1 | Surface related org knowledge (retrieval-only) |
 | `link_test` | 4 | Link test files |
 | `link_source_files` | 5 | Map source files to feature |
 | `bulk_link_source_files` | 5 | Bulk map across features |
