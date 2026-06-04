@@ -76,6 +76,7 @@ flowchart TD
 ## Installation
 
 ```bash
+claude plugin marketplace add MKITConsulting/zensu-claude-code
 claude plugin install zensu --scope project
 ```
 
