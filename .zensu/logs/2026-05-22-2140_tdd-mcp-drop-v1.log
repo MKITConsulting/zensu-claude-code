@@ -1,8 +1,0 @@
-[21:42:34] TDD STARTED — Fix MCP prod 404 by dropping /v1 from plugin URL | steps: 2 (1 Bug-Fix + 1 [W])
-[21:43:07] S1 RED tests/structure/test-mcp-json-url.sh — FAIL: assertion mismatch on mcpServers.zensu.url (got .../v1/mcp, want .../mcp) + regression guard '/v1/mcp' substring present in .mcp.json (2 of 4 asserts failing, exit=1)
-[21:43:29] S1 IMPL completed — files: .mcp.json
-[21:43:41] S1 GREEN — PASS (1 attempt, 4 tests)
-[21:44:00] S2 WIRED — CHANGELOG.md: added 'Fixed' subsection under [Unreleased] documenting the /v1-drop, before the [0.3.15] heading
-[21:44:19] CHECKPOINT — Full structure suite: 8/8 files PASS, 0 FAIL (suite grew from 7 to 8 with new test-mcp-json-url.sh)
-[21:44:29] COVERAGE SKIPPED — plugin is bash structure tests + JSON config, no coverage tool wired
-[21:45:38] TDD COMPLETE — 1/1 GREEN | Integration: 1 WIRED | Build: – n/a (plugin, no build) | Coverage: SKIPPED (bash structure tests)

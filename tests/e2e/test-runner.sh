@@ -253,7 +253,7 @@ Verdict: NEEDS CHANGES
 CAP
 
   local pattern_dest="$tmp/expected/echo.pattern"
-  cp /Users/marcelkarras/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/quirky-black-840860/tests/e2e/expected/false-test-claim.pattern "$pattern_dest"
+  cp "$TEST_DIR/expected/false-test-claim.pattern" "$pattern_dest"
   cp "$pattern_dest" "$tmp/expected/real.pattern"
 
   local out="$tmp/out.txt"

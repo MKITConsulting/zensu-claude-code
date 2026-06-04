@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **`.zensu/plans/` and `.zensu/logs/` are no longer tracked — the per-run TDD audit trail is now local-only, ahead of making the repository public.** These 144 files were ephemeral dogfooding output of running the plugin on itself (German-language prior-round plans/logs carrying developer-machine absolute paths like `/Users/<name>/...`); shipping them publicly added repo noise and personal-path leakage with no consumer value (no test or runtime path reads the *committed* historical files — `agents/code-reviewer.md` and the evals read whatever the live session writes at runtime). `.gitignore` now blanket-ignores `.zensu/*` and re-includes only the durable `.zensu/config.json`; `git rm --cached` drops the existing tracked plans/logs from `HEAD` (history is preserved, not rewritten). `tests/structure/test-gitignore-zensu.sh` is inverted to pin the new contract (plans + narrative + witness logs all ignored; `config.json` tracked). The `CLAUDE.md` Language section is updated — the German-exemption note for "immutable audit trail" files is replaced by "runtime, gitignored, never committed; every tracked file must be English-only."
+
+### Fixed
+- **`tests/e2e/test-runner.sh` — hardcoded absolute `cp` path from a non-existent worktree broke the `false-test-claim` pattern test for every other machine.** Line 256 copied the fixture from `/Users/<name>/.../worktrees/quirky-black-840860/tests/e2e/expected/false-test-claim.pattern` — a dead per-session worktree that exists only on the original author's disk — so the test failed (or silently skipped) anywhere else. Replaced with the script-relative `"$TEST_DIR/expected/false-test-claim.pattern"` (the file is tracked at that path). Also genericized a developer-machine absolute path in `tests/structure/test-resolve-session-id.sh` (`/Users/<name>/...` → `/Users/foo/...`) to match the synthetic-path convention the rest of that file already uses; the regression value (dotted `dev.zensu` segment → dash sanitization) is unchanged.
+- **`.claude-plugin/marketplace.json` owner email aligned with `plugin.json`.** The marketplace manifest advertised `contact@zensu.dev` while the plugin manifest, README, and CODE_OF_CONDUCT all use `hello@zensu.dev`; standardized to `hello@zensu.dev`.
+- **English-only violation in a tracked test fixture.** `evals/tdd-manager-pretool/test-projects/react-go-fullstack/CLAUDE.md` contained German (`Test-Projekt`, `Komplett:`); corrected to English.
+
 ## [0.6.6] - 2026-06-03
 
 ### Fixed

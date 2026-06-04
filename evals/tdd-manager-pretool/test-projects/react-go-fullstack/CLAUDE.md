@@ -1,9 +1,9 @@
-# React/Go Fullstack Test-Projekt
+# React/Go Fullstack Test Project
 
 npm workspaces monorepo: Frontend (React/TypeScript/Vitest) + Backend (Go).
 
 ## Tests
-- Komplett: `npm run test:all`
+- All: `npm run test:all`
 - Frontend: `npm --workspace frontend test`
 - Backend: `cd backend && go test ./...`
 

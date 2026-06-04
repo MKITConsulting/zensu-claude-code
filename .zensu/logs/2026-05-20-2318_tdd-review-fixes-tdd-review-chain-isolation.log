@@ -1,9 +1,0 @@
-23:21:09 TDD STARTED — review-fixes-tdd-review-chain-isolation | steps: 2
-23:21:15 EXECUTION STARTED
-23:21:23 S1 RED-REPRO bash evals/tdd-review-chain/assert-severity-routing.sh — FAIL: leaked file rounds-unknown.json appeared in ~/.zensu/state/ after run despite 17/17 assertion PASS (isolation bug). Reproduced during discovery.
-23:21:34 S1 IMPL completed — files: evals/tdd-review-chain/assert-severity-routing.sh
-23:21:47 S1 GREEN — PASS (1 attempt) — 17/17 assertions PASS, ~/.zensu/state/ remained empty after run
-23:21:55 S2 RED-REPRO bash evals/tdd-review-chain/run-eval.sh --self-check — FAIL: leaked file rounds-unknown.json appeared in ~/.zensu/state/ after run despite 20/21 passes (isolation bug). Reproduced during discovery.
-23:22:07 S2 IMPL completed — files: evals/tdd-review-chain/run-eval.sh
-23:22:21 S2 GREEN — PASS (1 attempt) — 20/21 preserved (1 FAIL = pre-existing assert-version.sh out-of-scope), ~/.zensu/state/ remained empty after run
-23:24:33 TDD COMPLETE — 2/2 GREEN | Integration: 0 WIRED | Build: – n/a (bash eval scripts) | Coverage: SKIPPED (shell)

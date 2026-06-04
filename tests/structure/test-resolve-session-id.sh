@@ -382,8 +382,8 @@ else
   check "F1-R-paren CLAUDE_PROJECT_DIR with () (got '$F1_PAREN_OUT' expected '$F1_PAREN_UUID')" FAIL
 fi
 
-F1_SMOKE_PROJECT="/Users/marcelkarras/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/thirsty-elbakyan-eaba92"
-F1_SMOKE_SUBDIR="-Users-marcelkarras-IdeaProjects-dev-zensu-zensu-claude-code--claude-worktrees-thirsty-elbakyan-eaba92"
+F1_SMOKE_PROJECT="/Users/foo/IdeaProjects/dev.zensu/zensu-claude-code/.claude/worktrees/thirsty-elbakyan-eaba92"
+F1_SMOKE_SUBDIR="-Users-foo-IdeaProjects-dev-zensu-zensu-claude-code--claude-worktrees-thirsty-elbakyan-eaba92"
 F1_SMOKE_PDIR="$TMP_ROOT/projects/$F1_SMOKE_SUBDIR"
 mkdir -p "$F1_SMOKE_PDIR"
 F1_SMOKE_UUID="a01473c3-c9cb-45ed-8d12-e00a548866ca"

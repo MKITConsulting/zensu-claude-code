@@ -1,5 +1,0 @@
-[14:48:17] TDD STARTED — feature-id-guard pattern tightening (round-8 review fixes) | steps: 2
-[14:49:40] Step1 RED test_feature_id_guard_rejects_silent_get_feature_call — FAIL: 4/5 silent-violation captures wrongly PASS the widened pattern (correct RED reason: discrimination contract not satisfied)
-[14:51:03] Step2 IMPL completed — files: tests/e2e-plm/expected/feature-id-guard.pattern (6 alternatives tightened with phrase-level ask-back anchors)
-[14:51:03] Step2 GREEN — test-runner.sh 28/28 PASS; offline 7/7 PASS; both live captures (141606+142927) PASS tightened pattern; both self-checks exit 0
-[14:52:24] TDD COMPLETE — 2/2 GREEN | Integration: 0 WIRED | Build: – n/a (bash-script plugin) | Coverage: SKIPPED (no coverage tooling for bash). Live invocations: 0 (offline-only round).

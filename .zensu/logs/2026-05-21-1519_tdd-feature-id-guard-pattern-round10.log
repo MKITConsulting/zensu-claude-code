@@ -1,7 +1,0 @@
-[15:20:37] TDD STARTED — feature-id-guard pattern round-10 multi-line + anchor-word-anywhere fixes | steps: 9
-[15:22:36] S1 RF GREEN-BEFORE — 28/28 PASS (baseline before printf %s→%b change)
-[15:23:08] S1 RF GREEN-AFTER — 28/28 PASS | smoke probe: $'line1\nline2' via %b → 2-line file
-[15:23:53] S2 RED — 10/20 captures wrongly PASS (cases 11-20: 3 multi-line F1 via alt 8 + 7 single-line F2 via alts 1/2/4/11/12/13/16). test_feature_id_guard_rejects_silent_get_feature_call FAIL — expected RED state confirmed.
-[15:32:21] S3-S8 CHANGE — pattern rewritten with 8 tightened alts + 2 alt-1 relaxations (verb-list + gerund-forms) to keep ideal+shim captures GREEN.
-[15:32:21] S9 GREEN — bash tests/e2e-plm/test-runner.sh: 28/28 PASS | run.sh --self-check: 0/0 (exit 0) | run.sh --offline: 7/7 PASS | tests/e2e/run.sh --self-check: exit 0
-[15:32:21] TDD COMPLETE — 9/9 GREEN | files: tests/e2e-plm/test-runner.sh (printf %b + corpus 10→20) + tests/e2e-plm/expected/feature-id-guard.pattern (16 alts: 8 tightened, 1 relaxed for ideal+shim, 7 unchanged)
