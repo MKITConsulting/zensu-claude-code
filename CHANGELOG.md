@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Zensu logo at the top of `README.md`, linked to the homepage (`https://zensu.dev`); asset committed at `assets/zensu-logo.svg`.
+
 ### Changed
 - **`.zensu/plans/` and `.zensu/logs/` are no longer tracked — the per-run TDD audit trail is now local-only, ahead of making the repository public.** These 144 files were ephemeral dogfooding output of running the plugin on itself (German-language prior-round plans/logs carrying developer-machine absolute paths like `/Users/<name>/...`); shipping them publicly added repo noise and personal-path leakage with no consumer value (no test or runtime path reads the *committed* historical files — `agents/code-reviewer.md` and the evals read whatever the live session writes at runtime). `.gitignore` now blanket-ignores `.zensu/*` and re-includes only the durable `.zensu/config.json`; `git rm --cached` drops the existing tracked plans/logs from `HEAD` (history is preserved, not rewritten). `tests/structure/test-gitignore-zensu.sh` is inverted to pin the new contract (plans + narrative + witness logs all ignored; `config.json` tracked). The `CLAUDE.md` Language section is updated — the German-exemption note for "immutable audit trail" files is replaced by "runtime, gitignored, never committed; every tracked file must be English-only."
 
