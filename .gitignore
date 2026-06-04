@@ -50,14 +50,10 @@ out/
 .claude/settings.local.json
 .claude/worktrees/
 
-# tdd-manager run artifacts (per-run plans + logs)
+# tdd-manager run artifacts (per-run plans + logs) — local-only, never committed.
+# Ephemeral dogfooding output of running the plugin on itself; the public repo
+# ships the plugin, not its internal session audit trail. Only config is tracked.
 .zensu/*
-!.zensu/plans/
-!.zensu/logs/
-!.zensu/logs/*.log
-# Witness logs are ephemeral per-session anti-hallucination evidence (consumed
-# only by the in-session Phase 6 cross-check). Keep them local; never commit.
-.zensu/logs/witness-*.log
 !.zensu/config.json
 
 # Internal

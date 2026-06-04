@@ -1,6 +1,0 @@
-[15:09:45]  TDD STARTED — single ordering violation per step + symmetric comparison | steps: 2
-[15:09:53]  EXECUTION STARTED
-[15:10:36]  S1 RED T5.8 — FAIL: count=3 (expected 1) — current script emits one stderr line per tripped sub-rule
-[15:11:01]  S2 IMPL completed — files: evals/tdd-review-chain/assert-tdd-log-compliance.sh
-[15:11:24]  S2 GREEN — PASS (1 attempt); T5.5 still rejects with exit 1; T5.8 PASS (count=1); T5.1-T5.7 no regression; self-check 28/29 PASS (1 pre-existing FAIL on assert-version.sh)
-[15:12:24]  TDD COMPLETE — 2/2 GREEN | Integration: 0 WIRED | Build: – n/a (shell-only repo, no build step) | Coverage: SKIPPED (no shell coverage tool)

@@ -1,7 +1,0 @@
-[22:52:18] TDD STARTED — DRY_RUN preflight ordering fix | steps: 1
-[22:53:47] EXECUTION STARTED — S1 DRY_RUN preflight ordering fix
-[22:55:03] S1 RED P7-S9 DRY_RUN with jq missing: exit 127, stderr 'jq not found', stdout no preview — FAIL: rc=0 with misleading 'DRY_RUN: would execute' preview (silent-failure window confirmed)
-[22:55:27] S1 IMPL completed — files: scripts/claude-promptfoo-wrapper.sh (moved claude+jq preflights to lines 4-12, before PROMPT/OPTIONS_JSON assignment and before all jq -r invocations and before DRY_RUN exit)
-[22:55:39] S1 GREEN — PASS (1 attempts, 11 tests)
-[22:55:57] CHECKPOINT — wrapper 11/11 PASS, patches 21/21 PASS, bash -n OK, agent 305 lines unchanged
-[22:56:47] TDD COMPLETE — 1/1 GREEN | Integration: 0 WIRED | Build: – n/a | Coverage: SKIPPED — no tool
