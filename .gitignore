@@ -38,6 +38,8 @@ tests/e2e-skills/fixtures/
 tests/e2e-skills/results/
 tests/e2e-tdd/fixtures/
 tests/e2e-tdd/results/
+tests/e2e-context-nudge/fixtures/
+tests/e2e-context-nudge/results/
 tests/results/
 
 # Build output

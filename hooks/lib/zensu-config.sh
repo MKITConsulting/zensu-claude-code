@@ -97,3 +97,58 @@ zensu_autofix_max_rounds() {
   [ -z "$val" ] && { echo "$default"; return 0; }
   echo "$val"
 }
+
+zensu_context_nudge_enabled() {
+  local config
+  config="$(_zensu_resolve_config)"
+  [ ! -f "$config" ] && return 0
+  command -v node >/dev/null 2>&1 || return 0
+  local val
+  val=$(node -e "
+    try {
+      const j = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
+      console.log(j.context && j.context.compactionNudge === false ? '0' : '1');
+    } catch (_) { console.log('1'); }
+  " "$config" 2>/dev/null)
+  [ -z "$val" ] && return 0
+  [ "$val" = "1" ]
+}
+
+zensu_context_nudge_threshold() {
+  local default=50
+  local config
+  config="$(_zensu_resolve_config)"
+  [ ! -f "$config" ] && { echo "$default"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
+  local val
+  val=$(node -e "
+    try {
+      const j = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
+      const n = j.context && j.context.nudgeThreshold;
+      if (Number.isInteger(n) && n >= 1 && n <= 99) {
+        console.log(String(n));
+      } else {
+        console.log('$default');
+      }
+    } catch (_) { console.log('$default'); }
+  " "$config" 2>/dev/null)
+  [ -z "$val" ] && { echo "$default"; return 0; }
+  echo "$val"
+}
+
+zensu_context_window_size() {
+  # Echoes the configured context.windowSize, or empty when unset/invalid so the
+  # caller can auto-detect the tier (200k vs 1M) from observed usage. Hooks are
+  # not handed the real window size, so there is no safe numeric default here.
+  local config
+  config="$(_zensu_resolve_config)"
+  [ ! -f "$config" ] && return 0
+  command -v node >/dev/null 2>&1 || return 0
+  node -e "
+    try {
+      const j = JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));
+      const n = j.context && j.context.windowSize;
+      if (Number.isInteger(n) && n >= 1000 && n <= 100000000) console.log(String(n));
+    } catch (_) {}
+  " "$config" 2>/dev/null
+}
