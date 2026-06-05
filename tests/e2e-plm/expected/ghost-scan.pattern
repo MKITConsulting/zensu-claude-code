@@ -1,5 +1,5 @@
 # Ghost-scan workflow — must enumerate existing features first (avoid duplicates), then scan, review, apply.
-# Important Rule 7 (agents/zensu-plm.md:182): "enrich_existing=true when product already has features".
+# Important Rule 7 (agents/zensu-plm.md): "enrich_existing=true when product already has features".
 list_features
 ghost_scan
 (ghost_get_candidates|ghost_batch_review)
@@ -8,3 +8,9 @@ enrich_existing
 # 0.6.5 (Important Rule #8): tests are first-class scan data — the agent must
 # detect and carry test files into the scan, not drop them.
 (detectedTestFiles|detected test files|test.files? detect|link_test|test.{0,8}link)
+# 0.6.8: docs are first-class scan data alongside tests — link existing docs, flag gaps.
+(detectedDocFiles|detected doc files|doc.files? detect|link_docs)
+# 0.6.8: multi-perspective fan-out — parallel read-only Explore lenses augment the seed walk.
+(fan-out|multi-perspective|parallel|Explore|sub-?agents?|teammates?|lenses?)
+# 0.6.8: journeys discovered + created after apply — brownfield release-gate parity with bootstrap.
+(create_user_journey|create_journey_step|analyze_journey_health|user journey)
