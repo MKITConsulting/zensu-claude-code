@@ -3,6 +3,8 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+
 tdd_state_file() {
   local session_id="${1:-}"
   local sanitized="${session_id//[^A-Za-z0-9_-]/_}"
@@ -105,7 +107,8 @@ _tdd_write_phase_critical() {
           }
         }
       } catch (_) {}
-      const entry = { step: process.env.STEP, phase: process.env.PHASE, ts: process.env.TS };
+      const entry = { step: process.env.STEP, phase: process.env.PHASE };
+      if (process.env.TS) entry.ts = process.env.TS;
       if (process.env.REASON) entry.reason = process.env.REASON;
       state.history.push(entry);
       state.step_id = process.env.STEP;
@@ -187,8 +190,10 @@ tdd_write_phase() {
   state_dir=$(dirname "$state_file")
   mkdir -p "$state_dir" 2>/dev/null || true
 
-  local ts
-  ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  local ts=""
+  if [ "$(_zensu_log_style)" != "none" ]; then
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
 
   command -v node >/dev/null 2>&1 || return 1
 

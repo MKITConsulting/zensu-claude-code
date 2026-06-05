@@ -76,21 +76,25 @@ case "$CURRENT" in
 esac
 NEXT=$((CURRENT + 1))
 
-TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "$(_zensu_log_style)" = "none" ]; then
+  PAYLOAD="$(printf '{"count":%d}' "$NEXT")"
+else
+  PAYLOAD="$(printf '{"count":%d,"ts":"%s"}' "$NEXT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+fi
 if TMP_FILE="$(mktemp "${STATE_DIR}/rounds-${SESSION_ID}.XXXXXX" 2>/dev/null)"; then
-  if printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$TMP_FILE" \
+  if printf '%s\n' "$PAYLOAD" > "$TMP_FILE" \
      && mv "$TMP_FILE" "$COUNTER_FILE" 2>/dev/null; then
     :
   else
     rm -f "$TMP_FILE" 2>/dev/null
     echo "zensu post-review hook: failed to persist counter for session ${SESSION_ID} (write/mv)" >&2
-    if ! printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$COUNTER_FILE" 2>/dev/null; then
+    if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
       echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
     fi
   fi
 else
   echo "zensu post-review hook: mktemp failed under ${STATE_DIR} for session ${SESSION_ID}" >&2
-  if ! printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$COUNTER_FILE" 2>/dev/null; then
+  if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
     echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
   fi
 fi
