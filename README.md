@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.7.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.1-green.svg)](CHANGELOG.md)
 
 Zensu is a Product Lifecycle Manager that treats features as first-class citizens. This plugin covers the **entire development lifecycle** inside Claude Code — from product planning through disciplined implementation to release readiness.
 
@@ -19,7 +19,7 @@ zensu-plm                /zensu:tdd         Zensu Dashboard
 /zensu:implement         (main thread)
 ```
 
-**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`). Both end with features tracked in Zensu with security profiles, user journeys, and pricing tiers.
+**Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
 **Layer 2 — Implementation (HOW is it built securely?):** Strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) enforced by a PreToolUse FSM (Finite State Machine — a discipline tracker with a small set of allowed states and transitions) gate (`pre-edit-tdd-reminder.sh`) that blocks edits outside the declared RED→IMPL→GREEN phase. Followed by 5 sequential specialist code-review perspectives.
 
@@ -190,10 +190,22 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 ### Existing Codebase
 
 ```
-1. /zensu:ghost-scan         → Discover features + journeys + docs (multi-agent fan-out)
+1. /zensu:ghost-scan         → Discover features + journeys + docs (multi-agent fan-out); seat each at a v1 build-out baseline
 2. /zensu:security-review    → Assess security posture per feature
 3. /zensu:tdd                → Add tests via TDD for untested features
 ```
+
+### Hybrid (Existing Codebase + Forward Plan)
+
+For a brownfield repo whose plan/vision doc also describes not-yet-built features:
+
+```
+1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline)
+2. (agent) create_feature    → Plan doc's not-yet-built items → planned features
+3. /zensu:implement ZEN-xxx  → Build the planned items; v1 revision at implement-time
+```
+
+No separate skill — the agent runs ghost-scan, then creates the remainder as planned features.
 
 ### Quick Feature (No Full TDD)
 

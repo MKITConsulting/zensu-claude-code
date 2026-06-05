@@ -4,9 +4,15 @@ Bootstrap a new Zensu product from a vision document through to a fully configur
 
 ## When to Use
 
+This is the **greenfield** entry point — a new product captured from a plan/vision doc, before (or independent of) any code.
+
 - Starting a new project from scratch with a plan document (MVP spec, PRD, idea paper)
 - Converting an existing product vision into tracked features
 - Setting up a complete product in Zensu for the first time
+
+**Brownfield instead?** Code already exists and its features are untracked → use `/zensu:ghost-scan`.
+
+**Hybrid (existing code *and* this plan doc)?** Run `/zensu:ghost-scan` first to import what is built, then create the plan's not-yet-built items as `planned` features — see that skill's Phase 6.
 
 ## Prerequisites
 
@@ -36,7 +42,7 @@ Execute these phases in order. Present results to the user after each phase and 
    - **Estimated effort**: S (hours-1 day), M (2-3 days), L (1-2 weeks), XL (2+ weeks, consider splitting)
 3. Present the decomposition to the user for review
 4. Use `apply_bootstrap` with the vision_id and the structured JSON containing components and features
-5. Report the created entities (component count, feature count, features by priority)
+5. Report the created entities (component count, feature count, features by priority). Bootstrapped features start at `planned` with **no revision baseline** — there is nothing built yet to capture; a feature gets its v1 revision at implement-time (`/zensu:implement`), or at discovery if `/zensu:ghost-scan` later finds it already built
 
 ### Phase 3: Post-Bootstrap Setup (5 Steps)
 
