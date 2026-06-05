@@ -32,7 +32,7 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 ## Three Layers (embedded — architecture overview)
 
-1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield) or `/zensu:ghost-scan` (brownfield) produce tracked features.
+1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield) or `/zensu:ghost-scan` (brownfield) produce tracked features, user journeys, and linked docs.
 2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + `zensu:code-reviewer` subagent) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop guaranteed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 the TDD workflow runs in the main agent (was a `tdd-manager` subagent); `zensu:code-reviewer` is the only remaining subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 

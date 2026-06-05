@@ -190,7 +190,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 ### Existing Codebase
 
 ```
-1. /zensu:ghost-scan         → Discover undocumented features from code
+1. /zensu:ghost-scan         → Discover features + journeys + docs (multi-agent fan-out)
 2. /zensu:security-review    → Assess security posture per feature
 3. /zensu:tdd                → Add tests via TDD for untested features
 ```
