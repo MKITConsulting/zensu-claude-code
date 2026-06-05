@@ -45,7 +45,11 @@ WITNESS_DIR="$PROJECT_DIR/.zensu/logs"
 WITNESS_LOG="$WITNESS_DIR/witness-${SANITIZED_SESSION}.log"
 mkdir -p "$WITNESS_DIR" 2>/dev/null || exit 0
 
-TS="$(date +%H:%M:%S)"
-printf '[%s] BASH cmd=%s exit=%s tail=%s interrupted=%s\n' "$TS" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" >> "$WITNESS_LOG" 2>/dev/null || true
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-config.sh"
+TS_PREFIX=""
+if [ "$(_zensu_log_style)" != "none" ]; then
+  TS_PREFIX="[$(date +%H:%M:%S)] "
+fi
+printf '%sBASH cmd=%s exit=%s tail=%s interrupted=%s\n' "$TS_PREFIX" "$CMD_JSON" "$EXIT_CODE" "$TAIL_JSON" "$INTERRUPTED" >> "$WITNESS_LOG" 2>/dev/null || true
 
 exit 0

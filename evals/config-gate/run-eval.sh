@@ -98,6 +98,7 @@ run_test "$EVAL_DIR/test-log-style-no-node.sh"  "test-log-style-no-node.sh"
 run_test "$EVAL_DIR/test-log-style-negative-delta.sh" "test-log-style-negative-delta.sh"
 run_test "$EVAL_DIR/test-log-style-bad-epoch.sh"      "test-log-style-bad-epoch.sh"
 run_test "$EVAL_DIR/test-log-style-long-delta.sh"     "test-log-style-long-delta.sh"
+run_test "$EVAL_DIR/test-log-style-artifacts.sh"      "test-log-style-artifacts.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Hook gate offline tests" | tee -a "$REPORT"
