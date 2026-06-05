@@ -31,7 +31,7 @@ fi
 
 echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
 echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
-echo "zensu: Tip — use Claude Code Plan mode for code changes; approving the plan auto-triggers the /zensu:tdd workflow, and edits are TDD-gate-enforced."
+echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 echo "zensu: Hide this banner: set hooks.sessionBanner=false in ~/.zensu/config.json."
 exit 0

@@ -45,7 +45,7 @@ PLUGIN_DIR="$(cd "$EVAL_DIR/../.." && pwd)"
 echo "Plugin dir: $PLUGIN_DIR" | tee -a "$REPORT"
 cd "$PLUGIN_DIR"
 
-# ─── Test 1: Doc-only plan → escape-hatch (NO tdd-manager) ──────
+# ─── Test 1: Doc-only plan → escape-hatch (fast-path, NO TDD question) ──────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 1: Doc-only plan (escape-hatch path)" | tee -a "$REPORT"
 DOC_OUT="$RESULTS_DIR/doc-${TIMESTAMP}.out"
@@ -61,7 +61,7 @@ check "T1.3 ExitPlanMode tool succeeded"      "$(contains "$DOC_LOG" "tool=ExitP
 check "T1.4 Escape-hatch path indicated"      "$(contains "$DOC_LOG" "Skipping TDD|escape.?hatch|doc.only|README|CHANGELOG|markdown only|non-executable")"
 check "T1.5 No tdd-manager Agent dispatch"    "$(not_contains "$DOC_LOG" "source=agent:custom:zensu:tdd-manager")"
 
-# ─── Test 2: Code-change plan → /zensu:tdd skill delegation ─────
+# ─── Test 2: Code-change plan → ask, then /zensu:tdd on Yes ─────
 echo "" | tee -a "$REPORT"
 echo "▸ Test 2: Code-change plan (delegation path)" | tee -a "$REPORT"
 CODE_OUT="$RESULTS_DIR/code-${TIMESTAMP}.out"

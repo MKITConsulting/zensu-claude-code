@@ -4,7 +4,7 @@ Execute a feature specification with strict Red/Green Test-Driven Development **
 
 ## When to Use
 
-- The plan-approval hook (`plan-approved-delegate.sh`) directs you here after the user approves a plan that adds executable code.
+- After the user approves a plan that adds executable code, the plan-approval hook (`plan-approved-delegate.sh`) asks the user whether to run the TDD flow and directs you here when they confirm (or on its fast-paths: an explicit TDD affirmation in the approval message, or non-interactive Auto Mode).
 - `/zensu:implement` Step 3 hands you a feature specification built from the Zensu feature + security context.
 - A user invokes `/zensu:tdd` directly with a feature spec.
 
