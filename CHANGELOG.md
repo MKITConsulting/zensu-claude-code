@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Docs polish: the `README.md` brownfield quick-start and the `/zensu:zensu-help` planning overview now state that `/zensu:ghost-scan` produces user journeys and linked docs via a multi-agent fan-out — not just features — aligning the high-level copy with the 0.6.8 skill behavior.
+
 ## [0.6.8] - 2026-06-05
 
 ### Added
