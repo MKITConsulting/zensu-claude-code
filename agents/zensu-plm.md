@@ -156,11 +156,13 @@ Use the `/zensu:security-review` skill workflow:
 
 ### When the user wants to scan a repo for features
 Use the `/zensu:ghost-scan` skill workflow:
-1. Load existing features to avoid duplicates
-2. Walk the file tree; for each candidate populate `detectedSourceFiles` AND `detectedTestFiles` — tests are co-located with source, so glob the test patterns inside each candidate's source dirs. Never submit an empty `detectedTestFiles` when the repo has tests.
-3. Create ghost scan with candidates
-4. Batch review (approve/reject)
-5. Apply approved candidates as features (`enrich_existing=true` when the product already has features)
+1. Load existing features AND journeys (`list_journeys`) to avoid duplicates
+2. Walk the file tree (seed pass); for each candidate populate `detectedSourceFiles`, `detectedTestFiles`, AND `detectedDocFiles` — tests and docs are co-located with source, so glob both patterns inside each candidate's source dirs. Never submit an empty `detectedTestFiles` or `detectedDocFiles` when the repo has tests or docs.
+3. **Multi-perspective fan-out:** spawn read-only `Explore` lenses in one parallel batch (adaptive count, cap 12) to refine boundaries, catch missed features, and draft journeys; consolidate in the main thread. This raises recall beyond the single seed pass.
+4. Create ghost scan with the refined candidates
+5. Batch review (approve/reject)
+6. Apply approved candidates as features (`enrich_existing=true` when the product already has features)
+7. **After apply, discover user journeys:** map drafted journeys to the new feature IDs and create them with `create_user_journey` + `create_journey_step`, then `analyze_journey_health` — brownfield imports need journeys to pass the release gate. Flag features with zero docs for `/zensu:implement` (ghost-scan links existing docs, never generates new ones).
 
 ### When the user asks about their dev session
 Use the `/zensu:pulse` skill workflow:
@@ -203,3 +205,4 @@ Never condense the context metadata straight into a wiki page — that is the fo
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.
 9. **Ground work in existing knowledge.** Before planning or implementing a feature, run `search_knowledge` to surface related features, visions, journeys, and connected sources — build on what the org already knows instead of reinventing it. Knowledge tools are **retrieval-only**: they return ranked evidence passages with provenance, never a generated answer. Synthesize from the returned passages yourself and cite their provenance; never assume the server reasoned for you.
 10. **Documentation is code-grounded, never a metadata dump.** `get_doc_generation_context` returns the *map* (source-file paths, symbols, security posture) — not the source. Before writing any doc or wiki page, open and **read** the `detectedSourceFiles` it names, then author content from the real signatures, endpoints, and behavior. Condensing the context metadata straight into `## Purpose / ## Source files / ## Security / ## Notes` sections is forbidden — it produces a reformatted feature record, not documentation. Pick `doc_type` and `audience` from the canonical sets. **Read `docs/documentation-guide.md`** for the full procedure before writing.
+11. **Ghost scans are multi-perspective and journey-aware.** A single heuristic pass misses features — augment the seed walk with a read-only `Explore` fan-out (adaptive count, cap 12) and consolidate in the main thread. Treat `detectedDocFiles` as first-class scan data alongside `detectedTestFiles` — glob existing READMEs/`docs` per candidate; an omitted array links zero. After apply, discover and create user journeys (`create_user_journey` → `create_journey_step` → `analyze_journey_health`) so brownfield imports can pass the journey-health release gate; flag features with zero docs for `/zensu:implement` rather than auto-generating docs.

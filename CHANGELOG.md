@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.8] - 2026-06-05
+
+### Added
+- **`/zensu:ghost-scan` — multi-perspective fan-out, user-journey discovery, and first-class docs.** The skill ran a single-pass heuristic walk in the main thread and missed features that span modules or are only legible from entry points, tests, data models, or docs; it never produced user journeys (so brownfield imports could not satisfy the journey-health release gate); and it treated `detectedDocFiles` as a second-class bonus — the same empty-by-omission trap that dropped ~600 tests before 0.6.5. `skills/ghost-scan/SKILL.md` now: (1) keeps the Phase 2 walk as a **seed** and adds **Phase 2b**, a read-only `Explore` fan-out spawned in one parallel batch with an adaptive lens count (cap 12: `<150` files → ~4 lenses, `150–500` → ~8, `>500` → up to 12; core lenses domain-boundary, test-mapper, journey-analyst, docs-coverage always cast), consolidated in the main thread with a no-silent-caps log — the house pattern from `/zensu:plan-review` and `/zensu:tdd` Phase 6; (2) adds **Phase 5 Journey Discovery & Creation** after apply, mapping drafted journeys to real feature IDs and creating them via `create_user_journey` → `create_journey_step` → `analyze_journey_health` (mirrors `/zensu:bootstrap` Step 2), plus a Phase 1 `list_journeys` dedup load; and (3) promotes docs to first-class — a co-location glob (step 7), a "Doc-file completeness" quality rule mirroring the test-file rule, a pre-submit self-check that sums `detectedTestFiles` **and** `detectedDocFiles`, a Phase 4 "Scan the Docs column" review flag, and a Phase 6 doc-gap report that recommends `/zensu:implement` for features with zero docs (ghost-scan links existing docs, never generates new ones). `agents/zensu-plm.md` mirrors all three in the ghost-scan workflow steps and a new Important Rule #11. The e2e behavioral-contract pattern (`tests/e2e-plm/expected/ghost-scan.pattern`) and prompt (`tests/e2e-plm/prompts/ghost-scan.txt`) gain lenient journey/docs/fan-out assertions. Pinned by `tests/structure/test-ghost-scan-test-detection.sh` (P14–P26).
+
 ## [0.6.7] - 2026-06-04
 
 ### Added

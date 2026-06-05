@@ -136,6 +136,118 @@ else
   check "P13b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
+# P14 — SKILL.md documents the multi-perspective fan-out (parallel read-only Explore lenses)
+if grep -qiE 'fan-out' "$SKILL_MD" && grep -qF 'Explore' "$SKILL_MD"; then
+  check "P14 SKILL.md documents the multi-perspective fan-out (Explore agents)" PASS
+else
+  check "P14 SKILL.md documents the multi-perspective fan-out (Explore agents)" FAIL
+fi
+
+# P15 — adaptive lens count (explicit cap 12 + size thresholds) + no-silent-caps logging
+if grep -qiE 'adaptive' "$SKILL_MD" && grep -qiE 'cap[ -]?12' "$SKILL_MD" && grep -qF '> 500' "$SKILL_MD" && grep -qiF 'No silent caps' "$SKILL_MD"; then
+  check "P15 SKILL.md documents adaptive lens count (cap 12 + thresholds) + no-silent-caps log" PASS
+else
+  check "P15 SKILL.md documents adaptive lens count (cap 12 + thresholds) + no-silent-caps log" FAIL
+fi
+
+# P16 — journey discovery phase creates journeys after apply
+if grep -qF 'create_user_journey' "$SKILL_MD" && grep -qF 'create_journey_step' "$SKILL_MD"; then
+  check "P16 SKILL.md journey phase calls create_user_journey + create_journey_step" PASS
+else
+  check "P16 SKILL.md journey phase calls create_user_journey + create_journey_step" FAIL
+fi
+
+# P17 — journey health analysis on the created journeys
+if grep -qF 'analyze_journey_health' "$SKILL_MD"; then
+  check "P17 SKILL.md runs analyze_journey_health on created journeys" PASS
+else
+  check "P17 SKILL.md runs analyze_journey_health on created journeys" FAIL
+fi
+
+# P18 — doc-file completeness quality rule (mirror of the test-file rule)
+if grep -qF 'Doc-file completeness' "$SKILL_MD"; then
+  check "P18 SKILL.md carries a doc-file completeness quality rule" PASS
+else
+  check "P18 SKILL.md carries a doc-file completeness quality rule" FAIL
+fi
+
+# P19 — pre-submit self-check sums detectedDocFiles too (not only tests)
+if grep -qiE 'sum .*detectedTestFiles.*and.*detectedDocFiles' "$SKILL_MD"; then
+  check "P19 SKILL.md pre-submit self-check sums detectedDocFiles too" PASS
+else
+  check "P19 SKILL.md pre-submit self-check sums detectedDocFiles too" FAIL
+fi
+
+# P20 — Phase 4 review flags an all-zero Docs column
+if grep -qF 'Scan the Docs column' "$SKILL_MD"; then
+  check "P20 SKILL.md tells review to flag an all-zero Docs column" PASS
+else
+  check "P20 SKILL.md tells review to flag an all-zero Docs column" FAIL
+fi
+
+# P21 — Phase 6 doc-gap report names the report and routes zero-doc features to /zensu:implement
+if grep -qiF 'Doc-gap report' "$SKILL_MD" && grep -qiF 'zero docs' "$SKILL_MD" && grep -qF '/zensu:implement' "$SKILL_MD"; then
+  check "P21 SKILL.md Phase 6 doc-gap report flags zero-doc features -> /zensu:implement" PASS
+else
+  check "P21 SKILL.md Phase 6 doc-gap report flags zero-doc features -> /zensu:implement" FAIL
+fi
+
+# P22a — zensu-plm.md mirrors the ghost-scan multi-perspective fan-out
+if grep -qiE 'fan-out|multi-perspective' "$AGENT_MD"; then
+  check "P22a zensu-plm.md mirrors the ghost-scan fan-out" PASS
+else
+  check "P22a zensu-plm.md mirrors the ghost-scan fan-out" FAIL
+fi
+
+# P22b — zensu-plm.md ghost-scan workflow discovers user journeys
+if grep -qF 'discover user journeys' "$AGENT_MD"; then
+  check "P22b zensu-plm.md ghost-scan workflow discovers user journeys" PASS
+else
+  check "P22b zensu-plm.md ghost-scan workflow discovers user journeys" FAIL
+fi
+
+# P22c — zensu-plm.md mirrors first-class docs (detectedDocFiles) in ghost-scan
+if grep -qF 'detectedDocFiles' "$AGENT_MD"; then
+  check "P22c zensu-plm.md requires populating detectedDocFiles" PASS
+else
+  check "P22c zensu-plm.md requires populating detectedDocFiles" FAIL
+fi
+
+# P23-P26 — e2e behavioral-contract pattern + prompt assert journeys, docs, fan-out
+PATTERN_FILE="$PLUGIN_DIR/tests/e2e-plm/expected/ghost-scan.pattern"
+PROMPT_TXT="$PLUGIN_DIR/tests/e2e-plm/prompts/ghost-scan.txt"
+
+if grep -qF 'create_user_journey' "$PATTERN_FILE"; then
+  check "P23 ghost-scan.pattern asserts journey creation" PASS
+else
+  check "P23 ghost-scan.pattern asserts journey creation" FAIL
+fi
+
+if grep -qiE 'detectedDocFiles|link_docs' "$PATTERN_FILE"; then
+  check "P24 ghost-scan.pattern asserts first-class docs" PASS
+else
+  check "P24 ghost-scan.pattern asserts first-class docs" FAIL
+fi
+
+if grep -qiE 'fan-out|parallel|Explore' "$PATTERN_FILE"; then
+  check "P25 ghost-scan.pattern asserts multi-perspective fan-out" PASS
+else
+  check "P25 ghost-scan.pattern asserts multi-perspective fan-out" FAIL
+fi
+
+if grep -qiF 'journey' "$PROMPT_TXT"; then
+  check "P26 ghost-scan.txt prompt invites journey discovery" PASS
+else
+  check "P26 ghost-scan.txt prompt invites journey discovery" FAIL
+fi
+
+# P27 — journeys are created AFTER ghost_apply (feature IDs exist only post-apply)
+if grep -qiE 'after .{0,4}ghost_apply|after apply' "$SKILL_MD"; then
+  check "P27 SKILL.md pins journey creation after ghost_apply" PASS
+else
+  check "P27 SKILL.md pins journey creation after ghost_apply" FAIL
+fi
+
 echo "----"
 echo "test-ghost-scan-test-detection: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
