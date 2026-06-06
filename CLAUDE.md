@@ -22,11 +22,11 @@ Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and nev
 
 **Releasing — automated via the `Release` workflow** (`.github/workflows/release.yml`):
 
-1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare` job runs the deterministic test gate, computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + `marketplace.json` + the README badge **together** to the same value, generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`), and opens a `chore(release): bump version to X.Y.Z` PR. (Run with `dry_run: true` to preview the version + notes without opening a PR.)
-2. Review + **squash-merge** that PR.
+1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare` job runs the deterministic test gate, computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + `marketplace.json` + the README badge **together** to the same value, generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`), **pushes a `release/vX.Y.Z` branch**, and prints a "Compare & PR" link in the run summary. (Run with `dry_run: true` to preview the version + notes without pushing a branch.)
+2. Open the PR from that link, then review + **squash-merge** it. (CI pushes the branch but does not open the PR — the org caps the workflow token for PR creation; release/tag creation only needs the per-job `contents: write`, which works.)
 3. The `publish` job fires on the release commit landing on `main`, creates a **draft** GitHub Release (notes = the new CHANGELOG section, source zip attached) and tags `main` HEAD on publish. Review the draft, then click **Publish**. Users then pull it via `claude plugin marketplace update zensu`.
 
-The same-value invariant above is machine-enforced: the gate runs `tests/run-all.sh` (incl. the version-sync tests) before the PR opens. For a manual hotfix bump, follow the invariant by hand — `plugin.json` + `marketplace.json` + README badge (same value) + a new `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section + commit subject `chore(release): bump version to X.Y.Z`.
+The same-value invariant above is machine-enforced: the gate runs `tests/run-all.sh` (incl. the version-sync tests) before the branch is pushed. For a manual hotfix bump, follow the invariant by hand — `plugin.json` + `marketplace.json` + README badge (same value) + a new `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section + commit subject `chore(release): bump version to X.Y.Z`.
 
 If `marketplace.json` ever lags `plugin.json` (e.g. a hand bump that forgot it), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
 
