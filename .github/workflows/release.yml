@@ -2,14 +2,17 @@ name: Release
 
 # Modeled on the ts-desktop-tauri release pipeline, adapted for a Claude Code
 # plugin: no binary build/sign, and `main` is branch-protected so the version
-# bump lands via a release PR (never a direct push).
+# bump lands via a release PR (never a direct push). The org caps the default
+# GITHUB_TOKEN at read for PR *creation*, so CI pushes the release branch and you
+# open the PR from the printed link — release/tag creation only needs the per-job
+# `contents: write` granted below, which works under the org policy.
 #
 # Flow:
 #   1. Dispatch this workflow (Actions -> Release) with a version_type.
 #   2. The `prepare` job computes the next version, bumps the version files,
 #      generates the CHANGELOG section from the commits since the last tag
-#      (git-cliff), and opens a `chore(release): bump version to X.Y.Z` PR.
-#   3. Review + merge (squash) that PR.
+#      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
+#   3. Open the PR from that link, then review + squash-merge it.
 #   4. The `publish` job fires on the release commit landing on main, creates a
 #      DRAFT GitHub Release whose notes are the new CHANGELOG section, and (only
 #      on publish) tags main HEAD. Review the draft, then click Publish.
@@ -35,7 +38,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 concurrency:
   group: release-${{ github.ref }}
@@ -43,7 +45,7 @@ concurrency:
 
 jobs:
   prepare:
-    name: Prepare release PR
+    name: Prepare release branch
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -125,22 +127,30 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Open release PR
+      - name: Push release branch + print PR link
         if: ${{ !inputs.dry_run }}
-        uses: peter-evans/create-pull-request@v6
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          base: main
-          branch: release/${{ steps.ver.outputs.tag }}
-          delete-branch: true
-          commit-message: 'chore(release): bump version to ${{ steps.ver.outputs.version }}'
-          title: 'chore(release): bump version to ${{ steps.ver.outputs.version }}'
-          body-path: ${{ runner.temp }}/section.md
-          add-paths: |
-            .claude-plugin/plugin.json
-            .claude-plugin/marketplace.json
-            README.md
-            CHANGELOG.md
+        run: |
+          set -euo pipefail
+          BR="release/${{ steps.ver.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BR"
+          git add .claude-plugin/plugin.json .claude-plugin/marketplace.json README.md CHANGELOG.md
+          git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          # Force-push so re-running for the same version overwrites a stale branch.
+          git push -f origin "$BR"
+          TITLE_ENC="$(printf '%s' 'chore(release): bump version to ${{ steps.ver.outputs.version }}' | jq -sRr @uri)"
+          PR_URL="${{ github.server_url }}/${{ github.repository }}/compare/main...${BR}?expand=1&title=${TITLE_ENC}"
+          {
+            echo "## Release v${{ steps.ver.outputs.version }} — open the PR"
+            echo ""
+            echo "Branch \`${BR}\` pushed. **Open the release PR:**"
+            echo ""
+            echo "${PR_URL}"
+            echo ""
+            echo "Review + **squash-merge** it → the \`publish\` job creates the draft release."
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "Open the PR: ${PR_URL}"
 
   publish:
     name: Publish draft release
