@@ -20,15 +20,15 @@ The two files serve different consumers:
 
 Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and never re-bumped while `plugin.json` advanced through 0.2.x → 0.3.x. Result: every release between 0.2.0 and 0.3.15 was invisible to the directory marketplace and users running `claude plugin install zensu@zensu` could not pull the new code without uninstalling + manually clearing the cache directory. Fixed in PR #31; this convention prevents recurrence.
 
-**Release commit checklist:**
+**Releasing — automated via the `Release` workflow** (`.github/workflows/release.yml`):
 
-1. `.claude-plugin/plugin.json` — `"version": "X.Y.Z"`
-2. `.claude-plugin/marketplace.json` — `plugins[0].version: "X.Y.Z"` (same value)
-3. `README.md` — version badge `version-X.Y.Z-green` (same value). Enforced by `tests/structure/test-zensu-help-skill.sh` and `tests/structure/test-reset-review-limit-skill.sh`, which derive the expected version from `plugin.json` and assert the badge matches.
-4. `CHANGELOG.md` — new `## [X.Y.Z] - YYYY-MM-DD` section, move applicable Unreleased entries down
-5. Commit subject: `chore(release): bump version to X.Y.Z`
+1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare` job runs the deterministic test gate, computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + `marketplace.json` + the README badge **together** to the same value, generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`), and opens a `chore(release): bump version to X.Y.Z` PR. (Run with `dry_run: true` to preview the version + notes without opening a PR.)
+2. Review + **squash-merge** that PR.
+3. The `publish` job fires on the release commit landing on `main`, creates a **draft** GitHub Release (notes = the new CHANGELOG section, source zip attached) and tags `main` HEAD on publish. Review the draft, then click **Publish**. Users then pull it via `claude plugin marketplace update zensu`.
 
-If `marketplace.json` cannot be bumped in the same commit (e.g. forgotten and the release already shipped), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
+The same-value invariant above is machine-enforced: the gate runs `tests/run-all.sh` (incl. the version-sync tests) before the PR opens. For a manual hotfix bump, follow the invariant by hand — `plugin.json` + `marketplace.json` + README badge (same value) + a new `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section + commit subject `chore(release): bump version to X.Y.Z`.
+
+If `marketplace.json` ever lags `plugin.json` (e.g. a hand bump that forgot it), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
 
 ## Pull Request Workflow
 

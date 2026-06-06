@@ -1,0 +1,200 @@
+name: Release
+
+# Modeled on the ts-desktop-tauri release pipeline, adapted for a Claude Code
+# plugin: no binary build/sign, and `main` is branch-protected so the version
+# bump lands via a release PR (never a direct push).
+#
+# Flow:
+#   1. Dispatch this workflow (Actions -> Release) with a version_type.
+#   2. The `prepare` job computes the next version, bumps the version files,
+#      generates the CHANGELOG section from the commits since the last tag
+#      (git-cliff), and opens a `chore(release): bump version to X.Y.Z` PR.
+#   3. Review + merge (squash) that PR.
+#   4. The `publish` job fires on the release commit landing on main, creates a
+#      DRAFT GitHub Release whose notes are the new CHANGELOG section, and (only
+#      on publish) tags main HEAD. Review the draft, then click Publish.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_type:
+        description: 'Version bump type'
+        required: true
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      dry_run:
+        description: 'Dry run: compute version + notes only, do not open a PR'
+        required: false
+        default: false
+        type: boolean
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    name: Prepare release PR
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Deterministic test gate
+        run: bash tests/run-all.sh
+
+      - name: Compute next version
+        id: ver
+        run: |
+          set -euo pipefail
+          LATEST="$(git tag -l 'v*' | sort -V | tail -1)"
+          if [[ ! "$LATEST" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            LATEST="v0.0.0"
+          fi
+          echo "Latest tag: $LATEST"
+          IFS='.' read -r MA MI PA <<< "${LATEST#v}"
+          case "${{ inputs.version_type }}" in
+            major) MA=$((MA + 1)); MI=0; PA=0 ;;
+            minor) MI=$((MI + 1)); PA=0 ;;
+            patch) PA=$((PA + 1)) ;;
+          esac
+          VER="${MA}.${MI}.${PA}"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          echo "New version: v$VER"
+
+      - name: Bump version files
+        run: |
+          set -euo pipefail
+          VER="${{ steps.ver.outputs.version }}"
+          tmp="$(mktemp)"
+          jq --arg v "$VER" '.version = $v' .claude-plugin/plugin.json > "$tmp" && mv "$tmp" .claude-plugin/plugin.json
+          jq --arg v "$VER" '.plugins[0].version = $v' .claude-plugin/marketplace.json > "$tmp" && mv "$tmp" .claude-plugin/marketplace.json
+          sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-green#version-${VER}-green#" README.md
+          echo "Bumped plugin.json, marketplace.json, README badge -> $VER"
+
+      - name: Generate CHANGELOG section (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --unreleased --tag ${{ steps.ver.outputs.tag }}
+        env:
+          OUTPUT: ${{ runner.temp }}/section.md
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepend section into CHANGELOG.md
+        run: |
+          set -euo pipefail
+          SECTION="${{ runner.temp }}/section.md"
+          test -s "$SECTION" || { echo "::error::git-cliff produced no section (no conventional commits since the last tag?)"; exit 1; }
+          # Insert the new section directly under the `## [Unreleased]` heading,
+          # leaving every historical section untouched (preserves curated prose
+          # and the changelog-pinning structure tests).
+          awk '
+            FNR == NR { sec = sec $0 "\n"; next }
+            { print }
+            /^## \[Unreleased\]/ && !done { printf "%s", sec; done = 1 }
+          ' "$SECTION" CHANGELOG.md > "${{ runner.temp }}/CHANGELOG.new"
+          mv "${{ runner.temp }}/CHANGELOG.new" CHANGELOG.md
+          echo "----- generated section -----"
+          cat "$SECTION"
+
+      - name: Dry-run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## Dry run — v${{ steps.ver.outputs.version }}"
+            echo ""
+            echo '```markdown'
+            cat "${{ runner.temp }}/section.md"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open release PR
+        if: ${{ !inputs.dry_run }}
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          base: main
+          branch: release/${{ steps.ver.outputs.tag }}
+          delete-branch: true
+          commit-message: 'chore(release): bump version to ${{ steps.ver.outputs.version }}'
+          title: 'chore(release): bump version to ${{ steps.ver.outputs.version }}'
+          body-path: ${{ runner.temp }}/section.md
+          add-paths: |
+            .claude-plugin/plugin.json
+            .claude-plugin/marketplace.json
+            README.md
+            CHANGELOG.md
+
+  publish:
+    name: Publish draft release
+    if: >-
+      github.event_name == 'push' &&
+      startsWith(github.event.head_commit.message, 'chore(release): bump version to')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version + idempotency guard
+        id: v
+        run: |
+          set -euo pipefail
+          VER="$(jq -r '.version' .claude-plugin/plugin.json)"
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VER" >/dev/null 2>&1; then
+            echo "Tag v$VER already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Extract release notes from CHANGELOG
+        if: steps.v.outputs.skip == 'false'
+        run: |
+          set -euo pipefail
+          VER="${{ steps.v.outputs.version }}"
+          awk -v ver="$VER" '
+            $0 ~ "^## \\[" ver "\\]" { f = 1; next }
+            f && /^## \[/ { f = 0 }
+            f { print }
+          ' CHANGELOG.md > "${{ runner.temp }}/notes.md"
+          if [ ! -s "${{ runner.temp }}/notes.md" ]; then
+            echo "Release v$VER" > "${{ runner.temp }}/notes.md"
+          fi
+
+      - name: Package plugin source
+        if: steps.v.outputs.skip == 'false'
+        run: git archive --format=zip -o "zensu-claude-code-v${{ steps.v.outputs.version }}.zip" HEAD
+
+      - name: Create draft release
+        if: steps.v.outputs.skip == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.v.outputs.tag }}
+          name: ${{ steps.v.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          draft: true
+          prerelease: false
+          body_path: ${{ runner.temp }}/notes.md
+          files: zensu-claude-code-v${{ steps.v.outputs.version }}.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
