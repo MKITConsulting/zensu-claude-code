@@ -13,9 +13,11 @@ name: Release
 #      generates the CHANGELOG section from the commits since the last tag
 #      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
-#   4. The `publish` job fires on the release commit landing on main, creates a
-#      DRAFT GitHub Release whose notes are the new CHANGELOG section, and (only
-#      on publish) tags main HEAD. Review the draft, then click Publish.
+#   4. The `publish` job fires on the release commit landing on main, tags main
+#      HEAD and creates a PUBLISHED GitHub Release whose notes are the new
+#      CHANGELOG section (already reviewed in the bump PR body). Plugin go-live
+#      is the merge itself (users install from main HEAD); the Release + tag are
+#      the record, published atomically with the merge.
 
 on:
   workflow_dispatch:
@@ -152,12 +154,12 @@ jobs:
             echo ""
             echo "${PR_URL}"
             echo ""
-            echo "Review + **squash-merge** it → the \`publish\` job creates the draft release."
+            echo "Review + **squash-merge** it → the \`publish\` job tags main and publishes the release."
           } >> "$GITHUB_STEP_SUMMARY"
           echo "Open the PR: ${PR_URL}"
 
   publish:
-    name: Publish draft release
+    name: Publish release
     if: >-
       github.event_name == 'push' &&
       startsWith(github.event.head_commit.message, 'chore(release): bump version to')
@@ -199,14 +201,14 @@ jobs:
         if: steps.v.outputs.skip == 'false'
         run: git archive --format=zip -o "zensu-claude-code-v${{ steps.v.outputs.version }}.zip" HEAD
 
-      - name: Create draft release
+      - name: Create release
         if: steps.v.outputs.skip == 'false'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.v.outputs.tag }}
           name: ${{ steps.v.outputs.tag }}
           target_commitish: ${{ github.sha }}
-          draft: true
+          draft: false
           prerelease: false
           body_path: ${{ runner.temp }}/notes.md
           files: zensu-claude-code-v${{ steps.v.outputs.version }}.zip
