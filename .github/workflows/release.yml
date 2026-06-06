@@ -84,11 +84,15 @@ jobs:
         run: |
           set -euo pipefail
           VER="${{ steps.ver.outputs.version }}"
-          tmp="$(mktemp)"
-          jq --arg v "$VER" '.version = $v' .claude-plugin/plugin.json > "$tmp" && mv "$tmp" .claude-plugin/plugin.json
-          jq --arg v "$VER" '.plugins[0].version = $v' .claude-plugin/marketplace.json > "$tmp" && mv "$tmp" .claude-plugin/marketplace.json
+          # Edit only the version line (format-preserving). jq would rewrite the
+          # whole file in canonical style and reformat e.g. inline arrays.
+          sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/plugin.json
+          sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/marketplace.json
           sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-green#version-${VER}-green#" README.md
           echo "Bumped plugin.json, marketplace.json, README badge -> $VER"
+          # Sanity: files stay valid JSON and carry the new version.
+          test "$(jq -r .version .claude-plugin/plugin.json)" = "$VER"
+          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
 
       - name: Generate CHANGELOG section (git-cliff)
         uses: orhun/git-cliff-action@v4
