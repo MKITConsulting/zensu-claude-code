@@ -180,15 +180,15 @@ PROJECT_TMP_H10="$(mktemp -d -t "witness-proj-XXXXXX")"
 SESSION_H10="sess-h10-$$"
 activate "$PROJECT_TMP_H10" "$SESSION_H10"
 P_H10=$(make_payload "npm test" 0 "PASS root/test.js" "$SESSION_H10")
-echo "$P_H10" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H10" TDD_STATE_DIR="$PROJECT_TMP_H10/.zensu/state" /bin/sh "$HOOK" >/dev/null 2>&1
+echo "$P_H10" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H10" TDD_STATE_DIR="$PROJECT_TMP_H10/.zensu/state" bash --posix "$HOOK" >/dev/null 2>&1
 WITNESS_H10="$PROJECT_TMP_H10/.zensu/logs/witness-${SESSION_H10}.log"
 H10_LINE="$(head -n1 "$WITNESS_H10" 2>/dev/null)"
 if printf '%s' "$H10_LINE" | grep -qE 'cmd="npm test" exit=0' \
    && printf '%s' "$H10_LINE" | grep -qF 'tail="PASS root/test.js"' \
    && ! printf '%s' "$H10_LINE" | grep -qF "$SESSION_H10"; then
-  check "P12-H10 hook under /bin/sh (bash 3.2) -> correct exit=0, tail= present, no session-id leak" PASS
+  check "P12-H10 hook under bash --posix -> correct exit=0, tail= present, no session-id leak" PASS
 else
-  check "P12-H10 /bin/sh field-split (line='${H10_LINE}')" FAIL
+  check "P12-H10 bash --posix field-split (line='${H10_LINE}')" FAIL
 fi
 rm -rf "$PROJECT_TMP_H10"
 
@@ -253,11 +253,11 @@ rm -rf "$PROJECT_TMP_H13"
 PROJECT_TMP_H13B="$(mktemp -d -t "witness-proj-XXXXXX")"
 SESSION_H13B="sess-h13b-$$"
 activate "$PROJECT_TMP_H13B" "$SESSION_H13B"
-# Multiline stdout fed to the hook running under /bin/sh (Apple bash 3.2 posix). Proves the
-# newline-delimited 5-field read keeps the whole record on ONE physical line under bash 3.2 —
-# the desync the old IFS=$'\x01' parser caused. printf '%s\n' feed avoids /bin/sh echo mangling.
+# Multiline stdout fed to the hook running under bash --posix (posix mode). Proves the
+# newline-delimited 5-field read keeps the whole record on ONE physical line in posix mode —
+# the desync the old IFS=$'\x01' parser caused. printf '%s\n' feed avoids echo mangling.
 H13B_PAYLOAD=$(make_payload "ml-cmd" 0 "$BIG_STDOUT" "$SESSION_H13B")
-printf '%s\n' "$H13B_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H13B" TDD_STATE_DIR="$PROJECT_TMP_H13B/.zensu/state" /bin/sh "$HOOK" >/dev/null 2>&1
+printf '%s\n' "$H13B_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H13B" TDD_STATE_DIR="$PROJECT_TMP_H13B/.zensu/state" bash --posix "$HOOK" >/dev/null 2>&1
 WITNESS_H13B="$PROJECT_TMP_H13B/.zensu/logs/witness-${SESSION_H13B}.log"
 H13B_PHYS_LINES=$(wc -l <"$WITNESS_H13B" 2>/dev/null | tr -d ' ')
 H13B_LINE="$(head -n1 "$WITNESS_H13B" 2>/dev/null)"
@@ -265,9 +265,9 @@ if [ "$H13B_PHYS_LINES" = "1" ] \
    && printf '%s' "$H13B_LINE" | grep -qF 'cmd="ml-cmd"' \
    && printf '%s' "$H13B_LINE" | grep -qF 'END-MARKER-ZZZ' \
    && printf '%s' "$H13B_LINE" | grep -qF 'interrupted=false'; then
-  check "P12-H13b multiline stdout, hook under /bin/sh (bash 3.2) -> tail= on ONE physical line, no desync" PASS
+  check "P12-H13b multiline stdout, hook under bash --posix -> tail= on ONE physical line, no desync" PASS
 else
-  check "P12-H13b /bin/sh multiline tail (phys_lines=$H13B_PHYS_LINES line='${H13B_LINE}')" FAIL
+  check "P12-H13b bash --posix multiline tail (phys_lines=$H13B_PHYS_LINES line='${H13B_LINE}')" FAIL
 fi
 rm -rf "$PROJECT_TMP_H13B"
 

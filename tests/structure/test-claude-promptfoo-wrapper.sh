@@ -87,7 +87,10 @@ cat >"$STUB_DIR_NO_JQ/claude" <<'STUB'
 exit 0
 STUB
 chmod +x "$STUB_DIR_NO_JQ/claude"
-OUT7=$(env -i PATH="$STUB_DIR_NO_JQ:/bin" bash "$WRAPPER" 'p' '{}' 2>&1)
+# PATH is the stub dir ONLY (no /bin) so jq is genuinely absent. On usr-merged
+# Linux /bin==/usr/bin would otherwise smuggle jq back in; bash is invoked by its
+# absolute path so it need not be on PATH.
+OUT7=$(env -i PATH="$STUB_DIR_NO_JQ" "$(command -v bash)" "$WRAPPER" 'p' '{}' 2>&1)
 RC7=$?
 if [ "$RC7" = "127" ] && printf '%s\n' "$OUT7" | grep -q -- 'jq not found'; then
   check "P7-S7 wrapper with jq missing from PATH: exit 127 + jq-not-found diagnostic" PASS
@@ -111,7 +114,7 @@ STUB
 chmod +x "$STUB_CLAUDE_DIR/claude"
 OUT9_STDOUT="$(mktemp)"
 OUT9_STDERR="$(mktemp)"
-env -i DRY_RUN=1 PATH="$STUB_CLAUDE_DIR:/bin" bash "$WRAPPER" 'p' '{}' >"$OUT9_STDOUT" 2>"$OUT9_STDERR"
+env -i DRY_RUN=1 PATH="$STUB_CLAUDE_DIR" "$(command -v bash)" "$WRAPPER" 'p' '{}' >"$OUT9_STDOUT" 2>"$OUT9_STDERR"
 RC9=$?
 OUT9_STDOUT_CONTENT="$(cat "$OUT9_STDOUT")"
 OUT9_STDERR_CONTENT="$(cat "$OUT9_STDERR")"

@@ -55,7 +55,7 @@ tdd_is_test_path() {
 
   if [ -f "$path" ]; then
     local link_count
-    link_count=$(stat -f %l "$path" 2>/dev/null || stat -c %h "$path" 2>/dev/null || echo "1")
+    link_count=$(stat -c %h "$path" 2>/dev/null || stat -f %l "$path" 2>/dev/null || echo "1")
     if [ "${link_count:-1}" -gt 1 ] 2>/dev/null; then
       echo "false"; return 0
     fi
@@ -145,7 +145,7 @@ _tdd_locked_run() {
   while ! mkdir "$lock_dir" 2>/dev/null; do
     local dead=0
     local mtime
-    mtime=$(stat -f %m "$lock_dir" 2>/dev/null || stat -c %Y "$lock_dir" 2>/dev/null || echo "")
+    mtime=$(stat -c %Y "$lock_dir" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo "")
     if [ -n "$mtime" ]; then
       local now
       now=$(date +%s 2>/dev/null || echo "")
