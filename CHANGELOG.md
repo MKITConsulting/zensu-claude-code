@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.2] - 2026-06-07
+
+### Added
+
+- **hooks**: Add UserPromptSubmit intent-router for product-planning prompts (#92)
+- **chain-summary**: List every review round in Auto-fix History (#91)
+
+### Changed
+
+- **release**: Publish the release on merge instead of as a draft (#89)
+
+### Fixed
+
+- **ghost-scan**: Classify by data sensitivity, never default to internal (#90)
+
 ## [0.8.1] - 2026-06-06
 
 ### Changed
