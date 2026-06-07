@@ -25,7 +25,7 @@ deterministic output rather than on non-deterministic model prose.
    a dev machine, **skipped** in a barren CI): **tiny window** (`context.windowSize:1000`)
    → `/compact` proposal; **huge window** (`100000000`) → silent.
 
-The occupancy *math* (200k/1M auto-tier, threshold bands, zero-usage skip) is pinned
+The occupancy *math* (silent at/below 200k unless windowSize is set; occupancy past 200k is proven 1M; threshold bands, zero-usage skip) is pinned
 hermetically by [`tests/structure/test-context-nudge-hook.sh`](../structure/test-context-nudge-hook.sh);
 this suite proves the read works against **real** Claude Code transcript structure —
 which is exactly how it caught that real transcripts end with a trailing all-zero

@@ -9,8 +9,8 @@
 #
 # All settings live under the top-level `context` node of .zensu/config.json:
 # context.compactionNudge (enable, default on), context.nudgeThreshold (default
-# 50, range 1..99), context.windowSize (optional; when unset the denominator
-# auto-tiers to 200k or 1M from observed usage). Disable per-project or globally
+# 50, range 1..99), context.windowSize (optional; when unset the nudge stays silent
+# at or below 200k and treats occupancy past 200k as a 1M window). Disable per-project or globally
 # by setting context.compactionNudge:false, resolved through the usual
 # env -> project-local -> global config order.
 #
@@ -89,14 +89,21 @@ TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$ST
     }
     if (occupied === null) process.exit(0);
 
-    // Hooks are not handed the real context-window size (only the statusline is),
-    // so when context.windowSize is unset we infer the tier from observed usage:
-    // Claude models run at ~200k or ~1M tokens, and occupied can never exceed the
-    // true window — anything past 200k must be a 1M-context session. Set
-    // context.windowSize explicitly for accurate early-session percentages.
-    const window = (Number.isInteger(cfgWindow) && cfgWindow > 0)
-      ? cfgWindow
-      : (occupied > 200000 ? 1000000 : 200000);
+    // Hooks never receive the real context-window size. The only unambiguous signal
+    // is occupancy: a 200k window cannot exceed 200k, so >200k proves a 1M session.
+    // With context.windowSize unset we stay silent at or below 200k (a 200k session
+    // is handled by Claude Code itself via auto-compaction; a 1M session there is nowhere
+    // near full) and treat anything past 200k as the 1M window.
+    const configured = Number.isInteger(cfgWindow) && cfgWindow > 0;
+    let window;
+    if (configured) {
+      window = cfgWindow;
+    } else if (occupied > 200000) {
+      window = 1000000;
+    } else {
+      try { fs.writeFileSync(stateFile, "-1"); } catch (_) {}
+      process.exit(0);
+    }
 
     const pct = Math.round((occupied / window) * 100);
     const band = Math.floor(pct / 10) * 10;
@@ -109,10 +116,12 @@ TRANSCRIPT="$TRANSCRIPT" WINDOW="$WINDOW" THRESHOLD="$THRESHOLD" STATE_FILE="$ST
 
     if (pct >= threshold && band > last) {
       try { fs.writeFileSync(stateFile, String(band)); } catch (_) {}
-      const msg = "zensu context-nudge: this conversation is at ~" + pct + "% of the context window "
-        + "(threshold " + threshold + "%). Proactively and briefly tell the user they can run /compact "
-        + "to compact the conversation and reclaim context, then continue with their request. "
-        + "Only the user can trigger /compact — do not attempt it via a tool. Mention this at most once.";
+      const occupiedK = Math.round(occupied / 1000);
+      const label = window === 1000000 ? "1M" : window === 200000 ? "200k" : String(window);
+      const msg = "zensu context-nudge: ~" + occupiedK + "k tokens in context, ~" + pct + "% of "
+        + (configured ? "the configured " : "the ") + label + " window (threshold " + threshold
+        + "%). Briefly tell the user they can run /compact to reclaim context. Only the user can "
+        + "trigger /compact — do not attempt it via a tool. Mention this at most once.";
       process.stdout.write(JSON.stringify({
         hookSpecificOutput: {
           hookEventName: "UserPromptSubmit",
