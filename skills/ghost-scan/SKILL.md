@@ -96,13 +96,27 @@ Building blocks:
 - Single file / unclear boundary: -0.2
 - Utils/helpers/infrastructure code: -0.3
 
-#### Security Classification Heuristic
+#### Security Classification
 
-Suggest a classification for each candidate (user verifies):
-- `restricted`: auth/, crypto/, keys/, secrets/, certs/
-- `confidential`: billing/, payment/, admin/
-- `internal`: default for all others
-- `public`: only when user explicitly confirms
+Classify each candidate by **what data the feature itself reads or writes** — not by its
+directory name or the product domain. Path is a weak hint; data sensitivity is the rule.
+**Never default to `internal` for un-triaged code.** Present each suggestion to the user for
+verification.
+
+- `restricted`: handles credentials, keys, secrets, auth config, health data, or
+  regulatory-controlled data (key management, auth/session, security tooling, compliance exports).
+- `confidential`: directly reads or writes PII, customer business data, financial records, or
+  personal data (user profiles, payments, roadmaps, journeys, product/feature data, org
+  membership). **This is the bulk of a typical product** — when a feature touches customer data
+  and you are unsure between `internal` and `confidential`, choose `confidential`.
+- `internal`: requires standard auth but handles **no** PII or secrets — pure infra/ops surfaces
+  (health checks, app shell, log viewers, aggregate-only dashboards). A feature that only displays
+  aggregated data is `internal` even if a sibling that writes the underlying records is `confidential`.
+- `public`: exposes no sensitive data and needs no auth (landing pages, public docs, blog,
+  status pages).
+
+If a candidate is genuinely un-triageable at scan time, leave `securityClassification` unset —
+`ghost_apply` fails safe to `confidential` (review-gated), never `internal`.
 
 ### Phase 2b: Multi-Perspective Deep Analysis (fan-out)
 
