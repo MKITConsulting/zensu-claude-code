@@ -54,10 +54,10 @@ else
   check "README references project-local '.zensu/config.json'" FAIL
 fi
 
-if grep -E -q "REPLACES[^,]*, does not [^M]*MERGE|REPLACES[^,]*, does not [^m]*merge" "$README"; then
-  check "README states resolution REPLACES, does not MERGE (or merge)" PASS
+if grep -E -q "deep-?MERGE" "$README" && grep -E -q "fall through|per[ -]key|field by field" "$README"; then
+  check "README states resolution deep-MERGES project over global (per-key fall-through)" PASS
 else
-  check "README states resolution REPLACES, does not MERGE (or merge)" FAIL
+  check "README states resolution deep-MERGES project over global (per-key fall-through)" FAIL
 fi
 
 if contains "autoFix:true"; then
