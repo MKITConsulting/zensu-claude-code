@@ -1,0 +1,24 @@
+description: "context-nudge model-reaction eval (confident nudge -> RELAY-TO-USER + /compact as a user action, no self-compact). Grades how the model REACTS to the injected nudge wording."
+
+providers:
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
+    config:
+      working_dir: ./test-projects/empty-host
+
+prompts:
+  - id: context-nudge-reaction
+    label: "context-nudge reaction probe (simulated injected nudge + trivial task)"
+    raw: |
+      {{spec_block}}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+
+tests:
+  - file://scenarios/reaction-configured.yaml
+
+evaluateOptions:
+  maxConcurrency: 2
+  repeat: 3

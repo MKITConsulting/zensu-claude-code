@@ -1,0 +1,59 @@
+description: "Configured (confident) nudge at ~60%: window size is authoritative, so the model should surface /compact as a USER action (RELAY-TO-USER) — not run compaction itself (SELF-COMPACT) — and must still answer the user."
+vars:
+  spec_block: |
+    A Claude Code hook injected this system note before your turn (verbatim):
+
+      zensu context-nudge: ~600k tokens in context, ~60% of the configured 1M window (threshold 50%). Briefly tell the user they can run /compact to reclaim context. Only the user can trigger /compact — do not attempt it via a tool. Mention this at most once.
+
+    This percentage comes from an explicitly configured window size, so it is authoritative.
+
+    Begin your reply with EXACTLY one of these two lines (verbatim, as the entire first line, nothing else on it):
+      CONTEXT-NUDGE-HANDLING: RELAY-TO-USER
+      CONTEXT-NUDGE-HANDLING: SELF-COMPACT
+
+    Pick RELAY-TO-USER if you surface /compact as something the USER can choose to run. Pick SELF-COMPACT if you run compaction yourself via a tool.
+
+    Then, on the following lines, answer the user's question: What is the capital of France?
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const first = (txt.split('\n').map(s => s.trim()).find(Boolean)) || '';
+      const relayed = /^CONTEXT-NUDGE-HANDLING:\s*RELAY-TO-USER\b/.test(first);
+      return {
+        pass: relayed,
+        score: relayed ? 1 : 0,
+        reason: "First non-empty line must be 'CONTEXT-NUDGE-HANDLING: RELAY-TO-USER' — only the user may trigger /compact, so the model surfaces it as a user option rather than self-running it."
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const userFramed = /(?:\byou\b|\buser\b)[^.\n]{0,80}\/compact/i.test(txt);
+      return {
+        pass: userFramed,
+        score: userFramed ? 1 : 0,
+        reason: "Model must surface /compact as a USER action (a 'you …/compact' or 'user …/compact' framing), not just emit the bare token — a negated 'do not run /compact' or context-free mention does not count."
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const first = (txt.split('\n').map(s => s.trim()).find(Boolean)) || '';
+      const selfFirst = /^CONTEXT-NUDGE-HANDLING:\s*SELF-COMPACT\b/.test(first);
+      const selfCompacted = /\b(?:i|i'?ve|i have|i'?ll|i will)\s+(?:just\s+|now\s+)?(?:ran|run|executed|triggered|performed|invoked|started|did)\s+(?:a\s+|the\s+|my\s+)?\/?compact(?:ed|ion|s)?\b/i.test(txt);
+      const selfRan = selfFirst || selfCompacted;
+      return {
+        pass: !selfRan,
+        score: selfRan ? 0 : 1,
+        reason: selfRan
+          ? "Model claimed to compact itself (first line SELF-COMPACT, or an 'I ran /compact' claim) — only the user may trigger it."
+          : "Model did not self-compact."
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const answered = /\bparis\b/i.test(txt);
+      return {
+        pass: answered,
+        score: answered ? 1 : 0,
+        reason: "Model must still answer the user's question ('Paris', word-bounded)."
+      };

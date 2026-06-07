@@ -52,7 +52,7 @@ else
 fi
 
 # ── Behavioral helpers ───────────────────────────────────────────────
-# Transcript with an assistant usage block of <input_tokens> (window default 200000).
+# Transcript with an assistant usage block of <input_tokens> tokens.
 make_transcript() {
   node -e '
     const fs=require("fs");
@@ -84,14 +84,10 @@ classify() {
   '
 }
 
-# C6 default-enabled, 60% -> nudge
+# C6 120k no-config -> SILENT (<=200k, tier unprovable; no false 60% nudge)
 P6="$(mktemp -d -t ctxnudge-XXXXXX)"; T6="$P6/t.jsonl"; make_transcript "$T6" 120000
 OUT6="$(payload "$T6" "s6-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P6" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-if [ "$OUT6" = "UserPromptSubmit|compact|60" ]; then
-  check "C6 60% occupancy -> UserPromptSubmit /compact nudge at ~60%" PASS
-else
-  check "C6 60% nudge (got '$OUT6')" FAIL
-fi
+[ "$OUT6" = "EMPTY" ] && check "C6 120k no-config -> SILENT (<=200k, tier unprovable)" PASS || check "C6 120k silent (got '$OUT6')" FAIL
 rm -rf "$P6"
 
 # C7 default-enabled, 10% -> silent
@@ -114,8 +110,8 @@ OUT9="$(payload "$T9" "s9-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJ
 [ "$OUT9" = "EMPTY" ] && check "C9 context.nudgeThreshold:90 -> 60% below custom threshold, silent" PASS || check "C9 custom threshold (got '$OUT9')" FAIL
 rm -rf "$P9"
 
-# C10 band de-bounce: same session+project, second 60% prompt -> silent
-P10="$(mktemp -d -t ctxnudge-XXXXXX)"; T10="$P10/t.jsonl"; make_transcript "$T10" 120000
+# C10 band de-bounce on the firing path: 600k (1M 60%) twice, 2nd silent
+P10="$(mktemp -d -t ctxnudge-XXXXXX)"; T10="$P10/t.jsonl"; make_transcript "$T10" 600000
 S10="s10-$$"
 OUT10A="$(payload "$T10" "$S10" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P10" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
 OUT10B="$(payload "$T10" "$S10" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P10" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
@@ -126,13 +122,13 @@ else
 fi
 rm -rf "$P10"
 
-# C11 re-arm after shrink: 60% -> drop to 10% (silent, resets) -> 60% again nudges
+# C11 re-arm: 600k (1M 60% fires) -> 180k (<=200k silent, re-arms) -> 600k (fires again)
 P11="$(mktemp -d -t ctxnudge-XXXXXX)"; T11="$P11/t.jsonl"; S11="s11-$$"
-make_transcript "$T11" 120000
+make_transcript "$T11" 600000
 OUT11A="$(payload "$T11" "$S11" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P11" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-make_transcript "$T11" 20000
+make_transcript "$T11" 180000
 OUT11B="$(payload "$T11" "$S11" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P11" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-make_transcript "$T11" 120000
+make_transcript "$T11" 600000
 OUT11C="$(payload "$T11" "$S11" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P11" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
 if [ "$OUT11A" = "UserPromptSubmit|compact|60" ] && [ "$OUT11B" = "EMPTY" ] && [ "$OUT11C" = "UserPromptSubmit|compact|60" ]; then
   check "C11 re-arm after compaction shrink: nudge -> shrink(silent) -> nudge again" PASS
@@ -206,11 +202,11 @@ make_transcript_trailing_zero() {
   ' "$1" "$2"
 }
 
-# C17 trailing zero-usage record -> hook skips it, uses the real 120k line -> 60% nudge
-P17="$(mktemp -d -t ctxnudge-XXXXXX)"; T17="$P17/t.jsonl"; make_transcript_trailing_zero "$T17" 120000
+# C17 trailing zero-usage record -> hook skips it, uses the real 600k line -> 1M 60% nudge
+P17="$(mktemp -d -t ctxnudge-XXXXXX)"; T17="$P17/t.jsonl"; make_transcript_trailing_zero "$T17" 600000
 OUT17="$(payload "$T17" "s17-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P17" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
 if [ "$OUT17" = "UserPromptSubmit|compact|60" ]; then
-  check "C17 trailing all-zero usage record skipped -> uses real 120k line -> 60% nudge" PASS
+  check "C17 trailing all-zero usage record skipped -> uses real 600k line -> 1M 60% nudge" PASS
 else
   check "C17 zero-usage skip (got '$OUT17')" FAIL
 fi
@@ -224,6 +220,78 @@ node -e 'const fs=require("fs");
 OUT18="$(payload "$T18" "s18-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P18" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT18" = "EMPTY" ] && check "C18 only zero-usage records -> silent (no real occupancy)" PASS || check "C18 all-zero silent (got '$OUT18')" FAIL
 rm -rf "$P18"
+
+P19="$(mktemp -d -t ctxnudge-XXXXXX)"; T19="$P19/t.jsonl"; make_transcript "$T19" 200000
+OUT19="$(payload "$T19" "s19-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P19" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT19" = "EMPTY" ] && check "C19 exact 200000 no-config -> SILENT (gate is strict >200000)" PASS || check "C19 exact-200000 (got '$OUT19')" FAIL
+rm -rf "$P19"
+
+P20="$(mktemp -d -t ctxnudge-XXXXXX)"; T20="$P20/t.jsonl"; make_transcript "$T20" 600000
+RAW20="$(payload "$T20" "s20-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P20" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$RAW20" | grep -qF '600k' && printf '%s' "$RAW20" | grep -qF '~60%' && printf '%s' "$RAW20" | grep -qF '1M' && printf '%s' "$RAW20" | grep -qF '/compact' && ! printf '%s' "$RAW20" | grep -qF 'Verify against Claude Code' && ! printf '%s' "$RAW20" | grep -qF 'may be wrong'; then
+  check "C20 unset>200k message: confident token count + ~60% + 1M + /compact, NO hedge" PASS
+else
+  check "C20 confident message (got '$RAW20')" FAIL
+fi
+rm -rf "$P20"
+
+P21="$(mktemp -d -t ctxnudge-XXXXXX)"; T21="$P21/t.jsonl"; make_transcript "$T21" 120000
+CFG21="$P21/config.json"; printf '%s' '{"context":{"windowSize":200000}}' > "$CFG21"
+RAW21="$(payload "$T21" "s21-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P21" ZENSU_CONFIG="$CFG21" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$RAW21" | grep -qF '120k' && printf '%s' "$RAW21" | grep -qF '~60%' && printf '%s' "$RAW21" | grep -qF 'configured' && ! printf '%s' "$RAW21" | grep -qF 'Verify against Claude Code'; then
+  check "C21 configured-window message: token count + ~60% + 'configured', no auto-detect hedge" PASS
+else
+  check "C21 confident message (got '$RAW21')" FAIL
+fi
+rm -rf "$P21"
+
+P22="$(mktemp -d -t ctxnudge-XXXXXX)"; T22="$P22/t.jsonl"; make_transcript "$T22" 600000
+RAW22="$(payload "$T22" "s22-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P22" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$RAW22" | grep -qF 'the 1M window' && ! printf '%s' "$RAW22" | grep -qF 'configured'; then
+  check "C22 unset>200k message says confident 'the 1M window', not 'configured'" PASS
+else
+  check "C22 unset-1M wording (got '$RAW22')" FAIL
+fi
+rm -rf "$P22"
+
+P23="$(mktemp -d -t ctxnudge-XXXXXX)"; T23="$P23/t.jsonl"; make_transcript "$T23" 600000
+CFG23="$P23/config.json"; printf '%s' '{"context":{"windowSize":1000000}}' > "$CFG23"
+RAW23="$(payload "$T23" "s23-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P23" ZENSU_CONFIG="$CFG23" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$RAW23" | grep -qF '600k' && printf '%s' "$RAW23" | grep -qF 'configured 1M window' && ! printf '%s' "$RAW23" | grep -qF 'Verify against Claude Code'; then
+  check "C23 configured 1M window: 'configured 1M window' label, no auto-detect hedge" PASS
+else
+  check "C23 configured 1M (got '$RAW23')" FAIL
+fi
+rm -rf "$P23"
+
+P24="$(mktemp -d -t ctxnudge-XXXXXX)"; T24="$P24/t.jsonl"; S24="s24-$$"
+CFG24="$P24/config.json"; printf '%s' '{"context":{"nudgeThreshold":10}}' > "$CFG24"
+make_transcript "$T24" 150000
+OUT24A="$(payload "$T24" "$S24" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P24" ZENSU_CONFIG="$CFG24" bash "$HOOK" 2>/dev/null | classify)"
+make_transcript "$T24" 250000
+OUT24B="$(payload "$T24" "$S24" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P24" ZENSU_CONFIG="$CFG24" bash "$HOOK" 2>/dev/null | classify)"
+if [ "$OUT24A" = "EMPTY" ] && [ "$OUT24B" = "UserPromptSubmit|compact|25" ]; then
+  check "C24 >200k gate is threshold-independent: thr10 150k->silent, 250k->1M 25% nudge" PASS
+else
+  check "C24 gate (a='$OUT24A' b='$OUT24B')" FAIL
+fi
+rm -rf "$P24"
+
+P25="$(mktemp -d -t ctxnudge-XXXXXX)"; T25="$P25/t.jsonl"; make_transcript "$T25" 80000
+CFG25="$P25/config.json"; printf '%s' '{"context":{"windowSize":100000}}' > "$CFG25"
+OUT25="$(payload "$T25" "s25-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P25" ZENSU_CONFIG="$CFG25" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT25" = "UserPromptSubmit|compact|80" ] && check "C25 configured windowSize<200k fires sub-200k occupancy (100k window @80k -> 80%)" PASS || check "C25 configured sub-200k (got '$OUT25')" FAIL
+rm -rf "$P25"
+
+P26="$(mktemp -d -t ctxnudge-XXXXXX)"; T26="$P26/t.jsonl"; make_transcript "$T26" 600000
+OUT26A="$(payload "$T26" "s26a-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P26" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+OUT26B="$(payload "$T26" "s26b-$$" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P26" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
+if [ "$OUT26A" = "UserPromptSubmit|compact|60" ] && [ "$OUT26B" = "UserPromptSubmit|compact|60" ]; then
+  check "C26 per-session state isolation: two session ids in one project dir both fire" PASS
+else
+  check "C26 cross-session (a='$OUT26A' b='$OUT26B')" FAIL
+fi
+rm -rf "$P26"
 
 echo "----"
 echo "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"

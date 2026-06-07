@@ -138,7 +138,7 @@ zensu_context_nudge_threshold() {
 
 zensu_context_window_size() {
   # Echoes the configured context.windowSize, or empty when unset/invalid so the
-  # caller can auto-detect the tier (200k vs 1M) from observed usage. Hooks are
+  # caller stays silent at/below 200k and treats occupancy past 200k as a 1M window. Hooks are
   # not handed the real window size, so there is no safe numeric default here.
   local config
   config="$(_zensu_resolve_config)"
