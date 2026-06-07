@@ -128,6 +128,8 @@ run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-reset-on-fresh-tdd.sh" "test-autofix-rounds-reset-on-fresh-tdd.sh"
+run_test "$EVAL_DIR/test-rounds-default-location.sh"          "test-rounds-default-location.sh"
+run_test "$EVAL_DIR/test-post-review-combined-summary.sh"     "test-post-review-combined-summary.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Pre-Edit TDD-Gate offline tests" | tee -a "$REPORT"

@@ -28,8 +28,12 @@ export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 export ZENSU_CONFIG="$TMP_CFG"
 
+# selfReview:false routes the CHAIN-END SUMMARY inline through this hook
+# (TAIL_DIRECTIVE). With selfReview enabled (the 0.5.0 default) the summary is
+# instead rendered by the terminal /zensu:self-review stage, so the hook emits
+# only the handoff directive — these cases assert the hook's own inline summary.
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true}}
+{"hooks": {"autoFix": true, "selfReview": false}}
 EOF
 
 STDIN_A='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-a-001"}'
@@ -63,8 +67,15 @@ case "$OUT" in
     check "case A/B legacy + flag on: output contains '## Auto-fix History' heading" FAIL ;;
 esac
 
+case "$OUT" in
+  *"including rounds that fixed nothing"*)
+    check "case A/B legacy + flag on: Auto-fix History lists no-fix/verification rounds" PASS ;;
+  *)
+    check "case A/B legacy + flag on: Auto-fix History lists no-fix/verification rounds" FAIL ;;
+esac
+
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true, "combinedSummary": false}}
+{"hooks": {"autoFix": true, "combinedSummary": false, "selfReview": false}}
 EOF
 
 STDIN_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-off-001"}'
@@ -85,17 +96,17 @@ case "$OUT" in
 esac
 
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true}}
+{"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true, "selfReview": false}}
 EOF
 
 STDIN_SUGG_ON='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-001"}'
 OUT="$(printf '%s' "$STDIN_SUGG_ON" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
-  *"ALL findings regardless of severity"*)
-    check "case B suggestions-on + flag on: existing 'ALL findings' directive preserved" PASS ;;
+  *"Include EVERY finding the reviewer raised"*)
+    check "case B suggestions-on + flag on: existing all-findings directive preserved" PASS ;;
   *)
-    check "case B suggestions-on + flag on: existing 'ALL findings' directive preserved" FAIL ;;
+    check "case B suggestions-on + flag on: existing all-findings directive preserved" FAIL ;;
 esac
 
 case "$OUT" in
@@ -106,7 +117,7 @@ case "$OUT" in
 esac
 
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true, "combinedSummary": false}}
+{"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true, "combinedSummary": false, "selfReview": false}}
 EOF
 
 STDIN_SUGG_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-off-001"}'
@@ -120,14 +131,14 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"ALL findings regardless of severity"*)
-    check "case B suggestions-on + flag off: 'ALL findings' directive preserved" PASS ;;
+  *"Include EVERY finding the reviewer raised"*)
+    check "case B suggestions-on + flag off: all-findings directive preserved" PASS ;;
   *)
-    check "case B suggestions-on + flag off: 'ALL findings' directive preserved" FAIL ;;
+    check "case B suggestions-on + flag off: all-findings directive preserved" FAIL ;;
 esac
 
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true, "autoFixMaxRounds": 5}}
+{"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "selfReview": false}}
 EOF
 SID_MR_ON="sess-summary-mr-on-001"
 printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_ON}.json"
@@ -148,8 +159,15 @@ case "$OUT" in
     check "max-rounds + flag on: output contains 'CHAIN-END SUMMARY'" FAIL ;;
 esac
 
+case "$OUT" in
+  *"including rounds that fixed nothing"*)
+    check "max-rounds + flag on: Auto-fix History lists no-fix/verification rounds" PASS ;;
+  *)
+    check "max-rounds + flag on: Auto-fix History lists no-fix/verification rounds" FAIL ;;
+esac
+
 cat > "$TMP_CFG" <<'EOF'
-{"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "combinedSummary": false}}
+{"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "combinedSummary": false, "selfReview": false}}
 EOF
 SID_MR_OFF="sess-summary-mr-off-001"
 printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_OFF}.json"

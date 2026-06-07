@@ -104,7 +104,12 @@ Feature title, files modified, tests created, build status, coverage status. Cit
 Final zensu:code-reviewer verdict: PASS / suggestions-only / max-rounds reached. Findings by severity.
 
 ## Auto-fix History
-For each code-review round 1..N: what was fixed in-thread. Skip this section if zero rounds.
+List EVERY code-review round 1..N — including rounds that fixed nothing. For each
+round give the round number and either what was fixed in-thread, OR — for a
+verification round with no findings — mark it explicitly as `PASS — 0 findings,
+nothing to fix`. Always include the final clean verification round so the reader
+sees the chain converged with every finding addressed. Only skip this section if
+no review round ran at all.
 
 ## Self-Review Summary
 The self-reflection verdict, the seven-dimension findings, what the single self-review fix round
