@@ -111,11 +111,9 @@ run_test "$EVAL_DIR/test-no-pluginroot-env.sh"   "test-no-pluginroot-env.sh"
 run_test "$EVAL_DIR/test-pluginroot-default-setu.sh" "test-pluginroot-default-setu.sh"
 
 echo "" | tee -a "$REPORT"
-echo "▸ Config resolution-order offline tests" | tee -a "$REPORT"
+echo "▸ Config deep-merge offline tests" | tee -a "$REPORT"
 
-run_test "$EVAL_DIR/test-resolution-order-env-override.sh"    "test-resolution-order-env-override.sh"
-run_test "$EVAL_DIR/test-resolution-order-project-local.sh"   "test-resolution-order-project-local.sh"
-run_test "$EVAL_DIR/test-resolution-order-global-fallback.sh" "test-resolution-order-global-fallback.sh"
+run_test "$EVAL_DIR/test-config-merge.sh" "test-config-merge.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Auto-fix flag offline tests (Suggestions routing + loop guard)" | tee -a "$REPORT"
