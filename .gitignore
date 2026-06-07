@@ -40,6 +40,8 @@ tests/e2e-tdd/fixtures/
 tests/e2e-tdd/results/
 tests/e2e-context-nudge/fixtures/
 tests/e2e-context-nudge/results/
+tests/e2e-intent-router/fixtures/
+tests/e2e-intent-router/results/
 tests/results/
 
 # Build output

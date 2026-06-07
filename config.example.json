@@ -8,7 +8,8 @@
     "combinedSummary": true,
     "selfReview": true,
     "pulseSession": true,
-    "sessionBanner": true
+    "sessionBanner": true,
+    "intentRouter": true
   },
   "context": {
     "compactionNudge": true,
