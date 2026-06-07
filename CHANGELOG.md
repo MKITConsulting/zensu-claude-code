@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-06-07
+
+### Fixed
+
+- **config**: Deep-merge project config over global instead of first-match shadowing (#95)
+- **context-nudge**: Nudge only on a provable context window (#94)
+
 ## [0.8.2] - 2026-06-07
 
 ### Added
