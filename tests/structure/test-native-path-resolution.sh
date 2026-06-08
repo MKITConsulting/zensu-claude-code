@@ -21,29 +21,14 @@ fi
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-PROJ="/agent/native/repo"
+PROJ="C:/ws/agent-native-repo"
 SAN="$(sanitize "$PROJ")"
 PDIR="$TMP/projects/$SAN"
 mkdir -p "$PDIR"
 UUID="a1a1a1a1-2b2b-3c3c-4d4d-5e5e5e5e5e5e"
 : > "$PDIR/$UUID.jsonl"
 
-NPROJ="$(native "$TMP/projects")"
-NHELP="$(native "$HELPER")"
-echo "  DIAG bash_pdir=$PDIR"
-echo "  DIAG native_projects=$NPROJ"
-ls -la "$PDIR" 2>&1 | sed 's/^/  DIAG ls /'
-ZENSU_PROJECTS_DIR="$NPROJ" CLAUDE_PROJECT_DIR="$PROJ" node -e '
-  const fs=require("fs"), path=require("path");
-  const base=process.env.ZENSU_PROJECTS_DIR;
-  const sub=String(process.env.CLAUDE_PROJECT_DIR).replace(/[^A-Za-z0-9_-]/g,"-");
-  const dir=path.join(base, sub);
-  process.stdout.write("  DIAG node_dir="+dir+"\n");
-  process.stdout.write("  DIAG node_exists="+fs.existsSync(dir)+"\n");
-  try { process.stdout.write("  DIAG node_readdir="+JSON.stringify(fs.readdirSync(dir))+"\n"); }
-  catch(e){ process.stdout.write("  DIAG node_readdir_ERR="+e.message+"\n"); }
-'
-OUT="$(ZENSU_PROJECTS_DIR="$NPROJ" CLAUDE_PROJECT_DIR="$PROJ" node "$NHELP")"
+OUT="$(MSYS_NO_PATHCONV=1 ZENSU_PROJECTS_DIR="$(native "$TMP/projects")" CLAUDE_PROJECT_DIR="$PROJ" node "$(native "$HELPER")")"
 if [ "$OUT" = "$UUID" ]; then
   check "N1 resolve-session-id.js returns UUID driven with native projects path (agent-faithful)" PASS
 else
