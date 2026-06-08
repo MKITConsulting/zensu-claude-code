@@ -90,19 +90,24 @@ else
 fi
 
 # --- Case 6: symlink guard — refuse to delete through a symlink -------------
-TARGET="$TMP_DIR/evil-target.json"
-printf '{"count":99,"ts":"2026-01-01T00:00:00Z"}\n' > "$TARGET"
-rm -f "$COUNTER_FILE"
-ln -s "$TARGET" "$COUNTER_FILE"
-err="$(bash "$SCRIPT" --tdd-begin --session "$SID" 2>&1 >/dev/null)"
-if [ -L "$COUNTER_FILE" ] && [ -f "$TARGET" ]; then
-  check "--tdd-begin refuses symlink — link and target both intact" PASS
-else
-  check "--tdd-begin refuses symlink — link and target both intact" FAIL
-fi
-case "$err" in
-  *symlink*) check "--tdd-begin emits symlink-refusal warning to stderr" PASS ;;
-  *)         check "--tdd-begin emits symlink-refusal warning to stderr (got: $err)" FAIL ;;
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  SKIP  --tdd-begin symlink refusal (2 checks) — Git Bash cannot create real symlinks" ;;
+  *)
+    TARGET="$TMP_DIR/evil-target.json"
+    printf '{"count":99,"ts":"2026-01-01T00:00:00Z"}\n' > "$TARGET"
+    rm -f "$COUNTER_FILE"
+    ln -s "$TARGET" "$COUNTER_FILE"
+    err="$(bash "$SCRIPT" --tdd-begin --session "$SID" 2>&1 >/dev/null)"
+    if [ -L "$COUNTER_FILE" ] && [ -f "$TARGET" ]; then
+      check "--tdd-begin refuses symlink — link and target both intact" PASS
+    else
+      check "--tdd-begin refuses symlink — link and target both intact" FAIL
+    fi
+    case "$err" in
+      *symlink*) check "--tdd-begin emits symlink-refusal warning to stderr" PASS ;;
+      *)         check "--tdd-begin emits symlink-refusal warning to stderr (got: $err)" FAIL ;;
+    esac ;;
 esac
 
 echo "----"
