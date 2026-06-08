@@ -51,22 +51,27 @@ REPO=<repo-root-absolute-path>
 # 3. Verify it's a git repo
 git -C "$REPO" rev-parse --is-inside-work-tree >/dev/null || { echo "not a git repo"; exit 1; }
 
-# 4. Fetch PR ref WITHOUT checking out — just creates the local ref
-git -C "$REPO" fetch origin pull/<n>/head:pr-<n>-review
+# 4. Per-run workspace with an UNPREDICTABLE name (mktemp -d) — never a fixed
+#    /tmp path. A predictable world-writable name invites a symlink / pre-creation
+#    race on shared hosts. Artifacts and the worktree both live under here.
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/pr<n>-review.XXXXXXXX")"
+WORKTREE="$WORKDIR/wt"
 
-# 5. Head SHA for reviews API
+# 5. Fetch PR head into a local ref; capture the head SHA (reviews API needs it)
+git -C "$REPO" fetch origin pull/<n>/head:pr-<n>-review
 SHA=$(git -C "$REPO" rev-parse pr-<n>-review)
 
-# 6. Create worktree in a dedicated path — MAIN CHECKOUT IS NOT TOUCHED
-mkdir -p /tmp/pr<n>-review
-WORKTREE=/tmp/pr<n>-review-wt
-git -C "$REPO" worktree list | grep -q "$WORKTREE" && git -C "$REPO" worktree remove --force "$WORKTREE"
-git -C "$REPO" worktree add --force "$WORKTREE" pr-<n>-review
+# 6. Worktree at the fetched SHA, DETACHED — MAIN CHECKOUT IS NOT TOUCHED, and a
+#    detached checkout never collides on the branch ref when the skill re-runs.
+git -C "$REPO" worktree add --force --detach "$WORKTREE" "$SHA"
 
-# 7. Persist env for downstream phases
-printf 'REPO=%s\nWORKTREE=%s\nSHA=%s\n' "$REPO" "$WORKTREE" "$SHA" > /tmp/pr<n>-review/.env
+# 7. Persist env for downstream phases (inside the per-run dir)
+printf 'REPO=%s\nWORKDIR=%s\nWORKTREE=%s\nSHA=%s\n' "$REPO" "$WORKDIR" "$WORKTREE" "$SHA" > "$WORKDIR/.env"
 
-# 8. Diff-stats from the worktree
+# 8. Tell the user where everything lives — the mktemp name is random by design
+echo "Review workspace (artifacts + worktree): $WORKDIR"
+
+# 9. Diff-stats from the worktree
 git -C "$WORKTREE" diff origin/<base>...HEAD --stat | tail -10
 ```
 
@@ -103,13 +108,13 @@ Spawn all reviewers in a **single message** with multiple `Agent` tool uses (par
 - `team_name: pr<n>-review`
 - `name: <role-id>`
 - `run_in_background: true`
-- Prompt: derived from `rules/reviewer-personas.md` template for that role + injected context block (PR metadata, head SHA, base, `--context` paths, `--conversation` text, **`WORKTREE=<absolute-path>` for all git/grep/file reads**)
+- Prompt: derived from `rules/reviewer-personas.md` template for that role + injected context block (PR metadata, head SHA, base, `--context` paths, `--conversation` text, **`WORKTREE=<absolute-path>` for all git/grep/file reads, plus the output path `<WORKDIR>/<role>.json`**)
 
 Every reviewer prompt MUST contain the explicit `WORKTREE` instruction:
 
-> **Working directory for all git/grep/find/file reads: `<WORKTREE>`** (separate worktree). Use `git -C <WORKTREE> ...` or `cd <WORKTREE>` at the start of your bash calls. **Never** `cd` into the main repo at `<REPO>` — the user is working there in parallel and any `git checkout` would clobber their branch. Output JSON goes to the absolute path `/tmp/pr<n>-review/<role>.json` (outside the worktree). Refinement-context paths from `--context=` stay absolute (not relative to the worktree).
+> **Working directory for all git/grep/find/file reads: `<WORKTREE>`** (separate worktree). Use `git -C <WORKTREE> ...` or `cd <WORKTREE>` at the start of your bash calls. **Never** `cd` into the main repo at `<REPO>` — the user is working there in parallel and any `git checkout` would clobber their branch. Output JSON goes to the absolute path `<WORKDIR>/<role>.json` (outside the worktree). Refinement-context paths from `--context=` stay absolute (not relative to the worktree).
 
-Each reviewer writes structured JSON to `/tmp/pr<n>-review/<role>.json`. Schema in `rules/reviewer-personas.md` (key fields: `inline_findings[]`, `overall_notes[]`, `verdict_hint`).
+Each reviewer writes structured JSON to `$WORKDIR/<role>.json`. Schema in `rules/reviewer-personas.md` (key fields: `inline_findings[]`, `overall_notes[]`, `verdict_hint`).
 
 Mark reviewer tasks `in_progress` with `owner=<role>`.
 
@@ -117,9 +122,9 @@ Mark reviewer tasks `in_progress` with `owner=<role>`.
 
 Background reviewers send idle notifications when done. Do not poll. When all idle:
 
-1. Read every `/tmp/pr<n>-review/<role>.json` (parallel `Read` calls).
+1. Read every `$WORKDIR/<role>.json` (parallel `Read` calls).
 2. Normalize: agents may write slightly different schemas — extract `findings`/`inline_findings` and `verdict`/`verdict_hint` defensively (handle missing keys + broken JSON; if `jq` errors on a file, read raw and parse manually).
-3. Write `/tmp/pr<n>-review/_debate.json` with:
+3. Write `$WORKDIR/_debate.json` with:
    - `consensus.naming_decision` (if naming was a topic)
    - `consensus.p1_required_changes[]` (deduplicated)
    - `consensus.p2_suggestions[]` (deduplicated, capped at ~20)
@@ -131,7 +136,7 @@ Lead-driven consolidation, not a DM roundtrip. See `rules/workflow.md` § Debate
 
 ### Phase D — Synthesis + GitHub Publish
 
-Write `/tmp/pr<n>-review/_synthesis.json` as the exact `gh api` payload:
+Write `$WORKDIR/_synthesis.json` as the exact `gh api` payload:
 
 ```json
 {
@@ -194,7 +199,7 @@ Submit:
 
 ```bash
 gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews \
-  --input /tmp/pr<n>-review/_synthesis.json
+  --input $WORKDIR/_synthesis.json
 ```
 
 Verify:
@@ -215,7 +220,7 @@ Remove worktree (main checkout untouched):
 git -C "$REPO" worktree remove --force "$WORKTREE"
 ```
 
-Keep `/tmp/pr<n>-review/` (JSON artifacts) as a debug record — do not delete.
+Keep `$WORKDIR/` (JSON artifacts) as a debug record — do not delete.
 
 Ask the user whether to drop the local PR ref:
 
@@ -231,11 +236,11 @@ Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" b
 
 ## Critical Conventions
 
-- **Never `git checkout` the PR ref in the main working tree.** Always use `git worktree add /tmp/pr<n>-review-wt pr-<n>-review`. Reviewer agents `cd` into the worktree, not the main repo. The main checkout's branch and uncommitted work must stay untouched.
+- **Never `git checkout` the PR ref in the main working tree.** Always use a detached worktree under an `mktemp -d` workspace (`git worktree add --force --detach "$WORKTREE" "$SHA"`). Reviewer agents `cd` into the worktree, not the main repo. The main checkout's branch and uncommitted work must stay untouched.
 - Always spawn reviewers in **one** parallel batch (single message, multiple `Agent` calls). Serial spawning wastes wall-clock time.
 - Always `run_in_background: true` for reviewers.
-- Reviewers write to `/tmp/pr<n>-review/<role>.json` (absolute path, outside the worktree). Lead reads + consolidates.
+- Reviewers write to `$WORKDIR/<role>.json` (absolute path, outside the worktree). Lead reads + consolidates.
 - Submit ONE review with bundled inline comments — never N single-comment reviews.
 - Default verdict `COMMENT`. Only escalate to `REQUEST_CHANGES`/`APPROVE` if user explicitly asked via `--verdict=`.
-- Idempotent: re-running on the same PR posts an additional review (no overwrite). Worktree from the prior run is removed (`--force`) and re-added.
+- Idempotent: re-running on the same PR posts an additional review (no overwrite). Each run gets a fresh `mktemp -d` workspace + detached worktree, so a re-run never collides with a prior run's worktree or the branch ref.
 - If `gh auth status` fails or the user lacks `repo` scope → stop and ask the user to fix auth before doing the review work.

@@ -133,6 +133,28 @@ else
   check "P10b README.md mentions /zensu:pr-team-review in the skills table" FAIL
 fi
 
+# P11 — per-run workspace must be race-safe (mirrors plan-review's P9 mktemp mandate).
+# A predictable world-writable /tmp name invites a symlink / pre-creation race on
+# shared hosts, so the working dir is materialized with `mktemp -d` and no fixed
+# /tmp/pr* path may survive anywhere in the skill tree.
+if grep -qF 'mktemp -d' "$SKILL_MD"; then
+  check "P11a SKILL.md materializes the working dir with mktemp -d" PASS
+else
+  check "P11a SKILL.md materializes the working dir with mktemp -d" FAIL
+fi
+
+if grep -rqF '/tmp/pr' "$SKILL_DIR"; then
+  check "P11b no predictable '/tmp/pr*' path remains (race-safe)" FAIL
+else
+  check "P11b no predictable '/tmp/pr*' path remains (race-safe)" PASS
+fi
+
+if grep -qF -- '--detach' "$SKILL_MD"; then
+  check "P11c worktree is created detached (re-run never collides on the branch ref)" PASS
+else
+  check "P11c worktree is created detached (re-run never collides on the branch ref)" FAIL
+fi
+
 echo "----"
 echo "test-pr-team-review-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

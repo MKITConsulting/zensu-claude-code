@@ -10,19 +10,21 @@ The skill MUST NOT switch branches in the main working tree. The user is typical
 
 ```bash
 REPO=<absolute-path-to-repo-root>
-WORKTREE=/tmp/pr<n>-review-wt
 
-# Idempotency: prior worktree from a previous run may linger
-git -C "$REPO" worktree list | grep -q "$WORKTREE" && git -C "$REPO" worktree remove --force "$WORKTREE"
+# Per-run root with an UNPREDICTABLE name (mktemp -d) — never a fixed /tmp path.
+# A predictable world-writable name invites a symlink / pre-creation race.
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/pr<n>-review.XXXXXXXX")"
+WORKTREE="$WORKDIR/wt"
 
-# Create worktree — separate physical checkout, shared .git
+# Create worktree — separate physical checkout, shared .git. DETACHED at the
+# fetched SHA so a re-run's fresh worktree never collides on the branch ref.
 git -C "$REPO" fetch origin pull/<n>/head:pr-<n>-review
-git -C "$REPO" worktree add --force "$WORKTREE" pr-<n>-review
+git -C "$REPO" worktree add --force --detach "$WORKTREE" "$(git -C "$REPO" rev-parse pr-<n>-review)"
 ```
 
 After `worktree add`:
-- `git -C "$REPO" branch --show-current` still reports the user's WIP branch (NOT `pr-<n>-review`).
-- `git -C "$WORKTREE" branch --show-current` reports `pr-<n>-review`.
+- `git -C "$REPO" branch --show-current` still reports the user's WIP branch — the main checkout is untouched.
+- the worktree is in DETACHED HEAD at the PR head SHA; `git -C "$WORKTREE" rev-parse HEAD` echoes that SHA.
 - Both share `.git` — disk overhead is roughly the working-tree size, not double the repo.
 
 **Reviewer prompts MUST inject `$WORKTREE`** as the working directory for all git/grep/file operations. See Phase B Spawn Pitfalls.
@@ -78,7 +80,7 @@ For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `doc
 
 ```bash
 # Inspect actual keys
-for f in /tmp/pr<n>-review/*.json; do echo "=== $f ==="; jq 'keys' "$f" 2>&1 | head -5; done
+for f in $WORKDIR/*.json; do echo "=== $f ==="; jq 'keys' "$f" 2>&1 | head -5; done
 ```
 
 Common variations:
@@ -104,7 +106,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 **Overall body length:** target 600-1200 words. Reviewer fatigue is real — a 5000-word body gets skimmed. Cut Strengths section to 5-7 bullets max. Cut Open Questions to 5 max.
 
-**No tables.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use numbered subsections (`#### 1. ...`) for P1 findings and bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `/tmp/pr<n>-review/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings.
+**No tables.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use numbered subsections (`#### 1. ...`) for P1 findings and bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `$WORKDIR/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings.
 
 **No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only.
 
@@ -113,7 +115,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 ## Phase E — Cleanup
 
 - Send `shutdown_request` to each teammate via `SendMessage` (response auto-terminates them).
-- Don't delete `/tmp/pr<n>-review/` — it's a debug artifact. macOS clears `/tmp` on reboot.
+- Don't delete `$WORKDIR/` — it's a debug artifact. macOS clears `/tmp` on reboot.
 - Mark all task statuses as `completed`.
 - Final message to user: review URL + one-sentence summary of verdict.
 
@@ -124,9 +126,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 - **Reviewer agent dies mid-run**: TaskList shows in_progress; respawn that single agent (same name, same prompt).
 - **All reviewers report APPROVE**: still post the review with `event=COMMENT` summarising strengths — user values the audit trail.
 - **PR closed/merged while review runs**: detect via `gh pr view --json state`; abort gracefully, save artifacts.
-- **Worktree path already exists**: previous run crashed or skipped cleanup. `git -C "$REPO" worktree remove --force "$WORKTREE"` then re-add.
-- **Branch already checked out in another worktree**: `git -C "$REPO" worktree list` will show it. Either remove the prior worktree or use a different path (`/tmp/pr<n>-review-wt-2`).
-- **`worktree add` fails with "fatal: '<path>' already exists"** but path is not a registered worktree: orphaned directory from `rm -rf`-style cleanup. `rm -rf "$WORKTREE" && git -C "$REPO" worktree prune` then re-add.
+- **Worktree / branch-checkout collisions** (path already exists, branch already checked out, orphaned dir): no longer occur — each run gets a fresh `mktemp -d` workspace and the worktree is DETACHED at the head SHA (it never checks out the `pr-<n>-review` branch). After a crash the worktree just lingers under its random `$WORKDIR`; `git -C "$REPO" worktree prune` clears the stale bookkeeping and the next run is unaffected.
 - **Disk full while creating worktree**: detect via `df -h /tmp`; warn user and offer `--worktree-path=<custom>` (later enhancement) or proceed without worktree (degraded: read diff via `gh pr diff` only, no file-level reads).
 
 ## Performance

@@ -4,7 +4,7 @@
 
 ## Shared Output Schema
 
-Every persona writes `/tmp/pr<n>-review/<role>.json` with this minimum shape:
+Every persona writes `$WORKDIR/<role>.json` with this minimum shape:
 
 ```json
 {
@@ -33,13 +33,13 @@ Hard caps: ≤ 8 inline findings per persona. Severity meaning:
 
 **Hard rule for `body` field**: NO Markdown tables. GitHub PR view compresses tables into unreadable narrow columns. Use code fences, bullet lists, and bold prefixes only. Internal fields like `test_coverage_matrix` may stay as JSON objects — they are not posted, the lead synthesises them into prose for the overall body.
 
-**Working directory**: The skill injects `$WORKTREE` (an absolute path like `/tmp/pr<n>-review-wt`) into every persona prompt. ALL git/grep/find/file-read commands MUST run with `$WORKTREE` as the working directory:
+**Working directory**: The skill injects `$WORKTREE` — the absolute path to this run's detached worktree (the `wt/` subdir of an `mktemp -d` workspace) — into every persona prompt. ALL git/grep/find/file-read commands MUST run with `$WORKTREE` as the working directory:
 
 - `git -C "$WORKTREE" diff origin/<base>...HEAD ...`
 - `cd "$WORKTREE" && grep -rn "pattern" src/`
-- `Read /tmp/pr<n>-review-wt/src/.../File.java`
+- `Read $WORKTREE/src/.../File.java`
 
-**Never** `cd` into the user's main repo at `$REPO` (`~/IdeaProjects/.../<repo>`). The user has parallel work there — any `git checkout`, `git switch`, or stray write would clobber their branch. Output JSON paths (`/tmp/pr<n>-review/<role>.json`) remain absolute and outside the worktree. `--context=` paths likewise remain absolute (refinement repos, glossary files).
+**Never** `cd` into the user's main repo at `$REPO` (`~/IdeaProjects/.../<repo>`). The user has parallel work there — any `git checkout`, `git switch`, or stray write would clobber their branch. Output JSON paths (`$WORKDIR/<role>.json`) remain absolute and outside the worktree. `--context=` paths likewise remain absolute (refinement repos, glossary files).
 
 ## Persona Pool
 
@@ -55,7 +55,7 @@ git diff origin/<base>...HEAD -- docs/DDD/
 grep -rn "BoundedContext\|@ApplicationModule" src/
 ```
 
-**Prompt template:** You are reviewing PR #<n> as DDD Strategic. Inputs: PR head SHA `<sha>`, base `<base>`, files `<count>`, refinement context `<paths>`, conversation context `<text>`. Check: BC naming consistency (code/docs/REST/tests/glossary), Context Map alignment, Published Language contracts (events crossing BC boundaries), supplier/customer relationships, BC vs ACL labelling. Output `/tmp/pr<n>-review/ddd-strategic.json` per shared schema. Max 6 inline findings. When done call `TaskUpdate` task → `completed`.
+**Prompt template:** You are reviewing PR #<n> as DDD Strategic. Inputs: PR head SHA `<sha>`, base `<base>`, files `<count>`, refinement context `<paths>`, conversation context `<text>`. Check: BC naming consistency (code/docs/REST/tests/glossary), Context Map alignment, Published Language contracts (events crossing BC boundaries), supplier/customer relationships, BC vs ACL labelling. Output `$WORKDIR/ddd-strategic.json` per shared schema. Max 6 inline findings. When done call `TaskUpdate` task → `completed`.
 
 ### `ddd-tactical`
 

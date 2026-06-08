@@ -42,7 +42,7 @@ Write the full payload to a file, post it via `--input`:
 
 ```bash
 gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews \
-  --input /tmp/pr<n>-review/_synthesis.json
+  --input $WORKDIR/_synthesis.json
 ```
 
 Capture the response — `id` and `html_url` are the values you return to the user.
@@ -75,7 +75,7 @@ Capture the response — `id` and `html_url` are the values you return to the us
 Re-running the skill on the same PR posts an **additional** review. There's no native idempotency key. If you want to suppress duplicates, hash the synthesis body and check existing reviews before posting:
 
 ```bash
-HASH=$(jq -r '.body' /tmp/pr<n>-review/_synthesis.json | sha256sum | head -c 8)
+HASH=$(jq -r '.body' $WORKDIR/_synthesis.json | sha256sum | head -c 8)
 if gh api repos/<o>/<r>/pulls/<n>/reviews | jq -e ".[] | select(.body | contains(\"$HASH\"))" > /dev/null; then
   echo "Already posted — skipping"
   exit 0
