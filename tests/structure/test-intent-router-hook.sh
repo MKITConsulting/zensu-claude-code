@@ -145,6 +145,19 @@ else
 fi
 rm -rf "$P14"
 
+P15="$(mktemp -d -t introuter-XXXXXX)"
+AC15="$(payload "I want to track my SaaS product and its features in Zensu" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P15" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+if [ -n "$AC15" ] \
+   && printf '%s' "$AC15" | grep -qi 'very next action' \
+   && printf '%s' "$AC15" | grep -qi 'do NOT read files' \
+   && printf '%s' "$AC15" | grep -qi 'ground'; then
+  check "C15 planning directive front-loads ask-first + forbids explore/ground-first deferral" PASS
+else
+  fired15="$([ -n "$AC15" ] && echo yes || echo no)"
+  check "C15 ask-first/anti-explore clause (fired=$fired15)" FAIL
+fi
+rm -rf "$P15"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
