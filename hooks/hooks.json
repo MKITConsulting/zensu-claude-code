@@ -9,6 +9,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__plugin_zensu_zensu__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-mcp-zensu-gate.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [

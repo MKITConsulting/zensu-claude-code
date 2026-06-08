@@ -24,6 +24,8 @@ This is the **greenfield** entry point — a new product captured from a plan/vi
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin`. This marks the Zensu product workflow active so the MCP write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `create_product` / `create_product_vision` / `apply_bootstrap` / `create_feature` calls as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
+
 ### Phase 1: Product & Vision Setup
 
 1. Ask the user for their product name, slug, type (public_product|internal_product|hybrid), and the vision/plan document content

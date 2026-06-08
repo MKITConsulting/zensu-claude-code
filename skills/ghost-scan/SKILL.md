@@ -25,6 +25,8 @@ This is the **brownfield** entry point — an existing codebase whose features a
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin`. This marks the Zensu product workflow active so the MCP write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `ghost_apply` / `create_feature` calls as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after the final phase, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
+
 ### Phase 1: Setup & Context
 
 1. Confirm the product ID via `list_products`

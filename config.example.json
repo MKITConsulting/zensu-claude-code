@@ -9,7 +9,8 @@
     "selfReview": true,
     "pulseSession": true,
     "sessionBanner": true,
-    "intentRouter": true
+    "intentRouter": true,
+    "mcpGate": true
   },
   "context": {
     "compactionNudge": true,
