@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.4] - 2026-06-08
+
+### Added
+
+- **summary**: Narrative CHAIN-END SUMMARY with TL;DR last (#99)
+- **mcp-gate**: Block freelance main-thread Zensu structural writes (default-on) (#98)
+
+### Fixed
+
+- **intent-router**: Front-load ask-first triage, forbid explore/ground-first deferral (#97)
+
 ## [0.8.3] - 2026-06-07
 
 ### Fixed
