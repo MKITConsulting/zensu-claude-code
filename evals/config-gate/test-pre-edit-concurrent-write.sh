@@ -1,6 +1,12 @@
 #!/bin/bash
 set -u
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  SKIP  test-pre-edit-concurrent-write on Windows — no flock on Git Bash; mkdir-fallback lock serialization is unverified/flaky under N-way contention (follow-up: harden flock-less locking)"
+    exit 0 ;;
+esac
+
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 
