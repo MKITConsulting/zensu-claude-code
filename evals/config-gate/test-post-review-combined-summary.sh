@@ -47,31 +47,64 @@ case "$OUT" in
 esac
 
 case "$OUT" in
-  *"## Implementation Summary"*)
-    check "case A/B legacy + flag on: output contains '## Implementation Summary' heading" PASS ;;
+  *"## Problem"*)
+    check "case A/B legacy + flag on: output contains '## Problem' heading" PASS ;;
   *)
-    check "case A/B legacy + flag on: output contains '## Implementation Summary' heading" FAIL ;;
+    check "case A/B legacy + flag on: output contains '## Problem' heading" FAIL ;;
 esac
 
 case "$OUT" in
-  *"## Review Summary"*)
-    check "case A/B legacy + flag on: output contains '## Review Summary' heading" PASS ;;
+  *"## What I built"*)
+    check "case A/B legacy + flag on: output contains '## What I built' heading" PASS ;;
   *)
-    check "case A/B legacy + flag on: output contains '## Review Summary' heading" FAIL ;;
+    check "case A/B legacy + flag on: output contains '## What I built' heading" FAIL ;;
 esac
 
 case "$OUT" in
-  *"## Auto-fix History"*)
-    check "case A/B legacy + flag on: output contains '## Auto-fix History' heading" PASS ;;
+  *"## How I built it"*)
+    check "case A/B legacy + flag on: output contains '## How I built it' heading" PASS ;;
   *)
-    check "case A/B legacy + flag on: output contains '## Auto-fix History' heading" FAIL ;;
+    check "case A/B legacy + flag on: output contains '## How I built it' heading" FAIL ;;
 esac
+
+case "$OUT" in
+  *"## Open"*)
+    check "case A/B legacy + flag on: output contains '## Open' heading" PASS ;;
+  *)
+    check "case A/B legacy + flag on: output contains '## Open' heading" FAIL ;;
+esac
+
+case "$OUT" in
+  *"## TL;DR"*)
+    check "case A/B legacy + flag on: output contains '## TL;DR' heading" PASS ;;
+  *)
+    check "case A/B legacy + flag on: output contains '## TL;DR' heading" FAIL ;;
+esac
+
+HOOK_SEQ="$(printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{const c=JSON.parse(s).hookSpecificOutput.additionalContext;process.stdout.write([...c.matchAll(/^## .*/gm)].map(m=>m[0].trim()).join("|"));})')"
+EXPECTED_HOOK_SEQ="## Problem|## What I built|## How I built it|## Open|## TL;DR"
+[ "$HOOK_SEQ" = "$EXPECTED_HOOK_SEQ" ] && check "case A/B legacy + flag on: hook emits exact ordered heading sequence" PASS || check "case A/B legacy + flag on: hook ordered sequence (got: $HOOK_SEQ)" FAIL
+
+LAST_HOOK_HEADING="${HOOK_SEQ##*|}"
+[ "$LAST_HOOK_HEADING" = "## TL;DR" ] && check "case A/B legacy + flag on: '## TL;DR' is the LAST section heading" PASS || check "case A/B legacy + flag on: '## TL;DR' last heading (got: $LAST_HOOK_HEADING)" FAIL
+
+case "$OUT" in
+  *"## Self-Review Summary"*)
+    check "case A/B legacy + flag on: hook must NOT emit '## Self-Review Summary' (skill-only)" FAIL ;;
+  *)
+    check "case A/B legacy + flag on: hook must NOT emit '## Self-Review Summary' (skill-only)" PASS ;;
+esac
+
+SKILL_MD_PARITY="$PLUGIN_DIR/skills/self-review/SKILL.md"
+SKILL_SEQ="$(awk '/^### Final report/{f=1} f&&/^```/{c++; if(c>=2) exit} f&&c>=1{print}' "$SKILL_MD_PARITY" | grep -E '^## ' | sed 's/[[:space:]]*$//' | paste -sd'|' -)"
+SKILL_SEQ_NO_SR="${SKILL_SEQ/|## Self-Review Summary/}"
+[ "$HOOK_SEQ" = "$SKILL_SEQ_NO_SR" ] && check "cross-renderer parity: hook seq == skill Final-report seq minus '## Self-Review Summary'" PASS || check "cross-renderer parity (hook: $HOOK_SEQ | skill-noSR: $SKILL_SEQ_NO_SR)" FAIL
 
 case "$OUT" in
   *"including rounds that fixed nothing"*)
-    check "case A/B legacy + flag on: Auto-fix History lists no-fix/verification rounds" PASS ;;
+    check "case A/B legacy + flag on: auto-fix history lists no-fix/verification rounds" PASS ;;
   *)
-    check "case A/B legacy + flag on: Auto-fix History lists no-fix/verification rounds" FAIL ;;
+    check "case A/B legacy + flag on: auto-fix history lists no-fix/verification rounds" FAIL ;;
 esac
 
 cat > "$TMP_CFG" <<'EOF'
@@ -161,9 +194,9 @@ esac
 
 case "$OUT" in
   *"including rounds that fixed nothing"*)
-    check "max-rounds + flag on: Auto-fix History lists no-fix/verification rounds" PASS ;;
+    check "max-rounds + flag on: auto-fix history lists no-fix/verification rounds" PASS ;;
   *)
-    check "max-rounds + flag on: Auto-fix History lists no-fix/verification rounds" FAIL ;;
+    check "max-rounds + flag on: auto-fix history lists no-fix/verification rounds" FAIL ;;
 esac
 
 cat > "$TMP_CFG" <<'EOF'
