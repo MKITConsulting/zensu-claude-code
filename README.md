@@ -145,7 +145,7 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (10)
+### Skills (11)
 
 | Skill | Description |
 |-------|-------------|
@@ -153,6 +153,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |
 | `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
+| `/zensu:pr-team-review` | Multi-agent review of an **existing GitHub PR**: scouts the PR, auto-casts a tailored reviewer team from a 14-persona pool, fetches the PR into an isolated git worktree (main checkout untouched), spawns the reviewers in parallel, runs a debate + synthesis pass, then publishes one consolidated GitHub review (inline comments + overall body) via `gh api`. Complements `/zensu:plan-review` (which validates a plan before code exists). |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository with a multi-perspective agent fan-out to discover undocumented features, user journeys, and docs, and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
