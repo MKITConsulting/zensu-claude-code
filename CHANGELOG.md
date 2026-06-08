@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **pr-team-review**: Multi-agent GitHub PR review skill — scouts an existing PR, auto-casts a tailored reviewer team from a 14-persona pool, fetches the PR into an isolated git worktree, spawns the reviewers in parallel, debates, and publishes one consolidated GitHub review (inline comments + body) via `gh api`
+
 ## [0.8.4] - 2026-06-08
 
 ### Added
