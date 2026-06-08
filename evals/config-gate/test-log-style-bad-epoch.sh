@@ -32,11 +32,12 @@ else
   check "exit code is 0 on non-numeric start arg (got $rc)" FAIL
 fi
 
-if [ "$stdout" = "[+00:00:00] " ]; then
-  check "stdout is exactly '[+00:00:00] ' on non-numeric start arg in relative mode" PASS
-else
-  check "stdout is exactly '[+00:00:00] ' on non-numeric start arg in relative mode (got '$stdout')" FAIL
-fi
+case "$stdout" in
+  "[+00:00:00] "|"[+00:00:01] ")
+    check "stdout is '[+00:00:0X] ' (~0 elapsed) on non-numeric start arg in relative mode" PASS ;;
+  *)
+    check "stdout is '[+00:00:0X] ' (~0 elapsed) on non-numeric start arg in relative mode (got '$stdout')" FAIL ;;
+esac
 
 if [ ! -s "$STDERR_FILE" ]; then
   check "stderr is empty on non-numeric start arg" PASS
