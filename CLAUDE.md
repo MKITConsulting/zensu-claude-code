@@ -30,6 +30,22 @@ The same-value invariant above is machine-enforced: the gate runs `tests/run-all
 
 If `marketplace.json` ever lags `plugin.json` (e.g. a hand bump that forgot it), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
 
+## MCP Tool Classification (`hooks/lib/zensu-mcp-tools.sh`)
+
+**When the Zensu MCP server gains a new tool, classify it in `hooks/lib/zensu-mcp-tools.sh` in the same change** — a state-mutating tool goes in `ZENSU_MUTATION_TOOL_NAMES`; a read/telemetry tool goes in the `zensu_is_read_tool` allowlist (`ZENSU_READ_TOOL_PREFIXES` / `ZENSU_READ_TOOL_NAMES`).
+
+This file is the single source of truth for tool classification, consumed by two places:
+
+- `hooks/pre-mcp-zensu-gate.sh` — the PreToolUse write-gate: allows `zensu_is_read_tool` tools ungated and default-denies everything else.
+- `tests/structure/test-skill-workflow-markers.sh` — the build-time guard that fails if a skill calls a `zensu_is_mutation_tool` without the `--workflow-begin` / `--workflow-end` markers.
+
+Consequences of forgetting a new tool:
+
+- **New mutation tool, not added to `ZENSU_MUTATION_TOOL_NAMES`:** no security hole — the gate default-denies anything not on the read-allowlist, so it is still gated at runtime. But the skill-marker test will NOT flag a skill that calls it without the workflow markers, so a wrapper-less skill could slip through CI. **Test-coverage gap, not an open gate.**
+- **New read tool, not added to the read-allowlist:** fail-closed — it is gated by default and wrongly DENIED on the main thread until added.
+
+Invariant: `ZENSU_MUTATION_TOOL_NAMES` must stay a strict superset of every skill's `--workflow-begin --tools` declaration (a skill may only declare real mutation tools). `tests/structure/test-skill-workflow-markers.sh` pins the read/mutation classification of a representative sample.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.
