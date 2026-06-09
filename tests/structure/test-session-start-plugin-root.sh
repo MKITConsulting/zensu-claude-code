@@ -60,10 +60,10 @@ else
   check "PR-F1 functional: missing or wrong content (got=$([ -f "$ROOT_FILE" ] && cat "$ROOT_FILE" || echo MISSING))" FAIL
 fi
 
-MTIME_BEFORE=$(stat -f %m "$ROOT_FILE" 2>/dev/null || stat -c %Y "$ROOT_FILE" 2>/dev/null || echo 0)
+MTIME_BEFORE=$(stat -c %Y "$ROOT_FILE" 2>/dev/null || stat -f %m "$ROOT_FILE" 2>/dev/null || echo 0)
 sleep 1
 env -i PATH="$PATH" HOME="$TMP_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_PLUGIN_ROOT" bash "$FAKE_PLUGIN_ROOT/hooks/session-start-pulse.sh" >/dev/null 2>&1
-MTIME_AFTER=$(stat -f %m "$ROOT_FILE" 2>/dev/null || stat -c %Y "$ROOT_FILE" 2>/dev/null || echo 0)
+MTIME_AFTER=$(stat -c %Y "$ROOT_FILE" 2>/dev/null || stat -f %m "$ROOT_FILE" 2>/dev/null || echo 0)
 if [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]; then
   check "PR-F2 idempotent: second invocation with same CLAUDE_PLUGIN_ROOT does not rewrite file (mtime unchanged)" PASS
 else
