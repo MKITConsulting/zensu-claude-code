@@ -19,10 +19,9 @@ field() {
 
 TOOL_NAME="$(field tool_name)"
 TOOL="${TOOL_NAME#mcp__plugin_zensu_zensu__}"
-case "$TOOL" in
-  create_product|create_product_vision|apply_bootstrap|ghost_apply|create_feature) ;;
-  *) exit 0 ;;
-esac
+[ -z "$TOOL" ] && exit 0
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh"
+zensu_is_read_tool "$TOOL" && exit 0
 
 [ "${ZENSU_MCP_GATE:-}" = "off" ] && exit 0
 
@@ -38,11 +37,11 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 SID_PRIMARY="$(zensu_resolve_session_id "$(field session_id)")"
 SID_FALLBACK="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
-[ "$(zensu_workflow_active "$(tdd_state_file "$SID_PRIMARY")")" = "true" ] && exit 0
+[ "$(zensu_workflow_allows "$(tdd_state_file "$SID_PRIMARY")" "$TOOL")" = "true" ] && exit 0
 [ -n "$SID_FALLBACK" ] && [ "$SID_FALLBACK" != "$SID_PRIMARY" ] \
-  && [ "$(zensu_workflow_active "$(tdd_state_file "$SID_FALLBACK")")" = "true" ] && exit 0
+  && [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_FALLBACK")" "$TOOL")" = "true" ] && exit 0
 
-REASON="Zensu structural write '${TOOL}' was blocked. A direct main-thread create/onboard bypasses the Zensu workflow conventions (dedup, user journeys, v1 baseline revisions, security classification) that the skills and the zensu-plm agent enforce. Run the /zensu:bootstrap (greenfield) or /zensu:ghost-scan (brownfield) skill, or delegate the task to the zensu-plm agent, instead of calling this MCP tool directly. For a deliberate one-off, set ZENSU_MCP_GATE=off."
+REASON="Zensu state-mutating operation '${TOOL}' was blocked. A direct main-thread mutation bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) that the skills and the zensu-plm agent enforce. Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — or delegate the whole task to the zensu-plm agent, instead of calling this MCP tool directly. For a deliberate one-off, set ZENSU_MCP_GATE=off."
 
 REASON="$REASON" node -e '
   process.stdout.write(JSON.stringify({

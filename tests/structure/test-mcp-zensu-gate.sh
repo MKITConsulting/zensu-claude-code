@@ -78,7 +78,7 @@ CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDF" bash -c '
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
   sid="$(zensu_resolve_session_id gate-test)"
-  tdd_set_flag "$sid" workflowActive true
+  tdd_workflow_begin "$sid" "create_product" "$(( $(date +%s) + 3600 ))"
 ' 2>/dev/null
 OUT="$(payload "$WRITE_TOOL" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDF" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "C8 write + workflowActive flag (skill running) -> ALLOW" PASS || check "C8 flag allow (got '$OUT')" FAIL
@@ -95,7 +95,7 @@ OUT="$(payload "$WRITE_TOOL" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 
-for sk in bootstrap ghost-scan; do
+for sk in bootstrap ghost-scan implement security-review; do
   F="$PLUGIN_DIR/skills/$sk/SKILL.md"
   if grep -qF -- '--workflow-begin' "$F" && grep -qF -- '--workflow-end' "$F"; then
     check "C12/$sk SKILL.md marks workflow (--workflow-begin/--workflow-end)" PASS
@@ -103,6 +103,28 @@ for sk in bootstrap ghost-scan; do
     check "C12/$sk SKILL.md marks workflow (--workflow-begin/--workflow-end)" FAIL
   fi
 done
+
+for sk in bootstrap ghost-scan implement security-review; do
+  F="$PLUGIN_DIR/skills/$sk/SKILL.md"
+  if grep -qF -- '--workflow-begin --tools' "$F"; then
+    check "C29/$sk SKILL.md declares --workflow-begin --tools" PASS
+  else
+    check "C29/$sk SKILL.md declares --workflow-begin --tools" FAIL
+  fi
+done
+
+GATED_ANALYSIS="analyze_feature_security generate_threat_model generate_claude_md bootstrap_from_vision"
+C30_FAIL=0
+for sk in bootstrap ghost-scan implement security-review; do
+  F="$PLUGIN_DIR/skills/$sk/SKILL.md"
+  TLINE="$(grep -F -- '--workflow-begin --tools' "$F")"
+  for t in $GATED_ANALYSIS; do
+    if grep -qFw -- "$t" "$F" && ! printf '%s' "$TLINE" | grep -qFw -- "$t"; then
+      C30_FAIL=$((C30_FAIL+1)); echo "      $sk calls $t but omits it from --tools"
+    fi
+  done
+done
+[ "$C30_FAIL" -eq 0 ] && check "C30 skills declare every gated analysis tool they call" PASS || check "C30 skill --tools coverage ($C30_FAIL)" FAIL
 
 if node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
@@ -122,10 +144,13 @@ OUT="$(payload "$WRITE_TOOL" "zensu:zensu-plm" gate-test | env CLAUDE_PLUGIN_ROO
 [ "$OUT" = "ALLOW" ] && check "C15b write + zensu-plm subagent (namespaced) -> ALLOW" PASS || check "C15b plm allow (got '$OUT')" FAIL
 
 REASON_OUT="$(payload "$WRITE_TOOL" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$REASON_OUT" | grep -qF 'zensu:bootstrap' \
+if printf '%s' "$REASON_OUT" | grep -qiF 'state-mutating' \
+   && printf '%s' "$REASON_OUT" | grep -qF 'zensu:bootstrap' \
+   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:implement' \
+   && printf '%s' "$REASON_OUT" | grep -qF '/zensu:security-review' \
    && printf '%s' "$REASON_OUT" | grep -qF 'create_product' \
    && ! printf '%s' "$REASON_OUT" | grep -qiF 'currently enabled'; then
-  check "C16 deny reason names skills + tool, drops contradictory parenthetical" PASS
+  check "C16 deny reason: state-mutating wording + skill routing + tool name" PASS
 else
   check "C16 deny reason content" FAIL
 fi
@@ -138,7 +163,7 @@ done
 [ "$G_FAIL" -eq 0 ] && check "C17 all 5 gated tools freelance -> DENY" PASS || check "C17 gated-tool coverage ($G_FAIL)" FAIL
 
 OUT="$(payload "mcp__plugin_zensu_zensu__update_feature" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT" = "ALLOW" ] && check "C18 non-gated zensu write (update_feature) -> ALLOW" PASS || check "C18 non-gated allow (got '$OUT')" FAIL
+[ "$OUT" = "DENY" ] && check "C18 mutation (update_feature) freelance -> DENY" PASS || check "C18 mutation deny (got '$OUT')" FAIL
 
 SDR="$(mktemp -d -t mcpgate-rst-XXXXXX)"
 CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDR" bash -c '
@@ -177,11 +202,52 @@ CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDD" CLAUDE_SESSION_ID="skill-s
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
   sid="$(zensu_resolve_session_id "$CLAUDE_SESSION_ID")"
-  tdd_set_flag "$sid" workflowActive true
+  tdd_workflow_begin "$sid" "create_product" "$(( $(date +%s) + 3600 ))"
 ' 2>/dev/null
 OUT="$(payload "$WRITE_TOOL" '' other-sess | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDD" CLAUDE_SESSION_ID="skill-sess" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
 [ "$OUT" = "ALLOW" ] && check "C22 dual session-resolution finds skill flag despite payload mismatch -> ALLOW" PASS || check "C22 dual-resolution (got '$OUT')" FAIL
 rm -rf "$SDD"
+
+M_FAIL=0
+for t in set_security_classification complete_security_review analyze_feature_security link_test set_feature_tiers deprecate_feature split_feature; do
+  O="$(payload "mcp__plugin_zensu_zensu__$t" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$O" = "DENY" ] || { M_FAIL=$((M_FAIL+1)); echo "      $t -> $O (expected DENY)"; }
+done
+[ "$M_FAIL" -eq 0 ] && check "C23 representative mutations freelance -> DENY" PASS || check "C23 mutation-gate coverage ($M_FAIL)" FAIL
+
+R_FAIL=0
+for t in list_features get_security_posture search_knowledge suggest_workflow analyze_journey_health validate_feature_security ghost_get_candidates pulse_start_session pulse_end_session pulse_session_summary; do
+  O="$(payload "mcp__plugin_zensu_zensu__$t" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$O" = "ALLOW" ] || { R_FAIL=$((R_FAIL+1)); echo "      $t -> $O (expected ALLOW)"; }
+done
+[ "$R_FAIL" -eq 0 ] && check "C24 reads + pulse telemetry freelance -> ALLOW" PASS || check "C24 read-allowlist coverage ($R_FAIL)" FAIL
+
+SDM="$(mktemp -d -t mcpgate-mut-XXXXXX)"
+CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDM" bash -c '
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+  sid="$(zensu_resolve_session_id gate-test)"
+  tdd_workflow_begin "$sid" "complete_security_review" "$(( $(date +%s) + 3600 ))"
+' 2>/dev/null
+OUT="$(payload "mcp__plugin_zensu_zensu__complete_security_review" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDM" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "C25 mutation + workflowActive (skill running) -> ALLOW" PASS || check "C25 mutation workflow allow (got '$OUT')" FAIL
+rm -rf "$SDM"
+
+OUT="$(payload "mcp__plugin_zensu_zensu__complete_security_review" zensu-plm gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "C26 mutation + zensu-plm agent -> ALLOW" PASS || check "C26 mutation agent allow (got '$OUT')" FAIL
+
+SDS="$(mktemp -d -t mcpgate-scope-XXXXXX)"
+CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDS" bash -c '
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+  sid="$(zensu_resolve_session_id gate-test)"
+  tdd_workflow_begin "$sid" "link_test,create_revision" "$(( $(date +%s) + 3600 ))"
+' 2>/dev/null
+OUT="$(payload "mcp__plugin_zensu_zensu__link_test" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDS" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "C27 in-scope tool (link_test in workflowTools) -> ALLOW" PASS || check "C27 in-scope allow (got '$OUT')" FAIL
+OUT="$(payload "mcp__plugin_zensu_zensu__set_security_classification" '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDS" ZENSU_CONFIG="$CFG2" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "DENY" ] && check "C27b out-of-scope tool (security not in implement set) -> DENY" PASS || check "C27b cross-scope deny (got '$OUT')" FAIL
+rm -rf "$SDS"
 
 rm -f "$CFG2"
 

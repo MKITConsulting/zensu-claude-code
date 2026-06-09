@@ -274,6 +274,7 @@ _tdd_write_clear_critical() {
     try { s = JSON.parse(fs.readFileSync(sf, "utf8")) || {}; } catch (_) {}
     s.active = false; s.implComplete = false; s.chainDone = false;
     s.codeReviewDone = false; s.selfReviewFixed = false; s.workflowActive = false;
+    s.workflowTools = [];
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -291,6 +292,53 @@ tdd_clear_session() {
   [ -f "$state_file" ] || return 0
   command -v node >/dev/null 2>&1 || return 1
   _tdd_locked_run "$state_file" _tdd_write_clear_critical "$state_file"
+}
+
+_tdd_write_workflow_begin_critical() {
+  local state_file="$1"
+  local session_id="$2"
+  local tools="$3"
+
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  STATE_FILE="$state_file" SID="$session_id" TOOLS="$tools" \
+    node -e '
+      const fs = require("fs");
+      const sf = process.env.STATE_FILE;
+      let state = {};
+      try {
+        const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+        if (prev && typeof prev === "object") state = prev;
+      } catch (_) {}
+      if (!state.session_id) state.session_id = process.env.SID;
+      if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
+      if (!Array.isArray(state.history)) state.history = [];
+      state.workflowActive = true;
+      state.workflowTools = (process.env.TOOLS || "").split(",").map(s => s.trim()).filter(Boolean);
+      fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_workflow_begin() {
+  local session_id="${1:-unknown}"
+  local tools="${2:-}"
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" \
+    _tdd_write_workflow_begin_critical "$state_file" "$session_id" "$tools"
 }
 
 tdd_get_flag() {
@@ -316,6 +364,22 @@ tdd_chain_done()        { tdd_get_flag "${1:-}" chainDone; }
 tdd_code_review_done()  { tdd_get_flag "${1:-}" codeReviewDone; }
 tdd_self_review_fixed() { tdd_get_flag "${1:-}" selfReviewFixed; }
 zensu_workflow_active()  { tdd_get_flag "${1:-}" workflowActive; }
+
+zensu_workflow_allows() {
+  local sf="${1:-}" tool="${2:-}"
+  [ -n "$tool" ] || { echo "false"; return 0; }
+  [ "$(zensu_workflow_active "$sf")" = "true" ] || { echo "false"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "false"; return 0; }
+  local verdict
+  verdict=$(TOOL="$tool" node -e '
+    try {
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const tools = Array.isArray(j.workflowTools) ? j.workflowTools : [];
+      console.log(tools.indexOf(process.env.TOOL) >= 0 ? "true" : "false");
+    } catch (_) { console.log("false"); }
+  ' "$sf" 2>/dev/null)
+  [ "$verdict" = "true" ] && echo "true" || echo "false"
+}
 
 tdd_phase() {
   local state_file="${1:-}"
@@ -373,4 +437,4 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active 2>/dev/null || true
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical 2>/dev/null || true

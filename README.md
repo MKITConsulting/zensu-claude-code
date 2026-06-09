@@ -73,6 +73,40 @@ flowchart TD
     style M fill:#51cf66,color:#fff
 ```
 
+## MCP Write-Gate
+
+Zensu MCP tools are **read-free, write-gated**. Any state-mutating call (creating or
+updating features, security classifications, tiers, journeys, revisions, …) issued
+directly on the main thread is **denied by default** — it must run inside a skill that
+declared its work, so "freelance" writes cannot bypass the dedup, user-journey,
+baseline-revision and security-review conventions the skills enforce. Reads and telemetry
+are always allowed.
+
+```mermaid
+flowchart TD
+    A["Zensu MCP tool call<br/>(main thread)"] --> B{"Read or telemetry tool?<br/>list_ get_ search_ suggest_<br/>+ pulse_*, analyze_journey_health, …"}
+    B -->|"yes"| ALLOW(["ALLOW"])
+    B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off<br/>or hooks.mcpGate=false?"}
+    C -->|"yes (escape hatch)"| ALLOW
+    C -->|"no"| D{"Caller is the<br/>zensu-plm agent?"}
+    D -->|"yes"| ALLOW
+    D -->|"no"| E{"Inside an active workflow?<br/>workflowActive = true<br/>AND tool in workflowTools (per-skill scope)"}
+    E -->|"yes"| ALLOW
+    E -->|"no"| DENY(["DENY<br/>run the matching skill<br/>or delegate to zensu-plm"])
+
+    style A fill:#4a9eff,color:#fff
+    style ALLOW fill:#51cf66,color:#fff
+    style DENY fill:#ff6b6b,color:#fff
+```
+
+A skill opens a **scoped** window with
+`zensu-log.sh --workflow-begin --tools "<exact tool set>"`: the bypass then allows **only**
+that skill's declared tools — so `/zensu:implement` cannot forge a `set_security_classification`
+it never declared — and `--workflow-end` closes it again. `ZENSU_MCP_GATE=off` disables the gate
+for a deliberate one-off. A structure test (`tests/structure/test-skill-workflow-markers.sh`)
+fails the build if any skill calls a mutation tool without the `--workflow-begin` /
+`--workflow-end` markers, so a new skill cannot silently regress the contract.
+
 ## Installation
 
 ```bash
