@@ -24,7 +24,7 @@ This is the **greenfield** entry point — a new product captured from a plan/vi
 
 Execute these phases in order. Present results to the user after each phase and wait for confirmation before proceeding.
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin`. This marks the Zensu product workflow active so the MCP write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `create_product` / `create_product_vision` / `apply_bootstrap` / `create_feature` calls as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "create_product,create_product_vision,bootstrap_from_vision,apply_bootstrap,create_feature,add_subfeature,create_tier,set_feature_tiers,create_user_journey,create_journey_step,split_feature,update_feature,update_bootstrap_step,generate_claude_md,generate_threat_model,analyze_feature_security"`. This marks the Zensu product workflow active so the MCP write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `create_product` / `create_product_vision` / `apply_bootstrap` / `create_feature` calls as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Phase 4, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
 
 ### Phase 1: Product & Vision Setup
 

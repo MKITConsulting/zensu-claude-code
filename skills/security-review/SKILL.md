@@ -19,6 +19,8 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 Execute these steps in order. The classification MUST be set first as all subsequent analysis depends on it.
 
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "set_security_classification,analyze_feature_security,add_security_test,generate_threat_model,complete_security_review"`. This marks the Zensu product workflow active so the MCP write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `set_security_classification` / `analyze_feature_security` / `add_security_test` / `generate_threat_model` / `complete_security_review` calls as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after the final step, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
+
 ### Step 1: Set Security Classification
 
 Ask the user for the feature ID, then use `set_security_classification` with:
