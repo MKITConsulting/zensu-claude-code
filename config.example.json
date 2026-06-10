@@ -10,6 +10,7 @@
     "pulseSession": true,
     "sessionBanner": true,
     "intentRouter": true,
+    "tddReminder": true,
     "mcpGate": true
   },
   "context": {
