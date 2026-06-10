@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **pr-team-review**: Multi-agent GitHub PR review skill — scouts an existing PR, auto-casts a tailored reviewer team from a 14-persona pool, fetches the PR into an isolated git worktree, spawns the reviewers in parallel, debates, and publishes one consolidated GitHub review (inline comments + body) via `gh api`
 
+### Changed
+
+- **`/zensu:ghost-scan` — the v1 build-out baseline revision is now minted server-side by `ghost_apply`, not client-side.** Since 0.7.1 the skill ran a Phase 5b that called `create_revision` per newly created feature to seat it at a v1 "Discovered baseline". Once the backend mints that baseline itself (zensu-monorepo #266), the client-side call hits the revision state machine's precondition — `create_revision` requires the previous revision to be `released`/`superseded`, but the backend baseline is `planned` — and **400s on every discovered feature**. Removed Phase 5b from `skills/ghost-scan/SKILL.md` (replaced with a server-side note), dropped agent workflow step 8 and Important Rule #12 from `agents/zensu-plm.md` (renumbered the snake_case rule 13→12), trimmed the `create_revision` reference from the skill's workflow-gate tool list and the MCP-tools table, and softened the hybrid / decision-rule "seated at a v1 baseline" copy. The general revisions/fan-out concept and the `create_revision` tool (still used at implement-time) are unchanged. **Release coupling:** ship this with or after the zensu-monorepo #266 deploy — a backend predating #266 simply produces no baseline (harmless), but a backend WITH #266 plus a plugin still running Phase 5b errors on every apply. Behavioral guard: `tests/e2e-plm/expected/ghost-scan.pattern` gains a `!create_revision` negative assert; `tests/structure/test-ghost-scan-test-detection.sh` P28–P29 pin the removal.
+
 ## [0.8.4] - 2026-06-08
 
 ### Added
