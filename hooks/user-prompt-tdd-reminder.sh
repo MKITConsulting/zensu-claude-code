@@ -1,0 +1,55 @@
+#!/bin/bash
+# UserPromptSubmit hook — model-facing, per-turn TDD reminder for DIRECT
+# (non-Plan-mode) implementation requests. The only other TDD trigger is the
+# Plan-mode path (plan-approved-delegate.sh, PostToolUse on ExitPlanMode); a
+# direct "implement X" / "fix the bug" prompt never reaches a plan approval, so
+# nothing asks about TDD and the agent just starts editing. This hook re-states
+# the convention every turn — with NO prompt regex — and lets the (multilingual)
+# model decide whether the request is a code change and ask about TDD
+# accordingly. It mirrors plan-approved-delegate.sh's decision logic + fast-paths
+# so the direct path and the Plan-mode path stay behaviorally identical.
+#
+# Silent when: the tddReminder flag is off, the payload has no prompt, or a TDD
+# session is already active for this session (the Plan-mode/TDD flows own the
+# reminder there). The active-session check reuses the exact session resolution
+# from pre-edit-tdd-reminder.sh; any failure falls through to firing (fail-open
+# toward the reminder). Advisory steering only — it never blocks an edit.
+set -u
+
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+zensu_hook_enabled tddReminder || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+
+INPUT="$(cat)"
+
+PROMPT="$(PAYLOAD="$INPUT" node -e '
+  try {
+    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    process.stdout.write(typeof j.prompt === "string" ? j.prompt : "");
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
+
+[ -n "$PROMPT" ] || exit 0
+
+SESSION_ID="$(PAYLOAD="$INPUT" node -e '
+  try {
+    const j = JSON.parse(process.env.PAYLOAD || "{}");
+    process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+STATE_FILE="$(tdd_state_file "$SESSION_ID")"
+[ "$(tdd_session_active "$STATE_FILE")" = "true" ] && exit 0
+
+cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "Zensu TDD reminder. If THIS request will lead you to add or modify executable code (functions, classes, methods, types, conditionals, loops, exports/imports, JSX/TSX components, React hooks, styles that affect rendered output, or schema/config that drives runtime behavior), do NOT silently hand-implement: before your FIRST code edit determine whether to run the strict TDD flow, and unless a fast-path applies, ASK. (a) NOT a code change — a question, explanation, code review, doc/comment/prose edit, static-config-only edit with no runtime logic, debugging discussion, or a Zensu product-planning request (handled separately by the planning notice) — IGNORE this and answer the request normally. (b) You will respond by entering Plan mode, or a TDD session is already active for this session — IGNORE this; those flows already ask about TDD (the plan-approval hook asks on approval). (c) Otherwise — the request adds or modifies executable code and you stated no preference — your action BEFORE the first Edit/Write/MultiEdit on a code file is the AskUserQuestion tool: ask a single question such as 'Run the strict TDD flow (RED→GREEN + review chain) for this?' with options 'Yes — TDD flow' and 'No — implement directly'. If the user chooses Yes → your next tool call is the Skill tool with skill='zensu:tdd', passing this request as the feature specification, and you begin that message with 'Executing via /zensu:tdd'. If the user chooses No → implement directly in this main thread (never run --tdd-begin, so the phase-gate stays inactive and edits flow freely) and begin that message with 'Skipping TDD: user declined'. Fast-paths that skip the question: the request already states an EXPLICIT TDD preference — an affirmation matching 'use tdd', 'with tdd', 'tdd please', 'mit tdd', 'tdd bitte' (run TDD without asking) or a negation matching 'no tdd', 'skip tdd', \"don't use tdd\", 'kein tdd', 'ohne tdd' (implement directly without asking); or you are running non-interactively in Auto Mode / headless with no human to answer (default to running TDD, do NOT ask). Generic action phrases ('go', 'go ahead', 'start now', 'implement', 'mach mal', 'los gehts', 'jetzt umsetzen') are NOT a TDD preference — ask anyway. If uncertain whether the request adds executable code, ask. This is advisory steering, not a hard gate."
+  }
+}
+JSON
+exit 0
