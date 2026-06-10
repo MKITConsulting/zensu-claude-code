@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-10
+
+### Added
+
+- **hooks**: Per-turn TDD reminder for direct implementation requests (#107)
+- **gate**: Default-deny MCP write-gate with per-skill tool scoping (#105)
+- **pr-team-review**: Bundle multi-agent PR review skill into the plugin (#101)
+
+### Changed
+
+- Document MCP tool-classification maintenance in CLAUDE.md (#106)
+- Cross-platform (Windows/Linux) test matrix + LF normalization (#102)
+
+### Fixed
+
+- **ci**: LF-lock all text files, not just sh/js/json (#104)
+- **zensu-plm**: Document create_product required args + snake_case MCP arg rule (#103)
+
 ### Added
 
 - **pr-team-review**: Multi-agent GitHub PR review skill — scouts an existing PR, auto-casts a tailored reviewer team from a 14-persona pool, fetches the PR into an isolated git worktree, spawns the reviewers in parallel, debates, and publishes one consolidated GitHub review (inline comments + body) via `gh api`
