@@ -248,6 +248,20 @@ else
   check "P27 SKILL.md pins journey creation after ghost_apply" FAIL
 fi
 
+# P28 — Phase 5b removed: the ghost-scan SKILL no longer drives a client-side create_revision baseline (now minted server-side by ghost_apply, zensu-monorepo #266)
+if grep -qF 'create_revision' "$SKILL_MD"; then
+  check "P28 SKILL.md has no client create_revision (baseline is server-side)" FAIL
+else
+  check "P28 SKILL.md has no client create_revision (baseline is server-side)" PASS
+fi
+
+# P29 — agent mirrors the removal: no ghost-scan client-baseline step or rule
+if grep -qiE 'Seat each discovered feature|Discovered features get a build-out baseline' "$AGENT_MD"; then
+  check "P29 zensu-plm.md has no ghost-scan client-baseline step/rule" FAIL
+else
+  check "P29 zensu-plm.md has no ghost-scan client-baseline step/rule" PASS
+fi
+
 echo "----"
 echo "test-ghost-scan-test-detection: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
