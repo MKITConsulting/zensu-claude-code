@@ -1,11 +1,7 @@
 #!/bin/bash
 set -u
 
-if ! command -v claude >/dev/null 2>&1; then
-  echo "claude-promptfoo-wrapper: claude CLI not found on PATH — install Claude Code CLI." >&2
-  exit 127
-fi
-
+# jq is needed even for DRY_RUN (it parses the options JSON for the preview).
 if ! command -v jq >/dev/null 2>&1; then
   echo "claude-promptfoo-wrapper: jq not found on PATH — install jq." >&2
   exit 127
@@ -66,6 +62,12 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   printf '  %q' "${CMD[@]}"
   echo
   exit 0
+fi
+
+# Real run only — DRY_RUN previews above never need the claude CLI installed.
+if ! command -v claude >/dev/null 2>&1; then
+  echo "claude-promptfoo-wrapper: claude CLI not found on PATH — install Claude Code CLI." >&2
+  exit 127
 fi
 
 if [ ! -d "$WORKDIR" ]; then

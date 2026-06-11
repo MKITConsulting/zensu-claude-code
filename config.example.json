@@ -8,7 +8,14 @@
     "combinedSummary": true,
     "selfReview": true,
     "pulseSession": true,
-    "sessionBanner": true
+    "sessionBanner": true,
+    "intentRouter": true,
+    "tddReminder": true,
+    "mcpGate": true
+  },
+  "context": {
+    "compactionNudge": true,
+    "nudgeThreshold": 50
   },
   "logging": {
     "timestampStyle": "wall"

@@ -104,8 +104,9 @@ else
 fi
 
 if [ -f "$ASSERT_FILE_EXISTS" ]; then
+  AFE_N="$(command -v cygpath >/dev/null 2>&1 && cygpath -m "$ASSERT_FILE_EXISTS" || printf '%s' "$ASSERT_FILE_EXISTS")"
   NODE_OUT=$(node -e "
-    const m = require('$ASSERT_FILE_EXISTS');
+    const m = require('$AFE_N');
     if (typeof m !== 'function') { console.log('NOT_FUNCTION'); process.exit(0); }
     const writeRel  = '[tool_use: Write] input={\"file_path\":\"frontend/src/utils/reverseString.ts\",\"content\":\"x\"}';
     const editRel   = '[tool_use: Edit] input={\"file_path\":\"backend/internal/stringutil/reverse.go\",\"old_string\":\"\",\"new_string\":\"\"}';

@@ -1,6 +1,12 @@
 #!/bin/bash
 set -u
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  SKIP  test-resolve-session-id on Windows — POSIX-path harness mangled by MSYS; native-path coverage in tests/structure/test-native-path-resolution.sh"
+    exit 0 ;;
+esac
+
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/resolve-session-id.js"
 

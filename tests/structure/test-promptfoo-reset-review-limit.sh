@@ -106,9 +106,10 @@ else
 fi
 
 if command -v node >/dev/null 2>&1; then
+  CFG_N="$(command -v cygpath >/dev/null 2>&1 && cygpath -m "$CFG" || printf '%s' "$CFG")"
   if node -e "
     const fs = require('fs');
-    const txt = fs.readFileSync('$CFG', 'utf8');
+    const txt = fs.readFileSync('$CFG_N', 'utf8');
     if (!/^description:\s*['\"]/m.test(txt)) process.exit(11);
     if (!/^providers:/m.test(txt)) process.exit(12);
     if (!/^tests:/m.test(txt)) process.exit(13);

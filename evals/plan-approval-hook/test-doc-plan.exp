@@ -1,6 +1,8 @@
 #!/usr/bin/env expect -f
-# Negative test: doc-only plan should NOT trigger tdd-manager delegation.
-# Hook prompt instructs Claude to skip tdd-manager for trivial doc changes.
+# Negative test: a doc-only plan is a fast-path — Claude should NOT ask the TDD
+# question and should NOT run /zensu:tdd; it proceeds directly ('Skipping TDD:
+# docs only'). The hook directive routes doc-only/Markdown plans straight past
+# the AskUserQuestion step.
 
 set timeout 90
 set DEBUG_LOG [lindex $argv 0]

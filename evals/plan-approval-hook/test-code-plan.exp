@@ -1,6 +1,8 @@
 #!/usr/bin/env expect -f
-# Positive test: code-change plan SHOULD trigger tdd-manager delegation.
-# Hook prompt instructs Claude to delegate execution to zensu:tdd-manager.
+# Positive test: a code-change plan should make Claude ASK whether to run the
+# TDD flow (AskUserQuestion) and, on "Yes", route to the /zensu:tdd skill in
+# the main thread. We approve the plan, answer Yes to the TDD question, then
+# assert the 'Executing via /zensu:tdd' status line.
 
 set timeout 240
 set DEBUG_LOG [lindex $argv 0]
@@ -26,15 +28,29 @@ expect {
   }
 }
 
+# Ask-first: Claude should now ask whether to run the TDD flow. Answer Yes (1).
 expect {
-  -re "Delegating to zensu:tdd-manager|spawn.*tdd-manager subagent" {
-    send_user "\n>>> POSITIVE: tdd-manager delegation acknowledged\n"
+  -re "TDD flow|Run the strict|Yes .*TDD" {
+    send_user "\n>>> TDD question detected — answering Yes (1)\n"
+    send "1\r"
   }
-  -re "Skipping TDD" {
-    send_user "\n>>> ESCAPE-HATCH (unexpected for code change)\n"
+  -re "Executing via /zensu:tdd" {
+    send_user "\n>>> Routed to /zensu:tdd before an explicit prompt match\n"
   }
   timeout {
-    send_user "\n>>> TIMEOUT post-approval (Claude still processing)\n"
+    send_user "\n>>> TIMEOUT waiting for the TDD question\n"
+  }
+}
+
+expect {
+  -re "Executing via /zensu:tdd" {
+    send_user "\n>>> POSITIVE: /zensu:tdd execution acknowledged\n"
+  }
+  -re "Skipping TDD" {
+    send_user "\n>>> UNEXPECTED skip for a code change\n"
+  }
+  timeout {
+    send_user "\n>>> TIMEOUT post-answer (Claude still processing)\n"
   }
   eof { send_user "\n>>> session ended\n" }
 }

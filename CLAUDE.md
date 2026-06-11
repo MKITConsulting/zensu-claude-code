@@ -20,15 +20,31 @@ The two files serve different consumers:
 
 Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and never re-bumped while `plugin.json` advanced through 0.2.x → 0.3.x. Result: every release between 0.2.0 and 0.3.15 was invisible to the directory marketplace and users running `claude plugin install zensu@zensu` could not pull the new code without uninstalling + manually clearing the cache directory. Fixed in PR #31; this convention prevents recurrence.
 
-**Release commit checklist:**
+**Releasing — automated via the `Release` workflow** (`.github/workflows/release.yml`):
 
-1. `.claude-plugin/plugin.json` — `"version": "X.Y.Z"`
-2. `.claude-plugin/marketplace.json` — `plugins[0].version: "X.Y.Z"` (same value)
-3. `README.md` — version badge `version-X.Y.Z-green` (same value). Enforced by `tests/structure/test-zensu-help-skill.sh` and `tests/structure/test-reset-review-limit-skill.sh`, which derive the expected version from `plugin.json` and assert the badge matches.
-4. `CHANGELOG.md` — new `## [X.Y.Z] - YYYY-MM-DD` section, move applicable Unreleased entries down
-5. Commit subject: `chore(release): bump version to X.Y.Z`
+1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare` job runs the deterministic test gate, computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + `marketplace.json` + the README badge **together** to the same value, generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`), **pushes a `release/vX.Y.Z` branch**, and prints a "Compare & PR" link in the run summary. (Run with `dry_run: true` to preview the version + notes without pushing a branch.)
+2. Open the PR from that link, then review + **squash-merge** it. (CI pushes the branch but does not open the PR — the org caps the workflow token for PR creation; release/tag creation only needs the per-job `contents: write`, which works.)
+3. The `publish` job fires on the release commit landing on `main`, tags `main` HEAD and creates a **published** GitHub Release (notes = the new CHANGELOG section, source zip attached). Plugin **go-live is the merge itself** — the marketplace is the repo (`"source": "./"`), so users install from `main` HEAD; the tag/Release are the record, published atomically with the merge (Claude Code's plugin install ignores tags/Releases). Users pull it via `claude plugin marketplace update zensu`. The release notes were already reviewed in the bump PR body, so there is no separate draft-publish step.
 
-If `marketplace.json` cannot be bumped in the same commit (e.g. forgotten and the release already shipped), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
+The same-value invariant above is machine-enforced: the gate runs `tests/run-all.sh` (incl. the version-sync tests) before the branch is pushed. For a manual hotfix bump, follow the invariant by hand — `plugin.json` + `marketplace.json` + README badge (same value) + a new `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section + commit subject `chore(release): bump version to X.Y.Z`.
+
+If `marketplace.json` ever lags `plugin.json` (e.g. a hand bump that forgot it), open a follow-up PR titled `chore(marketplace): bump marketplace.json to X.Y.Z` and merge it before any user-side `claude plugin install <name>@<name>` attempt.
+
+## MCP Tool Classification (`hooks/lib/zensu-mcp-tools.sh`)
+
+**When the Zensu MCP server gains a new tool, classify it in `hooks/lib/zensu-mcp-tools.sh` in the same change** — a state-mutating tool goes in `ZENSU_MUTATION_TOOL_NAMES`; a read/telemetry tool goes in the `zensu_is_read_tool` allowlist (`ZENSU_READ_TOOL_PREFIXES` / `ZENSU_READ_TOOL_NAMES`).
+
+This file is the single source of truth for tool classification, consumed by two places:
+
+- `hooks/pre-mcp-zensu-gate.sh` — the PreToolUse write-gate: allows `zensu_is_read_tool` tools ungated and default-denies everything else.
+- `tests/structure/test-skill-workflow-markers.sh` — the build-time guard that fails if a skill calls a `zensu_is_mutation_tool` without the `--workflow-begin` / `--workflow-end` markers.
+
+Consequences of forgetting a new tool:
+
+- **New mutation tool, not added to `ZENSU_MUTATION_TOOL_NAMES`:** no security hole — the gate default-denies anything not on the read-allowlist, so it is still gated at runtime. But the skill-marker test will NOT flag a skill that calls it without the workflow markers, so a wrapper-less skill could slip through CI. **Test-coverage gap, not an open gate.**
+- **New read tool, not added to the read-allowlist:** fail-closed — it is gated by default and wrongly DENIED on the main thread until added.
+
+Invariant: `ZENSU_MUTATION_TOOL_NAMES` must stay a strict superset of every skill's `--workflow-begin --tools` declaration (a skill may only declare real mutation tools). `tests/structure/test-skill-workflow-markers.sh` pins the read/mutation classification of a representative sample.
 
 ## Pull Request Workflow
 

@@ -76,28 +76,32 @@ case "$CURRENT" in
 esac
 NEXT=$((CURRENT + 1))
 
-TS="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+if [ "$(_zensu_log_style)" = "none" ]; then
+  PAYLOAD="$(printf '{"count":%d}' "$NEXT")"
+else
+  PAYLOAD="$(printf '{"count":%d,"ts":"%s"}' "$NEXT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
+fi
 if TMP_FILE="$(mktemp "${STATE_DIR}/rounds-${SESSION_ID}.XXXXXX" 2>/dev/null)"; then
-  if printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$TMP_FILE" \
+  if printf '%s\n' "$PAYLOAD" > "$TMP_FILE" \
      && mv "$TMP_FILE" "$COUNTER_FILE" 2>/dev/null; then
     :
   else
     rm -f "$TMP_FILE" 2>/dev/null
     echo "zensu post-review hook: failed to persist counter for session ${SESSION_ID} (write/mv)" >&2
-    if ! printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$COUNTER_FILE" 2>/dev/null; then
+    if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
       echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
     fi
   fi
 else
   echo "zensu post-review hook: mktemp failed under ${STATE_DIR} for session ${SESSION_ID}" >&2
-  if ! printf '{"count":%d,"ts":"%s"}\n' "$NEXT" "$TS" > "$COUNTER_FILE" 2>/dev/null; then
+  if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
     echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
   fi
 fi
 
 COMBINED_SUMMARY_DIRECTIVE=""
 if zensu_combined_summary_enabled; then
-  COMBINED_SUMMARY_DIRECTIVE=$'\n\nAfter your status line, produce a CHAIN-END SUMMARY with three sections (pull data from your own main-thread TDD execution and the prior zensu:code-reviewer Agent results in your context, do NOT re-spawn agents):\n\n## Implementation Summary\nWhat this main-thread TDD session built: feature title, files modified, tests created, build status (passed / skipped / failed), mtime audit verdict, coverage status. Cite the plan + log file paths.\n\n## Review Summary\nFinal zensu:code-reviewer verdict: PASS / PASS with suggestions / max-rounds reached. Findings count by severity. Files reviewed.\n\n## Auto-fix History\nFor each round 1..N: what findings were fixed in-thread, what was changed, what remains. Skip this section if zero rounds (chain ended on first review).'
+  COMBINED_SUMMARY_DIRECTIVE=$'\n\nAfter your status line, produce a CHAIN-END SUMMARY in narrative form with these sections IN THIS ORDER (pull data from your own main-thread TDD execution and the prior zensu:code-reviewer Agent results in your context, do NOT re-spawn agents). The TL;DR comes LAST:\n\n## Problem\nIn plain words: the feature, bug, or need this session addressed — why the work happened.\n\n## What I built\nNumbered deliverables. For each: what it does in plain words, its status (done / merged / built-tested), and a PR link if one exists. Carry the audit facts here: feature title, files modified, tests created, build status (passed / skipped / failed), mtime audit verdict, coverage status. Cite the plan + log file paths.\n\n## How I built it\nThe method and the review trail. State the TDD discipline followed, then the final zensu:code-reviewer verdict (PASS / PASS with suggestions / max-rounds reached) with findings count by severity and files reviewed. Then the auto-fix history: list EVERY review round 1..N — including rounds that fixed nothing. For each round give the round number and either the findings fixed in-thread (what changed, what remains), OR — for a verification round with no findings — mark it explicitly as PASS — 0 findings, nothing to fix. Always include the final clean verification round so the reader sees the chain converged with every finding addressed. At least one review round always ran.\n\n## Open\nWhat is left: any deferred suggestions (the buffered ### Suggestions block) or max-rounds findings requiring manual fix, plus the next step. If nothing is open, say so in one line.\n\n## TL;DR\nExactly ONE sentence, and it MUST be the last section: what shipped and the test verdict.'
 fi
 
 # When the self-review terminal stage is enabled, the code-reviewer chain hands

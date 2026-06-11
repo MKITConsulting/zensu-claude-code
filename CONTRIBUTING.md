@@ -33,6 +33,7 @@ You are welcome to clone and run the plugin locally for evaluation or learning p
 ```bash
 git clone https://github.com/MKITConsulting/zensu-claude-code.git
 cd zensu-claude-code
+claude plugin marketplace add .
 claude plugin install zensu --scope project
 export ZENSU_API_KEY=zsk_...
 ```

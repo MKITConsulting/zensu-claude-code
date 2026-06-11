@@ -28,11 +28,12 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 - **Journey** — user path through one or more Features; contributes to release readiness.
 - **Security Classification** — `public | internal | confidential | restricted`. Drives the 0–10 security score.
 - **Security Score** — computed from classification + OWASP tags + compliance tags + security tests + reviews.
-- **Revision** — versioned snapshot of a Feature's implementation summary.
+- **Revision** — a Feature's build-out *stage* over time. Auto-versioned (v1, v2, …); each tracks scope changes, acceptance criteria, breaking changes, effort, and target release. v1 is the baseline stage; later revisions are deeper build-out. `/zensu:ghost-scan` seats each discovered feature at a v1 baseline; `/zensu:implement` adds one per implementation.
+- **Subfeature** — *structural* fan-out of a Feature into child parts (same component + release): workflow steps, happy-vs-error paths, interface or data variations. A feature's two growth axes are revisions (stages over time) and subfeatures (parts); both differ from the product-level roadmap (features across a quarter timeline).
 
 ## Three Layers (embedded — architecture overview)
 
-1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield) or `/zensu:ghost-scan` (brownfield) produce tracked features.
+1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
 2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + `zensu:code-reviewer` subagent) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop guaranteed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 the TDD workflow runs in the main agent (was a `tdd-manager` subagent); `zensu:code-reviewer` is the only remaining subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
@@ -52,15 +53,17 @@ Before answering questions in the right column, `Read` the source file in the le
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
 | MCP server URL, MCP tool surface | `.mcp.json` + `.claude-plugin/plugin.json` |
 | Hook flags (`autoTdd`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
+| Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
 | Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
 | TDD FSM details, phase transitions, gate logic, three-channel logging | `docs/tdd-manager-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
-| Hook scripts (what each does, when it fires) | `README.md` § Hooks (9) table + `hooks/<script>.sh` source |
+| Hook scripts (what each does, when it fires) | `README.md` § Hooks (10) table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
 | Workflow step order (new product / existing codebase / quick feature) | `README.md` § Typical Workflows |
+| Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.md` § Decision Rules + `README.md` § Typical Workflows |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
 | Platform support, Windows caveats | `README.md` § Platform Support |

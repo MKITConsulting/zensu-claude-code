@@ -1,6 +1,12 @@
 #!/bin/bash
 set -u
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  SKIP  test-pre-edit-symlink-reject on Windows — Git Bash cannot create real symlinks"
+    exit 0 ;;
+esac
+
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 

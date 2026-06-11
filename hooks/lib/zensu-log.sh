@@ -32,12 +32,14 @@ case "${1:-}" in
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
     exit $?
     ;;
-  --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset)
+  --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
+    tools_val=""
     while [ $# -gt 0 ]; do
       case "$1" in
         --session) session_val="${2:-}"; shift 2 ;;
+        --tools)   tools_val="${2:-}";   shift 2 ;;
         *) shift ;;
       esac
     done
@@ -66,6 +68,10 @@ case "${1:-}" in
       --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
       --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
       --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
+      --workflow-begin)
+        tdd_workflow_begin "$session_val" "$tools_val"
+        ;;
+      --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
       --tdd-reset)    tdd_clear_session "$session_val" ;;
     esac
     exit $?

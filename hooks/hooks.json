@@ -9,6 +9,15 @@
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-edit-tdd-reminder.sh"
           }
         ]
+      },
+      {
+        "matcher": "mcp__plugin_zensu_zensu__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/pre-mcp-zensu-gate.sh"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -64,6 +73,24 @@
           {
             "type": "command",
             "command": "${CLAUDE_PLUGIN_ROOT}/hooks/stop-chain-enforcer.sh"
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-context-nudge.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-intent-router.sh"
+          },
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-tdd-reminder.sh"
           }
         ]
       }

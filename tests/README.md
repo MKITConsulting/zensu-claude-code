@@ -28,6 +28,7 @@ Exit 0 iff every selected suite passes. A timestamped report lands in `tests/res
 | `tests/e2e-plm/` | live | `zensu-plm` agent workflow + MCP tool sequencing |
 | `tests/e2e-skills/` | live | `zensu-help` · `plan-review` · `self-review` skills + `review-aspect` agent |
 | `tests/e2e-tdd/` | live | full `/zensu:tdd` cycle (RED→GREEN→review→self-review→done), real `node --test` |
+| `tests/e2e-context-nudge/` | live | `user-prompt-context-nudge.sh` parsing a real `claude --print` session transcript (read→occupancy→threshold→`/compact` proposal) |
 | `tests/structure/test-tdd-full-cycle.sh` | deterministic | the same full cycle driven through the hooks (no API) |
 
 ## Running individual suites

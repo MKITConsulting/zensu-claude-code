@@ -80,6 +80,19 @@ grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed l
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL
 grep -qF '## Self-Review Summary' "$SKILL_MD" && check "V11 renders ## Self-Review Summary report section" PASS || check "V11 Self-Review Summary section" FAIL
+
+for h in "## Problem" "## What I built" "## How I built it" "## Open" "## TL;DR"; do
+  grep -qF "$h" "$SKILL_MD" && check "V11b final report contains '$h'" PASS || check "V11b final report contains '$h'" FAIL
+done
+
+REPORT_BLOCK="$(awk '/^### Final report/{f=1} f&&/^```/{c++; if(c>=2) exit} f&&c>=1{print}' "$SKILL_MD")"
+LAST_HEADING="$(printf '%s\n' "$REPORT_BLOCK" | grep -E '^## ' | tail -1)"
+[ "$LAST_HEADING" = "## TL;DR" ] && check "V11c '## TL;DR' is the last heading in the Final report block" PASS || check "V11c '## TL;DR' last in Final report block (got: $LAST_HEADING)" FAIL
+
+REPORT_SEQ="$(printf '%s\n' "$REPORT_BLOCK" | grep -E '^## ' | sed 's/[[:space:]]*$//' | paste -sd'|' -)"
+EXPECTED_REPORT_SEQ="## Problem|## What I built|## How I built it|## Self-Review Summary|## Open|## TL;DR"
+[ "$REPORT_SEQ" = "$EXPECTED_REPORT_SEQ" ] && check "V11d Final report emits exact ordered heading sequence" PASS || check "V11d Final report ordered sequence (got: $REPORT_SEQ)" FAIL
+
 grep -qiE 'exactly one|one fix round|a single fix round' "$SKILL_MD" && check "V12 documents the exactly-one fix round" PASS || check "V12 one fix round" FAIL
 grep -qiF 'do not spawn' "$SKILL_MD" && check "V13 forbids spawning the code-reviewer (terminal)" PASS || check "V13 no reviewer respawn" FAIL
 
@@ -93,7 +106,7 @@ MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/nu
 { [ "$PLUGIN_VERSION" = "$MARKETPLACE_VERSION" ] && [ -n "$PLUGIN_VERSION" ]; } && check "V17 plugin.json == marketplace.json version (cross-file invariant)" PASS || check "V17 version cross-file invariant" FAIL
 
 { [ -f "$README_MD" ] && grep -qF "version-${EXPECTED_VERSION}-green" "$README_MD"; } && check "V18 README.md version badge contains $EXPECTED_VERSION" PASS || check "V18 README badge $EXPECTED_VERSION" FAIL
-{ [ -f "$README_MD" ] && grep -qF "### Skills (10)" "$README_MD"; } && check "V19 README.md Skills section heading reads '### Skills (10)'" PASS || check "V19 README Skills (10)" FAIL
+{ [ -f "$README_MD" ] && grep -qF "### Skills (11)" "$README_MD"; } && check "V19 README.md Skills section heading reads '### Skills (11)'" PASS || check "V19 README Skills (10)" FAIL
 { [ -f "$README_MD" ] && grep -qF "/zensu:self-review" "$README_MD"; } && check "V20 README.md mentions /zensu:self-review in the skills table" PASS || check "V20 README mentions self-review" FAIL
 { [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" "$CHANGELOG_MD"; } && check "V21 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS || check "V21 CHANGELOG $EXPECTED_VERSION dated section" FAIL
 

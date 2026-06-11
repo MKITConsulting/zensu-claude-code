@@ -98,6 +98,7 @@ run_test "$EVAL_DIR/test-log-style-no-node.sh"  "test-log-style-no-node.sh"
 run_test "$EVAL_DIR/test-log-style-negative-delta.sh" "test-log-style-negative-delta.sh"
 run_test "$EVAL_DIR/test-log-style-bad-epoch.sh"      "test-log-style-bad-epoch.sh"
 run_test "$EVAL_DIR/test-log-style-long-delta.sh"     "test-log-style-long-delta.sh"
+run_test "$EVAL_DIR/test-log-style-artifacts.sh"      "test-log-style-artifacts.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Hook gate offline tests" | tee -a "$REPORT"
@@ -110,11 +111,9 @@ run_test "$EVAL_DIR/test-no-pluginroot-env.sh"   "test-no-pluginroot-env.sh"
 run_test "$EVAL_DIR/test-pluginroot-default-setu.sh" "test-pluginroot-default-setu.sh"
 
 echo "" | tee -a "$REPORT"
-echo "▸ Config resolution-order offline tests" | tee -a "$REPORT"
+echo "▸ Config deep-merge offline tests" | tee -a "$REPORT"
 
-run_test "$EVAL_DIR/test-resolution-order-env-override.sh"    "test-resolution-order-env-override.sh"
-run_test "$EVAL_DIR/test-resolution-order-project-local.sh"   "test-resolution-order-project-local.sh"
-run_test "$EVAL_DIR/test-resolution-order-global-fallback.sh" "test-resolution-order-global-fallback.sh"
+run_test "$EVAL_DIR/test-config-merge.sh" "test-config-merge.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Auto-fix flag offline tests (Suggestions routing + loop guard)" | tee -a "$REPORT"
@@ -127,6 +126,8 @@ run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-reset-on-fresh-tdd.sh" "test-autofix-rounds-reset-on-fresh-tdd.sh"
+run_test "$EVAL_DIR/test-rounds-default-location.sh"          "test-rounds-default-location.sh"
+run_test "$EVAL_DIR/test-post-review-combined-summary.sh"     "test-post-review-combined-summary.sh"
 
 echo "" | tee -a "$REPORT"
 echo "▸ Pre-Edit TDD-Gate offline tests" | tee -a "$REPORT"

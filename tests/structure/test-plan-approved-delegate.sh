@@ -1,9 +1,10 @@
 #!/bin/bash
-# Pins plan-approved-delegate.sh (PostToolUse:ExitPlanMode) behavioral output (0.4.0):
+# Pins plan-approved-delegate.sh (PostToolUse:ExitPlanMode) behavioral output:
 #   default (autoTdd on) -> emits SessionStart-style additionalContext JSON that
-#     routes the MAIN thread to the /zensu:tdd Skill (skill='zensu:tdd'), with the
-#     'Executing via /zensu:tdd' / 'Skipping TDD' status-line contract and the
-#     doc-only (README/CHANGELOG/markdown) escape exception.
+#     directs the MAIN thread to ASK the user (AskUserQuestion) whether to run
+#     the /zensu:tdd Skill (skill='zensu:tdd'), with the 'Executing via
+#     /zensu:tdd' / 'Skipping TDD' status-line contract and the doc-only
+#     (README/CHANGELOG/markdown) escape exception.
 #   hooks.autoTdd=false  -> silent (no output), so the hook can be disabled.
 #   MUST NOT reference the removed pre-0.4.0 'tdd-manager' subagent.
 # This is the deterministic counterpart to evals/plan-approval-hook (interactive
@@ -81,6 +82,13 @@ if printf '%s' "$OUT" | grep -qiF 'main thread' \
   check "D6 routes in main thread, not via removed tdd-manager subagent dispatch" PASS
 else
   check "D6 routes in main thread, not via removed tdd-manager subagent dispatch" FAIL
+fi
+
+# D8 ask-first: default directive routes through the AskUserQuestion tool
+if printf '%s' "$OUT" | grep -qF 'AskUserQuestion'; then
+  check "D8 default directive asks the user (AskUserQuestion) before TDD" PASS
+else
+  check "D8 default directive asks the user (AskUserQuestion) before TDD" FAIL
 fi
 
 # D7 hooks.autoTdd=false -> silent (hook can be disabled)
