@@ -20,6 +20,7 @@ case "$SOURCE" in
   resume|compact) exit 0 ;;
 esac
 
+if zensu_hook_enabled tddImplementation; then
 cat <<'JSON'
 {
   "hookSpecificOutput": {
@@ -28,4 +29,14 @@ cat <<'JSON'
   }
 }
 JSON
+else
+cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "SessionStart",
+    "additionalContext": "Zensu PLM plugin is active in vanilla implementation mode (hooks.tddImplementation=false). Convention: for any task that adds or modifies executable code, prefer Claude Code Plan mode; when the user approves the plan, the plan-approval hook directs you to ASK the user (via the AskUserQuestion tool) whether to run the /zensu:tdd skill. On yes you run the implementation in vanilla mode in the MAIN thread — no RED→GREEN discipline, tests at your discretion; the workflow keeps the Phase 5/6 evidence audits and the guaranteed zensu:code-reviewer chain. On no you implement the plan directly. Either way, do not hand-implement code that should go through the workflow without asking first (fast-paths that skip the question: doc-only plans, an explicit preference already in the approval message, non-interactive Auto Mode). Feature planning and tracking run via the zensu-plm agent and /zensu:bootstrap or /zensu:ghost-scan. Use /zensu:zensu-help to answer questions about Zensu. This is a one-time per-session orientation; the plan-approval hook gives the authoritative directive at approval time."
+  }
+}
+JSON
+fi
 exit 0

@@ -51,10 +51,60 @@ if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
   exit 0
 fi
 
-case "$FILE_PATH" in
-  *..*) ;;
-  */.zensu/*|.zensu/*) exit 0 ;;
-esac
+# Path classification on the NORMALIZED form (dot-segments, duplicate slashes,
+# case folding, traversal, and the resolved TDD_STATE_DIR override all collapse
+# to the same class) so the state deny below cannot be evaded by an alternate
+# spelling that the broader .zensu/ exemption would then allow.
+PATH_CLASS="$(FP="$FILE_PATH" SD="$(dirname "$STATE_FILE")" node -e '
+  const path = require("path");
+  const fs = require("fs");
+  const lownorm = p => path.posix.normalize(String(p).replace(/\\/g, "/")).toLowerCase();
+  const realdir = p => { try { return fs.realpathSync(p); } catch (_) { return path.resolve(p); } };
+  const realfile = p => {
+    try { return fs.realpathSync(p); }
+    catch (_) { return path.join(realdir(path.dirname(p)), path.basename(p)); }
+  };
+  const fpRaw = process.env.FP || "";
+  const f = lownorm(fpRaw);
+  const fAbs = lownorm(realfile(path.resolve(fpRaw)));
+  const sAbs = lownorm(realdir(path.resolve(process.env.SD || ""))) + "/";
+  if (f.indexOf("/.zensu/state/") >= 0 || f.indexOf(".zensu/state/") === 0 || fAbs.indexOf(sAbs) === 0) { console.log("state"); }
+  else if (f.indexOf("/.zensu/") >= 0 || f.indexOf(".zensu/") === 0) { console.log("zensu"); }
+  else { console.log("other"); }
+' 2>/dev/null)"
+
+# Session-state hardening: while a session is active, Edit/Write on the
+# session-state files is denied in BOTH modes — flipping `vanilla`/`active`
+# there would silently un-gate the session. Legitimate state writes go through
+# zensu-log.sh via the Bash tool, which this hook never sees. Checked BEFORE
+# the vanilla bypass and the .zensu/ exemption on purpose.
+if [ "$PATH_CLASS" = "state" ]; then
+  PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
+    const root = process.env.PLUGIN_ROOT || "";
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason:
+          "TDD-Phase-Gate: direct edits to the session-state files (.zensu/state/) are blocked while a session is active — state flags change only through bash " + root + "/hooks/lib/zensu-log.sh (e.g. --tdd-begin, --tdd-reset, --phase)."
+      }
+    }));
+  '
+  echo
+  exit 0
+fi
+
+# Vanilla implementation mode: the per-session `vanilla` flag was frozen into
+# the state file by `--tdd-begin` (hooks.tddImplementation=false at begin time).
+# The gate reads ONLY the state flag — never live config — so a mid-session
+# config flip can neither un-gate a strict session nor wedge a vanilla one.
+if [ "$(tdd_vanilla_mode "$STATE_FILE")" = "true" ]; then
+  exit 0
+fi
+
+if [ "$PATH_CLASS" = "zensu" ]; then
+  exit 0
+fi
 
 PHASE=$(tdd_phase "$STATE_FILE")
 STEP=$(tdd_step "$STATE_FILE")
