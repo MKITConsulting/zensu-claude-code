@@ -1,0 +1,81 @@
+TDD STARTED — Vanilla Implementation Mode (hooks.tddImplementation) | steps: 9
+EXECUTION STARTED
+W0 WIRED — kcov 43 present (/opt/homebrew/bin/kcov, already installed)
+S1 RED test-tdd-vanilla-mode.sh(L1-L3) — FAIL: tdd_vanilla_mode unresolved; phase rebuild drops flag; clear leaves flag true
+S1 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+S1 GREEN — PASS (1 attempts, 3 tests)
+S2 RED test-tdd-vanilla-mode.sh(A,B,G) — FAIL: --tdd-begin echoes nothing, no vanilla flag persisted
+S2 IMPL completed — files: hooks/lib/zensu-log.sh
+S2 GREEN — PASS (1 attempts, 6 tests)
+S3 RED test-tdd-vanilla-mode.sh(GB1-GB3,E1) — FAIL: gate denies vanilla-session edits (no state-flag bypass)
+S3 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh
+S3 GREEN — PASS (1 attempts, 13 tests)
+S4 RED test-tdd-vanilla-mode.sh(F1,F3) — FAIL: ask-hooks emit strict directive under vanilla config
+S4 IMPL completed — files: hooks/plan-approved-delegate.sh, hooks/user-prompt-tdd-reminder.sh
+S4 GREEN — PASS (1 attempts, 4 tests)
+S5 RED test-tdd-vanilla-mode.sh(D6) — FAIL: post-review emits strict fix directive in vanilla session
+S5 IMPL completed — files: hooks/post-review-tdd-delegate.sh
+S5 GREEN — PASS (1 attempts, 2 tests)
+S6 RED test-tdd-vanilla-mode.sh(BNR1,BNR3) — FAIL: banner/primer static strict wording under vanilla config
+S6 IMPL completed — files: hooks/session-start-banner.sh, hooks/session-start-primer.sh
+S6 GREEN — PASS (1 attempts, 4 tests)
+S7 RED test-tdd-vanilla-mode.sh(H1,H2) — FAIL: SKILL.md section + config.example.json key missing
+S7 IMPL completed — files: skills/tdd/SKILL.md, config.example.json (cap bump skipped: SKILL.md at 390 <= 400)
+S7 GREEN — PASS (1 attempts, 2 tests)
+W1 WIRED — README.md (opt-out row + activation note), docs/tdd-manager-workflow.md (sec1 pointer + sec5 vanilla subsection), skills/zensu-help/SKILL.md (flag row), skills/self-review/SKILL.md (vanilla must-fix clause), skills/implement/SKILL.md (vanilla branch note)
+PHASE5 CHECKPOINT — cmd="for f in hooks/lib/zensu-log.sh hooks/lib/zensu-tdd-phase.sh hooks/pre-edit-tdd-reminder.sh hooks/post-review-tdd-delegate.sh hooks/plan-approved-delegate.sh hooks/user-prompt-tdd-reminder.sh hooks/session-start-banner.sh hooks/session-start-primer.sh tests/structure/test-tdd-vanilla-mode.sh; do bash -n \"$f\" || echo \"SYNTAX FAIL $f\"; done; echo \"syntax-check done rc=$?\"" exit=0 result="all 9 scripts parse clean"
+PHASE5 CHECKPOINT — cmd="bash tests/run-all.sh 2>&1 | tail -25" exit=0 result="49 suites passed / 0 failed (incl. test-tdd-vanilla-mode.sh 34 checks)"
+AUDIT — cmd="bash tests/run-all.sh 2>&1 | tail -4" exit=0 result="49 suites passed / 0 failed"
+AUDIT — cmd="rm -rf /tmp/kcov-vanilla && kcov --include-pattern=hooks/ /tmp/kcov-vanilla bash tests/structure/test-tdd-vanilla-mode.sh 2>&1 | tail -5" exit=0 result="test 34/34 PASS under kcov, but coverage data EMPTY"
+COVERAGE SKIPPED — kcov 43 installed and invoked but its bash engine records 0 files on macOS arm64 (child-bash tracing non-functional); no per-file metrics derivable
+MTIME AUDIT — inconclusive by design: single accumulating test file (test-tdd-vanilla-mode.sh) makes per-step test-vs-impl mtime comparison meaningless; supplemented by FSM history audit: 7/7 steps RED_FAIL precedes IMPL (gate-enforced, 0 violations)
+PRECONDITION DRIFT AUDIT — none: kcov decision=install, present in W0 WIRED entry and invoked in coverage AUDIT entry; node/git present, no decisions required
+CROSS-LAYER AUDIT — no pairings required: producer (zensu-log.sh --tdd-begin) and consumers (pre-edit gate, post-review hook) of the new vanilla flag all have their own IMPL steps with RED->GREEN coverage in this plan; no unchanged layer consumes the new value
+TDD COMPLETE — 7/7 GREEN | Integration: 2 WIRED | Build: – n/a (no build step wired; bash/markdown plugin, CI gate = tests/run-all.sh) | Coverage: SKIPPED (kcov bash engine empty on macOS arm64)
+REVIEW ROUND 1 — fixing 5 IMPORTANT + 11 suggestions in-thread (steps R1-R6)
+R1 RED test-tdd-vanilla-mode.sh(A3,M1-M3) — FAIL: echo on failed activation; --mode missing
+R1 IMPL completed — files: hooks/lib/zensu-log.sh
+R1 GREEN — PASS (1 attempts, 5 tests)
+R2 RED test-tdd-vanilla-mode.sh(D6 ext) — FAIL: shared GREEN done-phrase contradicts vanilla fragment
+R2 IMPL completed — files: hooks/post-review-tdd-delegate.sh
+R2 GREEN — PASS (1 attempts, 4 tests)
+R3 RED test-tdd-vanilla-mode.sh(SP1,SP2) — FAIL: state files editable through exemption/bypass
+R3 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh
+R3 GREEN — PASS (1 attempts, 3 tests)
+R4 RED test-tdd-vanilla-mode.sh(H3-H5) — FAIL: step-number coupling, no --mode in self-review, no overlay note
+R4 IMPL completed — files: skills/tdd/SKILL.md, skills/self-review/SKILL.md, README.md, CLAUDE.md
+R4 GREEN — PASS (1 attempts, 3 tests)
+R5 GREEN — PASS (characterization drift guard, 3 tests; heredocs verified lockstep, no prod change)
+R6 GREEN — PASS (infra hardening: live-vanilla-config pins for witness+stop, MS1 malformed-state characterization, hermetic witness-test config; 51+18 checks green)
+ROUND1 CHECKPOINT — cmd="bash tests/run-all.sh 2>&1 | tail -4" exit=0 result="49 suites passed / 0 failed after review-fix round 1"
+REVIEW ROUND 2 — fixing 4 IMPORTANT + 9 suggestions (steps R7-R11; A3-latency suggestion consciously accepted)
+R7 RED test-tdd-vanilla-mode.sh(SP4-SP8) — FAIL: non-normalized spellings evade state deny
+R7 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh
+R7 GREEN — PASS (1 attempts, 6 tests; mirror suite intact)
+R8 RED test-tdd-vanilla-mode.sh(M4) — FAIL: arg-loop spin on dangling --session
+R8 IMPL completed — files: hooks/lib/zensu-log.sh
+R8 GREEN — PASS (1 attempts, 1 test; shift-safe loops + freeze-write rc propagation)
+R9 GREEN — PASS (strengthened D9 branch pins + parity EXTRA_BLOCKS guard, 58 checks green)
+R10 RED test-tdd-vanilla-mode.sh(L4) — FAIL: phase rebuild drops workflow window flags
+R10 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+R10 GREEN — PASS (1 attempts, 1 test; preserve-all phase write, workflow window survives)
+R11 WIRED — README intro reconciled, CLAUDE.md carve-out scope+wording fixed, reminder header comment clarified, test chmod +x
+ROUND2 CHECKPOINT — cmd="bash tests/run-all.sh 2>&1 | tail -4" exit=0 result="49 suites passed / 0 failed after review-fix round 2"
+REVIEW ROUND 3 — fixing 3 IMPORTANT + 5 suggestions (steps R12-R15)
+R12 RED test-tdd-vanilla-mode.sh(M4b,M4c) — FAIL: remaining bare shift 2 arms spin
+R12 IMPL completed — files: hooks/lib/zensu-log.sh
+R12 GREEN — PASS (1 attempts, 2 tests; all 7 arg arms shift-safe)
+R13 RED test-tdd-vanilla-mode.sh(L5,L6) — FAIL: array-shape state accepted by flag/workflow writers
+R13 IMPL completed — files: hooks/lib/zensu-tdd-phase.sh
+R13 GREEN — PASS (1 attempts, 2 tests; uniform array-shape guards)
+R14 RED test-tdd-vanilla-mode.sh(SP9) — FAIL: symlink alias evades state deny
+R14 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh
+R14 GREEN — PASS (1 attempts, 1 test; realpath-resolved state deny, all SP pins green)
+R15 WIRED — CLAUDE.md carve-out citations+non-exhaustive lists, README state-deny qualifier
+ROUND3 CHECKPOINT — cmd="bash tests/run-all.sh 2>&1 | tail -3" exit=0 result="49 suites passed / 0 failed after review-fix round 3 (new test now 64 checks)"
+REVIEW ROUND 4 — suggestions only (6), fixing all as R16
+R16 RED test-tdd-vanilla-mode.sh(SP10) — FAIL: final-component symlink evades state deny
+R16 IMPL completed — files: hooks/pre-edit-tdd-reminder.sh, hooks/lib/zensu-tdd-phase.sh, CLAUDE.md, tests/structure/test-tdd-vanilla-mode.sh
+R16 GREEN — PASS (1 attempts, 1 test; 65 checks)
+ROUND4 CHECKPOINT — cmd="bash tests/run-all.sh 2>&1 | tail -3" exit=0 result="49 suites passed / 0 failed after round-4 suggestion fixes"
+CHAIN DONE — reviewer PASS round 5, self-review clean (0 must-fix), chain terminus

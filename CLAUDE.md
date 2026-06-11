@@ -9,6 +9,18 @@ Runtime `.zensu/plans/*.md` and `.zensu/logs/*.log` are local-only artifacts
 (gitignored, never committed) — not part of the repository and exempt from this
 rule. Every tracked file must be English-only.
 
+**Carve-out — verbatim user-utterance match literals.** Hook directive strings
+— and verbatim citations of those literals in structure-test pins, in
+README/CHANGELOG feature descriptions, and in this carve-out — may contain
+non-English phrases ONLY as match literals for real user input:
+the TDD preference fast-paths (e.g. `'kein tdd'`, `'mit tdd'`, `'tdd bitte'`)
+and the generic-action literals that are explicitly NOT a preference
+(e.g. `'mach mal'`, `'los gehts'`, `'jetzt umsetzen'`) in
+`plan-approved-delegate.sh` / `user-prompt-tdd-reminder.sh`. They exist to
+recognize what multilingual users actually type, never as prose. Keep these
+phrase lists in lockstep across every directive variant (strict and vanilla)
+— never edit one variant alone.
+
 ## Version Bumps
 
 **Every plugin version bump MUST update both `.claude-plugin/plugin.json` AND `.claude-plugin/marketplace.json` in the same commit.**

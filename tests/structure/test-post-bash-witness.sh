@@ -5,6 +5,8 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
+ZENSU_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"; export ZENSU_CONFIG
+
 PASS=0; FAIL=0
 check() {
   local label="$1" cond="$2"

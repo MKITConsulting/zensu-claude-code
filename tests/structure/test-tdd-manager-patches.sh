@@ -23,10 +23,10 @@ fi
 check "skills/tdd/SKILL.md exists" PASS
 
 LINES=$(wc -l <"$AGENT")
-if [ "$LINES" -le 400 ]; then
-  check "skill line count <= 400 (actual: $LINES)" PASS
+if [ "$LINES" -le 430 ]; then
+  check "skill line count <= 430 (actual: $LINES)" PASS
 else
-  check "skill line count <= 400 (actual: $LINES)" FAIL
+  check "skill line count <= 430 (actual: $LINES)" FAIL
 fi
 
 # Patch 1 — 3 new Rationalization Counters
