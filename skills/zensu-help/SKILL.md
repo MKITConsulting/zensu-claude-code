@@ -52,7 +52,7 @@ Before answering questions in the right column, `Read` the source file in the le
 |---|---|
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
 | MCP server URL, MCP tool surface | `.mcp.json` + `.claude-plugin/plugin.json` |
-| Hook flags (`autoTdd`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
+| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
 | Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
