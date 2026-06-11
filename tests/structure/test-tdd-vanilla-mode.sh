@@ -209,11 +209,16 @@ evil_path_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"
 [ "$(gate "$(evil_path_payload "$TDD_STATE_DIR/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
   && check "SP8 resolved TDD_STATE_DIR override location denied too" PASS || check "SP8 state-dir override deny" FAIL
 ln -s "$TDD_STATE_DIR" "$PROJ/statelink" 2>/dev/null
-{ [ -L "$PROJ/statelink" ] && [ "$(gate "$(evil_path_payload "$PROJ/statelink/tdd-phase-evil.json" "$SID_B")")" = "deny" ]; } \
-  && check "SP9 symlink alias to the state dir denied (realpath-resolved)" PASS || check "SP9 symlink-alias deny (setup ok: $([ -L "$PROJ/statelink" ] && echo yes || echo no))" FAIL
-ln -s "$TDD_STATE_DIR/tdd-phase-${SID_B}.json" "$PROJ/innocent.json" 2>/dev/null
-{ [ -L "$PROJ/innocent.json" ] && [ "$(gate "$(evil_path_payload "$PROJ/innocent.json" "$SID_B")")" = "deny" ]; } \
-  && check "SP10 file symlink to a state file denied (full-path realpath)" PASS || check "SP10 file-symlink deny (setup ok: $([ -L "$PROJ/innocent.json" ] && echo yes || echo no))" FAIL
+if [ -L "$PROJ/statelink" ]; then
+  [ "$(gate "$(evil_path_payload "$PROJ/statelink/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
+    && check "SP9 symlink alias to the state dir denied (realpath-resolved)" PASS || check "SP9 symlink-alias deny" FAIL
+  ln -s "$TDD_STATE_DIR/tdd-phase-${SID_B}.json" "$PROJ/innocent.json" 2>/dev/null
+  { [ -L "$PROJ/innocent.json" ] && [ "$(gate "$(evil_path_payload "$PROJ/innocent.json" "$SID_B")")" = "deny" ]; } \
+    && check "SP10 file symlink to a state file denied (full-path realpath)" PASS || check "SP10 file-symlink deny" FAIL
+else
+  check "SP9 SKIPPED — symlinks unavailable on this platform (ln -s failed)" PASS
+  check "SP10 SKIPPED — symlinks unavailable on this platform (ln -s failed)" PASS
+fi
 
 echo "== Witness: records in vanilla session (live vanilla config) =="
 echo '{"tool_input":{"command":"npm test"},"tool_response":{"stdout":"ok"},"session_id":"'"$SID_B"'"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$WITNESS" >/dev/null 2>&1
