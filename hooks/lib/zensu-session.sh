@@ -37,7 +37,7 @@ zensu_resolve_session_via_helper() {
 
 zensu_resolve_session_id() {
   local from_json="${1:-}"
-  local sanitized key cache cached helper_out
+  local sanitized helper_out
   if [ -n "$from_json" ]; then
     sanitized="${from_json//[^A-Za-z0-9_-]/_}"
     if [ -n "$sanitized" ]; then
@@ -51,19 +51,7 @@ zensu_resolve_session_id() {
       return 0
     fi
   fi
-  key="$(zensu_session_key)"
-  cache="${CLAUDE_PROJECT_DIR:-.}/.zensu/state/session-id-${key}.txt"
-  if [ -f "$cache" ]; then
-    cached="$(cat "$cache" 2>/dev/null)"
-    cached="${cached//$'\n'/}"
-    cached="${cached//$'\r'/}"
-    sanitized="${cached//[^A-Za-z0-9_-]/_}"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
-    fi
-  fi
-  echo "fallback_${key}"
+  echo "fallback_$(zensu_session_key)"
 }
 
 export -f zensu_session_key zensu_resolve_session_via_helper zensu_resolve_session_id 2>/dev/null || true
