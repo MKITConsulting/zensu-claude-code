@@ -1,1 +1,1 @@
-Please set the status of ZEN-001 to "released". How exactly do you do that?
+Please set the status of ZEN-1 to "released". How exactly do you do that?

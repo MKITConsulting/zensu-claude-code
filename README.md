@@ -219,7 +219,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
-2. /zensu:implement ZEN-001  → Load context, plan implementation
+2. /zensu:implement ZEN-1    → Load context, plan implementation
 3. /zensu:tdd                → Strict TDD in the main thread (RED→GREEN per step)
 4. @code-reviewer            → 5-perspective sequential review (spawned by /zensu:tdd Phase 6, Stop-hook guaranteed)
 5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds
@@ -241,7 +241,7 @@ For a brownfield repo whose plan/vision doc also describes not-yet-built feature
 ```
 1. /zensu:ghost-scan         → Import what is built (each feature seated at a v1 baseline)
 2. (agent) create_feature    → Plan doc's not-yet-built items → planned features
-3. /zensu:implement ZEN-xxx  → Build the planned items; v1 revision at implement-time
+3. /zensu:implement KEY-N    → Build the planned items; v1 revision at implement-time
 ```
 
 No separate skill — the agent runs ghost-scan, then creates the remainder as planned features.
@@ -249,7 +249,7 @@ No separate skill — the agent runs ghost-scan, then creates the remainder as p
 ### Quick Feature (No Full TDD)
 
 ```
-1. /zensu:implement ZEN-042  → Context-aware implementation with artifact linking
+1. /zensu:implement ZEN-42   → Context-aware implementation with artifact linking
 2. @code-reviewer            → Quality review
 ```
 

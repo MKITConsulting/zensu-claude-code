@@ -6,7 +6,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 
 - User asks "what is X?", "how does Y work?", "where is Z configured?"
 - User asks about plugin internals: agents, hooks, FSM, auto-fix loop, MCP server
-- User asks about Zensu concepts: features, ZEN-XXX, tiers, journeys, classifications
+- User asks about Zensu concepts: features, KEY-N ids, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
 - User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement`) applies to their situation
 
@@ -23,7 +23,7 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 - **Product** — top-level container; owns Components, Tiers, Features, Journeys.
 - **Component** — architectural module within a Product (e.g. `auth-service`).
-- **Feature** — unit of capability, identified by `ZEN-XXX` (e.g. `ZEN-001`). Lifecycle: `planned → in-progress → testing → released`.
+- **Feature** — unit of capability, identified by `KEY-N` — product feature key + number (e.g. `ZEN-42`). Lifecycle: `planned → in-progress → testing → released`.
 - **Tier** — pricing/availability level (e.g. Free, Pro, Team). Features map to tiers via the tier matrix.
 - **Journey** — user path through one or more Features; contributes to release readiness.
 - **Security Classification** — `public | internal | confidential | restricted`. Drives the 0–10 security score.
@@ -75,5 +75,5 @@ Before answering questions in the right column, `Read` the source file in the le
 - If the embedded glossary fully answers it → answer directly, no Read needed.
 - If a routed source applies → Read first, quote facts verbatim, cite.
 - Never invent tool names, hook names, config flags, or version numbers — verify via Read.
-- If a question falls outside this skill's scope (e.g. "implement feature ZEN-042"), point the user at the right action skill instead of half-answering.
+- If a question falls outside this skill's scope (e.g. "implement feature ZEN-42"), point the user at the right action skill instead of half-answering.
 - Match the conversational register — terse if the user is terse, fuller if they ask "explain in detail".

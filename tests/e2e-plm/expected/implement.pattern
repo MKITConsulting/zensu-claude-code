@@ -1,6 +1,6 @@
 # Implement workflow — must load feature context, check security before coding, link artifacts, create revision, validate release.
-# Decision Rule (agents/zensu-plm.md:166): "ZEN-xxx + code → implement".
-# Important Rule 4 (agents/zensu-plm.md:179): "Security classification before implementation".
+# Decision Rule (agents/zensu-plm.md:206): "KEY-N + code → implement".
+# Important Rule 4 (agents/zensu-plm.md:221): "Security classification before implementation".
 get_feature
 (analyze_feature_security|set_security_classification)
 (link_test|link_source_files)

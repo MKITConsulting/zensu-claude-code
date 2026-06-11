@@ -13,7 +13,7 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 - Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set
-- A feature ID (ZEN-xxx format or UUID) to review
+- A feature ID (KEY-N format, e.g. ZEN-42, or UUID) to review
 
 ## Workflow
 

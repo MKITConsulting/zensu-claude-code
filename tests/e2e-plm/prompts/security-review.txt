@@ -1,1 +1,1 @@
-Please run a security review for ZEN-007 (Payment module). Describe the full workflow including all MCP tools you call in sequence.
+Please run a security review for ZEN-7 (Payment module). Describe the full workflow including all MCP tools you call in sequence.
