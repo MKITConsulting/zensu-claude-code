@@ -12,7 +12,7 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 - Zensu MCP Server connected (plugin auto-configures via `.mcp.json`)
 - `ZENSU_API_KEY` environment variable set
-- A feature ID (ZEN-xxx format or UUID) to implement
+- A feature ID (KEY-N format, e.g. ZEN-42, or UUID) to implement
 
 ## Workflow
 
@@ -46,7 +46,7 @@ If the feature's security classification is confidential or restricted, emphasiz
 
 ### Step 3: Implement via the /zensu:tdd skill
 
-Invoke the **`/zensu:tdd` skill** (Skill tool, `skill='zensu:tdd'`) with a feature specification built from Steps 1-2 as the input. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the spec with: "Reference this feature as [ZEN-xxx] in all commit messages." You run the TDD workflow yourself in THIS main thread — do not spawn a subagent.
+Invoke the **`/zensu:tdd` skill** (Skill tool, `skill='zensu:tdd'`) with a feature specification built from Steps 1-2 as the input. Include the feature title, description, component, security classification, security constraints from Step 1, and the implementation plan from Step 2. End the spec with: "Reference this feature as [KEY-N] (the feature's actual id, e.g. [ZEN-42]) in all commit messages." You run the TDD workflow yourself in THIS main thread — do not spawn a subagent.
 
 If the TDD workflow cannot proceed or all steps are blocked, continue manually from Step 4.
 
@@ -145,7 +145,7 @@ Present a completion summary:
 ## Important Notes
 
 - The `update_feature` MCP tool does NOT have a `status` field. Status transitions (planned -> in-progress -> testing -> released) require a separate API call, not an MCP tool.
-- Always reference the feature ID in commit messages: `feat(component): description [ZEN-xxx]`
+- Always reference the feature ID in commit messages: `feat(component): description [KEY-N]`
 - Security classification should be set BEFORE implementation (use `/zensu:security-review` if not yet set)
 - The /zensu:tdd workflow creates a plan at `.zensu/plans/{timestamp}_tdd-{feature-slug}.md` and a progress log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{timestamp}_tdd-{feature-slug}.log`
 

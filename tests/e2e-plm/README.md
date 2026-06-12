@@ -25,7 +25,7 @@ produce English-only output.
 | Fixture | Asserts (signal kept tolerant — patterns use regex) |
 |---------|-----------------------------------------------------|
 | `bootstrap` | Vision → product workflow: `create_product`, `create_product_vision`, `bootstrap_from_vision` / `apply_bootstrap`, components + features |
-| `implement` | ZEN-xxx + code: `get_feature`, `analyze_feature_security` / `set_security_classification`, `link_test` / `link_source_files`, `create_revision`, `validate_feature_security`. Stresses Rule 4 (security classification before implementation) only — Rule 2 (`list_features` before guessing an ID) is intentionally NOT re-stressed here; see Known caveats. |
+| `implement` | KEY-N + code: `get_feature`, `analyze_feature_security` / `set_security_classification`, `link_test` / `link_source_files`, `create_revision`, `validate_feature_security`. Stresses Rule 4 (security classification before implementation) only — Rule 2 (`list_features` before guessing an ID) is intentionally NOT re-stressed here; see Known caveats. |
 | `security-review` | Full security sequence: classify → analyze → suggest/add tests → STRIDE → `complete_security_review` |
 | `ghost-scan` | `list_features` first (Rule 7), then `ghost_scan` with `enrich_existing`, candidates, batch review, apply |
 | `pulse-session` | `pulse_start_session` or summary plus git HEAD / branch reference |

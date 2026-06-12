@@ -382,7 +382,7 @@ I will run create_product, then create_product_vision, then bootstrap_from_visio
 apply_bootstrap to materialize Components and Features.
 CAP
   cat > "$tmp/results/implement-20260101-000000.captured.txt" <<'CAP'
-Step 1: get_feature for ZEN-042. Step 2: analyze_feature_security and set_security_classification.
+Step 1: get_feature for ZEN-42. Step 2: analyze_feature_security and set_security_classification.
 Step 3: link_test plus link_source_files. Step 4: create_revision. Step 5: validate_feature_security.
 CAP
   cat > "$tmp/results/security-review-20260101-000000.captured.txt" <<'CAP'
@@ -471,12 +471,12 @@ case "$prompt_arg" in
     echo "I will run create_product, then create_product_vision, then bootstrap_from_vision"
     echo "and apply_bootstrap. This materializes Components and Features."
     ;;
-  *"ZEN-042"*)
-    echo "Step 1: get_feature for ZEN-042. Step 2: analyze_feature_security and set_security_classification."
+  *"ZEN-42"*)
+    echo "Step 1: get_feature for ZEN-42. Step 2: analyze_feature_security and set_security_classification."
     echo "Step 3: link_test and link_source_files. Step 4: create_revision. Step 5: validate_feature_security."
     ;;
-  *"ZEN-007"*)
-    echo "Security review for ZEN-007: set_security_classification, then analyze_feature_security,"
+  *"ZEN-7"*)
+    echo "Security review for ZEN-7: set_security_classification, then analyze_feature_security,"
     echo "then suggest_security_tests, add_security_test, generate_threat_model (STRIDE),"
     echo "and finally complete_security_review."
     ;;
@@ -487,7 +487,7 @@ case "$prompt_arg" in
   *Pulse-Session*|*"Pulse"*)
     echo "I will call pulse_start_session with the current git HEAD SHA and branch name."
     ;;
-  *"ZEN-001"*|*released*)
+  *"ZEN-1"*|*released*)
     echo "Status transitions are not handled by an MCP tool. Use the Zensu REST API endpoint"
     echo "to set the status to released."
     ;;
@@ -528,7 +528,7 @@ test_status_transition_pattern_rejects_multiline_violation() {
   cat > "$tmp/results/status-transition-20260101-000000.captured.txt" <<'CAP'
 For status transitions, you can use either the REST API or update_feature.
 I will call update_feature with:
-- id: ZEN-001
+- id: ZEN-1
 - status: released
 CAP
 
@@ -550,7 +550,7 @@ test_status_transition_pattern_rejects_reversed_order() {
   mkdir -p "$tmp/fixtures/status-transition" "$tmp/prompts" "$tmp/results"
 
   cat > "$tmp/results/status-transition-20260101-000000.captured.txt" <<'CAP'
-For the status released, I call update_feature(id=ZEN-001). Use the REST API endpoint for the transition.
+For the status released, I call update_feature(id=ZEN-1). Use the REST API endpoint for the transition.
 CAP
 
   out="$tmp/out.txt"
@@ -832,7 +832,7 @@ CAP
   if grep -qE "PASS\s+feature-id-guard" "$out"; then
     check "test_feature_id_guard_accepts_paste_details_phrasing" PASS
   else
-    check "test_feature_id_guard_accepts_paste_details_phrasing" FAIL "expected PASS feature-id-guard (paste ZEN-XXX details is a valid Rule-2 ask-back), got:$(printf '\n')$(cat "$out")"
+    check "test_feature_id_guard_accepts_paste_details_phrasing" FAIL "expected PASS feature-id-guard (paste KEY-N details is a valid Rule-2 ask-back), got:$(printf '\n')$(cat "$out")"
   fi
   rm -rf "$tmp"
 }

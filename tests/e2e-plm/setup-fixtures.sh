@@ -44,7 +44,7 @@ EOF
 import { login } from "../src/auth/login";
 if (!login("a", "b")) throw new Error("login broken");
 EOF
-  commit_all "$d" "main: existing login feature (ZEN-042 target)"
+  commit_all "$d" "main: existing login feature (ZEN-42 target)"
 }
 
 make_security_review() {
@@ -56,7 +56,7 @@ export function charge(amount: number, card: string): void {
   console.log(`charging ${amount} to ${card}`);
 }
 EOF
-  commit_all "$d" "main: payment module (ZEN-007 target)"
+  commit_all "$d" "main: payment module (ZEN-7 target)"
 }
 
 make_ghost_scan() {
@@ -99,7 +99,7 @@ make_status_transition() {
   local d="$FIXTURES_DIR/status-transition"
   git_init "$d"
   cat > "$d/README.md" <<'EOF'
-# ZEN-001 lives in the Zensu backend; this fixture is just the working dir.
+# ZEN-1 lives in the Zensu backend; this fixture is just the working dir.
 EOF
   commit_all "$d" "main: status transition target"
 }

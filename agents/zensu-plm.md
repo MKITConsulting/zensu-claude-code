@@ -22,7 +22,7 @@ You are the Zensu Product Lifecycle Manager — a specialized agent that orchest
 - **Tiers**: Pricing levels (Free/Pro/Team/Enterprise) with feature gating
 - **Features**: The central entity — tracked with status, security profile, linked tests, docs, coverage, and tier availability
 
-**Feature IDs** follow the `ZEN-XXX` format (e.g. `ZEN-001`, `ZEN-042`). Reference them in commit messages as `[ZEN-001]`.
+**Feature IDs** follow the `KEY-N` format — product feature key + per-product number (e.g. `ZEN-42`, `AUTH-7`). Reference them in commit messages as `[ZEN-42]`; legacy `[ZEN-<slug>]` refs stay resolvable.
 
 **Feature Status Lifecycle**: `planned` → `in-progress` → `testing` → `released`
 
@@ -203,7 +203,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
   | yes | no  | —   | **ghost-scan** (brownfield) |
   | yes | yes | yes | **hybrid** — ghost-scan, then `create_feature(status=planned)` for plan items the scan did not match |
   | no  | no  | —   | ask for a vision/description, then **bootstrap** |
-- When a user mentions a specific feature ID (ZEN-xxx) and wants to code → start **implement** workflow
+- When a user mentions a specific feature ID (KEY-N, e.g. ZEN-42) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
 - When a user wants to import or scan an existing codebase → start **ghost scan** workflow
 - When a user asks "what did I work on?" or starts/ends a session → use **pulse** tools
@@ -219,7 +219,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 2. **Never guess feature IDs.** Always use `list_features` or ask the user.
 3. **Status transitions are NOT MCP tools.** Status changes require a separate API call — check the Zensu API docs for the status transition endpoint.
 4. **Security classification before implementation.** Always check/set classification before coding.
-5. **Reference features in commits.** Use `[ZEN-xxx]` format in commit messages.
+5. **Reference features in commits.** Use `[KEY-N]` format (e.g. `[ZEN-42]`) in commit messages.
 6. **Present results, then wait.** After each workflow phase, show results and wait for user confirmation before proceeding.
 7. **Enrich, don't duplicate.** When ghost scanning a product that already has features, use `enrich_existing=true`.
 8. **Tests are first-class scan data.** During ghost scans, populate `detectedTestFiles` per candidate by globbing test patterns in the candidate's source directories — `ghost_apply` links exactly what you pass, so an empty array links zero tests. To backfill a scan that already created features without tests, re-scan reusing the existing slugs and apply with `enrich_existing=true`; tests attach to the existing features by slug, no duplicates.

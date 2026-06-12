@@ -1,5 +1,5 @@
 # zensu-help answers the glossary question from embedded knowledge.
-# Must surface the ZEN feature id form and the lifecycle stages.
-ZEN-[0-9X]
+# Must surface the KEY-N feature id form and the lifecycle stages.
+(KEY-N|ZEN-[0-9])
 feature
 (planned|in.progress|testing|released)

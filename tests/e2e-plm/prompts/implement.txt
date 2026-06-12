@@ -1,1 +1,1 @@
-I want to implement ZEN-042 — a login form with rate-limiting against brute-force attacks. Which steps do you go through, which MCP tools do you need, and what do you check before and after implementation?
+I want to implement ZEN-42 — a login form with rate-limiting against brute-force attacks. Which steps do you go through, which MCP tools do you need, and what do you check before and after implementation?
