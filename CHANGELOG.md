@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.5] - 2026-06-12
+
+### Added
+
+- **tdd**: Add vanilla implementation mode via hooks.tddImplementation (#112)
+- **skills**: Prepend mandatory TDD command protocol to skill and primer (#110)
+- **hooks**: Per-turn TDD reminder for direct implementation requests (#107)
+- **gate**: Default-deny MCP write-gate with per-skill tool scoping (#105)
+- **pr-team-review**: Bundle multi-agent PR review skill into the plugin (#101)
+
+### Changed
+
+- **ids**: Adopt KEY-N feature id wording and normalize e2e fixture ids (#111)
+- Document MCP tool-classification maintenance in CLAUDE.md (#106)
+- Cross-platform (Windows/Linux) test matrix + LF normalization (#102)
+
+### Fixed
+
+- **session**: Resolve session id via transcript helper, drop agent-era PPID cache (#113)
+- **ghost-scan**: Mint v1 baseline server-side, drop client-side Phase 5b (#109)
+- **ci**: LF-lock all text files, not just sh/js/json (#104)
+- **zensu-plm**: Document create_product required args + snake_case MCP arg rule (#103)
+
 ### Added
 
 - **pr-team-review**: Multi-agent GitHub PR review skill — scouts an existing PR, auto-casts a tailored reviewer team from a 14-persona pool, fetches the PR into an isolated git worktree, spawns the reviewers in parallel, debates, and publishes one consolidated GitHub review (inline comments + body) via `gh api`
