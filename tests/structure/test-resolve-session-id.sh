@@ -451,6 +451,36 @@ else
   check "F3-R 13-digit ms-style argv[2] (got '$F3_OUT' expected '$F3_UUID_NEWER' — empty means silent filter-all, OLDER means newest-mtime-after-bad-cutoff misordered)" FAIL
 fi
 
+# G1 — CLAUDE_PROJECT_DIR unset -> git toplevel anchors the projects subdir,
+# so resolution holds even when the helper runs from a nested subdirectory.
+if command -v git >/dev/null 2>&1; then
+  G1_WORK="$TMP_ROOT/gitwork"
+  mkdir -p "$G1_WORK/sub/nested"
+  ( cd "$G1_WORK" && git init -q >/dev/null 2>&1 )
+  G1_TOP="$(cd "$G1_WORK/sub/nested" && git rev-parse --show-toplevel 2>/dev/null)"
+  G1_SUBDIR="$(node -e 'process.stdout.write(String(process.argv[1]).replace(/[^A-Za-z0-9_-]/g,"-"))' "$G1_TOP")"
+  G1_PDIR="$TMP_ROOT/projects/$G1_SUBDIR"
+  mkdir -p "$G1_PDIR"
+  G1_UUID="9a9a9a9a-1111-2222-3333-9a9a9a9a9a9a"
+  : > "$G1_PDIR/$G1_UUID.jsonl"
+  G1_OUT="$(cd "$G1_WORK/sub/nested" && env -u CLAUDE_PROJECT_DIR ZENSU_PROJECTS_DIR="$TMP_ROOT/projects" node "$HELPER")"
+  if [ "$G1_OUT" = "$G1_UUID" ]; then
+    check "G1 CLAUDE_PROJECT_DIR unset -> git toplevel anchors projects subdir (resolves from nested subdir)" PASS
+  else
+    check "G1 git-toplevel anchor (got '$G1_OUT' expected '$G1_UUID')" FAIL
+  fi
+else
+  check "G1 git-toplevel anchor SKIPPED (git absent)" PASS
+fi
+
+# G2 — gitToplevel must bound the git call (timeout + maxBuffer) so a stalled/hostile
+# cwd (e.g. git on a hung network FS) cannot hang the synchronous hook indefinitely.
+if grep -Eq "timeout:[[:space:]]*[0-9]+" "$HELPER" && grep -Eq "maxBuffer" "$HELPER"; then
+  check "G2 gitToplevel execFileSync bounds the git call (timeout + maxBuffer)" PASS
+else
+  check "G2 gitToplevel git call is unbounded (missing timeout/maxBuffer)" FAIL
+fi
+
 echo "----"
 echo "test-resolve-session-id: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

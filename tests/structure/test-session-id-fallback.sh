@@ -73,53 +73,33 @@ else
   check "S2-C6b zensu_session_key stable (a='$KEY1A' b='$KEY1B')" FAIL
 fi
 
-# Case 2 — stdin empty + cache file present at PPID+proc_hash key → cache value returned.
-# We compute the key from a wrapper subshell so we know which file to seed.
-SEED_SCRIPT="$TMP_DIR/seed-case2.sh"
-cat > "$SEED_SCRIPT" <<EOF
-#!/bin/bash
-set -u
-source "$HELPER"
-KEY=\$(zensu_session_key)
-mkdir -p "$PROJECT_DIR/.zensu/state"
-echo "cached-sid-value" > "$PROJECT_DIR/.zensu/state/session-id-\${KEY}.txt"
-RESOLVED=\$(zensu_resolve_session_id "")
-echo "RESOLVED=\${RESOLVED}"
-echo "KEY=\${KEY}"
-EOF
-chmod +x "$SEED_SCRIPT"
-OUT2_RAW=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$SEED_SCRIPT" 2>&1)
-OUT2=$(echo "$OUT2_RAW" | grep '^RESOLVED=' | cut -d= -f2-)
-if [ "$OUT2" = "cached-sid-value" ]; then
-  check "S2-C2 stdin empty + cache file present -> cache value returned" PASS
-else
-  check "S2-C2 stdin empty + cache file (got '$OUT2' raw='$OUT2_RAW')" FAIL
-fi
-
-# Case 5 — cache file with empty contents falls to tier-3 deterministic fallback.
+# Case 5 — cache file present is IGNORED by the file-less resolver -> deterministic fallback.
+# Helper is neutralized via an empty ZENSU_PROJECTS_DIR, so only the (removed) cache tier
+# could have returned the seeded value; the contract is that it does NOT.
 SEED5_SCRIPT="$TMP_DIR/seed-case5.sh"
 PROJECT_DIR5="$TMP_DIR/proj5"
-mkdir -p "$PROJECT_DIR5/.zensu/state"
+EMPTY_PROJECTS5="$TMP_DIR/empty-projects5"
+mkdir -p "$PROJECT_DIR5/.zensu/state" "$EMPTY_PROJECTS5"
 cat > "$SEED5_SCRIPT" <<EOF
 #!/bin/bash
 set -u
 source "$HELPER"
 KEY=\$(zensu_session_key)
 mkdir -p "$PROJECT_DIR5/.zensu/state"
-: > "$PROJECT_DIR5/.zensu/state/session-id-\${KEY}.txt"
+echo "cached-but-ignored" > "$PROJECT_DIR5/.zensu/state/session-id-\${KEY}.txt"
 RESOLVED=\$(zensu_resolve_session_id "")
 echo "RESOLVED=\${RESOLVED}"
 echo "KEY=\${KEY}"
 EOF
 chmod +x "$SEED5_SCRIPT"
-OUT5_RAW=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR5" "$SEED5_SCRIPT" 2>&1)
+OUT5_RAW=$(CLAUDE_PROJECT_DIR="$PROJECT_DIR5" ZENSU_PROJECTS_DIR="$EMPTY_PROJECTS5" "$SEED5_SCRIPT" 2>&1)
 OUT5=$(echo "$OUT5_RAW" | grep '^RESOLVED=' | cut -d= -f2-)
 KEY5=$(echo "$OUT5_RAW" | grep '^KEY=' | cut -d= -f2-)
 EXPECTED5="fallback_${KEY5}"
 if [ "$OUT5" = "$EXPECTED5" ]; then
-  check "S2-C5 cache file with empty contents -> deterministic tier-3 fallback (fallback_<key>)" PASS
+  check "S2-C5 cache file present is IGNORED (file-less) -> deterministic fallback (fallback_<key>)" PASS
 else
-  check "S2-C5 empty cache file (got '$OUT5' expected '$EXPECTED5' raw='$OUT5_RAW')" FAIL
+  check "S2-C5 cache-ignored fallback (got '$OUT5' expected '$EXPECTED5' raw='$OUT5_RAW')" FAIL
 fi
 
 # Case 3 — stdin empty + cache MISSING → claude_${PPID}_${proc_hash} returned.
@@ -182,35 +162,6 @@ case "$DEGRADED_RESOLVE" in
   *)
     check "S2-C7b ps/cksum failing resolve (got '$DEGRADED_RESOLVE')" FAIL ;;
 esac
-
-PROJECT_DIR8="$TMP_DIR/proj8"
-mkdir -p "$PROJECT_DIR8/.zensu/state"
-SEED8_SCRIPT="$TMP_DIR/seed-case8.sh"
-cat > "$SEED8_SCRIPT" <<EOF
-#!/bin/bash
-set -u
-source "$HELPER"
-KEY=\$(zensu_session_key)
-echo "cached-sid-c8" > "$PROJECT_DIR8/.zensu/state/session-id-\${KEY}.txt"
-unset CLAUDE_SESSION_ID
-export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PROJECT_DIR="$PROJECT_DIR8"
-( source "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --phase IMPL --step demo ) >/dev/null 2>&1
-echo "KEY=\${KEY}"
-EOF
-chmod +x "$SEED8_SCRIPT"
-OUT8_RAW=$("$SEED8_SCRIPT" 2>&1)
-KEY8=$(echo "$OUT8_RAW" | grep '^KEY=' | cut -d= -f2-)
-if [ -f "$PROJECT_DIR8/.zensu/state/tdd-phase-cached-sid-c8.json" ]; then
-  check "S2-C8 zensu-log.sh routes phase write to cached session id (3-tier resolver)" PASS
-else
-  check "S2-C8 zensu-log.sh tdd-phase-cached-sid-c8.json missing (raw='$OUT8_RAW' key='$KEY8')" FAIL
-fi
-if [ ! -f "$PROJECT_DIR8/.zensu/state/tdd-phase-fallback_${KEY8}.json" ]; then
-  check "S2-C8b zensu-log.sh does NOT write tier-3 fallback bucket when cache present" PASS
-else
-  check "S2-C8b zensu-log.sh leaked tier-3 fallback file despite cache hit" FAIL
-fi
 
 echo "----"
 echo "test-session-id-fallback: $PASS PASS / $FAIL FAIL"

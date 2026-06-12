@@ -194,7 +194,7 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json<br/>session-id-PPID_prochash.txt]
+      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -210,7 +210,9 @@ flowchart LR
 
 The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`, `session-id-<PPID>_<prochash>.txt`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). The SessionStart `session-id-*.txt` cache enables 3-tier session-id resolution (stdin → cache → `fallback_<key>` deterministic fallback) so a missing `session_id` payload no longer collides on a literal `unknown` bucket.
+Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). Session id is resolved file-lessly: hooks use the stdin `session_id`, while main-thread skill calls derive it from the session transcript via `resolve-session-id.js` (anchored on the git worktree root), falling back to a deterministic `fallback_<key>` only when the transcript cannot be located.
+
+**Limitations of file-less resolution.** Because the main-thread path depends on the session transcript existing on disk: (1) the very first phase write of a session — before claude-code has flushed the session `.jsonl` — may briefly resolve to `fallback_<key>` while stdin-fed hooks already see the real UUID; in practice the transcript is flushed well before the first `/zensu:tdd` phase marker, so the window is narrow. (2) Two `/zensu:tdd` sessions running concurrently in the **same** worktree are not supported: they share one `~/.claude/projects/<subdir>` bucket, and the `ZENSU_OWN_CMD` transcript needle cannot disambiguate identical `--phase`/`--step` writes across them, so their `tdd-phase-<session>.json` state can cross-bind. Run concurrent TDD sessions in separate worktrees (the default workflow), which gives each its own transcript subdir and `.zensu/state/`.
 
 ---
 
