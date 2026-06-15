@@ -46,7 +46,7 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 [ "$(tdd_session_active "$STATE_FILE")" = "true" ] && exit 0
 
-if zensu_hook_enabled tddImplementation; then
+if zensu_tdd_strict_enabled; then
 cat <<'JSON'
 {
   "hookSpecificOutput": {

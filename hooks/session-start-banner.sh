@@ -30,7 +30,7 @@ if command -v node >/dev/null 2>&1; then
 fi
 
 echo "zensu: Zensu PLM v${VERSION} active — features as first-class citizens."
-if zensu_hook_enabled tddImplementation; then
+if zensu_tdd_strict_enabled; then
   echo "zensu: Flow — track features → implement (strict RED→GREEN TDD) → review chain → dashboard."
   echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (RED→GREEN + review chain). Run it and edits are TDD-gate-enforced; decline and you implement directly."
 else

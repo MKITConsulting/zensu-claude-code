@@ -75,7 +75,7 @@ case "${1:-}" in
         tdd_set_flag "$session_val" active true
         tdd_begin_rc=$?
         if [ "$tdd_begin_rc" -eq 0 ]; then
-          if zensu_hook_enabled tddImplementation; then
+          if zensu_tdd_strict_enabled; then
             if ! tdd_set_flag "$session_val" vanilla false; then
               echo "zensu-log --tdd-begin: strict flag write failed — a stale vanilla flag may remain" >&2
               tdd_begin_rc=1

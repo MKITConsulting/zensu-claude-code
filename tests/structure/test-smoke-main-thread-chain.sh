@@ -34,7 +34,8 @@ check() {
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"   # force all defaults
+export ZENSU_CONFIG="$TDD_STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults
+printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE 2>/dev/null || true   # the whole point: no subagent scoping
 unset ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }

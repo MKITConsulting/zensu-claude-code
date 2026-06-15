@@ -41,6 +41,8 @@ export CLAUDE_PLUGIN_DATA_OVERRIDE="$PROJ/state"
 CFG_DEFAULT="$TDD_STATE_DIR/no-such-config.json"
 CFG_VANILLA="$TDD_STATE_DIR/vanilla-config.json"
 printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
+CFG_STRICT="$TDD_STATE_DIR/strict-config.json"
+printf '%s' '{"hooks":{"tddImplementation":true}}' > "$CFG_STRICT"
 export ZENSU_CONFIG="$CFG_DEFAULT"
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
 cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
@@ -107,12 +109,18 @@ tdd_write_phase "$SID_L4" SY IMPL "" >/dev/null 2>&1
   && check "L4 workflow window survives --phase state rebuild (preserve-all write landed)" PASS || check "L4 workflow flags survive phase write" FAIL
 
 echo "== Begin: mode persist + echo =="
+SID_A0="vanilla-begin-default"
+OUT_A0="$(ZENSU_CONFIG="$CFG_DEFAULT" bash "$LOG" --tdd-begin --session "$SID_A0" 2>/dev/null)"
+[ "$OUT_A0" = "mode: vanilla" ] \
+  && check "A0 default config (no tddImplementation key): --tdd-begin echoes 'mode: vanilla'" PASS || check "A0 default echo (got '$OUT_A0')" FAIL
+[ "$(tdd_get_flag "$(tdd_state_file "$SID_A0")" vanilla)" = "true" ] \
+  && check "A0b default config: state vanilla=true (default flipped to vanilla)" PASS || check "A0b default state" FAIL
 SID_A="vanilla-begin-strict"
-OUT_A="$(bash "$LOG" --tdd-begin --session "$SID_A" 2>/dev/null)"
+OUT_A="$(ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_A" 2>/dev/null)"
 [ "$OUT_A" = "mode: strict" ] \
-  && check "A1 default config: --tdd-begin echoes 'mode: strict'" PASS || check "A1 strict echo (got '$OUT_A')" FAIL
+  && check "A1 tddImplementation:true: --tdd-begin echoes 'mode: strict'" PASS || check "A1 strict echo (got '$OUT_A')" FAIL
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_A")" vanilla)" = "false" ] \
-  && check "A2 default config: state vanilla=false" PASS || check "A2 strict state" FAIL
+  && check "A2 tddImplementation:true: state vanilla=false" PASS || check "A2 strict state" FAIL
 SID_B="vanilla-begin-vanilla"
 OUT_B="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_B" 2>/dev/null)"
 [ "$OUT_B" = "mode: vanilla" ] \
@@ -127,12 +135,12 @@ RC_A3=$?
 { [ "$RC_A3" -ne 0 ] && ! printf '%s' "$OUT_A3" | grep -q "^mode:" && grep -q "active flag write failed" "$TDD_STATE_DIR/a3.err"; } \
   && check "A3 unwritable state dir: rc!=0, no mode echo, activation failure on stderr" PASS \
   || check "A3 begin failure path (rc=$RC_A3 stdout='$OUT_A3' err='$(cat "$TDD_STATE_DIR/a3.err")')" FAIL
-SID_A5="vanilla-strfalse"
-CFG_STR="$TDD_STATE_DIR/strfalse-config.json"
-printf '%s' '{"hooks":{"tddImplementation":"false"}}' > "$CFG_STR"
+SID_A5="vanilla-strtrue"
+CFG_STR="$TDD_STATE_DIR/strtrue-config.json"
+printf '%s' '{"hooks":{"tddImplementation":"true"}}' > "$CFG_STR"
 OUT_A5="$(ZENSU_CONFIG="$CFG_STR" bash "$LOG" --tdd-begin --session "$SID_A5" 2>/dev/null)"
-{ [ "$OUT_A5" = "mode: strict" ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_A5")" vanilla)" = "false" ]; } \
-  && check "A5 non-boolean \"false\" degrades to strict (only boolean false flips)" PASS || check "A5 non-boolean degrades strict (got '$OUT_A5')" FAIL
+{ [ "$OUT_A5" = "mode: vanilla" ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_A5")" vanilla)" = "true" ]; } \
+  && check "A5 non-boolean \"true\" stays vanilla (only boolean true flips to strict)" PASS || check "A5 non-boolean stays vanilla (got '$OUT_A5')" FAIL
 
 echo "== --mode query verb =="
 [ "$(bash "$LOG" --mode --session "$SID_B" 2>/dev/null)" = "vanilla" ] \
@@ -165,7 +173,7 @@ echo "== Reset hygiene: vanilla begin -> reset -> strict re-begin (same SID) =="
 SID_G="vanilla-rebegin"
 ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_G" >/dev/null 2>&1
 bash "$LOG" --tdd-reset --session "$SID_G" >/dev/null 2>&1
-OUT_G="$(bash "$LOG" --tdd-begin --session "$SID_G" 2>/dev/null)"
+OUT_G="$(ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_G" 2>/dev/null)"
 [ "$OUT_G" = "mode: strict" ] \
   && check "G1 strict re-begin after vanilla+reset echoes 'mode: strict'" PASS || check "G1 re-begin echo (got '$OUT_G')" FAIL
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_G")" vanilla)" = "false" ] \
@@ -254,9 +262,12 @@ PA_V="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
   && ! printf '%s' "$PA_V" | grep -qF "strict TDD flow"; } \
   && check "F1 plan-approval (vanilla cfg): vanilla wording + skill route + ask + docs fast-path, no strict text" PASS \
   || check "F1 plan-approval vanilla directive" FAIL
-PA_S="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_DEFAULT")"
+PA_S="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_STRICT")"
 printf '%s' "$PA_S" | grep -qF "strict TDD flow" \
-  && check "F2 plan-approval (default cfg): strict directive unchanged" PASS || check "F2 plan-approval strict directive" FAIL
+  && check "F2 plan-approval (tddImplementation:true): strict directive" PASS || check "F2 plan-approval strict directive" FAIL
+PA_D="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_DEFAULT")"
+{ printf '%s' "$PA_D" | grep -q "vanilla" && ! printf '%s' "$PA_D" | grep -qF "strict TDD flow"; } \
+  && check "F2b plan-approval (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F2b plan-approval default vanilla" FAIL
 RM_V="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-v"}' | hook_ctx "$REMINDER" "$CFG_VANILLA")"
 { printf '%s' "$RM_V" | grep -q "vanilla" \
   && printf '%s' "$RM_V" | grep -qF "skill='zensu:tdd'" \
@@ -265,9 +276,12 @@ RM_V="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanil
   && ! printf '%s' "$RM_V" | grep -qF "strict TDD flow"; } \
   && check "F3 reminder (vanilla cfg): vanilla wording + skill route + ask + not-a-code-change fast-path, no strict text" PASS \
   || check "F3 reminder vanilla directive" FAIL
-RM_S="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-s"}' | hook_ctx "$REMINDER" "$CFG_DEFAULT")"
+RM_S="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-s"}' | hook_ctx "$REMINDER" "$CFG_STRICT")"
 printf '%s' "$RM_S" | grep -qF "strict TDD flow" \
-  && check "F4 reminder (default cfg): strict directive unchanged" PASS || check "F4 reminder strict directive" FAIL
+  && check "F4 reminder (tddImplementation:true): strict directive" PASS || check "F4 reminder strict directive" FAIL
+RM_D="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-d"}' | hook_ctx "$REMINDER" "$CFG_DEFAULT")"
+{ printf '%s' "$RM_D" | grep -q "vanilla" && ! printf '%s' "$RM_D" | grep -qF "strict TDD flow"; } \
+  && check "F4b reminder (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F4b reminder default vanilla" FAIL
 
 echo "== Post-review: mode-aware fix directive =="
 PR_V="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_B"'"}' | hook_ctx "$POSTREV")"
@@ -327,16 +341,22 @@ echo "== Banner + primer: mode-aware wording =="
 BN_V="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$BANNER" 2>/dev/null)"
 { printf '%s' "$BN_V" | grep -q "vanilla" && ! printf '%s' "$BN_V" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR1 banner (vanilla cfg): vanilla wording, no strict-TDD flow line" PASS || check "BNR1 banner vanilla wording" FAIL
-BN_S="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash "$BANNER" 2>/dev/null)"
+BN_S="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_STRICT" bash "$BANNER" 2>/dev/null)"
 printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD" \
-  && check "BNR2 banner (default cfg): strict wording unchanged" PASS || check "BNR2 banner strict wording" FAIL
+  && check "BNR2 banner (tddImplementation:true): strict wording" PASS || check "BNR2 banner strict wording" FAIL
+BN_D="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash "$BANNER" 2>/dev/null)"
+{ printf '%s' "$BN_D" | grep -q "vanilla" && ! printf '%s' "$BN_D" | grep -qF "strict RED→GREEN TDD"; } \
+  && check "BNR2b banner (default cfg): vanilla wording — default flipped to vanilla" PASS || check "BNR2b banner default vanilla" FAIL
 PRM_V="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
 { printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:tdd" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR3 primer (vanilla cfg): vanilla orientation, /zensu:tdd route kept" PASS || check "BNR3 primer vanilla wording" FAIL
-PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_DEFAULT")"
+PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_STRICT")"
 printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD" \
-  && check "BNR4 primer (default cfg): strict orientation unchanged" PASS || check "BNR4 primer strict wording" FAIL
+  && check "BNR4 primer (tddImplementation:true): strict orientation" PASS || check "BNR4 primer strict wording" FAIL
+PRM_D="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_DEFAULT")"
+{ printf '%s' "$PRM_D" | grep -q "vanilla" && ! printf '%s' "$PRM_D" | grep -qF "strict RED→GREEN TDD"; } \
+  && check "BNR4b primer (default cfg): vanilla orientation — default flipped to vanilla" PASS || check "BNR4b primer default vanilla" FAIL
 
 echo "== Content pins: SKILL.md + config.example.json =="
 SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
@@ -344,8 +364,8 @@ SKILL_TDD="$PLUGIN_DIR/skills/tdd/SKILL.md"
   && grep -qF "mode: vanilla" "$SKILL_TDD" \
   && grep -qF "DISCIPLINE AUDIT SKIPPED — vanilla mode" "$SKILL_TDD"; } \
   && check "H1 SKILL.md documents the vanilla mode deltas + mode echo + audit skip" PASS || check "H1 SKILL.md vanilla section" FAIL
-node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===true?0:1)' "$PLUGIN_DIR/config.example.json" 2>/dev/null \
-  && check "H2 config.example.json ships hooks.tddImplementation=true" PASS || check "H2 config.example.json key" FAIL
+node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImplementation===false?0:1)' "$PLUGIN_DIR/config.example.json" 2>/dev/null \
+  && check "H2 config.example.json ships hooks.tddImplementation=false (default vanilla)" PASS || check "H2 config.example.json key" FAIL
 { grep -qF "Precondition Drift Audit" "$SKILL_TDD" \
   && grep -qF "mtime Discipline Audit" "$SKILL_TDD" \
   && grep -qF "Cross-Layer Value Flow Audit" "$SKILL_TDD" \

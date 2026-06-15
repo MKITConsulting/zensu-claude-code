@@ -37,6 +37,18 @@ zensu_hook_enabled() {
   [ "$val" = "1" ]
 }
 
+# Strict RED→GREEN TDD enable check — the INVERSE default of zensu_hook_enabled.
+# tddImplementation defaults to FALSE (vanilla mode): strict runs ONLY on an
+# explicit boolean `true`; absent / false / non-boolean all resolve to vanilla,
+# and node-missing degrades to vanilla (the new default). Do NOT fold this into
+# zensu_hook_enabled — that helper defaults every other flag to enabled.
+zensu_tdd_strict_enabled() {
+  command -v node >/dev/null 2>&1 || return 1   # node missing → vanilla (default off)
+  local val
+  val=$(node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.tddImplementation===true?"1":"0")' 2>/dev/null)
+  [ "$val" = "1" ]
+}
+
 _zensu_log_style() {
   command -v node >/dev/null 2>&1 || { echo "wall"; return 0; }
   local val
