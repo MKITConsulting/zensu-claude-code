@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.6] - 2026-06-15
+
+### Added
+
+- **tdd**: Default tddImplementation to false (vanilla mode) (#115)
+
 ## [0.8.5] - 2026-06-12
 
 ### Added
