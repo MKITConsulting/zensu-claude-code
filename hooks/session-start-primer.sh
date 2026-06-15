@@ -20,7 +20,7 @@ case "$SOURCE" in
   resume|compact) exit 0 ;;
 esac
 
-if zensu_hook_enabled tddImplementation; then
+if zensu_tdd_strict_enabled; then
 cat <<'JSON'
 {
   "hookSpecificOutput": {

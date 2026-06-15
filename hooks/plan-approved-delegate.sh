@@ -18,7 +18,7 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoTdd || exit 0
 
-if zensu_hook_enabled tddImplementation; then
+if zensu_tdd_strict_enabled; then
 cat <<'JSON'
 {
   "hookSpecificOutput": {
