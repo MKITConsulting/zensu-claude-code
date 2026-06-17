@@ -70,6 +70,17 @@ OUT="$(printf '{"session_id":"%s","agent_id":"sub-abc"}' "$SID" | ZENSU_FORCE_MA
   && check "N5 ZENSU_FORCE_MAIN=1 re-enables enforcement despite agent_id" PASS \
   || check "N5 force-main block (out=$OUT)" FAIL
 
+MARKER="$TDD_STATE_DIR/pending-review.json"
+SID_NF="noop-nomutate"
+bash "$LOG" --pending-review --files "x.ts" >/dev/null 2>&1
+OUT="$(printf '{"session_id":"%s","agent_id":"sub-zzz"}' "$SID_NF" | bash "$STOP" 2>/dev/null)"; RC=$?
+if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ -f "$MARKER" ]; then
+  check "N6 spawned no-op short-circuits before deferred-adopt (marker NOT consumed -> precedes state mutation)" PASS
+else
+  check "N6 no-op precedes mutation (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
+fi
+rm -f "$MARKER"
+
 echo "----"
 echo "test-stop-enforcer-subagent-noop: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

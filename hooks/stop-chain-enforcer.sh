@@ -52,12 +52,13 @@ read_field() {
 }
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-if [ "$(zensu_is_spawned_agent "$(read_field agent_id)" "$(read_field agent_type)")" = "true" ]; then
+if [ "$(zensu_is_spawned_agent "$(zensu_hook_agent_id "$INPUT")" "$(zensu_hook_agent_type "$INPUT")")" = "true" ]; then
   exit 0
 fi
 
 SESSION_ID="$(read_field session_id)"
-TRANSCRIPT_PATH="$(read_field transcript_path)"
+TRANSCRIPT_PATH=""
+[ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
@@ -72,12 +73,8 @@ if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
       tdd_clear_pending_review >/dev/null 2>&1 || true
       exit 0
     fi
-    if tdd_set_flag "$SESSION_ID" active true && tdd_set_flag "$SESSION_ID" implComplete true; then
-      if zensu_tdd_strict_enabled; then
-        tdd_set_flag "$SESSION_ID" vanilla false || echo "zensu chain-enforcer: deferred-adopt vanilla(false) write failed for ${SESSION_ID}; session resolves strict." >&2
-      else
-        tdd_set_flag "$SESSION_ID" vanilla true || echo "zensu chain-enforcer: deferred-adopt vanilla(true) write failed for ${SESSION_ID}; session resolves strict." >&2
-      fi
+    if zensu_tdd_strict_enabled; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
+    if tdd_seed_deferred_review "$SESSION_ID" "$VANILLA_SEED"; then
       ROUNDS_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
       ROUNDS_FILE="${ROUNDS_DIR}/rounds-${SESSION_ID}.json"
       if [ ! -L "$ROUNDS_FILE" ] && [ ! -L "$ROUNDS_DIR" ]; then

@@ -22,23 +22,14 @@ printf '%s' "$INPUT" | node -e '
       const tail = stdout.slice(-200);
       const interrupted = (j.tool_response && j.tool_response.interrupted === true) ? "true" : "false";
       const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "";
-      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n");
-    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n"); }
+      const transcript = (typeof j.transcript_path === "string") ? j.transcript_path : "";
+      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n" + transcript + "\n");
+    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n\n"); }
   });
 ' > "$TMP_FIELDS" 2>/dev/null
 
-{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
+{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; read -r TRANSCRIPT_PATH; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
-TRANSCRIPT_PATH="$(printf '%s' "$INPUT" | node -e '
-  let s = "";
-  process.stdin.on("data", c => s += c);
-  process.stdin.on("end", () => {
-    try {
-      const j = JSON.parse(s);
-      process.stdout.write(typeof j.transcript_path === "string" ? j.transcript_path : "");
-    } catch (_) { process.stdout.write(""); }
-  });
-' 2>/dev/null)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 SANITIZED_SESSION="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION")"
 

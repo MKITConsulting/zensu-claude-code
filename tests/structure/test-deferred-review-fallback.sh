@@ -53,10 +53,11 @@ fi
   && check "D3 marker cleared after adoption" FAIL \
   || check "D3 marker cleared after adoption" PASS
 
-if node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit((s.active===true&&s.implComplete===true)?0:1)' "$TDD_STATE_DIR/tdd-phase-${SID}.json" 2>/dev/null; then
-  check "D4 adopted session seeded active+implComplete (existing chain machinery runs)" PASS
+D4FILE="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+if node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit((s.active===true&&s.implComplete===true&&s.vanilla===true)?0:1)' "$D4FILE" 2>/dev/null; then
+  check "D4 adopted session seeded active+implComplete+vanilla (default vanilla fork)" PASS
 else
-  check "D4 adopted flags" FAIL
+  check "D4 adopted flags (state: $(tr -d '\n' < "$D4FILE" 2>/dev/null | head -c 200))" FAIL
 fi
 
 bash "$LOG" --pending-review --files "z.ts" >/dev/null 2>&1
@@ -93,6 +94,25 @@ else
   check "D7 coexistence (dec=$DEC marker_survives=$MARK_OK)" FAIL
 fi
 bash "$LOG" --pending-review-done >/dev/null 2>&1
+
+SID_FAIL="deferred-seedfail"
+bash "$LOG" --pending-review --files "x.ts" --summary "fresh" >/dev/null 2>&1
+chmod 555 "$TDD_STATE_DIR" 2>/dev/null || true
+if touch "$TDD_STATE_DIR/.wprobe" 2>/dev/null; then
+  rm -f "$TDD_STATE_DIR/.wprobe" 2>/dev/null
+  chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+  echo "  SKIP  D8 seed-failure — state dir still writable (cannot force failure on this platform)"
+else
+  OUT="$(printf '{"session_id":"%s"}' "$SID_FAIL" | bash "$STOP" 2>/dev/null)"; RC=$?
+  chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+  if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ -f "$MARKER" ]; then
+    check "D8 seed-write failure -> not adopted (allow) + marker retained for retry" PASS
+  else
+    check "D8 seed-failure (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
+  fi
+fi
+chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+rm -f "$MARKER"
 
 echo "----"
 echo "test-deferred-review-fallback: $PASS PASS / $FAIL FAIL"
