@@ -16,17 +16,18 @@ if [ ! -f "$AGENT" ]; then
   exit 1
 fi
 
-CP_LINE="$(grep -F 'create_product` — Create a new product' "$AGENT" 2>/dev/null)"
-if printf '%s' "$CP_LINE" | grep -qF 'slug' && printf '%s' "$CP_LINE" | grep -qF 'product_type'; then
-  check "C1 create_product entry names required slug + snake_case product_type" PASS
+CP_LINE="$(grep -F 'products create` — Create a new product' "$AGENT" 2>/dev/null)"
+if printf '%s' "$CP_LINE" | grep -qF -- '--slug' && printf '%s' "$CP_LINE" | grep -qF -- '--name'; then
+  check "C1 create_product entry names required --name + --slug flags" PASS
 else
-  check "C1 create_product entry names required slug + snake_case product_type" FAIL
+  check "C1 create_product entry names required --name + --slug flags" FAIL
 fi
 
-if grep -qiF 'snake_case' "$AGENT" && grep -qiF 'camelcase' "$AGENT" && grep -qF 'product_type' "$AGENT"; then
-  check "C2 snake_case argument rule present (warns camelCase, product_type example)" PASS
+RULE_LINE="$(grep -iF 'kebab-case' "$AGENT" 2>/dev/null)"
+if printf '%s' "$RULE_LINE" | grep -qF -- '--slug' && printf '%s' "$RULE_LINE" | grep -qiF 'required'; then
+  check "C2 CLI flag rule present (kebab-case + --slug + required on one line)" PASS
 else
-  check "C2 snake_case argument rule present (warns camelCase, product_type example)" FAIL
+  check "C2 CLI flag rule present (kebab-case + --slug + required on one line)" FAIL
 fi
 
 echo "----"

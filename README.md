@@ -73,18 +73,25 @@ flowchart TD
     style M fill:#51cf66,color:#fff
 ```
 
-## MCP Write-Gate
+## CLI Write-Gate
 
-Zensu MCP tools are **read-free, write-gated**. Any state-mutating call (creating or
-updating features, security classifications, tiers, journeys, revisions, …) issued
-directly on the main thread is **denied by default** — it must run inside a skill that
-declared its work, so "freelance" writes cannot bypass the dedup, user-journey,
-baseline-revision and security-review conventions the skills enforce. Reads and telemetry
-are always allowed.
+The `zensu` CLI is **read-free, write-gated**. Any state-mutating command (creating or
+updating features, security classifications, tiers, journeys, revisions, …) run directly
+on the main thread is **denied by default** — it must run inside a skill that declared its
+work, so "freelance" writes cannot bypass the dedup, user-journey, baseline-revision and
+security-review conventions the skills enforce. Reads and telemetry are always allowed.
+
+The gate is a PreToolUse(Bash) hook (`pre-bash-zensu-gate.sh`): it parses `zensu <noun> <verb>`
+(and `zensu api <METHOD> <path>`) out of the Bash command, resolves each to its canonical tool
+name via `hooks/lib/zensu-cli-map.sh`, and classifies it with the same `hooks/lib/zensu-mcp-tools.sh`
+source of truth. It is a **convention-nudge, not a hard boundary** — once the CLI's OAuth token
+is cached on disk an agent could `curl` the backend directly; the gate enforces the workflow
+conventions, not a security control (the same role, and the same `ZENSU_MCP_GATE=off` escape, as
+the MCP write-gate it replaced).
 
 ```mermaid
 flowchart TD
-    A["Zensu MCP tool call<br/>(main thread)"] --> B{"Read or telemetry tool?<br/>list_ get_ search_ suggest_<br/>+ pulse_*, analyze_journey_health, …"}
+    A["zensu CLI command<br/>(Bash, main thread)"] --> B{"Read or telemetry command?<br/>list / get / search / suggest verbs<br/>+ pulse, journeys health, …"}
     B -->|"yes"| ALLOW(["ALLOW"])
     B -->|"no — state mutation"| C{"ZENSU_MCP_GATE=off<br/>or hooks.mcpGate=false?"}
     C -->|"yes (escape hatch)"| ALLOW
@@ -102,9 +109,10 @@ flowchart TD
 A skill opens a **scoped** window with
 `zensu-log.sh --workflow-begin --tools "<exact tool set>"`: the bypass then allows **only**
 that skill's declared tools — so `/zensu:implement` cannot forge a `set_security_classification`
-it never declared — and `--workflow-end` closes it again. `ZENSU_MCP_GATE=off` disables the gate
-for a deliberate one-off. A structure test (`tests/structure/test-skill-workflow-markers.sh`)
-fails the build if any skill calls a mutation tool without the `--workflow-begin` /
+it never declared — and `--workflow-end` closes it again. The `--tools` list stays tool-name-keyed;
+the gate maps each CLI command back to its canonical tool name to check membership. `ZENSU_MCP_GATE=off`
+disables the gate for a deliberate one-off. A structure test (`tests/structure/test-skill-workflow-markers.sh`)
+fails the build if any skill runs a mutation command without the `--workflow-begin` /
 `--workflow-end` markers, so a new skill cannot silently regress the contract.
 
 ## Installation
@@ -122,23 +130,22 @@ No configuration needed. When you first use a Zensu tool, Claude Code will autom
 
 ### API Key (CI/CD)
 
-For headless environments where browser login isn't available, authenticate with an API key. Exporting the key alone is **not** enough — the bundled `.mcp.json` carries no `Authorization` header (the absence of one is exactly what lets interactive users get the OAuth flow above), so nothing forwards the key. Register a user-scope MCP entry that sends it:
+For headless environments where browser login isn't available, authenticate the `zensu` CLI with an API key instead of the OAuth browser flow. Set `ZENSU_API_KEY` and use the CLI's auth command:
 
 ```bash
 export ZENSU_API_KEY=zsk_...
-claude mcp add zensu --transport http --url https://mcp.zensu.dev/mcp \
-  --header "Authorization: Bearer ${ZENSU_API_KEY}" --scope user
+zensu auth login   # see `zensu auth --help` for the exact non-interactive / token flags
 ```
 
-The user-scope entry takes precedence over the plugin's project-scope `.mcp.json` and survives plugin upgrades. With double quotes the shell expands `${ZENSU_API_KEY}` at add time, baking the key into `~/.claude.json` — fine for an ephemeral CI runner. On a persistent machine, single-quote the header (`'Authorization: Bearer ${ZENSU_API_KEY}'`) to store the placeholder instead and let Claude Code expand it from the environment at startup. Remove with `claude mcp remove zensu --scope user`.
+Verify the session with `zensu auth status`; clear it with `zensu auth logout`. Run `zensu auth --help` for where the token is cached and the headless-auth options.
 
-To point Claude Code at a self-hosted Zensu MCP server, see [Self-hosting](#self-hosting) below.
+To point the CLI at a self-hosted Zensu backend, see [Self-hosting](#self-hosting) below.
 
 ## What's Included
 
-### MCP Server (60 Tools)
+### CLI (`zensu`)
 
-Auto-configured connection to the Zensu MCP server providing tools for feature CRUD, security analysis, tier management, user journeys, product bootstrap, ghost scans, pulse sessions, and more.
+The plugin drives Zensu through the typed `zensu` CLI — install it with `curl -fsSL https://zensu.dev/install.sh | sh` and authenticate with `zensu auth login`. It provides commands for feature CRUD, security analysis, tier management, user journeys, product bootstrap, ghost scans, pulse sessions, and more (`zensu --help`). The hosted MCP server (`mcp.zensu.dev`) still exists for the Zensu web app's own AI assistant, but is no longer wired into this plugin.
 
 ### Agents (3)
 
@@ -203,13 +210,13 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `session-start-banner.sh` | SessionStart | `sessionBanner` | User-facing "Zensu PLM vX active" banner + usage hints (Plan mode → ask whether to run `/zensu:tdd`, gate-enforced edits when you do, skills list). Plain stdout, shown to the user. Fires only on fresh starts (`source=startup`/`clear`), silent on `resume`/`compact`. Skipped when `sessionBanner:false`. |
 | `session-start-primer.sh` | SessionStart | `sessionBanner` | Model-facing orientation: injects a short `additionalContext` primer so the agent proactively uses Plan mode and asks before running `/zensu:tdd`. Same fresh-start filter + `sessionBanner` gate as the banner. |
 | `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only while the session's chain-state `active` flag is set (by `zensu-log.sh --tdd-begin`); pre-0.4.0 it keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the `/zensu:tdd` prompt discipline + PostToolUse code-reviewer chain. |
-| `pre-mcp-zensu-gate.sh` | PreToolUse `mcp__plugin_zensu_zensu__.*` | `mcpGate` (+ `ZENSU_MCP_GATE` env) | Zensu MCP write-gate. Classifies every Zensu MCP call via `hooks/lib/zensu-mcp-tools.sh`: read/telemetry tools (`zensu_is_read_tool`) pass ungated; every state-mutating tool is **default-denied** unless one of — the caller is the `zensu-plm` agent (`agent_type` match), the tool is declared in an active skill workflow window (opened by `zensu-log.sh --workflow-begin --tools "…"`, e.g. inside `/zensu:implement` or `/zensu:bootstrap`), or a bypass is set (`ZENSU_MCP_GATE=off` env / `mcpGate:false` config). A deny returns `permissionDecision:deny` with remediation pointing at the matching skill or the zensu-plm agent. Forces mutations through the workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) instead of raw main-thread MCP calls. |
+| `pre-bash-zensu-gate.sh` | PreToolUse `Bash` | `mcpGate` (+ `ZENSU_MCP_GATE` env) | Zensu CLI write-gate. Parses `zensu <noun> <verb>` (and `zensu api <METHOD> <path>`) from the Bash command, resolves each via `hooks/lib/zensu-cli-map.sh`, and classifies via `hooks/lib/zensu-mcp-tools.sh`: read/telemetry commands (`zensu_is_read_tool`) pass ungated; every state-mutating command is **default-denied** unless one of — the caller is the `zensu-plm` agent (`agent_type` match), the command is declared in an active skill workflow window (opened by `zensu-log.sh --workflow-begin --tools "…"`, e.g. inside `/zensu:implement` or `/zensu:bootstrap`), or a bypass is set (`ZENSU_MCP_GATE=off` env / `mcpGate:false` config). A deny returns `permissionDecision:deny` with remediation pointing at the matching skill or the zensu-plm agent. A convention-nudge, not a hard boundary (once the CLI's token is on disk an agent can `curl` the API directly): forces mutations through the workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) instead of raw main-thread CLI calls. |
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | After the user approves a Plan-mode plan that adds executable code, directs the main agent to **ask the user** (via the `AskUserQuestion` tool) whether to run the `/zensu:tdd` skill (in-thread, no subagent), then run it on confirmation or implement the plan directly on decline. The question is skipped on fast-paths: doc-only plans, an explicit TDD preference already in the approval message (e.g. `kein tdd` / `mit tdd`), and non-interactive Auto Mode (defaults to running TDD). Skipped entirely when `autoTdd:false`. |
 | `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, routes Critical/Important findings back to the **main thread** to be fixed in-thread under the phase-gate (or ALL severities when `autoFixIncludeSuggestions:true`), then the main agent re-spawns the reviewer. Round counter persisted at `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (project-local default since 0.3.23 — claude-code's auto-set `CLAUDE_PLUGIN_DATA` is intentionally IGNORED so the round budget resets per worktree); on reaching `autoFixMaxRounds` (default 5) it converges — with `hooks.selfReview` enabled (the 0.5.0 default) it marks `codeReviewDone` and hands off to the terminal `/zensu:self-review` stage, which owns `--chain-done`; otherwise it sets `chainDone` directly — and emits a convergence directive instead of routing again — pointing the user at `/zensu:reset-review-limit` to grant another budget without ending the session. At every chain-end branch (PASS, suggestions-only, max-rounds convergence) it appends a `CHAIN-END SUMMARY` directive — a narrative report (Problem → What I built → How I built it → Open, with the one-sentence TL;DR last). Disable summary with `combinedSummary:false`. |
 | `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` as an independent evidence channel. Active only while the session's chain-state `active` flag is set. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT `cmd="..."` claim against the witness log to detect hallucinated test runs. Bypass with `ZENSU_TEST_WITNESS=off`. |
 | `stop-chain-enforcer.sh` | Stop | `chainEnforcer` (+ `ZENSU_CHAIN` env) | Review-chain backstop. Blocks the main agent from ending its turn while a TDD session has finished implementation (`implComplete`) but the review chain has not terminated (`chainDone`) — forcing the `zensu:code-reviewer` spawn after implementation and after each in-thread fix round (this replaces the deleted `post-tdd-review-delegate.sh` Agent-completion trigger; since 0.5.0, once `codeReviewDone` is set with `hooks.selfReview` enabled it instead forces the terminal `/zensu:self-review` Skill until `chainDone`). Activation scoped to chain-state `active`; anti-deadlock stop-block budget = `autoFixMaxRounds + 3`. Disable with `chainEnforcer:false` or `ZENSU_CHAIN=off`. |
 | `user-prompt-context-nudge.sh` | UserPromptSubmit | `context.compactionNudge` (+ `context.nudgeThreshold`, `context.windowSize`) | Context-compaction nudge. On each user prompt it tail-reads the session transcript's most recent `usage` block, computes context occupancy (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` ÷ context size — when `context.windowSize` is unset the nudge stays silent at or below 200k occupancy and treats occupancy past 200k as a proven 1M window) and, once usage reaches `context.nudgeThreshold` (default `50`%), injects a model-facing `additionalContext` reminder so the **main-thread** agent proactively proposes `/compact` to the user. It never triggers compaction itself (only the user can) and never blocks the prompt — missing `node`/transcript, sub-threshold usage, or any error exits 0 silently. A per-session state file (`${CLAUDE_PROJECT_DIR:-.}/.zensu/state/context-nudge-<sid>.txt`) records the last 10%-band that fired, so the reminder repeats once per band climb (50→60→70…) instead of every prompt and re-arms after a compaction shrinks the context. All three settings live under the top-level `context` node of `.zensu/config.json` (not `hooks`); disable with `context.compactionNudge:false`. |
-| `user-prompt-intent-router.sh` | UserPromptSubmit | `intentRouter` | Product-planning intent router. On each user prompt a whole-word, case-insensitive regex (`zensu`, `product`, `feature`, `roadmap`, `milestone`, `bootstrap`, `ghost scan`, `journey`, `tier`, plus inflections) screens for Zensu planning/tracking intent; on a hit it injects a model-facing `additionalContext` directive steering the agent to run the greenfield/brownfield/hybrid triage — ask the three project-context questions, then route the work through the **zensu-plm** agent — instead of calling Zensu MCP tools directly. The directive carries an explicit dismiss clause so an ordinary coding/UI/debug task that merely mentions a word like "product"/"feature"/"tier" is answered normally. Advisory steering, not a hard gate; silent on no-keyword prompts, missing `node`, or `intentRouter:false`. |
+| `user-prompt-intent-router.sh` | UserPromptSubmit | `intentRouter` | Product-planning intent router. On each user prompt a whole-word, case-insensitive regex (`zensu`, `product`, `feature`, `roadmap`, `milestone`, `bootstrap`, `ghost scan`, `journey`, `tier`, plus inflections) screens for Zensu planning/tracking intent; on a hit it injects a model-facing `additionalContext` directive steering the agent to run the greenfield/brownfield/hybrid triage — ask the three project-context questions, then route the work through the **zensu-plm** agent — instead of running `zensu` CLI commands directly. The directive carries an explicit dismiss clause so an ordinary coding/UI/debug task that merely mentions a word like "product"/"feature"/"tier" is answered normally. Advisory steering, not a hard gate; silent on no-keyword prompts, missing `node`, or `intentRouter:false`. |
 | `user-prompt-tdd-reminder.sh` | UserPromptSubmit | `tddReminder` | Per-turn TDD reminder for **direct (non-Plan-mode)** requests. The Plan-mode path (`plan-approved-delegate.sh`) only fires on plan approval, so a direct "implement X" / "fix the bug" prompt otherwise reaches no TDD trigger. On each prompt this hook injects a model-facing `additionalContext` directive — mirroring the plan-approval decision logic + fast-paths — so the agent decides whether the request is a code change and, unless a fast-path applies, **asks** (via `AskUserQuestion`) whether to run `/zensu:tdd` before its first edit. **No prompt regex** — the (multilingual) model classifies intent, so detection is language-independent. Silent when `tddReminder:false`, when the payload has no prompt, or when a TDD session is already active for the session (reusing `pre-edit-tdd-reminder.sh`'s session resolution). Advisory steering — it never blocks an edit. |
 
 ## Typical Workflows
@@ -254,17 +261,17 @@ No separate skill — the agent runs ghost-scan, then creates the remainder as p
 
 ## Graceful Degradation
 
-The TDD manager and code reviewer work **without a Zensu account**. No MCP connection needed for:
+The TDD workflow and code reviewer work **without a Zensu account**. No `zensu` CLI needed for:
 - TDD orchestration (RED→GREEN cycles)
 - Code review (5 sequential specialist perspectives)
 - Progress logging (`.zensu/logs/`)
 
-When Zensu MCP **is** connected, additional capabilities activate:
-- Automatic `link_test` and `link_source_files` after TDD completion
-- Feature status updates (`in_progress` → `testing`)
-- Revision creation with implementation summary
-- Security findings fed into `complete_security_review`
-- Release gate validation (`validate_feature_security`)
+When the `zensu` CLI is installed and authenticated, additional capabilities activate:
+- Automatic `zensu link test` and `zensu link source` after TDD completion
+- Feature status updates (`zensu features status`)
+- Revision creation with implementation summary (`zensu features revision`)
+- Security findings fed into `zensu security review`
+- Release gate validation (`zensu security validate`)
 
 ## Configuration
 
@@ -286,7 +293,7 @@ Zensu ships twelve automatic hooks that fire across the development lifecycle (f
 | `sessionBanner` | `session-start-banner.sh` + `session-start-primer.sh` | Skips the "Zensu active" user banner AND the agent-orientation primer at fresh session starts (startup/clear) |
 | `tddReminder` | `user-prompt-tdd-reminder.sh` | When `false`, suppresses the per-turn TDD reminder for direct (non-Plan-mode) implementation requests — the hook injects no `additionalContext` and the agent is never prompted to ask about `/zensu:tdd` outside the Plan-mode path. Default `true`. The reminder is advisory (never blocks an edit) and is already silent when a prompt is empty or a TDD session is active. |
 | `intentRouter` | `user-prompt-intent-router.sh` | When `false`, suppresses the UserPromptSubmit product-planning intent router — keyword-bearing prompts are no longer screened and no zensu-plm triage steer is injected. Default `true`. Advisory steering only; it never blocks a prompt. |
-| `mcpGate` | `pre-mcp-zensu-gate.sh` | When `false`, disables the Zensu MCP write-gate — state-mutating Zensu MCP tools are no longer default-denied on the main thread. Read/telemetry tools are always allowed regardless of this flag. The `zensu-plm` agent and active skill workflow windows stay exempt even when the gate is on; for a deliberate one-off main-thread mutation use `ZENSU_MCP_GATE=off`. Default `true`. |
+| `mcpGate` | `pre-bash-zensu-gate.sh` | When `false`, disables the Zensu CLI write-gate — state-mutating `zensu` commands are no longer default-denied on the main thread. Read/telemetry commands are always allowed regardless of this flag. The `zensu-plm` agent and active skill workflow windows stay exempt even when the gate is on; for a deliberate one-off main-thread mutation use `ZENSU_MCP_GATE=off`. Default `true`. |
 | `context.compactionNudge` | `user-prompt-context-nudge.sh` | When `false`, suppresses the UserPromptSubmit context-compaction nudge entirely — the hook reads no transcript and never proposes `/compact`. Default `true`. Lives under the top-level `context` node (not `hooks`). |
 | `context.nudgeThreshold` | `user-prompt-context-nudge.sh` | Integer percent (default `50`, valid range `1..99`) of context-window occupancy at or above which the nudge fires. Out-of-range or non-integer values fall back to `50`. **Requires `context.compactionNudge:true`.** |
 | `context.windowSize` | `user-prompt-context-nudge.sh` | Optional integer token budget used as the 100% denominator when computing occupancy (valid range `1000..100000000`). **Unset by default** — since hooks aren't handed the real window size, the nudge then stays silent at or below 200k occupancy (a near-full 200k session is handled by Claude Code's own auto-compaction) and treats occupancy past 200k as a proven 1M window. Set it explicitly to the model's true window (e.g. `1000000` for a 1M model — or a sub-200k value to opt into earlier nudges) for accurate percentages on any window. **Requires `context.compactionNudge:true`.** |
@@ -367,7 +374,8 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — must be wired via a user-scope MCP header to take effect (see [Authentication](#authentication)); not needed when using OAuth |
+| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — consumed by the `zensu` CLI's auth (see [Authentication](#authentication)); not needed when using OAuth browser login |
+| `ZENSU_API_URL` | `https://api.zensu.dev` | Points the `zensu` CLI at a self-hosted Zensu backend (overridden per-invocation by the `--api-url` global flag). See [Self-hosting](#self-hosting). |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits during a main-thread `/zensu:tdd` session. Any other value (or unset) leaves the gate active while the session's chain-state `active` flag is set. |
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the session's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
 | `ZENSU_CHAIN` | — | Set to `off` to disable the Stop-hook review-chain backstop (`stop-chain-enforcer.sh`) so the main agent may end its turn without completing the `zensu:code-reviewer` chain. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell. |
@@ -377,7 +385,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 ## Data & Privacy
 
-When using this plugin, certain data is transmitted to the Zensu MCP server.
+When using this plugin, certain data is transmitted by the `zensu` CLI to the Zensu backend API.
 
 **What data is transmitted:**
 - Product names, feature titles, and descriptions
@@ -387,8 +395,8 @@ When using this plugin, certain data is transmitted to the Zensu MCP server.
 - Pulse session metadata: tool names, durations, feature IDs, file paths
 
 **Where it goes:**
-- Default: `https://mcp.zensu.dev` (all data transmitted via HTTPS)
-- Self-hosted Zensu MCP deployments — see [Self-hosting](#self-hosting) below
+- Default: `https://api.zensu.dev` (all data transmitted via HTTPS)
+- Self-hosted Zensu deployments — see [Self-hosting](#self-hosting) below
 
 **What is NOT transmitted:**
 - Source code content
@@ -400,15 +408,15 @@ When using this plugin, certain data is transmitted to the Zensu MCP server.
 
 ### Self-hosting
 
-The plugin ships pointing at the SaaS default `https://mcp.zensu.dev/mcp`. To redirect Claude Code at your own Zensu MCP instance, register a user-scope MCP entry — it takes precedence over the plugin's project-scope `.mcp.json` and survives plugin upgrades:
+The `zensu` CLI talks to the SaaS default backend (`https://api.zensu.dev`). To point it at your own Zensu deployment, set the API URL — via the `--api-url` global flag, the `ZENSU_API_URL` environment variable, or the CLI's stored host (`zensu auth login` against your deployment):
 
 ```bash
-claude mcp add zensu --transport http --url https://mcp.example.internal/mcp --scope user
+export ZENSU_API_URL=https://api.example.internal
+# or per-invocation:
+zensu --api-url https://api.example.internal features list --product <id>
 ```
 
-User-scope entries persist in `~/.claude.json` and apply to every project on the machine. Remove with `claude mcp remove zensu --scope user` to fall back to the SaaS default.
-
-Why not a `ZENSU_MCP_URL` env var? Variable expansion in `.mcp.json` only reads the shell environment at Claude Code startup — Claude Desktop's Custom Connector dialog rejects `${VAR:-default}` syntax outright, and `settings.json` `env` blocks do not reliably propagate to MCP HTTP URL expansion ([issue #1254](https://github.com/anthropics/claude-code/issues/1254)). `claude mcp add --scope user` is deterministic and portable.
+See `zensu --help` / `zensu auth --help` for the precedence between the flag, the env var, and the stored host. The hosted MCP server (`mcp.zensu.dev`) — used by the Zensu web app's own AI assistant — is no longer wired into this plugin, so there is no `.mcp.json` to redirect.
 
 **Regulated environments:**
 If you operate under GDPR, CCPA, or similar data protection regulations, review the data transmission above and consider using a self-hosted instance to maintain full control over your data.
@@ -425,8 +433,9 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 
 | Problem | Solution |
 |---------|----------|
-| MCP server unreachable | Verify network connectivity to `https://mcp.zensu.dev/mcp` (or your self-hosted URL — see [Self-hosting](#self-hosting)) |
-| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and that the user-scope MCP header is registered — see [API Key (CI/CD)](#api-key-cicd) |
+| `zensu` CLI not found | Install the CLI (`curl -fsSL https://zensu.dev/install.sh \| sh`) and ensure it is on `PATH` — the session banner warns when it is missing |
+| Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](#self-hosting)), and that `zensu auth status` shows a logged-in session |
+| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `zensu auth login` — see [API Key (CI/CD)](#api-key-cicd) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |

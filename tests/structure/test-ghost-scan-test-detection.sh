@@ -77,11 +77,11 @@ else
   check "P7 SKILL.md has the pre-submit self-check (zero-tests guard)" FAIL
 fi
 
-# P8 — backfill path via enrich_existing for a scan that already created features
-if grep -qiF 'Backfilling' "$SKILL_MD" && grep -qF 'enrich_existing=true' "$SKILL_MD"; then
-  check "P8 SKILL.md documents the enrich_existing=true backfill path" PASS
+# P8 — backfill path via --enrich-existing for a scan that already created features
+if grep -qiF 'Backfilling' "$SKILL_MD" && grep -qF -- '--enrich-existing' "$SKILL_MD"; then
+  check "P8 SKILL.md documents the --enrich-existing backfill path" PASS
 else
-  check "P8 SKILL.md documents the enrich_existing=true backfill path" FAIL
+  check "P8 SKILL.md documents the --enrich-existing backfill path" FAIL
 fi
 
 # P9 — Phase 4 review flags an all-zero Tests column
@@ -151,17 +151,17 @@ else
 fi
 
 # P16 — journey discovery phase creates journeys after apply
-if grep -qF 'create_user_journey' "$SKILL_MD" && grep -qF 'create_journey_step' "$SKILL_MD"; then
-  check "P16 SKILL.md journey phase calls create_user_journey + create_journey_step" PASS
+if grep -qF 'zensu journeys create' "$SKILL_MD" && grep -qF 'zensu journeys step' "$SKILL_MD"; then
+  check "P16 SKILL.md journey phase runs zensu journeys create + step" PASS
 else
-  check "P16 SKILL.md journey phase calls create_user_journey + create_journey_step" FAIL
+  check "P16 SKILL.md journey phase runs zensu journeys create + step" FAIL
 fi
 
 # P17 — journey health analysis on the created journeys
-if grep -qF 'analyze_journey_health' "$SKILL_MD"; then
-  check "P17 SKILL.md runs analyze_journey_health on created journeys" PASS
+if grep -qF 'zensu journeys health' "$SKILL_MD"; then
+  check "P17 SKILL.md runs zensu journeys health on created journeys" PASS
 else
-  check "P17 SKILL.md runs analyze_journey_health on created journeys" FAIL
+  check "P17 SKILL.md runs zensu journeys health on created journeys" FAIL
 fi
 
 # P18 — doc-file completeness quality rule (mirror of the test-file rule)
@@ -241,11 +241,11 @@ else
   check "P26 ghost-scan.txt prompt invites journey discovery" FAIL
 fi
 
-# P27 — journeys are created AFTER ghost_apply (feature IDs exist only post-apply)
-if grep -qiE 'after .{0,4}ghost_apply|after apply' "$SKILL_MD"; then
-  check "P27 SKILL.md pins journey creation after ghost_apply" PASS
+# P27 — journeys are created AFTER ghost apply (feature IDs exist only post-apply)
+if grep -qiE 'after[^.]{0,15}ghost apply' "$SKILL_MD"; then
+  check "P27 SKILL.md pins journey creation after ghost apply" PASS
 else
-  check "P27 SKILL.md pins journey creation after ghost_apply" FAIL
+  check "P27 SKILL.md pins journey creation after ghost apply" FAIL
 fi
 
 # P28 — Phase 5b removed: the ghost-scan SKILL no longer drives a client-side create_revision baseline (now minted server-side by ghost_apply, zensu-monorepo #266)
