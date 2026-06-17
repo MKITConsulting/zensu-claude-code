@@ -29,8 +29,18 @@ printf '%s' "$INPUT" | node -e '
 
 { read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
+TRANSCRIPT_PATH="$(printf '%s' "$INPUT" | node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s);
+      process.stdout.write(typeof j.transcript_path === "string" ? j.transcript_path : "");
+    } catch (_) { process.stdout.write(""); }
+  });
+' 2>/dev/null)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
+SANITIZED_SESSION="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION")"
 
 # Activation: record witness lines only while a main-thread TDD session is active
 # for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). Replaces

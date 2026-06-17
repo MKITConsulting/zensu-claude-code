@@ -22,7 +22,7 @@ zensu_resolve_session_via_helper() {
   [ -f "$helper" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
   local out
-  out="$(node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
+  out="$(ZENSU_TRANSCRIPT_PATH="${ZENSU_TRANSCRIPT_PATH:-}" node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
   out="${out//$'\n'/}"
   out="${out//$'\r'/}"
   if [ -n "$out" ]; then

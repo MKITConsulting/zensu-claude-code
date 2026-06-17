@@ -431,4 +431,73 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical 2>/dev/null || true
+zensu_pending_review_file() {
+  local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  echo "${dir}/pending-review.json"
+}
+
+_tdd_write_pending_review_critical() {
+  local pf="$1"
+  local files="$2"
+  local summary="$3"
+  local ts="$4"
+
+  local tmp
+  if ! tmp="$(mktemp "${pf}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  FILES="$files" SUMMARY="$summary" TS="$ts" \
+    node -e '
+      const fs = require("fs");
+      const files = (process.env.FILES || "").split(",").map(s => s.trim()).filter(Boolean);
+      const o = { files, summary: process.env.SUMMARY || "" };
+      if (process.env.TS) o.ts = process.env.TS;
+      fs.writeFileSync(process.argv[1], JSON.stringify(o, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$pf" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_write_pending_review() {
+  local files="${1:-}"
+  local summary="${2:-}"
+  local pf
+  pf="$(zensu_pending_review_file)"
+  local dir
+  dir="$(dirname "$pf")"
+  [ -L "$pf" ] && return 1
+  [ -L "$dir" ] && return 1
+  mkdir -p "$dir" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+  local ts=""
+  if [ "$(_zensu_log_style)" != "none" ]; then
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  _tdd_locked_run "$pf" _tdd_write_pending_review_critical "$pf" "$files" "$summary" "$ts"
+}
+
+tdd_clear_pending_review() {
+  local pf
+  pf="$(zensu_pending_review_file)"
+  local dir
+  dir="$(dirname "$pf")"
+  if [ -L "$pf" ]; then
+    echo "zensu: refusing to clear pending-review marker through symlink at $pf" >&2
+    return 1
+  fi
+  if [ -L "$dir" ]; then
+    echo "zensu: refusing to clear pending-review marker under symlinked dir $dir" >&2
+    return 1
+  fi
+  rm -f -- "$pf" 2>/dev/null || true
+  return 0
+}
+
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review 2>/dev/null || true

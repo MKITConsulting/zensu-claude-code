@@ -53,6 +53,24 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  --pending-review|--pending-review-done)
+    verb="$1"
+    files_val=""
+    summary_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --files)   files_val="${2:-}";   shift 2 || break ;;
+        --summary) summary_val="${2:-}"; shift 2 || break ;;
+        *) shift ;;
+      esac
+    done
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    case "$verb" in
+      --pending-review)      tdd_write_pending_review "$files_val" "$summary_val" ;;
+      --pending-review-done) tdd_clear_pending_review ;;
+    esac
+    exit $?
+    ;;
   --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
