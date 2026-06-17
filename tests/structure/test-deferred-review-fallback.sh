@@ -66,12 +66,17 @@ bash "$LOG" --pending-review-done >/dev/null 2>&1
   || check "D5 --pending-review-done clears marker" PASS
 
 SID_SYM="deferred-symlink"
-ln -s /etc/hosts "$MARKER" 2>/dev/null
-OUT="$(printf '{"session_id":"%s"}' "$SID_SYM" | bash "$STOP" 2>/dev/null)"; RC=$?
-if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ]; then
-  check "D6 symlinked marker refused (allow, clean exit 0, no adopt-through-symlink)" PASS
+rm -f "$MARKER" 2>/dev/null
+ln -s /etc/hosts "$MARKER" 2>/dev/null || true
+if [ -L "$MARKER" ]; then
+  OUT="$(printf '{"session_id":"%s"}' "$SID_SYM" | bash "$STOP" 2>/dev/null)"; RC=$?
+  if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ]; then
+    check "D6 symlinked marker refused (allow, clean exit 0, no adopt-through-symlink)" PASS
+  else
+    check "D6 symlink refused (rc=$RC out=$OUT)" FAIL
+  fi
 else
-  check "D6 symlink refused (rc=$RC out=$OUT)" FAIL
+  echo "  SKIP  D6 symlink refusal — ln -s did not create a real symlink (Windows/MSYS)"
 fi
 rm -f "$MARKER"
 
