@@ -500,4 +500,29 @@ tdd_clear_pending_review() {
   return 0
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review 2>/dev/null || true
+tdd_pending_review_stale() {
+  local ttl_hours="${1:-}"
+  case "$ttl_hours" in ''|*[!0-9]*) echo "false"; return 0 ;; esac
+  [ "$ttl_hours" -le 0 ] && { echo "false"; return 0; }
+  local pf
+  pf="$(zensu_pending_review_file)"
+  [ -f "$pf" ] || { echo "false"; return 0; }
+  [ -L "$pf" ] && { echo "false"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "false"; return 0; }
+  local verdict
+  verdict=$(TTL="$ttl_hours" node -e '
+    try {
+      const fs = require("fs");
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const ts = j && j.ts;
+      if (typeof ts !== "string" || !ts) { console.log("false"); process.exit(0); }
+      const t = Date.parse(ts);
+      if (!Number.isFinite(t)) { console.log("false"); process.exit(0); }
+      const ttlMs = parseInt(process.env.TTL, 10) * 3600 * 1000;
+      console.log((Date.now() - t) >= ttlMs ? "true" : "false");
+    } catch (_) { console.log("false"); }
+  ' "$pf" 2>/dev/null)
+  [ "$verdict" = "true" ] && echo "true" || echo "false"
+}
+
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale 2>/dev/null || true

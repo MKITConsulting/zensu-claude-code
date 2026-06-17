@@ -68,6 +68,10 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
   PENDING_FILE="$(zensu_pending_review_file)"
   if [ -n "$PENDING_FILE" ] && [ -f "$PENDING_FILE" ] && [ ! -L "$PENDING_FILE" ]; then
+    if [ "$(tdd_pending_review_stale "$(zensu_pending_review_ttl_hours)")" = "true" ]; then
+      tdd_clear_pending_review >/dev/null 2>&1 || true
+      exit 0
+    fi
     if tdd_set_flag "$SESSION_ID" active true && tdd_set_flag "$SESSION_ID" implComplete true; then
       if zensu_tdd_strict_enabled; then
         tdd_set_flag "$SESSION_ID" vanilla false || echo "zensu chain-enforcer: deferred-adopt vanilla(false) write failed for ${SESSION_ID}; session resolves strict." >&2

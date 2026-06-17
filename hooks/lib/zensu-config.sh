@@ -80,6 +80,15 @@ zensu_autofix_max_rounds() {
   echo "$val"
 }
 
+zensu_pending_review_ttl_hours() {
+  local default=6
+  command -v node >/dev/null 2>&1 || { echo "$default"; return 0; }
+  local val
+  val=$(node -e "$_ZENSU_CFG_JS"' var j=cfg();var n=j.hooks&&j.hooks.pendingReviewTtlHours;console.log(Number.isInteger(n)&&n>=0&&n<=8760?String(n):process.argv[1])' "$default" 2>/dev/null)
+  [ -z "$val" ] && { echo "$default"; return 0; }
+  echo "$val"
+}
+
 zensu_context_nudge_enabled() {
   command -v node >/dev/null 2>&1 || return 0
   local val
