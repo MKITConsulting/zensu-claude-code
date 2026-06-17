@@ -83,10 +83,7 @@ run "B6 freelance mutation (classify)"      "zensu security classify f1 --classi
 run "B7 mutation + zensu-plm agent"         "zensu security classify f1"                          zensu-plm ALLOW
 run "B12 alias mutation (sec classify)"     "zensu sec classify f1"                                      '' DENY
 run "B12b alias read (feature get)"         "zensu feature get f1"                                       '' ALLOW
-run "B13a api GET"                          "zensu api GET /features"                                    '' ALLOW
-run "B13b api POST (write)"                 "zensu api POST /features -f title=x"                        '' DENY
-run "B13c api path-only (GET default)"      "zensu api /api/features"                                    '' ALLOW
-run "B13d api path + -f (body=>POST)"       "zensu api /features -f title=x"                             '' DENY
+run "B13 api passthrough removed (ungated)" "zensu api POST /features -f title=x"                        '' ALLOW
 run "B14 zensu-log.sh is not the CLI"       "bash /p/hooks/lib/zensu-log.sh --workflow-begin --tools x"  '' ALLOW
 run "B15 echo merely mentions zensu"        "echo use zensu security classify please"                    '' ALLOW
 run "B16 env-prefix mutation (link test)"   "FOO=bar zensu link test f1 --test-type unit --file a.go"    '' DENY
@@ -187,12 +184,6 @@ run "B28d double-quoted zensu + mutation"    "\"zensu\" security classify f1"   
 run "B28e backslash zensu + mutation"        "\\zensu security classify f1"                               '' DENY
 run "B28f cmd-substitution mutation"         "zensu features get \$(zensu security classify f1)"          '' DENY
 run "B28g assignment-substitution mutation"  "x=\$(zensu security classify f1 --foo bar)"                 '' DENY
-
-# B29 api method/path fidelity
-run "B29a api POST (path named POST = read)" "zensu api POST"                                             '' ALLOW
-run "B29b api POST /features (write)"         "zensu api POST /features"                                   '' DENY
-run "B29c api path + --data (write)"          "zensu api /features --data title=x"                         '' DENY
-run "B29d api path + -d (write)"              "zensu api /features -d title=x"                             '' DENY
 
 # B30 --api-url <value> must not be misread as the subcommand
 run "B30 --api-url value + mutation"          "zensu --api-url https://h security classify f1"             '' DENY

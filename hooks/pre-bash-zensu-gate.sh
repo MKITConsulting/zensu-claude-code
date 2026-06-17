@@ -3,7 +3,7 @@
 #
 # Re-home of pre-mcp-zensu-gate.sh: same decision order, new trigger surface.
 # Instead of intercepting `mcp__plugin_zensu_zensu__*` tool calls, it parses the
-# Bash command for `zensu <noun> <verb>` (and `zensu api <METHOD> <path>`)
+# Bash command for `zensu <noun> <verb>`
 # invocations, maps each to its canonical tool name (hooks/lib/zensu-cli-map.sh),
 # and classifies it through the same SoT (hooks/lib/zensu-mcp-tools.sh). Reads
 # and unknown subcommands pass; a mutation run freelance on the main thread is
@@ -24,7 +24,7 @@ command -v node >/dev/null 2>&1 || exit 0
 INPUT="$(cat 2>/dev/null || true)"
 
 # Parse the Bash command into zensu invocations. Emits one line per invocation,
-# tab-separated "<noun>\t<verb>" (or "api\t<METHOD>"). Emits nothing — so the
+# tab-separated "<noun>\t<verb>". Emits nothing — so the
 # gate is a no-op — when the command runs no `zensu` CLI binary. Anchoring on the
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
@@ -37,8 +37,7 @@ INVOCATIONS="$(PAYLOAD="$INPUT" node -e '
   } catch (_) { process.exit(0); }
   if (!cmd || cmd.indexOf("zensu") === -1) process.exit(0);
   const ALIAS = {product:"products",feature:"features",subfeature:"subfeatures",roadmaps:"roadmap",tier:"tiers",sec:"security",journey:"journeys",docs:"doc",kb:"knowledge","wiki-pages":"wiki"};
-  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org api auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
-  const METHODS = new Set(["GET","HEAD","OPTIONS","POST","PUT","PATCH","DELETE"]);
+  const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = [];
   const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                        // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
@@ -63,28 +62,14 @@ INVOCATIONS="$(PAYLOAD="$INPUT" node -e '
       break;                                                                       // first non-flag token decides
     }
     if (!noun) continue;
-    if (noun === "api") {
-      const after = rest.slice(k + 1);
-      const positional = after.filter((t) => t.charAt(0) !== "-");
-      let method = "", hasBody = false;
-      // `api [method] <path>`: a method is present only with 2+ positional args; a lone path token is NOT a method
-      if (positional.length >= 2 && METHODS.has(positional[0].toUpperCase())) method = positional[0].toUpperCase();
-      for (const t of after) {
-        if (t === "-f" || t === "-d" || t === "-i" || t === "--field" || t === "--data" || t === "--input"
-            || t.indexOf("-f") === 0 || t.indexOf("--data=") === 0 || t.indexOf("--input=") === 0) hasBody = true;
-      }
-      if (!method) method = hasBody ? "POST" : "GET";                              // mirror api.go: lone path defaults GET, body ⇒ POST
-      out.push("api\t" + method);
-    } else {
-      let verb = "";
-      for (let m = k + 1; m < rest.length; m++) {
-        const t = rest[m];
-        if (t === "--api-url") { m++; continue; }
-        if (t.charAt(0) === "-") continue;
-        verb = t; break;
-      }
-      out.push(noun + "\t" + verb);
+    let verb = "";
+    for (let m = k + 1; m < rest.length; m++) {
+      const t = rest[m];
+      if (t === "--api-url") { m++; continue; }
+      if (t.charAt(0) === "-") continue;
+      verb = t; break;
     }
+    out.push(noun + "\t" + verb);
   }
   process.stdout.write(out.join("\n"));
 ' 2>/dev/null)"
@@ -130,24 +115,10 @@ tool_allowed_by_workflow() {
     && [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_FALLBACK")" "$tool")" = "true" ] && return 0
   return 1
 }
-# Generic (api write): allowed if ANY workflow is active in either session.
-any_workflow_active() {
-  [ "$(zensu_workflow_active "$(tdd_state_file "$SID_PRIMARY")")" = "true" ] && return 0
-  [ -n "$SID_FALLBACK" ] && [ "$SID_FALLBACK" != "$SID_PRIMARY" ] \
-    && [ "$(zensu_workflow_active "$(tdd_state_file "$SID_FALLBACK")")" = "true" ] && return 0
-  return 1
-}
 
 DENY_TOOL=""
 while IFS="$(printf '\t')" read -r noun verb; do
   [ -z "$noun" ] && continue
-  if [ "$noun" = "api" ]; then
-    case "$verb" in
-      GET|HEAD|OPTIONS) continue ;;                 # api read → allow
-      *) any_workflow_active && continue
-         DENY_TOOL="zensu api ${verb}"; break ;;     # api write freelance → deny
-    esac
-  fi
   TOOL="$(zensu_cli_to_tool "$noun" "$verb")"
   [ -z "$TOOL" ] && continue                          # unknown/neutral (auth, version) → allow
   zensu_is_read_tool "$TOOL" && continue              # read → allow
