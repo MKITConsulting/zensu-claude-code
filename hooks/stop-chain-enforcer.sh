@@ -14,6 +14,17 @@
 # Activation: only when chain-state `active` is true for THIS session. Other
 # sessions, non-TDD work, and plain CLI stop normally.
 #
+# Spawned-agent safety: only the genuine top-level interactive thread enforces
+# the chain. Any spawned/orchestrated agent (Task/Agent reviewers AND Claude
+# Code Workflow workers) is detected via the hook-input agent_id and stops
+# normally — blocking a subagent would deadlock the review cycle (it cannot run
+# the human-facing chain, and a nested agent() spawn throws).
+#
+# Deferred review: a spawned agent that finished implementation but could not
+# run review itself records a project-scoped pending-review marker; the next
+# interactive Stop adopts it as a review-only chain so the aggregate diff is
+# reviewed once through the existing machinery.
+#
 # Escapes:
 #   ZENSU_CHAIN=off                 -> never block
 #   hooks.chainEnforcer=false       -> disable via ~/.zensu/config.json
@@ -40,14 +51,44 @@ read_field() {
   ' 2>/dev/null
 }
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+if [ "$(zensu_is_spawned_agent "$(zensu_hook_agent_id "$INPUT")" "$(zensu_hook_agent_type "$INPUT")")" = "true" ]; then
+  exit 0
+fi
+
 SESSION_ID="$(read_field session_id)"
+TRANSCRIPT_PATH=""
+[ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 
-# Not a main-thread TDD session -> let the agent stop.
-[ "$(tdd_session_active "$STATE_FILE")" = "true" ] || exit 0
+# Not active: either stop normally, or adopt a pending-review marker as a
+# review-only chain for THIS interactive session (deferred review fallback).
+if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
+  PENDING_FILE="$(zensu_pending_review_file)"
+  if [ -n "$PENDING_FILE" ] && [ -f "$PENDING_FILE" ] && [ ! -L "$PENDING_FILE" ]; then
+    if [ "$(tdd_pending_review_stale "$(zensu_pending_review_ttl_hours)")" = "true" ]; then
+      tdd_clear_pending_review >/dev/null 2>&1 || true
+      exit 0
+    fi
+    if zensu_tdd_strict_enabled; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
+    if tdd_seed_deferred_review "$SESSION_ID" "$VANILLA_SEED"; then
+      ROUNDS_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+      ROUNDS_FILE="${ROUNDS_DIR}/rounds-${SESSION_ID}.json"
+      if [ ! -L "$ROUNDS_FILE" ] && [ ! -L "$ROUNDS_DIR" ]; then
+        rm -f -- "$ROUNDS_FILE" 2>/dev/null || true
+      fi
+      tdd_clear_pending_review >/dev/null 2>&1 || true
+    else
+      echo "zensu chain-enforcer: failed to seed deferred-review chain-state for ${SESSION_ID}; leaving pending-review marker for retry." >&2
+      exit 0
+    fi
+  else
+    exit 0
+  fi
+fi
 # Implementation not finished -> do not enforce the review chain yet (allow
 # legit mid-TDD pauses; TDD progression itself is driven by the gate + skill).
 [ "$(tdd_impl_complete "$STATE_FILE")" = "true" ] || exit 0

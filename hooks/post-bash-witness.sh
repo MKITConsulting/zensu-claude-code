@@ -22,15 +22,16 @@ printf '%s' "$INPUT" | node -e '
       const tail = stdout.slice(-200);
       const interrupted = (j.tool_response && j.tool_response.interrupted === true) ? "true" : "false";
       const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "";
-      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n");
-    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n"); }
+      const transcript = (typeof j.transcript_path === "string") ? j.transcript_path : "";
+      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n" + transcript + "\n");
+    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n\n"); }
   });
 ' > "$TMP_FIELDS" 2>/dev/null
 
-{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
+{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; read -r TRANSCRIPT_PATH; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")"
+SANITIZED_SESSION="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION")"
 
 # Activation: record witness lines only while a main-thread TDD session is active
 # for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). Replaces

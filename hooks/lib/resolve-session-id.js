@@ -84,6 +84,18 @@ function readTail(filePath, byteLen) {
 }
 
 function main() {
+  const transcriptPath = process.env.ZENSU_TRANSCRIPT_PATH || '';
+  if (transcriptPath) {
+    const base = path.basename(String(transcriptPath));
+    if (base.endsWith('.jsonl')) {
+      const id = base.slice(0, -'.jsonl'.length);
+      if (id) {
+        process.stdout.write(id);
+        return 0;
+      }
+    }
+  }
+
   const helperStartMs = Date.now();
   const projectDir = process.env.CLAUDE_PROJECT_DIR || gitToplevel() || process.cwd();
   const subdir = sanitizeProjectDir(projectDir);

@@ -431,4 +431,146 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical 2>/dev/null || true
+zensu_pending_review_file() {
+  local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  echo "${dir}/pending-review.json"
+}
+
+_tdd_write_pending_review_critical() {
+  local pf="$1"
+  local files="$2"
+  local summary="$3"
+  local ts="$4"
+
+  local tmp
+  if ! tmp="$(mktemp "${pf}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  FILES="$files" SUMMARY="$summary" TS="$ts" \
+    node -e '
+      const fs = require("fs");
+      const files = (process.env.FILES || "").split(",").map(s => s.trim()).filter(Boolean);
+      const o = { files, summary: process.env.SUMMARY || "" };
+      if (process.env.TS) o.ts = process.env.TS;
+      fs.writeFileSync(process.argv[1], JSON.stringify(o, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$pf" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_write_pending_review() {
+  local files="${1:-}"
+  local summary="${2:-}"
+  local pf
+  pf="$(zensu_pending_review_file)"
+  local dir
+  dir="$(dirname "$pf")"
+  [ -L "$pf" ] && return 1
+  [ -L "$dir" ] && return 1
+  mkdir -p "$dir" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+  local ts=""
+  if [ "$(_zensu_log_style)" != "none" ]; then
+    ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+  fi
+  _tdd_locked_run "$pf" _tdd_write_pending_review_critical "$pf" "$files" "$summary" "$ts"
+}
+
+tdd_clear_pending_review() {
+  local pf
+  pf="$(zensu_pending_review_file)"
+  local dir
+  dir="$(dirname "$pf")"
+  if [ -L "$pf" ]; then
+    echo "zensu: refusing to clear pending-review marker through symlink at $pf" >&2
+    return 1
+  fi
+  if [ -L "$dir" ]; then
+    echo "zensu: refusing to clear pending-review marker under symlinked dir $dir" >&2
+    return 1
+  fi
+  rm -f -- "$pf" 2>/dev/null || true
+  return 0
+}
+
+tdd_pending_review_stale() {
+  local ttl_hours="${1:-}"
+  case "$ttl_hours" in ''|*[!0-9]*) echo "false"; return 0 ;; esac
+  [ "$ttl_hours" -le 0 ] && { echo "false"; return 0; }
+  local pf
+  pf="$(zensu_pending_review_file)"
+  [ -f "$pf" ] || { echo "false"; return 0; }
+  [ -L "$pf" ] && { echo "false"; return 0; }
+  command -v node >/dev/null 2>&1 || { echo "false"; return 0; }
+  local verdict
+  verdict=$(TTL="$ttl_hours" node -e '
+    try {
+      const fs = require("fs");
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      const ts = j && j.ts;
+      if (typeof ts !== "string" || !ts) { console.log("false"); process.exit(0); }
+      const t = Date.parse(ts);
+      if (!Number.isFinite(t)) { console.log("false"); process.exit(0); }
+      const ttlMs = parseInt(process.env.TTL, 10) * 3600 * 1000;
+      console.log((Date.now() - t) >= ttlMs ? "true" : "false");
+    } catch (_) { console.log("false"); }
+  ' "$pf" 2>/dev/null)
+  [ "$verdict" = "true" ] && echo "true" || echo "false"
+}
+
+_tdd_write_seed_critical() {
+  local state_file="$1"
+  local session_id="$2"
+  local vanilla="$3"
+
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  STATE_FILE="$state_file" SID="$session_id" VANILLA="$vanilla" \
+    node -e '
+      const fs = require("fs");
+      const sf = process.env.STATE_FILE;
+      let state = {};
+      try {
+        const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+        if (prev && typeof prev === "object" && !Array.isArray(prev)) state = prev;
+      } catch (_) {}
+      if (!state.session_id) state.session_id = process.env.SID;
+      if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
+      if (!Array.isArray(state.history)) state.history = [];
+      state.active = true;
+      state.implComplete = true;
+      state.vanilla = (process.env.VANILLA === "true");
+      fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_seed_deferred_review() {
+  local session_id="${1:-unknown}"
+  local vanilla="${2:-false}"
+  case "$vanilla" in true|false) ;; *) vanilla="false" ;; esac
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" _tdd_write_seed_critical "$state_file" "$session_id" "$vanilla"
+}
+
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true

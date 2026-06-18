@@ -33,8 +33,10 @@ if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
 fi
 
 SESSION_ID="$(parse_field session_id)"
+TRANSCRIPT_PATH=""
+[ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(parse_field transcript_path)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 FILE_PATH="$(parse_field tool_input.file_path)"
 
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"

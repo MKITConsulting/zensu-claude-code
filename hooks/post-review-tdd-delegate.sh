@@ -48,8 +48,22 @@ SESSION_ID="$(node -e '
     } catch (_) { console.log(""); }
   });
 ' <<<"$INPUT" 2>/dev/null)"
+TRANSCRIPT_PATH=""
+if [ -z "$SESSION_ID" ]; then
+  TRANSCRIPT_PATH="$(node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s);
+        const tp = j.transcript_path;
+        console.log((typeof tp === "string") ? tp : "");
+      } catch (_) { console.log(""); }
+    });
+  ' <<<"$INPUT" 2>/dev/null)"
+fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
+SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 
 # Mode-aware fix discipline: the per-session `vanilla` flag was frozen into the
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
