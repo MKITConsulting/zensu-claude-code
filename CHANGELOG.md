@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-18
+
+### Added
+
+- **cli**: Re-home plugin from MCP tools to the typed zensu CLI (#117)
+
 ## [0.8.7] - 2026-06-18
 
 ### Added
