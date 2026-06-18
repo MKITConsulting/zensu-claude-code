@@ -5,7 +5,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 ## When to Use
 
 - User asks "what is X?", "how does Y work?", "where is Z configured?"
-- User asks about plugin internals: agents, hooks, FSM, auto-fix loop, MCP server
+- User asks about plugin internals: agents, hooks, FSM, auto-fix loop, the `zensu` CLI write-gate
 - User asks about Zensu concepts: features, KEY-N ids, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
 - User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement`) applies to their situation
@@ -51,14 +51,14 @@ Before answering questions in the right column, `Read` the source file in the le
 | Question type | Source to Read |
 |---|---|
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
-| MCP server URL, MCP tool surface | `.mcp.json` + `.claude-plugin/plugin.json` |
+| CLI command surface / install; plugin tool wiring | `README.md` § CLI + `zensu --help` + `.claude-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
 | Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
 | TDD FSM details, phase transitions, gate logic, three-channel logging | `docs/tdd-manager-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
-| Hook scripts (what each does, when it fires) | `README.md` § Hooks (10) table + `hooks/<script>.sh` source |
+| Hook scripts (what each does, when it fires) | `README.md` § Hooks table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
@@ -67,7 +67,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
 | Platform support, Windows caveats | `README.md` § Platform Support |
-| Troubleshooting (MCP unreachable, OAuth, gate blocking) | `README.md` § Troubleshooting |
+| Troubleshooting (`zensu` CLI not found, OAuth login, gate blocking) | `README.md` § Troubleshooting |
 
 ## Response Style
 
