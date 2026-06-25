@@ -27,6 +27,11 @@ zensu-plm                /zensu:tdd         Zensu Dashboard
 
 ## Agent & Workflow Overview
 
+The Implementation layer shows both modes: **vanilla** (`hooks.tddImplementation`
+default `false`) skips the RED→GREEN ceremony and lets the edit gate pass
+through; set it `true` for the strict gate. The review chain and evidence audits
+run in both.
+
 ```mermaid
 flowchart TD
     subgraph Planning["Layer 1: Planning"]
@@ -39,7 +44,10 @@ flowchart TD
         C -->|"/zensu:implement"| D["Load Feature Context"]
         PLAIN["Plan approval (ExitPlanMode)<br/>plain Claude Code, no Zensu"] -->|"ask, then invoke skill on yes"| E
         D --> E["/zensu:tdd skill<br/>(main thread)"]
-        E --> RED["RED — write failing test"]
+        E --> MODE{"hooks.tddImplementation?"}
+        MODE -->|"false · vanilla (default):<br/>no RED→GREEN, gate passes through"| VAN["IMPL — write code directly<br/>(tests at discretion)"]
+        MODE -->|"true · strict (opt-in)"| RED["RED — write failing test"]
+        VAN --> K
         RED --> IMPL["IMPL — minimum code"]
         IMPL --> GREEN{"GREEN — test passes?"}
         GREEN -->|"No (≤ 3 retries)"| IMPL
@@ -67,6 +75,8 @@ flowchart TD
     style A2 fill:#4a9eff,color:#fff
     style PLAIN fill:#4a9eff,color:#fff
     style E fill:#ff6b6b,color:#fff
+    style MODE fill:#fff3bf,color:#1e293b
+    style VAN fill:#b197fc,color:#fff
     style GATE fill:#888,color:#fff
     style K fill:#ffa94d,color:#fff
     style SR fill:#dcfce7,stroke:#166534,color:#1e293b
