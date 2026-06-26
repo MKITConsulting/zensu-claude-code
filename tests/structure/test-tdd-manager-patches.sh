@@ -324,6 +324,16 @@ else
   check "R16-P2 Phase 6 corroboration extracts only the tail= field value (substring after tail=, not the whole line)" FAIL
 fi
 
+# Plan-doc single-source-of-truth — the Steps-table Status column tracks completion.
+# The plan template must carry ZERO GFM task-list checkboxes: nothing ever flipped them
+# to [x], so generated plans always rendered "open items" no matter how the run finished.
+CHECKBOX_COUNT=$(grep -cE '^- \[[ xX]\]' "$AGENT")
+if [ "$CHECKBOX_COUNT" -eq 0 ]; then
+  check "PB1 plan template has zero GFM checkboxes (Status column is the only completion tracker)" PASS
+else
+  check "PB1 expected 0 GFM checkboxes in plan template; found $CHECKBOX_COUNT" FAIL
+fi
+
 echo "----"
 echo "test-tdd-manager-patches: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
