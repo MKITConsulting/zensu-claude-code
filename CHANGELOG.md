@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-06-26
+
+### Added
+
+- **skills**: Add pr-fix-findings skill (#127)
+- **implement**: Load feature mocks and design context in Step 1 (#123)
+- **gate**: Classify view_feature MCP tool as read (#122)
+
+### Changed
+
+- **e2e-plm**: Sync ghost-scan ideal captures with current pattern (#125)
+- **implement**: Run --workflow-end after Step 8, not stale Step 6 (#124)
+- Show vanilla mode in the workflow diagram (#126)
+
+### Fixed
+
+- **hooks**: Narrow zensu CLI write-gate to its threat model (#128)
+- **tdd**: Drop unflippable plan checkboxes; Status column is sole completion tracker (#121)
+
 ### Changed
 
 - **hooks**: Narrow the `zensu` CLI write-gate to its actual threat model — a low-context agent writing to the real tracked product. It no longer fires on reads or `--help`/`-h`, honors an inline `ZENSU_MCP_GATE=off` command prefix (previously only a session env), and skips writes whose target backend (`--api-url` flag / `ZENSU_API_URL` env) is localhost (a throwaway dev/test DB). Fixes false-positive denials on `--help` and on local dev/test seeding.
