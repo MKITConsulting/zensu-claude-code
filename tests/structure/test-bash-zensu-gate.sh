@@ -214,6 +214,29 @@ CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDX" bash -c '
 run "B32b mutation after --tdd-reset -> DENY" "zensu security classify f1"                                '' DENY "$SDX"
 rm -rf "$SDX"
 
+# B33–B36 gate-narrowing: reads/--help, inline ZENSU_MCP_GATE=off, localhost-skip
+run "B33 mutation + --help (a read) -> ALLOW"      "zensu security classify f1 --help"                          '' ALLOW
+run "B33b mutation + -h (a read) -> ALLOW"         "zensu features create -h"                                   '' ALLOW
+run "B34 inline ZENSU_MCP_GATE=off -> ALLOW"       "ZENSU_MCP_GATE=off zensu security classify f1"              '' ALLOW
+run "B34b inline gate value not 'off' -> DENY"     "ZENSU_MCP_GATE=on zensu security classify f1"               '' DENY
+run "B35 --api-url localhost -> ALLOW"             "zensu --api-url http://localhost:8090 security classify f1" '' ALLOW
+run "B35b inline ZENSU_API_URL 127.0.0.1 -> ALLOW" "ZENSU_API_URL=http://127.0.0.1:8090 zensu security classify f1" '' ALLOW
+run "B35c --api-url prod still -> DENY"            "zensu --api-url https://api.zensu.dev security classify f1" '' DENY
+
+# B36 localhost / prod via the hook's own ZENSU_API_URL process env
+OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=http://localhost:8090 bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "B36 process-env ZENSU_API_URL=localhost -> ALLOW" PASS || check "B36 process-env localhost (got '$OUT')" FAIL
+OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_API_URL=https://api.zensu.dev bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "DENY" ] && check "B36b process-env ZENSU_API_URL=prod -> DENY" PASS || check "B36b process-env prod (got '$OUT')" FAIL
+
+# B37 deny-reason advertises the narrowed escapes (inline off + localhost)
+REASON_N="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null)"
+if printf '%s' "$REASON_N" | grep -qF 'ZENSU_MCP_GATE=off' && printf '%s' "$REASON_N" | grep -qiF 'localhost'; then
+  check "B37 deny reason advertises inline-off + localhost escapes" PASS
+else
+  check "B37 deny reason narrowed-escape wording" FAIL
+fi
+
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
 
 echo "----"

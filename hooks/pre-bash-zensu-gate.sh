@@ -9,6 +9,13 @@
 # and unknown subcommands pass; a mutation run freelance on the main thread is
 # DENIED unless a Zensu skill workflow declared it active.
 #
+# Scoped to its actual threat model — a low-context agent writing to the real
+# tracked product — so it deliberately does NOT fire on: reads and `--help`/`-h`
+# (how an agent *gains* the context the gate wants), an explicit per-command
+# `ZENSU_MCP_GATE=off` prefix, or a write whose target backend
+# (`--api-url` flag / `ZENSU_API_URL` env) is localhost — a throwaway dev/test DB
+# where the dedup/journey/classification conventions are meaningless.
+#
 # This is a convention-nudge, not an airtight boundary: once the CLI's OAuth
 # token is cached on disk an agent can curl the API directly. The gate enforces
 # the Zensu workflow conventions (dedup, journeys, baseline revisions, security
@@ -29,7 +36,7 @@ INPUT="$(cat 2>/dev/null || true)"
 # known noun set makes flag values (e.g. an --api-url argument) immune to being
 # misread as a subcommand, and basename=="zensu" keeps `bash .../zensu-log.sh`
 # and `.zensu/...` paths from ever matching.
-INVOCATIONS="$(PAYLOAD="$INPUT" node -e '
+INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
   let cmd = "";
   try {
     const j = JSON.parse(process.env.PAYLOAD || "{}");
@@ -40,12 +47,28 @@ INVOCATIONS="$(PAYLOAD="$INPUT" node -e '
   const NOUNS = new Set("products features subfeatures roadmap tiers security journeys link ghost wiki doc knowledge pulse meta org auth product feature subfeature roadmaps tier sec journey docs kb wiki-pages".split(" "));
   const WRAP = new Set(["command","builtin","exec","env","sudo","nohup","nice","time"]);
   const out = [];
+  function isLocalUrl(u) {
+    u = String(u || "").toLowerCase();
+    const s = u.indexOf("://");
+    if (s !== -1) u = u.slice(s + 3);
+    let h = u;
+    for (let ci = 0; ci < u.length; ci++) {
+      const c = u.charAt(ci);
+      if (c === ":" || c === "/") { h = u.slice(0, ci); break; }
+    }
+    return h === "localhost" || h === "127.0.0.1" || h === "0.0.0.0" || h === "::1" || h === "[::1]";
+  }
   const norm = cmd.replace(/\x24\x28|[\x60\x28\x29]/g, ";");                        // $( backtick ( ) start a fresh command — treat as boundaries. Hex escapes keep literal ()/$ out of the bash $(...)-embedded node script so its paren counter stays balanced.
   for (const seg of norm.split(/\|\||&&|[;|\n&]/)) {
     const toks = seg.trim().split(/\s+/).filter(Boolean);
     let i = 0, base = "";
+    const envp = {};
     for (;;) {
-      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) i++;      // skip env prefixes (VAR=val)
+      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {         // capture env prefixes (VAR=val)
+        const a = toks[i], eq = a.indexOf("=");
+        envp[a.slice(0, eq)] = a.slice(eq + 1).replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
+        i++;
+      }
       if (i >= toks.length) break;
       const t = toks[i].replace(/^\\/, "").replace(/^[\x22\x27]+|[\x22\x27]+$/g, ""); // strip a leading backslash and any wrapping quote chars; quote bytes are hex-escaped so no literal quote appears in this bash single-quoted node script
       if (WRAP.has(t)) { i++; continue; }                                          // skip transparent wrappers (command/env/sudo/…)
@@ -53,6 +76,13 @@ INVOCATIONS="$(PAYLOAD="$INPUT" node -e '
     }
     if (base !== "zensu") continue;                                                // command basename must be zensu
     const rest = toks.slice(i + 1);
+    if (envp.ZENSU_MCP_GATE === "off") continue;                                   // explicit per-command bypass (deliberate one-off)
+    if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
+    let apiUrl = envp.ZENSU_API_URL || "";
+    const ai = rest.indexOf("--api-url");
+    if (ai !== -1 && typeof rest[ai + 1] === "string") apiUrl = rest[ai + 1].replace(/^[\x22\x27]+|[\x22\x27]+$/g, "");
+    if (!apiUrl) apiUrl = process.env.ZAPI || "";
+    if (isLocalUrl(apiUrl)) continue;                                              // localhost/dev backend → conventions moot, not the tracked product
     let noun = "", k = 0;
     for (; k < rest.length; k++) {
       const t = rest[k];
@@ -131,7 +161,7 @@ EOF
 
 [ -z "$DENY_TOOL" ] && exit 0
 
-REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct main-thread \`zensu\` mutation bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) that the skills and the zensu-plm agent enforce. Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — or delegate the whole task to the zensu-plm agent, instead of running the zensu CLI mutation directly. For a deliberate one-off, set ZENSU_MCP_GATE=off."
+REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct main-thread \`zensu\` mutation bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) that the skills and the zensu-plm agent enforce. Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — or delegate the whole task to the zensu-plm agent, instead of running the zensu CLI mutation directly. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
 
 REASON="$REASON" node -e '
   process.stdout.write(JSON.stringify({
