@@ -391,7 +391,11 @@ add_security_test, generate_threat_model (STRIDE), and finally complete_security
 CAP
   cat > "$tmp/results/ghost-scan-20260101-000000.captured.txt" <<'CAP'
 First list_features to avoid duplicates. Then ghost_scan with enrich_existing=true,
-ghost_get_candidates, ghost_batch_review, and ghost_apply.
+augmented by a multi-perspective parallel Explore fan-out. It carries detected test
+files (link_test) and detected doc files (link_docs) into the scan, then
+ghost_get_candidates, ghost_batch_review, and ghost_apply. After apply it runs
+create_user_journey to seed brownfield user journeys; the v1 baseline is minted
+server-side.
 CAP
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will call pulse_start_session with the current git HEAD SHA and branch name.
@@ -482,7 +486,10 @@ case "$prompt_arg" in
     ;;
   *"scanne"*|*"Repository"*|*scan*)
     echo "First list_features to avoid duplicates. Then ghost_scan with enrich_existing=true,"
-    echo "ghost_get_candidates, ghost_batch_review, and ghost_apply."
+    echo "augmented by a multi-perspective parallel Explore fan-out. It carries detected test"
+    echo "files (link_test) and detected doc files (link_docs) into the scan, then"
+    echo "ghost_get_candidates, ghost_batch_review, and ghost_apply. After apply it runs"
+    echo "create_user_journey to seed brownfield user journeys; the v1 baseline is minted server-side."
     ;;
   *Pulse-Session*|*"Pulse"*)
     echo "I will call pulse_start_session with the current git HEAD SHA and branch name."
