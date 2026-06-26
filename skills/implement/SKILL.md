@@ -23,14 +23,17 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 ### Step 1: Load Feature Context
 
 1. Ask the user for the feature ID
-2. Run `zensu features get <feature-id>` to load the full feature details (title, description, status, priority, component, security classification)
+2. Run `zensu features get <feature-id> --json` to load the full feature details (title, description, status, priority, product, component, security classification). The JSON response includes the `product_id` and `component_id` (when set) that Step 5 needs.
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
-4. Run `zensu knowledge search --query "<feature title + key terms>"` to surface related org context — existing features, visions, journeys, and connected sources — so the implementation builds on what the org already knows. It is retrieval-only: synthesize from the returned passages and cite their provenance.
-5. Present a summary to the user:
+4. Run `zensu mocks list <feature-id>` to discover per-feature UI mocks. For each **HTML** mock, pull its markup with `zensu mocks get <feature-id> <mock-id> --raw` and keep it as the visual/structural target the implementation must match. For **image** mocks, note their titles and that a visual reference exists (the raw bytes are not actionable as text). If no mocks are returned, this feature has none — continue normally; mocks are optional context, never a blocker.
+5. Run `zensu design context <product-id>` to load the product/component design system (Design.md guidance + shared CSS + image-asset references), taking `<product-id>` from the `product_id` in Step 2's JSON output; when that response also carries a `component_id`, add `--component <component-id>`. The implementation must conform to this design system. If the product has no design context, continue normally; the design system is optional context, never a blocker.
+6. Run `zensu knowledge search --query "<feature title + key terms>"` to surface related org context — existing features, visions, journeys, and connected sources — so the implementation builds on what the org already knows. It is retrieval-only: synthesize from the returned passages and cite their provenance.
+7. Present a summary to the user:
    - Feature title and description
    - Current status and priority
    - Security classification and constraints
    - Any security requirements that must be addressed during implementation
+   - Available UI mocks (HTML markup loaded, image titles noted) and whether a product/component design system is present
 
 ### Step 2: Implementation Planning
 
@@ -39,6 +42,7 @@ Based on the feature context and security profile, help the user plan the implem
 - Note security constraints from the classification (e.g., input validation required, audit logging needed)
 - Consider the OWASP tags and compliance requirements
 - Outline the implementation approach
+- When mocks were loaded in Step 1, the implementation MUST match them visually and structurally: reproduce the HTML mock's layout, structure, and component hierarchy, and treat image-mock titles as the target visual. When a design system was loaded, the implementation MUST conform to it — reuse the shared CSS and follow the Design.md guidance instead of inventing new styles. When neither is present, proceed normally; these are optional context, never a hard blocker.
 
 If the feature's security classification is confidential or restricted, emphasize:
 - Input validation on all user inputs
@@ -146,6 +150,9 @@ Present a completion summary:
 |---------|------|---------|
 | `zensu features get` | 1 | Load feature details |
 | `zensu security analyze` | 1 | Load security context |
+| `zensu mocks list` | 1 | Discover per-feature UI mocks (HTML + image) |
+| `zensu mocks get` | 1 | Pull an HTML mock's raw markup to match (`--raw`) |
+| `zensu design context` | 1 | Load the product/component design system (Design.md + shared CSS) |
 | `zensu knowledge search` | 1 | Surface related org knowledge (retrieval-only) |
 | `zensu link test` | 4 | Link test files |
 | `zensu link source` | 5 | Map source files to feature (bulk via repeated `--file`) |
