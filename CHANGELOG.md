@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **hooks**: Narrow the `zensu` CLI write-gate to its actual threat model — a low-context agent writing to the real tracked product. It no longer fires on reads or `--help`/`-h`, honors an inline `ZENSU_MCP_GATE=off` command prefix (previously only a session env), and skips writes whose target backend (`--api-url` flag / `ZENSU_API_URL` env) is localhost (a throwaway dev/test DB). Fixes false-positive denials on `--help` and on local dev/test seeding.
+
 ## [0.9.0] - 2026-06-18
 
 ### Added
