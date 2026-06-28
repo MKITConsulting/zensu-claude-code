@@ -15,6 +15,7 @@
     "./agents/review-aspect.md"
   ],
   "skills": [
+    "./skills/autopilot",
     "./skills/bootstrap",
     "./skills/ghost-scan",
     "./skills/implement",
