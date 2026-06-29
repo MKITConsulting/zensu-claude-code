@@ -271,7 +271,7 @@ This mirrors `/zensu:bootstrap` Step 2.
    (`docs/documentation-guide.md`).
 4. Recommend next steps:
    - `/zensu:implement` for feature implementation
-   - `/zensu:security-review` for security classification
+   - `/zensu:security-review` for a deep security review (threat model, pentest, data-sensitivity, auth/encryption posture) — the scan already set and persisted each feature's baseline `securityClassification` at apply, so this is the follow-up that hardens it, not where classification first happens
    - `zensu doc claude-md` for an updated CLAUDE.md
 5. **Hybrid — capture planned-but-unbuilt features.** If the repo also has a
    forward-looking plan/vision doc, diff it against the features just created. For
