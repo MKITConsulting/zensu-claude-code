@@ -42,6 +42,8 @@ tests/e2e-context-nudge/fixtures/
 tests/e2e-context-nudge/results/
 tests/e2e-intent-router/fixtures/
 tests/e2e-intent-router/results/
+tests/e2e-source-write-gate/fixtures/
+tests/e2e-source-write-gate/results/
 tests/results/
 
 # Build output
