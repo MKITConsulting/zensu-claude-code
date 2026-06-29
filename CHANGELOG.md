@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-06-29
+
+### Added
+
+- **hooks**: Add PreToolUse(Bash) source-write integrity gate (#130)
+- **hooks**: Inject zensu CLI auth-recovery directive in session primer (#131)
+
+### Changed
+
+- **e2e**: Add source-write-gate end-to-end suite (#133)
+- **ghost-scan**: Reframe security-review next-step as deep follow-up (#132)
+
 ### Added
 
 - **gate**: Add `pre-bash-source-write-gate.sh` — a PreToolUse(Bash) source-write integrity gate. Denies raw shell writes (`>`/`>>`, `tee`, `sed -i`, `dd of=`, `cat > f <<EOF`) that overwrite an existing git-tracked source file (A) or escape the session worktree into a sibling/main checkout (B, with `cd`-aware path resolution). Carve-outs: new files inside the project, gitignored/untracked files, non-source extensions, temp roots. Convention-nudge that closes the Bash-write blind spot of the Edit/Write gate; bypass via inline `ZENSU_BASH_WRITE_GATE=off` / `hooks.bashWriteGate:false`
