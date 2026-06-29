@@ -106,7 +106,12 @@ run "W19 new file inside project"         "printf x > src/newfile.rs"           
 run "W20 glued new file inside project"   "printf x >src/newfile2.rs"             ALLOW
 run "W21 non-source extension (.md)"      "echo hi > notes.md"                    ALLOW
 run "W22 gitignored existing .rs"         "printf x >> build/gen.rs"              ALLOW
-run "W23 temp-dir source write"           "printf x >> $FAKETMP/scratch.rs"       ALLOW
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  SKIP  W23 temp-dir source write (MSYS: native node cannot map /x/ mount paths to the mangled env override)" ;;
+  *)
+    run "W23 temp-dir source write"       "printf x >> $FAKETMP/scratch.rs"       ALLOW ;;
+esac
 run "W24 read, no write"                  "cat src/app.rs"                        ALLOW
 run "W25 plain command, no write"         "git status"                            ALLOW
 run "W26 arithmetic compare (not redir)"  "test 5 -gt 3 && echo ok"               ALLOW
