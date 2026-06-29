@@ -71,7 +71,7 @@ CG="$ROOT/evals/config-gate/run-eval.sh"
 if [ "$MODE" = "--live" ]; then
   log ""
   log "▸ Live claude --print suites (API)"
-  for s in e2e e2e-plm e2e-skills e2e-tdd e2e-context-nudge e2e-intent-router; do
+  for s in e2e e2e-plm e2e-skills e2e-tdd e2e-context-nudge e2e-intent-router e2e-source-write-gate; do
     setup="$TESTS_DIR/$s/setup-fixtures.sh"
     [ -f "$setup" ] && bash "$setup" >/dev/null 2>&1
     run_suite "$s/run.sh (live)" bash "$TESTS_DIR/$s/run.sh"
@@ -79,7 +79,7 @@ if [ "$MODE" = "--live" ]; then
 elif [ "$MODE" = "--self-check" ]; then
   log ""
   log "▸ Live suite skeletons (--self-check, no API)"
-  for s in e2e e2e-plm e2e-skills e2e-tdd e2e-context-nudge e2e-intent-router; do
+  for s in e2e e2e-plm e2e-skills e2e-tdd e2e-context-nudge e2e-intent-router e2e-source-write-gate; do
     run_suite "$s/run.sh (--self-check)" bash "$TESTS_DIR/$s/run.sh" --self-check
   done
 fi
