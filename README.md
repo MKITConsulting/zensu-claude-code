@@ -204,6 +204,17 @@ claude plugin marketplace add MKITConsulting/zensu-claude-code
 claude plugin install zensu --scope project
 ```
 
+## Updating
+
+Already installed an earlier version? Pull the latest release:
+
+```bash
+claude plugin marketplace update zensu   # refresh the catalog to the latest release
+claude plugin update zensu@zensu         # pull the new version into the installed plugin
+```
+
+Restart the session (`/exit` and reopen) so the new hooks, agents, and skills load — the plugin reloads only at SessionStart.
+
 ## Authentication
 
 ### OAuth Browser Login (Recommended)
