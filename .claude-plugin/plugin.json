@@ -17,6 +17,7 @@
   "skills": [
     "./skills/autopilot",
     "./skills/bootstrap",
+    "./skills/cover",
     "./skills/ghost-scan",
     "./skills/implement",
     "./skills/plan-review",

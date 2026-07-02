@@ -8,7 +8,7 @@ set -u
 # review, the 14-persona pool), is English-only, uses the namespaced command form and
 # the ${CLAUDE_PLUGIN_ROOT} path (no leaked ~/.claude/skills home path), is registered
 # in plugin.json, and that the version is in sync across plugin.json + marketplace.json
-# + the README badge with the skills-count heading bumped to 11.
+# + the README badge with the skills-count heading bumped to 12.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/pr-team-review"
@@ -120,11 +120,11 @@ else
   check "P9b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
-# P10 — README skills section: count bumped to 11 and the skill is listed
-if grep -qF "### Skills (11)" "$README_MD"; then
-  check "P10a README.md Skills section heading reads '### Skills (11)'" PASS
+# P10 — README skills section: count bumped to 12 and the skill is listed
+if grep -qF "### Skills (12)" "$README_MD"; then
+  check "P10a README.md Skills section heading reads '### Skills (12)'" PASS
 else
-  check "P10a README.md Skills section heading reads '### Skills (11)'" FAIL
+  check "P10a README.md Skills section heading reads '### Skills (12)'" FAIL
 fi
 
 if grep -qF "/zensu:pr-team-review" "$README_MD"; then

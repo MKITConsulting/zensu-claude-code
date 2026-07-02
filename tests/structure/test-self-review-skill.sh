@@ -106,7 +106,7 @@ MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/nu
 { [ "$PLUGIN_VERSION" = "$MARKETPLACE_VERSION" ] && [ -n "$PLUGIN_VERSION" ]; } && check "V17 plugin.json == marketplace.json version (cross-file invariant)" PASS || check "V17 version cross-file invariant" FAIL
 
 { [ -f "$README_MD" ] && grep -qF "version-${EXPECTED_VERSION}-green" "$README_MD"; } && check "V18 README.md version badge contains $EXPECTED_VERSION" PASS || check "V18 README badge $EXPECTED_VERSION" FAIL
-{ [ -f "$README_MD" ] && grep -qF "### Skills (11)" "$README_MD"; } && check "V19 README.md Skills section heading reads '### Skills (11)'" PASS || check "V19 README Skills (10)" FAIL
+{ [ -f "$README_MD" ] && grep -qF "### Skills (12)" "$README_MD"; } && check "V19 README.md Skills section heading reads '### Skills (12)'" PASS || check "V19 README Skills (10)" FAIL
 { [ -f "$README_MD" ] && grep -qF "/zensu:self-review" "$README_MD"; } && check "V20 README.md mentions /zensu:self-review in the skills table" PASS || check "V20 README mentions self-review" FAIL
 { [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" "$CHANGELOG_MD"; } && check "V21 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS || check "V21 CHANGELOG $EXPECTED_VERSION dated section" FAIL
 
