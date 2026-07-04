@@ -49,6 +49,7 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 
 | Signal type | Weight |
 |---|---|
+| Every PR (unconditional) | Forces `coverage-audit` — the always-on test-coverage evaluation |
 | File-extension match | Activates persona |
 | Path-prefix match (e.g. `docs/DDD/`) | Activates persona |
 | Migration directory present | Forces `persistence-db` |
@@ -58,7 +59,18 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 
 Cast size sanity check: 2-8 reviewers ideal. < 2 → ask user if more breadth wanted. > 8 → ask user to trim.
 
-For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `docs-only` single reviewer + simplified synthesis.
+For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `docs-only` single reviewer **plus `coverage-audit`** (which reports `N/A — no production code changed`) + simplified synthesis that still carries the mandatory `### Test Coverage` section.
+
+## Coverage Evaluation (always-on)
+
+The `coverage-audit` persona is cast on every run and its `### Test Coverage` section is mandatory (see Phase D). Operational notes:
+
+- **Static-first is the default.** Without `--run-coverage`, do NOT build or run the suite — map changed production files to tests by name/import/symbol reference, and cross any *already-present* coverage report against the diff. This keeps the skill inside its 3-7 min read-only budget.
+- **"Production file" = changed, non-test, executable source.** Exclude test files, fixtures, generated code, lockfiles, and pure docs/config from the uncovered inventory (a changed `*.md` or `*.lock` is not "uncovered code"). When in doubt, list it under `partial_files`/notes rather than as a hard `uncovered_files` entry.
+- **Existing report, not a fresh run.** Step 2 reads an artifact that already exists in the checkout (CI left a `jacoco.xml`, a `coverage/lcov.info`, etc.). Finding none is normal — fall back to static, say so in `coverage_source`. Never trigger a build to *produce* one unless `--run-coverage` was passed.
+- **`--run-coverage` is slow + fragile.** Reuse the `/zensu:tdd` Phase 1.5 detection (config files first). On any failure (missing tool, build break, wrong command) fall back to static and record the reason — a failed coverage run must never abort the review.
+- **Honesty over precision.** Static mapping is an approximation; label it as such. A file with no matching test is `uncovered`; a file whose new public method has no test is a `partial` with that method under `uncovered_paths`.
+- **Fallback if the agent dies.** If `coverage-audit.json` is missing/broken at Phase C, synthesize a minimal report from the diff (changed non-test files → `uncovered`, `coverage_source: "static (fallback)"`) so the section still renders. The guarantee is the section's presence, not the agent's liveness.
 
 ## Phase B — Spawn Pitfalls
 
@@ -95,6 +107,15 @@ Normalize during read, not before — keep the raw files for debug.
 **Convergence map:** when N agents flag the same line, that's high-signal. Merge into one inline comment citing all sources ("Convergence: backend-idiom, rest-api, tests-qa all flagged this — ..."). Increases the comment's authority + reduces duplicate noise on the PR.
 
 ## Phase D — Synthesis + Publish
+
+**Test Coverage section (mandatory, never dropped):**
+
+Render `### Test Coverage` in the overall body on EVERY run from `consensus.coverage` (the `coverage-audit` report carried through Phase C). Rules:
+- Lead with `coverage_source` + a one-line summary so the reader knows whether the numbers are static, from an ingested report, or from a real tool run.
+- List every `uncovered_files[]` entry (path — reason — risk). If empty: "None — every changed production file is exercised by a test." If `changed_production_files == 0`: "N/A — no production code changed in this PR."
+- List `partial_files[]` uncovered paths under "Uncovered paths". If empty: "None."
+- The section is present even when the verdict is APPROVE and even for docs-only PRs. A green coverage result is still reported explicitly — silence is not allowed.
+- `--coverage-gate`: if set and `uncovered_files[]` (production) is non-empty, the verdict is `REQUEST_CHANGES` and the Recommendation cites the uncovered files. Without the flag, coverage is advisory and the verdict is unaffected.
 
 **Inline-comment cap (`--max-inline`):**
 
