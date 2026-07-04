@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **pr-team-review**: Always produce an explicit test-coverage evaluation — adds an always-cast `coverage-audit` persona (pool 14→15) and a mandatory `### Test Coverage` synthesis section that inventories uncovered files and paths on every run (docs-only included). Hybrid methodology (static diff-vs-test mapping always + ingest an existing coverage report when present), with opt-in `--run-coverage` to run the real tool and optional `--coverage-gate` to escalate the verdict to `REQUEST_CHANGES` when changed production files are uncovered
+
 ## [0.10.0] - 2026-06-30
 
 ### Added

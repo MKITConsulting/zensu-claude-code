@@ -5,7 +5,8 @@ set -u
 # Pins: the skill exists with its SKILL.md + three rules files, follows the namespaced
 # title-line convention, carries the orchestration essentials (worktree isolation,
 # single-message parallel spawn, run_in_background reviewers, one consolidated gh api
-# review, the 14-persona pool), is English-only, uses the namespaced command form and
+# review, the 15-persona pool, the always-on coverage-audit + mandatory Test Coverage
+# section), is English-only, uses the namespaced command form and
 # the ${CLAUDE_PLUGIN_ROOT} path (no leaked ~/.claude/skills home path), is registered
 # in plugin.json, and that the version is in sync across plugin.json + marketplace.json
 # + the README badge with the skills-count heading bumped to 12.
@@ -64,7 +65,7 @@ declare -A ESSENTIALS=(
   ["P4c reviewers run in background"]="run_in_background"
   ["P4d one consolidated review (Submit ONE review)"]="Submit ONE review"
   ["P4e publishes via the gh api reviews endpoint"]="pulls/<n>/reviews"
-  ["P4f casts from the 14-persona pool"]="14-persona"
+  ["P4f casts from the 15-persona pool"]="15-persona"
 )
 for label in "${!ESSENTIALS[@]}"; do
   if grep -qF "${ESSENTIALS[$label]}" "$SKILL_MD"; then
@@ -153,6 +154,41 @@ if grep -qF -- '--detach' "$SKILL_MD"; then
   check "P11c worktree is created detached (re-run never collides on the branch ref)" PASS
 else
   check "P11c worktree is created detached (re-run never collides on the branch ref)" FAIL
+fi
+
+# P12 — always-on test-coverage evaluation. The skill MUST guarantee a coverage
+# assessment on every run: an always-cast `coverage-audit` persona + a mandatory
+# `### Test Coverage` synthesis section that inventories uncovered files/paths.
+PERSONAS_MD="$SKILL_DIR/rules/reviewer-personas.md"
+
+if grep -qF '### Test Coverage' "$SKILL_MD"; then
+  check "P12a SKILL.md mandates the '### Test Coverage' synthesis section" PASS
+else
+  check "P12a SKILL.md mandates the '### Test Coverage' synthesis section" FAIL
+fi
+
+if grep -qF 'coverage-audit' "$PERSONAS_MD"; then
+  check "P12b reviewer-personas.md defines the 'coverage-audit' persona" PASS
+else
+  check "P12b reviewer-personas.md defines the 'coverage-audit' persona" FAIL
+fi
+
+if grep -qF 'Always cast `coverage-audit`' "$PERSONAS_MD"; then
+  check "P12c coverage-audit is always cast (guaranteed every run)" PASS
+else
+  check "P12c coverage-audit is always cast (guaranteed every run)" FAIL
+fi
+
+if grep -riqF 'uncovered' "$SKILL_DIR"; then
+  check "P12d skill flags uncovered files/paths" PASS
+else
+  check "P12d skill flags uncovered files/paths" FAIL
+fi
+
+if grep -qF -- '--coverage-gate' "$SKILL_MD" && grep -qF -- '--run-coverage' "$SKILL_MD"; then
+  check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" PASS
+else
+  check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" FAIL
 fi
 
 echo "----"

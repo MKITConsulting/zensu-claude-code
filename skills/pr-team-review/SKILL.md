@@ -2,10 +2,11 @@
 name: pr-team-review
 description: >
   Orchestrate a multi-agent PR review on GitHub: scout the PR, auto-cast a tailored
-  reviewer team from a 14-persona pool (DDD strategic/tactical, backend, persistence,
-  security, REST API, tests, domain refiner, frontend component/UX, IaC, CI/CD,
-  performance, docs), spawn them in parallel, run a debate + synthesis phase, and
-  publish one consolidated GitHub review with inline comments + overall body via
+  reviewer team from a 15-persona pool (DDD strategic/tactical, backend, persistence,
+  security, REST API, tests, coverage audit, domain refiner, frontend component/UX,
+  IaC, CI/CD, performance, docs), ALWAYS run an explicit test-coverage evaluation that
+  flags uncovered files and paths, spawn them in parallel, run a debate + synthesis phase,
+  and publish one consolidated GitHub review with inline comments + overall body via
   `gh api`. Use whenever the user wants a comprehensive multi-perspective PR review:
   triggers include "team review", "multi-agent PR review", "horde review",
   "agent-team review", "reviewer consensus", "PR debate", "publish team feedback
@@ -29,6 +30,8 @@ Parse from the user prompt. Slash form: `/zensu:pr-team-review <pr-url> [--flag=
 | `--conversation=<text-or-path>` | no | none | Inline conversation context (naming debate, design decisions, screenshot OCR) |
 | `--verdict=<COMMENT\|REQUEST_CHANGES\|APPROVE>` | no | `COMMENT` | Final review event |
 | `--max-inline=<n>` | no | 25 | Cap on consolidated inline comments |
+| `--run-coverage` | no | off | Opt-in: actually run the repo's coverage tool in the worktree for true line/branch data. Off = static mapping + ingest an existing report only (fast). |
+| `--coverage-gate` | no | off | When set, uncovered changed **production** files escalate the final verdict to `REQUEST_CHANGES`. Off = coverage is reported but advisory (verdict unchanged). |
 
 If `<pr-url>` is missing, ask the user via `AskUserQuestion`.
 
@@ -81,10 +84,11 @@ For PRs > 50 files: launch 1-2 `Explore` subagents in parallel for deep diff ins
 
 **A.2 Persona-Cast:**
 
-Read `rules/reviewer-personas.md` for the 14-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. Always present the cast to the user before spawning:
+Read `rules/reviewer-personas.md` for the 15-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **`coverage-audit` is ALWAYS in the cast** — it is not trigger-gated; include it in every cast (docs-only included) so the guaranteed test-coverage evaluation always runs. Always present the cast to the user before spawning:
 
 ```
 Cast for PR #<n> (<X> files, <Y>+/<Z>-):
+  coverage-audit  — ALWAYS: test-coverage evaluation, uncovered files/paths
   ddd-tactical    — Aggregate classes + invariant docs in src/main/.../domain/
   backend-idiom   — 87 *.java files, Spring annotations detected
   persistence-db  — 6 Flyway migrations in db/migration/
@@ -93,7 +97,7 @@ Cast for PR #<n> (<X> files, <Y>+/<Z>-):
   tests-qa        — Test files present (97 @Test)
 ```
 
-Ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list. If `--roles=` arg was provided → skip the question entirely.
+Ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list; `coverage-audit` stays in regardless (re-add it if the user's custom list omits it). If `--roles=` arg was provided → still append `coverage-audit` if the user left it out.
 
 ### Phase B — Team Setup + Reviewer Spawn
 
@@ -129,8 +133,9 @@ Background reviewers send idle notifications when done. Do not poll. When all id
    - `consensus.p1_required_changes[]` (deduplicated)
    - `consensus.p2_suggestions[]` (deduplicated, capped at ~20)
    - `consensus.p3_nits[]`
+   - `consensus.coverage` — the `coverage_report` from `$WORKDIR/coverage-audit.json` carried through verbatim (`coverage_source`, `summary`, `uncovered_files[]`, `partial_files[]`, `covered_files[]`). This ALWAYS exists — if the coverage-audit agent died or wrote no report, synthesize a minimal one from the diff (list changed non-test files as `uncovered` with `coverage_source: "static (fallback — coverage-audit produced no report)"`) rather than dropping the section.
    - `convergence_map` — which finding appears in multiple agents' reports
-   - `consensus.verdict` — lead's recommendation
+   - `consensus.verdict` — lead's recommendation. If `--coverage-gate` was passed AND `consensus.coverage.uncovered_files[]` is non-empty (production files), set the verdict to `REQUEST_CHANGES`.
 
 Lead-driven consolidation, not a DM roundtrip. See `rules/workflow.md` § Debate Strategy.
 
@@ -159,6 +164,19 @@ Review by N-agent team (...).
 ### TL;DR
 <2-3 sentence summary>
 
+### Test Coverage   <!-- MANDATORY — always render, from consensus.coverage. Never omit. -->
+<coverage_source + one-line summary, e.g. "Static diff-vs-test mapping (no coverage report found). 7 changed production files, 2 uncovered.">
+
+**Uncovered files** (no test exercises them):
+- `path/to/File.ext` — <reason> (<P1|P2|P3>)
+
+<!-- if none: "None — every changed production file is exercised by a test." · if no prod code: "N/A — no production code changed in this PR." -->
+
+**Uncovered paths** (in otherwise-tested files):
+- `path/to/File.ext`: `functionName`, `<branch/endpoint>`
+
+<!-- if none: "None." -->
+
 ### Naming Decision   <!-- only if --conversation or DDD-strategic raised it -->
 <consensus>
 
@@ -183,6 +201,8 @@ Review by N-agent team (...).
 ### Recommendation
 <verdict + rationale>
 ```
+
+**Mandatory `### Test Coverage` section.** Render it on EVERY run from `consensus.coverage` — a fully-covered PR shows "None" under both lists, a docs-only PR shows "N/A — no production code changed". Never drop it, even when the verdict is APPROVE. When `--coverage-gate` is set and uncovered production files exist, the Recommendation must reflect `REQUEST_CHANGES` and cite the uncovered files. The coverage-audit persona's own inline findings (uncovered high-risk files/paths) flow into the inline comments like any other persona's, subject to `--max-inline`.
 
 **HARD RULE — NO MARKDOWN TABLES** in the overall body or inline comments. GitHub's PR view squeezes wide tables into unreadable narrow columns (text wraps character-by-character). Use:
 - numbered subsections (`#### 1. ... #### 2. ...`) for P1 findings
@@ -230,13 +250,14 @@ Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" b
 
 ## Reference Files
 
-- `rules/reviewer-personas.md` — 14-persona pool, trigger signals, prompt templates, JSON schema
+- `rules/reviewer-personas.md` — 15-persona pool (incl. the always-on `coverage-audit`), trigger signals, prompt templates, JSON schema
 - `rules/workflow.md` — phase-by-phase pitfalls + heuristics
 - `rules/github-publish.md` — `gh api` reviews schema, side/line rules, fallbacks
 
 ## Critical Conventions
 
 - **Never `git checkout` the PR ref in the main working tree.** Always use a detached worktree under an `mktemp -d` workspace (`git worktree add --force --detach "$WORKTREE" "$SHA"`). Reviewer agents `cd` into the worktree, not the main repo. The main checkout's branch and uncommitted work must stay untouched.
+- **Always cast `coverage-audit` and always render the `### Test Coverage` section.** The explicit test-coverage evaluation — uncovered files + uncovered paths — is guaranteed on every run, docs-only included. Coverage is advisory (verdict unchanged) unless `--coverage-gate` is passed, which escalates to `REQUEST_CHANGES` when changed production files are uncovered. Only run the coverage tool when `--run-coverage` is passed; otherwise use static mapping + any existing report.
 - Always spawn reviewers in **one** parallel batch (single message, multiple `Agent` calls). Serial spawning wastes wall-clock time.
 - Always `run_in_background: true` for reviewers.
 - Reviewers write to `$WORKDIR/<role>.json` (absolute path, outside the worktree). Lead reads + consolidates.

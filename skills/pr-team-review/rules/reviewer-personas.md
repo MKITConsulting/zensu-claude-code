@@ -1,6 +1,6 @@
 # Reviewer Personas
 
-14-persona pool. The skill auto-casts a tailored subset per PR in Phase A.2 (see `SKILL.md`).
+15-persona pool. The skill auto-casts a tailored subset per PR in Phase A.2 (see `SKILL.md`), and **always** casts `coverage-audit` so every run yields an explicit test-coverage evaluation that flags uncovered files and paths.
 
 ## Shared Output Schema
 
@@ -25,6 +25,8 @@ Every persona writes `$WORKDIR/<role>.json` with this minimum shape:
   "positives": ["<things done well — for the synthesis Strengths section>"]
 }
 ```
+
+The `coverage-audit` persona additionally emits a top-level `coverage_report` object (schema in its section below) — the always-on test-coverage evaluation that inventories uncovered files and paths.
 
 Hard caps: ≤ 8 inline findings per persona. Severity meaning:
 - **P1** — required before merge (correctness, security, data integrity, contract break)
@@ -131,7 +133,7 @@ grep -n "@GetMapping\|@PostMapping\|@PutMapping\|@PatchMapping\|@DeleteMapping" 
 
 **Trigger:** Test files in PR — or notable absence thereof. Mutation in test/ directory.
 
-**Focus:** Coverage (per BR/invariant), integration vs unit balance (Testcontainers/WireMock vs mocks-only), concurrency tests for race-prone paths (number allocators, optimistic locking), edge-case coverage (length boundaries, null, empty), mock strategy.
+**Focus:** Test *quality + strategy* — integration vs unit balance (Testcontainers/WireMock vs mocks-only), concurrency tests for race-prone paths (number allocators, optimistic locking), edge-case coverage (length boundaries, null, empty), mock strategy, coverage per BR/invariant. The explicit covered/uncovered *file + path inventory* is owned by `coverage-audit` — here focus on whether the tests that exist are the RIGHT tests.
 
 **Useful commands:**
 ```bash
@@ -140,6 +142,54 @@ grep -c "@Test" src/test/.../<X>Test.java
 ```
 
 **Prompt template:** Build a `test_coverage_matrix` mapping each business rule / invariant to test status (OK/PARTIAL/MISSING). Flag missing integration tests, missing concurrency tests, single-value Whitelist tests instead of parametrized boundaries. Max 8 inline findings.
+
+### `coverage-audit`
+
+**Trigger:** ALWAYS cast — every PR, every run, never gated by file type. This is the guaranteed, explicit test-coverage evaluation the skill must always produce. It is measurement + gap inventory, distinct from `tests-qa` (which reviews test *quality/strategy*).
+
+**Focus:** Which changed production code is exercised by tests and which is NOT. Produces a `coverage_report` that inventories **uncovered files** and **uncovered paths** (functions / methods / branches / endpoints with no test touching them), plus the covered/partial split — so the review always names exactly what is untested.
+
+**Methodology (hybrid — static-first, real data when cheaply available):**
+
+1. **Static diff-vs-test mapping (always runs).** List every changed production (non-test) file from `git -C "$WORKTREE" diff origin/<base>...HEAD --name-only`. For each, decide whether the PR adds/changes a test that exercises it, or an existing test already covers it — by matching test names, imports, and referenced symbols. Classify each changed production file `covered` / `partial` / `uncovered`. Inside covered/partial files, name the specific uncovered paths (new public functions/methods, new branches, new endpoints/handlers) that no test references.
+2. **Ingest an existing coverage report — no suite run.** Look for an already-generated report in the worktree and read line/branch data for the changed files (do NOT run the suite for this step):
+   - Java/JVM: `**/target/site/jacoco/jacoco.xml`, `**/build/reports/jacoco/**/*.xml`
+   - JS/TS: `coverage/lcov.info`, `coverage/coverage-final.json`
+   - Python: `coverage.xml`, `.coverage`
+   - Go: `coverage.out`
+   - .NET: `**/coverage.cobertura.xml`
+
+   When found, cross the real uncovered lines against the diff hunks → precise uncovered-line list per changed file. Record `coverage_source: "report:<path>"`.
+3. **Run the tool — opt-in only (`--run-coverage`).** ONLY when the run injects `--run-coverage`: detect the coverage command the way `/zensu:tdd` Phase 1.5 does (read config files first — `jacoco`/`nyc`/`vitest`/`jest`/`coverage.py`/`go test -cover`), then execute it once in `$WORKTREE`. It is slow + environment-dependent; on any failure fall back to static and record `coverage_source: "static (tool run failed: <reason>)"`. **Never run the suite without `--run-coverage`.**
+
+Always record which method produced the numbers in `coverage_source`, and be honest when it is an approximation.
+
+**Useful commands:**
+```bash
+git -C "$WORKTREE" diff origin/<base>...HEAD --name-only
+find "$WORKTREE" \( -path '*jacoco*.xml' -o -name 'lcov.info' -o -name 'coverage.xml' -o -name 'coverage.out' \) 2>/dev/null
+```
+
+**`coverage_report` schema** (top-level, in addition to the shared fields):
+```json
+{
+  "coverage_source": "static | report:<path> | tool-run",
+  "summary": "<1-2 sentences: N changed production files, M uncovered>",
+  "changed_production_files": 0,
+  "uncovered_files": [
+    {"path": "<repo-relative>", "reason": "no test references this file", "risk": "P1|P2|P3"}
+  ],
+  "partial_files": [
+    {"path": "<repo-relative>", "uncovered_paths": ["<fn/method/branch/endpoint>"], "covered_by": ["<test file>"]}
+  ],
+  "covered_files": ["<repo-relative>"],
+  "notes": ["<caveats, approximation warnings, real-report line ranges>"]
+}
+```
+
+Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an uncovered new public API or security-sensitive path warrants a P1-severity note; whether that BLOCKS the merge is governed by `--coverage-gate`, not by this persona). For docs-only or config-only PRs with zero changed production files, still emit the report with `changed_production_files: 0`, empty `uncovered_files`, and `summary: "No production code changed — coverage evaluation N/A."`
+
+**Prompt template:** You are the coverage-audit reviewer for PR #<n>. Head SHA `<sha>`, base `<base>`, working dir `$WORKTREE`. Produce the guaranteed test-coverage evaluation: inventory every changed production file as covered/partial/uncovered and list the uncovered paths. Use the hybrid methodology — static mapping always; ingest an existing coverage report if one is present in the worktree; run the coverage tool ONLY if `--run-coverage` was passed. Write `$WORKDIR/coverage-audit.json` with the shared fields PLUS the `coverage_report` object. Max 6 inline findings. When done call `TaskUpdate` task → `completed`.
 
 ### `domain-refiner`
 
@@ -205,8 +255,9 @@ grep -rn "<topic>" <context-path>
 
 ## Casting Rules of Thumb
 
+- **Always cast `coverage-audit` — every PR, no exceptions** (docs-only included; it reports `N/A` when no production code changed). It produces the guaranteed test-coverage evaluation, so the `### Test Coverage` synthesis section is always backed by data.
 - Always cast `tests-qa` unless the PR is docs-only.
 - Always cast `security` when new endpoints, auth-config, or third-party clients appear.
 - `domain-refiner` requires `--context=` — otherwise it has nothing to compare against.
-- Pure docs PR → single `docs-only` reviewer (skip multi-cast, skip debate phase, still synthesize + publish).
+- Pure docs PR → `docs-only` reviewer PLUS `coverage-audit` (reports N/A); skip the rest of the multi-cast and the debate phase, still synthesize + publish **with the mandatory `### Test Coverage` section**.
 - Mixed-stack PRs (frontend + backend) → cast from both sides; expect 6-8 reviewers.
