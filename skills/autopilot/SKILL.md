@@ -36,6 +36,7 @@ Slash form: `/zensu:autopilot <feature in plain words> [--flag=value ...]`.
 | `--base=<branch>` | no | `main` | PR base branch. |
 | `--no-validate` | no | off | Skip Phase 1 step 6 (live validation). Ship a reviewed+tested PR only. Degrades — note it. |
 | `--config=<path>` | no | `.zensu/autopilot.yaml` | Project recipe file (see `rules/config.md`). |
+| `--cover` | no | off | After the validate loop goes green, persist the validated ACs as **durable committed tests** via `/zensu:cover --from-acs` (Phase 1 step 6b). |
 
 If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place asking is allowed).
 
@@ -45,7 +46,8 @@ If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place a
   origin checkout it creates one first (see Critical Conventions).
 - `gh` CLI authenticated (`gh auth status`) for opening the PR + the review steps.
 - The sibling Zensu skills are present (same plugin): `/zensu:tdd`,
-  `/zensu:pr-team-review`, `/zensu:pr-fix-findings`.
+  `/zensu:pr-team-review`, `/zensu:pr-fix-findings` (and `/zensu:cover`, invoked at Phase 1
+  step 6b when `--cover` is set).
 - Everything else — how to boot, gate, authenticate, and validate the project — the
   skill **discovers and verifies itself** in Phase 0. No config to hand-write.
 
@@ -112,6 +114,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs as the feature
    specification. Let the built-in 5-perspective review chain (conventions, bugs,
    architecture, tests, security) run and address what it raises. Stay in the worktree.
+   (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
+   durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
 3. **Open the PR** — commit (Conventional Commits, no watermark), push, open the PR
@@ -130,6 +134,11 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    c. Anything off → fix it through `/zensu:tdd` (vanilla, scoped to the failing AC(s)),
       re-run the step-2 gates, push to update the PR, then go back to (a).
    d. Repeat (a)–(c) until all ACs pass. `/zensu:pr-team-review` does **not** re-run here.
+6b. **Persist coverage — opt-in `--cover`** — with `--cover`, after the loop exits green,
+   invoke `/zensu:cover --from-acs` to emit the now-passing ACs as **durable committed
+   tests** (one test per numbered AC), then re-run the step-2 gates and push. This turns the
+   throwaway live validation into a permanent regression net in the same PR. Off by default;
+   the live validate↔fix loop above is unchanged.
 
 ### Phase 2 — Deliver
 

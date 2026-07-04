@@ -106,3 +106,9 @@ driver** (with a note) rather than faking success when it is missing — toolcha
 3. Multiple app surfaces (e.g. web UI + backend API) can mix: validate UI-observable ACs
    via `browser` and backend-only ACs via `api` in the same run. Pick the cheapest driver
    that can actually observe each AC.
+
+## Reused by /zensu:cover
+
+The same catalog is reused by `/zensu:cover` to author **durable** tests: cover's drivers
+assert-and-**persist** to a committed test file instead of asserting-and-discarding (see
+`../../cover/rules/drivers.md`).

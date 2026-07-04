@@ -90,10 +90,10 @@ else
   check "S9 README.md version badge contains $EXPECTED_VERSION" FAIL
 fi
 
-if [ -f "$README_MD" ] && grep -qF "### Skills (11)" "$README_MD"; then
-  check "S10 README.md Skills section heading reads '### Skills (11)'" PASS
+if [ -f "$README_MD" ] && grep -qF "### Skills (12)" "$README_MD"; then
+  check "S10 README.md Skills section heading reads '### Skills (12)'" PASS
 else
-  check "S10 README.md Skills section heading reads '### Skills (11)'" FAIL
+  check "S10 README.md Skills section heading reads '### Skills (12)'" FAIL
 fi
 
 if [ -f "$README_MD" ] && grep -qF "/zensu:zensu-help" "$README_MD"; then
