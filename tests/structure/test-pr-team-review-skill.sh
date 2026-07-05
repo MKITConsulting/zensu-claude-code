@@ -5,8 +5,9 @@ set -u
 # Pins: the skill exists with its SKILL.md + three rules files, follows the namespaced
 # title-line convention, carries the orchestration essentials (worktree isolation,
 # single-message parallel spawn, run_in_background reviewers, one consolidated gh api
-# review, the 15-persona pool, the always-on coverage-audit + mandatory Test Coverage
-# section), is English-only, uses the namespaced command form and
+# review, the 25-persona pool, the always-on holistic core (coverage-audit + bug-hunter +
+# maintainability + adversarial) + the anti-groupthink challenge round + mandatory Test
+# Coverage section), is English-only, uses the namespaced command form and
 # the ${CLAUDE_PLUGIN_ROOT} path (no leaked ~/.claude/skills home path), is registered
 # in plugin.json, and that the version is in sync across plugin.json + marketplace.json
 # + the README badge with the skills-count heading bumped to 12.
@@ -59,16 +60,20 @@ else
 fi
 
 # P4 — orchestration essentials
-declare -A ESSENTIALS=(
-  ["P4a worktree isolation (git worktree add)"]="worktree add"
-  ["P4b single-message parallel spawn"]="single message"
-  ["P4c reviewers run in background"]="run_in_background"
-  ["P4d one consolidated review (Submit ONE review)"]="Submit ONE review"
-  ["P4e publishes via the gh api reviews endpoint"]="pulls/<n>/reviews"
-  ["P4f casts from the 15-persona pool"]="15-persona"
+# Indexed array of "label|needle" pairs (bash 3.2-safe — no `declare -A`, which
+# Apple's /bin/bash 3.2 cannot parse; associative arrays would abort this suite
+# locally while still exiting 0, silently skipping every check below).
+ESSENTIALS=(
+  "P4a worktree isolation (git worktree add)|worktree add"
+  "P4b single-message parallel spawn|single message"
+  "P4c reviewers run in background|run_in_background"
+  "P4d one consolidated review (Submit ONE review)|Submit ONE review"
+  "P4e publishes via the gh api reviews endpoint|pulls/<n>/reviews"
+  "P4f casts from the 25-persona pool|25-persona"
 )
-for label in "${!ESSENTIALS[@]}"; do
-  if grep -qF "${ESSENTIALS[$label]}" "$SKILL_MD"; then
+for entry in "${ESSENTIALS[@]}"; do
+  label="${entry%%|*}"; needle="${entry#*|}"
+  if grep -qF "$needle" "$SKILL_MD"; then
     check "$label" PASS
   else
     check "$label" FAIL
@@ -189,6 +194,81 @@ if grep -qF -- '--coverage-gate' "$SKILL_MD" && grep -qF -- '--run-coverage' "$S
   check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" PASS
 else
   check "P12e SKILL.md documents --coverage-gate + --run-coverage flags" FAIL
+fi
+
+# P13 — persona-pool expansion 15 → 25. Every new persona must be defined with its own
+# section, the always-on holistic core must be documented (correctness/design/anti-groupthink
+# beyond coverage-audit), and the anti-groupthink debate challenge round must be wired.
+WORKFLOW_MD="$SKILL_DIR/rules/workflow.md"
+
+for p in bug-hunter maintainability adversarial observability supply-chain resilience api-compat data-privacy accessibility concurrency; do
+  if grep -qF "### \`$p\`" "$PERSONAS_MD"; then
+    check "P13 reviewer-personas.md defines the new '$p' persona" PASS
+  else
+    check "P13 reviewer-personas.md defines the new '$p' persona" FAIL
+  fi
+done
+
+# P13k — exactly 25 persona sections (### `id`) in the pool. Complements the per-persona
+# loop above (which pins the 10 named new ids) by catching an accidental duplicate/extra
+# section OR a silent removal of one of the 15 pre-existing personas the loop never names.
+# On any future pool resize this literal `25` must move in lockstep with the P4f `25-persona`
+# needle and the header comment.
+PERSONA_COUNT="$(grep -cE '^### `[a-z-]+`$' "$PERSONAS_MD")"
+if [ "$PERSONA_COUNT" -eq 25 ]; then
+  check "P13k reviewer-personas.md has exactly 25 persona sections" PASS
+else
+  check "P13k reviewer-personas.md has exactly 25 persona sections (found $PERSONA_COUNT)" FAIL
+fi
+
+# P13l — always-on holistic core documented in both the skill body and the persona rules
+if grep -qF 'holistic core' "$SKILL_MD" && grep -qF 'holistic core' "$PERSONAS_MD"; then
+  check "P13l always-on holistic core documented in SKILL.md + reviewer-personas.md" PASS
+else
+  check "P13l always-on holistic core documented in SKILL.md + reviewer-personas.md" FAIL
+fi
+
+# P13m — anti-groupthink debate challenge round wired in SKILL.md + workflow.md
+if grep -qF 'Challenge Round' "$SKILL_MD" && grep -qF 'Challenge Round' "$WORKFLOW_MD"; then
+  check "P13m Phase C Challenge Round documented in SKILL.md + workflow.md" PASS
+else
+  check "P13m Phase C Challenge Round documented in SKILL.md + workflow.md" FAIL
+fi
+
+# P13n — accessibility split cleanly out of frontend-ux (no duplicate WCAG ownership):
+# frontend-ux must explicitly defer a11y to the accessibility persona.
+if grep -qF 'owned by the `accessibility` persona' "$PERSONAS_MD"; then
+  check "P13n frontend-ux defers WCAG/a11y to the accessibility persona (clean split)" PASS
+else
+  check "P13n frontend-ux defers WCAG/a11y to the accessibility persona (clean split)" FAIL
+fi
+
+# P13o — the always-on guarantee lives on the casting-rules line, not just the phrase:
+# all four core personas must be named on the "Always cast the holistic core" line, so a
+# regression that drops one from the enumeration (the line that makes it always-on) fails.
+CORE_LINE="$(grep -F 'Always cast the holistic core' "$PERSONAS_MD" | head -1)"
+if printf '%s' "$CORE_LINE" | grep -qF 'coverage-audit' \
+   && printf '%s' "$CORE_LINE" | grep -qF 'bug-hunter' \
+   && printf '%s' "$CORE_LINE" | grep -qF 'maintainability' \
+   && printf '%s' "$CORE_LINE" | grep -qF 'adversarial'; then
+  check "P13o casting rule names all 4 holistic-core personas on one line" PASS
+else
+  check "P13o casting rule names all 4 holistic-core personas on one line" FAIL
+fi
+
+# P13p — docs-only PRs must stay lean (docs-only + coverage-audit only, rest of core skipped)
+if grep -qF 'Docs-only PRs stay lean' "$PERSONAS_MD"; then
+  check "P13p docs-only lean cast documented (docs-only + coverage-audit)" PASS
+else
+  check "P13p docs-only lean cast documented (docs-only + coverage-audit)" FAIL
+fi
+
+# P13q — accessibility split is complete: frontend-component must NOT still claim a11y
+# (the 'accessibility basics' ownership phrase was removed so only `accessibility` owns WCAG)
+if grep -qF 'accessibility basics' "$PERSONAS_MD"; then
+  check "P13q frontend-component no longer owns a11y (no 'accessibility basics')" FAIL
+else
+  check "P13q frontend-component no longer owns a11y (no 'accessibility basics')" PASS
 fi
 
 echo "----"
