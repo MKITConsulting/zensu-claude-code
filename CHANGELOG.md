@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **hooks**: Recover `CLAUDE_PROJECT_DIR` from the active session transcript for non-hook Bash state verbs (`zensu-log.sh --chain-done`, `--tdd-*`, `--phase`, …). Claude Code sets `CLAUDE_PROJECT_DIR` only for hooks, so inside a git worktree these Bash calls anchored their chain-state to the wrong directory/session and the Stop-hook review chain deadlocked. A new cwd-independent `hooks/lib/resolve-project-dir.js` reads the launch/project dir from the active transcript's `cwd` at one choke point, realigning writers with the enforcer. No behavior change when `CLAUDE_PROJECT_DIR` is already set.
+
 ## [0.11.0] - 2026-07-04
 
 ### Added

@@ -4,6 +4,43 @@ export ZENSU_BASH_START="${ZENSU_BASH_START:-}"
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
+# Recover CLAUDE_PROJECT_DIR for non-hook Bash invocations (Claude Code sets it
+# only for hooks). Without it the state files anchor to ${CLAUDE_PROJECT_DIR:-.}
+# = cwd and the session id falls through resolve-session-id.js to gitToplevel()/
+# cwd() — both diverge from the Stop hook (which HAS CLAUDE_PROJECT_DIR) inside a
+# git worktree, so a marker like --chain-done lands in a state file the enforcer
+# never reads and the review chain deadlocks. Recovering the launch/project dir
+# from the active transcript's cwd (cwd-independent) realigns every verb below
+# with the (project-dir, session-id) the hook uses. Gated to the state verbs
+# (--*) so the hot `timestamp`/`style` path never spawns node; skipped entirely
+# when CLAUDE_PROJECT_DIR is already set (all hooks, all hermetic tests) —
+# behavior then is byte-for-byte unchanged. ZENSU_OWN_CMD is hoisted default-if-
+# unset so this recovery and the per-verb session resolution tail-match the same
+# command in the transcript.
+case "${1:-}" in
+  --*)
+    if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
+      # Build a quote-safe, reason-free tail-match needle. Claude Code stores a
+      # --reason value QUOTED in the transcript, so an unquoted "$*" would not
+      # substring-match; the per-verb session needles below are likewise reason-
+      # free. Assemble it from the verb/step tokens only (dropping any --reason
+      # <val> pair), without consuming $@, so this recovery and the per-verb
+      # resolution tail-match the same command in the active transcript.
+      _zensu_needle="bash $0"; _zensu_skip=0
+      for _zensu_a in "$@"; do
+        if [ "$_zensu_skip" = "1" ]; then _zensu_skip=0; continue; fi
+        if [ "$_zensu_a" = "--reason" ]; then _zensu_skip=1; continue; fi
+        _zensu_needle="$_zensu_needle $_zensu_a"
+      done
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-$_zensu_needle}"
+      unset _zensu_needle _zensu_skip _zensu_a
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      _zensu_pd="$(zensu_resolve_project_dir)" && [ -n "$_zensu_pd" ] && export CLAUDE_PROJECT_DIR="$_zensu_pd"
+      unset _zensu_pd
+    fi
+    ;;
+esac
+
 case "${1:-}" in
   --phase)
     phase_val=""
