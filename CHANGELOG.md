@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-07-05
+
+### Added
+
+- **pr-team-review**: Expand reviewer pool 15→25 + always-on core + challenge round (#143)
+
 ## [0.11.1] - 2026-07-05
 
 ### Fixed
