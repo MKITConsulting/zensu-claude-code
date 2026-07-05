@@ -58,18 +58,22 @@ else
 fi
 
 # P4 — orchestration essentials
-declare -A ESSENTIALS=(
-  ["P4a one interactive planning gate"]="the ONLY interactive gate"
-  ["P4b implements via /zensu:tdd"]="/zensu:tdd"
-  ["P4c team review via /zensu:pr-team-review"]="/zensu:pr-team-review"
-  ["P4d fixes via /zensu:pr-fix-findings"]="/zensu:pr-fix-findings"
-  ["P4e team review runs ONCE, not in the loop"]="ONCE"
-  ["P4f validate <-> fix loop"]="Validate ↔ fix LOOP"
-  ["P4g never auto-merge / auto-deploy"]="Never auto-merge"
-  ["P4h worktree-only build"]="Worktree only"
+# Indexed array of "label|needle" pairs (bash 3.2-safe — no `declare -A`, which Apple's
+# /bin/bash 3.2 cannot parse; the associative form aborts this suite locally yet exits 0,
+# silently skipping every check below while run-all.sh scores a false PASS).
+ESSENTIALS=(
+  "P4a one interactive planning gate|the ONLY interactive gate"
+  "P4b implements via /zensu:tdd|/zensu:tdd"
+  "P4c team review via /zensu:pr-team-review|/zensu:pr-team-review"
+  "P4d fixes via /zensu:pr-fix-findings|/zensu:pr-fix-findings"
+  "P4e team review runs ONCE, not in the loop|ONCE"
+  "P4f validate <-> fix loop|Validate ↔ fix LOOP"
+  "P4g never auto-merge / auto-deploy|Never auto-merge"
+  "P4h worktree-only build|Worktree only"
 )
-for label in "${!ESSENTIALS[@]}"; do
-  if grep -qF "${ESSENTIALS[$label]}" "$SKILL_MD"; then
+for entry in "${ESSENTIALS[@]}"; do
+  label="${entry%%|*}"; needle="${entry#*|}"
+  if grep -qF "$needle" "$SKILL_MD"; then
     check "$label" PASS
   else
     check "$label" FAIL

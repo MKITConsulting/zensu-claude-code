@@ -49,17 +49,23 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 
 | Signal type | Weight |
 |---|---|
-| Every PR (unconditional) | Forces `coverage-audit` — the always-on test-coverage evaluation |
+| Every code PR (unconditional) | Forces the holistic core — `coverage-audit` + `bug-hunter` + `maintainability` + `adversarial` |
 | File-extension match | Activates persona |
 | Path-prefix match (e.g. `docs/DDD/`) | Activates persona |
 | Migration directory present | Forces `persistence-db` |
-| New endpoint files | Forces `security` + `rest-api` |
+| New endpoint files | Forces `security` + `rest-api` + `observability` |
+| Dependency manifest / lockfile changed | Forces `supply-chain` |
+| Public contract changed (REST/gRPC/GraphQL/events/exported symbols) | Forces `api-compat` |
+| Outbound call / async consumer / retry-timeout config | Forces `resilience` |
+| New personal-data field / user-data logging / analytics / export | Forces `data-privacy` |
+| Shared mutable state / threads / async / locks | Forces `concurrency` |
+| UI component / template files | Forces `frontend-component` + `frontend-ux` + `accessibility` |
 | `--context=` flag | Forces `domain-refiner` |
 | `--conversation=` mentions naming/glossary | Forces `ddd-strategic` |
 
-Cast size sanity check: 2-8 reviewers ideal. < 2 → ask user if more breadth wanted. > 8 → ask user to trim.
+Cast size sanity check: with the always-on holistic core (4) plus matched specialists, a typical code PR runs **6-12 reviewers** — that is healthy, not bloated. All reviewers run in parallel in the background, so wall-clock is ~constant regardless of count (the concurrency cap `min(16, cores-2)` queues any excess automatically). Only ask the user to trim above ~14, and only where several specialists clearly don't apply. A docs-only PR runs just 2 (`docs-only` + `coverage-audit`).
 
-For docs-only PRs (only `*.md` changes), skip multi-cast — go straight to `docs-only` single reviewer **plus `coverage-audit`** (which reports `N/A — no production code changed`) + simplified synthesis that still carries the mandatory `### Test Coverage` section.
+For docs-only PRs (only `*.md` changes), skip the multi-cast AND the rest of the holistic core — go straight to `docs-only` single reviewer **plus `coverage-audit`** (which reports `N/A — no production code changed`) + simplified synthesis that still carries the mandatory `### Test Coverage` section.
 
 ## Coverage Evaluation (always-on)
 
@@ -87,6 +93,15 @@ The `coverage-audit` persona is cast on every run and its `### Test Coverage` se
 
 - Reviewers explicitly contradict on a major decision (e.g., one says APPROVE, three say REQUEST_CHANGES).
 - Naming/architecture decision requires multi-stakeholder buy-in beyond what the lead can adjudicate.
+
+**Challenge Round (anti-groupthink) — MANDATORY before finalizing consensus.** Lead consolidation is efficient but risks rubber-stamping: five personas that each glance at the happy path can all miss the same failure, and a pile-up of agreeing findings reads as more certainty than it earned. The always-on `adversarial` persona exists to break that. Before writing `consensus.verdict`:
+
+1. Take the `adversarial` report (`$WORKDIR/adversarial.json`) — its pre-mortem, steelman, and "what did the siloed specialists collectively miss" notes.
+2. For each emerging **P1**, test it against the adversarial lens: does the pre-mortem / steelman refute it, reframe its severity, or leave it standing? Drop or re-rank the findings that don't survive; keep the survivors with more confidence.
+3. For any **APPROVE-leaning** verdict, run the pre-mortem first — "it's 3am, this change caused the incident, what was it?" — and keep APPROVE only if nothing plausible surfaces.
+4. Promote any adversarial risk that no specialist raised, but that would sink the change, into the P1/P2 list.
+
+The rule is **convergence != correctness**: high convergence raises a finding's authority but does not verify it, and a real risk only the adversarial persona saw still counts. Record the surviving / killed / added set in `_debate.json` (e.g. a `challenge_round` note) so the synthesis can cite it. This stays lead-driven — no extra spawn round — unless a genuine contradiction trips the DM-roundtrip above.
 
 **Schema normalization:** reviewers may write slightly different schemas — handle defensively:
 
