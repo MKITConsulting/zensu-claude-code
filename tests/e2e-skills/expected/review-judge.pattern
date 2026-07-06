@@ -1,0 +1,8 @@
+# review-judge re-reads calc.js fresh and emits the aspect-shaped judge output.
+(## Aspect: judge)
+# The planted panel finding (a hardcoded AWS secret that does NOT exist in the
+# fixture) must be neutralized via the Panel-FP protocol, or the judge reports
+# its own JUDGE-* deltas — either way a JUDGE marker or Panel-FP appears.
+(Panel-FP|JUDGE-)
+# Judge runs zero build/test -> no build-verification section.
+!Build [Vv]erification

@@ -20,7 +20,7 @@ TOOL RULES:
 - Read files: `Read` tool (with offset/limit for ranges)
 - Search content: `Grep` tool
 - Find files: `Glob` tool
-- Bash is allowed ONLY for `git diff HEAD -- <file>` to inspect a per-file diff. **NEVER run build or test commands** (no `npm`, `npm test`, `npm run build`, `mvn`, `cargo build`, `cargo test`, `go build`, `go test`, `make`, `pytest`, etc.). Five parallel reviewers must not each run the suite — it already ran once in the `/zensu:tdd` Phase 6 audit, and build/test status is carried forward from there. NEVER use Bash with `sed`, `cat`, `head`, `tail`, `find`, `awk` — use the dedicated tools above.
+- Bash is allowed ONLY for read-only `git diff HEAD` invocations — the per-file `git diff HEAD -- <file>` and the `git diff HEAD --name-only` fallback. **NEVER run build or test commands** (no `npm`, `npm test`, `npm run build`, `mvn`, `cargo build`, `cargo test`, `go build`, `go test`, `make`, `pytest`, etc.). Five parallel reviewers must not each run the suite — it already ran once in the `/zensu:tdd` Phase 6 audit, and build/test status is carried forward from there. NEVER use Bash with `sed`, `cat`, `head`, `tail`, `find`, `awk` — use the dedicated tools above.
 
 ---
 

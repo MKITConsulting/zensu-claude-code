@@ -12,7 +12,8 @@
   "agents": [
     "./agents/zensu-plm.md",
     "./agents/code-reviewer.md",
-    "./agents/review-aspect.md"
+    "./agents/review-aspect.md",
+    "./agents/review-judge.md"
   ],
   "skills": [
     "./skills/autopilot",
