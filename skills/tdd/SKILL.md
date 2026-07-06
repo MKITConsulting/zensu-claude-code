@@ -139,7 +139,7 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 
 - Principles 1-2 (RED→GREEN cycles, work types, cross-layer pairing) and the FSM phase markers do NOT apply; the PreToolUse edit gate passes through; the Bash witness still records every command.
 - Tests are at your discretion — write them where they add value; none is acceptable. The Phase 5/6 suites, build, coverage, and the review chain are the safety net.
-- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding.
+- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding. The `## Requirements` table and the per-step `Covers` mapping are likewise unchanged and binding (Phase 6 step 6c runs in vanilla).
 - Phase 3: ONE task per step — `{step_id} [impl]` (activeForm: "Implementing {step_id}"); integration `[wire]` unchanged.
 - Phase 4 replaced: implement each step directly. The Feature-Cycle precondition self-check still applies — a step referencing a precondition marked `missing` with decision `skip` → mark `[!]`, log `{step_id} BLOCKED — precondition {name} missing`, TaskUpdate `cancelled`, next step. Log `{step_id} IMPL completed — files: {list}`; TaskUpdate `[impl]` completed; plan status `[I]`. Optionally log `{step_id} TESTED — {test_file}` when you wrote a test.
 - Phase 6: only the mtime Discipline Audit and the Cross-Layer Value Flow Audit are skipped — log `DISCIPLINE AUDIT SKIPPED — vanilla mode` instead; the Precondition Drift Audit still runs. Step 7 closure accepts `[I]`/`[W]`/`[!]`. Step 8 final line: `VANILLA COMPLETE — {N}/{M} implemented | Build: {…} | Coverage: {…}`.
@@ -224,6 +224,12 @@ MANDATORY — create BOTH files (plan + log are a pair).
 {Spec verbatim}
 **Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
 
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | {acceptance criterion — machine-checkable} | spec |
+| FR-001 | {functional requirement} | spec |
+
 ## Preconditions
 | Name | Type | Verification | Status | Decision |
 |------|------|--------------|--------|----------|
@@ -240,10 +246,11 @@ MANDATORY — create BOTH files (plan + log are a pair).
 | [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored | [!] Blocked | [W] Wired |
 
 ## Steps
-| Step | Type | Description | Test File | Depends On | Status | Attempts |
-|------|------|-------------|-----------|------------|--------|----------|
+| Step | Type | Description | Test File | Depends On | Status | Attempts | Covers |
+|------|------|-------------|-----------|------------|--------|----------|--------|
 
 ### Step {id} — {Description}
+- **Covers**: {AC-###, FR-### — the requirement IDs this step implements}
 - **RED**: Test `{name}` — {what}, {why fails}
 - **GREEN**: {what to implement}
 
@@ -254,6 +261,7 @@ MANDATORY — create BOTH files (plan + log are a pair).
 - Coverage report generated for changed files (threshold: {threshold})
 ```
 
+1b. **Requirement-ID allocation rule (stable IDs, never recycled).** The `## Requirements` table is MANDATORY: assign `AC-###` to each acceptance criterion and `FR-###` to each functional requirement parsed from the spec. **If the incoming spec already carries AC-###/FR-### IDs (e.g. from `/zensu:autopilot`), adopt them verbatim — never re-allocate; allocate new IDs monotonically above the highest ID seen.** IDs are allocated monotonically and are NEVER reused — a dropped requirement keeps its ID and is marked deprecated in the Requirement column; never delete a row or renumber. Every Steps-table row names the IDs it implements in its `Covers` cell (the step detail repeats them on a `- **Covers**:` line), so spec → plan → step → test stays traceable end to end. Phase 6 step 6c cross-checks this mapping at warning level.
 2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
 3. Tell user: `tail -f {log_file}`
 
@@ -400,6 +408,7 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
       - Verify the characterization asserts at the unchanged layer's OWN seam (DB row / response body / persisted file / returned struct), NOT at a caller-side mock. Read the test file; if its top-level assertions only inspect mocks created in the same test, append `CROSS-LAYER PAIRING MOCK-ONLY — {step_id_B} asserts only on caller mock, not on unchanged layer's seam` and mark Phase 6 NOT complete.
    b) **Missing-pairing detection.** Re-scan IMPL log entries for Feature/Bug-Fix steps. For each step, inspect the diff of its IMPL files for added literals matching field-name / payload-key patterns (`'foo':`, `"foo":`, `foo=`, `&foo=`) that did not exist in the pre-step version of those files. For each such added literal, grep the IMPL files of OTHER steps in this plan for the same literal — if no other step in this plan added the same literal AND the plan's Cross-Layer Pairings table has no row pairing this step to a layer that consumes the literal, append `CROSS-LAYER PAIRING MISSING — {step_id} added literal "{literal}" with no paired characterization` and mark Phase 6 NOT complete.
    c) Do NOT auto-fix — pairing violations are a discipline violation, same severity as mtime and precondition drift.
+6c. **Requirements Coverage Cross-Check** (warning level). Read the plan's `## Requirements` table. Verify (a) every Steps-table row has a non-empty `Covers` cell naming at least one requirement ID from the table, and (b) every requirement ID **not marked deprecated** is named by at least one step's `Covers` cell (deprecated rows are exempt by design — the never-recycle rule keeps them). On a miss append `REQUIREMENT COVERAGE WARNING — {step without Covers | requirement ID without covering step}` to the log and surface it in the final report. Warning level only — it does NOT mark Phase 6 incomplete. If the plan has no `## Requirements` table (legacy plan), skip silently.
 7. Update the plan's Steps-table `Status` column: every step `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` cell remaining. The plan carries no GFM checkboxes — the `Status` column is the only completion tracker.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
 9. Output summary, in this order: (a) `## TL;DR` — exactly ONE sentence following the template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Cover root cause + fix mechanism + test verdict; no fluff, no hedging. Then (b) results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `EVIDENCE CONTRADICTION` when the witness tail contradicts a claimed pass, `via=tool_name` when declared non-Bash escape), plan path.

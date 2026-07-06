@@ -107,7 +107,8 @@ In plain words: the feature, bug, or need this session addressed — why the wor
 Numbered deliverables. For each: what it does in plain words, its status (done /
 merged / built-tested), and a PR link if one exists. Carry the audit facts: feature
 title, files modified, tests created, build status, coverage status. Cite the plan
-+ log paths.
++ log paths. When the session plan carries a ## Requirements table, also give
+per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).
 
 ## How I built it
 The TDD discipline followed, then the final zensu:code-reviewer verdict (PASS /

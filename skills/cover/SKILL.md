@@ -36,7 +36,7 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
 | `--base=<branch>` | no | `main` | Diff base for the default `git diff <base>...HEAD` scope. |
 | `--level=unit\|integration\|e2e\|auto` | no | `auto` | Force a level; `auto` lets the matrix in `rules/levels.md` decide per behavior. |
 | `--layer=fe\|be\|fullstack\|auto` | no | `auto` | Force the scope; `auto` follows the changed code. |
-| `--from-acs` | no | off | **autopilot seam**: emit one durable E2E test per numbered AC. Source order: the AC block passed in the invocation payload (autopilot's Phase-0 ACs), else a named plan artifact, else the PR body. Implies E2E scope — overrides `--level`/`--layer`. |
+| `--from-acs` | no | off | **autopilot seam**: emit one durable E2E test per active `AC-###` ID, named/keyed by that stable ID; ACs marked deprecated are skipped. Source order: the AC block passed in the invocation payload (autopilot's Phase-0 ACs), else a named plan artifact, else the PR body. Implies E2E scope — overrides `--level`/`--layer`. |
 | `--driver=<name>` | no | auto (probe) | Force the authoring driver (`browser`/`api`/`cli`/`async`/`iac`/`custom` — see `rules/drivers.md`). |
 | `--yes` | no | off | Skip the Phase 1 test-plan approval gate (author straight from the plan). |
 | `--no-review` | no | off | Skip the Phase 3 review chain. Degrades — note it in the report. |

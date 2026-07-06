@@ -92,12 +92,16 @@ the detected app type — see `rules/drivers.md`.
 **0.C — Plan.** Turn the feature into:
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
-2. **Acceptance criteria** — a NUMBERED list, each one machine-checkable: verifiable by a
-   test, a gate assertion, or a concrete observation through the validation driver. No
-   vague ACs. For any UI, pin the visual/UX criteria explicitly (copy, states, empty/error,
-   responsive); if "how it should look" can't be pinned in text, ask for a mockup or
-   reference screenshot **now**. The ACs are the contract Phase 1 validates against —
-   anything not in an AC will not be checked.
+2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
+   each one machine-checkable: verifiable by a test, a gate assertion, or a concrete
+   observation through the validation driver. No vague ACs. **ID allocation is stable and
+   never recycled**: IDs are assigned monotonically; a dropped criterion keeps its ID and is
+   marked deprecated — never delete or renumber, so every artifact (PR body, validation
+   evidence, `--cover` tests) can reference the same ID for the run's whole life. For any UI,
+   pin the visual/UX criteria explicitly (copy, states, empty/error, responsive); if "how it
+   should look" can't be pinned in text, ask for a mockup or reference screenshot **now**.
+   The ACs are the contract Phase 1 validates against — anything not in an AC will not be
+   checked.
 3. **Every open question batched** — defaults, edge cases, scope cuts, data shape — asked
    in this phase. This is the only chance.
 
@@ -119,8 +123,10 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
 3. **Open the PR** — commit (Conventional Commits, no watermark), push, open the PR
-   against `--base` (English title + body). The body carries a per-AC table (status filled
-   in after step 6).
+   against `--base` (English title + body). The body carries a per-AC checklist table keyed
+   by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
+   (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
+   step 6).
 4. **Team review — ONCE** — run `/zensu:pr-team-review` on the PR. This is the single deep
    multi-persona pass. It runs **exactly once** and does **not** re-run in the loop.
 5. **Fix the findings** — run `/zensu:pr-fix-findings` and loop it until every review
@@ -129,21 +135,25 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 6. **Validate ↔ fix LOOP** — only now exercise the running feature:
    a. Run the resolved validation **driver** (see `rules/drivers.md`), authenticating via
       the credential-blind login script if one is configured (see `rules/auth.md`). Assert
-      **every numbered AC** and capture evidence per AC.
-   b. Every AC passes + gates green → **exit the loop**.
+      **every non-deprecated AC by its `AC-###` ID** and capture evidence per AC under that
+      ID (ACs marked deprecated are exempt — their rows stay in the table per the
+      never-recycle rule).
+   b. Every non-deprecated AC passes + gates green → **exit the loop**.
    c. Anything off → fix it through `/zensu:tdd` (vanilla, scoped to the failing AC(s)),
       re-run the step-2 gates, push to update the PR, then go back to (a).
-   d. Repeat (a)–(c) until all ACs pass. `/zensu:pr-team-review` does **not** re-run here.
+   d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
 6b. **Persist coverage — opt-in `--cover`** — with `--cover`, after the loop exits green,
    invoke `/zensu:cover --from-acs` to emit the now-passing ACs as **durable committed
-   tests** (one test per numbered AC), then re-run the step-2 gates and push. This turns the
+   tests** (one test per active `AC-###` ID, keyed by the ID; deprecated ACs are skipped),
+   then re-run the step-2 gates and push. This turns the
    throwaway live validation into a permanent regression net in the same PR. Off by default;
    the live validate↔fix loop above is unchanged.
 
 ### Phase 2 — Deliver
 
-Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table with the
-evidence. Then:
+Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
+stable `AC-###` IDs — one evidence entry per active ID; deprecated rows stay listed with
+status `deprecated`, no evidence. Then:
 - **Do NOT merge, push a release, or deploy.** The final merge is the human's.
 - Report: the PR link, the per-AC table, what looped and why, and anything decided
   autonomously that the user may want to revisit.
