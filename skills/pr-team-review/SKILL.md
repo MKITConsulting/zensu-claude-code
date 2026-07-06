@@ -209,14 +209,14 @@ Review by N-agent team (...).
 <verdict + rationale>
 ```
 
-**Mandatory `### Test Coverage` section.** Render it on EVERY run from `consensus.coverage` — a fully-covered PR shows "None" under both lists, a docs-only PR shows "N/A — no production code changed". Never drop it, even when the verdict is APPROVE. When `--coverage-gate` is set and uncovered production files exist, the Recommendation must reflect `REQUEST_CHANGES` and cite the uncovered files. The coverage-audit persona's own inline findings (uncovered high-risk files/paths) flow into the inline comments like any other persona's, subject to `--max-inline`.
+**Mandatory `### Test Coverage` section.** Render it on EVERY run from `consensus.coverage` as a one-line source disclosure + a compact four-column status table (Covered / Partial / Uncovered / Changed prod files) followed by bullet lists for the uncovered files and partial paths — exact format in `rules/workflow.md` Phase D. A fully-covered PR shows all-zero uncovered counts and "None" under both lists; a docs-only PR drops the table and shows "N/A — no production code changed". Numbers are the AI's static diff-vs-test mapping by default (honest approximation); `--run-coverage` or an ingested report makes them measured. Never drop the section, even when the verdict is APPROVE. When `--coverage-gate` is set and uncovered production files exist, the Recommendation must reflect `REQUEST_CHANGES` and cite the uncovered files. The coverage-audit persona's own inline findings (uncovered high-risk files/paths) flow into the inline comments like any other persona's, subject to `--max-inline`.
 
-**HARD RULE — NO MARKDOWN TABLES** in the overall body or inline comments. GitHub's PR view squeezes wide tables into unreadable narrow columns (text wraps character-by-character). Use:
+**HARD RULE — NO MARKDOWN TABLES, one carve-out.** In the overall body and inline comments, GitHub's PR view squeezes wide tables into unreadable narrow columns (text wraps character-by-character). Use:
 - numbered subsections (`#### 1. ... #### 2. ...`) for P1 findings
 - bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions
 - plain prose for everything else
 
-Same rule applies inside inline comments — no tables. Code fences, bullet lists, bold prefixes only.
+The **sole exception** is the `### Test Coverage` status table above: four short all-numeric columns survive the squeeze because every cell is a small integer. Nothing else — no findings table, no file-path table. Inside inline comments the exception does **not** apply: no tables at all, code fences / bullet lists / bold prefixes only.
 
 Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 first. See `rules/github-publish.md` for the `gh api` call, `line`/`side` rules per file `changeType` (ADDED/MODIFIED/RENAMED), and idempotency.
 
