@@ -43,7 +43,7 @@ INPUT="$(cat 2>/dev/null || true)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled bashWriteGate || exit 0
 
-REASON="$(PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+REASON="$(BSWG_MODE= PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
 [ -z "$REASON" ] && exit 0
 
 REASON="$REASON" node -e '

@@ -5,6 +5,11 @@
 // gated channel (redirect / tee / sed -i / dd of= / heredoc) hits a source file
 // that must not be clobbered. Prints the deny reason on stdout, or nothing.
 //
+// Dual mode: with BSWG_MODE=detect it instead emits the write channels present
+// in the command (one per line, no git checks, no path policy) — consumed by
+// pre-write-secret-scan.sh via the module export detectChannels(); the deny
+// caller pins BSWG_MODE= so an ambient value can never flip its behavior.
+//
 // Kept in its own file (like hooks/lib/resolve-session-id.js) so the logic uses
 // normal quoting instead of being escaped inside a bash single-quoted node -e.
 //
@@ -82,6 +87,28 @@ function lex(s) {
   return ev;
 }
 
+// BSWG_MODE=detect — channel-detection mode for pre-write-secret-scan.sh: emit
+// the write channels present in the command (one per line, deduped), with NO
+// git/tracked checks, NO path policy, and NO deny reasons. Heredoc intro lines
+// count as a channel here (their bodies are the secret-scan payload) even
+// though the deny path strips them. Over-detection is safe (it only widens
+// what gets scanned); fd dups (2>&1, >&2, >&-) are NOT channels. Default mode
+// is byte-identical.
+function detectChannels(cmd) {
+  const found = new Set();
+  const collapsed = stripHeredocs(cmd)
+    .replace(/>\|/g, ">")
+    .replace(/(\d*)(>>?)&(?=\s*[^\s0-9&|;<>(\-])/g, "$1$2");
+  const REDIR = /(\d*)>>?(?!\s*&\s*[\d-])(?!\s*['"]?\/dev\/(?:null|stdout|stderr|tty)\b)/;
+  const VERB = "(^|\\s|;|\\||&|/)";
+  if (REDIR.test(collapsed)) found.add("redirect");
+  if (new RegExp(VERB + "tee(\\s|$)").test(cmd)) found.add("tee");
+  if (new RegExp(VERB + "sed\\s+(-[A-Za-z]*\\s+)*-i").test(cmd)) found.add("sed -i");
+  if (new RegExp(VERB + "dd\\s+[^\\n]*of=").test(cmd)) found.add("dd of=");
+  if (/(?<!<)<<(?!<)[-~]?\s*['"]?[A-Za-z_]/.test(cmd)) found.add("heredoc");
+  return Array.from(found).join("\n");
+}
+
 function main() {
   let cmd = "";
   let cwd0 = "";
@@ -93,6 +120,7 @@ function main() {
     return "";
   }
   if (!cmd) return "";
+  if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
 
   const HOME = process.env.HOME || "";
   const projectRoot = stripSlash(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
@@ -278,4 +306,8 @@ function main() {
   return "";
 }
 
-process.stdout.write(main());
+if (require.main === module) {
+  process.stdout.write(main());
+} else {
+  module.exports = { detectChannels, stripHeredocs };
+}
