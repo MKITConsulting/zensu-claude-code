@@ -33,7 +33,7 @@ Hard caps: ≤ 8 inline findings per persona. Severity meaning:
 - **P2** — suggested (idiom, robustness, maintainability)
 - **P3** — nit (style, naming, redundancy)
 
-**Hard rule for `body` field**: NO Markdown tables. GitHub PR view compresses tables into unreadable narrow columns. Use code fences, bullet lists, and bold prefixes only. Internal fields like `test_coverage_matrix` may stay as JSON objects — they are not posted, the lead synthesises them into prose for the overall body.
+**Hard rule for `body` field**: NO Markdown tables in a persona's inline-finding `body` — GitHub PR view compresses tables into unreadable narrow columns. Use code fences, bullet lists, and bold prefixes only. Internal fields like `coverage-audit`'s `coverage_report` stay as JSON objects — they are not posted; the lead synthesises them into the overall body, where the ONLY permitted table is the compact `### Test Coverage` counts table (four numeric columns, see `workflow.md` Phase D). That body-only carve-out never extends to inline comments.
 
 **Working directory**: The skill injects `$WORKTREE` — the absolute path to this run's detached worktree (the `wt/` subdir of an `mktemp -d` workspace) — into every persona prompt. ALL git/grep/find/file-read commands MUST run with `$WORKTREE` as the working directory:
 

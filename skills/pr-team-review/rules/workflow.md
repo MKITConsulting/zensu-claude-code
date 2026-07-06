@@ -126,9 +126,19 @@ Normalize during read, not before — keep the raw files for debug.
 **Test Coverage section (mandatory, never dropped):**
 
 Render `### Test Coverage` in the overall body on EVERY run from `consensus.coverage` (the `coverage-audit` report carried through Phase C). Rules:
-- Lead with `coverage_source` + a one-line summary so the reader knows whether the numbers are static, from an ingested report, or from a real tool run.
-- List every `uncovered_files[]` entry (path — reason — risk). If empty: "None — every changed production file is exercised by a test." If `changed_production_files == 0`: "N/A — no production code changed in this PR."
-- List `partial_files[]` uncovered paths under "Uncovered paths". If empty: "None."
+- **Open with a one-line source disclosure**, italic, so the reader knows how the numbers were derived: `_Source: <coverage_source> — <AI static mapping (approximate) | from report:<path> | tool-run>._` The default is the AI's static diff-vs-test mapping; only `--run-coverage` or an ingested report gives measured numbers. State it honestly.
+- **Then a compact status table** — the ONE table permitted in the body (see the No-tables carve-out below). Exactly four short **numeric** columns, so GitHub cannot squeeze it:
+
+  ```markdown
+  | Covered | Partial | Uncovered | Changed prod files |
+  |--:|--:|--:|--:|
+  | 12 | 2 | 3 | 17 |
+  ```
+
+  Counts come from `covered_files[]`, `partial_files[]`, `uncovered_files[]`, `changed_production_files`. When `changed_production_files == 0` (docs/config-only PR) DROP the table entirely and render just `N/A — no production code changed in this PR.`
+- Below the table, list every `uncovered_files[]` entry as a bullet — `` `path` — reason — risk ``. If empty: "None — every changed production file is exercised by a test."
+- List `partial_files[]` uncovered paths as a **Uncovered paths** bullet list — `` `path` → `fn/method/branch` (covered by: `<test>`) ``. If empty: "None."
+- **Detail stays in bullets, never in the table.** Long file paths and path names wrap character-by-character inside a table cell — exactly the failure the No-tables rule guards against. The table carries only the at-a-glance counts; everything with a path goes in a bullet.
 - The section is present even when the verdict is APPROVE and even for docs-only PRs. A green coverage result is still reported explicitly — silence is not allowed.
 - `--coverage-gate`: if set and `uncovered_files[]` (production) is non-empty, the verdict is `REQUEST_CHANGES` and the Recommendation cites the uncovered files. Without the flag, coverage is advisory and the verdict is unaffected.
 
@@ -142,9 +152,9 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 **Overall body length:** target 600-1200 words. Reviewer fatigue is real — a 5000-word body gets skimmed. Cut Strengths section to 5-7 bullets max. Cut Open Questions to 5 max.
 
-**No tables.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use numbered subsections (`#### 1. ...`) for P1 findings and bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `$WORKDIR/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings.
+**No tables — one carve-out.** GitHub PR view squeezes Markdown tables into narrow columns that wrap character-by-character — unreadable. Use numbered subsections (`#### 1. ...`) for P1 findings and bullet lists with bold prefixes (`- **Area**: ...`) for P2 / Strengths / Open Questions. Lead is responsible for the synthesis Markdown — persona reports may still use tables internally (they live in `$WORKDIR/<role>.json` and are not posted), but the synthesis MUST flatten everything to prose/bullets/headings. **The sole exception is the `### Test Coverage` status table** (Phase D): four short all-numeric columns (Covered / Partial / Uncovered / Changed) that GitHub cannot squeeze because every cell is a small integer. That carve-out is limited to those counts — file paths, findings, and every other table stay banned and flatten to bullets.
 
-**No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only.
+**No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only. The coverage-table carve-out is **body-only** — inline comments never contain a table.
 
 **Pre-publish preview:** ALWAYS show the user the overall body + inline count before posting. They may want edits. After approval, post — don't wait for explicit "go" if the user already approved the skill execution.
 
