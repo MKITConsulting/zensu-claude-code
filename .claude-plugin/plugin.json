@@ -18,6 +18,7 @@
     "./skills/autopilot",
     "./skills/bootstrap",
     "./skills/cover",
+    "./skills/docs",
     "./skills/ghost-scan",
     "./skills/implement",
     "./skills/plan-review",

@@ -14,6 +14,7 @@ GUIDE="$PLUGIN_DIR/docs/documentation-guide.md"
 PLM="$PLUGIN_DIR/agents/zensu-plm.md"
 IMPLEMENT="$PLUGIN_DIR/skills/implement/SKILL.md"
 GHOST="$PLUGIN_DIR/skills/ghost-scan/SKILL.md"
+DOCS="$PLUGIN_DIR/skills/docs/SKILL.md"
 ZENSUHELP="$PLUGIN_DIR/skills/zensu-help/SKILL.md"
 READ_REF='Read `docs/documentation-guide.md`'
 
@@ -81,6 +82,12 @@ check "D16 zensu-plm has explicit Read imperative" \
   "$(has "$PLM" "$READ_REF")"
 check "D17 zensu-help routes documentation questions to the guide" \
   "$(has "$ZENSUHELP" "docs/documentation-guide.md")"
+
+# --- docs skill (the primary doc-authoring surface) ---------------------------
+check "D18 docs skill references the shared guide" \
+  "$(has "$DOCS" "docs/documentation-guide.md")"
+check "D19 docs skill has explicit Read imperative" \
+  "$(has "$DOCS" "$READ_REF")"
 
 echo "----"
 echo "test-doc-generation-guidance: $PASS PASS / $FAIL FAIL"
