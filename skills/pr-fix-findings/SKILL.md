@@ -1,7 +1,7 @@
 ---
 name: pr-fix-findings
 description: >
-  Fix every open review comment / finding on a GitHub pull request end-to-end:
+  [Zensu] Fix every open review comment / finding on a GitHub pull request end-to-end:
   locate the PR for the current branch (or a given number), pull the unresolved
   review threads, triage them into independent vs dependent work, implement each
   fix through the Zensu workflow (vanilla `/zensu:tdd` + review chain), fan

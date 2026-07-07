@@ -27,11 +27,15 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "R1 skills/reset-review-limit/SKILL.md exists" PASS
 
-FIRST_LINE="$(head -1 "$SKILL_MD")"
-if [ "$FIRST_LINE" = "# /zensu:reset-review-limit" ]; then
-  check "R2 SKILL.md first line is exactly '# /zensu:reset-review-limit'" PASS
+if grep -qxF '# /zensu:reset-review-limit' "$SKILL_MD"; then
+  check "R2 SKILL.md has the namespaced H1 '# /zensu:reset-review-limit'" PASS
 else
-  check "R2 SKILL.md first line is '# /zensu:reset-review-limit' — got: $FIRST_LINE" FAIL
+  check "R2 SKILL.md has the namespaced H1 '# /zensu:reset-review-limit'" FAIL
+fi
+if grep -qE '^name: *reset-review-limit *$' "$SKILL_MD"; then
+  check "R2b SKILL.md frontmatter declares 'name: reset-review-limit'" PASS
+else
+  check "R2b SKILL.md frontmatter declares 'name: reset-review-limit'" FAIL
 fi
 
 REQUIRED_SECTIONS=(

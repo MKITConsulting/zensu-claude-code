@@ -1,7 +1,7 @@
 ---
 name: pr-team-review
 description: >
-  Orchestrate a multi-agent PR review on GitHub: scout the PR, auto-cast a tailored
+  [Zensu] Orchestrate a multi-agent PR review on GitHub: scout the PR, auto-cast a tailored
   reviewer team from a 25-persona pool (DDD strategic/tactical, backend, persistence,
   security, REST API, tests, coverage audit, bug-hunter, maintainability, adversarial,
   observability, supply-chain, resilience, api-compat, data-privacy, domain refiner,

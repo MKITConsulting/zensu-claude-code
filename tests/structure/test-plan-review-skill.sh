@@ -33,12 +33,16 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "P1 skills/plan-review/SKILL.md exists" PASS
 
-# P2 — first line is exactly the namespaced title
-FIRST_LINE="$(head -1 "$SKILL_MD")"
-if [ "$FIRST_LINE" = "# /zensu:plan-review" ]; then
-  check "P2 SKILL.md first line is exactly '# /zensu:plan-review'" PASS
+# P2 — namespaced H1 title + frontmatter name (drives invocation + auto-trigger)
+if grep -qxF '# /zensu:plan-review' "$SKILL_MD"; then
+  check "P2 SKILL.md has the namespaced H1 '# /zensu:plan-review'" PASS
 else
-  check "P2 SKILL.md first line is '# /zensu:plan-review' — got: $FIRST_LINE" FAIL
+  check "P2 SKILL.md has the namespaced H1 '# /zensu:plan-review'" FAIL
+fi
+if grep -qE '^name: *plan-review *$' "$SKILL_MD"; then
+  check "P2b SKILL.md frontmatter declares 'name: plan-review'" PASS
+else
+  check "P2b SKILL.md frontmatter declares 'name: plan-review'" FAIL
 fi
 
 # P3 — orchestration essentials
