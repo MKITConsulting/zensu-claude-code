@@ -111,7 +111,7 @@ Phase 2). Author one doc per required type.
 | `default` | `user_facing` | `end_user` |
 | `api` | `api_reference` | `developer` |
 | `internal_only` | `adr` | `internal` |
-| `public_facing` | `user_facing` — **plus** `tutorial` when `estimated_effort` ∈ {L, XL} | `end_user` / `developer` |
+| `public_facing` | `user_facing` — **plus** `tutorial` when `estimated_effort` ∈ {L, XL} | `user_facing`→`end_user`; `tutorial`→`developer` |
 
 If `feature_scope` is absent (an older backend), default to `user_facing` and say
 so. When a `public_facing` feature's `estimated_effort` is unknown, author the
@@ -122,15 +122,14 @@ in `docs/documentation-guide.md`.
 ## Workflow
 
 **Workflow gate (first + last action).** As the VERY FIRST action, run
-`bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs,create_wiki_page,update_wiki_page"`.
+`bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs"`.
 This marks the Zensu product workflow active so the CLI write-gate
-(`hooks.mcpGate`, default-on) recognizes this skill's `zensu link docs` /
-`zensu wiki create` / `zensu wiki update` commands as workflow-driven rather than
-freelance and does not block them. As the VERY LAST action (after the final phase,
+(`hooks.mcpGate`, default-on) recognizes this skill's `zensu link docs` command
+as workflow-driven rather than freelance and does not block it. As the VERY LAST action (after the final phase,
 or on early exit), run
 `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
 
-All Zensu **mutations** (`zensu link docs`, `zensu wiki create/update`) run in
+The single Zensu **mutation** (`zensu link docs`) runs in
 **this main thread** under that marker. The Phase 3 authoring fan-out uses
 read-only `Explore` agents that cannot mutate — the exact invariant
 `/zensu:ghost-scan` follows (fan out to read, consolidate + write in the main
@@ -216,13 +215,15 @@ zensu link docs <feature-id> \
   --content "<authored-markdown>"
 ```
 
-`--content` creates (or updates) the wiki page linked to this one feature;
-`--publish-to-wiki` defaults true; the call **automatically updates the feature's
-docs score**. To inspect or refresh an existing page instead of re-creating it,
-use `zensu wiki list --entity-type feature --entity-id <feature-uuid> --json` and
-`zensu wiki update <page-id> --content "<markdown>"`, then re-run `zensu link docs`
-to recompute. For a `public_facing` L/XL feature, run `zensu link docs` once per
-required type (`user_facing` and `tutorial`).
+`--content` creates the wiki page on first run and **updates it in place** on
+re-run — so refreshing an `is_outdated` doc is just re-running this call with
+fresh markdown. `--publish-to-wiki` defaults true; the call **automatically
+updates the feature's docs score**. For a `public_facing` L/XL feature, run
+`zensu link docs` once per required type (`user_facing` and `tutorial`).
+
+> Sibling `/zensu:implement` Step 6 publishes the wiki page in two steps (author
+> the page, then link it); this skill uses the equivalent one-call `--content`
+> form of `zensu link docs`. Both produce a feature-linked wiki page.
 
 **Repo-file mode (`--repo-file`).** Write a **unique per-feature** file, then link
 it:
@@ -235,8 +236,10 @@ zensu link docs <feature-id> \
 ```
 
 The per-feature path guarantees exactly one feature links it, satisfying the
-over-share rule (≤ 3 features). **Never** link a shared component README to many
-features — that is the false-green the gate rejects.
+over-share rule (≤ 3 features). Slugify `<slug>` / `<KEY-N>` into a
+traversal-safe filename (no `/` or `..`) so the write stays inside
+`docs/features/`. **Never** link a shared component README to many features —
+that is the false-green the gate rejects.
 
 > Doc-link auto-fires the per-feature score recompute; the CLI exposes no
 > standalone product-scoped recompute verb (the server-side `RecomputeDocsScore`
@@ -296,9 +299,6 @@ never published green.
 | `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped |
 | `zensu doc gen-context` | 2, 3 | Aggregated authoring context map (paths + posture, not source) |
 | `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
-| `zensu wiki list` | 4 | Inspect existing feature-linked wiki pages (idempotency / refresh) |
-| `zensu wiki update` | 4 | Refresh an existing wiki page's content |
-| `zensu wiki create` | 4 | Author a standalone wiki page when not using the `link docs --content` one-call path |
 
 ## Agents & Skills Used
 

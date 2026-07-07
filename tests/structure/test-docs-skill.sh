@@ -58,9 +58,8 @@ else
   check "D3 SKILL.md is workflow-wrapped (--workflow-begin + --workflow-end)" FAIL
 fi
 
-# D4 — the --tools declaration names exactly the doc mutations the skill runs.
-pin "D4 workflow --tools declares the doc mutations" "$SKILL_MD" \
-  'link_docs,create_wiki_page,update_wiki_page'
+# D4 — the --tools declaration names exactly the one doc mutation the skill runs.
+pin "D4 workflow --tools declares the doc mutation" "$SKILL_MD" '--tools "link_docs"'
 
 # D5 — the docs_complete contract: the three hard rules.
 pin "D5a contract: fresh (require_fresh / is_outdated)" "$SKILL_MD" "is_outdated"
@@ -70,8 +69,8 @@ pin "D5c contract: one doc PER feature" "$SKILL_MD" "one doc PER feature"
 # D6 — feature_scope -> doc_type mapping (all four scopes + the tutorial rule).
 pin "D6a maps feature_scope" "$SKILL_MD" "feature_scope"
 pin "D6b default -> user_facing" "$SKILL_MD" "user_facing"
-pin "D6c api -> api_reference" "$SKILL_MD" "api_reference"
-pin "D6d internal_only -> adr" "$SKILL_MD" "internal_only"
+pin "D6c api -> api_reference row" "$SKILL_MD" '`api` | `api_reference`'
+pin "D6d internal_only -> adr row" "$SKILL_MD" '`internal_only` | `adr`'
 pin "D6e public_facing tutorial rule keys on estimated_effort" "$SKILL_MD" "estimated_effort"
 
 # D7 — the CLI mechanics: gen-context (context map) + link docs (publish + recompute).
@@ -87,10 +86,10 @@ pin "D8c forbids the metadata-dump anti-pattern" "$SKILL_MD" "metadata dump"
 
 # D9 — batch fan-out is a READ-ONLY Explore pass (mutations stay on the main thread).
 pin "D9a batch authoring fans out to Explore agents" "$SKILL_MD" "subagent_type: Explore"
-pin "D9b Explore agents are read-only (no Zensu mutation)" "$SKILL_MD" "read-only"
+pin "D9b batch authoring agents perform no Zensu writes" "$SKILL_MD" "performs NO Zensu writes"
 
 # D10 — idempotency + no silent truncation.
-pin "D10a idempotent: skips features already docs_complete" "$SKILL_MD" "docs_complete"
+pin "D10a idempotent: skips features already complete" "$SKILL_MD" "Skip every feature already"
 pin "D10b no silent truncation of the batch" "$SKILL_MD" "silent truncation"
 
 # D11 — English-only guard: German tokens MUST be ABSENT.
@@ -121,6 +120,11 @@ if jq -e '.skills | index("./skills/docs")' "$PLUGIN_JSON" >/dev/null 2>&1; then
 else
   check "D14 plugin.json skills[] contains './skills/docs'" FAIL
 fi
+
+# D15/D16 — high-value invariants: the repo-file per-feature path rule (the
+# antidote to the shared-README false-green) and the Phase 5 verify step.
+pin "D15 repo-file mode uses a unique per-feature path" "$SKILL_MD" "docs/features/<KEY-N>-<slug>.md"
+pin "D16 Phase 5 verifies the gate flipped" "$SKILL_MD" "Verify the gate flipped"
 
 echo "----"
 echo "test-docs-skill: $PASS PASS / $FAIL FAIL"
