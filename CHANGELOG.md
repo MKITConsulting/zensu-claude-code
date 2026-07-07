@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.2] - 2026-07-07
+
+### Added
+
+- **docs**: Add /zensu:docs skill for code-grounded per-feature documentation (#147)
+
+### Changed
+
+- **implement**: Reconcile Step 6 + guide with the one-call link-docs form (#154)
+- **skills**: Add frontmatter descriptions and [Zensu] prefix (#152)
+
 ## [0.13.1] - 2026-07-07
 
 ### Added
