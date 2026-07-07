@@ -1,3 +1,16 @@
+---
+name: ghost-scan
+description: >
+  [Zensu] Brownfield entry point — scan an existing repository to discover undocumented features,
+  review the candidates with the user, and import them into Zensu as tracked features with
+  linked tests, docs, and source files. Use when importing an existing codebase into Zensu
+  for the first time, discovering undocumented features in a repo, linking artifacts to
+  newly created features, or the slash command /zensu:ghost-scan. For a new product with
+  only a plan/vision doc and no code use /zensu:bootstrap instead; for hybrid (code plus a
+  forward plan) run this scan first, then add the plan's not-yet-built items as planned
+  features.
+---
+
 # /zensu:ghost-scan
 
 Scan an existing repository to discover undocumented features, then review and import them into Zensu as tracked features with linked tests, docs, and source files.

@@ -1,3 +1,16 @@
+---
+name: implement
+description: >
+  [Zensu] Implement a tracked Zensu feature end-to-end. Loads the feature context and security
+  profile, UI mocks, product design system, and org knowledge, then runs disciplined
+  implementation via the /zensu:tdd skill in the main thread (RED-GREEN TDD when armed,
+  PreToolUse phase-gate, guaranteed code-review chain), and afterwards links all artifacts
+  (tests, source, docs) and creates a revision. Use when starting implementation of a
+  planned feature, resuming an in-progress feature, completing a feature with proper
+  artifact linking, or the slash command /zensu:implement. Requires a Zensu feature ID
+  (KEY-N, e.g. ZEN-42, or UUID).
+---
+
 # /zensu:implement
 
 Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then runs disciplined implementation via the **`/zensu:tdd` skill** in the main thread (strict RED-GREEN TDD, PreToolUse phase-gate, guaranteed code-review chain). After TDD completes, links all artifacts and creates a revision.
