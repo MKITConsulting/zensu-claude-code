@@ -127,10 +127,10 @@ else
 fi
 
 # P10 — README skills section: count bumped to 12 and the skill is listed
-if grep -qF "### Skills (12)" "$README_MD"; then
-  check "P10a README.md Skills section heading reads '### Skills (12)'" PASS
+if grep -qE '^### Skills \([0-9]+\)$' "$README_MD"; then
+  check "P10a README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" PASS
 else
-  check "P10a README.md Skills section heading reads '### Skills (12)'" FAIL
+  check "P10a README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" FAIL
 fi
 
 if grep -qF "/zensu:pr-team-review" "$README_MD"; then

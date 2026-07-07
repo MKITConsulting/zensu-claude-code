@@ -108,11 +108,82 @@ module.exports = { divide, lastItem };
 EOF
 }
 
+# ─── Fixture: review-judge ────────────────────────────────────────────
+# Clean uncommitted change; the judge prompt plants a FALSE-POSITIVE panel
+# finding (a hardcoded secret that does not exist) which the judge must
+# neutralize via the Panel-FP: protocol after re-reading calc.js fresh.
+make_review_judge() {
+  local d="$FIXTURES_DIR/review-judge"
+  git_init "$d"
+  cat > "$d/calc.js" <<'EOF'
+function add(a, b) {
+  return a + b;
+}
+module.exports = { add };
+EOF
+  commit_all "$d" "baseline: calc.add"
+  cat > "$d/calc.js" <<'EOF'
+function add(a, b) {
+  return a + b;
+}
+function double(n) {
+  return n * 2;
+}
+module.exports = { add, double };
+EOF
+}
+
+# ─── Fixture: converge ───────────────────────────────────────────────
+# A plan with a Requirements table (AC-001 covered, AC-002 missing) and code
+# carrying an unrequested business rule (MAX_PRICE validation threshold) —
+# /zensu:converge must classify the gaps and propose a flow-back edit
+# WITHOUT applying it (non-interactive run is report-only).
+make_converge() {
+  local d="$FIXTURES_DIR/converge"
+  git_init "$d"
+  mkdir -p "$d/.zensu/plans"
+  cat > "$d/CLAUDE.md" <<'EOF'
+# Fixture project (converge e2e)
+Language: JavaScript.
+EOF
+  cat > "$d/calc.js" <<'EOF'
+const MAX_PRICE = 10000;
+function assertPriceLimit(price) {
+  if (price > MAX_PRICE) throw new Error("price exceeds maximum");
+}
+function applyTax(price) {
+  return price * 1.19;
+}
+module.exports = { applyTax, assertPriceLimit };
+EOF
+  cat > "$d/.zensu/plans/2026-01-01-0000_tdd-pricing.md" <<'EOF'
+# TDD Plan: pricing helpers
+
+## Context
+Add tax and discount helpers to calc.js.
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| AC-001 | applyTax(price) returns the price with 19% tax applied | spec |
+| AC-002 | applyDiscount(price, pct) returns price reduced by pct percent | spec |
+
+## Steps
+| Step | Type | Description | Test File | Depends On | Status | Attempts | Covers |
+|------|------|-------------|-----------|------------|--------|----------|--------|
+| S1 | Feature | implement applyTax in calc.js | - | - | [I] | 1 | AC-001 |
+| S2 | Feature | implement applyDiscount in calc.js | - | S1 | [ ] | 0 | AC-002 |
+EOF
+  commit_all "$d" "fixture: pricing plan + partial implementation"
+}
+
 mkdir -p "$FIXTURES_DIR"
 make_zensu_help
 make_plan_review
 make_self_review
 make_review_aspect
+make_review_judge
+make_converge
 
 echo "e2e-skills fixtures built under: $FIXTURES_DIR"
 ls -1 "$FIXTURES_DIR"

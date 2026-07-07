@@ -62,6 +62,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
+| Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
 | Workflow step order (new product / existing codebase / quick feature) | `README.md` § Typical Workflows |
 | Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.md` § Decision Rules + `README.md` § Typical Workflows |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |

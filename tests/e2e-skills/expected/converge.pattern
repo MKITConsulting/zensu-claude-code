@@ -1,0 +1,12 @@
+# converge classifies the fixture gaps: AC-002 has no applyDiscount -> missing.
+(missing)
+# The MAX_PRICE threshold guard (assertPriceLimit) is an unrequested business
+# rule -> flow-back proposal with a freshly allocated stable ID.
+(unrequested|business rule)
+# Per-requirement verdicts reference the stable IDs.
+(AC-001|AC-002)
+# Report-only run must be stated; the affirmative apply-marker must be absent.
+(report.only|no edits|not appl)
+!Applying flow-back edit
+# converge never triggers the TDD implementation workflow.
+!Executing via /zensu:tdd

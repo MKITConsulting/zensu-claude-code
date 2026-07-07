@@ -122,6 +122,16 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
+2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
+   session plan, never mtime-resolved — scoped fix runs write newer plans): a
+   `contradicts` finding on an active AC **blocks the PR open** until fixed via
+   `/zensu:tdd` (vanilla, scoped); after each fix re-run the converge report against the
+   SAME session plan — if `contradicts` persists after 2 fix attempts, treat it as a
+   stop-the-world blocker per The one rule (halt + report). `missing`/`partial`
+   findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
+   active AC also blocks the PR open and `partial` is recorded unvalidated in the
+   PR body's per-AC table. Flow-back edit proposals are reported only — never
+   auto-applied in this non-interactive run.
 3. **Open the PR** — commit (Conventional Commits, no watermark), push, open the PR
    against `--base` (English title + body). The body carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC

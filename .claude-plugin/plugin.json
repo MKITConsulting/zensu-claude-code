@@ -18,6 +18,7 @@
   "skills": [
     "./skills/autopilot",
     "./skills/bootstrap",
+    "./skills/converge",
     "./skills/cover",
     "./skills/ghost-scan",
     "./skills/implement",
