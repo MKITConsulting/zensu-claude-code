@@ -30,6 +30,7 @@
     "./skills/security-review",
     "./skills/setup",
     "./skills/tdd",
+    "./skills/wargame",
     "./skills/zensu-help"
   ]
 }
