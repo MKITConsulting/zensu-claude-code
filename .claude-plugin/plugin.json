@@ -27,6 +27,7 @@
     "./skills/reset-review-limit",
     "./skills/self-review",
     "./skills/security-review",
+    "./skills/setup",
     "./skills/tdd",
     "./skills/zensu-help"
   ]
