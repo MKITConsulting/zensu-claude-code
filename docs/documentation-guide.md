@@ -86,13 +86,19 @@ capability warrants `user_facing`; an architectural choice warrants `adr`.
    feature's docs score. Use `link_docs` alone (no wiki page) only for docs that
    already live in the repo or at an external URL.
 
+   *CLI one-call form.* `zensu link docs <feature-id> --doc-type <type> --content
+   <markdown>` folds these two steps into one — `--content` creates (or updates) the
+   feature-linked wiki page and recomputes the score. This is the form the
+   `/zensu:docs` skill uses; the two-step `create_wiki_page` + `link_docs` above stays
+   valid when you want explicit control over the page.
+
 ## Tools
 
 | Tool | Role |
 |------|------|
 | `get_doc_generation_context` | Fetch the context (the map). Read the named source before writing. |
 | `create_wiki_page` / `update_wiki_page` | Publish authored markdown to the wiki (`content` is the full markdown). |
-| `link_docs` | Register a doc (file path / external URL) against a feature; updates the docs score. |
+| `link_docs` | Register a doc against a feature and update the docs score. Via the CLI, `zensu link docs --content <markdown>` also authors/updates the linked wiki page in the same call; `--file` / `--external-url` register a repo or external doc. |
 
 The rich `POST /api/features/{id}/docs/generate` streaming LLM path is
 **frontend-only** — it is not exposed as an MCP tool. Agents do not call it;
