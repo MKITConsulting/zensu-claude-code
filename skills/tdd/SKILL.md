@@ -55,8 +55,6 @@ Provide a FEATURE SPECIFICATION as the input. Describe WHAT needs to be built, n
 - **Subagent / Claude Code Workflow safety.** The Stop backstop fires only on the top-level interactive thread: `stop-chain-enforcer.sh` detects spawned agents via the hook-input `agent_id` and no-ops inside Task/Agent reviewers AND Claude Code Workflow workers, so a worker's `Stop` never deadlocks the cycle. If this skill is driven from a Workflow, run the review ONCE over the aggregate diff — the orchestrator script spawns the five `zensu:review-aspect` agents, the `zensu:review-judge` second pass (when `hooks.reviewJudge` is enabled), + the `zensu:code-reviewer` consume-mode spawn itself (see the README "Claude Code Workflows" section), or a worker records `zensu-log.sh --pending-review --files "<changed>"` and the next interactive `Stop` adopts it as a review-only chain. Review is per-implementation over the combined diff, never per spawned worker.
 - **Work sequentially — NO parallel tool batches.** TDD is inherently linear: RED → IMPL → GREEN, then evidence, then review. Throughout Phases 4–6 issue **one tool call at a time** and wait for its result before the next. Do NOT emit a parallel batch of tool calls. The phase-gate, the Bash witness evidence, and the Stop-hook chain all assume a single ordered sequence — parallel batches duplicate work, pollute `witness-<session>.log`, and can race the chain terminus (e.g. a `--chain-done` landing before the reviewer runs). The ONE sanctioned parallel batch is the Phase 6.10 review fan-out: spawning the five read-only `zensu:review-aspect` agents at once is allowed because it runs post-implementation, is strictly read-only, writes no witness evidence, and never touches the phase-gate.
 
----
-
 ## Principle 1: STRICT TDD DISCIPLINE
 
 NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST. For each step you MUST follow:
@@ -160,8 +158,6 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 - Phase 6: only the mtime Discipline Audit and the Cross-Layer Value Flow Audit are skipped — log `DISCIPLINE AUDIT SKIPPED — vanilla mode` instead; the Precondition Drift Audit still runs. Step 7 closure accepts `[I]`/`[W]`/`[!]`. Step 8 final line: `VANILLA COMPLETE — {N}/{M} implemented | Build: {…} | Coverage: {…}`.
 - Review-fix rounds and the self-review fix round are vanilla too: fix findings directly (no RED→GREEN cycle), keep the structured CHECKPOINT/AUDIT evidence discipline, re-run the fan-out + consume-mode reviewer per round.
 
----
-
 ## Phase 0: Pre-flight
 
 1. **Resolve plugin root once.** Run `bash -c 'cat "$HOME/.zensu/plugin-root"'` via the Bash tool and store its trimmed output (no trailing newline) as `{PLUGIN_ROOT}` for the entire session. Use `{PLUGIN_ROOT}` in ALL subsequent helper invocations: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh …`. If the command exits non-zero or the output is empty, abort with: `FATAL: plugin root unresolvable — run a fresh session to trigger SessionStart hook AND ensure hooks.pulseSession is not set to false in ~/.zensu/config.json`. **Never search the filesystem** for the helper; the SessionStart hook (`hooks/session-start-pulse.sh`) is the single source of truth for the plugin-root path.
@@ -169,8 +165,6 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 3. **Activate the TDD session.** Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-begin`. This sets the per-session chain-state `active` flag, which turns on the PreToolUse phase-gate and the Bash witness for THIS main-thread session (they were silent until now). Without this call, your edits are NOT gated and the witness records nothing — so do it before any test/production edit. The command echoes the session mode: `mode: strict` → run all phases as written; `mode: vanilla` → apply the deltas in ## Vanilla Implementation Mode. The mode is frozen per session into the state file — config flips mid-session change nothing.
 4. **Load the task-tracking tools.** In the main thread `TaskCreate`/`TaskUpdate` are deferred — their schemas are NOT preloaded (the deleted subagent got them for free via its `tools:` frontmatter; a main-thread skill does not). Before the first `TaskCreate`, load them: call `ToolSearch` with query `select:TaskCreate,TaskUpdate`. If your harness already exposes them, this is a harmless no-op — but never let a load hiccup become an excuse to skip tasks: they are the user's live dashboard (Principle 3, Per-Step Task Contract), not optional.
 5. Create the first task with `TaskCreate(subject: "TDD: Analyzing spec and creating plan", description: "Parse the feature spec and produce the TDD plan", activeForm: "Analyzing specification")`, then set it `in_progress` with `TaskUpdate`. **Contract:** `TaskCreate` requires BOTH `subject` and `description` (a one-liner is fine) and accepts an optional `activeForm`; it has NO `status` field (new tasks are always `pending`) and NO `blockedBy` — set status via `TaskUpdate(status: ...)` and dependencies via `TaskUpdate(addBlockedBy: [...])`.
-
----
 
 ## Phase 1: Discover the Project
 
@@ -199,8 +193,6 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 7. Build dependency graph: `depends_on: [step_ids]`. Independent steps (different files, no type deps) can run sequentially without blocking.
 8. Compile context: root path, tech stack, test commands, coverage_cmd, coverage_thresholds, threshold_source, rules, test utilities
 
----
-
 ## Phase 1.5: Spec Precondition Discovery
 
 Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependency the spec names.
@@ -221,8 +213,6 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
 5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
 6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
 7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
-
----
 
 ## Phase 2: Create Plan + Log
 
@@ -280,8 +270,6 @@ MANDATORY — create BOTH files (plan + log are a pair).
 2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
 3. Tell user: `tail -f {log_file}`
 
----
-
 ## Phase 3: Create ALL Tasks
 
 Create tasks for ALL steps BEFORE starting execution — **MANDATORY**. This is the user's live progress dashboard and the one channel they watch in real time. Do NOT enter Phase 4 until every step has its tasks.
@@ -295,8 +283,6 @@ Per integration step — 1 task:
 - `{step_id} [wire]` (activeForm: "Wiring {step_id}")
 
 Create each via `TaskCreate` with `subject` (the `{step_id} [test]` label), a one-line `description`, and the `activeForm` shown above. Set dependencies with `TaskUpdate(addBlockedBy: [...])` per the dependency graph (not on `TaskCreate`). Mark the Phase 0 "Analyzing" task `completed` with `TaskUpdate`.
-
----
 
 ## Phase 4: Execute TDD Cycles
 
@@ -345,8 +331,6 @@ Same logging as Feature cycle.
 ### Integration Steps
 
 Implement directly (wiring, config, migrations). Log: `{step} WIRED`. Mark `[W]`. Execute after dependent TDD steps are `[G]`.
-
----
 
 ## Phase 5: Checkpoint
 
