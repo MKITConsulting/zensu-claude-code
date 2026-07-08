@@ -36,10 +36,15 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "P1 skills/ghost-scan/SKILL.md exists" PASS
 
-if [ "$(head -1 "$SKILL_MD")" = "# /zensu:ghost-scan" ]; then
-  check "P2 SKILL.md first line is exactly '# /zensu:ghost-scan'" PASS
+if grep -qxF '# /zensu:ghost-scan' "$SKILL_MD"; then
+  check "P2 SKILL.md has the namespaced H1 '# /zensu:ghost-scan'" PASS
 else
-  check "P2 SKILL.md first line is '# /zensu:ghost-scan'" FAIL
+  check "P2 SKILL.md has the namespaced H1 '# /zensu:ghost-scan'" FAIL
+fi
+if grep -qE '^name: *ghost-scan *$' "$SKILL_MD"; then
+  check "P2b SKILL.md frontmatter declares 'name: ghost-scan'" PASS
+else
+  check "P2b SKILL.md frontmatter declares 'name: ghost-scan'" FAIL
 fi
 
 # P3 — the detectedTestFiles array is named (the core fix: patterns alone were not enough)

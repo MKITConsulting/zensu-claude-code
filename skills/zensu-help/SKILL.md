@@ -1,3 +1,17 @@
+---
+name: zensu-help
+description: >
+  [Zensu] Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Zensu
+  Claude Code plugin itself work — an in-conversation glossary, architecture explainer, and
+  config reference. Read-only Q&A; it does NOT execute workflows or modify Zensu data. Use
+  when the user asks "what is X?", "how does Y work?", "where is Z configured?", about
+  plugin internals (agents, hooks, FSM, auto-fix loop, the zensu CLI write-gate), about
+  Zensu concepts (features, KEY-N ids, tiers, journeys, classifications), "what changed in
+  version X", "how do I disable hook Y", is unsure which skill (bootstrap vs ghost-scan vs
+  implement) applies, or the slash command /zensu:zensu-help. To actually run a workflow use
+  the corresponding skill instead.
+---
+
 # /zensu:zensu-help
 
 Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Zensu Claude Code plugin itself work. Acts as an in-conversation glossary, architecture explainer, and config reference — does NOT execute workflows.

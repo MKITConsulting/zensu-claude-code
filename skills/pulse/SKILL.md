@@ -1,3 +1,15 @@
+---
+name: pulse
+description: >
+  [Zensu] Developer Journal — privacy-first coding-session tracking that records session
+  boundaries and which Zensu features you touch (file paths and session metadata only,
+  never code content). Run at the start and end of each coding session: pulse start records
+  the session (idempotent per HEAD SHA), pulse end maps the changed files you report to the
+  features they touch and surfaces your development patterns. Use to track a coding session,
+  review what you worked on, understand your dev patterns, or the slash command
+  /zensu:pulse. Requires the Zensu CLI, authentication, and a git repository.
+---
+
 # /zensu:pulse
 
 Your Developer Journal: privacy-first session tracking that helps you understand your development patterns.

@@ -26,11 +26,15 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "S1 skills/zensu-help/SKILL.md exists" PASS
 
-FIRST_LINE="$(head -1 "$SKILL_MD")"
-if [ "$FIRST_LINE" = "# /zensu:zensu-help" ]; then
-  check "S2 SKILL.md first line is exactly '# /zensu:zensu-help'" PASS
+if grep -qxF '# /zensu:zensu-help' "$SKILL_MD"; then
+  check "S2 SKILL.md has the namespaced H1 '# /zensu:zensu-help'" PASS
 else
-  check "S2 SKILL.md first line is '# /zensu:zensu-help' — got: $FIRST_LINE" FAIL
+  check "S2 SKILL.md has the namespaced H1 '# /zensu:zensu-help'" FAIL
+fi
+if grep -qE '^name: *zensu-help *$' "$SKILL_MD"; then
+  check "S2b SKILL.md frontmatter declares 'name: zensu-help'" PASS
+else
+  check "S2b SKILL.md frontmatter declares 'name: zensu-help'" FAIL
 fi
 
 REQUIRED_SECTIONS=(

@@ -1,7 +1,7 @@
 ---
 name: cover
 description: >
-  Author durable, committed tests at the RIGHT level for a change — generic across any
+  [Zensu] Author durable, committed tests at the RIGHT level for a change — generic across any
   stack, framework, and app type. Point it at a diff, a feature, a PR, a path, or a
   described behavior and it probes the repo, decides per behavior whether a unit,
   component, integration/contract, or end-to-end test is the faithful cover (the test

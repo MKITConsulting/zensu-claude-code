@@ -27,11 +27,15 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "V1 skills/self-review/SKILL.md exists" PASS
 
-FIRST_LINE="$(head -1 "$SKILL_MD")"
-if [ "$FIRST_LINE" = "# /zensu:self-review" ]; then
-  check "V2 SKILL.md first line is exactly '# /zensu:self-review'" PASS
+if grep -qxF '# /zensu:self-review' "$SKILL_MD"; then
+  check "V2 SKILL.md has the namespaced H1 '# /zensu:self-review'" PASS
 else
-  check "V2 SKILL.md first line is '# /zensu:self-review' — got: $FIRST_LINE" FAIL
+  check "V2 SKILL.md has the namespaced H1 '# /zensu:self-review'" FAIL
+fi
+if grep -qE '^name: *self-review *$' "$SKILL_MD"; then
+  check "V2b SKILL.md frontmatter declares 'name: self-review'" PASS
+else
+  check "V2b SKILL.md frontmatter declares 'name: self-review'" FAIL
 fi
 
 REQUIRED_SECTIONS=(

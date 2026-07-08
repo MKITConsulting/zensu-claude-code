@@ -1,7 +1,7 @@
 ---
 name: autopilot
 description: >
-  Take a feature from a plain-language idea to a ready, validated GitHub pull
+  [Zensu] Take a feature from a plain-language idea to a ready, validated GitHub pull
   request — autonomously. One interactive planning gate (spec + acceptance
   criteria), then a fully unattended build: implement via the Zensu workflow
   (vanilla `/zensu:tdd` + review chain), open the PR, run `/zensu:pr-team-review`

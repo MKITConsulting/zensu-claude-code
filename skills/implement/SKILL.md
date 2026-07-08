@@ -1,3 +1,16 @@
+---
+name: implement
+description: >
+  [Zensu] Implement a tracked Zensu feature end-to-end. Loads the feature context and security
+  profile, UI mocks, product design system, and org knowledge, then runs disciplined
+  implementation via the /zensu:tdd skill in the main thread (RED-GREEN TDD when armed,
+  PreToolUse phase-gate, guaranteed code-review chain), and afterwards links all artifacts
+  (tests, source, docs) and creates a revision. Use when starting implementation of a
+  planned feature, resuming an in-progress feature, completing a feature with proper
+  artifact linking, or the slash command /zensu:implement. Requires a Zensu feature ID
+  (KEY-N, e.g. ZEN-42, or UUID).
+---
+
 # /zensu:implement
 
 Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then runs disciplined implementation via the **`/zensu:tdd` skill** in the main thread (strict RED-GREEN TDD, PreToolUse phase-gate, guaranteed code-review chain). After TDD completes, links all artifacts and creates a revision.
@@ -99,10 +112,17 @@ implemented, not a restatement of the feature record.
 Then register the doc with `zensu link docs <feature-id>` (updates the feature's docs score):
 - `--doc-type` (required): user_facing | api_reference | tutorial | adr | internal | release_notes | migration_guide | overview
 - `--title` (optional): Document title
+- `--content` (optional): wiki page markdown — authors/updates the linked wiki page in this same call
 - `--file` (optional): Path to the doc file
 - `--external-url` (optional): External URL
 - `--audience` (optional): end_user | developer | admin | internal
 - `--publication-status` (optional): draft | published | archived
+
+**One-call form.** Passing `--content <markdown>` to `zensu link docs` folds authoring +
+linking into a single call: it creates (or updates) the feature-linked wiki page and
+recomputes the score, so the separate `zensu wiki create` in step 4 is not needed. This
+is the form the `/zensu:docs` skill uses; the two-step `wiki create` + `link docs` above
+stays valid when you want explicit control over the page (`--entity-*`, visibility).
 
 Run `zensu link docs` alone (no wiki page) only for docs that already live in the repo
 or at an external URL.
