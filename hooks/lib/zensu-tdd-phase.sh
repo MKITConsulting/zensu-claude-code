@@ -267,7 +267,7 @@ _tdd_write_clear_critical() {
     } catch (_) {}
     s.active = false; s.implComplete = false; s.chainDone = false;
     s.codeReviewDone = false; s.selfReviewFixed = false; s.workflowActive = false;
-    s.workflowTools = []; s.vanilla = false;
+    s.workflowTools = []; s.vanilla = false; s.bypasses = [];
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -431,6 +431,184 @@ tdd_has_red_fail() {
   echo "$val"
 }
 
+# --- Bypass ledger (visible opt-outs) --------------------------------------
+# Gate escapes (ZENSU_*=off) stay free but become visible: each gate records
+# the env-var name it was bypassed through into the per-session state file
+# while the session is active. Dedup per gate; consumers render the list at
+# chain end. Writes are fail-open — a ledger failure never blocks a gate.
+# Ledger hygiene: entries are validated against the closed gate allowlist at
+# write AND read (pre-seeded junk is sanitized before the 32-entry cap so it
+# can never exhaust the ledger) — a crafted value can neither smuggle
+# directive text into the rendered surfaces nor bloat the state file every
+# hook parses. New gates extend ZENSU_BYPASS_GATE_ALLOWLIST in ONE place.
+
+ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS"
+
+_tdd_bypass_shape_ok() {
+  case "${1:-}" in
+    *[[:space:]]*|*$'\n'*|'') return 1 ;;
+  esac
+  case " $ZENSU_BYPASS_GATE_ALLOWLIST " in
+    *" ${1:-} "*) return 0 ;;
+  esac
+  return 1
+}
+
+_tdd_write_bypass_critical() {
+  local state_file="$1"
+  local session_id="$2"
+  local gate="$3"
+
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+
+  STATE_FILE="$state_file" SID="$session_id" GATE="$gate" ALLOWLIST="$ZENSU_BYPASS_GATE_ALLOWLIST" \
+    node -e '
+      const fs = require("fs");
+      const sf = process.env.STATE_FILE;
+      let state = {};
+      try {
+        const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+        if (prev && typeof prev === "object" && !Array.isArray(prev)) state = prev;
+      } catch (_) {}
+      if (!state.session_id) state.session_id = process.env.SID;
+      if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
+      if (!Array.isArray(state.history)) state.history = [];
+      const allow = String(process.env.ALLOWLIST || "").split(" ").filter(Boolean);
+      state.bypasses = (Array.isArray(state.bypasses) ? state.bypasses : [])
+        .filter((x, i, a) => allow.indexOf(x) >= 0 && a.indexOf(x) === i);
+      const gate = String(process.env.GATE || "").trim();
+      if (allow.indexOf(gate) >= 0
+          && state.bypasses.indexOf(gate) < 0
+          && state.bypasses.length < 32) state.bypasses.push(gate);
+      fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
+    ' "$tmp" 2>/dev/null
+
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_add_bypass() {
+  local session_id="${1:-unknown}"
+  local gate="${2:-}"
+  _tdd_bypass_shape_ok "$gate" || return 1
+
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  [ -L "$state_file" ] && return 1
+  [ -L "$(dirname "$state_file")" ] && return 1
+  case ", $(tdd_bypasses "$state_file")," in
+    *", $gate,"*) return 0 ;;
+  esac
+  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  command -v node >/dev/null 2>&1 || return 1
+
+  _tdd_locked_run "$state_file" \
+    _tdd_write_bypass_critical "$state_file" "$session_id" "$gate"
+}
+
+tdd_record_bypass() {
+  local session_id="${1:-}"
+  local gate="${2:-}"
+  [ -z "$session_id" ] && return 0
+  if [ "$(tdd_session_active "$(tdd_state_file "$session_id")")" = "true" ]; then
+    tdd_add_bypass "$session_id" "$gate" 2>/dev/null || true
+  fi
+  return 0
+}
+
+tdd_record_bypass_payload() {
+  local payload="${1:-}"
+  local gate="${2:-}"
+  command -v node >/dev/null 2>&1 || return 0
+  local fields sid tp
+  fields="$(printf '%s' "$payload" | node -e '
+    let s = "";
+    process.stdin.on("data", c => s += c);
+    process.stdin.on("end", () => {
+      try {
+        const j = JSON.parse(s || "{}");
+        const sid = typeof j.session_id === "string" ? j.session_id : "";
+        const tp = typeof j.transcript_path === "string" ? j.transcript_path : "";
+        process.stdout.write(sid + "\n" + tp);
+      } catch (_) { process.stdout.write("\n"); }
+    });
+  ' 2>/dev/null)"
+  sid="${fields%%$'\n'*}"
+  tp="${fields#*$'\n'}"
+  [ "$tp" = "$fields" ] && tp=""
+  [ -n "$sid" ] && tp=""
+  if [ -f "${CLAUDE_PLUGIN_ROOT:-}/hooks/lib/zensu-session.sh" ]; then
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    sid="$(ZENSU_TRANSCRIPT_PATH="$tp" zensu_resolve_session_id "$sid")"
+  fi
+  tdd_record_bypass "$sid" "$gate"
+}
+
+tdd_clear_bypasses() {
+  local session_id="${1:-unknown}"
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  [ -f "$state_file" ] || return 0
+  [ -L "$state_file" ] && return 1
+  [ -L "$(dirname "$state_file")" ] && return 1
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" _tdd_write_bypass_clear_critical "$state_file"
+}
+
+_tdd_write_bypass_clear_critical() {
+  local state_file="$1"
+  [ -f "$state_file" ] || return 0
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+  STATE_FILE="$state_file" node -e '
+    const fs = require("fs");
+    let s = {};
+    try {
+      const prev = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+      if (prev && typeof prev === "object" && !Array.isArray(prev)) s = prev;
+    } catch (_) {}
+    s.bypasses = [];
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+tdd_bypasses() {
+  local state_file="${1:-}"
+  if [ -z "$state_file" ] || [ ! -f "$state_file" ]; then
+    echo ""
+    return 0
+  fi
+  command -v node >/dev/null 2>&1 || { echo ""; return 0; }
+  local val
+  val=$(ALLOWLIST="$ZENSU_BYPASS_GATE_ALLOWLIST" node -e '
+    try {
+      const allow = String(process.env.ALLOWLIST || "").split(" ").filter(Boolean);
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const b = Array.isArray(j.bypasses)
+        ? j.bypasses.filter((x, i, a) => allow.indexOf(x) >= 0 && a.indexOf(x) === i).slice(0, 32)
+        : [];
+      console.log(b.join(", "));
+    } catch (_) { console.log(""); }
+  ' "$state_file" 2>/dev/null)
+  echo "$val"
+}
+
 zensu_pending_review_file() {
   local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
   echo "${dir}/pending-review.json"
@@ -550,6 +728,7 @@ _tdd_write_seed_critical() {
       state.active = true;
       state.implComplete = true;
       state.vanilla = (process.env.VANILLA === "true");
+      state.bypasses = [];
       fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
     ' "$tmp" 2>/dev/null
 
@@ -573,4 +752,4 @@ tdd_seed_deferred_review() {
   _tdd_locked_run "$state_file" _tdd_write_seed_critical "$state_file" "$session_id" "$vanilla"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true

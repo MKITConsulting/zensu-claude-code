@@ -223,6 +223,15 @@ function main() {
   const MAX_TARGETS = 200;
   let evaluated = 0;
 
+  // Bypass-ledger markers: when an inline env prefix (unquoted OR quoted —
+  // envp values are unquote()d below) suppresses this gate for a segment, the
+  // fact is reported to the caller as `__bypass__\t<VAR>` lines — but only
+  // when no deny reason wins. Detection thereby shares the ONE code path that
+  // decides the bypass, instead of a shell-side textual re-parse.
+  const bypassed = [];
+  const bypassMarkers = () =>
+    bypassed.map((v) => "__bypass__\t" + v).join("\n");
+
   // `>|` (noclobber override) and `>&FILE`/`>>&FILE` (redirect-all-to-file) are
   // just `>`/`>>` with the same target; collapse them before lexing so the bare
   // `|`/`&` is not taken as a boundary that severs the redirect from its file.
@@ -264,7 +273,11 @@ function main() {
       curdir = abspath(unquote(rest[ci + 1]));
       continue;
     }
-    if (envp.ZENSU_BASH_WRITE_GATE === "off" || envp.ZENSU_MCP_GATE === "off") continue;
+    if (envp.ZENSU_BASH_WRITE_GATE === "off" || envp.ZENSU_MCP_GATE === "off") {
+      if (envp.ZENSU_BASH_WRITE_GATE === "off" && bypassed.indexOf("ZENSU_BASH_WRITE_GATE") < 0) bypassed.push("ZENSU_BASH_WRITE_GATE");
+      if (envp.ZENSU_MCP_GATE === "off" && bypassed.indexOf("ZENSU_MCP_GATE") < 0) bypassed.push("ZENSU_MCP_GATE");
+      continue;
+    }
 
     const targets = [];
     for (let k = 0; k < rest.length; k++) {
@@ -298,12 +311,12 @@ function main() {
     }
 
     for (let x = 0; x < targets.length; x++) {
-      if (++evaluated > MAX_TARGETS) return "";
+      if (++evaluated > MAX_TARGETS) return bypassMarkers();
       const r = decide(targets[x][0], targets[x][1]);
       if (r) return r;
     }
   }
-  return "";
+  return bypassMarkers();
 }
 
 if (require.main === module) {

@@ -69,7 +69,6 @@ function main() {
   } else if (tool === "Bash") {
     const cmd = typeof ti.command === "string" ? ti.command : "";
     if (!cmd) return "";
-    if (/(^|\s)ZENSU_SECRET_SCAN=off(\s|$)/.test(stripHeredocs(cmd))) return "";
     let channels = "";
     try {
       channels = detectChannels(cmd);
@@ -77,7 +76,19 @@ function main() {
       process.stderr.write("zensu secret-scan: channel detection failed, failing open\n");
       return "";
     }
-    if (channels) candidates.push(cmd);
+    if (!channels) return "";
+    const escaped = stripHeredocs(cmd).split(/\|\||&&|[;|\n&]/).some((seg) => {
+      const toks = seg.trim().split(/\s+/).filter(Boolean);
+      for (const t of toks) {
+        if (!/^[A-Za-z_][A-Za-z0-9_]*=/.test(t)) break;
+        const eq = t.indexOf("=");
+        if (t.slice(0, eq) === "ZENSU_SECRET_SCAN"
+            && t.slice(eq + 1).replace(/^["']+|["']+$/g, "") === "off") return true;
+      }
+      return false;
+    });
+    if (escaped) return "__bypass__:ZENSU_SECRET_SCAN";
+    candidates.push(cmd);
   } else {
     return "";
   }

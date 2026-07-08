@@ -36,7 +36,6 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled chainEnforcer || exit 0
 
-if [ "${ZENSU_CHAIN:-}" = "off" ]; then exit 0; fi
 command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
@@ -63,6 +62,13 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
+
+# Bypass ledger: the escape stays free, but while a TDD session is active the
+# opt-out is recorded to chain state so the chain-end summary can surface it.
+if [ "${ZENSU_CHAIN:-}" = "off" ]; then
+  tdd_record_bypass "$SESSION_ID" ZENSU_CHAIN 2>/dev/null || true
+  exit 0
+fi
 
 # Not active: either stop normally, or adopt a pending-review marker as a
 # review-only chain for THIS interactive session (deferred review fallback).

@@ -94,10 +94,10 @@ if grep -qiF 'FAIL OPEN' "$HOOK" && grep -qF 'failing open' "$HOOK"; then
 else
   check "P4a fail-open behavior documented + implemented in the hook" FAIL
 fi
-if grep -qF 'ZENSU_SECRET_SCAN=off(\s|$)' "$DECIDE" && grep -qF 'stripHeredocs(cmd)' "$DECIDE"; then
-  check "P4b inline escape regex checked against heredoc-stripped text (code, not prose)" PASS
+if grep -qF 'stripHeredocs(cmd).split' "$DECIDE" && grep -qF '"ZENSU_SECRET_SCAN"' "$DECIDE" && grep -qF '=== "off"' "$DECIDE"; then
+  check "P4b inline escape decided on heredoc-stripped segment-leading env tokens (code, not prose)" PASS
 else
-  check "P4b inline escape regex checked against heredoc-stripped text (code, not prose)" FAIL
+  check "P4b inline escape decided on heredoc-stripped segment-leading env tokens (code, not prose)" FAIL
 fi
 
 # P5 — shared parser exposes detectChannels for the secret path; deny caller pins the mode
@@ -213,7 +213,7 @@ printf '{"hooks":{"secretScan":false}}' > "$TMPD/config-off.json"
 
 run_hook() {
   local payload="$1"; shift
-  printf '%s' "$payload" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= ${1+"$@"} bash "$HOOK" 2>/dev/null
+  printf '%s' "$payload" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= TDD_STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" ${1+"$@"} bash "$HOOK" 2>/dev/null
 }
 
 DENY='permissionDecision":"deny'

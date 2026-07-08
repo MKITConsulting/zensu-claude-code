@@ -76,7 +76,10 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
     }
     if (base !== "zensu") continue;                                                // command basename must be zensu
     const rest = toks.slice(i + 1);
-    if (envp.ZENSU_MCP_GATE === "off") continue;                                   // explicit per-command bypass (deliberate one-off)
+    if (envp.ZENSU_MCP_GATE === "off") {                                           // explicit per-command bypass (deliberate one-off) — reported as a ledger marker
+      if (out.indexOf("__bypass__\tZENSU_MCP_GATE") < 0) out.push("__bypass__\tZENSU_MCP_GATE");
+      continue;
+    }
     if (rest.indexOf("--help") !== -1 || rest.indexOf("-h") !== -1) continue;      // --help/-h is a read, never a mutation
     let apiUrl = envp.ZENSU_API_URL || "";
     const ai = rest.indexOf("--api-url");
@@ -104,10 +107,6 @@ INVOCATIONS="$(PAYLOAD="$INPUT" ZAPI="${ZENSU_API_URL:-}" node -e '
   process.stdout.write(out.join("\n"));
 ' 2>/dev/null)"
 
-# No zensu CLI invocation (or unparseable) → not our concern, allow (fail-open,
-# mirroring the MCP gate's empty/non-JSON behaviour).
-[ -z "$INVOCATIONS" ] && exit 0
-
 field() {
   PAYLOAD="$INPUT" F="$1" node -e '
     try {
@@ -118,22 +117,56 @@ field() {
   ' 2>/dev/null
 }
 
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh"
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
+# No zensu CLI invocation at all (or unparseable) → not our concern, allow
+# (fail-open, mirroring the MCP gate's empty/non-JSON behaviour). Inline
+# bypasses still parse as __bypass__ marker lines, so a bypassed zensu segment
+# never lands in this hot-path exit.
+[ -z "$INVOCATIONS" ] && exit 0
 
-# Global escapes (apply regardless of which tool) — checked before per-tool work.
-[ "${ZENSU_MCP_GATE:-}" = "off" ] && exit 0
-
+# Config-disabled gate has no decision point — nothing to bypass, nothing to
+# ledger (kept ahead of the marker/escape handling so all Bash gates share the
+# order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled mcpGate || exit 0
 
+# zensu-plm agent is exempt — the gate has no decision point for it, so its
+# escapes are meaningless and never ledgered (checked BEFORE any recording).
 AGENT_TYPE="$(field agent_type)"
 case "$AGENT_TYPE" in
   *zensu-plm*) exit 0 ;;
 esac
 
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+# Bypass ledger: escapes stay free, but while a TDD session is active the
+# opt-out is recorded to chain state (fail-open, gate name only). Inline
+# escapes are reported by the embedded parser itself (__bypass__ marker lines
+# in INVOCATIONS) — the one code path that decides the bypass — so quoted
+# spellings, mixed commands, and mere textual mentions all behave correctly.
+# Recording is DEFERRED to the allow outcomes below: a command that ends up
+# denied never executes, so it must not mint a ledger entry (deny wins over
+# markers, same rule the source-write parser enforces).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+
+BYPASS_GATES="$(printf '%s\n' "$INVOCATIONS" | awk -F'\t' '$1=="__bypass__"{print $2}')"
+INVOCATIONS="$(printf '%s\n' "$INVOCATIONS" | grep -v '^__bypass__')"
+record_bypass_markers() {
+  for gate in $BYPASS_GATES; do
+    case "$gate" in
+      ZENSU_MCP_GATE) tdd_record_bypass_payload "$INPUT" "$gate" 2>/dev/null || true ;;
+    esac
+  done
+}
+
+# Only markers, no real invocation left → allow.
+[ -z "$INVOCATIONS" ] && { record_bypass_markers; exit 0; }
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-mcp-tools.sh"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
+
+# Global env escape (applies regardless of which tool) — an allow outcome, so
+# record env + any markers here.
+[ "${ZENSU_MCP_GATE:-}" = "off" ] && { tdd_record_bypass_payload "$INPUT" ZENSU_MCP_GATE 2>/dev/null || true; record_bypass_markers; exit 0; }
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SID_PRIMARY="$(zensu_resolve_session_id "$(field session_id)")"
 SID_FALLBACK="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
 
@@ -159,7 +192,7 @@ done <<EOF
 $INVOCATIONS
 EOF
 
-[ -z "$DENY_TOOL" ] && exit 0
+[ -z "$DENY_TOOL" ] && { record_bypass_markers; exit 0; }
 
 REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct main-thread \`zensu\` mutation bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) that the skills and the zensu-plm agent enforce. Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — or delegate the whole task to the zensu-plm agent, instead of running the zensu CLI mutation directly. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
 

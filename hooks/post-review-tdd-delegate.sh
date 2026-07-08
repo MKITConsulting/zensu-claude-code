@@ -127,6 +127,10 @@ else
   fi
 fi
 
+BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)"
+[ -z "$BYPASSES" ] && BYPASSES="none"
+BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): in the ## Open section include the literal line: Gates bypassed during this session: '"$BYPASSES"
+
 COMBINED_SUMMARY_DIRECTIVE=""
 if zensu_combined_summary_enabled; then
   COMBINED_SUMMARY_DIRECTIVE=$'\n\nAfter your status line, produce a CHAIN-END SUMMARY in narrative form with these sections IN THIS ORDER (pull data from your own main-thread TDD execution and the prior zensu:code-reviewer Agent results in your context, do NOT re-spawn agents). The TL;DR comes LAST:\n\n## Problem\nIn plain words: the feature, bug, or need this session addressed — why the work happened.\n\n## What I built\nNumbered deliverables. For each: what it does in plain words, its status (done / merged / built-tested), and a PR link if one exists. Carry the audit facts here: feature title, files modified, tests created, build status (passed / skipped / failed), mtime audit verdict, coverage status. Cite the plan + log file paths. When the session plan carries a ## Requirements table, also give per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).\n\n## How I built it\nThe method and the review trail. State the TDD discipline followed, then the final zensu:code-reviewer verdict (PASS / PASS with suggestions / max-rounds reached) with findings count by severity and files reviewed. Then the auto-fix history: list EVERY review round 1..N — including rounds that fixed nothing. For each round give the round number and either the findings fixed in-thread (what changed, what remains), OR — for a verification round with no findings — mark it explicitly as PASS — 0 findings, nothing to fix. Always include the final clean verification round so the reader sees the chain converged with every finding addressed. At least one review round always ran.\n\n## Open\nWhat is left: any deferred suggestions (the buffered ### Suggestions block) or max-rounds findings requiring manual fix, plus the next step. If nothing is open, say so in one line.\n\n## TL;DR\nExactly ONE sentence, and it MUST be the last section: what shipped and the test verdict.'
@@ -143,7 +147,7 @@ if [ "$SELF_REVIEW_ON" = "1" ]; then
   TAIL_DIRECTIVE=""
 else
   CLOSE_PASS="close the review chain by running 'bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' (PLUGIN_ROOT = contents of ~/.zensu/plugin-root, the value you resolved in Phase 0), then stop."
-  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}"
+  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
 fi
 
 if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
@@ -156,7 +160,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry the remaining reviewer findings forward for it under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
   else
     bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" >/dev/null 2>&1 || true
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}"
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
   fi
   node -e '
     const msg = process.argv[1];

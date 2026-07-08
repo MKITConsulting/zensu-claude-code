@@ -126,7 +126,11 @@ changed (if any), and any advisory findings buffered (not fixed). State whether 
 
 ## Open
 What is left: any deferred suggestions or max-rounds findings requiring manual fix,
-plus the next step. If nothing is open, say so in one line.
+plus the next step. If nothing is open, say so in one line. Close the section with
+the bypass-ledger audit line: run
+`bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --bypass-list` and render its output as
+`Gates bypassed during this session: <output>` (the verb echoes `none` when the
+ledger is empty).
 
 ## TL;DR
 Exactly ONE sentence, and it is the last section: what shipped and the test verdict.

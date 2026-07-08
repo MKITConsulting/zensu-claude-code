@@ -3,7 +3,19 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 
-if [ "${ZENSU_TEST_WITNESS:-}" = "off" ]; then exit 0; fi
+# Bypass ledger: the escape stays free, but while a TDD session is active the
+# opt-out is recorded to chain state (fail-open, gate name only; per-gate dedup
+# makes this once per session). The state-dir pre-filter keeps the off-path
+# free of node spawns when no session was ever armed.
+if [ "${ZENSU_TEST_WITNESS:-}" = "off" ]; then
+  _state_dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  ls "$_state_dir"/tdd-phase-*.json >/dev/null 2>&1 || exit 0
+  command -v node >/dev/null 2>&1 || exit 0
+  INPUT="$(cat 2>/dev/null || true)"
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+  tdd_record_bypass_payload "$INPUT" ZENSU_TEST_WITNESS 2>/dev/null || true
+  exit 0
+fi
 
 if ! command -v node >/dev/null 2>&1; then exit 0; fi
 

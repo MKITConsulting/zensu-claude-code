@@ -136,7 +136,16 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    against `--base` (English title + body). The body carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
-   step 6).
+   step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
+   from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
+   each fix loop), run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --bypass-list`
+   (`{PLUGIN_ROOT}` = contents of `~/.zensu/plugin-root`) and union the non-`none` entries —
+   each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
+   Persist the running union durably after every chain as a `Gates bypassed (build union):`
+   line in the autopilot plan artifact — the PR body is rendered FROM that line, never from
+   conversation memory, so a compaction or session restart between chains cannot
+   under-report. Render `none` when the union is empty; update the line whenever step 5/6
+   pushes.
 4. **Team review — ONCE** — run `/zensu:pr-team-review` on the PR. This is the single deep
    multi-persona pass. It runs **exactly once** and does **not** re-run in the loop.
 5. **Fix the findings** — run `/zensu:pr-fix-findings` and loop it until every review
@@ -163,7 +172,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
 Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
 stable `AC-###` IDs — one evidence entry per active ID; deprecated rows stay listed with
-status `deprecated`, no evidence. Then:
+status `deprecated`, no evidence — and the `Gates bypassed during build:` audit line
+(the step-3 union, `none` when clean). Then:
 - **Do NOT merge, push a release, or deploy.** The final merge is the human's.
 - Report: the PR link, the per-AC table, what looped and why, and anything decided
   autonomously that the user may want to revisit.

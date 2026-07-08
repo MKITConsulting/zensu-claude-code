@@ -28,10 +28,6 @@ case "$TOOL_NAME" in
   *) exit 0 ;;
 esac
 
-if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
-  exit 0
-fi
-
 SESSION_ID="$(parse_field session_id)"
 TRANSCRIPT_PATH=""
 [ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(parse_field transcript_path)"
@@ -42,6 +38,13 @@ FILE_PATH="$(parse_field tool_input.file_path)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
 
 STATE_FILE=$(tdd_state_file "$SESSION_ID")
+
+# Bypass ledger: the escape stays free, but while a TDD session is active the
+# opt-out is recorded to chain state so the chain-end summary can surface it.
+if [ "${ZENSU_TDD_GATE:-}" = "off" ]; then
+  tdd_record_bypass "$SESSION_ID" ZENSU_TDD_GATE 2>/dev/null || true
+  exit 0
+fi
 
 # Activation: the gate enforces only while a main-thread TDD session is active
 # for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). When no
