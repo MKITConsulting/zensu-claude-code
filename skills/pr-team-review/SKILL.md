@@ -218,7 +218,9 @@ Review by N-agent team (...).
 
 The **sole exception** is the `### Test Coverage` status table above: four short all-numeric columns survive the squeeze because every cell is a small integer. Nothing else — no findings table, no file-path table. Inside inline comments the exception does **not** apply: no tables at all, code fences / bullet lists / bold prefixes only.
 
-Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 first. See `rules/github-publish.md` for the `gh api` call, `line`/`side` rules per file `changeType` (ADDED/MODIFIED/RENAMED), and idempotency.
+Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 first. See `rules/github-publish.md` for the `gh api` call, `line`/`side` rules per file `changeType` (ADDED/MODIFIED/RENAMED/REMOVED), the mandatory anchor validation, and idempotency.
+
+Validate every inline anchor per `rules/github-publish.md` § Pre-Publish Anchor Validation (`hooks/lib/valid-diff-lines.js`: `valid` keeps the anchor, `remap` moves it with a body note, `none` folds the finding into the overall body) — only validated anchors enter `comments[]`.
 
 Before posting, show the user the body preview + inline count.
 
@@ -226,7 +228,7 @@ Submit:
 
 ```bash
 gh api -X POST repos/<owner>/<repo>/pulls/<n>/reviews \
-  --input $WORKDIR/_synthesis.json
+  --input "$WORKDIR/_synthesis.json"
 ```
 
 Verify:
@@ -259,7 +261,7 @@ Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" b
 
 - `rules/reviewer-personas.md` — 25-persona pool (incl. the always-on holistic core `coverage-audit` / `bug-hunter` / `maintainability` / `adversarial`), trigger signals, prompt templates, JSON schema
 - `rules/workflow.md` — phase-by-phase pitfalls + heuristics
-- `rules/github-publish.md` — `gh api` reviews schema, side/line rules, fallbacks
+- `rules/github-publish.md` — `gh api` reviews schema, side/line rules, pre-publish anchor validation, fallbacks
 
 ## Critical Conventions
 

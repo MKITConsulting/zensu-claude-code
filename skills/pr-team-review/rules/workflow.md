@@ -107,7 +107,7 @@ The rule is **convergence != correctness**: high convergence raises a finding's 
 
 ```bash
 # Inspect actual keys
-for f in $WORKDIR/*.json; do echo "=== $f ==="; jq 'keys' "$f" 2>&1 | head -5; done
+for f in "$WORKDIR"/*.json; do echo "=== $f ==="; jq 'keys' "$f" 2>&1 | head -5; done
 ```
 
 Common variations:
@@ -156,6 +156,15 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 **No tables in inline comments either.** Inline comments suffer the same column compression. Use code fences, bullet lists, bold prefixes only. The coverage-table carve-out is **body-only** — inline comments never contain a table.
 
+**Anchor validation (mandatory, before the preview):** validate every inline
+comment's `(path, line, side)` against the PR diff with
+`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"`
+per `rules/github-publish.md` (Pre-Publish Anchor Validation — the quoting
+rules there are load-bearing): `valid` → keep, `remap <n>` → move the anchor
+and append the remap note to the comment body, `none` (or no output) → fold
+the finding into the overall body. The payload may only carry validated
+anchors — this eliminates the 422 line-out-of-diff round-trip.
+
 **Pre-publish preview:** ALWAYS show the user the overall body + inline count before posting. They may want edits. After approval, post — don't wait for explicit "go" if the user already approved the skill execution.
 
 ## Phase E — Cleanup
@@ -167,7 +176,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 ## Failure Modes
 
-- **`gh api` POST 422 line out-of-diff**: drop the offending comment, retry POST with reduced `comments[]` array.
+- **`gh api` POST 422 line out-of-diff**: should not occur — anchors are pre-validated in Phase D. If it still fires: re-fetch the diff, re-validate every anchor, retry; last resort drop the offending comment (fold it into the body) and retry with the reduced `comments[]` array.
 - **`gh api` POST 401**: tell user to `gh auth refresh`.
 - **Reviewer agent dies mid-run**: TaskList shows in_progress; respawn that single agent (same name, same prompt).
 - **All reviewers report APPROVE**: still post the review with `event=COMMENT` summarising strengths — user values the audit trail.
