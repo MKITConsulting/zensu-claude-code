@@ -93,3 +93,7 @@ If you found nothing, output:
 ```
 
 Do NOT build, do NOT run tests, do NOT render an overall verdict or a `# Code Review Report` — the main thread merges all five aspects and the thin `zensu:code-reviewer` spawn produces the consolidated report and verdict.
+
+## Custom personas
+
+Repo-local custom personas (`.claude/agents/zensu-review-*.md`) run in the SAME fan-out batch under this exact contract — read-only, single perspective, no build/test, no overall verdict. Their normative output shape and the activation/trust contract live in the README section "Custom review personas": `## Aspect: <persona-name>` header, findings prefixed with the persona's uppercased `<NAME>-<n>` ID.
