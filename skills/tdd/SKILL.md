@@ -220,52 +220,7 @@ MANDATORY — create BOTH files (plan + log are a pair).
 
 > **Gate note (read before writing):** Phase 0's `--tdd-begin` armed the phase-gate. Paths under `.zensu/` (the plan + log artifacts) are exempt from the gate, so write the **plan** with the **Write tool** — its full body must NOT go through Bash, or the witness log would record the entire plan in one `cmd=` entry. The **log** is an append-only trace: write and grow it with **Bash** (`printf >> {log_file}`), never the Write tool (which would overwrite it). Never use Bash to write *production code* to bypass the gate — production source goes through Edit/Write under a declared phase in Phase 4.
 
-1. Create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate), with this content:
-
-```markdown
-# TDD Plan: {Feature Title}
-
-## Context
-{Spec verbatim}
-**Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
-
-## Requirements
-| ID | Requirement | Source |
-|----|-------------|--------|
-| AC-001 | {acceptance criterion — machine-checkable} | spec |
-| FR-001 | {functional requirement} | spec |
-
-## Preconditions
-| Name | Type | Verification | Status | Decision |
-|------|------|--------------|--------|----------|
-| {name} | CLI/secret/endpoint/fixture | `{verify_cmd}` | present/missing | install / substitute=`{user-named}` / skip |
-
-## Cross-Layer Value Flow Pairings
-(Per Principle 2 — Cross-Layer Value Flow Pairing. Omit table body if no pairings; keep the heading so Phase 6 audit can detect absence vs zero rows.)
-
-| Feature Step | New Value | Unchanged Layer (file / module) | Characterization Step | Seam Asserted |
-|--------------|-----------|---------------------------------|------------------------|----------------|
-| {step_id_A} | {field}=`{example}` | {path} | {step_id_B} | DB row / response body / persisted file / returned struct |
-
-## Status Legend
-| [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored | [!] Blocked | [W] Wired |
-
-## Steps
-| Step | Type | Description | Test File | Depends On | Status | Attempts | Covers |
-|------|------|-------------|-----------|------------|--------|----------|--------|
-
-### Step {id} — {Description}
-- **Covers**: {AC-###, FR-### — the requirement IDs this step implements}
-- **RED**: Test `{name}` — {what}, {why fails}
-- **GREEN**: {what to implement}
-
-**Checkpoint**: {test_cmd} + {lint_cmd} pass
-
-## Final Verification
-- All test suites pass
-- Coverage report generated for changed files (threshold: {threshold})
-```
-
+1. **Resolve the plan template** (repo override wins): use `$(git rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md` when that file exists, else the plugin default `{PLUGIN_ROOT}/templates/tdd-plan.md`. Read the resolved template, fill every `{curly}` placeholder from the Phase 1 context, and create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate). A repo override replaces the default wholesale but MUST keep the mandatory sections (`## Requirements` with ID/Covers, `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification`) — the Phase 5/6 audits and `/zensu:converge` anchor on them.
 1b. **Requirement-ID allocation rule (stable IDs, never recycled).** The `## Requirements` table is MANDATORY: assign `AC-###` to each acceptance criterion and `FR-###` to each functional requirement parsed from the spec. **If the incoming spec already carries AC-###/FR-### IDs (e.g. from `/zensu:autopilot`), adopt them verbatim — never re-allocate; allocate new IDs monotonically above the highest ID seen.** IDs are allocated monotonically and are NEVER reused — a dropped requirement keeps its ID and is marked deprecated in the Requirement column; never delete a row or renumber. Every Steps-table row names the IDs it implements in its `Covers` cell (the step detail repeats them on a `- **Covers**:` line), so spec → plan → step → test stays traceable end to end. Phase 6 step 6c cross-checks this mapping at warning level.
 2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
 3. Tell user: `tail -f {log_file}`

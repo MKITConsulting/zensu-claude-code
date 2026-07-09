@@ -89,7 +89,9 @@ Phase 0. A wrong guess surfaces here, not mid-loop. Silent to the user if it wor
 fails, that becomes one of the plain questions in 0.D. Pick the validation **driver** from
 the detected app type — see `rules/drivers.md`.
 
-**0.C — Plan.** Turn the feature into:
+**0.C — Plan.** Turn the feature into (shape it on the resolved spec template:
+`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md` when that file
+exists, else `{PLUGIN_ROOT}/templates/autopilot-spec.md`):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
 2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
@@ -133,7 +135,9 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    PR body's per-AC table. Flow-back edit proposals are reported only — never
    auto-applied in this non-interactive run.
 3. **Open the PR** — commit (Conventional Commits, no watermark), push, open the PR
-   against `--base` (English title + body). The body carries a per-AC checklist table keyed
+   against `--base` (English title + body). Render the body from the resolved template
+   (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
+   exists, else `{PLUGIN_ROOT}/templates/autopilot-pr-body.md`): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
    step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`

@@ -2,7 +2,7 @@
 set -u
 
 # Structure test for stable requirement IDs + traceable spec artifact (P1-1).
-# Pins: the tdd SKILL plan template carries a ## Requirements table with stable
+# Pins: the plugin plan template (templates/tdd-plan.md) carries a ## Requirements table with stable
 # AC-###/FR-### IDs, the Steps table + step detail carry a Covers mapping, the
 # never-recycle allocation rule is stated, and Phase 6 runs a warning-level
 # requirements coverage cross-check; the autopilot SKILL assigns stable AC-###
@@ -15,6 +15,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
+TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
@@ -28,7 +29,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$TDD_MD" "$AUTOPILOT_MD" "$SELF_REVIEW_MD" "$COVER_MD" "$DELEGATE_SH" "$WORKFLOW_DOC"; do
+for f in "$TDD_MD" "$TPL_PLAN" "$AUTOPILOT_MD" "$SELF_REVIEW_MD" "$COVER_MD" "$DELEGATE_SH" "$WORKFLOW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -36,12 +37,12 @@ for f in "$TDD_MD" "$AUTOPILOT_MD" "$SELF_REVIEW_MD" "$COVER_MD" "$DELEGATE_SH" 
     exit 1
   fi
 done
-check "P0 all six target files exist" PASS
+check "P0 all target files exist" PASS
 
-# P1 — tdd SKILL plan template: Requirements table with stable IDs
+# P1 — plugin plan template (templates/tdd-plan.md): Requirements table with stable IDs
 # P1a uses exact-line match: backticked prose mentions of `## Requirements`
 # elsewhere in the skill must not satisfy the heading pin.
-if grep -qxF "## Requirements" "$TDD_MD"; then
+if grep -qxF "## Requirements" "$TPL_PLAN"; then
   check "P1a plan template has a ## Requirements section heading" PASS
 else
   check "P1a plan template has a ## Requirements section heading" FAIL
@@ -53,20 +54,20 @@ PINS_TDD=(
 )
 for entry in "${PINS_TDD[@]}"; do
   label="${entry%%|*}"; needle="${entry#*|}"
-  if grep -qF "$needle" "$TDD_MD"; then
+  if grep -qF "$needle" "$TPL_PLAN"; then
     check "$label" PASS
   else
     check "$label" FAIL
   fi
 done
 
-# P2 — tdd SKILL: per-step Covers traceability (Steps table column + detail line)
-if grep -qF "| Step | Type | Description | Test File | Depends On | Status | Attempts | Covers |" "$TDD_MD"; then
+# P2 — plugin plan template: per-step Covers traceability (Steps table column + detail line)
+if grep -qF "| Step | Type | Description | Test File | Depends On | Status | Attempts | Covers |" "$TPL_PLAN"; then
   check "P2a Steps table carries a Covers column" PASS
 else
   check "P2a Steps table carries a Covers column" FAIL
 fi
-if grep -qF -- "- **Covers**: {AC-###" "$TDD_MD"; then
+if grep -qF -- "- **Covers**: {AC-###" "$TPL_PLAN"; then
   check "P2b step detail carries a Covers line" PASS
 else
   check "P2b step detail carries a Covers line" FAIL
