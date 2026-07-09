@@ -179,11 +179,15 @@ printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claud
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
 case "$OUT" in *'Summary:'*'no blockers'*) check "P1s summary is warn-only (no blockers) when only ⚠️ rows exist" PASS ;; *) check "P1s summary warn-only (got: $OUT)" FAIL ;; esac
 
-# --- state dir not writable (skip under root, which ignores mode bits) ------
-if [ "$(id -u 2>/dev/null)" = "0" ]; then
-  check "P1t state-not-writable ❌ (skipped: running as root)" PASS
+# --- state dir not writable -------------------------------------------------
+# Probe whether chmod actually made the dir read-only; filesystems that ignore
+# Unix mode bits (root, Windows git-bash, some network mounts) cannot simulate
+# this branch, so skip the assertion there instead of failing spuriously.
+mkdir -p "$SBOX/ro-st"; : > "$SBOX/ro-st/tdd-phase-z.json"; chmod 0500 "$SBOX/ro-st" 2>/dev/null
+if ( : > "$SBOX/ro-st/.wtest" ) 2>/dev/null; then
+  rm -f "$SBOX/ro-st/.wtest" 2>/dev/null; chmod 0700 "$SBOX/ro-st" 2>/dev/null
+  check "P1t state-not-writable ❌ (skipped: filesystem ignores mode bits)" PASS
 else
-  mkdir -p "$SBOX/ro-st"; : > "$SBOX/ro-st/tdd-phase-z.json"; chmod 0500 "$SBOX/ro-st"
   OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/ro-st")"; RC=$?
   chmod 0700 "$SBOX/ro-st" 2>/dev/null
   [ "$RC" -eq 0 ] && case "$OUT" in *'is not writable'*) check "P1t state-not-writable ❌ (exit 0)" PASS ;; *) check "P1t state-not-writable ❌ (got: $OUT)" FAIL ;; esac || check "P1t state-not-writable (rc=$RC)" FAIL
