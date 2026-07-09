@@ -196,6 +196,7 @@ case "${1:-}" in
         [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
         tdd_clear_bypasses "$session_val" 2>/dev/null || \
           echo "zensu-log --tdd-begin: bypass-ledger reset failed — prior entries may persist" >&2
+        tdd_clear_review_pass "$session_val" 2>/dev/null || true
         rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
         rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
         if [ -L "$rounds_counter_file" ]; then
@@ -208,14 +209,22 @@ case "${1:-}" in
         exit "$tdd_begin_rc"
         ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
-      --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
+      --chain-done)
+        tdd_set_flag "$session_val" chainDone true
+        chain_done_rc=$?
+        tdd_write_review_pass "$session_val" 2>&1 >/dev/null | head -2 >&2 || true
+        exit "$chain_done_rc"
+        ;;
       --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
       --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
       --workflow-begin)
         tdd_workflow_begin "$session_val" "$tools_val"
         ;;
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
-      --tdd-reset)    tdd_clear_session "$session_val" ;;
+      --tdd-reset)
+        tdd_clear_review_pass "$session_val" 2>/dev/null || true
+        tdd_clear_session "$session_val"
+        ;;
     esac
     exit $?
     ;;

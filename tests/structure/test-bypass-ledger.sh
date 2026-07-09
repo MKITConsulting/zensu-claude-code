@@ -9,7 +9,7 @@ set -u
 # active-scoped, dedup, `none` when empty, --tdd-begin reset); parser-owned
 # inline-bypass markers (__bypass__ lines from bash-source-write-parse.js and
 # the zensu-gate embedded parser, __bypass__: verdict from
-# secret-scan-decide.js); the recording call sites in all six hooks;
+# secret-scan-decide.js); the recording call sites in all seven hooks;
 # the rendering surfaces (delegate directive incl. unconditional `none`,
 # self-review template, autopilot PR-body line, README docs); and functional
 # end-to-end recording through the REAL hooks for every gate in a sandboxed
@@ -113,7 +113,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN post-bash-witness.sh:ZENSU_TEST_WITNESS"
+SITES="pre-bash-pr-gate.sh:ZENSU_PR_GATE pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN post-bash-witness.sh:ZENSU_TEST_WITNESS"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"
@@ -123,7 +123,7 @@ for entry in $SITES; do
     check "P3 $hook_file records $gate_name via the shared recorder" FAIL
   fi
 done
-for hook_file in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh post-bash-witness.sh; do
+for hook_file in pre-bash-pr-gate.sh pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh post-bash-witness.sh; do
   hf="$PLUGIN_DIR/hooks/$hook_file"
   if [ -f "$hf" ] && grep -qE 'tdd_record_bypass(_payload)? .*2>/dev/null \|\| true' "$hf"; then
     check "P3 $hook_file records fail-open" PASS
