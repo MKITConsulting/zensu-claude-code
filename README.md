@@ -345,6 +345,17 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:self-review` | Terminal self-reflection stage of the review chain. After `zensu:code-reviewer` converges, re-reads this session's own changes across 7 dimensions, takes at most one fix round under the phase-gate (never re-running the reviewer), then owns the chain terminus (`--chain-done`) and renders the final report with a `## Self-Review Summary`. Hard-enforced via `codeReviewDone`/`selfReviewFixed`; gated by `hooks.selfReview`. |
 | `/zensu:zensu-help` | Q&A skill — explains Zensu PLM concepts and plugin internals (agents, hooks, FSM, config flags). Read-only; routes workflow requests to the appropriate action skill. |
 
+### Diagnostics — `/zensu:doctor`
+
+A read-only health check for the install, for when something is not firing and you want to see why. `/zensu:doctor` runs `hooks/lib/zensu-doctor.sh` and prints one four-block ✅/⚠️/❌ table:
+
+- **CLI & tooling** — zensu CLI present + authenticated, node version, `gh` present + authenticated, Playwright availability (the `/zensu:autopilot` browser driver).
+- **Plugin integrity** — every `hooks.json` command resolves to a script on disk (and every hook script is referenced), and `plugin.json` ↔ `marketplace.json` versions agree.
+- **Config** — the effective config files are valid JSON and free of the **quoted-boolean trap**: a value written as the string `"true"`/`"false"` is silently ignored by the strict `=== true` checks, so the feature stays at its default until you drop the quotes. Doctor names each offending key.
+- **Session state** — the state dir is writable, and leftover per-session markers or an expired `pending-review.json` are counted.
+
+The helper never writes and always exits `0` — a red ❌ is a finding in the report, not a failed command. The only mutation the skill can make is a leftover-marker cleanup you explicitly confirm (never the current session's own markers, current worktree only). It changes nothing else — use `/zensu:setup` to edit config and `/zensu:reset-review-limit` to reset the auto-fix counter.
+
 ### Hooks (15)
 
 | Hook Script | Event | Config Flag | Description |
