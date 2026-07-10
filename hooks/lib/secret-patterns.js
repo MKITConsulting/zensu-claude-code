@@ -35,6 +35,7 @@ const ENTROPY_ASSIGN =
   /\b[A-Za-z0-9_-]*(?:key|secret|token|password|passwd|credential)[A-Za-z0-9_-]*\s*[:=]\s*(?:['"]([^'"\s]{16,})['"]|([A-Za-z0-9+/_=-]{16,})(?=\s|$))/i;
 const ENTROPY_THRESHOLD = 3.5;
 const MAX_LINE_LENGTH = 2048;
+const WINDOW_OVERLAP = 256;
 
 const PLACEHOLDER =
   /EXAMPLE|PLACEHOLDER|CHANGE_?ME|YOUR_|XXXX|\.\.\.|<[^>]*>|\{\{|\$\{/i;
@@ -64,23 +65,38 @@ function scan(text) {
   if (typeof text !== "string" || text.length === 0) return { matches };
   const lines = text.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    let line = lines[i];
-    if (line.indexOf(ALLOW_MARKER) !== -1) continue;
-    if (line.length > MAX_LINE_LENGTH) line = line.slice(0, MAX_LINE_LENGTH);
-    for (const { rule, re } of RULES) {
-      const g = new RegExp(re.source, re.flags.indexOf("g") === -1 ? re.flags + "g" : re.flags);
-      for (const m of line.matchAll(g)) {
-        if (!PLACEHOLDER.test(m[0])) {
-          matches.push({ rule, line: i + 1 });
-          break;
-        }
+    const raw = lines[i];
+    if (raw.indexOf(ALLOW_MARKER) !== -1) continue;
+    const seen = Object.create(null);
+    const windows = [];
+    if (raw.length <= MAX_LINE_LENGTH) {
+      windows.push(raw);
+    } else {
+      for (let off = 0; off < raw.length; off += MAX_LINE_LENGTH - WINDOW_OVERLAP) {
+        windows.push(raw.slice(off, off + MAX_LINE_LENGTH));
       }
     }
-    const eg = new RegExp(ENTROPY_ASSIGN.source, ENTROPY_ASSIGN.flags + "g");
-    for (const em of line.matchAll(eg)) {
-      if (entropyCandidate(em[1] !== undefined ? em[1] : em[2])) {
-        matches.push({ rule: "high-entropy-assignment", line: i + 1 });
-        break;
+    for (const line of windows) {
+      for (const { rule, re } of RULES) {
+        if (seen[rule]) continue;
+        const g = new RegExp(re.source, re.flags.indexOf("g") === -1 ? re.flags + "g" : re.flags);
+        for (const m of line.matchAll(g)) {
+          if (!PLACEHOLDER.test(m[0])) {
+            matches.push({ rule, line: i + 1 });
+            seen[rule] = true;
+            break;
+          }
+        }
+      }
+      if (!seen["high-entropy-assignment"]) {
+        const eg = new RegExp(ENTROPY_ASSIGN.source, ENTROPY_ASSIGN.flags + "g");
+        for (const em of line.matchAll(eg)) {
+          if (entropyCandidate(em[1] !== undefined ? em[1] : em[2])) {
+            matches.push({ rule: "high-entropy-assignment", line: i + 1 });
+            seen["high-entropy-assignment"] = true;
+            break;
+          }
+        }
       }
     }
   }

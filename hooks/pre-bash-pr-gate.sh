@@ -56,7 +56,7 @@ if [ "${ZENSU_PR_GATE:-}" = "off" ]; then
   exit 0
 fi
 
-if printf '%s' "$CMD" | grep -qE '(^|[[:space:]])ZENSU_PR_GATE=off([[:space:]]|$)'; then
+if printf '%s' "$CMD" | grep -qE '^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*ZENSU_PR_GATE=off([[:space:]]|$)'; then
   tdd_record_bypass_payload "$INPUT" ZENSU_PR_GATE 2>/dev/null || true
   exit 0
 fi

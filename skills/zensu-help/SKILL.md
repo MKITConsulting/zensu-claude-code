@@ -83,6 +83,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
 | Platform support, Windows caveats | `README.md` § Platform Support |
 | Troubleshooting (`zensu` CLI not found, OAuth login, gate blocking) | `README.md` § Troubleshooting |
+| Diagnosing the install (CLI auth, hooks wired, config validity + quoted-boolean trap, stale markers, version sync) | `skills/doctor/SKILL.md` (`/zensu:doctor` — read-only status table) |
 
 ## Response Style
 

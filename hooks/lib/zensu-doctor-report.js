@@ -28,6 +28,12 @@ var OK = '✅';
 var WARN = '⚠️';
 var BAD = '❌';
 
+// Mirror of hooks/lib/zensu-config.sh zensu_pending_review_ttl_hours: the wrapper
+// passes the canonical value via ZDOC_TTL_HOURS; these apply only to a direct
+// (test/no-wrapper) invocation and must stay in lockstep with that getter.
+var TTL_HOURS_FALLBACK = 6;
+var TTL_HOURS_MAX = 8760;
+
 var env = process.env;
 var out = [];
 var warnCount = 0;
@@ -186,8 +192,8 @@ function configBlock() {
 
 function ttlHours() {
   var n = Number(env.ZDOC_TTL_HOURS);
-  if (Number.isInteger(n) && n >= 0 && n <= 8760) return n;
-  return 6;
+  if (Number.isInteger(n) && n >= 0 && n <= TTL_HOURS_MAX) return n;
+  return TTL_HOURS_FALLBACK;
 }
 function stateBlock(nowMs) {
   block('Session state');

@@ -206,6 +206,12 @@ case "${1:-}" in
         else
           rm -f -- "$rounds_counter_file"
         fi
+        stopblocks_file="$(tdd_state_file "$session_val").stopblocks"
+        if [ -L "$stopblocks_file" ]; then
+          echo "zensu-log --tdd-begin: refusing to delete through symlink at $stopblocks_file — stop-block budget NOT reset" >&2
+        else
+          rm -f -- "$stopblocks_file"
+        fi
         exit "$tdd_begin_rc"
         ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;

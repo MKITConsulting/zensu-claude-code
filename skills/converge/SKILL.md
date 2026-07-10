@@ -1,7 +1,7 @@
 ---
 name: converge
 description: >
-  Bidirectional flow-back audit: evaluate the CURRENT code state against the
+  [Zensu] Bidirectional flow-back audit: evaluate the CURRENT code state against the
   newest TDD plan's Requirements table (stable AC-###/FR-### IDs), classify
   gaps (missing / partial / contradicts / unrequested), split unrequested work
   into business rules vs implementation details, and propose spec/plan edits

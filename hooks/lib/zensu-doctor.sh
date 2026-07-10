@@ -48,9 +48,10 @@ if [ -z "${ZDOC_GH:-}" ]; then
   fi
 fi
 
-# Playwright: a resolvable binary is enough of a signal (no network install)
+# Playwright: a PATH binary is a safe signal. Deliberately NOT `npx playwright`
+# — even `--no-install` would execute a repo-planted ./node_modules/.bin binary.
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
-  if command -v playwright >/dev/null 2>&1 || npx --no-install playwright --version >/dev/null 2>&1; then
+  if command -v playwright >/dev/null 2>&1; then
     ZDOC_PLAYWRIGHT=present
   else
     ZDOC_PLAYWRIGHT=absent

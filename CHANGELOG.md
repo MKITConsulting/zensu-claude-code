@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Notes
+
+- **Upgrade note — `secretScan` is a new PreToolUse gate that ships default-ON.**
+  It scans file-write payloads (and Bash write channels) for provider secret
+  patterns plus a Shannon-entropy heuristic and **denies** on a match. Legitimate
+  high-entropy writes outside `test(s)/`/`spec(s)/`/`fixtures/`/`*.example.*`
+  paths may be flagged; add the inline `zensu-secret-allow` marker, write under a
+  test/example path, bypass a one-off with `ZENSU_SECRET_SCAN=off`, or disable
+  entirely with `hooks.secretScan: false`. (The sibling `prGate` ships default-OFF
+  by contrast — it is opt-in until field-proven.)
+
 ## [0.13.3] - 2026-07-07
 
 ### Added

@@ -158,6 +158,12 @@ case "$OUT" in *'"stripe-live-key"'*) check "U6 engine: Stripe restricted live k
 OUT="$(engine_rules '-----BEGIN PRIVATE KEY-----')"
 case "$OUT" in *'"private-key-pem"'*) check "U7 engine: PKCS#8 PEM header" PASS;; *) check "U7 engine: PKCS#8 PEM header" FAIL;; esac
 
+# windowed scan: a secret PAST the 2048-char per-line window must still be caught
+# (old code truncated the line to 2048 and missed it)
+LONGLINE="$(printf 'a%.0s' $(seq 1 2100))\"AKIA""IOSFODNN7RGY4Q2B\""
+OUT="$(engine_rules "$LONGLINE")"
+case "$OUT" in *'"aws-access-key-id"'*) check "U8 engine: secret past column 2048 is caught (window scan)" PASS;; *) check "U8 engine: secret past column 2048 is caught (window scan)" FAIL;; esac
+
 OUT="$(engine_rules 'api_token = "f8Zk2pQ9xL4mNv7wRs3TuY6bE1cD5gHj"')"
 case "$OUT" in *'"high-entropy-assignment"'*'"line":1'*) check "U8 engine: quoted high-entropy assignment + line number" PASS;; *) check "U8 engine: quoted high-entropy assignment + line number" FAIL;; esac
 
@@ -294,10 +300,20 @@ for a in "$@"; do
 done
 exec /usr/bin/env -i PATH=/usr/bin:/bin:/usr/local/bin node "$@" 2>/dev/null || exec node "$@"
 SHIM
-chmod +x "$TMPD/shim/node"
+chmod +x "$TMPD/shim/node" 2>/dev/null
 REAL_NODE_DIR="$(dirname "$(command -v node)")"
-OUT="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= PATH="$TMPD/shim:$REAL_NODE_DIR:/usr/bin:/bin" bash "$HOOK" 2>/dev/null)"
-[ -z "$OUT" ] && check "F13 scanner crash (node shim rc=1) -> fail-open allow" PASS || check "F13 scanner crash (node shim rc=1) -> fail-open allow" FAIL
+# Effectiveness probe: this case needs a chmod +x'd script to be executable by
+# bare name off PATH. Filesystems that ignore the Unix exec bit (Windows
+# git-bash, some mounts) can't simulate the node shim, so skip rather than fail.
+printf '#!/bin/bash\necho SHIMOK\n' > "$TMPD/shim/_probe"
+chmod +x "$TMPD/shim/_probe" 2>/dev/null
+if [ "$(PATH="$TMPD/shim:/usr/bin:/bin" _probe 2>/dev/null)" = "SHIMOK" ]; then
+  OUT="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= PATH="$TMPD/shim:$REAL_NODE_DIR:/usr/bin:/bin" bash "$HOOK" 2>/dev/null)"
+  [ -z "$OUT" ] && check "F13 scanner crash (node shim rc=1) -> fail-open allow" PASS || check "F13 scanner crash (node shim rc=1) -> fail-open allow" FAIL
+else
+  check "F13 scanner crash -> fail-open allow (skipped: FS ignores exec bit)" PASS
+fi
+rm -f "$TMPD/shim/_probe" 2>/dev/null
 
 echo "----"
 echo "test-secret-scan-gate: $PASS PASS / $FAIL FAIL"

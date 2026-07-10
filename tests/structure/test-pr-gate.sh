@@ -14,6 +14,7 @@ set -u
 # config.example.json prGate:false, allowlist extended with ZENSU_PR_GATE.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-pr-gate.sh"
 LOG_SH="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
@@ -266,6 +267,34 @@ if [ ! -f "$SBOX/st/review-pass-prfx" ]; then
 else
   check "P1v --tdd-reset clears the review-pass marker" FAIL
 fi
+
+# --tdd-begin resets the stop-chain anti-deadlock budget (.stopblocks) so a long
+# multi-feature session cannot carry a stale budget past the cap into a new chain
+run_log --tdd-begin --session prfx >/dev/null 2>&1
+printf 'xxxxx' > "$SBOX/st/tdd-phase-prfx.json.stopblocks"
+run_log --tdd-begin --session prfx >/dev/null 2>&1
+if [ ! -f "$SBOX/st/tdd-phase-prfx.json.stopblocks" ]; then
+  check "P1w --tdd-begin clears the .stopblocks budget" PASS
+else
+  check "P1w --tdd-begin clears the .stopblocks budget (still present)" FAIL
+fi
+
+# inline bypass must be a genuine command PREFIX, not a mere mention in an argument
+MENTION='{"session_id":"prfx","tool_name":"Bash","tool_input":{"command":"gh pr create --title x --body \"see ZENSU_PR_GATE=off in the notes\""}}'
+rm -f "$SBOX"/st/review-pass-*
+OUT="$(run_hook "$MENTION" cfg-on.json)"
+case "$OUT" in
+  *'"deny"'*) check "P1x ZENSU_PR_GATE=off mentioned in --body does NOT bypass (still gated)" PASS ;;
+  *) check "P1x --body mention must not bypass (got: ${OUT:-empty})" FAIL ;;
+esac
+L_MENTION="$(run_log --bypass-list --session prfx 2>/dev/null)"
+case "$L_MENTION" in
+  *ZENSU_PR_GATE*) check "P1y --body mention must not record a bypass (got: $L_MENTION)" FAIL ;;
+  *) check "P1y --body mention records no bypass in the ledger" PASS ;;
+esac
+PREFIX='{"session_id":"prfx","tool_name":"Bash","tool_input":{"command":"FOO=1 ZENSU_PR_GATE=off gh pr create --title x"}}'
+OUT="$(run_hook "$PREFIX" cfg-on.json)"
+[ -z "$OUT" ] && check "P1z genuine env-prefix (even after another assignment) still bypasses" PASS || check "P1z env-prefix should bypass (got: $OUT)" FAIL
 
 cd / && rm -rf "$SBOX" 2>/dev/null
 

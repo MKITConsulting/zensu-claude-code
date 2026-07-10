@@ -775,8 +775,10 @@ tdd_pending_review_stale() {
       const fs = require("fs");
       const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
       const ts = j && j.ts;
-      if (typeof ts !== "string" || !ts) { console.log("false"); process.exit(0); }
-      const t = Date.parse(ts);
+      let t = (typeof ts === "string" && ts) ? Date.parse(ts) : NaN;
+      if (!Number.isFinite(t)) {
+        try { t = fs.statSync(process.argv[1]).mtimeMs; } catch (_) { console.log("false"); process.exit(0); }
+      }
       if (!Number.isFinite(t)) { console.log("false"); process.exit(0); }
       const ttlMs = parseInt(process.env.TTL, 10) * 3600 * 1000;
       console.log((Date.now() - t) >= ttlMs ? "true" : "false");
