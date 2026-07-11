@@ -1,6 +1,6 @@
 # Spec: VCS Driver (GitHub + GitLab)
 
-Status: **draft — not built.** Spec-first. Nothing is implemented until this is approved.
+Status: **partially implemented** — Phases 1–2 shipped (see §6 "Implementation status"); Phases 3–4 pending.
 
 ## 1. What it does
 
@@ -184,6 +184,29 @@ forge without a probe).
   mismatch.
 - Extend the marker/structure guards so a skill can't call `gh`/`glab` directly
   outside the driver.
+
+### Implementation status
+
+- **Phase 1 — DONE** (PR #158): `hooks/lib/zensu-vcs.sh --detect` + `test-vcs-detect.sh` / `test-vcs-reconcile.sh`.
+- **Phase 2 — DONE**: mechanical PR ops on the helper + `pr-fix-findings` wired to them.
+  - Subcommands: `--pr-state <id>` → `OPEN|MERGED|CLOSED`; `--locate-pr [<num>]` →
+    `{id,url,state,base,head}`; `--fetch-threads <id>` → normalized unresolved-thread
+    array; `--resolve-thread <id> <threadId> [<replyTo>] [--reply <text>]`.
+  - Each op = a pure argv-builder (dry-printable via `ZENSU_VCS_PRINT_ARGV=1` under
+    `ZENSU_VCS_TEST=1`) + a thin runner + a `node` normalizer. Live `gh`/`glab`
+    execution is untested — the hermetic seam is the argv-builder + normalizer, same
+    stance as the Phase-1 probe. Test: `test-vcs-pr-ops.sh`.
+  - **Normalized thread shape**: `{threadId, replyTo, path, line, body, author}`.
+    `threadId` is the **resolve** handle (GitHub GraphQL thread id / GitLab discussion
+    id); `replyTo` is the **reply** target (GitHub REST comment id / the same GitLab
+    discussion id). Surfacing both is what bridges the resolve-handle asymmetry.
+  - Ops require an explicit `--provider` (fail-loud, no silent auto-detect) and
+    `--repo-id` in **API-path form** (`owner/repo` for GitHub, url-encoded
+    `ns%2Fproj` for GitLab, as `--detect` emits `repo`). `id` is validated numeric,
+    `threadId`/`replyTo` against a safe charset; string GraphQL vars use `gh -f`
+    (raw, no `@`-file magic). Known limits (follow-up): GitHub `reviewThreads` caps at
+    `first:100` (no cursor paging yet); GitLab discussions use `--paginate`.
+- **Phase 3–4 — pending**: `pr-team-review` (publish path, §7) + `autopilot`.
 
 ---
 
