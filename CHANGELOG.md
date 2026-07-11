@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-07-11
+
+### Added
+
+- **skills**: /zensu:doctor read-only setup diagnostics
+- **skills**: Additive-only repo overlays for tdd, cover, pr-team-review
+- **templates**: Artifact templates with repo override
+- **tdd**: Activation triggers + repo-local review personas
+- **pr-team-review**: Pre-publish inline-comment anchor validation
+- **hooks**: Bypass ledger — visible gate opt-outs
+- **skills**: Converge flow-back audit skill
+- **agents,tdd**: Review-judge second-pass stage in the review chain
+- **hooks**: Secret-scan gate for writes and raw bash writes
+- **tdd,autopilot**: Stable requirement IDs with end-to-end traceability
+
+### Changed
+
+- **pending-review**: Cover the ts-absent mtime-fallback branch
+
+### Fixed
+
+- **review**: Address team-review findings (1 P1, 4 P2, 5 P3)
+- **tests**: Make test-doctor state-not-writable check portable
+- **tdd**: Compress skill under the 430-line cap after main merge
+
 ### Notes
 
 - **Upgrade note — `secretScan` is a new PreToolUse gate that ships default-ON.**
