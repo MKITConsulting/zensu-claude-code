@@ -471,6 +471,25 @@ else
 fi
 rm -rf "$STUB_P12S3_DIR" "$SRC_P12S3_DIR"
 
+# P13 — a set argv[2] must round-trip through OPTIONS_JSON byte-identical.
+# Bash terminates ${2:-...} at the FIRST '}', so the unquoted default '{}' used
+# to append a literal '}' to every provided options payload; only jq's stream
+# tolerance masked it. Evaluates the wrapper's actual assignment line so a
+# regression to the unquoted spelling turns this red.
+OPT_LINE="$(grep -m1 '^OPTIONS_JSON=' "$WRAPPER")"
+GOT_RT="$(OPT_LINE="$OPT_LINE" bash -c 'set -- prompt "{\"a\":1}"; eval "$OPT_LINE"; printf %s "$OPTIONS_JSON"' 2>/dev/null)"
+if [ "$GOT_RT" = '{"a":1}' ]; then
+  check "P13 argv[2] round-trips byte-identical through OPTIONS_JSON (no trailing brace)" PASS
+else
+  check "P13 OPTIONS_JSON round-trip (got '$GOT_RT' expected '{\"a\":1}')" FAIL
+fi
+GOT_DEF="$(OPT_LINE="$OPT_LINE" bash -c 'set -- prompt; eval "$OPT_LINE"; printf %s "$OPTIONS_JSON"' 2>/dev/null)"
+if [ "$GOT_DEF" = '{}' ]; then
+  check "P13b missing argv[2] still defaults to {}" PASS
+else
+  check "P13b OPTIONS_JSON default (got '$GOT_DEF' expected '{}')" FAIL
+fi
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
