@@ -73,9 +73,10 @@ RULES="$VERDICT" node -e '
         "for the Write/Edit tools, place it under a test(s)/, __tests__/, spec(s)/, testdata/, " +
         "evals/ or fixtures/ path or an *.example.* file; on any channel, append the " +
         "zensu-secret-allow marker to that line or use an obvious placeholder (EXAMPLE, " +
-        "YOUR_...). Deliberate one-off: for a Bash command prefix it inline with " +
-        "ZENSU_SECRET_SCAN=off; for the file tools ask the user to export " +
-        "ZENSU_SECRET_SCAN=off or set hooks.secretScan:false."
+        "YOUR_...). Prefer the surgical, auditable escape (the allow marker, visible in " +
+        "the diff) over disabling the gate. A blanket opt-out exists but is documented in " +
+        "the README (§ Secret Scan) rather than inlined here, so turning the whole gate " +
+        "off stays a deliberate, human choice."
     }
   }));
 '

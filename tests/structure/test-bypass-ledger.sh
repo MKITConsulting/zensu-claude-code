@@ -9,7 +9,7 @@ set -u
 # active-scoped, dedup, `none` when empty, --tdd-begin reset); parser-owned
 # inline-bypass markers (__bypass__ lines from bash-source-write-parse.js and
 # the zensu-gate embedded parser, __bypass__: verdict from
-# secret-scan-decide.js); the recording call sites in all seven hooks;
+# secret-scan-decide.js); the recording call sites in all six hooks;
 # the rendering surfaces (delegate directive incl. unconditional `none`,
 # self-review template, autopilot PR-body line, README docs); and functional
 # end-to-end recording through the REAL hooks for every gate in a sandboxed
@@ -69,10 +69,10 @@ if [ "${ALLOW_USES:-0}" -ge 2 ]; then
 else
   check "P1d closed gate allowlist enforced at write and read ($ALLOW_USES sites)" FAIL
 fi
-if grep -qF 'state.bypasses.length < 32' "$PHASE_LIB" && grep -qF '.slice(0, 32)' "$PHASE_LIB" && grep -qF 'allow.indexOf(x) >= 0 && a.indexOf(x) === i' "$PHASE_LIB"; then
-  check "P1e ledger capped at 32 with pre-cap sanitization + dedup" PASS
+if grep -qF 'allow.indexOf(x) >= 0 && a.indexOf(x) === i' "$PHASE_LIB" && grep -qF 'allow.indexOf(gate) >= 0' "$PHASE_LIB"; then
+  check "P1e ledger bounded by the closed allowlist + per-name dedup (no cap needed)" PASS
 else
-  check "P1e ledger capped at 32 with pre-cap sanitization + dedup" FAIL
+  check "P1e ledger bounded by the closed allowlist + per-name dedup (no cap needed)" FAIL
 fi
 if grep -qF 'tdd_session_active' "$PHASE_LIB" && grep -qE 'tdd_record_bypass\(\)' "$PHASE_LIB"; then
   check "P1f active-session scoping lives in the shared recorder" PASS
@@ -113,7 +113,7 @@ else
 fi
 
 # P3 — recording call sites route through the shared recorder, fail-open
-SITES="pre-bash-pr-gate.sh:ZENSU_PR_GATE pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN post-bash-witness.sh:ZENSU_TEST_WITNESS"
+SITES="pre-edit-tdd-reminder.sh:ZENSU_TDD_GATE pre-bash-source-write-gate.sh:ZENSU_BASH_WRITE_GATE pre-bash-source-write-gate.sh:ZENSU_MCP_GATE pre-bash-zensu-gate.sh:ZENSU_MCP_GATE pre-write-secret-scan.sh:ZENSU_SECRET_SCAN stop-chain-enforcer.sh:ZENSU_CHAIN post-bash-witness.sh:ZENSU_TEST_WITNESS"
 for entry in $SITES; do
   hook_file="${entry%%:*}"; gate_name="${entry#*:}"
   hf="$PLUGIN_DIR/hooks/$hook_file"
@@ -123,7 +123,7 @@ for entry in $SITES; do
     check "P3 $hook_file records $gate_name via the shared recorder" FAIL
   fi
 done
-for hook_file in pre-bash-pr-gate.sh pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh post-bash-witness.sh; do
+for hook_file in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-bash-zensu-gate.sh pre-write-secret-scan.sh stop-chain-enforcer.sh post-bash-witness.sh; do
   hf="$PLUGIN_DIR/hooks/$hook_file"
   if [ -f "$hf" ] && grep -qE 'tdd_record_bypass(_payload)? .*2>/dev/null \|\| true' "$hf"; then
     check "P3 $hook_file records fail-open" PASS
@@ -220,6 +220,15 @@ if [ -n "$SBOX" ]; then
     check "P5c --tdd-begin clears the ledger" PASS
   else
     check "P5c --tdd-begin clears the ledger (got: $CLEARED)" FAIL
+  fi
+  # --tdd-begin also resets the stop-chain anti-deadlock budget (.stopblocks) so a
+  # long multi-feature session cannot carry a stale budget past the cap.
+  printf 'xxxxx' > "$SBOX/state/tdd-phase-fx.json.stopblocks"
+  run_log --tdd-begin --session fx >/dev/null 2>&1
+  if [ ! -f "$SBOX/state/tdd-phase-fx.json.stopblocks" ]; then
+    check "P5c2 --tdd-begin clears the .stopblocks budget" PASS
+  else
+    check "P5c2 --tdd-begin clears the .stopblocks budget (still present)" FAIL
   fi
   run_log --tdd-begin --session fx2 >/dev/null 2>&1
   run_log --bypass-note ZENSU_TDD_GATE --session fx2 >/dev/null 2>&1

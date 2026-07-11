@@ -15,8 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   high-entropy writes outside `test(s)/`/`spec(s)/`/`fixtures/`/`*.example.*`
   paths may be flagged; add the inline `zensu-secret-allow` marker, write under a
   test/example path, bypass a one-off with `ZENSU_SECRET_SCAN=off`, or disable
-  entirely with `hooks.secretScan: false`. (The sibling `prGate` ships default-OFF
-  by contrast — it is opt-in until field-proven.)
+  entirely with `hooks.secretScan: false`.
 
 ## [0.13.3] - 2026-07-07
 

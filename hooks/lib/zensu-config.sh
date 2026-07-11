@@ -49,16 +49,6 @@ zensu_tdd_strict_enabled() {
   [ "$val" = "1" ]
 }
 
-# PR-create gate enable check — INVERSE default like zensu_tdd_strict_enabled:
-# hooks.prGate defaults to FALSE (gate off); it runs ONLY on an explicit
-# boolean `true`, and node-missing degrades to off.
-zensu_pr_gate_enabled() {
-  command -v node >/dev/null 2>&1 || return 1
-  local val
-  val=$(node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.prGate===true?"1":"0")' 2>/dev/null)
-  [ "$val" = "1" ]
-}
-
 _zensu_log_style() {
   command -v node >/dev/null 2>&1 || { echo "wall"; return 0; }
   local val

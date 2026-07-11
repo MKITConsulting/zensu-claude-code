@@ -432,87 +432,6 @@ tdd_has_red_fail() {
 }
 
 
-# --- Reviewed-at-SHA marker (review chain terminus) -------------------------
-# --chain-done records WHICH state the converged review chain covered:
-# review-pass-<sid>, line 1 = HEAD SHA at chain end, `tree:` = digest of the
-# reviewed WORKING TREE (via `git stash create`, HEAD^{tree} when clean) — so
-# the follow-up commit that freezes exactly the reviewed state still matches,
-# while a commit introducing new content does not. Consumed by the optional
-# PR-create gate
-# (hooks/pre-bash-pr-gate.sh, hooks.prGate default off). Never fails the
-# caller; skipped with a stderr note outside a git checkout.
-
-zensu_review_pass_file() {
-  local session_id="${1:-}"
-  local sanitized="${session_id//[^A-Za-z0-9_-]/_}"
-  local dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-  echo "${dir}/review-pass-${sanitized}"
-}
-
-tdd_write_review_pass() {
-  local session_id="${1:-unknown}"
-  local mf
-  mf="$(zensu_review_pass_file "$session_id")"
-  local dir
-  dir="$(dirname "$mf")"
-  [ -L "$mf" ] && { echo "zensu: refusing to write review-pass marker through symlink at $mf" >&2; return 1; }
-  [ -L "$dir" ] && { echo "zensu: refusing to write review-pass marker under symlinked dir $dir" >&2; return 1; }
-  mkdir -p "$dir" 2>/dev/null || true
-  local repo=""
-  if git rev-parse HEAD >/dev/null 2>&1; then
-    repo="."
-  elif git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse HEAD >/dev/null 2>&1; then
-    repo="${CLAUDE_PROJECT_DIR:-.}"
-  fi
-  if [ -z "$repo" ]; then
-    echo "zensu: no git checkout found — review-pass marker skipped" >&2
-    return 0
-  fi
-  local sha tree tree_tracked stash tmpidx
-  sha="$(git -C "$repo" rev-parse HEAD 2>/dev/null)"
-  tree=""
-  tmpidx="$(mktemp 2>/dev/null)"
-  if [ -n "$tmpidx" ]; then
-    if GIT_INDEX_FILE="$tmpidx" git -C "$repo" read-tree HEAD 2>/dev/null \
-      && GIT_INDEX_FILE="$tmpidx" git -C "$repo" add -A 2>/dev/null; then
-      tree="$(GIT_INDEX_FILE="$tmpidx" git -C "$repo" write-tree 2>/dev/null)"
-    fi
-    rm -f "$tmpidx"
-  fi
-  [ -z "$tree" ] && tree="$(git -C "$repo" rev-parse "HEAD^{tree}" 2>/dev/null)"
-  tree_tracked=""
-  stash="$(git -C "$repo" stash create 2>/dev/null)"
-  if [ -n "$stash" ]; then
-    tree_tracked="$(git -C "$repo" rev-parse "${stash}^{tree}" 2>/dev/null)"
-  else
-    tree_tracked="$(git -C "$repo" rev-parse "HEAD^{tree}" 2>/dev/null)"
-  fi
-  local tmp
-  tmp="$(mktemp "${dir}/.review-pass-tmp.XXXXXX" 2>/dev/null)" || return 1
-  {
-    printf '%s\n' "$sha"
-    printf 'tree: %s\n' "$tree"
-    if [ -n "$tree_tracked" ] && [ "$tree_tracked" != "$tree" ]; then
-      printf 'tree-tracked: %s\n' "$tree_tracked"
-    fi
-    if [ "$(_zensu_log_style)" != "none" ]; then
-      printf 'reviewed-at: %s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    fi
-    printf 'session: %s\n' "$session_id"
-  } > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$mf" 2>/dev/null || { rm -f "$tmp"; return 1; }
-  return 0
-}
-
-tdd_clear_review_pass() {
-  local session_id="${1:-unknown}"
-  local mf
-  mf="$(zensu_review_pass_file "$session_id")"
-  [ -L "$mf" ] && return 1
-  rm -f -- "$mf" 2>/dev/null || true
-  return 0
-}
-
 # --- Bypass ledger (visible opt-outs) --------------------------------------
 # Gate escapes (ZENSU_*=off) stay free but become visible: each gate records
 # the env-var name it was bypassed through into the per-session state file
@@ -524,7 +443,7 @@ tdd_clear_review_pass() {
 # directive text into the rendered surfaces nor bloat the state file every
 # hook parses. New gates extend ZENSU_BYPASS_GATE_ALLOWLIST in ONE place.
 
-ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS ZENSU_PR_GATE"
+ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS"
 
 _tdd_bypass_shape_ok() {
   case "${1:-}" in
@@ -563,8 +482,7 @@ _tdd_write_bypass_critical() {
         .filter((x, i, a) => allow.indexOf(x) >= 0 && a.indexOf(x) === i);
       const gate = String(process.env.GATE || "").trim();
       if (allow.indexOf(gate) >= 0
-          && state.bypasses.indexOf(gate) < 0
-          && state.bypasses.length < 32) state.bypasses.push(gate);
+          && state.bypasses.indexOf(gate) < 0) state.bypasses.push(gate);
       fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
     ' "$tmp" 2>/dev/null
 
@@ -683,7 +601,7 @@ tdd_bypasses() {
       const allow = String(process.env.ALLOWLIST || "").split(" ").filter(Boolean);
       const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       const b = Array.isArray(j.bypasses)
-        ? j.bypasses.filter((x, i, a) => allow.indexOf(x) >= 0 && a.indexOf(x) === i).slice(0, 32)
+        ? j.bypasses.filter((x, i, a) => allow.indexOf(x) >= 0 && a.indexOf(x) === i)
         : [];
       console.log(b.join(", "));
     } catch (_) { console.log(""); }

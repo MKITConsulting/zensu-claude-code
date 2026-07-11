@@ -111,13 +111,13 @@ printf '{"name":"zensu","version":"1.2.3"}\n' > "$SBOX/plug/.claude-plugin/plugi
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
 printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hooks/a.sh"}]}]}}\n' > "$SBOX/plug/hooks/hooks.json"
 printf '#!/bin/bash\n' > "$SBOX/plug/hooks/a.sh"
-printf '{"hooks":{"prGate":true,"secretScan":false}}\n' > "$SBOX/good-cfg.json"
+printf '{"hooks":{"reviewJudge":true,"secretScan":false}}\n' > "$SBOX/good-cfg.json"
 
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1a report exits 0 on the green fixture" PASS || check "P1a report exits 0 (rc=$RC)" FAIL
 case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "P1b version sync ✅ when equal" PASS ;; *) check "P1b version sync ✅ when equal" FAIL ;; esac
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
-case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (prGate:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
+case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
 GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
@@ -141,10 +141,10 @@ printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hook
 rm -f "$SBOX/plug/hooks/orphan.sh"
 
 # --- quoted-boolean trap ---------------------------------------------------
-printf '{"hooks":{"prGate":"true","secretScan":false}}\n' > "$SBOX/bad-cfg.json"
+printf '{"hooks":{"reviewJudge":"true","secretScan":false}}\n' > "$SBOX/bad-cfg.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/bad-cfg.json" "$SBOX/st")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1i report exits 0 on quoted-boolean config" PASS || check "P1i report exits 0 (rc=$RC)" FAIL
-case "$OUT" in *'quoted boolean'*'hooks.prGate = "true"'*) check "P1j quoted boolean ⚠️ names the dotted key" PASS ;; *) check "P1j quoted boolean ⚠️ (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'quoted boolean'*'hooks.reviewJudge = "true"'*) check "P1j quoted boolean ⚠️ names the dotted key" PASS ;; *) check "P1j quoted boolean ⚠️ (got: $OUT)" FAIL ;; esac
 case "$OUT" in *secretScan*) check "P1k real boolean secretScan:false NOT flagged" FAIL ;; *) check "P1k real boolean secretScan:false NOT flagged" PASS ;; esac
 
 # --- invalid JSON config ---------------------------------------------------

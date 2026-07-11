@@ -15,7 +15,6 @@
     "mcpGate": true,
     "bashWriteGate": true,
     "secretScan": true,
-    "prGate": false,
     "reviewJudge": true,
     "pendingReviewTtlHours": 6
   },
