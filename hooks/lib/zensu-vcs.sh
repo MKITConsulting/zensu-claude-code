@@ -216,11 +216,208 @@ EOF
   printf 'cliState=%s\n' "$cli_state"
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect 2>/dev/null || true
+_zensu_vcs_is_num() {
+  case "${1:-}" in ''|*[!0-9]*) return 1 ;; *) return 0 ;; esac
+}
+
+_zensu_vcs_is_id() {
+  case "${1:-}" in ''|*[!A-Za-z0-9=_-]*) return 1 ;; *) return 0 ;; esac
+}
+
+_zensu_vcs_map_state() {
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var st="";try{st=(JSON.parse(s).state||"");}catch(_){}
+      st=String(st).toLowerCase();
+      var out="";
+      if(st==="open"||st==="opened"||st==="locked")out="OPEN";
+      else if(st==="merged")out="MERGED";
+      else if(st==="closed")out="CLOSED";
+      process.stdout.write(out);
+    });'
+}
+
+_zensu_vcs_normalize_pr() {
+  local provider="${1:-}"
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  PROV="$provider" node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var o={id:"",url:"",state:"",base:"",head:""},p=process.env.PROV;
+      try{var j=JSON.parse(s);
+        if(p==="github"){o.id=String(j.number||"");o.url=j.url||"";o.state=j.state||"";o.base=j.baseRefName||"";o.head=j.headRefName||"";}
+        else if(p==="gitlab"){o.id=String(j.iid||"");o.url=j.web_url||"";o.state=j.state||"";o.base=j.target_branch||"";o.head=j.source_branch||"";}
+      }catch(_){}
+      var st=String(o.state).toLowerCase();
+      o.state=st==="merged"?"MERGED":(st==="closed"?"CLOSED":(st?"OPEN":""));
+      process.stdout.write(JSON.stringify(o));
+    });'
+}
+
+_zensu_vcs_normalize_threads() {
+  local provider="${1:-}"
+  command -v node >/dev/null 2>&1 || { printf '[]'; return 0; }
+  PROV="$provider" node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var out=[],p=process.env.PROV;
+      try{var j=JSON.parse(s);
+        if(p==="github"){
+          var rt=(((j.data||{}).repository||{}).pullRequest||{}).reviewThreads||{};
+          var arr=rt.nodes||[];
+          for(var i=0;i<arr.length;i++){var t=arr[i];
+            if(t&&t.isResolved===false){
+              var c=((t.comments||{}).nodes||[])[0]||{};
+              out.push({threadId:t.id||"",replyTo:(c.databaseId!=null?String(c.databaseId):""),path:c.path||"",line:(c.line!=null?c.line:null),body:c.body||"",author:((c.author||{}).login)||""});
+            }}
+        } else if(p==="gitlab"){
+          var arr2=Array.isArray(j)?j:(j.discussions||[]);
+          for(var k=0;k<arr2.length;k++){var d=arr2[k];
+            if(d&&d.resolvable===true&&d.resolved===false){
+              var n=((d.notes||[]))[0]||{},pos=n.position||{};
+              out.push({threadId:String(d.id||""),replyTo:String(d.id||""),path:pos.new_path||pos.old_path||"",line:(pos.new_line!=null?pos.new_line:null),body:n.body||"",author:((n.author||{}).username)||""});
+            }}
+        }
+      }catch(_){}
+      process.stdout.write(JSON.stringify(out));
+    });'
+}
+
+_zensu_vcs_dry() {
+  [ "${ZENSU_VCS_TEST:-}" = "1" ] && [ "${ZENSU_VCS_PRINT_ARGV:-}" = "1" ]
+}
+
+_zensu_vcs_pr_state() {
+  local provider="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --*) ;;
+      *) [ -z "$id" ] && id="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  local argv
+  case "$provider" in
+    github) argv=(gh pr view --json state -- "$id") ;;
+    gitlab) argv=(glab mr view --output json -- "$id") ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  "${argv[@]}" 2>/dev/null | _zensu_vcs_map_state "$provider"
+}
+
+_zensu_vcs_locate_pr() {
+  local provider="" num=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --*) ;;
+      *) [ -z "$num" ] && num="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  local argv
+  case "$provider" in
+    github)
+      if [ -n "$num" ]; then argv=(gh pr view --json number,url,state,headRefName,baseRefName -- "$num")
+      else argv=(gh pr view --json number,url,state,headRefName,baseRefName); fi ;;
+    gitlab)
+      if [ -n "$num" ]; then argv=(glab mr view --output json -- "$num")
+      else argv=(glab mr view --output json); fi ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  "${argv[@]}" 2>/dev/null | _zensu_vcs_normalize_pr "$provider"
+}
+
+_zensu_vcs_fetch_threads() {
+  local provider="" repoid="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  repoid="${2:-}"; shift ;;
+      --*) ;;
+      *) [ -z "$id" ] && id="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  _zensu_vcs_is_num "$id" || return 1
+  local argv
+  case "$provider" in
+    github)
+      case "$repoid" in */?*) : ;; *) return 1 ;; esac
+      local owner="${repoid%%/*}" name="${repoid#*/}"
+      local q='query($owner:String!,$name:String!,$num:Int!){repository(owner:$owner,name:$name){pullRequest(number:$num){reviewThreads(first:100){nodes{id isResolved comments(first:1){nodes{databaseId body path line author{login}}}}}}}}'
+      argv=(gh api graphql -f query="$q" -f owner="$owner" -f name="$name" -F num="$id") ;;
+    gitlab)
+      argv=(glab api --paginate "projects/$repoid/merge_requests/$id/discussions") ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  local out rc
+  out="$("${argv[@]}" 2>/dev/null)"; rc=$?
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s' "$out" | _zensu_vcs_normalize_threads "$provider"
+}
+
+_zensu_vcs_resolve_thread() {
+  local provider="" repoid="" reply="" id="" thread_id="" reply_to=""
+  local pos=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  repoid="${2:-}"; shift ;;
+      --reply)    reply="${2:-}"; shift ;;
+      --*) ;;
+      *)
+        case "$pos" in
+          0) id="$1" ;;
+          1) thread_id="$1" ;;
+          2) reply_to="$1" ;;
+        esac
+        pos=$((pos + 1)) ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  [ -n "$reply_to" ] || reply_to="$thread_id"
+  _zensu_vcs_is_num "$id" || return 1
+  _zensu_vcs_is_id "$thread_id" || return 1
+  _zensu_vcs_is_id "$reply_to" || return 1
+  local reply_argv=() resolve_argv=()
+  case "$provider" in
+    github)
+      case "$repoid" in */?*) : ;; *) return 1 ;; esac
+      local owner="${repoid%%/*}" name="${repoid#*/}"
+      [ -n "$reply" ] && reply_argv=(gh api "repos/$owner/$name/pulls/$id/comments/$reply_to/replies" -f body="$reply")
+      local m='mutation($t:ID!){resolveReviewThread(input:{threadId:$t}){thread{id}}}'
+      resolve_argv=(gh api graphql -f query="$m" -f t="$thread_id") ;;
+    gitlab)
+      [ -n "$reply" ] && reply_argv=(glab api --method POST "projects/$repoid/merge_requests/$id/discussions/$thread_id/notes" -f body="$reply")
+      resolve_argv=(glab api --method PUT "projects/$repoid/merge_requests/$id/discussions/$thread_id?resolved=true") ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then
+    [ "${#reply_argv[@]}" -gt 0 ] && printf '%s\n' "${reply_argv[*]}"
+    printf '%s\n' "${resolve_argv[*]}"
+    return 0
+  fi
+  [ "${#reply_argv[@]}" -gt 0 ] && { "${reply_argv[@]}" >/dev/null 2>&1 || return 1; }
+  "${resolve_argv[@]}" >/dev/null 2>&1
+}
+
+export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
-    --detect) _zensu_vcs_detect "$@" ;;
-    *) printf 'usage: zensu-vcs.sh --detect [--provider github|gitlab] [--api-base URL] [--repo DIR]\n' >&2; exit 2 ;;
+    --detect)         _zensu_vcs_detect "$@" ;;
+    --pr-state)       shift; _zensu_vcs_pr_state "$@" ;;
+    --locate-pr)      shift; _zensu_vcs_locate_pr "$@" ;;
+    --fetch-threads)  shift; _zensu_vcs_fetch_threads "$@" ;;
+    --resolve-thread) shift; _zensu_vcs_resolve_thread "$@" ;;
+    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread [--provider github|gitlab] [--repo-id R] [--reply TEXT] [args]\n' >&2; exit 2 ;;
   esac
 fi
