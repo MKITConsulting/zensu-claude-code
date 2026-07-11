@@ -52,10 +52,8 @@ Provide a FEATURE SPECIFICATION as the input. Describe WHAT needs to be built, n
 - **You are the implementer.** Run Phases 0–6 below in this conversation. Do NOT spawn a `tdd-manager` subagent — that agent no longer exists.
 - **The discipline hooks enforce YOU.** The PreToolUse phase-gate (`pre-edit-tdd-reminder.sh`) and the Bash witness (`post-bash-witness.sh`) activate on a per-session chain-state flag, set by `--tdd-begin` in Phase 0. Until you call `--tdd-begin` they are silent; after it, edits are gated to the declared TDD phase exactly as a subagent would have been.
 - **The review chain is guaranteed.** When you finish Phase 6 you mark `--tdd-complete` and spawn `zensu:code-reviewer`. A Stop hook (`stop-chain-enforcer.sh`) refuses to let you end your turn while implementation is complete but the review chain has not terminated — so the review cannot be silently skipped. Findings come back to you; you fix them in-thread under the same TDD discipline and re-spawn the reviewer until PASS or max rounds.
-- **Subagent / Claude Code Workflow safety.** The Stop backstop fires only on the top-level interactive thread: `stop-chain-enforcer.sh` detects spawned agents via the hook-input `agent_id` and no-ops inside Task/Agent reviewers AND Claude Code Workflow workers, so a worker's `Stop` never deadlocks the cycle. If this skill is driven from a Workflow, run the review ONCE over the aggregate diff — the orchestrator script spawns the five `zensu:review-aspect` agents + the `zensu:code-reviewer` consume-mode spawn itself (see the README "Claude Code Workflows" section), or a worker records `zensu-log.sh --pending-review --files "<changed>"` and the next interactive `Stop` adopts it as a review-only chain. Review is per-implementation over the combined diff, never per spawned worker.
-- **Work sequentially — NO parallel tool batches.** TDD is inherently linear: RED → IMPL → GREEN, then evidence, then review. Throughout Phases 4–6 issue **one tool call at a time** and wait for its result before the next. Do NOT emit a parallel batch of tool calls. The phase-gate, the Bash witness evidence, and the Stop-hook chain all assume a single ordered sequence — parallel batches duplicate work, pollute `witness-<session>.log`, and can race the chain terminus (e.g. a `--chain-done` landing before the reviewer runs). The ONE sanctioned parallel batch is the Phase 6.10 review fan-out: spawning the five read-only `zensu:review-aspect` agents at once is allowed because it runs post-implementation, is strictly read-only, writes no witness evidence, and never touches the phase-gate.
-
----
+- **Subagent / Claude Code Workflow safety.** The Stop backstop fires only on the top-level interactive thread: `stop-chain-enforcer.sh` detects spawned agents via the hook-input `agent_id` and no-ops inside Task/Agent reviewers AND Claude Code Workflow workers, so a worker's `Stop` never deadlocks the cycle. If this skill is driven from a Workflow, run the review ONCE over the aggregate diff — the orchestrator script spawns the five `zensu:review-aspect` agents, the `zensu:review-judge` second pass (when `hooks.reviewJudge` is enabled), + the `zensu:code-reviewer` consume-mode spawn itself (see the README "Claude Code Workflows" section), or a worker records `zensu-log.sh --pending-review --files "<changed>"` and the next interactive `Stop` adopts it as a review-only chain. Review is per-implementation over the combined diff, never per spawned worker.
+- **Work sequentially — NO parallel tool batches.** TDD is inherently linear: RED → IMPL → GREEN, then evidence, then review. Throughout Phases 4–6 issue **one tool call at a time** and wait for its result before the next. Do NOT emit a parallel batch of tool calls. The phase-gate, the Bash witness evidence, and the Stop-hook chain all assume a single ordered sequence — parallel batches duplicate work, pollute `witness-<session>.log`, and can race the chain terminus (e.g. a `--chain-done` landing before the reviewer runs). The ONE sanctioned parallel batch is the Phase 6.10 review fan-out: spawning the five read-only `zensu:review-aspect` agents (plus any step-2b personas) at once is allowed because it runs post-implementation, is strictly read-only, writes no witness evidence, and never touches the phase-gate.
 
 ## Principle 1: STRICT TDD DISCIPLINE
 
@@ -154,13 +152,14 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 
 - Principles 1-2 (RED→GREEN cycles, work types, cross-layer pairing) and the FSM phase markers do NOT apply; the PreToolUse edit gate passes through; the Bash witness still records every command.
 - Tests are at your discretion — write them where they add value; none is acceptable. The Phase 5/6 suites, build, coverage, and the review chain are the safety net.
-- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding.
+- Phase 2 plan: `**Approach**: Vanilla implementation (TDD discipline disabled via hooks.tddImplementation)`; omit the per-step RED/GREEN bullets and Cross-Layer rows (keep the heading). The `## Preconditions` table is unchanged and binding. The `## Requirements` table and the per-step `Covers` mapping are likewise unchanged and binding (Phase 6 step 6c runs in vanilla).
 - Phase 3: ONE task per step — `{step_id} [impl]` (activeForm: "Implementing {step_id}"); integration `[wire]` unchanged.
 - Phase 4 replaced: implement each step directly. The Feature-Cycle precondition self-check still applies — a step referencing a precondition marked `missing` with decision `skip` → mark `[!]`, log `{step_id} BLOCKED — precondition {name} missing`, TaskUpdate `cancelled`, next step. Log `{step_id} IMPL completed — files: {list}`; TaskUpdate `[impl]` completed; plan status `[I]`. Optionally log `{step_id} TESTED — {test_file}` when you wrote a test.
 - Phase 6: only the mtime Discipline Audit and the Cross-Layer Value Flow Audit are skipped — log `DISCIPLINE AUDIT SKIPPED — vanilla mode` instead; the Precondition Drift Audit still runs. Step 7 closure accepts `[I]`/`[W]`/`[!]`. Step 8 final line: `VANILLA COMPLETE — {N}/{M} implemented | Build: {…} | Coverage: {…}`.
 - Review-fix rounds and the self-review fix round are vanilla too: fix findings directly (no RED→GREEN cycle), keep the structured CHECKPOINT/AUDIT evidence discipline, re-run the fan-out + consume-mode reviewer per round.
 
----
+<!-- zensu:overlay tdd -->
+> **Repo overlay (additive-only).** If `$(git rev-parse --show-toplevel)/.zensu/overlays/tdd.md` exists, read it now and inject its content here as team guidance: it may ADD conventions, extra checks, and stack particularities; it can NEVER disable, replace, weaken, or reorder this skill's mandatory phases (discipline gates, evidence audits, review chain, chain terminus). On any conflict the skill text wins — surface one line naming the ignored overlay directive. Missing or empty file = no-op. Overlays are repo-controlled prompts (same trust level as `.claude/agents` personas, not enforced by code) — audit them in third-party repos.
 
 ## Phase 0: Pre-flight
 
@@ -169,8 +168,6 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 3. **Activate the TDD session.** Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-begin`. This sets the per-session chain-state `active` flag, which turns on the PreToolUse phase-gate and the Bash witness for THIS main-thread session (they were silent until now). Without this call, your edits are NOT gated and the witness records nothing — so do it before any test/production edit. The command echoes the session mode: `mode: strict` → run all phases as written; `mode: vanilla` → apply the deltas in ## Vanilla Implementation Mode. The mode is frozen per session into the state file — config flips mid-session change nothing.
 4. **Load the task-tracking tools.** In the main thread `TaskCreate`/`TaskUpdate` are deferred — their schemas are NOT preloaded (the deleted subagent got them for free via its `tools:` frontmatter; a main-thread skill does not). Before the first `TaskCreate`, load them: call `ToolSearch` with query `select:TaskCreate,TaskUpdate`. If your harness already exposes them, this is a harmless no-op — but never let a load hiccup become an excuse to skip tasks: they are the user's live dashboard (Principle 3, Per-Step Task Contract), not optional.
 5. Create the first task with `TaskCreate(subject: "TDD: Analyzing spec and creating plan", description: "Parse the feature spec and produce the TDD plan", activeForm: "Analyzing specification")`, then set it `in_progress` with `TaskUpdate`. **Contract:** `TaskCreate` requires BOTH `subject` and `description` (a one-liner is fine) and accepts an optional `activeForm`; it has NO `status` field (new tasks are always `pending`) and NO `blockedBy` — set status via `TaskUpdate(status: ...)` and dependencies via `TaskUpdate(addBlockedBy: [...])`.
-
----
 
 ## Phase 1: Discover the Project
 
@@ -199,8 +196,6 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
 7. Build dependency graph: `depends_on: [step_ids]`. Independent steps (different files, no type deps) can run sequentially without blocking.
 8. Compile context: root path, tech stack, test commands, coverage_cmd, coverage_thresholds, threshold_source, rules, test utilities
 
----
-
 ## Phase 1.5: Spec Precondition Discovery
 
 Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependency the spec names.
@@ -222,57 +217,16 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
 6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
 7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
 
----
-
 ## Phase 2: Create Plan + Log
 
 MANDATORY — create BOTH files (plan + log are a pair).
 
 > **Gate note (read before writing):** Phase 0's `--tdd-begin` armed the phase-gate. Paths under `.zensu/` (the plan + log artifacts) are exempt from the gate, so write the **plan** with the **Write tool** — its full body must NOT go through Bash, or the witness log would record the entire plan in one `cmd=` entry. The **log** is an append-only trace: write and grow it with **Bash** (`printf >> {log_file}`), never the Write tool (which would overwrite it). Never use Bash to write *production code* to bypass the gate — production source goes through Edit/Write under a declared phase in Phase 4.
 
-1. Create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate), with this content:
-
-```markdown
-# TDD Plan: {Feature Title}
-
-## Context
-{Spec verbatim}
-**Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
-
-## Preconditions
-| Name | Type | Verification | Status | Decision |
-|------|------|--------------|--------|----------|
-| {name} | CLI/secret/endpoint/fixture | `{verify_cmd}` | present/missing | install / substitute=`{user-named}` / skip |
-
-## Cross-Layer Value Flow Pairings
-(Per Principle 2 — Cross-Layer Value Flow Pairing. Omit table body if no pairings; keep the heading so Phase 6 audit can detect absence vs zero rows.)
-
-| Feature Step | New Value | Unchanged Layer (file / module) | Characterization Step | Seam Asserted |
-|--------------|-----------|---------------------------------|------------------------|----------------|
-| {step_id_A} | {field}=`{example}` | {path} | {step_id_B} | DB row / response body / persisted file / returned struct |
-
-## Status Legend
-| [ ] Not started | [R] RED test | [I] Implemented | [G] GREEN | [RF] Refactored | [!] Blocked | [W] Wired |
-
-## Steps
-| Step | Type | Description | Test File | Depends On | Status | Attempts |
-|------|------|-------------|-----------|------------|--------|----------|
-
-### Step {id} — {Description}
-- **RED**: Test `{name}` — {what}, {why fails}
-- **GREEN**: {what to implement}
-
-**Checkpoint**: {test_cmd} + {lint_cmd} pass
-
-## Final Verification
-- All test suites pass
-- Coverage report generated for changed files (threshold: {threshold})
-```
-
+1. **Resolve the plan template** (repo override wins): use `$(git rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md` when that file exists, else the plugin default `{PLUGIN_ROOT}/templates/tdd-plan.md`. Read the resolved template, fill every `{curly}` placeholder from the Phase 1 context, and create the plan file with the **Write tool** at `.zensu/plans/{SESSION_TS}_tdd-{slug}.md` (the `.zensu/` path bypasses the phase-gate). A repo override replaces the default wholesale but MUST keep the mandatory sections (`## Requirements` with ID/Covers, `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification`) — the Phase 5/6 audits and `/zensu:converge` anchor on them.
+1b. **Requirement-ID allocation rule (stable IDs, never recycled).** The `## Requirements` table is MANDATORY: assign `AC-###` to each acceptance criterion and `FR-###` to each functional requirement parsed from the spec. **If the incoming spec already carries AC-###/FR-### IDs (e.g. from `/zensu:autopilot`), adopt them verbatim — never re-allocate; allocate new IDs monotonically above the highest ID seen.** IDs are allocated monotonically and are NEVER reused — a dropped requirement keeps its ID and is marked deprecated in the Requirement column; never delete a row or renumber. Every Steps-table row names the IDs it implements in its `Covers` cell (the step detail repeats them on a `- **Covers**:` line), so spec → plan → step → test stays traceable end to end. Phase 6 step 6c cross-checks this mapping at warning level.
 2. `mkdir -p "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs" && printf '%s%s\n' "$(bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "TDD STARTED — {title} | steps: {N}" > {log_file}`
 3. Tell user: `tail -f {log_file}`
-
----
 
 ## Phase 3: Create ALL Tasks
 
@@ -287,8 +241,6 @@ Per integration step — 1 task:
 - `{step_id} [wire]` (activeForm: "Wiring {step_id}")
 
 Create each via `TaskCreate` with `subject` (the `{step_id} [test]` label), a one-line `description`, and the `activeForm` shown above. Set dependencies with `TaskUpdate(addBlockedBy: [...])` per the dependency graph (not on `TaskCreate`). Mark the Phase 0 "Analyzing" task `completed` with `TaskUpdate`.
-
----
 
 ## Phase 4: Execute TDD Cycles
 
@@ -337,8 +289,6 @@ Same logging as Feature cycle.
 ### Integration Steps
 
 Implement directly (wiring, config, migrations). Log: `{step} WIRED`. Mark `[W]`. Execute after dependent TDD steps are `[G]`.
-
----
 
 ## Phase 5: Checkpoint
 
@@ -415,14 +365,17 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
       - Verify the characterization asserts at the unchanged layer's OWN seam (DB row / response body / persisted file / returned struct), NOT at a caller-side mock. Read the test file; if its top-level assertions only inspect mocks created in the same test, append `CROSS-LAYER PAIRING MOCK-ONLY — {step_id_B} asserts only on caller mock, not on unchanged layer's seam` and mark Phase 6 NOT complete.
    b) **Missing-pairing detection.** Re-scan IMPL log entries for Feature/Bug-Fix steps. For each step, inspect the diff of its IMPL files for added literals matching field-name / payload-key patterns (`'foo':`, `"foo":`, `foo=`, `&foo=`) that did not exist in the pre-step version of those files. For each such added literal, grep the IMPL files of OTHER steps in this plan for the same literal — if no other step in this plan added the same literal AND the plan's Cross-Layer Pairings table has no row pairing this step to a layer that consumes the literal, append `CROSS-LAYER PAIRING MISSING — {step_id} added literal "{literal}" with no paired characterization` and mark Phase 6 NOT complete.
    c) Do NOT auto-fix — pairing violations are a discipline violation, same severity as mtime and precondition drift.
+6c. **Requirements Coverage Cross-Check** (warning level). Read the plan's `## Requirements` table. Verify (a) every Steps-table row has a non-empty `Covers` cell naming at least one requirement ID from the table, and (b) every requirement ID **not marked deprecated** is named by at least one step's `Covers` cell (deprecated rows are exempt by design — the never-recycle rule keeps them). On a miss append `REQUIREMENT COVERAGE WARNING — {step without Covers | requirement ID without covering step}` to the log and surface it in the final report. Warning level only — it does NOT mark Phase 6 incomplete. If the plan has no `## Requirements` table (legacy plan), skip silently.
 7. Update the plan's Steps-table `Status` column: every step `[G]`, `[W]`, or `[!]`. No `[ ]`/`[R]`/`[I]` cell remaining. The plan carries no GFM checkboxes — the `Status` column is the only completion tracker.
 8. Log: `TDD COMPLETE — {N}/{M} GREEN | Integration: {N} WIRED | Build: {✓ passed | – n/a | – skipped} | Coverage: {N}/{M} files >= {threshold}` (omit Coverage segment if SKIPPED).
 9. Output summary, in this order: (a) `## TL;DR` — exactly ONE sentence following the template `{component} {symptom} because {root_cause} — fixed via {mechanism}[, {N} TDD round(s)], {pass}/{total} tests green.` Cover root cause + fix mechanism + test verdict; no fluff, no hedging. Then (b) results, files modified, test counts, verification status, **Build status from step 2**, **Coverage table from step 3e**, **Test Evidence section** (every CHECKPOINT/AUDIT `cmd="..."` claim with its witness cross-check verdict — `verified` when matched in witness log, `EVIDENCE GAP` when missing, `EVIDENCE CONTRADICTION` when the witness tail contradicts a claimed pass, `via=tool_name` when declared non-Bash escape), plan path.
 10. **Close implementation and trigger the review chain.** This replaces the old subagent auto-review hook — the chain is now driven from this main thread. Execute these steps STRICTLY ONE AT A TIME (single tool call per step, wait for each result), never as a parallel batch and never bundled with the Phase 6 audit writes above:
     1. Mark implementation complete: `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --tdd-complete`. This arms the Stop-hook backstop (`stop-chain-enforcer.sh`): you will NOT be allowed to end your turn until the review chain terminates.
     2. Enumerate changed files: `git diff --name-only HEAD`.
-    3. **Review fan-out (read-only, parallel).** Spawn FIVE `zensu:review-aspect` agents in ONE parallel batch (the single sanctioned parallel batch noted in the main-thread model above) — one per perspective: `conventions`, `bugs`, `architecture`, `tests`, `security`. Give each the same one-paragraph implementation summary + the changed-file list from step 2, and name its perspective in the prompt. They are strictly read-only and run NO build/test commands — the suite and build already ran in the Phase 6 audit above, so the aspects must not re-run them.
-    4. **Merge in-thread.** Collect the five `## Aspect:` findings lists, deduplicate (same `file:line` raised by multiple perspectives → keep the highest confidence), and sort CRITICAL → IMPORTANT → SUGGESTION → by file path. This is the synthesis the standalone reviewer used to perform in its own Phase 5; you now do it here.
-    5. **Thin consume-mode spawn (the single hook trigger).** Spawn ONE `zensu:code-reviewer` with the Agent tool (`subagent_type='zensu:code-reviewer'`). Its prompt MUST begin with the marker line `PRE-MERGED FINDINGS (fan-out)` followed by the merged findings from step 4 and the build/test/coverage status lines from the Phase 6 audit. It runs in consume mode — it skips its own Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from your pre-merged findings. Its single completion is what fires `post-review-tdd-delegate.sh`, so the round counter and the entire downstream chain behave exactly as before. Do NOT ask the user about review — running the fan-out IS the autonomous action.
+    2b. **Persona discovery (repo-local).** Pipe the step-2 list into `node {PLUGIN_ROOT}/hooks/lib/persona-activation.js "$(git rev-parse --show-toplevel)/.claude/agents"` — it decides which `.claude/agents/zensu-review-*.md` personas join (activation globs vs changed paths; no `activation:` field = always joins; cap 5, matched-before-always-join, each lexicographic). Empty output = no custom personas; a FAILING command (node missing, non-zero exit) is different — log `PERSONA DISCOVERY UNAVAILABLE — <reason>` and continue without customs. Append every `skip`/`drop` verdict to the run log humanized: `PERSONA SKIPPED — <name> (no activation match | malformed)` / `PERSONA DROPPED — <name> (over cap)` — no silent omission.
+    3. **Review fan-out (read-only, parallel).** Spawn ONE parallel batch (the single sanctioned parallel batch noted in the main-thread model above): FIVE `zensu:review-aspect` agents — one per perspective: `conventions`, `bugs`, `architecture`, `tests`, `security` — PLUS one agent per step-2b `spawn <name>` persona (Agent tool, `subagent_type=<name>`; its findings MUST carry the persona's uppercased `<NAME>-` ID prefix per the README persona contract). Give every batch member the same one-paragraph implementation summary + the changed-file list from step 2, and name its perspective (or persona) in the prompt. All are strictly read-only and run NO build/test commands — the suite and build already ran in the Phase 6 audit above. If a persona spawn fails because the subagent_type is not registered, log `PERSONA SKIPPED — <name> (not registered)` and continue the batch.
+    4. **Merge in-thread.** Collect the five `## Aspect:` findings lists plus every custom persona's list, deduplicate (same `file:line` raised by multiple perspectives → keep the highest confidence), and sort CRITICAL → IMPORTANT → SUGGESTION → by file path. This is the synthesis the standalone reviewer used to perform in its own Phase 5; you now do it here.
+    4b. **Judge second pass (config-gated).** Resolve the flag with the real merge semantics: `bash -c 'source {PLUGIN_ROOT}/hooks/lib/zensu-config.sh && zensu_hook_enabled reviewJudge && echo on || echo off'`. On `on` (the default), spawn ONE `zensu:review-judge` agent (Agent tool, `subagent_type='zensu:review-judge'`) with the changed-file list, the implementation summary, the plan baseline (the `## Requirements` table when the plan has one), the MERGED findings from step 4, and the build/test evidence. It re-reads the changed files fresh (read-only, no build/test) and returns `JUDGE-*` deltas covering the panel's blind spots (cross-cutting, requirement drift, missed edge cases, panel quality). Merge the deltas BEFORE fix routing: a `Panel-FP:`-prefixed meta-verdict neutralizes the finding it references — keep BOTH visible in the merged list, retitle the referenced finding `[Panel-FP-neutralized — do not fix]` and set it to SUGGESTION (a referenced CRITICAL is never dropped outright, only annotated + downgraded), and exempt neutralized items from fix routing in EVERY severity mode, including `autoFixIncludeSuggestions`; every other JUDGE finding joins the list normally. Flag disabled → skip straight to step 5.
+    5. **Thin consume-mode spawn (the single hook trigger).** Spawn ONE `zensu:code-reviewer` with the Agent tool (`subagent_type='zensu:code-reviewer'`). Its prompt MUST begin with the marker line `PRE-MERGED FINDINGS (fan-out)` followed by the merged findings from step 4 (including the step-4b judge deltas when the judge ran) and the build/test/coverage status lines from the Phase 6 audit. It runs in consume mode — it skips its own Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from your pre-merged findings. Its single completion is what fires `post-review-tdd-delegate.sh`, so the round counter and the entire downstream chain behave exactly as before. Do NOT ask the user about review — running the fan-out IS the autonomous action.
     - **`--chain-done` is the chain-terminus marker, now owned by the `/zensu:self-review` stage.** Run it yourself ONLY when (a) implementation produced ZERO file changes (every step blocked `[!]`) — then run it INSTEAD of spawning the reviewer and stop; or (b) `hooks.selfReview` is disabled and the reviewer returned PASS / suggestions-only. When self-review is enabled (the default), the reviewer convergence routes to `--code-review-done` + `/zensu:self-review`, which issues `--chain-done` itself. **NEVER** issue `--chain-done` in the same turn or batch as `--tdd-complete`, the reviewer spawn, a plan write, or the audit — landing it early releases the Stop gate before review and silently defeats the guarantee.
-    - The `post-review-tdd-delegate.sh` hook routes the reviewer's findings back to you. On Critical/Important findings: fix them in THIS thread under the same TDD discipline (re-enter Phase 4 cycles — the gate is still active), then re-run the review fan-out (steps 3-5 above: re-fan-out the five aspects, re-merge, re-spawn the thin consume-mode `zensu:code-reviewer`) to re-verify — one reviewer completion per round, so round-counter semantics are unchanged. On PASS / suggestions-only (and on `autoFixMaxRounds` convergence): run `--code-review-done`, then invoke the `/zensu:self-review` skill (Skill tool, `skill='zensu:self-review'`) — the terminal self-review stage. **The self-review stage owns `--chain-done`**: it re-reads this session's changes, takes at most one fix round (never re-running the reviewer), then runs `--chain-done` and renders the final CHAIN-END SUMMARY (with a `## Self-Review Summary` section). Do NOT run `--chain-done` or render the summary yourself when self-review is enabled (the default). The loop ends at PASS or `autoFixMaxRounds`, then self-review finalizes.
+    - The `post-review-tdd-delegate.sh` hook routes the reviewer's findings back to you. On Critical/Important findings: fix them in THIS thread under the same TDD discipline (re-enter Phase 4 cycles — the gate is still active), then re-run the review fan-out (steps 2b-5 above: re-run the persona helper, re-fan-out the five aspects plus matched personas, re-merge, re-run the step-4b judge when `hooks.reviewJudge` is enabled — never carry a prior round's `JUDGE-*` deltas forward — then re-spawn the thin consume-mode `zensu:code-reviewer`) to re-verify — one reviewer completion per round, so round-counter semantics are unchanged. On PASS / suggestions-only (and on `autoFixMaxRounds` convergence): run `--code-review-done`, then invoke the `/zensu:self-review` skill (Skill tool, `skill='zensu:self-review'`) — the terminal self-review stage. **The self-review stage owns `--chain-done`**: it re-reads this session's changes, takes at most one fix round (never re-running the reviewer), then runs `--chain-done` and renders the final CHAIN-END SUMMARY (with a `## Self-Review Summary` section). Do NOT run `--chain-done` or render the summary yourself when self-review is enabled (the default). The loop ends at PASS or `autoFixMaxRounds`, then self-review finalizes. After the chain closes, when the plan carries a `## Requirements` table, offer `/zensu:converge` as an optional flow-back audit next step (offer only — never run it unasked).

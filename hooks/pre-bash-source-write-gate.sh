@@ -34,16 +34,37 @@ command -v node >/dev/null 2>&1 || exit 0
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
 INPUT="$(cat 2>/dev/null || true)"
 
-# Process-env escapes.
-[ "${ZENSU_BASH_WRITE_GATE:-}" = "off" ] && exit 0
-[ "${ZENSU_MCP_GATE:-}" = "off" ] && exit 0
-
-[ -z "$INPUT" ] && exit 0
-
+# Config-disabled gate has no decision point — nothing to bypass, nothing to
+# ledger (kept ahead of the escape checks so all Bash gates share the order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled bashWriteGate || exit 0
 
-REASON="$(PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+# Bypass ledger: escapes stay free, but while a TDD session is active the
+# opt-out is recorded to chain state (fail-open, gate name only). Inline
+# escapes are reported by the parser itself (__bypass__ markers) — the ONE
+# code path that decides the bypass — so quoted spellings and mixed commands
+# are covered and mere textual mentions are not.
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+
+# Process-env escapes.
+[ "${ZENSU_BASH_WRITE_GATE:-}" = "off" ] && { tdd_record_bypass_payload "$INPUT" ZENSU_BASH_WRITE_GATE 2>/dev/null || true; exit 0; }
+[ "${ZENSU_MCP_GATE:-}" = "off" ] && { tdd_record_bypass_payload "$INPUT" ZENSU_MCP_GATE 2>/dev/null || true; exit 0; }
+
+[ -z "$INPUT" ] && exit 0
+
+REASON="$(BSWG_MODE= PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+case "$REASON" in
+  __bypass__*)
+    for gate in $(printf '%s\n' "$REASON" | awk -F'\t' '$1=="__bypass__"{print $2}'); do
+      case "$gate" in
+        ZENSU_BASH_WRITE_GATE|ZENSU_MCP_GATE)
+          tdd_record_bypass_payload "$INPUT" "$gate" 2>/dev/null || true
+          ;;
+      esac
+    done
+    exit 0
+    ;;
+esac
 [ -z "$REASON" ] && exit 0
 
 REASON="$REASON" node -e '

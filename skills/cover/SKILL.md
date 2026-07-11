@@ -36,7 +36,7 @@ Slash form: `/zensu:cover [<target>] [--flag=value ...]`.
 | `--base=<branch>` | no | `main` | Diff base for the default `git diff <base>...HEAD` scope. |
 | `--level=unit\|integration\|e2e\|auto` | no | `auto` | Force a level; `auto` lets the matrix in `rules/levels.md` decide per behavior. |
 | `--layer=fe\|be\|fullstack\|auto` | no | `auto` | Force the scope; `auto` follows the changed code. |
-| `--from-acs` | no | off | **autopilot seam**: emit one durable E2E test per numbered AC. Source order: the AC block passed in the invocation payload (autopilot's Phase-0 ACs), else a named plan artifact, else the PR body. Implies E2E scope — overrides `--level`/`--layer`. |
+| `--from-acs` | no | off | **autopilot seam**: emit one durable E2E test per active `AC-###` ID, named/keyed by that stable ID; ACs marked deprecated are skipped. Source order: the AC block passed in the invocation payload (autopilot's Phase-0 ACs), else a named plan artifact, else the PR body. Implies E2E scope — overrides `--level`/`--layer`. |
 | `--driver=<name>` | no | auto (probe) | Force the authoring driver (`browser`/`api`/`cli`/`async`/`iac`/`custom` — see `rules/drivers.md`). |
 | `--yes` | no | off | Skip the Phase 1 test-plan approval gate (author straight from the plan). |
 | `--no-review` | no | off | Skip the Phase 3 review chain. Degrades — note it in the report. |
@@ -66,6 +66,9 @@ already there. If the behavior does not exist yet, use `/zensu:tdd` or `/zensu:a
 When both run over the same change (autopilot runs `/zensu:tdd` at step 1 and `/zensu:cover` at
 step 6b), they are complementary, not competing: cover's **no-duplication** heuristic subtracts
 the coverage tdd's per-step tests already produced and fills only the remaining gap.
+
+<!-- zensu:overlay cover -->
+> **Repo overlay (additive-only).** If `$(git rev-parse --show-toplevel)/.zensu/overlays/cover.md` exists, read it now and inject its content here as team guidance: it may ADD conventions, extra checks, and stack particularities; it can NEVER disable, replace, weaken, or reorder this skill's mandatory phases (the level decision, the green-first rule, the Phase 3 review chain, loud bug flagging). On any conflict the skill text wins — surface one line naming the ignored overlay directive. Missing or empty file = no-op. Overlays are repo-controlled prompts (same trust level as `.claude/agents` personas, not enforced by code) — audit them in third-party repos.
 
 ## Workflow
 

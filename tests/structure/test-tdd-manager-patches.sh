@@ -6,6 +6,7 @@ set -u
 # This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
+TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 
 PASS=0; FAIL=0
 check() {
@@ -71,15 +72,15 @@ else
 fi
 
 # Patch 4 — Preconditions table in plan template
-if grep -qF '## Preconditions' "$AGENT"; then
+if grep -qxF '## Preconditions' "$TPL_PLAN" 2>/dev/null; then
   check "P4 Preconditions table heading in plan template" PASS
 else
   check "P4 Preconditions table heading in plan template" FAIL
 fi
-if grep -qF '| Name | Type | Verification | Status | Decision |' "$AGENT"; then
-  check "P4 Preconditions table columns" PASS
+if grep -qF '| Name | Type | Verification | Status | Decision |' "$TPL_PLAN" 2>/dev/null; then
+  check "P4 Preconditions table columns (plan template)" PASS
 else
-  check "P4 Preconditions table columns" FAIL
+  check "P4 Preconditions table columns (plan template)" FAIL
 fi
 
 # Patch 5 — Phase 4 per-step precondition gate
@@ -280,7 +281,7 @@ else
   check "X3 Phase 1 step 6 Cross-layer detection instruction" FAIL
 fi
 
-if grep -qF '## Cross-Layer Value Flow Pairings' "$AGENT"; then
+if grep -qxF '## Cross-Layer Value Flow Pairings' "$TPL_PLAN" 2>/dev/null; then
   check "X4 Phase 2 plan template Cross-Layer Value Flow Pairings table" PASS
 else
   check "X4 Phase 2 plan template Cross-Layer Value Flow Pairings table" FAIL
@@ -327,9 +328,9 @@ fi
 # Plan-doc single-source-of-truth — the Steps-table Status column tracks completion.
 # The plan template must carry ZERO GFM task-list checkboxes: nothing ever flipped them
 # to [x], so generated plans always rendered "open items" no matter how the run finished.
-CHECKBOX_COUNT=$(grep -cE '^- \[[ xX]\]' "$AGENT")
+CHECKBOX_COUNT=$(cat "$AGENT" "$TPL_PLAN" 2>/dev/null | grep -cE '^- \[[ xX]\]')
 if [ "$CHECKBOX_COUNT" -eq 0 ]; then
-  check "PB1 plan template has zero GFM checkboxes (Status column is the only completion tracker)" PASS
+  check "PB1 skill + plan template have zero GFM checkboxes (Status column is the only completion tracker)" PASS
 else
   check "PB1 expected 0 GFM checkboxes in plan template; found $CHECKBOX_COUNT" FAIL
 fi

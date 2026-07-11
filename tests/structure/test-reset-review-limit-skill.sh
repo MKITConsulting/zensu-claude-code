@@ -115,10 +115,10 @@ else
   check "R12 README.md version badge contains $EXPECTED_VERSION" FAIL
 fi
 
-if [ -f "$README_MD" ] && grep -qF "### Skills (12)" "$README_MD"; then
-  check "R13 README.md Skills section heading reads '### Skills (12)'" PASS
+if [ -f "$README_MD" ] && grep -qE '^### Skills \([0-9]+\)$' "$README_MD"; then
+  check "R13 README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" PASS
 else
-  check "R13 README.md Skills section heading reads '### Skills (12)'" FAIL
+  check "R13 README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" FAIL
 fi
 
 if [ -f "$README_MD" ] && grep -qF "/zensu:reset-review-limit" "$README_MD"; then

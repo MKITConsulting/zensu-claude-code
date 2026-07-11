@@ -36,7 +36,6 @@ set -u
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled chainEnforcer || exit 0
 
-if [ "${ZENSU_CHAIN:-}" = "off" ]; then exit 0; fi
 command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat)"
@@ -63,6 +62,13 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
+
+# Bypass ledger: the escape stays free, but while a TDD session is active the
+# opt-out is recorded to chain state so the chain-end summary can surface it.
+if [ "${ZENSU_CHAIN:-}" = "off" ]; then
+  tdd_record_bypass "$SESSION_ID" ZENSU_CHAIN 2>/dev/null || true
+  exit 0
+fi
 
 # Not active: either stop normally, or adopt a pending-review marker as a
 # review-only chain for THIS interactive session (deferred review fallback).
@@ -119,7 +125,7 @@ CODE_REVIEW_DONE="$(tdd_code_review_done "$STATE_FILE")"
 if zensu_hook_enabled selfReview && [ "$CODE_REVIEW_DONE" = "true" ]; then
   REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the chain terminus (it runs 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done'). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run --chain-done yourself — let /zensu:self-review finalize the chain."
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Your VERY NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer', passing as the prompt a one-paragraph summary of what was implemented/fixed PLUS the list of changed files (use 'git diff --name-only HEAD' to enumerate). Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' and then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt begins with the marker line 'PRE-MERGED FINDINGS (fan-out)' followed by the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' and then stop."
 fi
 
 node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"

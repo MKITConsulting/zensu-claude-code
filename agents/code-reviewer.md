@@ -28,7 +28,7 @@ TOOL RULES:
 
 ## Fan-out Consume Mode (check this FIRST)
 
-If your spawn prompt contains the marker `PRE-MERGED FINDINGS (fan-out)`, you were spawned by the `/zensu:tdd` review chain only to surface findings that five parallel `zensu:review-aspect` agents already produced and the main thread already merged (deduped + sorted by severity). In that case do NOT run the standalone review below:
+If your spawn prompt contains the marker `PRE-MERGED FINDINGS (fan-out)`, you were spawned by the `/zensu:tdd` review chain only to surface findings that five parallel `zensu:review-aspect` agents already produced and the main thread already merged (deduped + sorted by severity) — optionally extended by `JUDGE-*` deltas from the `zensu:review-judge` second pass (when `hooks.reviewJudge` is enabled; `Panel-FP:`-neutralized items arrive annotated `[Panel-FP-neutralized — do not fix]` and stay excluded from fix routing). When `JUDGE-*` findings are present, append "+ judge second pass" to your report's Perspectives line. In that case do NOT run the standalone review below:
 
 - **SKIP Phases 1-4 entirely** — do NOT re-read the changed files, do NOT run Phase 3 Build Verification, do NOT run Phase 4 Test Reproduce. The five read-only aspect reviewers already covered every perspective, and the suite + build already ran once in the `/zensu:tdd` Phase 6 audit. Running them again here would re-execute the suite for no reason.
 - Read the build / test / coverage status from the status lines the main thread carries in your spawn prompt (it passes them from the Phase 6 audit) — never execute build or test commands in consume mode. You are a fresh subagent and cannot resolve the session id, so do not try to read the witness log yourself.

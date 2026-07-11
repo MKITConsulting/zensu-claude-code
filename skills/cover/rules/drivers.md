@@ -31,14 +31,16 @@ observes the behavior faithfully.
 ## `--from-acs` — the autopilot seam
 
 When invoked as `/zensu:cover --from-acs` (from `/zensu:autopilot --cover`), emit **one durable
-end-to-end test per numbered acceptance criterion**. Resolve the ACs in this order: (1) the AC
-block handed in as the invocation payload — autopilot passes the same numbered ACs it authored
-in its Phase-0 planning; (2) a named plan artifact (e.g. a `.zensu/plans/*.md` file) when one is
-given; (3) the PR body's per-AC table. autopilot invokes cover at its Phase 1 step 6b, so it
-supplies the ACs via (1) — it does not depend on the PR body being finalized first. For each:
+end-to-end test per active `AC-###` ID** — ACs marked deprecated are skipped (their rows stay in
+the source table per the never-recycle rule). Resolve the ACs in this order: (1) the AC
+block handed in as the invocation payload — autopilot passes the same `AC-###`-keyed ACs it
+authored in its Phase-0 planning; (2) a named plan artifact (e.g. a `.zensu/plans/*.md` file)
+when one is given; (3) the PR body's per-AC table. autopilot invokes cover at its Phase 1 step
+6b, so it supplies the ACs via (1) — it does not depend on the PR body being finalized first.
+For each:
 
-- Each numbered AC → one test case, named for the AC, driven by the same driver autopilot used
-  to validate it live.
+- Each active `AC-###` ID → one test case, named/keyed by that stable ID, driven by the same
+  driver autopilot used to validate it live.
 - The AC's *exercise* step becomes the test's actions; its *observe* step becomes the test's
   assertions — the throwaway live check is transcribed into a permanent one.
 - Authenticated flows load the session from autopilot's credential-blind login-script artifact

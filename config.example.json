@@ -12,7 +12,11 @@
     "sessionBanner": true,
     "intentRouter": true,
     "tddReminder": true,
-    "mcpGate": true
+    "mcpGate": true,
+    "bashWriteGate": true,
+    "secretScan": true,
+    "reviewJudge": true,
+    "pendingReviewTtlHours": 6
   },
   "context": {
     "compactionNudge": true,

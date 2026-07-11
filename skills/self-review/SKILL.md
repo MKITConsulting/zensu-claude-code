@@ -120,7 +120,8 @@ In plain words: the feature, bug, or need this session addressed — why the wor
 Numbered deliverables. For each: what it does in plain words, its status (done /
 merged / built-tested), and a PR link if one exists. Carry the audit facts: feature
 title, files modified, tests created, build status, coverage status. Cite the plan
-+ log paths.
++ log paths. When the session plan carries a ## Requirements table, also give
+per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).
 
 ## How I built it
 The TDD discipline followed, then the final zensu:code-reviewer verdict (PASS /
@@ -138,7 +139,11 @@ changed (if any), and any advisory findings buffered (not fixed). State whether 
 
 ## Open
 What is left: any deferred suggestions or max-rounds findings requiring manual fix,
-plus the next step. If nothing is open, say so in one line.
+plus the next step. If nothing is open, say so in one line. Close the section with
+the bypass-ledger audit line: run
+`bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --bypass-list` and render its output as
+`Gates bypassed during this session: <output>` (the verb echoes `none` when the
+ledger is empty).
 
 ## TL;DR
 Exactly ONE sentence, and it is the last section: what shipped and the test verdict.

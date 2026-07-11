@@ -12,13 +12,16 @@
   "agents": [
     "./agents/zensu-plm.md",
     "./agents/code-reviewer.md",
-    "./agents/review-aspect.md"
+    "./agents/review-aspect.md",
+    "./agents/review-judge.md"
   ],
   "skills": [
     "./skills/autopilot",
     "./skills/bootstrap",
+    "./skills/converge",
     "./skills/cover",
     "./skills/docs",
+    "./skills/doctor",
     "./skills/ghost-scan",
     "./skills/implement",
     "./skills/plan-review",

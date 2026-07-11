@@ -54,3 +54,5 @@ bash tests/e2e-skills/run.sh --offline
   spawn is flaky, capture once with a live run and re-validate with `--offline`.
 - No CI yet; this suite is local-only and opt-in (API cost). The repo-wide
   `tests/run-all.sh` only invokes it under `--live`.
+| review-judge | `zensu:review-judge` agent | `.agent` spawn | fresh-read second pass: neutralizes a planted false-positive panel finding via `Panel-FP:` |
+| converge | `/zensu:converge` skill | `/slash` prompt | classifies plan-vs-code gaps (AC-002 missing) + flow-back proposal for the unrequested MAX_PRICE rule, report-only |

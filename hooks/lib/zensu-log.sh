@@ -90,6 +90,51 @@ case "${1:-}" in
     fi
     exit 0
     ;;
+  --bypass-note)
+    gate_val=""
+    session_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --bypass-note) gate_val="${2:-}";    shift 2 || break ;;
+        --session)     session_val="${2:-}"; shift 2 || break ;;
+        *) shift ;;
+      esac
+    done
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    if ! _tdd_bypass_shape_ok "$gate_val"; then
+      echo "zensu-log.sh --bypass-note requires a known gate name (one of: $ZENSU_BYPASS_GATE_ALLOWLIST)" >&2
+      exit 2
+    fi
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --bypass-note $gate_val}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    tdd_record_bypass "$session_val" "$gate_val"
+    exit $?
+    ;;
+  --bypass-list)
+    session_val=""
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --session) session_val="${2:-}"; shift 2 || break ;;
+        *) shift ;;
+      esac
+    done
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --bypass-list}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    bypass_list="$(tdd_bypasses "$(tdd_state_file "$session_val")")"
+    if [ -n "$bypass_list" ]; then
+      echo "$bypass_list"
+    else
+      echo "none"
+    fi
+    exit 0
+    ;;
   --pending-review|--pending-review-done)
     verb="$1"
     files_val=""
@@ -147,6 +192,10 @@ case "${1:-}" in
         else
           echo "zensu-log --tdd-begin: active flag write failed — session NOT activated" >&2
         fi
+        outgoing_bypasses="$(tdd_bypasses "$(tdd_state_file "$session_val")" 2>/dev/null)"
+        [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
+        tdd_clear_bypasses "$session_val" 2>/dev/null || \
+          echo "zensu-log --tdd-begin: bypass-ledger reset failed — prior entries may persist" >&2
         rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
         rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
         if [ -L "$rounds_counter_file" ]; then
@@ -156,17 +205,28 @@ case "${1:-}" in
         else
           rm -f -- "$rounds_counter_file"
         fi
+        stopblocks_file="$(tdd_state_file "$session_val").stopblocks"
+        if [ -L "$stopblocks_file" ]; then
+          echo "zensu-log --tdd-begin: refusing to delete through symlink at $stopblocks_file — stop-block budget NOT reset" >&2
+        else
+          rm -f -- "$stopblocks_file"
+        fi
         exit "$tdd_begin_rc"
         ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
-      --chain-done)   tdd_set_flag "$session_val" chainDone true ;;
+      --chain-done)
+        tdd_set_flag "$session_val" chainDone true
+        exit $?
+        ;;
       --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
       --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
       --workflow-begin)
         tdd_workflow_begin "$session_val" "$tools_val"
         ;;
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
-      --tdd-reset)    tdd_clear_session "$session_val" ;;
+      --tdd-reset)
+        tdd_clear_session "$session_val"
+        ;;
     esac
     exit $?
     ;;
