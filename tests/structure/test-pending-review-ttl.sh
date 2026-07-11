@@ -46,10 +46,16 @@ printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER
   && check "U3 ttl=0 disables staleness (old marker not stale)" PASS \
   || check "U3 ttl=0 disable" FAIL
 
+# no-ts marker: staleness falls back to the file mtime (a cosmetic
+# logging.timestampStyle:"none" omits ts, but the TTL guard must still apply).
 printf '%s\n' '{"files":["x.ts"],"summary":"nots"}' > "$MARKER"
 [ "$(stale 6)" = "false" ] \
-  && check "U4 marker without ts -> not stale (cannot expire, fail-safe adopt)" PASS \
-  || check "U4 no-ts not stale" FAIL
+  && check "U4 no-ts marker, fresh mtime -> not stale (mtime fallback treats it as recent)" PASS \
+  || check "U4 no-ts fresh-mtime not stale" FAIL
+touch -t 202001010000 "$MARKER" 2>/dev/null
+[ "$(stale 6)" = "true" ] \
+  && check "U5 no-ts marker, old mtime -> stale (mtime fallback; TTL not silently disabled)" PASS \
+  || check "U5 no-ts old-mtime stale" FAIL
 rm -f "$MARKER"
 
 # --- Integration via stop-chain-enforcer ---
@@ -79,6 +85,18 @@ OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STO
 [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
   && check "I3 ttl=0 disables guard -> stale marker still adopts (block)" PASS \
   || check "I3 ttl=0 still adopts (dec=$(printf '%s' "$OUT" | decision))" FAIL
+rm -f "$MARKER"
+
+# no-ts marker (as timestampStyle:"none" writes) with an OLD file mtime -> NOT
+# adopted, so an abandoned marker from a crashed run cannot hijack a later
+# session even when ts is absent. This is the end-to-end shape of the TTL bug.
+SID4="ttl-nots-old"
+printf '%s\n' '{"files":["x.ts"],"summary":"nots-old"}' > "$MARKER"
+touch -t 202001010000 "$MARKER" 2>/dev/null
+OUT="$(printf '{"session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"; RC=$?
+{ [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ ! -f "$MARKER" ]; } \
+  && check "I4 no-ts + old mtime -> NOT adopted (allow, clean exit) + marker cleared" PASS \
+  || check "I4 no-ts old-mtime not adopted (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
 rm -f "$MARKER"
 
 echo "----"
