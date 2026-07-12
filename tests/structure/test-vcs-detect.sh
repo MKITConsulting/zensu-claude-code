@@ -160,6 +160,28 @@ expect "D20 unknown real-auth empty cli" "$O" cliState missing
 expect "D20 unknown real-auth empty cli" "$O" cliReady false
 rm -rf "$MC"
 
+# D21/D22 — ZENSU_VCS_NO_PROBE=1 must make _zensu_vcs_probe skip curl and fall to
+# the marker/unknown tiebreak (the offline mode /zensu:doctor relies on). A
+# sentinel `curl` on PATH proves no outbound probe fires; TEST=1 + FAKE_AUTH keep
+# auth deterministic WITHOUT stubbing the probe (no ZENSU_VCS_PROBE_RESULT set),
+# so execution actually reaches the NO_PROBE branch.
+NP="$(mktemp -d -t vcsdetect-noprobe-XXXXXX)"; mkdir -p "$NP/bin"
+CURL_HIT="$NP/curl-was-called"
+printf '#!/bin/sh\ntouch "%s"\nexit 1\n' "$CURL_HIT" > "$NP/bin/curl"; chmod +x "$NP/bin/curl"
+noprobe() {
+  env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$NP/bin:$PATH" \
+      ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_NO_PROBE=1 \
+      ZENSU_VCS_REMOTE='git@git.corp.io:g/p.git' bash "$LIB" --detect --repo "$1" 2>/dev/null
+}
+O="$(noprobe "$NP")"
+expect "D21 NO_PROBE self-hosted no-marker -> unknown (offline)" "$O" provider unknown
+[ ! -f "$CURL_HIT" ] && check "D21 NO_PROBE fired no curl" PASS || check "D21 NO_PROBE fired no curl (curl WAS called)" FAIL
+: > "$NP/.gitlab-ci.yml"
+O="$(noprobe "$NP")"
+expect "D22 NO_PROBE falls to CI-marker tiebreak gitlab" "$O" provider gitlab
+[ ! -f "$CURL_HIT" ] && check "D22 NO_PROBE (marker path) fired no curl" PASS || check "D22 NO_PROBE (marker path) fired no curl" FAIL
+rm -rf "$NP"
+
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

@@ -101,7 +101,7 @@ run_report() {
   local pd="$1" cfg="$2" sd="$3"
   local cfgenv=""
   [ "$cfg" != "-" ] && cfgenv="$cfg"
-  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_GH=absent ZDOC_PLAYWRIGHT=absent \
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$pd" ZENSU_CONFIG="$cfgenv" TDD_STATE_DIR="$sd" \
     node "$REPORT" 2>/dev/null
 }
@@ -119,7 +119,7 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
@@ -212,7 +212,7 @@ OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
 case "$OUT" in *'hooks.json: invalid JSON'*) check "P1x hooks.json invalid ❌" PASS ;; *) check "P1x hooks.json invalid ❌ (got: $OUT)" FAIL ;; esac
 
 # --- config-absent (defaults apply) ---------------------------------------
-OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_GH=absent ZDOC_PLAYWRIGHT=absent \
+OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" HOME="$SBOX/nohome" CLAUDE_PROJECT_DIR="$SBOX/noproj" TDD_STATE_DIR="$SBOX/empty-st" \
   node "$REPORT" 2>/dev/null)"
 case "$OUT" in *'no config file present'*) check "P1y config-absent falls back to defaults ✅" PASS ;; *) check "P1y config-absent (got: $OUT)" FAIL ;; esac
@@ -228,10 +228,10 @@ case "$OUT" in *'__proto__'*) check "P1aa __proto__ key not reported (pollution 
 # (!= 6) keeps it fresh — proving ZDOC_TTL_HOURS is the value that is honored.
 mkdir -p "$SBOX/ttl-st"; : > "$SBOX/ttl-st/pending-review.json"
 touch -t 202601010000 "$SBOX/ttl-st/pending-review.json" 2>/dev/null
-FAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_GH=absent ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=8760 ZDOC_NOW_MS=1780000000000 \
+FAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=8760 ZDOC_NOW_MS=1780000000000 \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/ttl-st" node "$REPORT" 2>/dev/null)"
 case "$FAR" in *'within its 8760h TTL'*) check "P1ab TTL honored from ZDOC_TTL_HOURS (injected 8760 != default 6)" PASS ;; *) check "P1ab TTL honored (got: $FAR)" FAIL ;; esac
-NEAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_GH=absent ZDOC_PLAYWRIGHT=absent ZDOC_NOW_MS=1780000000000 \
+NEAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_NOW_MS=1780000000000 \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/ttl-st" node "$REPORT" 2>/dev/null)"
 case "$NEAR" in *'(TTL 6h) — expired'*) check "P1ac default TTL 6h (getter default) marks the same marker expired" PASS ;; *) check "P1ac default TTL 6h expired (got: $NEAR)" FAIL ;; esac
 
@@ -243,6 +243,87 @@ if grep -qF 'zensu_pending_review_ttl_hours' "$HELPER" && grep -qF 'zensu-config
 else
   check "P2i wrapper resolves the TTL through the canonical getter" FAIL
 fi
+
+# --- forge CLI: provider-aware (gh for GitHub, glab for GitLab) -------------
+# The code-forge line is driven by the VCS driver's --detect output (ZDOC_FORGE_*),
+# NOT a hard-coded gh probe — so a GitLab checkout is told about glab and never
+# falsely warned that gh is missing.
+forge_report() { # forge_report <provider> <cli> <state> [edition]
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_PLAYWRIGHT=absent \
+  ZDOC_FORGE_PROVIDER="$1" ZDOC_FORGE_CLI="$2" ZDOC_FORGE_STATE="$3" ZDOC_FORGE_EDITION="${4:-cloud}" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+    node "$REPORT" 2>/dev/null
+}
+case "$(forge_report github gh ready)" in
+  *'GitHub CLI (gh): installed and authenticated'*) check "P3a github+ready -> ✅ gh authenticated" PASS ;;
+  *) check "P3a github+ready ✅ gh" FAIL ;;
+esac
+case "$(forge_report github gh unauthed)" in
+  *'GitHub CLI (gh): installed but not authenticated'*'gh auth login'*) check "P3a2 github+unauthed -> ⚠️ gh auth login" PASS ;;
+  *) check "P3a2 github+unauthed ⚠️" FAIL ;;
+esac
+case "$(forge_report github gh missing)" in
+  *'GitHub CLI (gh): not found on PATH'*unavailable*) check "P3a3 github+missing -> ⚠️ gh not found, PR unavailable" PASS ;;
+  *) check "P3a3 github+missing ⚠️" FAIL ;;
+esac
+case "$(forge_report github gh ready enterprise)" in
+  *'GitHub (enterprise) CLI (gh): installed and authenticated'*) check "P3a4 github enterprise edition surfaced" PASS ;;
+  *) check "P3a4 github enterprise edition" FAIL ;;
+esac
+case "$(forge_report gitlab glab ready)" in
+  *'GitLab CLI (glab): installed and authenticated'*) check "P3b gitlab+ready -> ✅ glab authenticated" PASS ;;
+  *) check "P3b gitlab+ready ✅ glab" FAIL ;;
+esac
+case "$(forge_report gitlab glab unauthed)" in
+  *'GitLab CLI (glab): installed but not authenticated'*'glab auth login'*) check "P3c gitlab+unauthed -> ⚠️ glab auth login" PASS ;;
+  *) check "P3c gitlab+unauthed ⚠️" FAIL ;;
+esac
+case "$(forge_report gitlab glab missing)" in
+  *'GitLab CLI (glab): not found on PATH'*unavailable*) check "P3d gitlab+missing -> ⚠️ glab not found, PR unavailable" PASS ;;
+  *) check "P3d gitlab+missing ⚠️" FAIL ;;
+esac
+case "$(forge_report unknown '' missing)" in
+  *'no GitHub/GitLab remote detected'*) check "P3e unknown provider -> ⚠️ neutral (no false gh scare)" PASS ;;
+  *) check "P3e unknown provider ⚠️ neutral" FAIL ;;
+esac
+case "$(forge_report gitlab glab ready selfhosted)" in
+  *'GitLab (selfhosted) CLI (glab): installed and authenticated'*) check "P3f gitlab self-hosted edition surfaced" PASS ;;
+  *) check "P3f gitlab self-hosted edition" FAIL ;;
+esac
+# defensive: provider known but CLI name empty must take the neutral branch,
+# never render a bare "CLI ():" with empty parens (the !fc guard in report.js).
+GH_EMPTY="$(forge_report github '' ready)"
+case "$GH_EMPTY" in
+  *'CLI (): '*) check "P3g empty CLI name never renders 'CLI ():'" FAIL ;;
+  *'no GitHub/GitLab remote detected'*) check "P3g provider+empty-cli -> neutral (defensive !fc guard)" PASS ;;
+  *) check "P3g provider+empty-cli neutral (got: $GH_EMPTY)" FAIL ;;
+esac
+
+# wrapper end-to-end: it must resolve the provider from the git remote through the
+# driver's PUBLIC --detect seam, then render the matching CLI line — proving
+# doctor.sh is wired to the driver, not still probing gh. ZENSU_VCS_* fakes drive
+# detect; ambient ZDOC_FORGE_* are cleared so the guard cannot skip detection.
+if grep -qF 'zensu-vcs.sh' "$HELPER" && grep -qF -- '--detect' "$HELPER"; then
+  check "P2j wrapper resolves the forge through the driver's public --detect seam" PASS
+else
+  check "P2j wrapper resolves the forge through the driver's public --detect seam" FAIL
+fi
+GL="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
+  ZENSU_VCS_REMOTE='git@gitlab.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
+  bash "$HELPER" 2>/dev/null)"
+case "$GL" in *'GitLab CLI (glab): installed and authenticated'*) check "P2k wrapper detects a gitlab remote -> GitLab glab line" PASS ;; *) check "P2k wrapper gitlab detect (got: $GL)" FAIL ;; esac
+case "$GL" in *GitHub*) check "P2k gitlab repo NOT warned about GitHub/gh (the false scare this feature removes)" FAIL ;; *) check "P2k gitlab repo NOT warned about GitHub/gh" PASS ;; esac
+GHUB="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
+  ZENSU_VCS_REMOTE='git@github.com:acme/app.git' ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
+  bash "$HELPER" 2>/dev/null)"
+case "$GHUB" in *'GitHub CLI (gh): installed and authenticated'*) check "P2l wrapper detects a github remote -> GitHub gh line" PASS ;; *) check "P2l wrapper github detect (got: $GHUB)" FAIL ;; esac
+UNK="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE= \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" \
+  ZENSU_VCS_REMOTE= ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
+  bash "$HELPER" 2>/dev/null)"
+case "$UNK" in *'no GitHub/GitLab remote detected'*) check "P2m wrapper no-remote -> neutral hint (real driver, offline)" PASS ;; *) check "P2m wrapper no-remote neutral (got: $UNK)" FAIL ;; esac
 
 rm -rf "$SBOX"
 echo "----"
