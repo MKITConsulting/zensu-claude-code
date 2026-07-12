@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-07-12
+
+### Added
+
+- **vcs**: Wire autopilot to VCS driver for GitHub + GitLab (phase 4)
+- **vcs**: Wire pr-team-review to VCS driver for GitHub + GitLab (phase 3)
+- **vcs**: Wire pr-fix-findings to VCS driver for GitHub + GitLab (phase 2)
+- **vcs**: Add forge-detection helper (VCS driver phase 1)
+
 ## [0.14.0] - 2026-07-11
 
 ### Added
