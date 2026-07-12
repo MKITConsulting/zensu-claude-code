@@ -74,8 +74,39 @@ nothas "A10b resolve github no-reply -> no /replies" "$GHRN" "/replies"
 GHRF="$(argv --resolve-thread --provider github --repo-id acme/widget --reply x 42 RT_1)"
 has    "A11 resolve github reply_to defaults to threadId" "$GHRF" "comments/RT_1/replies"
 
+# ---- open-pr (autopilot; hermetic, no gh/glab execution) ----
+OPBF="$(mktemp)"; printf 'PR body content\n' > "$OPBF"
+GHOP="$(argv --open-pr --provider github --base main --head feat --title 'My PR' --body-file "$OPBF")"
+eq     "O1 open-pr github argv"              "$GHOP" "gh pr create --title My PR --body-file $OPBF --base main --head feat"
+nothas "O1b open-pr github not glab"         "$GHOP" "glab"
+
+GLOP="$(argv --open-pr --provider gitlab --base main --head feat --title 'My PR' --body-file "$OPBF")"
+eq     "O2 open-pr gitlab argv"              "$GLOP" "glab mr create --title My PR --description PR body content --source-branch feat --target-branch main --yes"
+has    "O2a open-pr gitlab -> glab mr create" "$GLOP" "glab mr create"
+has    "O2b open-pr gitlab description inline (body content)" "$GLOP" "--description PR body content"
+has    "O2c open-pr gitlab head->source-branch"   "$GLOP" "--source-branch feat"
+has    "O2d open-pr gitlab base->target-branch"   "$GLOP" "--target-branch main"
+has    "O2e open-pr gitlab non-interactive --yes" "$GLOP" "--yes"
+nothas "O2f open-pr gitlab not gh pr create"      "$GLOP" "gh pr create"
+
+fails "O3 open-pr requires --provider"   --open-pr --base main --head feat --title T --body-file "$OPBF"
+fails "O4 open-pr unknown provider"      --open-pr --provider bogus --base main --head feat --title T --body-file "$OPBF"
+fails "O5 open-pr requires --base"       --open-pr --provider github --head feat --title T --body-file "$OPBF"
+fails "O6 open-pr requires --head"       --open-pr --provider github --base main --title T --body-file "$OPBF"
+fails "O7 open-pr requires --body-file"  --open-pr --provider github --base main --head feat --title T
+fails "O8 open-pr requires --title"      --open-pr --provider github --base main --head feat --body-file "$OPBF"
+rm -f "$OPBF"
+
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
+
+# ---- open-pr URL normalizer (_zensu_vcs_extract_url; pure fn, the --open-pr return value) ----
+eq "U1 extract github pull url"     "$(printf 'https://github.com/acme/widget/pull/42\n' | _zensu_vcs_extract_url)" "https://github.com/acme/widget/pull/42"
+eq "U2 extract gitlab mr url"       "$(printf 'https://gitlab.com/grp/proj/-/merge_requests/7\n' | _zensu_vcs_extract_url)" "https://gitlab.com/grp/proj/-/merge_requests/7"
+eq "U3 extract prefers PR url over preceding non-PR url" "$(printf 'Run: https://github.com/acme/widget/actions/runs/9\nhttps://github.com/acme/widget/pull/42\n' | _zensu_vcs_extract_url)" "https://github.com/acme/widget/pull/42"
+eq "U4 extract https fallback (no PR url)" "$(printf 'created: https://example.test/x/y\n' | _zensu_vcs_extract_url)" "https://example.test/x/y"
+eq "U5 extract strips control/ANSI bytes"  "$(printf 'https://github.com/acme/widget/pull/9%b[0m\n' '\033' | _zensu_vcs_extract_url)" "https://github.com/acme/widget/pull/9[0m"
+eq "U6 extract empty on no url"     "$(printf 'no url here\n' | _zensu_vcs_extract_url)" ""
 
 GH_THREADS='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_1","isResolved":false,"comments":{"nodes":[{"databaseId":111,"body":"fix this","path":"a.js","line":10,"author":{"login":"alice"}}]}},{"id":"RT_2","isResolved":true,"comments":{"nodes":[{"databaseId":222,"body":"done","path":"b.js","line":5,"author":{"login":"bob"}}]}}]}}}}}'
 N1="$(printf '%s' "$GH_THREADS" | _zensu_vcs_normalize_threads github)"

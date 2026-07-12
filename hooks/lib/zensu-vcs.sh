@@ -669,7 +669,51 @@ _zensu_vcs_post_review_gitlab() {
   return 0
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_post_review _zensu_vcs_post_review_gitlab 2>/dev/null || true
+_zensu_vcs_extract_url() {
+  command -v node >/dev/null 2>&1 || { grep -oE 'https?://[^[:space:]]+/(pull|merge_requests)/[0-9]+[^[:space:]]*' | head -n1 | tr -d '[:cntrl:]'; return 0; }
+  node -e 'var s="";process.stdin.on("data",function(d){s+=d;});process.stdin.on("end",function(){var m=s.match(/https?:\/\/[^\s]*\/(?:pull|merge_requests)\/[0-9]+[^\s]*/);if(!m){m=s.match(/https?:\/\/[^\s]+/);}var u=m?m[0]:"",o="";for(var z=0;z<u.length;z++){var cc=u.charCodeAt(z);if(cc>=32&&cc!==127){o+=u[z];}}process.stdout.write(o);});'
+}
+
+_zensu_vcs_open_pr() {
+  local provider="" base="" head="" title="" bodyfile=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider)  provider="${2:-}"; shift ;;
+      --base)      base="${2:-}"; shift ;;
+      --head)      head="${2:-}"; shift ;;
+      --title)     title="${2:-}"; shift ;;
+      --body-file) bodyfile="${2:-}"; shift ;;
+      --*) ;;
+      *) ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  [ -n "$base" ] || return 1
+  [ -n "$head" ] || return 1
+  [ -n "$title" ] || return 1
+  [ -n "$bodyfile" ] || return 1
+  local argv
+  case "$provider" in
+    github)
+      argv=(gh pr create --title "$title" --body-file "$bodyfile" --base "$base" --head "$head")
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+      [ -f "$bodyfile" ] || return 1 ;;
+    gitlab)
+      if ! _zensu_vcs_dry; then [ -f "$bodyfile" ] || return 1; fi
+      local body=""
+      [ -f "$bodyfile" ] && body="$(cat "$bodyfile")"
+      argv=(glab mr create --title "$title" --description "$body" --source-branch "$head" --target-branch "$base" --yes)
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi ;;
+    *) return 1 ;;
+  esac
+  local out rc
+  out="$("${argv[@]}" 2>&1)"; rc=$?
+  [ "$rc" -eq 0 ] || { printf '%s' "$out" >&2; return "$rc"; }
+  printf '%s' "$out" | _zensu_vcs_extract_url
+}
+
+export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
@@ -682,6 +726,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     --fetch-pr-ref)   shift; _zensu_vcs_fetch_pr_ref "$@" ;;
     --diff-refs)      shift; _zensu_vcs_diff_refs "$@" ;;
     --post-review)    shift; _zensu_vcs_post_review "$@" ;;
-    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--post-review [--provider github|gitlab] [--repo-id R] [--reply TEXT] [--diff-refs-json JSON] [args]\n' >&2; exit 2 ;;
+    --open-pr)        shift; _zensu_vcs_open_pr "$@" ;;
+    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--post-review|--open-pr [--provider github|gitlab] [--repo-id R] [--reply TEXT] [--diff-refs-json JSON] [--base B] [--head H] [--title T] [--body-file F] [args]\n' >&2; exit 2 ;;
   esac
 fi

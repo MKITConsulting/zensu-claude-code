@@ -1,8 +1,8 @@
 ---
 name: autopilot
 description: >
-  [Zensu] Take a feature from a plain-language idea to a ready, validated GitHub pull
-  request — autonomously. One interactive planning gate (spec + acceptance
+  [Zensu] Take a feature from a plain-language idea to a ready, validated GitHub or GitLab
+  pull/merge request — autonomously. One interactive planning gate (spec + acceptance
   criteria), then a fully unattended build: implement via the Zensu workflow
   (vanilla `/zensu:tdd` + review chain), open the PR, run `/zensu:pr-team-review`
   once, fix every finding with `/zensu:pr-fix-findings`, then validate the running
@@ -44,7 +44,9 @@ If `<feature>` is missing, ask via `AskUserQuestion` in Phase 0 (the one place a
 
 - A git repository. The skill works **in a worktree only** — if the session is on the
   origin checkout it creates one first (see Critical Conventions).
-- `gh` CLI authenticated (`gh auth status`) for opening the PR + the review steps.
+- The detected forge's CLI authenticated — `gh` (GitHub, `gh auth status`) **or** `glab`
+  (GitLab, `glab auth status`) — for opening the PR/MR + the review steps. The driver's
+  `--detect` (Step 0 + Phase 0.B) resolves which forge and whether its CLI is ready.
 - The sibling Zensu skills are present (same plugin): `/zensu:tdd`,
   `/zensu:pr-team-review`, `/zensu:pr-fix-findings` (and `/zensu:cover`, invoked at Phase 1
   step 6b when `--cover` is set).
@@ -60,6 +62,22 @@ report; only a true stop-the-world blocker (no scriptable login AND auth is requ
 AC that is impossible as written, a missing toolchain with no degradation) may halt — and
 then it halts and reports rather than guessing on anything irreversible.
 
+## Step 0 — Resolve the VCS driver
+
+Every git-host call — opening the PR/MR and the pre-push state guard — goes through the driver
+so the forge (GitHub or GitLab) is detected once and each op degrades correctly.
+
+```bash
+ROOT="$(cat ~/.zensu/plugin-root)"   # empty → ABORT (FATAL): start a fresh session so the
+                                     # SessionStart hook re-writes the plugin-root path.
+VCS="$ROOT/hooks/lib/zensu-vcs.sh"
+```
+
+Forge **detection is repo-scoped**, so it runs inside Phase 0.B once the worktree/repo root is
+resolved (`bash "$VCS" --detect --repo "$REPO"`) — not here. Carry `PROVIDER` and `CLIREADY`
+from that detect forward to the PR-open (Phase 1 step 3) and the pre-push guard. (`--detect`
+also emits `repo=`, but autopilot's own driver ops are cwd-inferred, so it needs no repo-id.)
+
 ## Workflow
 
 Three phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has a live
@@ -71,6 +89,20 @@ progress view.
 worktree under `.claude/worktrees/`), create one and continue inside it
 (`git worktree add .claude/worktrees/<slug> -b <branch> <base>`). Never build on the
 origin checkout. See Critical Conventions.
+
+**0.A.1 — Forge detect.** With the repo root `$REPO` resolved, detect the forge ONCE via the
+Step 0 driver and carry the result forward to every git-host op:
+
+```bash
+DETECT="$(bash "$VCS" --detect --repo "$REPO")"
+PROVIDER="$(printf '%s\n' "$DETECT" | sed -n 's/^provider=//p')"
+CLIREADY="$(printf '%s\n' "$DETECT" | sed -n 's/^cliReady=//p')"
+```
+
+- `CLIREADY=false` → **stop** in this planning gate: the detected forge's CLI is not ready. Tell
+  the user to install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`
+  (install `glab` first if missing, e.g. `brew install glab`). Do NOT fall back to the other forge.
+- `PROVIDER=unknown` → ask the user (this is the planning gate) which forge / remote to target.
 
 **0.B — Probe (self-setup).** Resolve the four seams the run needs — **boot**, **gates**,
 **auth**, **validate** — by the resolution order in `rules/probe.md`:
@@ -134,8 +166,26 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    active AC also blocks the PR open and `partial` is recorded unvalidated in the
    PR body's per-AC table. Flow-back edit proposals are reported only — never
    auto-applied in this non-interactive run.
-3. **Open the PR** — commit (Conventional Commits, no watermark), push, open the PR
-   against `--base` (English title + body). Render the body from the resolved template
+3. **Open the PR** — commit (Conventional Commits, no watermark), push, then open the PR/MR
+   against `--base` **through the driver** (run from `$REPO` so `gh`/`glab` resolve the host;
+   GitHub → `gh pr create`, GitLab → `glab mr create` with `--source-branch`/`--target-branch`,
+   the driver picks per `$PROVIDER` and returns the PR/MR URL):
+
+   ```bash
+   REPO="$(git rev-parse --show-toplevel)"
+   HEAD="$(git -C "$REPO" rev-parse --abbrev-ref HEAD)"
+   URL="$(cd "$REPO" && bash "$VCS" --open-pr --provider "$PROVIDER" \
+     --base "$BASE" --head "$HEAD" --title "$TITLE" --body-file "$BODY_FILE")" \
+     || { echo "PR/MR open failed — see the driver's stderr above"; exit 1; }
+   [ -n "$URL" ] || { echo "PR/MR open returned an empty URL — aborting"; exit 1; }
+   ```
+
+   `$HEAD` is the worktree's feature branch (already pushed above), `$BASE` the `--base` arg
+   (default `main`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
+   expired, an MR already exists on the branch, a push race) is a **stop-the-world blocker**
+   (The one rule) — halt and report; never run step 4+ against a PR/MR that was not created.
+
+   Render the body (`$BODY_FILE`, English title + body) from the resolved template
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
    exists, else `{PLUGIN_ROOT}/templates/autopilot-pr-body.md`): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
@@ -247,9 +297,9 @@ The worst case is still a reviewed, gated PR. The skill never produces nothing.
   and returns only an artifact path. Artifacts are treated as credentials (temp dir,
   `chmod 600`, deleted after the run, never logged or printed).
 - **Never auto-merge / auto-deploy.** Stop at a ready PR. The merge is the human's.
-- **Never push to a merged/closed branch.** Re-check `gh pr view <n> --json state,mergedAt`
-  immediately before every push; if `MERGED`/`CLOSED`, branch off `origin/<base>` and open
-  a fresh PR.
+- **Never push to a merged/closed branch.** Re-check `bash "$VCS" --pr-state --provider "$PROVIDER" <n>`
+  immediately before every push; if it returns `MERGED`/`CLOSED`, branch off `origin/<base>` and
+  open a fresh PR/MR.
 - **English PR + commits.** Conventional Commits. No AI watermark / co-author trailer.
 - **iac never against prod.** Default plan/dry-run + kind/localstack/throwaway target;
   `apply` only to a disposable environment (see `rules/drivers.md`).
