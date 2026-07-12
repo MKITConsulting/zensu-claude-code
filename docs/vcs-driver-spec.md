@@ -1,6 +1,6 @@
 # Spec: VCS Driver (GitHub + GitLab)
 
-Status: **partially implemented** — Phases 1–2 shipped (see §6 "Implementation status"); Phases 3–4 pending.
+Status: **partially implemented** — Phases 1–3 shipped (see §6 "Implementation status"); Phase 4 pending.
 
 ## 1. What it does
 
@@ -130,13 +130,15 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 > host, and rely on the per-host token binding of `gh` / `glab` rather than a raw
 > authenticated `curl <apiBase>`.
 
-> **Decision — helper scope.** Default: the helper owns the **mechanical**
-> ops (detect, pr-state, fetch-threads, resolve-thread, fetch-pr-ref) as thin
-> subcommands so logic lives in ONE file with no cross-skill doc drift. The
-> **publish** op (needs the synthesized review payload) stays in-skill, branching
-> on `provider` per recipes in §7. *Alternative:* full driver-as-CLI including
-> publish. **Default chosen** — publish payload is skill-specific and large;
-> keeping it in-skill avoids marshalling it through argv.
+> **Decision — helper scope (superseded in Phase 3).** Original default: the helper
+> owns the **mechanical** ops (detect, pr-state, fetch-threads, resolve-thread,
+> fetch-pr-ref) as thin subcommands, with the **publish** op staying in-skill because
+> its payload is large. **Phase 3 revised this**: publish moved into the driver too
+> (`--post-review`), because the "large payload" objection dissolves once the payload is
+> passed **by file path** (`--input <file>` on GitHub; a `readFileSync` in the GitLab
+> planner) rather than inline argv. Keeping publish in the driver is what lets the GitLab
+> loop (§7) live in ONE hermetically-testable place instead of being re-encoded in
+> markdown. The skill now issues zero raw `gh`/`glab` publish calls.
 
 ### Step 2 — Driver operation set (the interface both forges satisfy)
 
@@ -146,6 +148,8 @@ run the matching auth check — `gh auth status` / `glab auth status` — to set
 | `locate_pr(branch\|num)` | fix, autopilot | `gh pr view` | `glab mr view --output json` |
 | `pr_state(id)` | all (pre-push guard) | `gh pr view <n> --json state,mergedAt` | `glab mr view <iid> --output json` → `.state` |
 | `fetch_pr_ref(id)` | team-review | `git fetch origin pull/<n>/head` | `git fetch origin merge-requests/<iid>/head` |
+| `scout_pr(num?)` | team-review | `gh pr view [<n>] --json number,url,state,title,body,headRefName,baseRefName,author,labels` | `glab mr view [<iid>] --output json` |
+| `diff_refs(id)` | team-review | `gh pr view <n> --json headRefOid` (head SHA only) | MR `diff_refs` (`base_sha`/`start_sha`/`head_sha`) via `glab api …/merge_requests/:iid` |
 | `open_pr(title,body,base,head)` | autopilot | `gh pr create` | `glab mr create` |
 | `fetch_threads(id)` | fix | GraphQL `reviewThreads` | REST `GET …/merge_requests/:iid/discussions` (keep `resolvable && !resolved`) |
 | `fetch_inline_comments(id)` | fix | `gh api …/pulls/<n>/comments --paginate` | discussions (same call as above) |
@@ -206,7 +210,29 @@ forge without a probe).
     `threadId`/`replyTo` against a safe charset; string GraphQL vars use `gh -f`
     (raw, no `@`-file magic). Known limits (follow-up): GitHub `reviewThreads` caps at
     `first:100` (no cursor paging yet); GitLab discussions use `--paginate`.
-- **Phase 3–4 — pending**: `pr-team-review` (publish path, §7) + `autopilot`.
+- **Phase 3 — DONE**: team-review publish ops on the helper + `pr-team-review` wired to them.
+  - Subcommands: `--scout-pr [<num>]` → normalized
+    `{id,url,state,title,body,base,head,author,labels}`; `--fetch-pr-ref <id>` → the git
+    refspec (`pull/<n>/head` / `merge-requests/<iid>/head`); `--diff-refs <id>` →
+    `{base_sha,start_sha,head_sha}` (GitLab live `diff_refs`; GitHub `headRefOid` only);
+    `--post-review <id> <payload>` (optional `--diff-refs-json`).
+  - **GitHub publish** is one atomic `gh api -X POST …/pulls/<n>/reviews --input <payload>`
+    (byte-identical to the pre-driver call). **GitLab publish** degrades per §7 to a LOOP: one
+    summary note + N inline discussions, each carrying a `position` object
+    (`base_sha`/`start_sha`/`head_sha` + `new_path`/`new_line` on `RIGHT`, `old_path`/`old_line`
+    on `LEFT`) and a `<!-- zensu:pr<iid>:<hash> -->` idempotency marker so a re-run after a
+    partial failure skips already-posted threads. The verdict rides in the summary-note text;
+    the driver NEVER calls `glab mr approve`/`merge` (§9.3). Dry mode
+    (`ZENSU_VCS_PRINT_ARGV=1`) prints the ordered argv sequence (note first, then each
+    discussion) — the same hermetic seam as Phases 1-2; live `gh`/`glab` execution untested.
+    Test: `test-vcs-publish.sh`.
+  - `pr-team-review`: Step 0 resolves the driver; Phase A.1 detects the forge (repo-scoped) +
+    scouts + fetches the PR/MR ref through the driver (the file list for casting stays the
+    forge-agnostic worktree diff — not a forge API); Phase D publishes via `--post-review`.
+    Publish rules split into `rules/github-publish.md` (atomic) + `rules/gitlab-publish.md`
+    (loop). Known limit (follow-up): multi-line range comments collapse to a single-line GitLab
+    position.
+- **Phase 4 — pending**: `autopilot` — `open_pr` / `pr_state` for the PR-open + pre-push guard.
 
 ---
 

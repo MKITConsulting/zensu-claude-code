@@ -2,10 +2,11 @@
 set -u
 
 # Structure test for the /zensu:pr-team-review skill.
-# Pins: the skill exists with its SKILL.md + three rules files, follows the namespaced
+# Pins: the skill exists with its SKILL.md + four rules files, follows the namespaced
 # title-line convention, carries the orchestration essentials (worktree isolation,
-# single-message parallel spawn, run_in_background reviewers, one consolidated gh api
-# review, the 25-persona pool, the always-on holistic core (coverage-audit + bug-hunter +
+# single-message parallel spawn, run_in_background reviewers, one consolidated review
+# published through the VCS driver (GitHub or GitLab, via --post-review/--detect),
+# the 25-persona pool, the always-on holistic core (coverage-audit + bug-hunter +
 # maintainability + adversarial) + the anti-groupthink challenge round + mandatory Test
 # Coverage section), is English-only, uses the namespaced command form and
 # the ${CLAUDE_PLUGIN_ROOT} path (no leaked ~/.claude/skills home path), is registered
@@ -36,8 +37,8 @@ if [ ! -f "$SKILL_MD" ]; then
 fi
 check "P1 skills/pr-team-review/SKILL.md exists" PASS
 
-# P2 — the three rules files ship alongside the skill
-for r in reviewer-personas workflow github-publish; do
+# P2 — the rules files ship alongside the skill (incl. the GitLab publish sibling)
+for r in reviewer-personas workflow github-publish gitlab-publish; do
   if [ -f "$SKILL_DIR/rules/$r.md" ]; then
     check "P2 skills/pr-team-review/rules/$r.md exists" PASS
   else
@@ -68,12 +69,14 @@ ESSENTIALS=(
   "P4b single-message parallel spawn|single message"
   "P4c reviewers run in background|run_in_background"
   "P4d one consolidated review (Submit ONE review)|Submit ONE review"
-  "P4e publishes via the gh api reviews endpoint|pulls/<n>/reviews"
+  "P4e publishes through the VCS driver publish op|--post-review"
+  "P4g every git-host call goes through the VCS driver|zensu-vcs.sh"
+  "P4h detects the forge (GitHub or GitLab)|--detect"
   "P4f casts from the 25-persona pool|25-persona"
 )
 for entry in "${ESSENTIALS[@]}"; do
   label="${entry%%|*}"; needle="${entry#*|}"
-  if grep -qF "$needle" "$SKILL_MD"; then
+  if grep -qF -- "$needle" "$SKILL_MD"; then
     check "$label" PASS
   else
     check "$label" FAIL

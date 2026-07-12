@@ -22,6 +22,11 @@ git -C "$REPO" fetch origin pull/<n>/head:pr-<n>-review
 git -C "$REPO" worktree add --force --detach "$WORKTREE" "$(git -C "$REPO" rev-parse pr-<n>-review)"
 ```
 
+> **Forge-agnostic refspec.** The example shows the GitHub refspec; in the rewired skill it
+> comes from `bash "$VCS" --fetch-pr-ref --provider "$PROVIDER" <n>` (GitHub `pull/<n>/head`,
+> GitLab `merge-requests/<iid>/head`). This companion doc is GitHub-illustrative — GitLab
+> publish + position specifics live in `rules/gitlab-publish.md`.
+
 After `worktree add`:
 - `git -C "$REPO" branch --show-current` still reports the user's WIP branch — the main checkout is untouched.
 - the worktree is in DETACHED HEAD at the PR head SHA; `git -C "$WORKTREE" rev-parse HEAD` echoes that SHA.
@@ -37,7 +42,7 @@ After `worktree add`:
 
 ## Phase A.1 — Scout Pitfalls
 
-- **`git fetch origin pull/<n>/head:pr-<n>-review` fails with "couldn't find remote ref"**: PR is from a fork. Use `gh pr checkout <n>` inside the worktree — but that command checks out into the *current* CWD, so first `cd "$WORKTREE"` then run it. Never run `gh pr checkout` from `$REPO` root.
+- **`git fetch origin pull/<n>/head:pr-<n>-review` fails with "couldn't find remote ref"** (GitHub): PR is from a fork. Use `gh pr checkout <n>` inside the worktree — but that command checks out into the *current* CWD, so first `cd "$WORKTREE"` then run it. Never run `gh pr checkout` from `$REPO` root. (GitLab's `merge-requests/<iid>/head` ref covers fork MRs natively — no equivalent fallback needed.)
 - **Head SHA changes between scout and publish**: Re-fetch SHA right before the publish step. The reviews API rejects stale SHAs with HTTP 422.
 - **Wrong base branch**: PR JSON `baseRefName` is authoritative. Don't assume `main`/`dev` — read it.
 - **Huge PR (> 200 files)**: Cap `--stat` output, use `git diff --name-only` for routing only. Don't dump full diff into agent prompts.
