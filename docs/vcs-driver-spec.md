@@ -1,6 +1,6 @@
 # Spec: VCS Driver (GitHub + GitLab)
 
-Status: **partially implemented** — Phases 1–3 shipped (see §6 "Implementation status"); Phase 4 pending.
+Status: **implemented** — Phases 1–4 shipped (see §6 "Implementation status").
 
 ## 1. What it does
 
@@ -232,7 +232,21 @@ forge without a probe).
     Publish rules split into `rules/github-publish.md` (atomic) + `rules/gitlab-publish.md`
     (loop). Known limit (follow-up): multi-line range comments collapse to a single-line GitLab
     position.
-- **Phase 4 — pending**: `autopilot` — `open_pr` / `pr_state` for the PR-open + pre-push guard.
+- **Phase 4 — DONE**: `autopilot` wired to the driver for the PR-open + pre-push guard.
+  - New subcommand: `--open-pr --provider <p> --base <b> --head <h> --title <t> --body-file <f>` →
+    GitHub `gh pr create --title --body-file --base --head`; GitLab
+    `glab mr create --title --description --source-branch --target-branch --yes`. GitHub body BY
+    FILE (`--body-file`); GitLab body inlined by value (`--description`), title by value on both.
+    Returns the PR/MR URL — normalizer prefers the `.../pull|merge_requests/<n>` URL, falls back to the
+    first http URL, and strips control/ANSI bytes. Failure is propagated (non-zero rc + stderr; not
+    swallowed). It infers the repo from **cwd** (caller `cd "$REPO"`) — no `--repo-id`, matching
+    `scout_pr`/`pr_state`. Dry-printable (`ZENSU_VCS_PRINT_ARGV=1`); live `gh`/`glab` execution untested
+    (hermetic argv seam, same stance as Phases 1-3). `--pr-state` (Phase 2) is REUSED for the pre-push
+    guard — no new state op. Test: `test-vcs-pr-ops.sh` (open-pr assertions O1-O7).
+  - `autopilot`: Step 0 resolves the driver; Phase 0.A.1 detects the forge (carries
+    `PROVIDER`/`REPOID`/`CLIREADY`, `cliReady=false` stop, `unknown` ask); Phase 1 step 3 opens the
+    PR/MR via `--open-pr` (run from `$REPO`); the Critical-Conventions pre-push guard uses `--pr-state`.
+    Pins: `test-autopilot-skill.sh` (P11a-g). Never auto-merge/approve preserved.
 
 ---
 

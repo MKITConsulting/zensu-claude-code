@@ -157,6 +157,32 @@ else
   check "P10b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
+# P11 — VCS driver wiring (Phase 4): PR-open + pre-push guard go through the driver so
+# autopilot works on GitHub AND GitLab, not hard-wired to gh. Needles start with '--', so
+# grep with '--' end-of-options (a bare `grep -qF "--open-pr"` treats it as a flag).
+VCS_PINS=(
+  "P11a Step 0 resolves the VCS driver|## Step 0 — Resolve the VCS driver"
+  "P11b driver lib referenced|hooks/lib/zensu-vcs.sh"
+  "P11c forge detected via --detect|--detect --repo"
+  "P11d PR opened via the driver --open-pr invocation|--open-pr --provider"
+  "P11e pre-push guard via --pr-state|--pr-state --provider"
+  "P11f forge-agnostic (GitHub or GitLab)|GitHub or GitLab"
+)
+for entry in "${VCS_PINS[@]}"; do
+  label="${entry%%|*}"; needle="${entry#*|}"
+  if grep -qF -- "$needle" "$SKILL_MD"; then
+    check "$label" PASS
+  else
+    check "$label" FAIL
+  fi
+done
+# P11g — the raw pre-push `gh pr view <n>` guard must be GONE (routed through --pr-state)
+if grep -qF -- 'gh pr view <n> --json state,mergedAt' "$SKILL_MD"; then
+  check "P11g pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" FAIL
+else
+  check "P11g pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" PASS
+fi
+
 echo "----"
 echo "test-autopilot-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
