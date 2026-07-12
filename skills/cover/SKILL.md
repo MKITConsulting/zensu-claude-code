@@ -184,3 +184,10 @@ Governed by five heuristics: **lowest-faithful-level**, **pyramid budget**,
   login-script artifact by path (Playwright `storageState`, a bearer-token file); never place
   a real secret in context. Same rule as autopilot's `rules/auth.md`.
 - **English only.** All authored tests, comments, and docs are English.
+
+## Next step
+
+When invoked standalone — not delegated by `/zensu:autopilot` or `/zensu:pilot`
+— offer, when the authored suite is green and only after the user confirms, to
+commit and open/refresh the PR, or `/zensu:pilot` to re-probe the feature and
+continue conducting it toward release.

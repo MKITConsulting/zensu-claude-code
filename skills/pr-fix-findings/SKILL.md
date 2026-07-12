@@ -112,3 +112,10 @@ When run under `/loop` (self-paced): each iteration re-fetches unresolved thread
 
 Stop early and ask the user when you hit a fix that needs a product/architecture
 decision, an auth error (`zensu auth login`), or a failing gate you cannot satisfy.
+
+## Next step
+
+When invoked standalone — not delegated by `/zensu:autopilot` or `/zensu:pilot`
+— offer, once every thread is resolved and only after the user confirms, to
+harden the change with `/zensu:cover`, or `/zensu:pilot` to re-probe the
+feature and continue toward the release gate.

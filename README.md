@@ -325,14 +325,15 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (18)
+### Skills (19)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (19 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (20 skills are registered in `plugin.json`).
 
 | Skill | Description |
 |-------|-------------|
 | `/zensu:bootstrap` | Bootstrap a product from a vision document — creates features, journeys, security profiles, tiers |
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
+| `/zensu:pilot` | Interactive pipeline conductor — probes a feature's real state (backend status, release gate, git, PR review threads), renders a status card, offers the next step via AskUserQuestion, delegates to the matching sibling skill, and executes confirmed status transitions along the server FSM. Loops probe → offer → delegate until released or exit; resumable across sessions because the backend status IS the pipeline state. The guided counterpart to `/zensu:autopilot`. |
 | `/zensu:cover` | Author durable, right-level tests (unit → integration → E2E) for a change — generic across stacks. Green-first coverage of existing code, report-only on surfaced bugs; reuses the `zensu:review-aspect` fan-out + `zensu:code-reviewer`. The durable-test complement to `/zensu:autopilot`'s one-shot validation (persist its ACs via `--from-acs`). |
 | `/zensu:converge` | Bidirectional flow-back audit: evaluate the current code state against the newest plan's `## Requirements` table (stable `AC-###`/`FR-###` IDs), classify gaps (`missing` / `partial` / `contradicts` / `unrequested`), split unrequested work into business rules vs implementation details, and propose plan edits with freshly allocated stable IDs — applied only after explicit user confirmation (report-only in non-interactive runs; legacy plans without a Requirements table stop cleanly). Offered at the `/zensu:tdd` chain end; `/zensu:autopilot` runs it report-only before opening the PR. |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |

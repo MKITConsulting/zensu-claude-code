@@ -158,6 +158,18 @@ else
 fi
 rm -rf "$P15"
 
+P16="$(mktemp -d -t introuter-XXXXXX)"
+AC16="$(payload "continue feature ZEN-42" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P16" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+if [ -n "$AC16" ] \
+   && printf '%s' "$AC16" | grep -qi 'skip the triage entirely' \
+   && printf '%s' "$AC16" | grep -qF '/zensu:pilot conductor skill'; then
+  check "C16 existing-tracked-feature carve-out routes to /zensu:pilot instead of the triage" PASS
+else
+  fired16="$([ -n "$AC16" ] && echo yes || echo no)"
+  check "C16 pilot carve-out in directive (fired=$fired16)" FAIL
+fi
+rm -rf "$P16"
+
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

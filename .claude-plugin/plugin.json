@@ -24,6 +24,7 @@
     "./skills/doctor",
     "./skills/ghost-scan",
     "./skills/implement",
+    "./skills/pilot",
     "./skills/plan-review",
     "./skills/pr-fix-findings",
     "./skills/pr-team-review",
