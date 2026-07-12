@@ -95,7 +95,7 @@ Capture the response — `id` and `html_url` are the values you return to the us
 
 ## `line` + `side` Rules
 
-| File `changeType` (from `gh pr view --json files`) | Default `side` for new content | Notes |
+| File `changeType` (from the worktree `git diff --name-status`, forge-agnostic) | Default `side` for new content | Notes |
 |---|---|---|
 | `ADDED` | `RIGHT` | Every line is in the diff; any line number valid |
 | `MODIFIED` | `RIGHT` for new lines, `LEFT` for removed lines | Line must be in the diff hunk — out-of-hunk → 422 |

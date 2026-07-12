@@ -224,6 +224,10 @@ _zensu_vcs_is_id() {
   case "${1:-}" in ''|*[!A-Za-z0-9=_-]*) return 1 ;; *) return 0 ;; esac
 }
 
+_zensu_vcs_is_gl_repoid() {
+  case "${1:-}" in ''|*[!A-Za-z0-9._%-]*) return 1 ;; *) return 0 ;; esac
+}
+
 _zensu_vcs_map_state() {
   command -v node >/dev/null 2>&1 || { printf ''; return 0; }
   node -e '
@@ -409,7 +413,263 @@ _zensu_vcs_resolve_thread() {
   "${resolve_argv[@]}" >/dev/null 2>&1
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread 2>/dev/null || true
+_zensu_vcs_json_field() {
+  local field="${1:-}"
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  FIELD="$field" node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var v="";try{v=JSON.parse(s)[process.env.FIELD];}catch(_){}
+      process.stdout.write(v==null?"":String(v));
+    });'
+}
+
+_zensu_vcs_normalize_scout() {
+  local provider="${1:-}"
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  PROV="$provider" node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var o={id:"",url:"",state:"",title:"",body:"",base:"",head:"",author:"",labels:[]},p=process.env.PROV;
+      try{var j=JSON.parse(s);
+        if(p==="github"){
+          o.id=String(j.number||"");o.url=j.url||"";o.state=j.state||"";o.title=j.title||"";o.body=j.body||"";
+          o.base=j.baseRefName||"";o.head=j.headRefName||"";o.author=((j.author||{}).login)||"";
+          o.labels=(j.labels||[]).map(function(l){return (l&&l.name)||"";}).filter(Boolean);
+        } else if(p==="gitlab"){
+          o.id=String(j.iid||"");o.url=j.web_url||"";o.state=j.state||"";o.title=j.title||"";o.body=j.description||"";
+          o.base=j.target_branch||"";o.head=j.source_branch||"";o.author=((j.author||{}).username)||"";
+          o.labels=(j.labels||[]).map(function(l){return typeof l==="string"?l:((l&&l.name)||"");}).filter(Boolean);
+        }
+      }catch(_){}
+      var st=String(o.state).toLowerCase();
+      o.state=(st==="merged")?"MERGED":((st==="closed")?"CLOSED":(st?"OPEN":""));
+      process.stdout.write(JSON.stringify(o));
+    });'
+}
+
+_zensu_vcs_normalize_diff_refs() {
+  local provider="${1:-}"
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  PROV="$provider" node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var o={base_sha:"",start_sha:"",head_sha:""},p=process.env.PROV;
+      try{var j=JSON.parse(s);
+        if(p==="github"){o.head_sha=j.headRefOid||"";}
+        else if(p==="gitlab"){var d=j.diff_refs||{};o.base_sha=d.base_sha||"";o.start_sha=d.start_sha||"";o.head_sha=d.head_sha||"";}
+      }catch(_){}
+      process.stdout.write(JSON.stringify(o));
+    });'
+}
+
+_zensu_vcs_scout_pr() {
+  local provider="" num=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  shift ;;
+      --*) ;;
+      *) [ -z "$num" ] && num="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  [ -z "$num" ] || _zensu_vcs_is_num "$num" || return 1
+  local argv
+  case "$provider" in
+    github)
+      if [ -n "$num" ]; then argv=(gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels -- "$num")
+      else argv=(gh pr view --json number,url,state,title,body,headRefName,baseRefName,author,labels); fi ;;
+    gitlab)
+      if [ -n "$num" ]; then argv=(glab mr view --output json -- "$num")
+      else argv=(glab mr view --output json); fi ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  "${argv[@]}" 2>/dev/null | _zensu_vcs_normalize_scout "$provider"
+}
+
+_zensu_vcs_fetch_pr_ref() {
+  local provider="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  shift ;;
+      --*) ;;
+      *) [ -z "$id" ] && id="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  _zensu_vcs_is_num "$id" || return 1
+  case "$provider" in
+    github) printf 'pull/%s/head' "$id" ;;
+    gitlab) printf 'merge-requests/%s/head' "$id" ;;
+    *) return 1 ;;
+  esac
+}
+
+_zensu_vcs_diff_refs() {
+  local provider="" repoid="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider) provider="${2:-}"; shift ;;
+      --repo-id)  repoid="${2:-}"; shift ;;
+      --*) ;;
+      *) [ -z "$id" ] && id="$1" ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  [ -z "$id" ] || _zensu_vcs_is_num "$id" || return 1
+  local argv
+  case "$provider" in
+    github)
+      if [ -n "$id" ]; then argv=(gh pr view --json headRefOid -- "$id")
+      else argv=(gh pr view --json headRefOid); fi ;;
+    gitlab)
+      _zensu_vcs_is_num "$id" || return 1
+      _zensu_vcs_is_gl_repoid "$repoid" || return 1
+      argv=(glab api "projects/$repoid/merge_requests/$id") ;;
+    *) return 1 ;;
+  esac
+  if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+  "${argv[@]}" 2>/dev/null | _zensu_vcs_normalize_diff_refs "$provider"
+}
+
+_zensu_vcs_post_review() {
+  local provider="" repoid="" diffrefs="" id="" payload=""
+  local pos=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --provider)       provider="${2:-}"; shift ;;
+      --repo-id)        repoid="${2:-}"; shift ;;
+      --diff-refs-json) diffrefs="${2:-}"; shift ;;
+      --*) ;;
+      *)
+        case "$pos" in
+          0) id="$1" ;;
+          1) payload="$1" ;;
+        esac
+        pos=$((pos + 1)) ;;
+    esac
+    shift
+  done
+  [ -n "$provider" ] || return 1
+  _zensu_vcs_is_num "$id" || return 1
+  [ -n "$repoid" ] || return 1
+  [ -n "$payload" ] || return 1
+  case "$provider" in
+    github)
+      case "$repoid" in */?*) : ;; *) return 1 ;; esac
+      local owner="${repoid%%/*}" name="${repoid#*/}"
+      local argv=(gh api -X POST "repos/$owner/$name/pulls/$id/reviews" --input "$payload")
+      if _zensu_vcs_dry; then printf '%s' "${argv[*]}"; return 0; fi
+      [ -f "$payload" ] || return 1
+      local resp
+      resp="$("${argv[@]}" 2>/dev/null)" || return 1
+      printf '%s' "$resp" | _zensu_vcs_json_field html_url ;;
+    gitlab)
+      _zensu_vcs_post_review_gitlab "$repoid" "$id" "$payload" "$diffrefs" ;;
+    *) return 1 ;;
+  esac
+}
+
+_zensu_vcs_post_review_gitlab() {
+  local repoid="$1" id="$2" payload="$3" diffrefs="$4"
+  command -v node >/dev/null 2>&1 || return 1
+  _zensu_vcs_is_gl_repoid "$repoid" || return 1
+  if ! _zensu_vcs_dry; then [ -f "$payload" ] || return 1; fi
+  if [ -z "$diffrefs" ]; then
+    if _zensu_vcs_dry; then
+      diffrefs='{"base_sha":"BASE_SHA","start_sha":"START_SHA","head_sha":"HEAD_SHA"}'
+    else
+      diffrefs="$(glab api "projects/$repoid/merge_requests/$id" 2>/dev/null | _zensu_vcs_normalize_diff_refs gitlab)"
+    fi
+  fi
+  local ZPLAN='
+    var fs=require("fs"),crypto=require("crypto");
+    var mode=process.env.ZENSU_PL_MODE||"count";
+    var idx=parseInt(process.env.ZENSU_PL_IDX||"0",10);
+    var iid=process.env.ZENSU_PL_IID||"",repo=process.env.ZENSU_PL_REPO||"";
+    var dr={};try{dr=JSON.parse(process.env.ZENSU_PL_DIFFREFS||"{}");}catch(_){}
+    var pl={};try{pl=JSON.parse(fs.readFileSync(process.env.ZENSU_PL_PAYLOAD,"utf8"));}catch(_){}
+    function h(x){return crypto.createHash("sha256").update(String(x)).digest("hex").slice(0,8);}
+    function mk(tag){return "<!-- zensu:pr"+iid+":"+tag+" -->";}
+    function san(v){v=String(v);var o="";for(var z=0;z<v.length;z++){var cc=v.charCodeAt(z);if(cc>31||cc===9||cc===10||cc===13)o+=v[z];}return o;}
+    var body=pl.body||"",event=pl.event||"COMMENT";
+    var comments=Array.isArray(pl.comments)?pl.comments:[];
+    var calls=[];
+    var sTag=h(body);
+    calls.push({path:"projects/"+repo+"/merge_requests/"+iid+"/notes",
+      fields:[["body",mk(sTag)+"\n\n_Verdict: "+event+"_\n\n"+body]],marker:mk(sTag)});
+    for(var i=0;i<comments.length;i++){
+      var c=comments[i]||{},side=String(c.side||"RIGHT").toUpperCase();
+      var hasLine=(c.line!=null&&String(c.line)!=="");
+      var line=hasLine?c.line:"";
+      var cTag=h((c.path||"")+"\n"+line+"\n"+(c.body||""));
+      var f;
+      if(hasLine){
+        f=[["body",mk(cTag)+"\n\n"+(c.body||"")],
+           ["position[position_type]","text"],
+           ["position[base_sha]",dr.base_sha||""],
+           ["position[start_sha]",dr.start_sha||""],
+           ["position[head_sha]",dr.head_sha||""]];
+        if(side==="LEFT"){f.push(["position[old_path]",c.path||""]);f.push(["position[old_line]",String(line)]);}
+        else{f.push(["position[new_path]",c.path||""]);f.push(["position[new_line]",String(line)]);}
+      } else {
+        f=[["body",mk(cTag)+"\n\n`"+(c.path||"")+"`: "+(c.body||"")]];
+      }
+      calls.push({path:"projects/"+repo+"/merge_requests/"+iid+"/discussions",fields:f,marker:mk(cTag),pos:hasLine});
+    }
+    if(mode==="count"){process.stdout.write(String(calls.length));return;}
+    if(mode==="needpos"){var np=0;for(var q=0;q<calls.length;q++){if(calls[q].pos)np=1;}process.stdout.write(String(np));return;}
+    var call=calls[idx];if(!call){process.exit(1);}
+    var NUL=String.fromCharCode(0);
+    var toks=[call.marker,"glab","api","--method","POST",call.path];
+    for(var k=0;k<call.fields.length;k++){toks.push("-f");toks.push(call.fields[k][0]+"="+san(call.fields[k][1]));}
+    process.stdout.write(toks.join(NUL)+NUL);
+  '
+  local n
+  n="$(ZENSU_PL_MODE=count ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
+  _zensu_vcs_is_num "$n" || return 1
+  if ! _zensu_vcs_dry; then
+    local needpos
+    needpos="$(ZENSU_PL_MODE=needpos ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
+    if [ "$needpos" = "1" ]; then
+      local drb drh
+      drb="$(printf '%s' "$diffrefs" | _zensu_vcs_json_field base_sha)"
+      drh="$(printf '%s' "$diffrefs" | _zensu_vcs_json_field head_sha)"
+      { [ -n "$drb" ] && [ -n "$drh" ]; } || return 1
+    fi
+  fi
+  local existing=""
+  if ! _zensu_vcs_dry; then
+    local en ed
+    en="$(glab api --paginate "projects/$repoid/merge_requests/$id/notes" 2>/dev/null)" || return 1
+    ed="$(glab api --paginate "projects/$repoid/merge_requests/$id/discussions" 2>/dev/null)" || return 1
+    existing="$en$ed"
+  fi
+  local i=0
+  while [ "$i" -lt "$n" ]; do
+    local all=() t
+    while IFS= read -r -d '' t; do all[${#all[@]}]="$t"; done < <(ZENSU_PL_MODE=emit ZENSU_PL_IDX="$i" ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)
+    [ "${#all[@]}" -ge 6 ] || return 1
+    local mkr="${all[0]}"
+    local argv=("${all[@]:1}")
+    [ -n "$mkr" ] || return 1
+    if _zensu_vcs_dry; then
+      printf '%s\n' "${argv[*]}"
+    else
+      case "$existing" in
+        *"$mkr"*) : ;;
+        *) "${argv[@]}" >/dev/null 2>&1 || return 1 ;;
+      esac
+    fi
+    i=$((i + 1))
+  done
+  return 0
+}
+
+export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_post_review _zensu_vcs_post_review_gitlab 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
@@ -418,6 +678,10 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     --locate-pr)      shift; _zensu_vcs_locate_pr "$@" ;;
     --fetch-threads)  shift; _zensu_vcs_fetch_threads "$@" ;;
     --resolve-thread) shift; _zensu_vcs_resolve_thread "$@" ;;
-    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread [--provider github|gitlab] [--repo-id R] [--reply TEXT] [args]\n' >&2; exit 2 ;;
+    --scout-pr)       shift; _zensu_vcs_scout_pr "$@" ;;
+    --fetch-pr-ref)   shift; _zensu_vcs_fetch_pr_ref "$@" ;;
+    --diff-refs)      shift; _zensu_vcs_diff_refs "$@" ;;
+    --post-review)    shift; _zensu_vcs_post_review "$@" ;;
+    *) printf 'usage: zensu-vcs.sh --detect|--pr-state|--locate-pr|--fetch-threads|--resolve-thread|--scout-pr|--fetch-pr-ref|--diff-refs|--post-review [--provider github|gitlab] [--repo-id R] [--reply TEXT] [--diff-refs-json JSON] [args]\n' >&2; exit 2 ;;
   esac
 fi
