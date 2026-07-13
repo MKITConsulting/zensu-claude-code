@@ -72,6 +72,13 @@ _zensu_vcs_probe() {
     printf '%s' "$ZENSU_VCS_PROBE_RESULT"
     return 0
   fi
+  # Offline mode: skip the network probe entirely (callers that must not emit
+  # outbound HTTP — e.g. /zensu:doctor — set this). Detection falls back to the
+  # CI-file marker / unknown tiebreak instead of curl-ing the remote's host.
+  if [ "${ZENSU_VCS_NO_PROBE:-}" = "1" ]; then
+    printf 'none'
+    return 0
+  fi
   local host="${1:-}"
   _zensu_vcs_probeable_host "$host" || { printf 'none'; return 0; }
   if _zensu_vcs_http_present "$host" "/api/v4/version"; then

@@ -5,18 +5,20 @@
 // glyphs. NEVER writes, NEVER throws out (every failure degrades to a ⚠️ row),
 // ALWAYS exits 0 — the skill decides what to do about warnings.
 //
-// Tool facts (zensu CLI, node, gh, Playwright) and the pending-review TTL are
-// resolved by the bash wrapper (command -v is a shell concern; the TTL comes
-// from the canonical zensu_pending_review_ttl_hours getter so the doctor and
-// the real Stop enforcer agree) and handed in via ZDOC_* env, so this file
-// stays a pure file/JSON reader that a structure test can drive with fixtures.
+// Tool facts (zensu CLI, node, the code-forge CLI, Playwright) and the pending-
+// review TTL are resolved by the bash wrapper (command -v + the VCS-driver forge
+// detection are shell concerns; the TTL comes from the canonical
+// zensu_pending_review_ttl_hours getter so the doctor and the real Stop enforcer
+// agree) and handed in via ZDOC_* env, so this file stays a pure file/JSON
+// reader that a structure test can drive with fixtures.
 //
 // Inputs (all overridable so the structure test can point at a sandbox):
 //   ZENSU_DOCTOR_PLUGIN_DIR  plugin root holding .claude-plugin/ + hooks/
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
 //   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots
 //   TDD_STATE_DIR            state dir (else CLAUDE_PROJECT_DIR/.zensu/state)
-//   ZDOC_NODE/ZENSU/GH/PLAYWRIGHT  tool probe results from the wrapper
+//   ZDOC_NODE/ZENSU/PLAYWRIGHT           tool probe results from the wrapper
+//   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_NOW_MS              clock override for deterministic tests
 
@@ -79,10 +81,25 @@ function toolBlock() {
   if (n) line(OK, 'node: ' + n);
   else line(BAD, 'node: not found on PATH — the plugin hooks require node');
 
-  var g = env.ZDOC_GH || 'absent';
-  if (g === 'authed') line(OK, 'gh CLI: installed and authenticated');
-  else if (g === 'present') line(WARN, 'gh CLI: installed but not authenticated — run `gh auth login` (needed to open/review PRs)');
-  else line(WARN, 'gh CLI: not found on PATH — PR create/review skills will be unavailable');
+  // Forge CLI (code host): the bash wrapper detects the repo's provider through
+  // the VCS driver and hands us ZDOC_FORGE_* — so we name the RIGHT CLI (gh for
+  // GitHub, glab for GitLab) and its auth state, instead of hard-probing gh and
+  // falsely telling a GitLab checkout that "gh is missing".
+  var fp = env.ZDOC_FORGE_PROVIDER || 'unknown';
+  var fc = env.ZDOC_FORGE_CLI || '';
+  var fst = env.ZDOC_FORGE_STATE || 'missing';
+  var fed = env.ZDOC_FORGE_EDITION || '';
+  var pname = fp === 'github' ? 'GitHub' : (fp === 'gitlab' ? 'GitLab' : '');
+  var plabel = pname + (fed && fed !== 'cloud' ? ' (' + fed + ')' : '');
+  if (fp === 'unknown' || !fc || !pname) {
+    line(WARN, 'forge CLI: no GitHub/GitLab remote detected — needs a repo with a GitHub (gh) or GitLab (glab) remote (or ZENSU_VCS_PROVIDER set for a self-hosted host)');
+  } else if (fst === 'ready') {
+    line(OK, plabel + ' CLI (' + fc + '): installed and authenticated');
+  } else if (fst === 'unauthed') {
+    line(WARN, plabel + ' CLI (' + fc + '): installed but not authenticated — run `' + fc + ' auth login` (needed to open/review PRs)');
+  } else {
+    line(WARN, plabel + ' CLI (' + fc + '): not found on PATH — PR create/review for ' + pname + ' will be unavailable');
+  }
 
   var p = env.ZDOC_PLAYWRIGHT || 'absent';
   if (p === 'present') line(OK, 'Playwright: available (autopilot browser driver)');

@@ -3,7 +3,8 @@ name: doctor
 description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
-  tooling (zensu CLI + auth, node, gh + auth, Playwright), plugin integrity
+  tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
+  from the repo's provider, Playwright), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
@@ -73,7 +74,12 @@ concrete next step for each — but only for rows the table actually marked ⚠�
 - **⚠️ config quoted boolean** → the named key is a string (`"true"`) where a real
   boolean is required; strict `=== true` ignores it, so the feature stays at its
   default. Drop the quotes (offer `/zensu:setup` to rewrite it safely).
-- **⚠️ zensu / gh not authenticated** → `zensu auth login` / `gh auth login`.
+- **⚠️ forge CLI not authenticated / not found** → authenticate or install the CLI
+  the report names for the detected provider: `gh auth login` for GitHub,
+  `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
+  detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
+  self-hosted host).
+- **⚠️ zensu not authenticated** → `zensu auth login`.
 
 If everything is green, say so in one line and stop — there is nothing to do.
 
