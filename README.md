@@ -325,7 +325,9 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (15)
+### Skills (18)
+
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (19 skills are registered in `plugin.json`).
 
 | Skill | Description |
 |-------|-------------|
@@ -334,6 +336,8 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:cover` | Author durable, right-level tests (unit → integration → E2E) for a change — generic across stacks. Green-first coverage of existing code, report-only on surfaced bugs; reuses the `zensu:review-aspect` fan-out + `zensu:code-reviewer`. The durable-test complement to `/zensu:autopilot`'s one-shot validation (persist its ACs via `--from-acs`). |
 | `/zensu:converge` | Bidirectional flow-back audit: evaluate the current code state against the newest plan's `## Requirements` table (stable `AC-###`/`FR-###` IDs), classify gaps (`missing` / `partial` / `contradicts` / `unrequested`), split unrequested work into business rules vs implementation details, and propose plan edits with freshly allocated stable IDs — applied only after explicit user confirmation (report-only in non-interactive runs; legacy plans without a Requirements table stop cleanly). Offered at the `/zensu:tdd` chain end; `/zensu:autopilot` runs it report-only before opening the PR. |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |
+| `/zensu:docs` | Author code-grounded documentation for a tracked feature (or a whole product/component in one batch) so it honestly clears the hardened `docs_complete` release gate — one feature-specific doc per feature from the REAL linked source, published to the wiki (or a per-feature repo file) and linked via `zensu link docs`; forbids placeholder / metadata-dump stubs. Idempotent, batchable, and logs every feature skipped or failed. |
+| `/zensu:wargame` | Wargame a hard mission before a cheaper executor runs it — an executable-blind battle plan (every move + expected observation, likely failure + counter-move, forks, abort conditions, verification runs, red-team pass, graded against an 8-point standard). Also handles `/goal` property-proof contracts; code/feature missions reuse the Zensu review chain to converge. |
 | `/zensu:autopilot` | Take a feature from a plain-language idea to a ready, validated GitHub PR — one interactive planning gate, then an autonomous build via vanilla `/zensu:tdd`, gates, converge report, PR, one `/zensu:pr-team-review` pass, `/zensu:pr-fix-findings`, and a validate↔fix loop driven by a pluggable, credential-blind driver. Stops at a ready PR; never merges or deploys. |
 | `/zensu:pr-fix-findings` | Fix every unresolved review comment on a GitHub PR end-to-end: locate the PR, pull unresolved threads, triage, implement each fix through vanilla `/zensu:tdd`, push, and resolve the threads. Built to run standalone or repeatedly until no unresolved threads remain. |
 | `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
@@ -343,6 +347,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
 | `/zensu:reset-review-limit` | Reset the auto-fix loop round counter so the chain can resume past `autoFixMaxRounds` within the same session. Deletes `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-*.json` and re-arms the Stop-hook chain (clears `chainDone` + `*.stopblocks`); idempotent and symlink-safe. |
 | `/zensu:self-review` | Terminal self-reflection stage of the review chain. After `zensu:code-reviewer` converges, re-reads this session's own changes across 7 dimensions, takes at most one fix round under the phase-gate (never re-running the reviewer), then owns the chain terminus (`--chain-done`) and renders the final report with a `## Self-Review Summary`. Hard-enforced via `codeReviewDone`/`selfReviewFixed`; gated by `hooks.selfReview`. |
+| `/zensu:setup` | Interactive first-run configuration — verifies the zensu CLI + auth (offers `zensu auth login`), asks global vs project-local, then walks a curated set of high-impact plugin settings via AskUserQuestion and writes them with a jq-free deep-merge that preserves every other key. |
 | `/zensu:zensu-help` | Q&A skill — explains Zensu PLM concepts and plugin internals (agents, hooks, FSM, config flags). Read-only; routes workflow requests to the appropriate action skill. |
 
 ### Diagnostics — `/zensu:doctor`
