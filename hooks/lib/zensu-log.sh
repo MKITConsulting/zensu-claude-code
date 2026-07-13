@@ -196,6 +196,10 @@ case "${1:-}" in
         [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
         tdd_clear_bypasses "$session_val" 2>/dev/null || \
           echo "zensu-log --tdd-begin: bypass-ledger reset failed — prior entries may persist" >&2
+        tdd_reset_chain_flags "$session_val" || {
+          echo "zensu-log --tdd-begin: chain-flag reset failed — a stale chainDone may keep the Stop backstop released" >&2
+          tdd_begin_rc=1
+        }
         rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
         rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
         if [ -L "$rounds_counter_file" ]; then
