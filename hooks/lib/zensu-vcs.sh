@@ -20,11 +20,12 @@ _zensu_vcs_split_url() {
     printf '\t'
     return 0
   fi
+  # Host capture excludes `@` so a userinfo-authority (`a@b@127.0.0.1`) cannot be smuggled past the private-IP guard (SSRF).
   U="$url" node -e '
     var u=(process.env.U||"").trim().replace(/\.git$/,"");
     var host="",path="",m;
-    if(m=u.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@\/]*@)?([^\/:]+)(?::[0-9]+)?\/(.*)$/)){host=m[2];path=m[3];}
-    else if(m=u.match(/^([^@\/]*@)?([^\/:]+):(.*)$/)){host=m[2];path=m[3];}
+    if(m=u.match(/^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^@\/]*@)?([^\/:@]+)(?::[0-9]+)?\/(.*)$/)){host=m[2];path=m[3];}
+    else if(m=u.match(/^([^@\/]*@)?([^\/:@]+):(.*)$/)){host=m[2];path=m[3];}
     process.stdout.write(host+"\t"+path);
   '
 }
