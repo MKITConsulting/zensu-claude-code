@@ -194,7 +194,7 @@ printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$CURL_LOG" > "$SS/bi
 ssrf_run() { # ssrf_run <remote> : reset the curl log, run detect, echo its output
   : > "$CURL_LOG"
   env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$SS/bin:$PATH" \
-    ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
+    ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_FAKE_RESOLVE='git.corp.io=93.184.216.34' \
     ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$SS" 2>/dev/null
 }
 # positive control: a benign probeable self-hosted host DOES reach the sentinel
@@ -241,7 +241,7 @@ expect "D24 ssh git@host form still parses" "$O" repo     owner/repo
 SC="$(mktemp -d -t vcsdetect-case-XXXXXX)"; mkdir -p "$SC/bin"
 CLOG="$SC/curl.log"
 printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$CLOG" > "$SC/bin/curl"; chmod +x "$SC/bin/curl"
-case_run() { : > "$CLOG"; env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$SC/bin:$PATH" ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$SC" >/dev/null 2>&1; }
+case_run() { : > "$CLOG"; env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$SC/bin:$PATH" ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_FAKE_RESOLVE='git.corp.io=93.184.216.34' ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$SC" >/dev/null 2>&1; }
 # positive control: a benign probeable host DOES reach the sentinel curl — proves
 # the harness is wired, so the negatives below are non-vacuous.
 case_run 'https://git.corp.io/g/p.git'
@@ -263,6 +263,79 @@ case_run 'git@FOO.LOCALHOST:x.git'
   && check "D25 ssh mixed-case denylist: git@FOO.LOCALHOST was probed (SSRF)" FAIL \
   || check "D25 ssh mixed-case denylist rejects git@FOO.LOCALHOST (never probed)" PASS
 rm -rf "$SC"
+
+# --- SSRF: connection-time IP pinning closes IP-literal encodings + rebinding --
+# probeable_host is a string pre-filter; the AUTHORITATIVE gate resolves the host,
+# rejects if ANY resolved address is private/loopback (defeats round-robin
+# rebinding), then curls with --resolve pinned to the checked IP (defeats the
+# check-vs-connect TOCTOU). ZENSU_VCS_FAKE_RESOLVE mocks DNS under TEST=1; a PATH
+# curl sentinel records what would be fetched.
+IPP="$(mktemp -d -t vcsdetect-ippin-XXXXXX)"; mkdir -p "$IPP/bin"
+ILOG="$IPP/curl.log"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$ILOG" > "$IPP/bin/curl"; chmod +x "$IPP/bin/curl"
+ippin_run() { : > "$ILOG"; env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$IPP/bin:$PATH" ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_FAKE_RESOLVE="$2" ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$IPP" >/dev/null 2>&1; }
+# hosts that (string-)pass the pre-filter but RESOLVE to a private/loopback/
+# link-local/metadata/transition address must NEVER be curled — one biting
+# reject per classifier branch (else a mutant dropping the branch survives).
+# The first three are realistic IP-literal encodings; the rest are ordinary
+# hostnames that resolve into each rejected range.
+for spec in \
+  "0x7f.0.0.1=127.0.0.1" \
+  "0x7f.0x0.0x0.0x1=127.0.0.1" \
+  "foo.127.0.0.1.nip.io=127.0.0.1" \
+  "meta.example.test=169.254.169.254" \
+  "ten.example.test=10.0.0.5" \
+  "rfc1918a.example.test=192.168.1.1" \
+  "rfc1918b.example.test=172.16.0.1" \
+  "cgnat.example.test=100.64.0.1" \
+  "zeronet.example.test=0.0.0.1" \
+  "mcast.example.test=224.0.0.1" \
+  "overflow.example.test=999.1.2.3" \
+  "v6lo.example.test=::1" \
+  "v6un.example.test=::" \
+  "v6ll.example.test=fe80::1" \
+  "v6ula.example.test=fc00::1" \
+  "v6mc.example.test=ff02::1" \
+  "v6map.example.test=::ffff:127.0.0.1" \
+  "v6nat64.example.test=64:ff9b::a9fe:a9fe" \
+  "v66to4.example.test=2002:c058:6301::1"; do
+  h="${spec%%=*}"; ip="${spec#*=}"
+  ippin_run "https://${h}/x.git" "$spec"
+  [ -s "$ILOG" ] \
+    && check "D26 IP-pin: $h (-> $ip) was curled (SSRF)" FAIL \
+    || check "D26 IP-pin rejects $h -> $ip (never curled)" PASS
+done
+# round-robin rebinding: ANY private address in the resolved set -> reject
+ippin_run 'https://rebind.example.test/x.git' 'rebind.example.test=93.184.216.34,127.0.0.1'
+[ -s "$ILOG" ] \
+  && check "D26 IP-pin: rebind set (public+private) was curled" FAIL \
+  || check "D26 IP-pin rejects a resolve set with ANY private address" PASS
+# unresolvable host -> fail-closed (never curled)
+ippin_run 'https://nxdomain.example.test/x.git' 'other.example.test=1.2.3.4'
+[ -s "$ILOG" ] \
+  && check "D26 IP-pin: unresolvable host was curled" FAIL \
+  || check "D26 IP-pin fail-closed on an unresolvable host" PASS
+# positive control: a benign host with TWO public IPs IS curled, pinned to the
+# FIRST validated address (proves the harness, the --resolve pin, AND that
+# pick() pins addrs[0] rather than an arbitrary resolved address).
+ippin_run 'https://git.corp.io/x.git' 'git.corp.io=93.184.216.34,8.8.4.4'
+grep -q -- '--resolve git.corp.io:443:93.184.216.34' "$ILOG" \
+  && check "D26 IP-pin: benign host pinned to the FIRST validated IP" PASS \
+  || check "D26 IP-pin benign --resolve pin (got: $(cat "$ILOG"))" FAIL
+grep -q -- ':443:8.8.4.4' "$ILOG" \
+  && check "D26 IP-pin: pinned a non-first resolved address (wrong)" FAIL \
+  || check "D26 IP-pin: does not pin a non-first resolved address" PASS
+grep -q 'git.corp.io/api/v4/version' "$ILOG" \
+  && check "D26 IP-pin positive control: benign host actually probed" PASS \
+  || check "D26 IP-pin positive control probed" FAIL
+# positive control (IPv6): a benign host resolving to a PUBLIC IPv6 IS curled,
+# pinned with a bare-v6 --resolve (curl reads everything after host:port: as the
+# address) — exercises the IPv6-accept path end-to-end, not just the classifier.
+ippin_run 'https://v6ok.example.test/x.git' 'v6ok.example.test=2606:2800:220:1:248:1893:25c8:1946'
+grep -q -- '--resolve v6ok.example.test:443:2606:2800:220:1:248:1893:25c8:1946' "$ILOG" \
+  && check "D26 IP-pin: public-IPv6 host curled with a bare-v6 --resolve pin" PASS \
+  || check "D26 IP-pin public-IPv6 --resolve pin (got: $(cat "$ILOG"))" FAIL
+rm -rf "$IPP"
 
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"
