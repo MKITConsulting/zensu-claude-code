@@ -182,6 +182,57 @@ expect "D22 NO_PROBE falls to CI-marker tiebreak gitlab" "$O" provider gitlab
 [ ! -f "$CURL_HIT" ] && check "D22 NO_PROBE (marker path) fired no curl" PASS || check "D22 NO_PROBE (marker path) fired no curl" FAIL
 rm -rf "$NP"
 
+# --- SSRF: userinfo `@` must not smuggle the post-@ authority into the host ---
+# `https://a@b@127.0.0.1/x` once parsed host `b@127.0.0.1`, which passed the
+# private-IP guard yet curl-connected to loopback. BOTH host captures (URL-form
+# and SSH-form) now exclude `@`. A sentinel curl on PATH records every URL it is
+# handed. ZENSU_VCS_TEST=1 WITHOUT PROBE_RESULT so the REAL probe path runs;
+# FAKE_AUTH keeps auth deterministic.
+SS="$(mktemp -d -t vcsdetect-ssrf-at-XXXXXX)"; mkdir -p "$SS/bin"
+CURL_LOG="$SS/curl-args.log"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$CURL_LOG" > "$SS/bin/curl"; chmod +x "$SS/bin/curl"
+ssrf_run() { # ssrf_run <remote> : reset the curl log, run detect, echo its output
+  : > "$CURL_LOG"
+  env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$SS/bin:$PATH" \
+    ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
+    ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$SS" 2>/dev/null
+}
+# positive control: a benign probeable self-hosted host DOES reach the sentinel
+# curl (both probe URLs, since the sentinel exits non-2xx) — proves the harness
+# (PATH sentinel + real probe path) is wired, so the negative asserts below are
+# meaningful, not vacuously green.
+ssrf_run 'https://git.corp.io/g/p.git' >/dev/null
+{ grep -q 'git\.corp\.io/api/v4/version' "$CURL_LOG" && grep -q 'git\.corp\.io/api/v3/meta' "$CURL_LOG"; } \
+  && check "D23 positive control: sentinel curl IS reached for a probeable host" PASS \
+  || check "D23 positive control: sentinel curl IS reached for a probeable host" FAIL
+# HTTPS-form multi-@ (URL-form host capture): must not reach loopback.
+MAL="$(ssrf_run 'https://a@b@127.0.0.1/x.git')"
+grep -q '127\.0\.0\.1' "$CURL_LOG" \
+  && check "D23 https @-bypass reached loopback (SSRF)" FAIL \
+  || check "D23 https @-bypass: curl never reached loopback (URL-form capture excludes @)" PASS
+case "$(field "$MAL" provider)" in
+  gitlab|github) check "D23 https @-bypass classified a forge (should stay unknown)" FAIL ;;
+  *)             check "D23 https @-bypass -> not a forge (safe unknown/marker tiebreak)" PASS ;;
+esac
+# SSH-form multi-@ (`git@evil@127.0.0.1:g/p.git`) — the equally-exploitable SSH
+# vector; guards the SSH-form host capture, which a mutation reverting only that
+# branch would otherwise re-open with D21(https) still green.
+ssrf_run 'git@evil@127.0.0.1:g/p.git' >/dev/null
+grep -q '127\.0\.0\.1' "$CURL_LOG" \
+  && check "D23b ssh @-bypass reached loopback (SSRF)" FAIL \
+  || check "D23b ssh @-bypass: curl never reached loopback (SSH-form capture excludes @)" PASS
+rm -rf "$SS"
+
+# legit single-userinfo HTTPS + SSH forms must still parse to the right host (the
+# fix must not break real `user@host` URLs). PROBE_RESULT stubs classification; a
+# correct apiBase proves the host itself parsed intact past the userinfo.
+O="$(det 'https://user@gitlab.example.com/g/p.git' gitlab)"
+expect "D24 single-userinfo self-hosted host parses intact" "$O" provider gitlab
+expect "D24 single-userinfo self-hosted host parses intact" "$O" apiBase "https://gitlab.example.com/api/v4"
+O="$(det 'git@github.com:owner/repo.git')"
+expect "D24 ssh git@host form still parses" "$O" provider github
+expect "D24 ssh git@host form still parses" "$O" repo     owner/repo
+
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
