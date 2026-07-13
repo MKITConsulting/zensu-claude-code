@@ -61,10 +61,61 @@ _zensu_vcs_probeable_host() {
   esac
 }
 
+_zensu_vcs_safe_ip() {
+  command -v node >/dev/null 2>&1 || { printf ''; return 0; }
+  H="${1:-}" FAKE="${ZENSU_VCS_FAKE_RESOLVE:-}" TEST="${ZENSU_VCS_TEST:-}" node -e '
+    var host=(process.env.H||"").trim().toLowerCase();
+    var test=process.env.TEST==="1";
+    function isPrivate(ip){
+      ip=String(ip).trim().toLowerCase();
+      var m=ip.match(/^::(?:ffff:)?(\d+\.\d+\.\d+\.\d+)$/);
+      if(m){ip=m[1];}
+      var v4=ip.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+      if(v4){
+        var a=+v4[1],b=+v4[2],c=+v4[3],d=+v4[4];
+        if(a>255||b>255||c>255||d>255){return true;}
+        if(a===0||a===10||a===127){return true;}
+        if(a===169&&b===254){return true;}
+        if(a===172&&b>=16&&b<=31){return true;}
+        if(a===192&&b===168){return true;}
+        if(a===100&&b>=64&&b<=127){return true;}
+        if(a>=224){return true;}
+        return false;
+      }
+      if(ip.indexOf(":")<0){return true;}
+      var em=ip.match(/(?:^|:)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
+      if(em){return isPrivate(em[1]);}
+      if(/^64:ff9b:/.test(ip)||/^2002:/.test(ip)){return true;}
+      if(/^[23]/.test(ip)){return false;}
+      return true;
+    }
+    function pick(addrs){
+      if(!addrs||!addrs.length){return "";}
+      for(var i=0;i<addrs.length;i++){if(isPrivate(addrs[i])){return "";}}
+      return addrs[0];
+    }
+    if(test){
+      var map={},s=process.env.FAKE||"";
+      s.split(";").forEach(function(p){var i=p.indexOf("=");if(i>0){map[p.slice(0,i).trim().toLowerCase()]=p.slice(i+1).split(",").map(function(x){return x.trim();}).filter(Boolean);}});
+      process.stdout.write(pick(map[host]||[]));
+    } else {
+      var done=false,t=setTimeout(function(){if(!done){done=true;process.stdout.write("");process.exit(0);}},2000);
+      require("dns").lookup(host,{all:true},function(e,addrs){
+        if(done){return;}
+        done=true;clearTimeout(t);
+        if(e||!addrs){process.stdout.write("");return;}
+        process.stdout.write(pick(addrs.map(function(a){return a.address;})));
+      });
+    }
+  '
+}
+
 _zensu_vcs_http_present() {
   command -v curl >/dev/null 2>&1 || return 1
+  local host="${1:-}" path="${2:-}" ip="${3:-}"
+  [ -n "$ip" ] || return 1
   local code
-  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 "https://${1}${2}" 2>/dev/null)"
+  code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 5 --resolve "${host}:443:${ip}" "https://${host}${path}" 2>/dev/null)"
   case "$code" in
     200|401|403) return 0 ;;
     *)           return 1 ;;
@@ -85,9 +136,12 @@ _zensu_vcs_probe() {
   fi
   local host="${1:-}"
   _zensu_vcs_probeable_host "$host" || { printf 'none'; return 0; }
-  if _zensu_vcs_http_present "$host" "/api/v4/version"; then
+  # Connection-time IP pinning: resolve the host, reject if ANY address is private/loopback/link-local (defeats round-robin rebinding), then curl --resolve to the checked IP (defeats the check-vs-connect TOCTOU). Fail-closed: no safe IP (private / unresolvable / no node) -> do not probe.
+  local ip; ip="$(_zensu_vcs_safe_ip "$host")"
+  [ -n "$ip" ] || { printf 'none'; return 0; }
+  if _zensu_vcs_http_present "$host" "/api/v4/version" "$ip"; then
     printf 'gitlab'
-  elif _zensu_vcs_http_present "$host" "/api/v3/meta"; then
+  elif _zensu_vcs_http_present "$host" "/api/v3/meta" "$ip"; then
     printf 'github-enterprise'
   else
     printf 'none'
@@ -724,7 +778,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_http_present _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
+export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in
