@@ -287,6 +287,46 @@ tdd_clear_session() {
   _tdd_locked_run "$state_file" _tdd_write_clear_critical "$state_file"
 }
 
+_tdd_write_chain_reset_critical() {
+  local state_file="$1"
+  local tmp
+  if ! tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)"; then
+    return 1
+  fi
+  STATE_FILE="$state_file" node -e '
+    const fs = require("fs");
+    const sf = process.env.STATE_FILE;
+    let s = {};
+    try {
+      const prev = JSON.parse(fs.readFileSync(sf, "utf8"));
+      if (prev && typeof prev === "object" && !Array.isArray(prev)) s = prev;
+    } catch (_) {}
+    s.implComplete = false; s.chainDone = false;
+    s.codeReviewDone = false; s.selfReviewFixed = false;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null
+  if [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  return 0
+}
+
+# Clear only the review-chain completion flags (implComplete/chainDone/
+# codeReviewDone/selfReviewFixed) in one atomic write, preserving active,
+# vanilla, workflow and FSM keys. Called by --tdd-begin so the Stop backstop
+# and the self-review fix-round latch re-arm for every chain in a session, not
+# just the first.
+tdd_reset_chain_flags() {
+  local session_id="${1:-unknown}"
+  local state_file
+  state_file=$(tdd_state_file "$session_id")
+  [ -f "$state_file" ] || return 0
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" _tdd_write_chain_reset_critical "$state_file"
+}
+
 _tdd_write_workflow_begin_critical() {
   local state_file="$1"
   local session_id="$2"
@@ -754,4 +794,4 @@ tdd_seed_deferred_review() {
   _tdd_locked_run "$state_file" _tdd_write_seed_critical "$state_file" "$session_id" "$vanilla"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_write_chain_reset_critical tdd_reset_chain_flags tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true

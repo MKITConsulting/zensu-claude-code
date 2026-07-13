@@ -153,8 +153,9 @@ Exactly ONE sentence, and it is the last section: what shipped and the test verd
 
 - Operate ONLY on the current session and the current worktree. NEVER run
   `git worktree list` or traverse sibling worktrees.
-- The latch (`selfReviewFixed`) and the terminus (`--chain-done`) are per-session —
-  never touch another session's chain-state.
+- The latch (`selfReviewFixed`) and the terminus (`--chain-done`) are per-chain —
+  each `--tdd-begin` re-arms them, so a later chain in the same session gets its
+  own single fix round. Never touch another session's chain-state.
 - Do not fix advisory findings — only a genuine must-fix earns the single fix round.
 
 ## Response Style
