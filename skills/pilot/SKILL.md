@@ -70,10 +70,10 @@ runs until the feature reaches `released` or the user picks Exit. Checkpoints
 sit ONLY at skill boundaries: once a delegated skill starts, pilot never
 interrupts it — in particular the `/zensu:tdd` review chain runs to its own
 terminus (owned by `/zensu:self-review`; pilot never touches the chain-state
-markers itself). Note: the Stop-hook backstop hard-enforces that terminus for
-a session's first `/zensu:tdd` chain; later same-session `/zensu:tdd`
-delegations rely on the skill's own protocol — pilot still never interrupts
-either.
+markers itself). The Stop-hook backstop hard-enforces that terminus for every
+`/zensu:tdd` chain in the session (`--tdd-begin` re-arms it per chain), so
+pilot's repeated delegations each get the full guarantee — and pilot never
+interrupts a chain either way.
 
 ## Workflow
 
@@ -147,9 +147,8 @@ Invoke the chosen skill in THIS main thread via the Skill tool
 and the relevant slice of the status card as the skill's input. Rules:
 
 - **Never pause inside a delegated skill.** `/zensu:tdd`'s review chain —
-  backstopped by the Stop hook for the session's first chain (see the loop
-  contract) — must reach its own terminus; pilot resumes only after the skill
-  returns.
+  backstopped by the Stop hook on every chain (see the loop contract) — must
+  reach its own terminus; pilot resumes only after the skill returns.
 - **Never spawn the work into a subagent** — sibling skills run in the main
   thread by design.
 - Pilot performs no code edits itself; implementation always goes through a
