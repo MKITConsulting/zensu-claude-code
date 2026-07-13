@@ -232,6 +232,37 @@ expect "D24 single-userinfo self-hosted host parses intact" "$O" apiBase "https:
 O="$(det 'git@github.com:owner/repo.git')"
 expect "D24 ssh git@host form still parses" "$O" provider github
 expect "D24 ssh git@host form still parses" "$O" repo     owner/repo
+# --- SSRF: named-host denylist is case-insensitive -------------------------
+# `FOO.LOCALHOST` / `y.LOCAL` / `x.INTERNAL` must be rejected exactly like their
+# lowercase forms; on `*.localhost`->127.0.0.1 resolvers an uppercase form was a
+# loopback SSRF. A sentinel curl on PATH records probe attempts; assert these
+# hosts are never handed to curl. ZENSU_VCS_TEST=1 WITHOUT PROBE_RESULT drives
+# the REAL probe path; FAKE_AUTH keeps auth deterministic.
+SC="$(mktemp -d -t vcsdetect-case-XXXXXX)"; mkdir -p "$SC/bin"
+CLOG="$SC/curl.log"
+printf '#!/bin/sh\nprintf "%%s\\n" "$*" >> "%s"\nexit 1\n' "$CLOG" > "$SC/bin/curl"; chmod +x "$SC/bin/curl"
+case_run() { : > "$CLOG"; env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$SC/bin:$PATH" ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready ZENSU_VCS_REMOTE="$1" bash "$LIB" --detect --repo "$SC" >/dev/null 2>&1; }
+# positive control: a benign probeable host DOES reach the sentinel curl — proves
+# the harness is wired, so the negatives below are non-vacuous.
+case_run 'https://git.corp.io/g/p.git'
+grep -q 'git\.corp\.io/api/v4/version' "$CLOG" \
+  && check "D25 positive control: sentinel curl IS reached for a benign probeable host" PASS \
+  || check "D25 positive control: sentinel curl IS reached for a benign probeable host" FAIL
+# uppercase / mixed-case + trailing-dot FQDN + .localdomain loopback-synonyms must NOT be probed
+for bad in FOO.LOCALHOST y.LOCAL x.INTERNAL LOCALHOST Foo.LocalHost \
+           foo.localhost. LOCALHOST. y.LOCAL. x.INTERNAL. localhost.localdomain \
+           foo.localhost.. x.LOCALHOST..; do
+  case_run "https://${bad}/x.git"
+  [ -s "$CLOG" ] \
+    && check "D25 loopback denylist: $bad was probed (SSRF)" FAIL \
+    || check "D25 loopback denylist rejects $bad (never probed)" PASS
+done
+# SSH remote form of a mixed-case named host (a different parse path) must also be rejected
+case_run 'git@FOO.LOCALHOST:x.git'
+[ -s "$CLOG" ] \
+  && check "D25 ssh mixed-case denylist: git@FOO.LOCALHOST was probed (SSRF)" FAIL \
+  || check "D25 ssh mixed-case denylist rejects git@FOO.LOCALHOST (never probed)" PASS
+rm -rf "$SC"
 
 echo "----"
 echo "test-vcs-detect: $PASS PASS / $FAIL FAIL"

@@ -41,18 +41,21 @@ _zensu_vcs_classify_host() {
 _zensu_vcs_probeable_host() {
   local h="${1:-}"
   [ -n "$h" ] || return 1
-  case "$h" in
+  # Normalize for the loopback denylist (bash 3.2 lacks ${h,,}): lowercase + strip trailing FQDN dots, so FOO.LOCALHOST / localhost. / localhost.. deny like localhost (DNS is case-insensitive; curl uses the original $h).
+  local hl; hl="$(printf '%s' "$h" | tr '[:upper:]' '[:lower:]')"
+  while [ "$hl" != "${hl%.}" ]; do hl="${hl%.}"; done
+  case "$hl" in
     *:*) return 1 ;;
-    localhost|*.local|*.localhost|*.internal) return 1 ;;
+    localhost|localhost.localdomain|*.local|*.localhost|*.internal) return 1 ;;
     0.*|127.*|10.*|192.168.*|169.254.*|255.255.255.255) return 1 ;;
     172.1[6-9].*|172.2[0-9].*|172.3[0-1].*) return 1 ;;
   esac
-  case "$h" in
+  case "$hl" in
     *[!0-9.]*) : ;;
     *.*.*.*)   return 1 ;;
     *)         return 1 ;;
   esac
-  case "$h" in
+  case "$hl" in
     *.*) return 0 ;;
     *)   return 1 ;;
   esac
