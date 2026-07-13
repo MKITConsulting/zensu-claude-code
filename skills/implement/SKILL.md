@@ -31,7 +31,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 ## Workflow
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the VERY LAST action (after Step 8, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
 
 ### Step 1: Load Feature Context
 
@@ -188,3 +188,11 @@ Present a completion summary:
 |-----------|------|------|---------|
 | `/zensu:tdd` | skill (main thread) | Step 3 | Strict RED-GREEN TDD, phase-gated, guaranteed review chain |
 | `zensu:code-reviewer` | subagent | Step 3 (Phase 6) | 5-perspective code review + auto-fix routing |
+
+## Next step
+
+When invoked standalone — not delegated by `/zensu:autopilot` or `/zensu:pilot`
+— offer the natural follow-up after `--workflow-end` has closed the gate, and
+only after the user confirms: a deep PR review via `/zensu:pr-team-review`
+once a PR exists, or `/zensu:pilot` to continue conducting this feature through
+the remaining pipeline steps (review, fixes, release gate).

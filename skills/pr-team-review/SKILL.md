@@ -318,3 +318,10 @@ Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" b
 - Default verdict `COMMENT`. Only escalate to `REQUEST_CHANGES`/`APPROVE` if user explicitly asked via `--verdict=`.
 - Idempotent: re-running on the same PR posts an additional review (no overwrite). Each run gets a fresh `mktemp -d` workspace + detached worktree, so a re-run never collides with a prior run's worktree or the branch ref.
 - If the detected forge's CLI auth is not ready (`bash "$VCS" --detect` reports `cliReady=false`) or the user lacks the write scope → stop and ask the user to fix auth first (`gh auth login` / `glab auth login`) before doing the review work. Do NOT fall back to the other forge.
+
+## Next step
+
+When invoked standalone — not delegated by `/zensu:autopilot` or `/zensu:pilot`
+— offer, after the review is published and only after the user confirms, to
+work the findings via `/zensu:pr-fix-findings`, or `/zensu:pilot` to continue
+conducting the feature through the remaining pipeline steps.
