@@ -26,7 +26,8 @@ REG_N="$(node -e '
   const walk=(o)=>{
     if(Array.isArray(o)){o.forEach(walk);return;}
     if(o&&typeof o==="object"){
-      if(typeof o.command==="string"){const m=o.command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);if(m)s.add(m[1]);}
+      const words=[typeof o.command==="string"?o.command:"",...(Array.isArray(o.args)?o.args:[])];
+      for(const word of words){const m=word.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);if(m)s.add(m[1]);}
       Object.values(o).forEach(walk);
     }
   };

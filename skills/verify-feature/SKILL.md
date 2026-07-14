@@ -121,7 +121,7 @@ confirmed.
 Before any browser call, require the plugin's version-1 navigation broker declared by
 `validate.navigationBroker` and configured in Claude's parent environment as
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. Run
-`bash {PLUGIN_ROOT}/scripts/playwright-mcp.sh --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
+`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
 as a standalone preflight for every route. The parent JSON must bind each exact page route to
 its validated origin with the `declared-safe` mode described in the config contract. Contract
 v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is
@@ -329,9 +329,10 @@ npm/network access to install the integrity-locked runtime. For every required b
 direct `mcp__playwright__<operation>` name or Claude's plugin namespace
 `mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
 that the plugin MCP server was not loaded and ask the user to restart Claude Code after
-checking the plugin installation. If the browser binary is missing, resolve `{PLUGIN_ROOT}`
-from `~/.zensu/plugin-root`, obtain explicit approval for the networked browser installation,
-then run `bash {PLUGIN_ROOT}/scripts/playwright-mcp.sh install-browser` and ask the user to
+checking the plugin installation. If the browser binary is missing, require the validated
+session-bound `ZENSU_CLAUDE_PLUGIN_ROOT` export, obtain explicit approval for the networked
+browser installation, then run
+`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" install-browser` and ask the user to
 restart Claude Code so the MCP server reloads. `browser_install` is not a tool in the pinned
 runtime. Do not silently replace the browser driver with ad-hoc `curl` checks; that cannot
 prove the UI.

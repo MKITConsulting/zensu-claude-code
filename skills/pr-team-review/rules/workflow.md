@@ -90,7 +90,7 @@ The `coverage-audit` persona is cast on every run and its `### Test Coverage` se
 - **Always `run_in_background: true`**: otherwise the main thread blocks on the first reviewer.
 - **Always pass `team_name` + `name`**: required for `SendMessage` and `TaskUpdate` ownership.
 - **Inject ALL context in the prompt**: the agent starts fresh with no history. Include PR metadata, head SHA, base ref, `$WORKTREE` path, `--context` paths verbatim, `--conversation` text.
-- **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `${CLAUDE_PLUGIN_ROOT}/skills/pr-team-review/rules/reviewer-personas.md` if it needs the schema.
+- **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `${ROOT:?FATAL: validated session plugin root missing}/skills/pr-team-review/rules/reviewer-personas.md` if it needs the schema. `ROOT` is the value validated from `ZENSU_CLAUDE_PLUGIN_ROOT` in Step 0; never substitute a hook-subprocess-only variable.
 
 ## Phase C — Debate Strategy
 
@@ -163,7 +163,7 @@ Default 25. Strategy when consolidated findings exceed cap:
 
 **Anchor validation (mandatory, before the preview):** validate every inline
 comment's `(path, line, side)` against the PR diff with
-`node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"`
+`node "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"`
 per `rules/github-publish.md` (Pre-Publish Anchor Validation — the quoting
 rules there are load-bearing): `valid` → keep, `remap <n>` → move the anchor
 and append the remap note to the comment body, `none` (or no output) → fold

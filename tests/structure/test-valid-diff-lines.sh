@@ -63,10 +63,12 @@ else
   check "P3d 422 guidance demoted to last-resort" FAIL
 fi
 WF_SECTION="$(awk '/Anchor validation \(mandatory/,/eliminates the 422/' "$WORKFLOW_MD")"
-if grep -qF 'CLAUDE_PLUGIN_ROOT' "$PUBLISH_MD" && printf '%s' "$WF_SECTION" | grep -qF 'valid-diff-lines.js' && printf '%s' "$WF_SECTION" | grep -qF 'CLAUDE_PLUGIN_ROOT'; then
-  check "P3e both validation fences use the resolvable plugin root" PASS
+if grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:' "$PUBLISH_MD" && printf '%s' "$WF_SECTION" | grep -qF 'valid-diff-lines.js' && \
+   printf '%s' "$WF_SECTION" | grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:' && \
+   ! grep -qF '${CLAUDE_PLUGIN_ROOT' "$PUBLISH_MD" && ! printf '%s' "$WF_SECTION" | grep -qF '${CLAUDE_PLUGIN_ROOT'; then
+  check "P3e both validation commands expand the exact session export" PASS
 else
-  check "P3e both validation fences use the resolvable plugin root" FAIL
+  check "P3e validation commands bypass or omit the exact session export" FAIL
 fi
 if grep -qF "'<path>'" "$PUBLISH_MD" && grep -qF 'single quotes exactly as shown' "$PUBLISH_MD" && grep -qF 'escape it as' "$PUBLISH_MD"; then
   check "P3f untrusted path is single-quoted with an escape instruction" PASS

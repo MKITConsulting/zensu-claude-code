@@ -164,9 +164,9 @@ and the relevant slice of the status card as the skill's input. Rules:
    the server rejects it as `invalid_status_transition` anyway.
 2. **Execute only after explicit confirm** (the AskUserQuestion answer IS the
    confirm), and wrap each transition in its own gate window:
-   1. `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "update_feature"`
+   1. `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --workflow-begin --tools "update_feature"`
    2. `zensu features status <id> <new-status>`
-   3. `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end`
+   3. `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --workflow-end`
    The workflow gate is a single flat per-session flag — no nesting, and every
    delegated skill arms and ends its OWN window — so pilot arms **per
    mutation**, never once per session. Run step iii regardless of the

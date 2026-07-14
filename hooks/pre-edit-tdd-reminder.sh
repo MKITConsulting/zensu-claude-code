@@ -84,14 +84,14 @@ PATH_CLASS="$(FP="$FILE_PATH" SD="$(dirname "$STATE_FILE")" node -e '
 # zensu-log.sh via the Bash tool, which this hook never sees. Checked BEFORE
 # the vanilla bypass and the .zensu/ exemption on purpose.
 if [ "$PATH_CLASS" = "state" ]; then
-  PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
-    const root = process.env.PLUGIN_ROOT || "";
+  node -e '
+    const logCommand = "bash \"${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh\"";
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
         hookEventName: "PreToolUse",
         permissionDecision: "deny",
         permissionDecisionReason:
-          "TDD-Phase-Gate: direct edits to the session-state files (.zensu/state/) are blocked while a session is active — state flags change only through bash " + root + "/hooks/lib/zensu-log.sh (e.g. --tdd-begin, --tdd-reset, --phase)."
+          "TDD-Phase-Gate: direct edits to the session-state files (.zensu/state/) are blocked while a session is active — state flags change only through " + logCommand + " (e.g. --tdd-begin, --tdd-reset, --phase)."
       }
     }));
   '
@@ -141,25 +141,25 @@ if decide_allow; then
   exit 0
 fi
 
-PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$FILE_PATH" PAYLOAD_TOOL="$TOOL_NAME" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" node -e '
+PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$FILE_PATH" PAYLOAD_TOOL="$TOOL_NAME" node -e '
   const phase = process.env.PAYLOAD_PHASE || "UNINITIALIZED";
   const step  = process.env.PAYLOAD_STEP || "(none)";
   const file  = process.env.PAYLOAD_FILE || "(unknown)";
   const tool  = process.env.PAYLOAD_TOOL || "Edit";
-  const root  = process.env.PLUGIN_ROOT || "$CLAUDE_PLUGIN_ROOT";
+  const logCommand = "bash \"${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh\"";
   const header =
     "TDD-Phase-Gate: " + tool + " on " + file + " blocked.\n" +
     "Current phase: " + phase + ", step: " + step + ".\n" +
     "Expected: RED_WRITE | REFACTOR | (IMPL after RED_FAIL for step " + step + ") | (GREEN_PASS only on test paths).\n";
   const reason = header +
     "Action:\n" +
-    "  1. New test file: bash " + root + "/hooks/lib/zensu-log.sh --phase RED_WRITE --step <id>\n" +
+    "  1. New test file: " + logCommand + " --phase RED_WRITE --step <id>\n" +
     "  2. IMPL: first run the test, set RED_FAIL:\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase RED_RUN --step <id>\n" +
+    "     " + logCommand + " --phase RED_RUN --step <id>\n" +
     "     (run the test command)\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase RED_FAIL --step <id> --reason \"...\"\n" +
-    "     bash " + root + "/hooks/lib/zensu-log.sh --phase IMPL --step <id>\n" +
-    "  3. Refactor: bash " + root + "/hooks/lib/zensu-log.sh --phase REFACTOR --step <id>\n" +
+    "     " + logCommand + " --phase RED_FAIL --step <id> --reason \"...\"\n" +
+    "     " + logCommand + " --phase IMPL --step <id>\n" +
+    "  3. Refactor: " + logCommand + " --phase REFACTOR --step <id>\n" +
     "  4. Legitimate non-TDD edit: set ZENSU_TDD_GATE=off";
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {

@@ -44,9 +44,10 @@ work (use `/zensu:bootstrap`).
 ## Procedure
 
 0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
-   `ROOT="$(cat ~/.zensu/plugin-root)"` — if this is empty, **ABORT** with a FATAL
-   message (start a fresh session so the SessionStart hook re-writes the plugin-root
-   path). Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, run `bash "$VCS" --detect`, and
+   `ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"` and verify
+   `[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-log.sh" ]` — otherwise **ABORT**
+   with a FATAL message and start a fresh Claude Code session. Then
+   `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, run `bash "$VCS" --detect`, and
    read `provider` + `cliReady` + `repo` from the `key=value` output.
    - `cliReady=false` → **STOP**: the detected forge's CLI is not ready. Tell the user
      to install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`

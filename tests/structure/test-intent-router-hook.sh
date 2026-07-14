@@ -26,7 +26,7 @@ bash -n "$HOOK" 2>/dev/null && check "C2 bash -n syntax check passes" PASS || ch
 
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command);
+  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>[z.command||"",...(z.args||[])].join(" "));
   process.exit(ups.some(c=>/user-prompt-intent-router\.sh/.test(c))?0:1);
 ' "$HOOKS_JSON" 2>/dev/null; then
   check "C3 registered in hooks.json UserPromptSubmit" PASS

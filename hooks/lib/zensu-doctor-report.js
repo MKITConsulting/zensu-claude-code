@@ -147,7 +147,7 @@ function pluginBlock() {
     var matchers = events[ev] || [];
     matchers.forEach(function (m) {
       (m && m.hooks || []).forEach(function (h) {
-        var cmd = (h && h.command) || '';
+        var cmd = [(h && h.command) || ''].concat(Array.isArray(h && h.args) ? h.args : []).join(' ');
         var mm = cmd.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
         if (mm) wired[mm[1]] = true;
       });

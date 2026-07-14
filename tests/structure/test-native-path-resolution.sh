@@ -2,7 +2,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/resolve-session-id.js"
-PULSE="$PLUGIN_DIR/hooks/session-start-pulse.sh"
+EXPORT_ROOT="$PLUGIN_DIR/hooks/session-start-export-root.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -37,21 +37,23 @@ fi
 
 FAKE_ROOT="$TMP/plugin-root-dir"
 mkdir -p "$FAKE_ROOT/hooks/lib"
-printf 'zensu_hook_enabled() { return 1; }\n' > "$FAKE_ROOT/hooks/lib/zensu-config.sh"
-cp "$PULSE" "$FAKE_ROOT/hooks/session-start-pulse.sh"
+printf '# fixture helper\n' > "$FAKE_ROOT/hooks/lib/zensu-log.sh"
+cp "$EXPORT_ROOT" "$FAKE_ROOT/hooks/session-start-export-root.sh"
 FAKE_HOME="$TMP/home"
 mkdir -p "$FAKE_HOME"
+ENV_FILE="$FAKE_HOME/session-env.sh"
+: > "$ENV_FILE"
 
 ROOT_NATIVE="$(native "$FAKE_ROOT")"
+ROOT_CANON_NATIVE="$(native "$(cd "$FAKE_ROOT" && pwd -P)")"
 HOME_NATIVE="$(native "$FAKE_HOME")"
-HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$ROOT_NATIVE" bash "$FAKE_ROOT/hooks/session-start-pulse.sh" >/dev/null 2>&1
+HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$ROOT_NATIVE" CLAUDE_ENV_FILE="$(native "$ENV_FILE")" bash "$FAKE_ROOT/hooks/session-start-export-root.sh" >/dev/null 2>&1
 
-PR_FILE="$FAKE_HOME/.zensu/plugin-root"
-GOT="$(cat "$PR_FILE" 2>/dev/null || echo MISSING)"
-if [ "$GOT" = "$ROOT_NATIVE" ]; then
-  check "N2 session-start-pulse.sh persists plugin-root under native HOME/CLAUDE_PLUGIN_ROOT (agent-faithful)" PASS
+GOT="$(bash -c '. "$1"; printf "%s" "${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' _ "$ENV_FILE" 2>/dev/null || echo MISSING)"
+if [ "$GOT" = "$ROOT_CANON_NATIVE" ]; then
+  check "N2 SessionStart exporter persists the native plugin root through CLAUDE_ENV_FILE (agent-faithful)" PASS
 else
-  check "N2 pulse plugin-root persist (got '$GOT' expected '$ROOT_NATIVE')" FAIL
+  check "N2 session export (got '$GOT' expected '$ROOT_CANON_NATIVE')" FAIL
 fi
 
 echo "----"

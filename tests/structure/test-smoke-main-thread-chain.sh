@@ -144,9 +144,9 @@ echo "$CTX2" | grep -qF "skill='zensu:self-review'" && check "4g max rounds -> h
 [ "$(flag chainDone)" = "false" ] && check "4i max rounds -> chainDone deferred to self-review (stays false)" PASS || check "4i chainDone deferred" FAIL
 
 echo "== 5. Wiring =="
-node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(h.hooks.Stop&&h.hooks.Stop[0].hooks.some(x=>/stop-chain-enforcer/.test(x.command))?0:1)' "$HOOKS_JSON" \
+node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit(h.hooks.Stop&&h.hooks.Stop[0].hooks.some(x=>/stop-chain-enforcer/.test([x.command||"",...(x.args||[])].join(" ")))?0:1)' "$HOOKS_JSON" \
   && check "5a hooks.json registers Stop -> stop-chain-enforcer.sh" PASS || check "5a Stop registered" FAIL
-node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const a=(h.hooks.PostToolUse||[]).find(x=>x.matcher==="Agent");const bad=a&&a.hooks.some(x=>/post-tdd-review-delegate/.test(x.command));process.exit(bad?1:0)' "$HOOKS_JSON" \
+node -e 'const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));const a=(h.hooks.PostToolUse||[]).find(x=>x.matcher==="Agent");const bad=a&&a.hooks.some(x=>/post-tdd-review-delegate/.test([x.command||"",...(x.args||[])].join(" ")));process.exit(bad?1:0)' "$HOOKS_JSON" \
   && check "5b Agent matcher no longer references post-tdd-review-delegate.sh" PASS || check "5b post-tdd-review deregistered" FAIL
 grep -qF "skill='zensu:tdd'" "$PLANHOOK" && check "5c plan-approved-delegate invokes /zensu:tdd skill" PASS || check "5c plan-approved skill invoke" FAIL
 grep -qF "subagent_type='zensu:tdd-manager'" "$PLANHOOK" && check "5d plan-approved must NOT spawn tdd-manager subagent" FAIL || check "5d plan-approved no subagent spawn" PASS

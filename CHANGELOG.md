@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **runtime**: Bind model-issued helper commands to the exact Claude Code plugin
+  installation for the current session via a shell-safe
+  `ZENSU_CLAUDE_PLUGIN_ROOT` export in `CLAUDE_ENV_FILE`. Hook subprocesses keep
+  resolving independently from `CLAUDE_PLUGIN_ROOT`, so concurrent
+  `SessionStart` hooks do not depend on execution order.
+- **hooks**: Keep complete quoted Bash invocations in Claude Code's supported
+  `command` field and invalidate an older session export before every new root
+  validation, leaving failed resumes fail closed.
+
+### Fixed
+
+- **isolation**: Stop reading or rewriting the legacy shared plugin-root
+  locator, which could be clobbered by another host, plugin version, or
+  worktree while a session was still active.
+
 ## [0.16.0] - 2026-07-14
 
 ### Added

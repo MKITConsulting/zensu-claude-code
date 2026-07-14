@@ -64,7 +64,7 @@ WIRING="$(node -e '
   const groups = (h.hooks && h.hooks.PreToolUse) || [];
   const has = (m) => groups.some((g) =>
     g.matcher === m &&
-    (g.hooks || []).some((x) => typeof x.command === "string" && x.command.indexOf("pre-write-secret-scan.sh") !== -1)
+    (g.hooks || []).some((x) => [x.command || "", ...(x.args || [])].join(" ").indexOf("pre-write-secret-scan.sh") !== -1)
   );
   process.stdout.write([has("Edit|Write|MultiEdit"), has("NotebookEdit"), has("Bash")].join(","));
 ' "$HOOKS_JSON" 2>/dev/null)"

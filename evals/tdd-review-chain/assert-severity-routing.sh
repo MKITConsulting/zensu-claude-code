@@ -99,7 +99,7 @@ WIRED="$(node -e '
   const post = (j.hooks && j.hooks.PostToolUse) || [];
   const m = post.find(b => b.matcher === "Agent");
   if (!m) { console.log("no-matcher"); process.exit(0); }
-  const hits = (m.hooks || []).filter(h => h.type === "command" && /post-review-tdd-delegate\.sh/.test(h.command || ""));
+  const hits = (m.hooks || []).filter(h => h.type === "command" && /post-review-tdd-delegate\.sh/.test([h.command || "", ...(h.args || [])].join(" ")));
   console.log(hits.length ? "wired" : "missing");
 ' "$HOOKS" 2>/dev/null || echo error)"
 
@@ -116,7 +116,7 @@ BOTH_WIRED="$(node -e '
   const post = (j.hooks && j.hooks.PostToolUse) || [];
   const m = post.find(b => b.matcher === "Agent");
   if (!m) { console.log("no"); process.exit(0); }
-  const cmds = (m.hooks || []).map(h => h.command || "");
+  const cmds = (m.hooks || []).map(h => [h.command || "", ...(h.args || [])].join(" "));
   const hasOld = cmds.some(c => /post-tdd-review-delegate\.sh/.test(c));
   const hasNew = cmds.some(c => /post-review-tdd-delegate\.sh/.test(c));
   console.log(hasOld && hasNew ? "yes" : "no");

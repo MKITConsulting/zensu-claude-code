@@ -44,8 +44,10 @@ Every git-host call goes through the driver so the forge (GitHub or GitLab) is d
 and the publish path degrades correctly.
 
 ```bash
-ROOT="$(cat ~/.zensu/plugin-root)"   # empty → ABORT (FATAL): start a fresh session so the
-                                     # SessionStart hook re-writes the plugin-root path.
+ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"
+[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-log.sh" ] || {
+  echo "FATAL: plugin root unavailable — start a fresh Claude Code session" >&2; exit 1;
+}
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 ```
 

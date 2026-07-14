@@ -143,10 +143,10 @@ SELF_REVIEW_ON=0
 if zensu_hook_enabled selfReview; then SELF_REVIEW_ON=1; fi
 
 if [ "$SELF_REVIEW_ON" = "1" ]; then
-  CLOSE_PASS="run 'bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --code-review-done' (PLUGIN_ROOT = contents of ~/.zensu/plugin-root, the value you resolved in Phase 0), then your VERY NEXT action must be the Skill tool with skill='zensu:self-review' — the terminal self-review stage that owns the chain terminus and renders the final CHAIN-END SUMMARY. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the chain."
+  CLOSE_PASS="run 'bash \"\${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh\" --code-review-done', then your VERY NEXT action must be the Skill tool with skill='zensu:self-review' — the terminal self-review stage that owns the chain terminus and renders the final CHAIN-END SUMMARY. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the chain."
   TAIL_DIRECTIVE=""
 else
-  CLOSE_PASS="close the review chain by running 'bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' (PLUGIN_ROOT = contents of ~/.zensu/plugin-root, the value you resolved in Phase 0), then stop."
+  CLOSE_PASS="close the review chain by running 'bash \"\${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh\" --chain-done', then stop."
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
 fi
 

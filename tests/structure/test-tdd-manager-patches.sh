@@ -165,16 +165,16 @@ fi
 
 # Round 15 — Plugin root resolution to eliminate helper-discovery improvisation
 
-if grep -qF '$HOME/.zensu/plugin-root' "$AGENT" && grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
-  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" PASS
+if grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$AGENT" && ! grep -qF '{PLUGIN_ROOT}' "$AGENT" && ! grep -qF '.zensu/plugin-root' "$AGENT"; then
+  check "R15-P1 Phase 0 uses only the session-bound export, never raw placeholders or the legacy pointer" PASS
 else
-  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" FAIL
+  check "R15-P1 Phase 0 still uses a raw placeholder or legacy pointer" FAIL
 fi
 
 if grep -qF 'FATAL: plugin root unresolvable' "$AGENT"; then
-  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" PASS
+  check "R15-P2 Phase 0 contains FATAL abort message when the session export is missing" PASS
 else
-  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" FAIL
+  check "R15-P2 Phase 0 contains FATAL abort message when the session export is missing" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
@@ -190,31 +190,31 @@ else
   check "R15-P4 expected 0 \$CLAUDE_PLUGIN_ROOT helper calls; found $CNT" FAIL
 fi
 
-PLACEHOLDER_COUNT=$(grep -cF '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT")
-if [ "$PLACEHOLDER_COUNT" -ge 10 ]; then
-  check "R15-P5 at least 10 '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' invocations present (got $PLACEHOLDER_COUNT)" PASS
+SAFE_HELPER_COUNT=$(grep -cF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh' "$AGENT")
+if [ "$SAFE_HELPER_COUNT" -ge 10 ]; then
+  check "R15-P5 at least 10 direct session-export helper invocations present (got $SAFE_HELPER_COUNT)" PASS
 else
-  check "R15-P5 expected >=10 {PLUGIN_ROOT} helper invocations; got $PLACEHOLDER_COUNT" FAIL
+  check "R15-P5 expected >=10 direct session-export helper invocations; got $SAFE_HELPER_COUNT" FAIL
 fi
 
 # Fix-round 2: finding 2 — Phase 0 Step 1 uses explicit Bash invocation, not ambiguous "Read"
 
-if grep -qF "bash -c 'cat \"\$HOME/.zensu/plugin-root\"'" "$AGENT"; then
-  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" PASS
+if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"' "$AGENT"; then
+  check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" PASS
 else
-  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" FAIL
+  check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" FAIL
 fi
 
-if grep -qF 'trimmed output' "$AGENT"; then
-  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" PASS
+if grep -qF 'never paste a previously returned path into shell source' "$AGENT"; then
+  check "F1.b Phase 0 forbids returned-path interpolation" PASS
 else
-  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" FAIL
+  check "F1.b Phase 0 lacks the returned-path interpolation ban" FAIL
 fi
 
-if grep -qF 'hooks.pulseSession is not set to false' "$AGENT"; then
-  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" PASS
+if grep -qF 'session-start-export-root.sh' "$AGENT" && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
+  check "F1.c Phase 0 recovery points at the SessionStart exporter and a fresh session" PASS
 else
-  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" FAIL
+  check "F1.c Phase 0 recovery points at the SessionStart exporter and a fresh session" FAIL
 fi
 
 if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; then

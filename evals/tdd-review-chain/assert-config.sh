@@ -24,7 +24,7 @@ HOOK_CMDS="$(node -e '
   const post = (j.hooks && j.hooks.PostToolUse) || [];
   const m = post.find(b => b.matcher === "Agent");
   if (!m) { console.log(""); process.exit(0); }
-  const cmds = (m.hooks || []).filter(h => h.type === "command").map(h => h.command || "");
+  const cmds = (m.hooks || []).filter(h => h.type === "command").map(h => [h.command || "", ...(h.args || [])].join(" "));
   console.log(cmds.join("\n"));
 ' "$HOOKS")"
 
