@@ -69,6 +69,7 @@ else
 fi
 
 JQ_DIR="$(dirname "$(command -v jq)")"
+NODE_DIR="$(dirname "$(command -v node)")"
 OUT4=$(env -i PATH="/usr/bin:/bin:$JQ_DIR" bash "$WRAPPER" 'p' '{}' 2>&1)
 RC4=$?
 if [ "$RC4" = "127" ] && printf '%s\n' "$OUT4" | grep -q -- 'claude-promptfoo-wrapper:'; then
@@ -83,7 +84,7 @@ cat >"$STUB_DIR/claude" <<'STUB'
 exit 0
 STUB
 chmod +x "$STUB_DIR/claude"
-OUT5=$(env -i PATH="$STUB_DIR:/usr/bin:/bin:$JQ_DIR" bash "$WRAPPER" 'p' '{"config":{"working_dir":"/no/such/path/exists"}}' 2>&1)
+OUT5=$(env -i PATH="$STUB_DIR:$NODE_DIR:/usr/bin:/bin:$JQ_DIR" bash "$WRAPPER" 'p' '{"config":{"working_dir":"/no/such/path/exists"}}' 2>&1)
 RC5=$?
 if [ "$RC5" = "2" ] && printf '%s\n' "$OUT5" | grep -q -- 'cannot cd'; then
   check "P7-S5 real-run with bad working_dir: exit 2 + cannot-cd diagnostic" PASS
