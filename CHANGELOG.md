@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-07-14
+
 ### Added
 
-- **skills**: Add `/zensu:verify-feature` live worktree/preview verification with a pinned, integrity-locked, credential-blind Playwright MCP configuration
-- **evals**: Add live Promptfoo E2E coverage for `/zensu:verify-feature`, including an isolated browser fixture and unsafe remote URL rejection
+- **verify**: Add `/zensu:verify-feature` live worktree/preview verification with a pinned, integrity-locked, credential-blind Playwright MCP configuration (#170)
+- **evals**: Add live Promptfoo E2E coverage for `/zensu:verify-feature`, including an isolated browser fixture and unsafe remote URL rejection (#170)
+- **doctor**: Report the forge CLI per detected provider via the VCS driver (#164)
+- **pilot**: Add /zensu:pilot guided pipeline conductor skill (#163)
+
+### Changed
+
+- **readme**: Backfill missing skill rows (#167)
+
+### Fixed
+
+- **vcs**: Pin the forge probe to a validated IP (close IP-encoding + rebinding SSRF) (#169)
+- **vcs**: Make the probe loopback denylist case- and trailing-dot-insensitive (#168)
+- **vcs**: Exclude `@` from the host capture to close a userinfo-authority SSRF (#166)
+- **tdd**: Re-arm review-chain Stop backstop for every session chain (#165)
 
 ## [0.15.0] - 2026-07-12
 
