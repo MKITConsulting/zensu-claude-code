@@ -18,7 +18,9 @@ RENDER_STATUS_DIR=""
 
 collect_process_tree() {
   local pid="$1" child
-  for child in $(pgrep -P "$pid" 2>/dev/null || true); do collect_process_tree "$child"; done
+  if command -v pgrep >/dev/null 2>&1; then
+    for child in $(pgrep -P "$pid" 2>/dev/null || true); do collect_process_tree "$child"; done
+  fi
   printf '%s\n' "$pid"
 }
 
@@ -89,7 +91,8 @@ else
   CLONE_FLAGS="-R"
 fi
 
-if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
+if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ] \
+  && [ "${DRY_RUN:-0}" != "1" ]; then
   ISOLATION_ROOT=""
   for candidate in /private/tmp /var/tmp; do
     if [ -d "$candidate" ] && [ -w "$candidate" ]; then ISOLATION_ROOT="$candidate"; break; fi
@@ -154,10 +157,6 @@ fi
 # Real run only — DRY_RUN previews above never need the claude CLI installed.
 if ! command -v claude >/dev/null 2>&1; then
   echo "claude-promptfoo-wrapper: claude CLI not found on PATH — install Claude Code CLI." >&2
-  exit 127
-fi
-if ! command -v pgrep >/dev/null 2>&1; then
-  echo "claude-promptfoo-wrapper: pgrep not found on PATH — required for owned process-tree cleanup." >&2
   exit 127
 fi
 if ! command -v node >/dev/null 2>&1 || [ ! -f "$STREAM_RENDERER" ] || [ ! -f "$ENRICH_RENDERER" ] \

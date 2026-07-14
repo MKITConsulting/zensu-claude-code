@@ -195,6 +195,7 @@ mkdir -p "$NO_NPM_BIN"
 ln -s "$(command -v node)" "$NO_NPM_BIN/node"
 ln -s "$(command -v dirname)" "$NO_NPM_BIN/dirname"
 DECLARED_OUT="$(PATH="$NO_NPM_BIN" ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" \
+  ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE='' \
   ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
 [ "$DECLARED_RC" -eq 0 ] && check "P1eh valid declaration/no-npm helper path exits 0" PASS || check "P1eh valid declaration/no-npm helper path exits 0 (rc=$DECLARED_RC)" FAIL
 case "$DECLARED_OUT" in *'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH'*) check "P1ei valid declaration without npm renders degraded warning" PASS ;; *) check "P1ei declared/no-npm warning (got: $DECLARED_OUT)" FAIL ;; esac

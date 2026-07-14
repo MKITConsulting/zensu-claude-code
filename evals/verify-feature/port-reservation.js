@@ -3,9 +3,10 @@
 
 const fs = require('node:fs');
 const net = require('node:net');
+const path = require('node:path');
 
 const [portFile, handoffFile, acknowledgementFile, token] = process.argv.slice(2);
-if (![portFile, handoffFile, acknowledgementFile].every((value) => value && value.startsWith('/'))
+if (![portFile, handoffFile, acknowledgementFile].every((value) => value && path.isAbsolute(value))
     || !/^[a-f0-9]{32}$/.test(token || '')) {
   process.stderr.write('verify-feature port reservation: invalid parent contract\n');
   process.exit(2);

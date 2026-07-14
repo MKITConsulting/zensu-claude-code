@@ -8,6 +8,9 @@ const { spawn } = require('node:child_process');
 const test = require('node:test');
 
 const ownedProcess = path.resolve(__dirname, '../../scripts/owned-process.js');
+const posixProcessGroups = process.platform === 'win32'
+  ? { skip: 'native Windows has no POSIX process-group signaling; live evals require macOS, Linux, or WSL' }
+  : {};
 
 function waitFor(file) {
   return new Promise((resolve, reject) => {
@@ -28,7 +31,7 @@ function waitForExit(handle) {
   });
 }
 
-test('normal root exit still kills a TERM-resistant background descendant', async () => {
+test('normal root exit still kills a TERM-resistant background descendant', posixProcessGroups, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-normal-'));
   const descendantFile = path.join(root, 'descendant.pid');
   const descendantReady = path.join(root, 'descendant.ready');
@@ -57,7 +60,7 @@ test('normal root exit still kills a TERM-resistant background descendant', asyn
   }
 });
 
-test('a descendant forked by a TERM handler remains inside the owned group and is killed', async () => {
+test('a descendant forked by a TERM handler remains inside the owned group and is killed', posixProcessGroups, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-owned-signal-'));
   const readyFile = path.join(root, 'ready');
   const descendantFile = path.join(root, 'late-descendant.pid');

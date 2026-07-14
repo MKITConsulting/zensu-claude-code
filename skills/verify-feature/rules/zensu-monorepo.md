@@ -16,6 +16,11 @@ under lease-authenticated supervisors that own their complete child process grou
 
 ## Prerequisites and run boundary
 
+The bundled local adapter requires macOS, Linux, or WSL because its ownership boundary uses
+POSIX process-group signaling. Native Windows Git Bash remains supported by the plugin's hooks,
+but is not a safe execution host for this adapter; report PARTIAL and use WSL, a deployed remote
+target, or a checked-in platform-specific validation driver instead.
+
 The controller validates `docker`, `go`, `pnpm`, `curl`, `lsof`, `cksum`, `openssl`, `git`,
 `node`, and `make`. The parent skill must first create the non-symlink run directory beneath the
 physical worktree at `$GIT_ROOT/.zensu/verify-feature-runs/<random>`.

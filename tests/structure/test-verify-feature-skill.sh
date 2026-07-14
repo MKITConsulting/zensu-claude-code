@@ -367,6 +367,9 @@ else
   check "P6d concurrent MCP starts use an auto-released kernel lock and re-check install state" FAIL
 fi
 
+if ! command -v lockf >/dev/null 2>&1 && ! command -v flock >/dev/null 2>&1; then
+  check "P6e kernel-lock concurrency behavior (skipped: lockf/flock unavailable on this host)" PASS
+else
 LOCK_TEST_DIR="$(mktemp -d -t zensu-mcp-lock-XXXXXX)"
 LOCK_TEST_RUNTIME="$LOCK_TEST_DIR/runtime"
 LOCK_TEST_BIN="$LOCK_TEST_DIR/bin"
@@ -410,6 +413,7 @@ else
   check "P6e concurrent launchers ignore an inert lock file and execute exactly one install" FAIL
 fi
 rm -rf "$LOCK_TEST_DIR"
+fi
 if jq -e '.skills | index("./skills/verify-feature")' "$PLUGIN_JSON" >/dev/null 2>&1 \
   && [ "$(jq -r '.mcpServers' "$PLUGIN_JSON" 2>/dev/null)" = './.mcp.json' ]; then
   check "P6c plugin manifest registers skill and MCP file" PASS

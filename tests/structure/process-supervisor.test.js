@@ -9,6 +9,9 @@ const test = require('node:test');
 
 const supervisor = path.resolve(__dirname, '../../scripts/process-supervisor.js');
 const lease = 'a'.repeat(64);
+const posixProcessGroups = process.platform === 'win32'
+  ? { skip: 'native Windows has no POSIX process-group signaling; the local adapter requires macOS, Linux, or WSL' }
+  : {};
 
 function waitFor(file, predicate = fs.existsSync) {
   return new Promise((resolve, reject) => {
@@ -22,7 +25,7 @@ function waitFor(file, predicate = fs.existsSync) {
   });
 }
 
-test('lease-authenticated supervisor reports status and tears down its owned process group', async () => {
+test('lease-authenticated supervisor reports status and tears down its owned process group', posixProcessGroups, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-supervisor-'));
   const ready = path.join(root, 'service.ready');
   const log = path.join(root, 'service.log');
@@ -63,7 +66,7 @@ test('lease-authenticated supervisor reports status and tears down its owned pro
   }
 });
 
-test('stop waits for and SIGKILLs a descendant that survives SIGTERM', async () => {
+test('stop waits for and SIGKILLs a descendant that survives SIGTERM', posixProcessGroups, async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-supervisor-tree-'));
   const ready = path.join(root, 'service.ready');
   const log = path.join(root, 'service.log');

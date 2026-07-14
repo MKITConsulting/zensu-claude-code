@@ -13,6 +13,15 @@ DOCKER_STATE="$TMP/docker"
 EVENTS="$TMP/events"
 PASS=0; FAIL=0
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    echo "  PASS  native Windows local-adapter runtime skipped (macOS/Linux/WSL required)"
+    echo "----"
+    echo "test-zensu-runtime-controller: 1 PASS / 0 FAIL"
+    exit 0
+    ;;
+esac
+
 cleanup() {
   if [ -d "$RUN_DIR" ]; then
     env PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" \

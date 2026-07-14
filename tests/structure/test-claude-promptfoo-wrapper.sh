@@ -234,6 +234,11 @@ else
   check "P7-S12 Claude and enrichment streams share sanitization with bounded output" FAIL
 fi
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "P7-S12a POSIX process-group cleanup (skipped: native Windows live eval unsupported)" PASS
+    ;;
+  *)
 STUB_SIGNAL_DIR="$(mktemp -d)"
 SRC_SIGNAL_DIR="$(mktemp -d -t wrapper-signal-src-XXXXXX)"
 SIGNAL_CHILD_PID="$STUB_SIGNAL_DIR/child.pid"
@@ -285,6 +290,8 @@ else
   [ -z "$DESCENDANT_SIGNAL_PID" ] || kill -KILL "$DESCENDANT_SIGNAL_PID" 2>/dev/null || true
 fi
 rm -rf "$STUB_SIGNAL_DIR" "$SRC_SIGNAL_DIR"
+    ;;
+esac
 
 RENDERER_TEST_OUTPUT="$(node --test "$RENDERER_TEST" 2>&1)"
 RENDERER_TEST_RC=$?

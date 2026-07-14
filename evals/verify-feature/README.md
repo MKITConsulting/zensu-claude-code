@@ -22,6 +22,14 @@ clone as a clean `main` Git repository because `/zensu:verify-feature` grounds i
 
 ## Run
 
+The live eval requires macOS or Linux (including WSL). Its immutable-fixture boundary relies on
+
+- `sandbox-exec` on macOS, or
+- `bwrap` on Linux/WSL.
+
+Native Windows Git Bash can run the deterministic structure suite, but it is not a supported
+host for this unrestricted live eval.
+
 ```bash
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```

@@ -6,6 +6,13 @@ RUNTIME_DIR="$PLUGIN_DIR/mcp-runtime"
 if [ "${ZENSU_MCP_TEST_MODE:-0}" = "1" ] && [ -n "${ZENSU_MCP_RUNTIME_DIR_OVERRIDE:-}" ]; then
   RUNTIME_DIR="$ZENSU_MCP_RUNTIME_DIR_OVERRIDE"
 fi
+# Node-based tests pass native Windows temp paths into Git Bash. Normalize only
+# that drive-letter form; regular POSIX paths and production plugin paths stay untouched.
+if command -v cygpath >/dev/null 2>&1; then
+  case "$RUNTIME_DIR" in
+    [A-Za-z]:[\\/]*) RUNTIME_DIR="$(cygpath -u "$RUNTIME_DIR")" ;;
+  esac
+fi
 LOCK_FILE="$RUNTIME_DIR/package-lock.json"
 BIN="$RUNTIME_DIR/node_modules/.bin/playwright-mcp"
 PROXY="$PLUGIN_DIR/scripts/playwright-mcp-proxy.js"
