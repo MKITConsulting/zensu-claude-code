@@ -171,6 +171,23 @@ else
 fi
 rm -rf "$SRC_DIR"
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    RENDERER_TEST_OUTPUT="$(node --test "$RENDERER_TEST" 2>&1)"
+    RENDERER_TEST_RC=$?
+    if [ "$RENDERER_TEST_RC" = "0" ]; then
+      check "P7-S12b stream renderer behavior enforces framing and resource limits" PASS
+    else
+      check "P7-S12b stream renderer behavior (rc=$RENDERER_TEST_RC, out=${RENDERER_TEST_OUTPUT:0:500})" FAIL
+    fi
+    check "native Windows live-wrapper integration skipped (macOS/Linux/WSL required)" PASS
+    echo "----"
+    echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
+    [ "$FAIL" -eq 0 ]
+    exit $?
+    ;;
+esac
+
 STUB_STREAM_DIR="$(mktemp -d)"
 cat >"$STUB_STREAM_DIR/claude" <<'STUB'
 #!/bin/bash

@@ -11,6 +11,9 @@ const test = require('node:test');
 
 const installedMcpDir = path.resolve(__dirname, '../../mcp-runtime/node_modules/@playwright/mcp');
 const installedMcpAvailable = fs.existsSync(path.join(installedMcpDir, 'package.json'));
+const posixLauncher = process.platform === 'win32'
+  ? { skip: 'the live launcher requires macOS, Linux, or WSL' }
+  : {};
 
 const {
   ALLOWED_TOOLS,
@@ -370,7 +373,7 @@ test('JSON line transport terminates and releases its buffer after one oversized
   assert.equal(transport.buffer, '');
 });
 
-test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {
+test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', posixLauncher, () => {
   const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
   const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-mcp-policy-runtime-'));
   const lock = '{"lockfileVersion":3}\n';
@@ -403,7 +406,7 @@ test('launcher check-policy subprocess pins parent mode, origin, route, and evid
   }
 });
 
-test('launcher install-browser delegates to the integrity-matched pinned runtime', () => {
+test('launcher install-browser delegates to the integrity-matched pinned runtime', posixLauncher, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-mcp-runtime-'));
   const binDir = path.join(root, 'node_modules', '.bin');
   fs.mkdirSync(binDir, { recursive: true });

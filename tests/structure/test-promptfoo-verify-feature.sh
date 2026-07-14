@@ -276,6 +276,11 @@ else
   check "fixture ignores run-owned runtime and wrapper artifacts" FAIL
 fi
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "fixture lifecycle smoke test (covered on macOS/Linux/WSL)" PASS
+    ;;
+  *)
 SMOKE_DIR="$(mktemp -d -t verify-feature-smoke-XXXXXX)"
 cp -R "$FIXTURE/." "$SMOKE_DIR/"
 SMOKE_RUNTIME="$SMOKE_DIR/scripts/fixture-runtime.sh"
@@ -316,6 +321,8 @@ else
   check "fixture lifecycle smoke test serves inventory and removes its exact runtime" FAIL
 fi
 rm -rf "$SMOKE_DIR" "$SMOKE_RESERVATION_DIR"
+    ;;
+esac
 
 NEG_DIR="$(mktemp -d -t verify-feature-port-negative-XXXXXX)"
 NEG_PORT_FILE="$NEG_DIR/port"
@@ -341,6 +348,11 @@ fi
 kill "$NEG_PID" 2>/dev/null || true
 wait "$NEG_PID" 2>/dev/null || true
 
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "fixture parent-death cleanup (covered on macOS/Linux/WSL)" PASS
+    ;;
+  *)
 EARLY_DIR="$(mktemp -d -t verify-feature-early-death-XXXXXX)"
 cp -R "$FIXTURE/." "$EARLY_DIR/"
 EARLY_PORT_FILE="$NEG_DIR/early-port"
@@ -364,6 +376,10 @@ else
   check "fixture startup fails closed when the parent proxy dies before acknowledgement" FAIL
 fi
 rm -rf "$NEG_DIR" "$EARLY_DIR"
+    ;;
+esac
+
+rm -rf "$NEG_DIR"
 
 if grep -qF 'live and advisory' "$README" \
   && grep -qF 'remote-accepted-public.yaml' "$README" \
