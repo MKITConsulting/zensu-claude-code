@@ -26,6 +26,41 @@ Skill:  load the artifact into the driver → already authenticated → validate
 The skill passes the **path** to the driver. It never opens the artifact, never echoes it,
 never `cat`s it. The credential lives only inside the script and the artifact file.
 
+### Canonical artifact-directory contract
+
+Before invoking `auth.loginScript`, the orchestrator MUST:
+
+1. create a fresh run-owned directory with mode `0700`;
+2. resolve its absolute physical path; and
+3. export that path as `ZENSU_AUTH_ARTIFACT_DIR` for the login-script process; and
+4. resolve the selected runtime's authentication/API origin and export it as
+   `ZENSU_AUTH_BASE_URL`; and
+5. for browser validation, resolve the exact application origin and export it separately as
+   `ZENSU_APP_ORIGIN`.
+
+When `ZENSU_AUTH_ARTIFACT_DIR` is set, the script MUST write its artifact directly beneath
+that directory (nested real directories are allowed), MUST NOT replace the directory or use
+symlinks, and MUST return the absolute artifact path. A script may create its own `mktemp -d`
+only when invoked standalone without the variable; Zensu workflow consumers always set it.
+
+When `ZENSU_AUTH_BASE_URL` is set, the script MUST direct every authentication request to
+that origin. For a browser `storageState` artifact it MUST also consume `ZENSU_APP_ORIGIN`
+and create state valid for that exact browser origin, while preserving any separate
+auth-origin cookies/origins the browser needs. A same-origin `/api` proxy may set both values
+to the application origin; split frontend/API deployments keep them distinct. For API/CLI
+drivers only `ZENSU_AUTH_BASE_URL` is required. The script must not fall back to a compiled
+default, fixed port, production URL, or an unrelated environment variable. A consumer may
+reuse a configured script with a different runtime adapter only after inspecting its
+source/target and confirming that it consumes every applicable canonical variable; otherwise
+the consumer degrades to visible manual login.
+
+The consumer validates, without reading the file, that the returned path is absolute, is a
+non-symlink regular file, and resolves physically beneath `ZENSU_AUTH_ARTIFACT_DIR`. It loads
+and later deletes only that validated path. A rejected/out-of-bound path remains untouched
+and authentication degrades safely. This artifact boundary is used by `/zensu:autopilot`.
+`/zensu:verify-feature` deliberately does not accept artifacts or run login scripts; it uses
+visible manual browser login only.
+
 ### Artifact forms by driver
 
 | Driver | Artifact (`auth.artifact`) | How the driver consumes it |
@@ -82,7 +117,7 @@ throwaway login creds  →  derived at runtime inside the login script, never st
 
 A `storageState` file or token file authenticates as the user; treat it like a password:
 
-- Write it under a per-run `mktemp -d` temp dir, `chmod 600`.
+- Write it beneath `ZENSU_AUTH_ARTIFACT_DIR`, `chmod 600`.
 - Never log it, never print its contents, never include it in evidence or the PR body.
 - Delete it (and tear down the temp dir) at the end of the run, including on failure.
 - The skill references the artifact **by path** only; it does not read the value.
@@ -101,6 +136,8 @@ is not.
 
 - [ ] The skill never receives, constructs, prints, or stores a password or token.
 - [ ] The login script prints only `<KEY>=<path|ok>` — no secret on stdout/stderr.
+- [ ] The login script targets only `ZENSU_AUTH_BASE_URL` supplied by the selected runtime.
+- [ ] Browser storage state is valid for the exact `ZENSU_APP_ORIGIN`.
 - [ ] Ephemeral users exist only in a local/throwaway DB, never against real data.
 - [ ] Artifacts: temp dir, `chmod 600`, never logged, deleted after the run.
 - [ ] Config is secret-free; values live in gitignored `.env`, referenced by name.

@@ -17,7 +17,7 @@
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
 //   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots
 //   TDD_STATE_DIR            state dir (else CLAUDE_PROJECT_DIR/.zensu/state)
-//   ZDOC_NODE/ZENSU/PLAYWRIGHT           tool probe results from the wrapper
+//   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
 //   ZDOC_NOW_MS              clock override for deterministic tests
@@ -102,8 +102,11 @@ function toolBlock() {
   }
 
   var p = env.ZDOC_PLAYWRIGHT || 'absent';
-  if (p === 'present') line(OK, 'Playwright: available (autopilot browser driver)');
-  else line(WARN, 'Playwright: not detected — /zensu:autopilot browser validation will fall back or skip');
+  if (p === 'ready') line(OK, 'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)');
+  else if (p === 'configured') line(WARN, 'Playwright MCP: valid integrity-locked plugin config + npm present; first use installs the locked runtime, then restart/confirm MCP tools');
+  else if (p === 'declared') line(WARN, 'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH');
+  else if (p === 'present') line(WARN, 'Playwright: PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools');
+  else line(WARN, 'Playwright MCP: valid plugin config not detected — /zensu:verify-feature cannot drive the UI and autopilot browser validation may skip');
 }
 
 function pluginBlock() {

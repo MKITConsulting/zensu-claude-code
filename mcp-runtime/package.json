@@ -1,0 +1,9 @@
+{
+  "name": "zensu-playwright-mcp-runtime",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Lockfile-backed runtime for the Zensu Playwright MCP server",
+  "dependencies": {
+    "@playwright/mcp": "0.0.75"
+  }
+}
