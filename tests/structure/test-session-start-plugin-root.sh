@@ -13,6 +13,14 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
+native() {
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$1"
+  else
+    printf '%s' "$1"
+  fi
+}
+
 if [ -f "$EXPORT_HOOK" ] && bash -n "$EXPORT_HOOK" 2>/dev/null; then
   check "C1 SessionStart root exporter exists and parses" PASS
 else
@@ -54,7 +62,7 @@ if [ -f "$EXPORT_HOOK" ]; then
 fi
 
 GOT="$(env -i PATH="$PATH" bash -c '. "$1"; printf "%s" "${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' _ "$ENV_FILE" 2>/dev/null)"
-EXPECTED_ROOT="$(cd "$FAKE_ROOT" && pwd -P)"
+EXPECTED_ROOT="$(native "$(cd "$FAKE_ROOT" && pwd -P)")"
 if [ "$GOT" = "$EXPECTED_ROOT" ]; then
   check "C3 exported root round-trips spaces, quotes, and dollar characters" PASS
 else
@@ -94,7 +102,8 @@ env -i PATH="$PATH" HOME="$TEST_HOME" CLAUDE_PLUGIN_ROOT="$WEIRD_B" CLAUDE_ENV_F
 wait "$EA"; RCA=$?; wait "$EB"; RCB=$?
 ROUNDTRIP="$(env -i PATH="$PATH" bash -c '. "$1"; printf "%s" "${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' _ "$ENV_FILE" 2>/dev/null)"; SOURCE_RC=$?
 if [ "$RCA" -eq 0 ] && [ "$RCB" -eq 0 ] && [ "$SOURCE_RC" -eq 0 ] && \
-   { [ "$ROUNDTRIP" = "$(cd "$WEIRD_A" && pwd -P)" ] || [ "$ROUNDTRIP" = "$(cd "$WEIRD_B" && pwd -P)" ]; }; then
+   { [ "$ROUNDTRIP" = "$(native "$(cd "$WEIRD_A" && pwd -P)")" ] || \
+     [ "$ROUNDTRIP" = "$(native "$(cd "$WEIRD_B" && pwd -P)")" ]; }; then
   check "C4c concurrent hostile-path exports remain complete and sourceable" PASS
 else
   check "C4c concurrent exporter output was torn or unsourceable" FAIL

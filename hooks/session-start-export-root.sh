@@ -21,7 +21,22 @@ cleanup_failed_export() {
 }
 trap cleanup_failed_export EXIT
 
-ROOT="$(cd "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || exit 1
+ROOT_POSIX="$(cd "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || exit 1
+[ -f "$ROOT_POSIX/hooks/lib/zensu-log.sh" ] || exit 1
+
+# pwd -P returns an MSYS path under Git Bash (/c/...), even when Claude
+# supplied a native Windows plugin root. Publish the canonical native form so
+# later model-issued Bash commands consume the same cross-runtime path shape.
+ROOT="$ROOT_POSIX"
+if command -v cygpath >/dev/null 2>&1; then
+  ROOT="$(cygpath -m "$ROOT_POSIX" 2>/dev/null)" || exit 1
+  [ -n "$ROOT" ] || exit 1
+fi
+
+# Re-resolve the exact value that will be published. A broken or shadowed
+# cygpath must not redirect the session to another plugin-shaped directory.
+PUBLISHED_CANON="$(cd "$ROOT" 2>/dev/null && pwd -P)" || exit 1
+[ "$PUBLISHED_CANON" = "$ROOT_POSIX" ] || exit 1
 [ -f "$ROOT/hooks/lib/zensu-log.sh" ] || exit 1
 
 # Bash's %q produces one shell word and safely preserves spaces, quotes,

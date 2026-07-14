@@ -56,6 +56,60 @@ else
   check "N2 session export (got '$GOT' expected '$ROOT_CANON_NATIVE')" FAIL
 fi
 
+# Exercise the Git Bash conversion branch on every CI host. A shim keeps this
+# regression deterministic even when the host does not provide cygpath.
+SHIM_DIR="$TMP/cygpath-shim"
+mkdir -p "$SHIM_DIR"
+printf '%s\n' \
+  '#!/bin/bash' \
+  '[ "$1" = "-m" ] || exit 64' \
+  'case "${FAKE_CYGPATH_MODE:-ok}" in' \
+  '  ok) printf '\''%s/.\n'\'' "$2" ;;' \
+  '  empty) exit 0 ;;' \
+  '  nonzero) exit 65 ;;' \
+  '  invalid) printf '\''%s\n'\'' "$FAKE_CYGPATH_INVALID_ROOT" ;;' \
+  '  *) exit 66 ;;' \
+  'esac' \
+  > "$SHIM_DIR/cygpath"
+chmod +x "$SHIM_DIR/cygpath"
+SIM_ENV_FILE="$FAKE_HOME/session-env-simulated-windows.sh"
+: > "$SIM_ENV_FILE"
+PATH="$SHIM_DIR:$PATH" HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$ROOT_NATIVE" \
+  CLAUDE_ENV_FILE="$SIM_ENV_FILE" bash "$FAKE_ROOT/hooks/session-start-export-root.sh" >/dev/null 2>&1
+SIM_GOT="$(bash -c '. "$1"; printf "%s" "${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' _ "$SIM_ENV_FILE" 2>/dev/null || echo MISSING)"
+SIM_EXPECTED="$(cd "$FAKE_ROOT" && pwd -P)/."
+if [ "$SIM_GOT" = "$SIM_EXPECTED" ]; then
+  check "N3 SessionStart exporter publishes a resolvable cygpath conversion of the same root" PASS
+else
+  check "N3 cygpath conversion (got '$SIM_GOT' expected '$SIM_EXPECTED')" FAIL
+fi
+
+# Every cygpath failure mode must invalidate a stale binding. The invalid case
+# redirects to a different, otherwise valid plugin-shaped directory so only a
+# physical-root round trip can reject it.
+OTHER_ROOT="$TMP/other-plugin-root"
+mkdir -p "$OTHER_ROOT/hooks/lib"
+printf '# other fixture helper\n' > "$OTHER_ROOT/hooks/lib/zensu-log.sh"
+for CASE in empty nonzero invalid; do
+  BAD_ENV_FILE="$FAKE_HOME/session-env-bad-$CASE.sh"
+  printf '%s\n' 'export ZENSU_CLAUDE_PLUGIN_ROOT=/stale/plugin-root' > "$BAD_ENV_FILE"
+  FAKE_CYGPATH_MODE="$CASE" FAKE_CYGPATH_INVALID_ROOT="$OTHER_ROOT" \
+    PATH="$SHIM_DIR:$PATH" HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$ROOT_NATIVE" \
+    CLAUDE_ENV_FILE="$BAD_ENV_FILE" bash "$FAKE_ROOT/hooks/session-start-export-root.sh" >/dev/null 2>&1
+  BAD_RC=$?
+  BAD_GOT="$(bash -c '. "$1"; printf "%s" "${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' _ "$BAD_ENV_FILE" 2>/dev/null || echo MISSING)"
+  case "$CASE" in
+    empty) LABEL="N4 empty cygpath output fails closed" ;;
+    nonzero) LABEL="N5 nonzero cygpath exit fails closed" ;;
+    invalid) LABEL="N6 cygpath output resolving to another plugin root fails closed" ;;
+  esac
+  if [ "$BAD_RC" -ne 0 ] && [ -z "$BAD_GOT" ]; then
+    check "$LABEL" PASS
+  else
+    check "$LABEL (rc=$BAD_RC exported '$BAD_GOT')" FAIL
+  fi
+done
+
 echo "----"
 echo "test-native-path-resolution: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
