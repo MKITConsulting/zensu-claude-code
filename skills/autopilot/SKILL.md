@@ -252,10 +252,15 @@ scripts), never a dead end.
 **The AI never sees a password or token.** When a feature needs an authenticated session,
 a project **login script** holds the secret, performs the login, writes a session
 **artifact**, and prints exactly one line — `<KEY>=<path|ok>` — never the secret itself.
-The skill receives only the path, loads the artifact into the driver, and validates. A
-script ships **no app code** (zero prod attack surface), which is why it is preferred over
-a test-login endpoint. Full contract, artifact handling, and the security rules:
-`rules/auth.md`.
+Before invoking it, the skill creates a mode-`0700` run-owned directory and exports its
+absolute physical path as `ZENSU_AUTH_ARTIFACT_DIR`, resolves the selected runtime's auth/API
+origin and browser application origin, and exports them separately as
+`ZENSU_AUTH_BASE_URL` and `ZENSU_APP_ORIGIN`; the script logs in only against the former,
+creates browser storage state valid for the latter, and writes the artifact beneath the
+directory boundary. The skill receives only the path, validates containment without reading
+the file, loads the artifact into the driver, and validates. A script ships **no app code**
+(zero prod attack surface), which is why it is preferred over a test-login endpoint. Full
+contract, artifact handling, and the security rules: `rules/auth.md`.
 
 ## Config
 

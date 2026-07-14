@@ -1,0 +1,4 @@
+.verify-runtime/
+.zensu/hook-events.log
+.zensu/logs/
+.zensu/state/

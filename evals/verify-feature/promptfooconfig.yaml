@@ -1,0 +1,28 @@
+description: "/zensu:verify-feature live E2E suite (local proof + rejected and accepted remote boundaries)"
+
+providers:
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
+    config:
+      working_dir: ./test-projects/live-app
+      init_git: true
+      require_disposable_environment: true
+
+prompts:
+  - id: verify-feature-spec
+    label: "verify-feature invocation runner"
+    raw: |
+      {{spec_block}}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+
+tests:
+  - file://scenarios/local-happy-path.yaml
+  - file://scenarios/remote-unsafe-url.yaml
+  - file://scenarios/remote-accepted-public.yaml
+
+evaluateOptions:
+  maxConcurrency: 1
+  repeat: 1

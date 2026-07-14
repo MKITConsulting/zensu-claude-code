@@ -1,0 +1,41 @@
+description: "Local happy path: /zensu:verify-feature proves inventory loading with real Playwright MCP evidence and owned teardown"
+vars:
+  spec_block: |
+    Invoke `/zensu:verify-feature` in local mode for the inventory dashboard at route `/`,
+    using `.zensu/autopilot.yaml`. These five supplied acceptance criteria are the exhaustive
+    and complete feature scope even though this disposable fixture starts from a clean Git
+    commit:
+
+    1. The initial page has a visible `Load inventory` button.
+    2. Clicking it renders the summary `2 items available`.
+    3. The rendered table contains `Alpha` with quantity `3` and `Beta` with quantity `7`.
+    4. The loaded dashboard is visibly styled, readable, and free of overlap or clipping.
+    5. The inventory request succeeds with no feature-related console errors or failed requests.
+
+    The recipe's `validate.baseUrlCommand` is the authoritative way to obtain the exact
+    parent-reserved, broker-allowlisted loopback URL after startup. Follow the invoked skill
+    rather than reproducing the workflow
+    from this prompt. Do not add responsive, idempotence, error-path, data-variation, or other
+    exploratory scenario rows outside the five criteria. Do not resize the browser. Do not edit
+    source files, write tests, or spawn subagents. During cleanup, run the configured
+    `./scripts/fixture-runtime.sh down` command as its own standalone Bash invocation exactly;
+    perform any additional run-owned cleanup in separate Bash calls.
+assert:
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: skillInvocation }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: localBrowserTools }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: localInventory }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: localEvidence }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: localTeardown }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: localVerdict }

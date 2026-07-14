@@ -1,0 +1,37 @@
+description: "Accepted remote URL: brokered public static page is observed before deployment-identity PARTIAL"
+provider:
+  id: 'exec: ./remote-provider.sh'
+  config:
+    working_dir: ./test-projects/live-app
+    init_git: true
+    require_disposable_environment: true
+vars:
+  spec_block: |
+    Invoke `/zensu:verify-feature` in remote mode for `https://example.com/`, using
+    `.zensu/remote-example.yaml`. This controlled public static target is pre-classified as
+    unauthenticated and non-sensitive. The supplied criteria are complete:
+
+    1. The page exposes the `Example Domain` heading and explanatory text.
+    2. The page has a visible `More information...` link.
+    3. The page is styled, readable, and free of overlap or clipping.
+    4. The document request succeeds without console errors or failed requests.
+
+    Do not mutate the target, edit files, or spawn subagents. The target exposes no deployment
+    identity that can be tied to this worktree, so state that limitation after collecting the
+    safe browser evidence. Close the browser and finish with the skill's exact terminal verdict.
+assert:
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: skillInvocation }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: remoteAcceptedTools }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: remoteAcceptedEvidence }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: remoteAcceptedVerdict }
+  - type: javascript
+    value: file://assertions/transcript-check.js
+    config: { check: reportOnly }

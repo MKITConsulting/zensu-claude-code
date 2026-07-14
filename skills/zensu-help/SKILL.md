@@ -8,8 +8,8 @@ description: >
   plugin internals (agents, hooks, FSM, auto-fix loop, the zensu CLI write-gate), about
   Zensu concepts (features, KEY-N ids, tiers, journeys, classifications), "what changed in
   version X", "how do I disable hook Y", is unsure which skill (bootstrap vs ghost-scan vs
-  implement) applies, or the slash command /zensu:zensu-help. To actually run a workflow use
-  the corresponding skill instead.
+  implement vs verify-feature vs cover) applies, or the slash command /zensu:zensu-help. To
+  actually run a workflow use the corresponding skill instead.
 ---
 
 # /zensu:zensu-help
@@ -22,11 +22,11 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 - User asks about plugin internals: agents, hooks, FSM, auto-fix loop, the `zensu` CLI write-gate
 - User asks about Zensu concepts: features, KEY-N ids, tiers, journeys, classifications
 - User asks "what changed in version X" or "how do I disable hook Y"
-- User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement`) applies to their situation
+- User is unsure which other skill (`bootstrap` vs `ghost-scan` vs `implement` vs `verify-feature` vs `cover`) applies to their situation
 
 ## Do NOT Use For
 
-- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`
+- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:verify-feature`, `/zensu:cover`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`
 - Modifying Zensu data — this skill is read-only Q&A
 
 ## Prerequisites
@@ -77,6 +77,8 @@ Before answering questions in the right column, `Read` the source file in the le
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
+| Live feature/worktree/preview verification, local vs remote mode, browser evidence, Playwright MCP | `skills/verify-feature/SKILL.md` + `skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof) |
+| Durable unit/integration/E2E test authoring for existing code | `skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |
 | Workflow step order (new product / existing codebase / quick feature) | `README.md` § Typical Workflows |
 | Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.md` § Decision Rules + `README.md` § Typical Workflows |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |

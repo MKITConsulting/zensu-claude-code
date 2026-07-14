@@ -1,0 +1,19 @@
+version: 1
+
+auth:
+  mode: none
+  artifact: none
+
+validate:
+  driver: browser
+  route: "/"
+  navigationBroker:
+    contractVersion: 1
+    policyEnv: ZENSU_VERIFY_NAVIGATION_POLICY_V1
+  evidenceSafety:
+    contractVersion: 1
+    mode: declared-safe
+    dataClassification: pre-classified-non-sensitive
+    routes: ["/"]
+    containsPersonalData: false
+    containsSecrets: false

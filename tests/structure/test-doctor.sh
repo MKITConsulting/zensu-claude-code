@@ -3,7 +3,8 @@ set -u
 
 # Structure + functional test for /zensu:doctor read-only diagnostics.
 # Structure pins: helper .sh (+ shebang), report .js, skill frontmatter,
-# plugin.json skills[] registration, README Diagnostics section. Functional
+# plugin.json skills[] registration, README Diagnostics section, bundled
+# Playwright MCP detection. Functional
 # (sandbox, node required): zensu-doctor-report.js renders a four-block table
 # and ALWAYS exits 0 while correctly flagging version mismatch (❌), hooks
 # wired-but-missing (❌) + disk-but-unwired (⚠️), the quoted-boolean config
@@ -78,6 +79,22 @@ if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:doctor'; then
 else
   check "P2h doctor kept out of the curated Skills table (count-sync unaffected)" PASS
 fi
+if grep -qF 'playwright_mcp_declared' "$HELPER" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$HELPER" && grep -qF 'command -v npm' "$HELPER"; then
+  check "P2i helper validates integrity-locked Playwright MCP without executing npm" PASS
+else
+  check "P2i helper validates integrity-locked Playwright MCP without executing npm" FAIL
+fi
+if grep -qF 'Playwright MCP: valid integrity-locked plugin config + npm present' "$REPORT"; then
+  check "P2j report distinguishes configured from runtime-ready Playwright MCP" PASS
+else
+  check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
+fi
+if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh' "$SKILL_MD"; then
+  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" PASS
+else
+  check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" FAIL
+fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "  SKIP  node not on PATH — functional checks skipped (doc pins above ran)"
@@ -119,10 +136,76 @@ case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
-GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=present \
+GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
+case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
+
+# --- wrapper Playwright MCP detection (offline; npm must never execute) -----
+MCP_PLUG="$SBOX/mcp-plug"
+FAKE_BIN="$SBOX/fake-bin"
+NPM_MARKER="$SBOX/npm-invoked"
+mkdir -p "$MCP_PLUG/.claude-plugin" "$MCP_PLUG/hooks" "$MCP_PLUG/scripts" "$MCP_PLUG/mcp-runtime" "$FAKE_BIN"
+printf '{"name":"zensu","version":"1.2.3","mcpServers":"./.mcp.json"}\n' > "$MCP_PLUG/.claude-plugin/plugin.json"
+printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$MCP_PLUG/.claude-plugin/marketplace.json"
+printf '{"hooks":{}}\n' > "$MCP_PLUG/hooks/hooks.json"
+printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
+printf '%s\n' '{"private":true,"dependencies":{"@playwright/mcp":"0.0.75"}}' > "$MCP_PLUG/mcp-runtime/package.json"
+printf '%s\n' '{"lockfileVersion":3,"packages":{"":{"dependencies":{"@playwright/mcp":"0.0.75"}},"node_modules/@playwright/mcp":{"version":"0.0.75","integrity":"sha512-fixture"}}}' > "$MCP_PLUG/mcp-runtime/package-lock.json"
+printf '#!/bin/bash\nexit 0\n' > "$MCP_PLUG/scripts/playwright-mcp.sh"
+chmod +x "$MCP_PLUG/scripts/playwright-mcp.sh"
+cat > "$MCP_PLUG/scripts/playwright-mcp-proxy.js" <<'PROXY_FIXTURE'
+'use strict';
+module.exports.ALLOWED_TOOLS = [
+  'browser_click', 'browser_close', 'browser_console_messages',
+  'browser_drag', 'browser_fill_form', 'browser_handle_dialog', 'browser_hover',
+  'browser_navigate', 'browser_network_requests', 'browser_press_key', 'browser_resize',
+  'browser_select_option', 'browser_snapshot', 'browser_tabs', 'browser_take_screenshot',
+  'browser_type', 'browser_wait_for'
+];
+PROXY_FIXTURE
+ln -s "$(command -v node)" "$FAKE_BIN/node"
+printf '#!/bin/bash\n: > "${FAKE_NPM_MARKER:?}"\nexit 99\n' > "$FAKE_BIN/npm"
+chmod +x "$FAKE_BIN/npm"
+MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  bash "$HELPER" 2>/dev/null)"
+case "$MCP_OUT" in *'Playwright MCP: valid integrity-locked plugin config + npm present'*) check "P1eb helper executes valid MCP declaration path" PASS ;; *) check "P1eb valid MCP declaration path (got: $MCP_OUT)" FAIL ;; esac
+if [ -e "$NPM_MARKER" ]; then
+  check "P1ec helper never executes npm during offline detection" FAIL
+else
+  check "P1ec helper never executes npm during offline detection" PASS
+fi
+printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
+rm -f "$NPM_MARKER"
+BAD_MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  bash "$HELPER" 2>/dev/null)"; BAD_MCP_RC=$?
+[ "$BAD_MCP_RC" -eq 0 ] && check "P1ed invalid MCP helper path exits 0" PASS || check "P1ed invalid MCP helper path exits 0 (rc=$BAD_MCP_RC)" FAIL
+case "$BAD_MCP_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ef invalid/floating MCP declaration renders exact warning" PASS ;; *) check "P1ef invalid/floating MCP warning (got: $BAD_MCP_OUT)" FAIL ;; esac
+if [ -e "$NPM_MARKER" ]; then
+  check "P1eg invalid MCP detection still never executes npm" FAIL
+else
+  check "P1eg invalid MCP detection still never executes npm" PASS
+fi
+printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh","args":["--isolated"]}}}' > "$MCP_PLUG/.mcp.json"
+NO_NPM_BIN="$SBOX/no-npm-bin"
+mkdir -p "$NO_NPM_BIN"
+ln -s "$(command -v node)" "$NO_NPM_BIN/node"
+ln -s "$(command -v dirname)" "$NO_NPM_BIN/dirname"
+DECLARED_OUT="$(PATH="$NO_NPM_BIN" ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" \
+  ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
+[ "$DECLARED_RC" -eq 0 ] && check "P1eh valid declaration/no-npm helper path exits 0" PASS || check "P1eh valid declaration/no-npm helper path exits 0 (rc=$DECLARED_RC)" FAIL
+case "$DECLARED_OUT" in *'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH'*) check "P1ei valid declaration without npm renders degraded warning" PASS ;; *) check "P1ei declared/no-npm warning (got: $DECLARED_OUT)" FAIL ;; esac
+READY_HELPER="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT_TOOLS=ready \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  bash "$HELPER" 2>/dev/null)"; READY_HELPER_RC=$?
+[ "$READY_HELPER_RC" -eq 0 ] && case "$READY_HELPER" in *'Playwright MCP: loaded and ready'*) check "P1ej helper requires valid plugin config + loaded-tool signal for readiness" PASS ;; *) check "P1ej helper ready message (got: $READY_HELPER)" FAIL ;; esac || check "P1ej helper ready path (rc=$READY_HELPER_RC)" FAIL
+PATH_ONLY="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  node "$REPORT" 2>/dev/null)"
+case "$PATH_ONLY" in *'PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools'*) check "P1ee PATH-only Playwright is a warning, not false green" PASS ;; *) check "P1ee PATH-only Playwright warning (got: $PATH_ONLY)" FAIL ;; esac
 
 # --- version mismatch ------------------------------------------------------
 printf '{"plugins":[{"name":"zensu","version":"9.9.9"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
@@ -239,9 +322,9 @@ case "$NEAR" in *'(TTL 6h) — expired'*) check "P1ac default TTL 6h (getter def
 OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$SBOX" bash "$HELPER" 2>/dev/null)"; RC=$?
 [ "$RC" -eq 0 ] && case "$OUT" in *'Zensu doctor — read-only setup diagnostics'*) check "P1ad wrapper runs end-to-end and exits 0" PASS ;; *) check "P1ad wrapper header (got: $OUT)" FAIL ;; esac || check "P1ad wrapper exit (rc=$RC)" FAIL
 if grep -qF 'zensu_pending_review_ttl_hours' "$HELPER" && grep -qF 'zensu-config.sh' "$HELPER"; then
-  check "P2i wrapper resolves the TTL through the canonical getter" PASS
+  check "P2k wrapper resolves the TTL through the canonical getter" PASS
 else
-  check "P2i wrapper resolves the TTL through the canonical getter" FAIL
+  check "P2k wrapper resolves the TTL through the canonical getter" FAIL
 fi
 
 # --- forge CLI: provider-aware (gh for GitHub, glab for GitLab) -------------

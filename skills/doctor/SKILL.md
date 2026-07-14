@@ -4,7 +4,7 @@ description: >
   [Zensu] Read-only setup diagnostics for the Zensu plugin. Runs
   hooks/lib/zensu-doctor.sh and prints a four-block ✅/⚠️/❌ table: CLI &
   tooling (zensu CLI + auth, node, the code-forge CLI gh/glab + auth resolved
-  from the repo's provider, Playwright), plugin integrity
+  from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
@@ -46,17 +46,38 @@ the single exception is a leftover-marker cleanup you explicitly confirm.
 ## Prerequisites
 
 None. No MCP connection, no API key, no network. The tool probes are local
-(`command -v`, `--version`, auth-status exit codes) and the manifest/config/state
-reads are local files.
+(`command -v`, `--version`, auth-status exit codes), the lockfile-backed Playwright MCP
+probe validates `.mcp.json`, its manifest wiring, its integrity lock, and `npm`
+without installing or executing the package, and the remaining manifest/config/state reads are local
+files. A configured MCP row remains a warning until the loaded MCP tools are confirmed.
 
 ## Phase 1: Run the diagnostics
 
 Resolve `{PLUGIN_ROOT}` = the trimmed contents of `~/.zensu/plugin-root` (the
-same value `/zensu:tdd` Phase 0 resolves). Then run, once:
+same value `/zensu:tdd` Phase 0 resolves). Before invoking the helper, inspect the tools
+already available in this Claude Code session — do not call the browser. Runtime readiness
+requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
+`browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
+`browser_fill_form`, `browser_wait_for`, `browser_console_messages`,
+`browser_network_requests`, and `browser_close`. Accept each
+suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`. If the complete
+set is loaded, pass that signal separately; the helper still
+validates this plugin's pinned MCP declaration before it can emit `ready`:
+
+```
+ZDOC_PLAYWRIGHT_TOOLS=ready bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh
+```
+
+Otherwise run, once:
 
 ```
 bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh
 ```
+
+The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but
+cannot prove that Claude loaded the MCP server, so it deliberately reports `configured` as
+a warning. The tools signal alone cannot bypass declaration validation. Never inject
+`ZDOC_PLAYWRIGHT=ready` directly and never infer readiness from a PATH `playwright` binary.
 
 Print its output verbatim to the user — it is already the formatted four-block
 table with a summary line. The helper always exits 0; a red ❌ is a finding in

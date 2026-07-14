@@ -325,7 +325,7 @@ The code-reviewer agent is a single READ-ONLY agent (no `Edit` / `Write` / `Task
 
 Anti-hallucination rules: every finding requires file:line reference, confidence >= 80, must Read the file before reporting.
 
-### Skills (19)
+### Skills (20)
 
 > The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (20 skills are registered in `plugin.json`).
 
@@ -335,6 +335,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:implement` | Implement a feature end-to-end with artifact linking and revision tracking |
 | `/zensu:pilot` | Interactive pipeline conductor — probes a feature's real state (backend status, release gate, git, PR review threads), renders a status card, offers the next step via AskUserQuestion, delegates to the matching sibling skill, and executes confirmed status transitions along the server FSM. Loops probe → offer → delegate until released or exit; resumable across sessions because the backend status IS the pipeline state. The guided counterpart to `/zensu:autopilot`. |
 | `/zensu:cover` | Author durable, right-level tests (unit → integration → E2E) for a change — generic across stacks. Green-first coverage of existing code, report-only on surfaced bugs; reuses the `zensu:review-aspect` fan-out + `zensu:code-reviewer`. The durable-test complement to `/zensu:autopilot`'s one-shot validation (persist its ACs via `--from-acs`). |
+| `/zensu:verify-feature` | Live-verify an already-built feature against the current worktree or a deployed preview. Builds a diff-grounded P0/P1/P2 matrix, drives the real UI through the pinned, integrity-locked Playwright MCP configuration, and reports DOM/data, visual, console, and network evidence. Credential-blind and report-only: it neither fixes code nor writes committed tests. The exact origin, page routes, and `declared-safe` evidence mode must already be present in the parent navigation policy; unknown dynamic ports require discovery followed by a restarted policy-configured session. First use may require npm/network access to install the locked runtime. |
 | `/zensu:converge` | Bidirectional flow-back audit: evaluate the current code state against the newest plan's `## Requirements` table (stable `AC-###`/`FR-###` IDs), classify gaps (`missing` / `partial` / `contradicts` / `unrequested`), split unrequested work into business rules vs implementation details, and propose plan edits with freshly allocated stable IDs — applied only after explicit user confirmation (report-only in non-interactive runs; legacy plans without a Requirements table stop cleanly). Offered at the `/zensu:tdd` chain end; `/zensu:autopilot` runs it report-only before opening the PR. |
 | `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |
 | `/zensu:docs` | Author code-grounded documentation for a tracked feature (or a whole product/component in one batch) so it honestly clears the hardened `docs_complete` release gate — one feature-specific doc per feature from the REAL linked source, published to the wiki (or a per-feature repo file) and linked via `zensu link docs`; forbids placeholder / metadata-dump stubs. Idempotent, batchable, and logs every feature skipped or failed. |
@@ -351,11 +352,16 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:setup` | Interactive first-run configuration — verifies the zensu CLI + auth (offers `zensu auth login`), asks global vs project-local, then walks a curated set of high-impact plugin settings via AskUserQuestion and writes them with a jq-free deep-merge that preserves every other key. |
 | `/zensu:zensu-help` | Q&A skill — explains Zensu PLM concepts and plugin internals (agents, hooks, FSM, config flags). Read-only; routes workflow requests to the appropriate action skill. |
 
+`/zensu:verify-feature` also has an agentic Promptfoo E2E suite under
+`evals/verify-feature/`. Its live runner exercises the current plugin worktree against an
+isolated browser fixture and checks the unsafe-remote-URL boundary; the corresponding structure
+test remains offline and deterministic for the default repository suite.
+
 ### Diagnostics — `/zensu:doctor`
 
 A read-only health check for the install, for when something is not firing and you want to see why. `/zensu:doctor` runs `hooks/lib/zensu-doctor.sh` and prints one four-block ✅/⚠️/❌ table:
 
-- **CLI & tooling** — zensu CLI present + authenticated, node version, `gh` present + authenticated, Playwright availability (the `/zensu:autopilot` browser driver).
+- **CLI & tooling** — zensu CLI present + authenticated, node version, `gh` present + authenticated, and the pinned, integrity-locked Playwright MCP config used by `/zensu:verify-feature` (plus the `/zensu:autopilot` browser driver). Doctor validates the declaration and lockfile offline without executing `npm`; “configured” remains a warning until loaded MCP tools prove runtime readiness.
 - **Plugin integrity** — every `hooks.json` command resolves to a script on disk (and every hook script is referenced), and `plugin.json` ↔ `marketplace.json` versions agree.
 - **Config** — the effective config files are valid JSON and free of the **quoted-boolean trap**: a value written as the string `"true"`/`"false"` is silently ignored by the strict `=== true` checks, so the feature stays at its default until you drop the quotes. Doctor names each offending key.
 - **Session state** — the state dir is writable, and leftover per-session markers or an expired `pending-review.json` are counted.
@@ -585,7 +591,7 @@ export ZENSU_API_URL=https://api.example.internal
 zensu --api-url https://api.example.internal features list --product <id>
 ```
 
-See `zensu --help` / `zensu auth --help` for the precedence between the flag, the env var, and the stored host. The hosted MCP server (`mcp.zensu.dev`) — used by the Zensu web app's own AI assistant — is no longer wired into this plugin, so there is no `.mcp.json` to redirect.
+See `zensu --help` / `zensu auth --help` for the precedence between the flag, the env var, and the stored host. The hosted MCP server (`mcp.zensu.dev`) — used by the Zensu web app's own AI assistant — is no longer wired into this plugin. The plugin `.mcp.json` contains only the local Playwright driver used for live verification; it has no Zensu API or hosted-MCP endpoint to redirect.
 
 **Regulated environments:**
 If you operate under GDPR, CCPA, or similar data protection regulations, review the data transmission above and consider using a self-hosted instance to maintain full control over your data.

@@ -24,6 +24,7 @@ Exit 0 iff every selected suite passes. A timestamped report lands in `tests/res
 |---|---|---|
 | `tests/structure/test-*.sh` | deterministic | hooks, libs, skill/agent wiring, version sync, witness, stop-enforcer, plan-approved, session-start, FSM gate |
 | `evals/config-gate/run-eval.sh` | deterministic | pre-edit TDD gate matrix, auto-fix rounds/suggestions routing, config resolution, log-style (~60 offline tests) |
+| `evals/verify-feature/run-eval.sh` | advisory live Promptfoo | `/zensu:verify-feature` local proof and remote URL-policy boundary; requires a disposable host and is intentionally excluded from `tests/run-all.sh --live` |
 | `tests/e2e/` | live | `code-reviewer` agent anti-loop guardrails |
 | `tests/e2e-plm/` | live | `zensu-plm` agent workflow + MCP tool sequencing |
 | `tests/e2e-skills/` | live | `zensu-help` · `plan-review` · `self-review` skills + `review-aspect` agent |
@@ -44,6 +45,9 @@ bash tests/e2e-plm/setup-fixtures.sh    && bash tests/e2e-plm/run.sh
 bash tests/e2e-skills/setup-fixtures.sh && bash tests/e2e-skills/run.sh
 # Re-match the newest captures without re-spending: append --offline
 # Validate skeleton without spawning claude:           append --self-check
+
+# Advisory Promptfoo eval; it has no --offline/--self-check mode and grants unrestricted host access.
+ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
 ```
 
 ## Conventions

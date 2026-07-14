@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **skills**: Add `/zensu:verify-feature` live worktree/preview verification with a pinned, integrity-locked, credential-blind Playwright MCP configuration
+- **evals**: Add live Promptfoo E2E coverage for `/zensu:verify-feature`, including an isolated browser fixture and unsafe remote URL rejection
+
 ## [0.15.0] - 2026-07-12
 
 ### Added

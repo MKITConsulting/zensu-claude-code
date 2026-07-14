@@ -2,15 +2,16 @@
 # zensu-doctor.sh — read-only setup diagnostics for /zensu:doctor.
 #
 # Probes the local toolchain (zensu CLI + auth, node, the code-forge CLI gh/glab
-# resolved from the repo's provider, Playwright) in
+# resolved from the repo's provider, and Playwright MCP) in
 # the shell — `command -v` and auth-status exit codes are a shell concern — then
 # hands the results to zensu-doctor-report.js (env ZDOC_*), which reads the
 # plugin manifest/hooks, the effective config, and the session state dir and
 # renders a four-block ✅/⚠️/❌ table. NOTHING here writes; the script always
 # exits 0 (a probe that errors degrades to a warning row, never a failure).
 #
-# Every ZDOC_* is set with `:=` so a caller (the structure test) can inject a
-# fixed toolchain verdict; real probing only fills the gaps left unset.
+# Every ZDOC_* is set with `:=` so a caller (the structure test, or /zensu:doctor
+# after observing loaded MCP tools) can inject a fixed toolchain verdict; real
+# probing only fills the gaps left unset.
 set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -63,10 +64,60 @@ export ZDOC_FORGE_PROVIDER="${ZDOC_FORGE_PROVIDER:-}" \
        ZDOC_FORGE_CLI="${ZDOC_FORGE_CLI:-}" \
        ZDOC_FORGE_STATE="${ZDOC_FORGE_STATE:-}"
 
-# Playwright: a PATH binary is a safe signal. Deliberately NOT `npx playwright`
-# — even `--no-install` would execute a repo-planted ./node_modules/.bin binary.
+# Playwright: validate the plugin's lockfile-backed MCP declaration without executing it.
+# Doctor stays read-only/offline, so a valid declaration + npm can prove only
+# "configured", not that Claude loaded the MCP server or that npm can install
+# the integrity-locked package graph. A PATH binary is a separate project-driver signal and is
+# never sufficient for /zensu:verify-feature.
+playwright_mcp_declared() {
+  local probe_root mcp_file plugin_file package_file lock_file launcher proxy
+  probe_root="${ZENSU_DOCTOR_PLUGIN_DIR:-$DIR/../..}"
+  mcp_file="$probe_root/.mcp.json"
+  plugin_file="$probe_root/.claude-plugin/plugin.json"
+  package_file="$probe_root/mcp-runtime/package.json"
+  lock_file="$probe_root/mcp-runtime/package-lock.json"
+  launcher="$probe_root/scripts/playwright-mcp.sh"
+  proxy="$probe_root/scripts/playwright-mcp-proxy.js"
+  [ -f "$mcp_file" ] && [ -f "$plugin_file" ] && [ -f "$package_file" ] \
+    && [ -f "$lock_file" ] && [ -x "$launcher" ] && [ -f "$proxy" ] \
+    && command -v node >/dev/null 2>&1 || return 1
+  node -e '
+    const fs = require("fs");
+    const mcp = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const plugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
+    const pkg = JSON.parse(fs.readFileSync(process.argv[3], "utf8"));
+    const lock = JSON.parse(fs.readFileSync(process.argv[4], "utf8"));
+    const proxy = require(process.argv[5]);
+    const expectedTools = [
+      "browser_click", "browser_close", "browser_console_messages",
+      "browser_drag", "browser_fill_form", "browser_handle_dialog", "browser_hover",
+      "browser_navigate", "browser_network_requests", "browser_press_key", "browser_resize",
+      "browser_select_option", "browser_snapshot", "browser_tabs", "browser_take_screenshot",
+      "browser_type", "browser_wait_for"
+    ];
+    const server = mcp && mcp.mcpServers && mcp.mcpServers.playwright;
+    const args = server && Array.isArray(server.args) ? server.args : [];
+    const locked = lock && lock.packages && lock.packages["node_modules/@playwright/mcp"];
+    if (!server || server.type !== "stdio" ||
+        server.command !== "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" ||
+        pkg.dependencies?.["@playwright/mcp"] !== "0.0.75" ||
+        !locked || locked.version !== "0.0.75" || !/^sha512-/.test(locked.integrity || "") ||
+        !args.includes("--isolated") || args.includes("--caps=storage") ||
+        JSON.stringify(proxy.ALLOWED_TOOLS) !== JSON.stringify(expectedTools) ||
+        plugin.mcpServers !== "./.mcp.json") process.exit(1);
+  ' "$mcp_file" "$plugin_file" "$package_file" "$lock_file" "$proxy" >/dev/null 2>&1
+}
+
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
-  if command -v playwright >/dev/null 2>&1; then
+  if playwright_mcp_declared; then
+    if [ "${ZDOC_PLAYWRIGHT_TOOLS:-}" = ready ]; then
+      ZDOC_PLAYWRIGHT=ready
+    elif command -v npm >/dev/null 2>&1; then
+      ZDOC_PLAYWRIGHT=configured
+    else
+      ZDOC_PLAYWRIGHT=declared
+    fi
+  elif command -v playwright >/dev/null 2>&1; then
     ZDOC_PLAYWRIGHT=present
   else
     ZDOC_PLAYWRIGHT=absent
