@@ -384,8 +384,9 @@ if [ "$OUTER_RELEASE_STAGE" = "BLOCKED" ]; then
         "$INNER_BOUND_CHAIN"; then
     exit 0
   fi
-  outer_finish
-  exit 0
+  # BLOCKED does not own an unrelated standalone or mismatched Inner. Keep the
+  # resumable Outer present, but let that unfinished Inner reach the ordinary
+  # review routing (or the bound-generation fail-closed check) below.
 fi
 if outer_is_stop_terminal; then
   # A terminal pointer owns only its exact still-armed inner generation. It is

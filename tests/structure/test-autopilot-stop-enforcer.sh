@@ -442,6 +442,32 @@ if [ -z "$OUT9RB" ] && [ "$BEFORE9RB" = "$AFTER9RB" ] && [ -f "$PENDING9RB" ] \
   check "S9e BLOCKED outer preserves binding and queued deferred review" PASS
 else check "S9e BLOCKED outer cannot seed an unbound deferred review" FAIL; fi
 
+# A standalone unfinished Inner can legitimately predate a later Outer in the
+# same session. BLOCKED owns only an exact bound Inner generation, so it must
+# leave this Outer byte-stable while the unrelated standalone review routes.
+P7W="$TMP/blocked-after-standalone"; mkdir -p "$P7W"
+S7W=stop_session_blocked_after_standalone
+R7W=stop_run_blocked_after_standalone
+CLAUDE_PROJECT_DIR="$P7W" bash "$LOG" --tdd-begin --session "$S7W" >/dev/null
+CLAUDE_PROJECT_DIR="$P7W" bash "$LOG" --tdd-complete --session "$S7W" >/dev/null
+start "$P7W" "$R7W" "$S7W"
+autopilot_apply_event "$R7W" block-after-standalone BLOCK \
+  '{"code":"MANUAL_BLOCK"}' "$P7W" >/dev/null
+TF7W="$P7W/.zensu/state/tdd-phase-${S7W}.json"
+RF7W="$(autopilot_run_file "$R7W" "$P7W")"
+BEFORE9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+OUT9W="$(invoke "$P7W" "$S7W")"
+AFTER9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+if [ "$(printf '%s' "$OUT9W" | decision)" = block ] \
+  && printf '%s' "$OUT9W" | grep -qF 'zensu:code-reviewer' \
+  && [ "$BEFORE9W" = "$AFTER9W" ] \
+  && field_ok "$TF7W" \
+    'j.active===true&&j.implComplete===true&&j.chainDone===false&&j.stopBlockCount===1&&!("autopilotRunId" in j)' \
+  && field_ok "$RF7W" \
+    'j.stage==="BLOCKED"&&j.blocked.code==="MANUAL_BLOCK"&&j.stopBudget.count===0'; then
+  check "S9j BLOCKED outer cannot suppress an unrelated standalone review chain" PASS
+else check "S9j unrelated standalone review wins while BLOCKED outer remains byte-stable" FAIL; fi
+
 P8="$TMP/cap"; start "$P8" stop_run_cap stop_session_cap
 CAP_BLOCKS=true
 for _ in 1 2 3 4 5 6 7 8 9 10 11 12; do
