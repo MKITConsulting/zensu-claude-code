@@ -56,8 +56,57 @@ if grep -qF -- '--review-ticket' "$SKILL_MD" \
 else
   check "F6a skill requires an exact second-line fresh review ticket" FAIL
 fi
+if grep -qF 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-BINDING: run=${RUN_ID} attempt=${ATTEMPT} chain=${CHAIN_ID}' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-STAGE: ${RETURN_STAGE}' "$SKILL_MD" \
+  && grep -qiE 'each (official )?(envelope )?line exactly once|three.{0,30}lines exactly once' "$SKILL_MD"; then
+  check "F6b bound reviewer prompt carries the official three-line envelope exactly once" PASS
+else
+  check "F6b official exact-once bound reviewer envelope" FAIL
+fi
+if grep -qiE 'partial.{0,40}duplicate.{0,40}(conflict|mismatch)|duplicate.{0,40}partial.{0,40}(conflict|mismatch)' "$SKILL_MD" \
+  && grep -qiE 'standalone.{0,50}(omit|no|without).{0,30}(envelope|ZENSU-DELEGATED-CALLER)' "$SKILL_MD"; then
+  check "F6c delegated envelope fails closed while standalone stays envelope-free" PASS
+else
+  check "F6c strict delegated/standalone envelope boundary" FAIL
+fi
 grep -qF "subagent_type='zensu:code-reviewer'" "$SKILL_MD" \
   && check "F7 skill still spawns zensu:code-reviewer (hook trigger preserved)" PASS || check "F7 code-reviewer spawn preserved" FAIL
+
+# Once Autopilot has crossed its single planning gate, the delegated TDD chain
+# may report a durable BLOCK but may not open a second interactive decision.
+UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
+  const fs = require("fs");
+  const lines = fs.readFileSync(process.env.SKILL_MD, "utf8").split(/\r?\n/);
+  const interactive = /AskUserQuestion|ask (?:the )?user|ask again|ask anyway|always asks|pause and wait|escalate to (?:the )?user/i;
+  const qualified = /standalone/i;
+  const planGate = /plan-approval hook/i;
+  const prohibition = /(?:do not|never|without)\b.*\bask/i;
+  lines.forEach((line, index) => {
+    if (interactive.test(line) && !qualified.test(line) && !planGate.test(line) && !prohibition.test(line)) {
+      process.stdout.write(`${index + 1}:${line}\n`);
+    }
+  });
+')"
+TDD_BLOCK_CODES=(
+  'coverage-tool-decision-required'
+  'precondition-decision-required'
+  'tdd-retry-limit'
+  'coverage-threshold-decision-required'
+)
+TDD_NO_ASK=true
+for code in "${TDD_BLOCK_CODES[@]}"; do
+  grep -qF -- "$code" "$SKILL_MD" || TDD_NO_ASK=false
+done
+if [ -z "$UNQUALIFIED_ASKS" ] \
+   && [ "$TDD_NO_ASK" = true ] \
+   && grep -qF -- 'persist `BLOCK`' "$SKILL_MD" \
+   && grep -qF -- 'Autopilot has exactly one interactive gate' "$SKILL_MD"; then
+  check "F7a delegated TDD reports durable blockers without opening another question" PASS
+else
+  [ -z "$UNQUALIFIED_ASKS" ] || printf '%s\n' "$UNQUALIFIED_ASKS" >&2
+  check "F7a delegated TDD reports durable blockers without opening another question" FAIL
+fi
 
 # Explicit carve-out to the line-18 "NO parallel tool batches" rule.
 grep -qiE 'sanctioned parallel batch|ONE (sanctioned|allowed) parallel|exception.{0,40}parallel|fan-out is the (one|only)' "$SKILL_MD" \

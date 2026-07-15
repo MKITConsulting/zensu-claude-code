@@ -180,6 +180,20 @@ const canonical = value => {
   return JSON.stringify(value);
 };
 const digest = payload => crypto.createHash("sha256").update(canonical(payload)).digest("hex");
+const rawDigest = value => crypto.createHash("sha256").update(value).digest("hex");
+const teamReviewOperationKey = (runId, headSha) =>
+  `team-review:v1:${digest({ headSha: headSha.toLowerCase(), runId })}`;
+const parseReviewMarker = marker => {
+  if (typeof marker !== "string") return null;
+  const match = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/.exec(marker);
+  if (!match || match[4] !== match[5]) return null;
+  return { opDigest: match[1], payloadDigest: match[2], headSha: match[3], partCount: Number(match[4]) };
+};
+const reviewMarkerMatches = (marker, operationKey, headSha) => {
+  const parsed = parseReviewMarker(marker);
+  return parsed !== null && parsed.opDigest === rawDigest(operationKey)
+    && sameSha(parsed.headSha, headSha) && Number.isSafeInteger(parsed.partCount);
+};
 
 const regularFile = file => {
   let stat;
@@ -247,7 +261,7 @@ const payloadValid = (type, payload) => {
         && nonEmpty(payload.pr.url, 2048) && /^https:\/\//.test(payload.pr.url) && sha(payload.pr.headSha);
     case "TEAM_REVIEW_PUBLISHED":
       return exact(payload, ["operationKey", "marker", "headSha"])
-        && nonEmpty(payload.operationKey, 256) && nonEmpty(payload.marker, 512) && sha(payload.headSha);
+        && nonEmpty(payload.operationKey, 256) && parseReviewMarker(payload.marker) !== null && sha(payload.headSha);
     case "FIX_REQUIRED":
       return exact(payload, ["headSha", "unresolvedCount"])
         && sha(payload.headSha) && positive(payload.unresolvedCount);
@@ -280,7 +294,7 @@ const evidenceValid = evidence => exact(evidence, ["pr", "gates", "review", "fin
   && (evidence.gates === null || (exact(evidence.gates, ["passed", "headSha"])
     && typeof evidence.gates.passed === "boolean" && sha(evidence.gates.headSha)))
   && (evidence.review === null || (exact(evidence.review, ["published", "marker", "headSha"])
-    && evidence.review.published === true && nonEmpty(evidence.review.marker, 512) && sha(evidence.review.headSha)))
+    && evidence.review.published === true && parseReviewMarker(evidence.review.marker) !== null && sha(evidence.review.headSha)))
   && (evidence.findings === null || (exact(evidence.findings, ["cleared", "headSha", "unresolvedCount"])
     && typeof evidence.findings.cleared === "boolean" && sha(evidence.findings.headSha)
     && natural(evidence.findings.unresolvedCount)))
@@ -296,6 +310,14 @@ const eventValid = event => exact(event, ["eventId", "eventType", "payloadDigest
 
 const sameSha = (left, right) => typeof left === "string" && typeof right === "string"
   && left.toLowerCase() === right.toLowerCase();
+const originalPrHead = state => {
+  const opened = state.events.find(event => event.eventType === "PR_OPENED");
+  return opened && opened.payload && opened.payload.pr && opened.payload.pr.headSha;
+};
+const teamReviewOperationKeyForState = state => {
+  const head = originalPrHead(state);
+  return head ? teamReviewOperationKey(state.runId, head) : null;
+};
 const reviewBelongsToPrGeneration = state => {
   const prIndex = state.events.findIndex(event => event.eventType === "PR_OPENED");
   const reviewIndex = state.events.findIndex(event => event.eventType === "TEAM_REVIEW_PUBLISHED");
@@ -357,6 +379,13 @@ const stateValid = state => {
     || typeof state.tdd.headUpdateRequired !== "boolean") return false;
   if (!exact(state.effects, ["prOpen", "teamReview"]) || !effectValid(state.effects.prOpen)
     || !effectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
+  if (state.effects.teamReview.status !== "none") {
+    if (!state.evidence.pr || state.effects.teamReview.operationKey !== teamReviewOperationKeyForState(state)) return false;
+    if (state.effects.teamReview.status === "requested" && state.evidence.review !== null) return false;
+    if (state.effects.teamReview.status === "completed"
+      && (!state.evidence.review || !reviewMarkerMatches(state.evidence.review.marker,
+        state.effects.teamReview.operationKey, state.evidence.review.headSha))) return false;
+  } else if (state.evidence.review !== null) return false;
   if (!exact(state.blocked, ["from", "code"])
     || !(state.blocked.from === null || STAGES.has(state.blocked.from))
     || !(state.blocked.code === null || identifier(state.blocked.code))) return false;
@@ -527,12 +556,19 @@ const transition = (state, type, payload, reject = fail) => {
       return;
     case "TEAM_REVIEW:TEAM_REVIEW_REQUESTED":
       if (state.effects.teamReview.status !== "none") reject(4, "team review already requested");
+      if (!state.evidence.pr
+        || payload.operationKey !== teamReviewOperationKeyForState(state)) {
+        reject(4, "team-review operation key is not bound to this run and PR head");
+      }
       state.effects.teamReview = { status: "requested", operationKey: payload.operationKey };
       return;
     case "TEAM_REVIEW:TEAM_REVIEW_PUBLISHED":
       if (state.effects.teamReview.status !== "requested"
         || state.effects.teamReview.operationKey !== payload.operationKey) reject(4, "team-review operation key mismatch");
       if (!headMatchesPr(state, payload.headSha)) reject(4, "team review targets a stale PR head");
+      if (!reviewMarkerMatches(payload.marker, payload.operationKey, payload.headSha)) {
+        reject(4, "team-review marker does not prove the operation, head, and first publication part");
+      }
       state.effects.teamReview = { status: "completed", operationKey: payload.operationKey };
       state.evidence.review = { published: true, marker: payload.marker, headSha: payload.headSha.toLowerCase() };
       move(state, "FIX_FINDINGS");
@@ -991,6 +1027,379 @@ autopilot_chain_event_id() {
   ' 2>/dev/null)" || return 5
   [ "${#digest}" -eq 64 ] || return 5
   printf '%s-%s\n' "$prefix" "$digest"
+}
+
+# Produce the only TEAM_REVIEW_REQUESTED operation key accepted by the durable
+# transition: a fixed-size digest of the run id plus the original lowercase PR
+# head. Callers persist this write-ahead key before attempting remote publish.
+autopilot_team_review_operation_key() {
+  local run_id="${1:-}" head_sha="${2:-}"
+  [ "$#" -eq 2 ] && _autopilot_identifier_ok "$run_id" || return 3
+  RUN_ID="$run_id" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const head=process.env.HEAD_SHA;
+    if(!/^[a-fA-F0-9]{7,64}$/.test(head))process.exit(3);
+    const canonical=value => value && typeof value === "object" && !Array.isArray(value)
+      ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+    const seed={headSha:head.toLowerCase(),runId:process.env.RUN_ID};
+    process.stdout.write(`team-review:v1:${crypto.createHash("sha256").update(canonical(seed)).digest("hex")}`);
+  ' 2>/dev/null
+}
+
+# The delegated review body is a remote-write input, so a crash after the forge
+# accepted it must not allow a retry to synthesize different bytes for the same
+# operation key. Keep one private immutable snapshot per operation/head pair in
+# the project-local durable state directory.
+_autopilot_team_review_payload_target() {
+  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}"
+  [ "$#" -eq 3 ] || return 3
+  ROOT="$root" OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+    const crypto = require("crypto");
+    const path = require("path");
+    const root = process.env.ROOT;
+    const operationKey = process.env.OPERATION_KEY;
+    const head = String(process.env.HEAD_SHA || "").toLowerCase();
+    if (!root || !/^team-review:v1:[a-f0-9]{64}$/.test(operationKey)
+        || !/^[a-f0-9]{7,64}$/.test(head)) process.exit(3);
+    const operationDigest = crypto.createHash("sha256").update(operationKey).digest("hex");
+    process.stdout.write(path.join(root, ".zensu", "state",
+      `autopilot-team-review-payload-${operationDigest}-${head}.json`));
+  ' 2>/dev/null
+}
+
+_autopilot_team_review_payload_identity_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4"
+  local state_dir="$root/.zensu/state" expected_key state
+  expected_key="$(autopilot_team_review_operation_key "$run_id" "$head_sha")" || return $?
+  [ "$operation_key" = "$expected_key" ] || return 4
+  state="$(_autopilot_node read-active \
+    "$state_dir/autopilot-active.json" "$state_dir" "$root")" || return $?
+  printf '%s' "$state" | RUN_ID="$run_id" OPERATION_KEY="$operation_key" \
+    HEAD_SHA="$head_sha" node -e '
+      let state;
+      try { state = JSON.parse(require("fs").readFileSync(0, "utf8")); }
+      catch (_) { process.exit(2); }
+      const head = String(process.env.HEAD_SHA || "").toLowerCase();
+      const review = state && state.effects && state.effects.teamReview;
+      const pr = state && state.evidence && state.evidence.pr;
+      if (!state || state.runId !== process.env.RUN_ID || state.stage !== "TEAM_REVIEW"
+          || !review || review.status !== "requested"
+          || review.operationKey !== process.env.OPERATION_KEY
+          || !pr || typeof pr.headSha !== "string" || pr.headSha.toLowerCase() !== head
+          || (state.evidence && state.evidence.review !== null)) process.exit(4);
+    ' 2>/dev/null
+}
+
+# Securely inspect a payload. The target variant additionally requires private
+# permissions. Reading through O_NOFOLLOW and comparing lstat/fstat identities
+# closes the leaf-swap window and rejects hard-linked files.
+_autopilot_team_review_payload_inspect() {
+  local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}"
+  [ "$#" -eq 3 ] || return 3
+  case "$private" in true|false) ;; *) return 3 ;; esac
+  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    const max = 8 * 1024 * 1024;
+    const file = process.env.PAYLOAD_FILE;
+    const head = String(process.env.HEAD_SHA || "").toLowerCase();
+    const requirePrivate = process.env.PRIVATE === "true";
+    const unsafe = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+    const fail = code => process.exit(code);
+    const validate = data => {
+      let payload;
+      try { payload = JSON.parse(data.toString("utf8")); } catch (_) { fail(2); }
+      if (!payload || Array.isArray(payload) || typeof payload !== "object") fail(2);
+      const keys = Object.keys(payload).sort().join(",");
+      if (keys !== "body,comments,commit_id,event") fail(2);
+      if (typeof payload.body !== "string" || unsafe.test(payload.body)
+          || payload.body.includes("zensu-review:v1")
+          || !["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(payload.event)
+          || typeof payload.commit_id !== "string"
+          || payload.commit_id.toLowerCase() !== head
+          || !Array.isArray(payload.comments) || payload.comments.length > 999998) fail(2);
+      for (const comment of payload.comments) {
+        if (!comment || Array.isArray(comment) || typeof comment !== "object"
+            || !Object.keys(comment).every(key =>
+              ["body", "path", "line", "side", "start_line", "start_side"].includes(key))
+            || typeof comment.body !== "string" || unsafe.test(comment.body)
+            || comment.body.includes("zensu-review:v1")
+            || typeof comment.path !== "string" || !comment.path || unsafe.test(comment.path)
+            || comment.path.includes("zensu-review:v1")) fail(2);
+        if (comment.side != null && !["LEFT", "RIGHT"].includes(comment.side)) fail(2);
+        if (comment.line != null && (!Number.isSafeInteger(comment.line) || comment.line < 1)) fail(2);
+        const hasStartLine = comment.start_line != null;
+        const hasStartSide = comment.start_side != null;
+        if (hasStartLine !== hasStartSide) fail(2);
+        if (hasStartLine && (!Number.isSafeInteger(comment.start_line) || comment.start_line < 1
+            || !Number.isSafeInteger(comment.line) || comment.start_line > comment.line
+            || !["LEFT", "RIGHT"].includes(comment.start_side)
+            || comment.start_side !== comment.side)) fail(2);
+      }
+    };
+    let fd;
+    try {
+      const before = fs.lstatSync(file);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+          || before.size < 1 || before.size > max
+          || (requirePrivate && (before.mode & 0o777) !== 0o600)) fail(2);
+      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const opened = fs.fstatSync(fd);
+      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
+          || opened.ino !== before.ino || opened.size !== before.size
+          || (requirePrivate && (opened.mode & 0o777) !== 0o600)) fail(2);
+      const data = fs.readFileSync(fd);
+      const after = fs.fstatSync(fd);
+      fs.closeSync(fd); fd = undefined;
+      if (data.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
+          || after.nlink !== 1 || after.size !== opened.size
+          || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) fail(2);
+      validate(data);
+      process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
+    } catch (_) {
+      if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+      fail(2);
+    }
+  ' 2>/dev/null
+}
+
+# Recover the sole crash shape produced by the atomic no-replace publication:
+# link(temp, target) succeeded, but the process died before unlink(temp). This
+# runs only while the project-wide Autopilot lock is held. Exactly two links
+# must exist and both must be the deterministic target plus one mktemp-shaped
+# sibling pointing at the same private inode. Anything ambiguous stays
+# fail-closed and untouched.
+_autopilot_recover_team_review_payload_alias() {
+  local target="${1:-}"
+  [ "$#" -eq 1 ] && [ -n "$target" ] || return 3
+  TARGET_FILE="$target" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const target = process.env.TARGET_FILE;
+    const directory = path.dirname(target);
+    const basename = path.basename(target);
+    const expectedTarget = /^autopilot-team-review-payload-[a-f0-9]{64}-[a-f0-9]{7,64}\.json$/;
+    const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expectedTemp = new RegExp(`^${escape(basename)}\\.tmp\\.[A-Za-z0-9]{8}$`);
+    const privateRegular = stat => stat.isFile() && !stat.isSymbolicLink()
+      && (stat.mode & 0o777) === 0o600;
+    let targetFd, tempFd, directoryFd;
+    const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
+    const fail = code => {
+      close(targetFd); close(tempFd); close(directoryFd);
+      process.exit(code);
+    };
+    if (!expectedTarget.test(basename)) fail(3);
+    let targetBefore;
+    try { targetBefore = fs.lstatSync(target); }
+    catch (error) {
+      if (error.code === "ENOENT") process.exit(0);
+      fail(2);
+    }
+    if (!privateRegular(targetBefore)) fail(2);
+    if (targetBefore.nlink === 1) process.exit(0);
+    if (targetBefore.nlink !== 2) fail(2);
+
+    let names, aliases;
+    try {
+      names = fs.readdirSync(directory).filter(name => expectedTemp.test(name));
+      aliases = names.filter(name => {
+        const stat = fs.lstatSync(path.join(directory, name));
+        return stat.dev === targetBefore.dev && stat.ino === targetBefore.ino;
+      });
+    } catch (_) { fail(2); }
+    // A pre-link crash can leave unrelated private temp files with the same
+    // prefix. Ignore and preserve them; only same-inode aliases account for
+    // targetBefore.nlink. nlink=2 plus one such alias is the sole healable case.
+    if (aliases.length !== 1) fail(2);
+    const temp = path.join(directory, aliases[0]);
+
+    try {
+      const tempBefore = fs.lstatSync(temp);
+      if (!privateRegular(tempBefore) || tempBefore.nlink !== 2
+          || tempBefore.dev !== targetBefore.dev || tempBefore.ino !== targetBefore.ino) fail(2);
+      targetFd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const targetOpen = fs.fstatSync(targetFd);
+      const tempOpen = fs.fstatSync(tempFd);
+      if (!privateRegular(targetOpen) || !privateRegular(tempOpen)
+          || targetOpen.nlink !== 2 || tempOpen.nlink !== 2
+          || targetOpen.dev !== targetBefore.dev || targetOpen.ino !== targetBefore.ino
+          || tempOpen.dev !== targetOpen.dev || tempOpen.ino !== targetOpen.ino) fail(2);
+
+      // Re-account both names immediately before removal. nlink=2 plus these
+      // two same-inode directory entries proves that no foreign link exists.
+      const targetFinal = fs.lstatSync(target);
+      const tempFinal = fs.lstatSync(temp);
+      if (!privateRegular(targetFinal) || !privateRegular(tempFinal)
+          || targetFinal.nlink !== 2 || tempFinal.nlink !== 2
+          || targetFinal.dev !== targetOpen.dev || targetFinal.ino !== targetOpen.ino
+          || tempFinal.dev !== targetOpen.dev || tempFinal.ino !== targetOpen.ino) fail(2);
+      fs.unlinkSync(temp);
+
+      const targetAfterOpen = fs.fstatSync(targetFd);
+      const tempAfterOpen = fs.fstatSync(tempFd);
+      const targetAfter = fs.lstatSync(target);
+      if (!privateRegular(targetAfterOpen) || !privateRegular(tempAfterOpen)
+          || !privateRegular(targetAfter) || targetAfterOpen.nlink !== 1
+          || tempAfterOpen.nlink !== 1 || targetAfter.nlink !== 1
+          || targetAfterOpen.dev !== targetOpen.dev || targetAfterOpen.ino !== targetOpen.ino
+          || tempAfterOpen.dev !== targetOpen.dev || tempAfterOpen.ino !== targetOpen.ino
+          || targetAfter.dev !== targetOpen.dev || targetAfter.ino !== targetOpen.ino) fail(2);
+      close(targetFd); targetFd = undefined;
+      close(tempFd); tempFd = undefined;
+
+      directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);
+      try { fs.fsyncSync(directoryFd); } catch (error) {
+        if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+      }
+      close(directoryFd); directoryFd = undefined;
+    } catch (_) { fail(2); }
+  ' 2>/dev/null
+}
+
+_autopilot_read_team_review_payload_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4"
+  local state_dir="$root/.zensu/state" target
+  _autopilot_team_review_payload_identity_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" || return $?
+  target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
+    || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
+  _autopilot_recover_team_review_payload_alias "$target" || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe \
+    "$state_dir" directory "$target" regular-or-absent || return 2
+  [ -e "$target" ] || return 1
+  _autopilot_team_review_payload_inspect "$target" "$head_sha" true >/dev/null || return $?
+  printf '%s\n' "$target"
+}
+
+autopilot_read_team_review_payload() {
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" root
+  [ "$#" -eq 4 ] && _autopilot_identifier_ok "$run_id" || return 3
+  root="$(_autopilot_project_root "${4:-}")" || return 2
+  _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
+    >/dev/null || return 3
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_read_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha"
+}
+
+_autopilot_store_team_review_payload_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5"
+  local state_dir="$root/.zensu/state" target tmp rc source_digest target_digest
+  _autopilot_team_review_payload_identity_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" || return $?
+  target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
+    || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
+  _autopilot_recover_team_review_payload_alias "$target" || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe \
+    "$state_dir" directory "$source_file" regular "$target" regular-or-absent || return 2
+  source_digest="$(_autopilot_team_review_payload_inspect \
+    "$source_file" "$head_sha" false)" || return $?
+
+  # Existing snapshots are immutable. A byte-identical replay is idempotent;
+  # every other payload (including unsafe identity/mode changes) is a conflict.
+  if [ -e "$target" ]; then
+    target_digest="$(_autopilot_team_review_payload_inspect \
+      "$target" "$head_sha" true)" || return $?
+    [ "$source_digest" = "$target_digest" ] || return 4
+    printf '%s\n' "$target"
+    return 0
+  fi
+
+  tmp="$(mktemp "${target}.tmp.XXXXXXXX" 2>/dev/null)" || return 5
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$tmp" regular "$target" regular-or-absent \
+    || { rm -f "$tmp"; return 2; }
+  SOURCE_FILE="$source_file" TARGET_FILE="$target" TEMP_FILE="$tmp" \
+    EXPECTED_DIGEST="$source_digest" \
+    node -e '
+      const fs = require("fs");
+      const crypto = require("crypto");
+      const source = process.env.SOURCE_FILE;
+      const target = process.env.TARGET_FILE;
+      const temp = process.env.TEMP_FILE;
+      let sourceFd, tempFd;
+      const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
+      try {
+        const sourceBefore = fs.lstatSync(source);
+        if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) process.exit(2);
+        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        const sourceOpen = fs.fstatSync(sourceFd);
+        if (!sourceOpen.isFile() || sourceOpen.nlink !== 1 || sourceOpen.dev !== sourceBefore.dev
+            || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) process.exit(2);
+        const data = fs.readFileSync(sourceFd);
+        const sourceAfter = fs.fstatSync(sourceFd);
+        close(sourceFd); sourceFd = undefined;
+        if (data.length !== sourceOpen.size || sourceAfter.size !== sourceOpen.size
+            || sourceAfter.mtimeMs !== sourceOpen.mtimeMs || sourceAfter.ctimeMs !== sourceOpen.ctimeMs) process.exit(2);
+        if (crypto.createHash("sha256").update(data).digest("hex") !== process.env.EXPECTED_DIGEST) process.exit(4);
+
+        const tempBefore = fs.lstatSync(temp);
+        if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) process.exit(2);
+        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_TRUNC
+          | (fs.constants.O_NOFOLLOW || 0));
+        const tempOpen = fs.fstatSync(tempFd);
+        if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
+            || tempOpen.ino !== tempBefore.ino) process.exit(2);
+        fs.fchmodSync(tempFd, 0o600);
+        fs.writeFileSync(tempFd, data);
+        fs.fsyncSync(tempFd);
+        close(tempFd); tempFd = undefined;
+
+        // link(2) is an atomic no-replace publication. EEXIST is never
+        // overwritten; the shell revalidates any concurrently published file.
+        fs.linkSync(temp, target);
+        fs.unlinkSync(temp);
+        try {
+          const directoryFd = fs.openSync(require("path").dirname(target), fs.constants.O_RDONLY);
+          try { fs.fsyncSync(directoryFd); } catch (error) {
+            if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+          }
+          fs.closeSync(directoryFd);
+        } catch (error) {
+          if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+        }
+      } catch (error) {
+        close(sourceFd); close(tempFd);
+        if (error && error.code === "EEXIST") process.exit(4);
+        process.exit(5);
+      }
+    ' 2>/dev/null
+  rc=$?
+  rm -f "$tmp"
+  if [ "$rc" -eq 4 ]; then
+    CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$target" regular-or-absent || return 2
+    [ -e "$target" ] || return 4
+    target_digest="$(_autopilot_team_review_payload_inspect \
+      "$target" "$head_sha" true)" || return $?
+    [ "$source_digest" = "$target_digest" ] || return 4
+  elif [ "$rc" -ne 0 ]; then
+    return "$rc"
+  fi
+  target_digest="$(_autopilot_team_review_payload_inspect \
+    "$target" "$head_sha" true)" || return $?
+  [ "$source_digest" = "$target_digest" ] || return 4
+  printf '%s\n' "$target"
+}
+
+autopilot_store_team_review_payload() {
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" root
+  [ "$#" -eq 5 ] && _autopilot_identifier_ok "$run_id" || return 3
+  root="$(_autopilot_project_root "${5:-}")" || return 2
+  _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
+    >/dev/null || return 3
+  source_file="$(SOURCE_FILE="$source_file" node -e '
+    const path = require("path");
+    const source = process.env.SOURCE_FILE;
+    if (!source || /[\u0000-\u001f]/.test(source)) process.exit(3);
+    process.stdout.write(path.resolve(source));
+  ' 2>/dev/null)" || return 3
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_store_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$source_file"
 }
 
 # Starting a standalone inner generation must serialize with every durable

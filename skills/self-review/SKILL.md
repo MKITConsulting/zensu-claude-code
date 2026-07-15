@@ -57,20 +57,34 @@ skill. If the line is missing, malformed, or ambiguous, do not run
 `--self-review-fixed` or `--chain-done`; report that the self-review handoff is
 unbound and let the Stop hook reconstruct the current handoff.
 
-An Autopilot-bound handoff MUST additionally include exactly one official
-current binding-evidence line:
-`AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>`. Capture
-those three values as `RUN_ID`, `ATTEMPT`, and `CHAIN_ID` from that evidence,
-never from conversation memory. Before reading or changing files, resolve the current
-session through `zensu-session.sh`, run
+An Autopilot-bound handoff MUST additionally include exactly one complete
+official three-line envelope, with each line occurring exactly once:
+
+`ZENSU-DELEGATED-CALLER: autopilot`
+`AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>`
+`AUTOPILOT-STAGE: <returnStage>`
+
+The appearance of any one of the three header prefixes activates delegated
+validation. A partial, duplicate, malformed, or conflicting envelope is a stale
+handoff: do not read/change project files and do not run `--self-review-fixed`
+or `--chain-done`. Capture `RUN_ID`, `ATTEMPT`, `CHAIN_ID`, and `RETURN_STAGE`
+only from the accepted envelope, never from conversation memory.
+
+Before reading or changing files, resolve the current session through
+`zensu-session.sh`, run
 `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --autopilot-status`, and
-cross-check that the result is the current session's `TDD_RUNNING` run and its
-`tdd.sessionId`, `tdd.attempt`, and `tdd.chainId` match the evidence exactly.
-A missing, malformed, ambiguous, foreign, terminal, or mismatched result is a
-stale handoff: stop without mutation. Conversely, if current status proves an
-owned `TDD_RUNNING` binding but the evidence line is absent, fail closed rather
-than using an unqualified terminus. A standalone handoff has no binding line
-and no owned `TDD_RUNNING` durable status.
+cross-check the durable result. It must name the captured `runId`, have
+`ownerSessionId` equal to the resolved session, be the current nonterminal
+`stage=TDD_RUNNING` run, and match `tdd.sessionId`, `tdd.attempt`,
+`tdd.chainId`, and `tdd.returnStage` to the resolved session plus the four
+envelope values exactly. The `AUTOPILOT-STAGE: <returnStage>` line therefore
+proves the same value as `tdd.returnStage`; it is not a navigation hint. A
+missing, foreign, terminal, or mismatched status is stale and stops without
+mutation. Conversely, if current status proves an owned `TDD_RUNNING` binding
+but the envelope is absent, fail closed rather than using an unqualified
+terminus. Standalone handoffs omit the entire Autopilot envelope and must have
+no owned `TDD_RUNNING` durable status; their existing unqualified behavior is
+otherwise unchanged.
 
 Every command below that shows `<review-ticket>` means the captured ticket.
 Every bound command uses the same captured run/attempt/chain. A non-zero exit
@@ -134,9 +148,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
-  bound handoff, the same captured
-  `AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>` line.
-  Do not re-read, re-derive, or omit either generation token. In this branch you MUST NOT:
+  bound handoff, the same captured official envelope exactly once:
+  `ZENSU-DELEGATED-CALLER: autopilot`,
+  `AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>`, and
+  `AUTOPILOT-STAGE: <returnStage>`. Do not re-read, re-derive, or omit either generation token or any envelope line. In this branch you MUST NOT:
   - run `--tdd-complete` (implementation is already complete);
   - spawn the `zensu:code-reviewer` agent — self-review is terminal, so do not spawn it;
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).

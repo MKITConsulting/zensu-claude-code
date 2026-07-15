@@ -9,6 +9,14 @@ LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 source "$LIB"
+review_marker() {
+  local operation_key="$1" head_sha="$2"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${"f".repeat(64)}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  '
+}
 TMP="$(mktemp -d -t zensu-autopilot-stop-XXXXXX)"; trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
@@ -19,6 +27,7 @@ invoke() {
     ZENSU_CHAIN="$chain" ZENSU_AUTOPILOT="$autopilot" bash "$STOP" 2>/dev/null
 }
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).decision||"allow")}catch(_){console.log("allow")}})'; }
+context() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){process.exit(1)}})'; }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
 
 P1="$TMP/planning"; start "$P1" stop_run_01 stop_session_01
@@ -40,8 +49,10 @@ head_event stop-head-gates GATES_PASSED "{\"headSha\":\"$HEAD_SHA\"}"
 head_event stop-head-converge CONVERGENCE_PASSED '{}'
 head_event stop-head-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:stop-head"}'
 head_event stop-head-pr-open PR_OPENED "{\"operationKey\":\"pr:stop-head\",\"pr\":{\"number\":714,\"url\":\"https://github.com/acme/repo/pull/714\",\"headSha\":\"$HEAD_SHA\"}}"
-head_event stop-head-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:stop-head"}'
-head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:stop-head\",\"marker\":\"zensu-autopilot-review:stop-head\",\"headSha\":\"$HEAD_SHA\"}"
+HEAD_REVIEW_KEY="$(autopilot_team_review_operation_key stop_run_head "$HEAD_SHA")"
+HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA")"
+head_event stop-head-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$HEAD_REVIEW_KEY\"}"
+head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}"
 head_event stop-head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
 head_event stop-head-tdd-start-2 TDD_STARTED '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head"}'
 head_event stop-head-tdd-done-2 TDD_CHAIN_DONE '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head","outcome":"pass"}'
@@ -183,9 +194,13 @@ CLAUDE_PROJECT_DIR="$P7" bash "$LOG" --tdd-complete --session stop_session_prior
   --autopilot-run stop_run_priority --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-priority-001 >/dev/null
 OUT9="$(invoke "$P7" stop_session_priority)"
+CTX9="$(printf '%s' "$OUT9" | context)"
 if [ "$(printf '%s' "$OUT9" | decision)" = block ] \
   && printf '%s' "$OUT9" | grep -qF 'zensu:code-reviewer' \
   && printf '%s' "$OUT9" | grep -qF -- '--outcome no-changes' \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'ZENSU-DELEGATED-CALLER: autopilot')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'AUTOPILOT-BINDING: run=stop_run_priority attempt=1 chain=chain-priority-001')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'AUTOPILOT-STAGE: GATES')" -eq 1 ] \
   && ! printf '%s' "$OUT9" | grep -qF 'nextActionCode=AWAIT_TDD_CHAIN'; then
   check "S9 inner review routing has priority over outer-stage routing" PASS
 else check "S9 inner review routing has priority" FAIL; fi
@@ -223,8 +238,12 @@ OUT9F="$(printf '%s' '{"session_id":"stop_session_fresh"}' \
   | CLAUDE_PROJECT_DIR="$P7F" CLAUDE_PLUGIN_ROOT="$FRESH_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_FRESH_REVIEW_TICKET="$TICKET9F" \
     bash "$STOP" 2>/dev/null)"
+CTX9F="$(printf '%s' "$OUT9F" | context)"
 if [ "$(printf '%s' "$OUT9F" | decision)" = block ] \
   && printf '%s' "$OUT9F" | grep -qF "skill='zensu:self-review'" \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'ZENSU-DELEGATED-CALLER: autopilot')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'AUTOPILOT-BINDING: run=stop_run_fresh attempt=1 chain=chain-fresh-001')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'AUTOPILOT-STAGE: GATES')" -eq 1 ] \
   && ! printf '%s' "$OUT9F" | grep -qF "subagent_type='zensu:code-reviewer'"; then
   check "S9a fresh codeReviewDone routes self-review after the budget CAS" PASS
 else check "S9a fresh prompt snapshot owns reviewer vs self-review routing" FAIL; fi

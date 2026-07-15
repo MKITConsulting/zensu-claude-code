@@ -7,7 +7,7 @@ description: >
   --tdd-begin. After implementation a guaranteed review chain fans out five read-only
   zensu:review-aspect subagents, merges findings, and consolidates through a single
   zensu:code-reviewer spawn whose findings you fix in-thread until PASS or max rounds. When
-  hooks.tddImplementation is false it runs vanilla mode (no RED->GREEN ceremony, tests at
+  hooks.tddImplementation is false it runs vanilla mode (no RED-to-GREEN ceremony, tests at
   your discretion) but keeps the evidence audits and the full review chain. Invoked after a
   plan is approved (the plan-approval hook asks), by /zensu:implement, or the slash command
   /zensu:tdd with a feature specification. Provide WHAT to build, not HOW.
@@ -31,8 +31,18 @@ The phase-gate and the witness only see these shell commands — prose complianc
    Never follow a delegated begin with the standalone form: that would erase
    the outer-run binding. The helper rejects a wrong owner, stale attempt, or
    guessed return stage before mutating the inner chain. Keep `RUN_ID`,
-   `ATTEMPT`, and `CHAIN_ID` as the immutable binding for every later terminal
-   command in this chain; never derive them again from conversation memory.
+   `ATTEMPT`, `RETURN_STAGE`, and `CHAIN_ID` as the immutable binding for every
+   later reviewer handoff and terminal command in this chain; never derive them
+   again from conversation memory. Every bound reviewer prompt carries this
+   official envelope after its required consume-mode headers:
+   `ZENSU-DELEGATED-CALLER: autopilot`
+   `AUTOPILOT-BINDING: run=${RUN_ID} attempt=${ATTEMPT} chain=${CHAIN_ID}`
+   `AUTOPILOT-STAGE: ${RETURN_STAGE}`
+   Carry each official envelope line exactly once. If any delegated header is
+   partial, duplicate, malformed, or conflicts with a fresh
+   `--autopilot-status` result, fail closed before issuing/consuming a review
+   ticket or spawning an agent. Standalone chains omit the Autopilot envelope
+   and retain their two consume-mode header lines.
    Until this runs the gate and witness are silent and the session records ZERO
    discipline evidence — TDD without arming is a protocol violation.
 2. **Declare every phase BEFORE acting — `--step <id>` is REQUIRED on every marker**:
@@ -55,6 +65,18 @@ The phase-gate and the witness only see these shell commands — prose complianc
 
 Full details (work types, planning, logging, review chain) follow below — the
 command sequence above is non-negotiable on every step.
+
+### Delegated no-question rule
+
+Autopilot has exactly one interactive gate: approval of its specification and acceptance
+criteria before this delegated TDD chain begins. Once an `AUTOPILOT-RUN` binding is active,
+do not open another question for a missing tool, precondition, retry decision, coverage
+decision, authentication problem, or product choice. Read fresh outer state, persist `BLOCK`
+with a stable generation-specific event id through `zensu-log.sh --autopilot-event`, report
+the blocker, and stop without guessing. Use the closed codes
+`coverage-tool-decision-required`, `precondition-decision-required`, `tdd-retry-limit`, and
+`coverage-threshold-decision-required` in the branches below. Standalone TDD retains its
+explicitly labeled interactive paths.
 
 ## When to Use
 
@@ -96,7 +118,7 @@ If you find yourself thinking any of the following, STOP and write the test firs
 - *"One more edit and it's done"* → No. Current scope only. Commit mentally, then start next RED.
 - *"Tool X is missing, I'll write a small replacement / inline equivalent"* → LIE. A hand-rolled replacement is not the contracted artifact. STOP. Phase 1.5 escalates this — never substitute.
 - *"Secret / env var missing, I'll commit a placeholder fixture and let CI fill it in"* → LIE. A placeholder fixture is a fake green. STOP. Mark the dependent step `[!]` and escalate via Phase 1.5.
-- *"The user said 'no questions', so I'll make my best guess"* → LIE. "No questions" applies to clarification of intent, not to blocking-precondition escalation. The Phase-1-3b coverage-tool ask is the precedent: ask anyway. See Phase 1.5.
+- *"The user said 'no questions', so I'll make my best guess"* → LIE. In standalone mode, the Phase-1-3b coverage-tool ask is the precedent: ask anyway. In delegated mode, persist the specified `BLOCK` and report it without guessing. See Phase 1.5.
 - *"Tasks are just UI noise — the log already tracks progress"* → LIE. The Task list is the user's ONLY live progress view; the log is a post-hoc file they must `tail`. Skipping `TaskCreate`/`TaskUpdate` leaves the user blind to where you are. Create the step tasks in Phase 3, flip their status in Phase 4 — same discipline as the log.
 
 ### Hard Bans
@@ -206,7 +228,7 @@ Active when Phase 0's `--tdd-begin` echoes `mode: vanilla` (`hooks.tddImplementa
    - Step 4 — threshold resolution:
      - Numeric thresholds extracted from config → use those values verbatim. Set `{threshold_source}=project-config`.
      - No thresholds in config (even if tool installed) → default 90% lines. Set `{threshold_source}=default-90%`.
-   - If a test runner exists but NO coverage tool installed → use AskUserQuestion to ask whether to install one (recommend matching tool: vitest→@vitest/coverage-v8, jest→built-in, pytest→pytest-cov). On accept: add a `[W]` step in the Phase 2 plan for install. On decline: set `{coverage_cmd}=null`, mark coverage SKIPPED in Phase 6.
+   - If a test runner exists but NO coverage tool is installed, standalone mode uses AskUserQuestion to ask whether to install one (recommend matching tool: vitest→@vitest/coverage-v8, jest→built-in, pytest→pytest-cov). On accept: add a `[W]` step in the Phase 2 plan for install. On decline: set `{coverage_cmd}=null`, mark coverage SKIPPED in Phase 6. Delegated mode instead persists `BLOCK(coverage-tool-decision-required)`, reports it, and stops without asking.
 4. Read 1-2 sample test files for patterns
 5. Scan `.zensu/plans/*_tdd-*.md` for patterns
 6. Parse spec into atomic steps, classify work type per step. Non-testable work folded into related IMPL. **Cross-layer detection (Principle 2):** for each Feature/Bug-Fix step, trace the call graph from changed code to the persistence/transport boundary. If the path crosses unchanged code that consumes a NEW value/field/payload-key/query-param, add a paired Characterization step (`[G]`, Feature work type) in that unchanged layer. The originating step's `depends_on` MUST list the characterization step. Record the pairing in the Phase 2 plan's `## Cross-Layer Value Flow Pairings` table.
@@ -228,11 +250,12 @@ Generalizes the Phase 1 step 3b coverage-tool pattern to every external dependen
    - Endpoint: `curl -fsS --max-time 5 {url}` (only if the spec implies live use; otherwise skip)
    - Fixture: `[ -f {path} ]` or `[ -d {path} ]`
    Record `{precondition_name}`, `{verification_cmd}`, `{result: present|missing}`.
-3. For every `missing` precondition: use AskUserQuestion to present three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
-4. **AskUserQuestion override**: if an earlier user instruction said "no questions" or similar terseness preference, that instruction is OVERRIDDEN here. Blocking-precondition escalation always asks. This mirrors the Phase 1 step 3b coverage-tool ask, which is also unconditional.
-5. If the user picks (a) install: pause and wait for the user to install/provide the precondition. After the user confirms completion, re-run the verification command from step 2. If still missing, ask again (loop back to step 3). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user has explicitly authorized the specific install command in the same exchange.
-6. If the user picks (b) substitution: the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
-7. If the user picks (c) skip: every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
+3. In delegated mode, any `missing` precondition persists `BLOCK(precondition-decision-required)` with the precondition named in the report, then stops without asking or substituting.
+4. In standalone mode, for every `missing` precondition use AskUserQuestion to present three options — **(a) install/provide it now, (b) approve a named substitution** (the user names the substitute, agent does not propose one), or **(c) mark the dependent steps `[!]` and skip**. Record the user's answer verbatim in the plan's `## Preconditions` section (Phase 2).
+5. **Standalone AskUserQuestion override**: if an earlier user instruction said "no questions" or a similar terseness preference, standalone blocking-precondition escalation always asks. This mirrors the standalone Phase 1 step 3b coverage-tool ask.
+6. In standalone mode, if the user picks (a) install, pause and wait for the user to install/provide the precondition. After confirmation, re-run the verification command from step 2. If it is still missing, ask again (loop back to step 4). The workflow does NOT proactively run install commands (e.g. `npm install`, `brew install`) unless the user explicitly authorized the specific install command in the same exchange.
+7. In standalone mode, if the user picks (b) substitution, the substitution MUST be named by the user, not proposed by the agent. Re-run the matching verification on the user-named substitute. If the substitute is also missing, ask again.
+8. In standalone mode, if the user picks (c) skip, every spec step that names the missing precondition gets `[!]` in Phase 2. Do not silently re-route the step's IMPL to a different tool.
 
 ## Phase 2: Create Plan + Log
 
@@ -286,7 +309,7 @@ Log `EXECUTION STARTED` before the first step. All log-append commands in this p
   - Run the test.
   - **Phase marker (on PASS)**: `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase GREEN_PASS --step {step_id}`
   - If PASS: Log `{step} GREEN — PASS ({N} attempts)`. TaskUpdate [verify] completed. Next step.
-  - If FAIL: Log `RETRY({N}/3)`. Fix implementation (re-emit `--phase IMPL` per RETRY), back to C. Max 3 attempts → escalate to user.
+  - If FAIL: Log `RETRY({N}/3)`. Fix implementation (re-emit `--phase IMPL` per RETRY), back to C. After 3 attempts, standalone mode escalates to the user; delegated mode persists `BLOCK(tdd-retry-limit)`, reports the exhausted step, and stops without asking.
   - Full suite runs only at Phase 5 checkpoints (not per step) — avoids 20× overhead on large codebases.
 
 ### Refactoring Cycle
@@ -359,7 +382,7 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
         Threshold source: {threshold_source}
         ```
 
-   - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}` and ask user (in their language) whether to run an additional TDD cycle for uncovered branches. Do NOT auto-loop (avoids scope explosion).
+   - If ≥1 file FAIL: log `COVERAGE BELOW THRESHOLD on {N} files: {file_list}`. Standalone mode asks the user (in their language) whether to run an additional TDD cycle for uncovered branches. Delegated mode persists `BLOCK(coverage-threshold-decision-required)`, reports the files, and stops without asking. Do NOT auto-loop (avoids scope explosion).
 4. Read plan and implementation files. Verify every step's description matches the actual code. For `[W]` steps, verify wired code is actually USED (not dead imports). If gaps → fix through another TDD cycle → re-verify.
 5. **mtime Discipline Audit**. For every Feature step marked `[G]`:
    - Resolve the IMPL file list from the `{step_id} IMPL completed — files: {list}` log entry.
@@ -393,6 +416,6 @@ The `cmd="..."` field MUST be the literal command string that was sent to the Ba
     3. **Review fan-out (read-only, parallel).** Spawn ONE parallel batch (the single sanctioned parallel batch noted in the main-thread model above): FIVE `zensu:review-aspect` agents — one per perspective: `conventions`, `bugs`, `architecture`, `tests`, `security` — PLUS one agent per step-2b `spawn <name>` persona (Agent tool, `subagent_type=<name>`; its findings MUST carry the persona's uppercased `<NAME>-` ID prefix per the README persona contract). Give every batch member the same one-paragraph implementation summary + the changed-file list from step 2, and name its perspective (or persona) in the prompt. All are strictly read-only and run NO build/test commands — the suite and build already ran in the Phase 6 audit above. If a persona spawn fails because the subagent_type is not registered, log `PERSONA SKIPPED — <name> (not registered)` and continue the batch.
     4. **Merge in-thread.** Collect the five `## Aspect:` findings lists plus every custom persona's list, deduplicate (same `file:line` raised by multiple perspectives → keep the highest confidence), and sort CRITICAL → IMPORTANT → SUGGESTION → by file path. This is the synthesis the standalone reviewer used to perform in its own Phase 5; you now do it here.
     4b. **Judge second pass (config-gated).** Resolve the flag with the real merge semantics: `bash -c 'source "$1/hooks/lib/zensu-config.sh"; zensu_hook_enabled reviewJudge && echo on || echo off' _ "${CLAUDE_PLUGIN_ROOT}"`. On `on` (the default), spawn ONE `zensu:review-judge` agent (Agent tool, `subagent_type='zensu:review-judge'`) with the changed-file list, the implementation summary, the plan baseline (the `## Requirements` table when the plan has one), the MERGED findings from step 4, and the build/test evidence. It re-reads the changed files fresh (read-only, no build/test) and returns `JUDGE-*` deltas covering the panel's blind spots (cross-cutting, requirement drift, missed edge cases, panel quality). Merge the deltas BEFORE fix routing: a `Panel-FP:`-prefixed meta-verdict neutralizes the finding it references — keep BOTH visible in the merged list, retitle the referenced finding `[Panel-FP-neutralized — do not fix]` and set it to SUGGESTION (a referenced CRITICAL is never dropped outright, only annotated + downgraded), and exempt neutralized items from fix routing in EVERY severity mode, including `autoFixIncludeSuggestions`; every other JUDGE finding joins the list normally. Flag disabled → skip straight to step 5.
-    5. **Thin consume-mode spawn (the single hook trigger).** First issue a one-shot ticket with `REVIEW_TICKET="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket)"`; an empty value is a blocker and you MUST NOT spawn. Then spawn ONE `zensu:code-reviewer` with the Agent tool (`subagent_type='zensu:code-reviewer'`). Its prompt MUST start with exactly two header lines — first `PRE-MERGED FINDINGS (fan-out)`, second `REVIEW-TICKET: ${REVIEW_TICKET}` — followed by the merged findings from step 4 (including the step-4b judge deltas when the judge ran) and the build/test/coverage status lines from the Phase 6 audit. It runs in consume mode — it skips its own Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from your pre-merged findings. The hook atomically consumes that ticket, so duplicate or prior-chain Agent completions are no-ops. Issue a fresh ticket before EVERY verification spawn. Do NOT ask the user about review — running the fan-out IS the autonomous action.
+    5. **Thin consume-mode spawn (the single hook trigger).** Immediately before every ticket/spawn, a bound chain MUST read fresh `--autopilot-status` and require the current session owner, `stage=TDD_RUNNING`, `tdd.sessionId`, `tdd.attempt`, `tdd.chainId`, and `tdd.returnStage` to match `RUN_ID`, `ATTEMPT`, `CHAIN_ID`, and `RETURN_STAGE`; stale or incomplete evidence blocks before the ticket is issued. First issue a one-shot ticket with `REVIEW_TICKET="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket)"`; an empty value is a blocker and you MUST NOT spawn. Then spawn ONE `zensu:code-reviewer` with the Agent tool (`subagent_type='zensu:code-reviewer'`). Its prompt MUST start with exactly two header lines — first `PRE-MERGED FINDINGS (fan-out)`, second `REVIEW-TICKET: ${REVIEW_TICKET}`. A standalone chain follows those two lines directly with the merged findings and carries no delegated envelope. A bound chain appends these three official lines immediately after the ticket, each exactly once and unchanged: `ZENSU-DELEGATED-CALLER: autopilot`, `AUTOPILOT-BINDING: run=${RUN_ID} attempt=${ATTEMPT} chain=${CHAIN_ID}`, and `AUTOPILOT-STAGE: ${RETURN_STAGE}`. Preserve that envelope exactly once through the post-review handoff into `/zensu:self-review`. Then append the merged findings from step 4 (including the step-4b judge deltas when the judge ran) and the build/test/coverage status lines from the Phase 6 audit. A partial, duplicate, malformed, or conflicting envelope is a fail-closed blocker; do not issue another ticket to work around it. The reviewer runs in consume mode — it skips its own Phases 1-4 (no re-read, no build, no test) and emits the consolidated report from your pre-merged findings. The hook atomically consumes that ticket, so duplicate or prior-chain Agent completions are no-ops. Issue a fresh ticket before EVERY verification spawn. Do NOT ask the user about review — running the fan-out IS the autonomous action.
     - **`--chain-done` is the chain-terminus marker, now owned by the `/zensu:self-review` stage.** Run it yourself ONLY when (a) implementation produced ZERO file changes (every step blocked `[!]`) — then run it INSTEAD of spawning the reviewer and stop; or (b) `hooks.selfReview` is disabled and the reviewer returned PASS / suggestions-only. Standalone chains use the existing unqualified command. In zero-change case (a), a bound chain MUST use `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --outcome no-changes`; never let the helper's normal `pass` default mislabel that receipt. In reviewed case (b), use the same bound command without an explicit outcome and append `--claimed-review-ticket "$REVIEW_TICKET"` whenever a ticket was issued. When self-review is enabled (the default), the reviewer convergence routes to `--code-review-done` + `/zensu:self-review`, carrying the exact binding evidence so that skill issues the same bound terminus. **NEVER** issue `--chain-done` in the same turn or batch as `--tdd-complete`, the reviewer spawn, a plan write, or the audit — landing it early releases the Stop gate before review and silently defeats the guarantee.
     - The `post-review-tdd-delegate.sh` hook routes the reviewer's findings back to you. On Critical/Important findings: fix them in THIS thread under the same TDD discipline (re-enter Phase 4 cycles — the gate is still active), then re-run the review fan-out (steps 2b-5 above: re-run the persona helper, re-fan-out the five aspects plus matched personas, re-merge, re-run the step-4b judge when `hooks.reviewJudge` is enabled — never carry a prior round's `JUDGE-*` deltas forward — then re-spawn the thin consume-mode `zensu:code-reviewer`) to re-verify — one reviewer completion per round, so round-counter semantics are unchanged. On PASS / suggestions-only (and on `autoFixMaxRounds` convergence): run `--code-review-done`, then invoke the `/zensu:self-review` skill (Skill tool, `skill='zensu:self-review'`) — the terminal self-review stage. **The self-review stage owns `--chain-done`**: it re-reads this session's changes, takes at most one fix round (never re-running the reviewer), then runs `--chain-done` and renders the final CHAIN-END SUMMARY (with a `## Self-Review Summary` section). Do NOT run `--chain-done` or render the summary yourself when self-review is enabled (the default). The loop ends at PASS or `autoFixMaxRounds`, then self-review finalizes. After the chain closes, when the plan carries a `## Requirements` table, offer `/zensu:converge` as an optional flow-back audit next step (offer only — never run it unasked).

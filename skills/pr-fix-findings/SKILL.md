@@ -2,7 +2,7 @@
 name: pr-fix-findings
 description: >
   [Zensu] Fix every open review comment / finding on a GitHub or GitLab pull/merge request end-to-end:
-  locate the PR for the current branch (or a given number), pull the unresolved
+  locate the PR for the current branch (or a given URL/number), pull the unresolved
   review threads, triage them into independent vs dependent work, implement each
   fix through the Zensu workflow (vanilla `/zensu:tdd` + review chain), fan
   independent fixes out across parallel workflows where sensible, push, resolve
@@ -39,7 +39,74 @@ work (use `/zensu:bootstrap`).
 
 ## Arguments
 
-- `$ARGUMENTS` (optional): a PR number to target. Omitted → the PR for the current branch.
+- `$ARGUMENTS` (optional): a PR/MR URL or number to target. Omitted → the PR for the current
+  branch. Delegated mode requires the full durable PR/MR URL and parses its final number.
+
+## Invocation modes and delegated envelope
+
+Standalone mode keeps the interactive parallelism policy above and the ordinary next-step
+offer below. Delegated mode is activated by any delegated-envelope header and requires
+exactly these three contiguous lines with no intervening or additional delegated headers,
+in this order and exactly once:
+
+```text
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+```
+
+Require caller `autopilot`, `<outer-stage>` equal to `FIX_FINDINGS`, a positive integer
+attempt, and valid durable run/chain identifiers. A partial, duplicate, malformed, or conflicting envelope is a hard error before any edit, TDD invocation, push, or forge
+mutation. A non-contiguous or extended envelope fails the same way. Never reinterpret it as a standalone request, and never accept or synthesize an
+`AUTOPILOT-REVIEW-OP` line for this skill.
+
+Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"`, read fresh state with
+`bash "$LOG" --autopilot-status`, and resolve the current session id through
+`hooks/lib/zensu-session.sh`. Fail closed unless `ownerSessionId` is this task/session;
+`tdd.sessionId` equals that same current session; `runId`, `tdd.attempt`, and `tdd.chainId`
+equal the binding; `stage` equals both the
+envelope and `FIX_FINDINGS`; and `evidence.pr.number`, `evidence.pr.url`, and
+`evidence.pr.headSha` exactly identify the invoked PR and its bound head. Also require
+`effects.prOpen.status == "completed"`, `effects.teamReview.status == "completed"`, and
+`evidence.review.published == true` with a valid durable review marker. The review evidence
+remains bound to the original reviewed head after later `PR_HEAD_UPDATED` events; do not
+incorrectly require its head to equal the current fix head.
+
+For every delegated remote guard, combine `--pr-state` with `--diff-refs`: require state is `OPEN`, the located URL/number still match `evidence.pr`, and the remote head equals `evidence.pr.headSha`. Perform this guard immediately before every remote mutation and
+immediately before every push. A moved head, closed/merged PR, malformed response, or CLI
+failure blocks the outer run; never ask a mid-run question or write against a successor
+generation.
+
+Every delegated provider, authentication, authorization, pagination, gate, or product
+decision failure must persist `BLOCK` with a stable generation-specific event id, report
+the blocker, and stop without a question. Use the closed codes `fix-provider-unknown`,
+`fix-auth-unavailable`, `fix-pagination-unsafe`, `fix-gate-failed`, and
+`fix-decision-required`. Standalone mode retains the explicitly labeled prompts below.
+
+### Delegated fixing path
+
+1. Use the driver's complete paginated thread fetch. GitHub GraphQL must exhaust
+   `pageInfo.endCursor`; GitLab must consume all `--paginate --output json` pages. Treat a
+   non-zero command, invalid normalized JSON, duplicate/conflicting thread identity, or
+   missing/incomplete page as unsafe and fail closed on pagination. Never treat a partial
+   result as an empty worklist.
+2. Build one aggregate specification containing every unresolved actionable thread with
+   its stable thread id, location, required behavior, and verification. If a product choice
+   is genuinely required, persist `BLOCK` and report it; do not ask. If the worklist is
+   empty, re-fetch once authoritatively and record `FINDINGS_CLEARED` only when it remains
+   empty.
+3. For a non-empty list, persist one `FIX_REQUIRED` event with the bound head and complete
+   unresolved count. Then execute one aggregate bound `/zensu:tdd` fix run serially in the main task, passing `AUTOPILOT-RUN: <runId>`. Use no parallel editing agents or editing worktrees. The bound TDD chain and its self-review must finish before any landing step.
+4. Run every configured gate. Commit locally, run the OPEN/current-head guard immediately
+   before push, then push once. Read back the new remote head and persist the exact
+   `PR_HEAD_UPDATED` transition before resolving threads; stale/unchanged heads fail closed.
+5. For each addressed thread, repeat the OPEN/current-head guard immediately before the
+   reply/resolve mutation. Finally perform another complete paginated thread fetch. Record
+   `FINDINGS_CLEARED` only for authoritative count zero; otherwise repeat the entire
+   aggregate bound loop for the remaining set.
+
+This delegated path supersedes the standalone parallelism clauses in Procedure steps 3–4.
+All other safety and reporting rules still apply.
 
 ## Procedure
 
@@ -48,11 +115,13 @@ work (use `/zensu:bootstrap`).
    `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with a FATAL message and
    start a fresh Claude Code session. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, run `bash "$VCS" --detect`, and
    read `provider` + `cliReady` + `repo` from the `key=value` output.
-   - `cliReady=false` → **STOP**: the detected forge's CLI is not ready. Tell the user
-     to install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`
-     (install `glab` first if missing, e.g. `brew install glab`). Do **not** fall back
-     to the other forge.
-   - `provider=unknown` → ask the user which forge / remote to target.
+   - `cliReady=false` → in standalone mode stop and ask the user to install/authenticate
+     the detected forge CLI (GitHub: `gh auth login`; GitLab: `glab auth login`, installing
+     `glab` first if missing). In delegated mode persist `BLOCK(fix-auth-unavailable)`,
+     report it, and stop without asking. Do **not** fall back to the other forge.
+   - `provider=unknown` → in standalone mode ask the user which forge / remote to target;
+     in delegated mode persist `BLOCK(fix-provider-unknown)`, report it, and stop without
+     asking.
    - Otherwise carry `provider` and `repo` forward; pass `--provider <provider>` and
      `--repo-id <repo>` to every driver op below so detection runs only once.
 
@@ -69,7 +138,7 @@ work (use `/zensu:bootstrap`).
      `resolvable && !resolved`).
    - Build a worklist of actionable items. Skip pure praise, already-addressed, and outdated-and-moot threads.
 
-3. **Triage for parallelism.**
+3. **Triage for parallelism (standalone only).**
    - Group items by independence. Items touching disjoint files/concerns are
      independent → safe to fix in parallel. Items on the same file/region or with
      ordering dependencies → sequential.
@@ -77,7 +146,7 @@ work (use `/zensu:bootstrap`).
      agent per item or cluster, `isolation: "worktree"` if they edit files
      concurrently). A single small item does not need a workflow — fix it inline.
 
-4. **Implement each fix via the Zensu workflow.**
+4. **Implement each fix via the Zensu workflow (standalone only).**
    - Code changes go through the Zensu vanilla workflow (`/zensu:tdd`) so the
      evidence audit + review chain run. For parallel fan-out, each agent implements
      its item and returns a structured result (files changed, what was fixed,
@@ -86,7 +155,9 @@ work (use `/zensu:bootstrap`).
 
 5. **Land the changes.**
    - Re-verify the PR/MR is still OPEN
-     (`bash "$VCS" --pr-state --provider <provider> <id>` → `OPEN`) before pushing.
+     (`bash "$VCS" --pr-state --provider <provider> <id>` → `OPEN`) before pushing. In
+     delegated mode also re-read `--diff-refs` and require its head SHA to equal the fresh
+     durable PR head.
    - Commit with a Conventional Commit message referencing the addressed comments,
      push to the PR branch. Clean commit messages — no watermark / co-author lines.
 
@@ -110,8 +181,9 @@ When run under `/loop` (self-paced): each iteration re-fetches unresolved thread
 - If **none remain**, report "all review comments resolved" and end the loop.
 - Otherwise address the next batch and continue.
 
-Stop early and ask the user when you hit a fix that needs a product/architecture
-decision, an auth error (`zensu auth login`), or a failing gate you cannot satisfy.
+In standalone mode only, stop early and ask the user when you hit a fix that needs a product/architecture decision, an auth error (`zensu auth login`), or a failing gate you
+cannot satisfy. In delegated mode, persist `BLOCK` with the appropriate code and report the
+blocker without asking a mid-run question.
 
 ## Next step
 

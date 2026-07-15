@@ -12,6 +12,15 @@ check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else ech
 [ -f "$LIB" ] && bash -n "$LIB" 2>/dev/null && check "P2 state library exists and parses" PASS || { check "P2 state library exists and parses" FAIL; exit 1; }
 source "$LIB"
 
+review_marker() {
+  local operation_key="$1" head_sha="$2"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${"f".repeat(64)}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  '
+}
+
 TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 PROJECT="$TMP/project"; mkdir -p "$PROJECT"
@@ -148,8 +157,10 @@ done_plan_event done-gates GATES_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-converge CONVERGENCE_PASSED '{}'
 done_plan_event done-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:done-plan"}'
 done_plan_event done-pr-open PR_OPENED "{\"operationKey\":\"pr:done-plan\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$DONE_HEAD\"}}"
-done_plan_event done-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:done-plan"}'
-done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:done-plan\",\"marker\":\"zensu-autopilot-review:done-plan\",\"headSha\":\"$DONE_HEAD\"}"
+DONE_REVIEW_KEY="$(autopilot_team_review_operation_key "$DONE_RUN" "$DONE_HEAD")"
+DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD")"
+done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\"}"
+done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"marker\":\"$DONE_REVIEW_MARKER\",\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-findings FINDINGS_CLEARED "{\"headSha\":\"$DONE_HEAD\",\"unresolvedCount\":0}"
 done_plan_event done-validation VALIDATION_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-delivery DELIVERY_COMPLETE "{\"headSha\":\"$DONE_HEAD\"}"

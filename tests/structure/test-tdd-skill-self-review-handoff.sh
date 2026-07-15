@@ -31,6 +31,14 @@ printf '%s\n' "$REGION" | grep -qiE "self-review (stage )?owns|self-review final
   && check "H3 Phase 6.10 states self-review owns/finalizes the terminus" PASS || check "H3 self-review owns terminus" FAIL
 printf '%s\n' "$REGION" | grep -qF "zensu:code-reviewer" \
   && check "H4 Phase 6.10 still spawns zensu:code-reviewer first (regression)" PASS || check "H4 reviewer still first" FAIL
+if printf '%s\n' "$REGION" | grep -qF 'ZENSU-DELEGATED-CALLER: autopilot' \
+  && printf '%s\n' "$REGION" | grep -qF 'AUTOPILOT-BINDING: run=${RUN_ID} attempt=${ATTEMPT} chain=${CHAIN_ID}' \
+  && printf '%s\n' "$REGION" | grep -qF 'AUTOPILOT-STAGE: ${RETURN_STAGE}' \
+  && printf '%s\n' "$REGION" | grep -qiE 'preserve.{0,40}exactly once|carry.{0,40}exactly once'; then
+  check "H5 bound reviewer-to-self-review path preserves the official envelope exactly once" PASS
+else
+  check "H5 exact-once bound reviewer/self-review envelope" FAIL
+fi
 
 echo "----"
 echo "test-tdd-skill-self-review-handoff: $PASS PASS / $FAIL FAIL"

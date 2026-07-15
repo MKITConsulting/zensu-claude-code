@@ -52,6 +52,14 @@ OTHER_CWD="$TMP/other-cwd"
 mkdir -p "$PROJECT" "$EMPTY_PROJECT" "$OTHER_CWD"
 
 source "$STATE_LIB"
+review_marker() {
+  local operation_key="$1" head_sha="$2"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${"f".repeat(64)}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  '
+}
 RUN_ID="resume_run_01"
 OWNER="owner_session_01"
 if autopilot_begin_run "$RUN_ID" "$OWNER" "$PROJECT" >/dev/null 2>&1; then
@@ -197,10 +205,12 @@ evidence_event evidence-gates GATES_PASSED "{\"headSha\":\"$EVIDENCE_HEAD\"}"
 evidence_event evidence-converge CONVERGENCE_PASSED '{}'
 evidence_event evidence-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:resume-evidence"}'
 evidence_event evidence-pr-open PR_OPENED "{\"operationKey\":\"pr:resume-evidence\",\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$EVIDENCE_HEAD\"}}"
-evidence_event evidence-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:resume-evidence"}'
-evidence_event evidence-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:resume-evidence\",\"marker\":\"zensu-autopilot-review:resume-evidence\",\"headSha\":\"$EVIDENCE_HEAD\"}"
+EVIDENCE_REVIEW_KEY="$(autopilot_team_review_operation_key "$EVIDENCE_RUN" "$EVIDENCE_HEAD")"
+EVIDENCE_REVIEW_MARKER="$(review_marker "$EVIDENCE_REVIEW_KEY" "$EVIDENCE_HEAD")"
+evidence_event evidence-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$EVIDENCE_REVIEW_KEY\"}"
+evidence_event evidence-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$EVIDENCE_REVIEW_KEY\",\"marker\":\"$EVIDENCE_REVIEW_MARKER\",\"headSha\":\"$EVIDENCE_HEAD\"}"
 
-EVIDENCE_FRAGMENT="evidence={\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$EVIDENCE_HEAD\"},\"review\":{\"published\":true,\"marker\":\"zensu-autopilot-review:resume-evidence\",\"headSha\":\"$EVIDENCE_HEAD\"}}"
+EVIDENCE_FRAGMENT="evidence={\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$EVIDENCE_HEAD\"},\"review\":{\"published\":true,\"marker\":\"$EVIDENCE_REVIEW_MARKER\",\"headSha\":\"$EVIDENCE_HEAD\"}}"
 OUT_EVIDENCE="$(invoke "$EVIDENCE_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$EVIDENCE_OWNER\"}")"
 if [ "$EVIDENCE_READY" = true ] \
   && printf '%s' "$OUT_EVIDENCE" | valid_session_context 'ACTIVE_RUN' "$EVIDENCE_RUN" \
@@ -228,8 +238,10 @@ head_event head-gates GATES_PASSED "{\"headSha\":\"$HEAD_SHA\"}"
 head_event head-converge CONVERGENCE_PASSED '{}'
 head_event head-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:head-recovery"}'
 head_event head-pr-open PR_OPENED "{\"operationKey\":\"pr:head-recovery\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$HEAD_SHA\"}}"
-head_event head-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:head-recovery"}'
-head_event head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:head-recovery\",\"marker\":\"zensu-autopilot-review:head-recovery\",\"headSha\":\"$HEAD_SHA\"}"
+HEAD_REVIEW_KEY="$(autopilot_team_review_operation_key "$HEAD_RUN" "$HEAD_SHA")"
+HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA")"
+head_event head-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$HEAD_REVIEW_KEY\"}"
+head_event head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}"
 head_event head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
 head_event head-tdd-start-2 TDD_STARTED "{\"attempt\":2,\"chainId\":\"head-chain-02\",\"sessionId\":\"$HEAD_OWNER\"}"
 head_event head-tdd-done-2 TDD_CHAIN_DONE "{\"attempt\":2,\"chainId\":\"head-chain-02\",\"sessionId\":\"$HEAD_OWNER\",\"outcome\":\"pass\"}"

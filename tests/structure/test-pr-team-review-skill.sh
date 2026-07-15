@@ -176,6 +176,14 @@ else
   check "P11c worktree is created detached (re-run never collides on the branch ref)" FAIL
 fi
 
+if grep -qF 'worktree list --porcelain' "$SKILL_MD" \
+  && grep -qF 'grep -Fqx "branch $LOCAL_REVIEW_REF"' "$SKILL_MD" \
+  && grep -qF 'fetch origin "+$REF:$LOCAL_REVIEW_REF"' "$SKILL_MD"; then
+  check "P11d retained review refs refresh safely after force-pushes" PASS
+else
+  check "P11d retained review refs refresh safely after force-pushes" FAIL
+fi
+
 # P12 — always-on test-coverage evaluation. The skill MUST guarantee a coverage
 # assessment on every run: an always-cast `coverage-audit` persona + a mandatory
 # `### Test Coverage` synthesis section that inventories uncovered files/paths.
@@ -284,6 +292,142 @@ if grep -qF 'accessibility basics' "$PERSONAS_MD"; then
   check "P13q frontend-component no longer owns a11y (no 'accessibility basics')" FAIL
 else
   check "P13q frontend-component no longer owns a11y (no 'accessibility basics')" PASS
+fi
+
+# P14 — an Autopilot delegation is a strict, durable capability envelope. Any
+# envelope header activates delegated parsing; all four lines must then occur
+# exactly once and bind the remote review to the current durable run generation.
+DELEGATED_NEEDLES=(
+  'ZENSU-DELEGATED-CALLER: autopilot'
+  'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>'
+  'AUTOPILOT-STAGE: <outer-stage>'
+  'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>'
+  'any delegated-envelope header'
+  'partial, duplicate, malformed, or conflicting'
+  'bash "$LOG" --autopilot-status'
+  '`ownerSessionId`'
+  '`tdd.sessionId` equals that same current session id'
+  '`runId`'
+  '`tdd.attempt`'
+  '`tdd.chainId`'
+  '`stage`'
+  '`evidence.pr.number`'
+  '`evidence.pr.url`'
+  '`evidence.pr.headSha`'
+  '`effects.prOpen.status == "completed"`'
+  '`effects.teamReview.status == "requested"`'
+  '`effects.teamReview.operationKey`'
+)
+P14A=true
+for needle in "${DELEGATED_NEEDLES[@]}"; do
+  grep -qF -- "$needle" "$SKILL_MD" || P14A=false
+done
+if [ "$P14A" = true ]; then
+  check "P14a delegated review validates an exact durable envelope and fresh state" PASS
+else
+  check "P14a delegated review validates an exact durable envelope and fresh state" FAIL
+fi
+
+TEAM_ENVELOPE="$(awk '
+  $0 == "ZENSU-DELEGATED-CALLER: autopilot" { capture=1 }
+  capture && $0 == "```" { exit }
+  capture { print }
+' "$SKILL_MD")"
+EXPECTED_TEAM_ENVELOPE="$(printf '%s\n' \
+  'ZENSU-DELEGATED-CALLER: autopilot' \
+  'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' \
+  'AUTOPILOT-STAGE: <outer-stage>' \
+  'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>')"
+if [ "$TEAM_ENVELOPE" = "$EXPECTED_TEAM_ENVELOPE" ] \
+   && [ "$(grep -cFx -- 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_MD")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' "$SKILL_MD")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-STAGE: <outer-stage>' "$SKILL_MD")" -eq 1 ] \
+   && [ "$(grep -cFx -- 'AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>' "$SKILL_MD")" -eq 1 ] \
+   && grep -qF -- 'four contiguous lines with no intervening or additional delegated headers' "$SKILL_MD"; then
+  check "P14b delegated review envelope is contiguous, ordered, unique, and closed" PASS
+else
+  check "P14b delegated review envelope is contiguous, ordered, unique, and closed" FAIL
+fi
+
+if grep -qF -- '--reconcile-review --provider "$PROVIDER" --repo-id "$REPOID"' "$SKILL_MD" \
+   && grep -qF -- '--expected-head "$BOUND_HEAD"' "$SKILL_MD" \
+   && grep -qF -- '<n> "$REVIEW_PAYLOAD" "$OPERATION_KEY"' "$SKILL_MD" \
+   && grep -qF -- '`{status,marker,headSha,partCount,postedCount,url}`' "$SKILL_MD" \
+   && grep -qF -- '`present|posted|reconciled`' "$SKILL_MD" \
+   && grep -qF -- '`posted` requires `postedCount == partCount`' "$SKILL_MD" \
+   && grep -qF -- '`reconciled` requires `0 < postedCount < partCount`' "$SKILL_MD" \
+   && grep -qF -- 'GitHub requires `partCount == 1` and rejects `reconciled`' "$SKILL_MD" \
+   && grep -qF -- 'GitLab requires `partCount == 1 + comments.length`' "$SKILL_MD"; then
+  check "P14c delegated publish validates the exact structured reconcile receipt" PASS
+else
+  check "P14c delegated publish validates the exact structured reconcile receipt" FAIL
+fi
+
+if grep -qF -- 'autopilot_read_team_review_payload' "$SKILL_MD" \
+   && grep -qF -- 'autopilot_store_team_review_payload' "$SKILL_MD" \
+   && grep -qF -- 'REUSE_DURABLE_PAYLOAD=true' "$SKILL_MD" \
+   && grep -qF -- 'REVIEW_PAYLOAD="$WORKDIR/_synthesis.json"' "$SKILL_MD" \
+   && grep -qF -- 'before the first `--reconcile-review` call' "$SKILL_MD" \
+   && grep -qF -- 'must not re-synthesize or overwrite' "$SKILL_MD" \
+   && grep -qF -- 'skip Phases B, C, and the synthesis portion of Phase D' "$SKILL_MD"; then
+  check "P14d delegated retry reuses one durable payload and never re-synthesizes it" PASS
+else
+  check "P14d delegated retry reuses one durable payload and never re-synthesizes it" FAIL
+fi
+
+if grep -qF -- 'Delegated mode MUST NOT ask' "$SKILL_MD" \
+   && grep -qF -- 'cast confirmation' "$SKILL_MD" \
+   && grep -qF -- 'body preview' "$SKILL_MD" \
+   && grep -qF -- 'cleanup/ref deletion' "$SKILL_MD" \
+   && grep -qF -- 'next-step' "$SKILL_MD" \
+   && grep -qF -- 'Standalone mode remains interactive' "$SKILL_MD" \
+   && grep -qF -- '--post-review' "$SKILL_MD"; then
+  check "P14e delegated mode is unattended while standalone publish stays unchanged" PASS
+else
+  check "P14e delegated mode is unattended while standalone publish stays unchanged" FAIL
+fi
+
+# Interactive branches are allowed only when the same line explicitly scopes
+# them to standalone mode. This catches future mid-run auth/provider/repository
+# prompts that would silently break Autopilot's unattended contract.
+UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
+  const fs = require("fs");
+  const lines = fs.readFileSync(process.env.SKILL_MD, "utf8").split(/\r?\n/);
+  const interactive = /AskUserQuestion|ask (?:the )?user|ask again|ask anyway|always asks|pause and wait|escalate to (?:the )?user/i;
+  const qualified = /standalone/i;
+  const prohibition = /(?:do not|never|without)\b.*\bask/i;
+  lines.forEach((line, index) => {
+    if (interactive.test(line) && !qualified.test(line) && !prohibition.test(line)) {
+      process.stdout.write(`${index + 1}:${line}\n`);
+    }
+  });
+')"
+if [ -z "$UNQUALIFIED_ASKS" ] \
+   && grep -qF -- 'review-repo-unavailable' "$SKILL_MD" \
+   && grep -qF -- 'review-provider-unknown' "$SKILL_MD" \
+   && grep -qF -- 'review-auth-unavailable' "$SKILL_MD" \
+   && grep -qF -- 'persist `BLOCK`' "$SKILL_MD"; then
+  check "P14f delegated repository/provider/auth blockers never enter an interactive ask path" PASS
+else
+  [ -z "$UNQUALIFIED_ASKS" ] || printf '%s\n' "$UNQUALIFIED_ASKS" >&2
+  check "P14f delegated repository/provider/auth blockers never enter an interactive ask path" FAIL
+fi
+
+if grep -qF -- 'hexadecimal head between 7 and 64 characters' "$SKILL_MD" \
+   && grep -qF -- '[ "$SHA" = "$BOUND_HEAD" ]' "$SKILL_MD" \
+   && grep -qF -- 'never substitute the freshly fetched SHA for the capability-bound head' "$SKILL_MD"; then
+  check "P14g delegated review keeps the state SHA domain and bound head" PASS
+else
+  check "P14g delegated review keeps the state SHA domain and bound head" FAIL
+fi
+
+if grep -qF -- 'Delegated mode fails closed on every non-zero or malformed `--reconcile-review` result' "$PUBLISH_RULE" \
+   && grep -qF -- 'retry the complete `--reconcile-review` call' "$PUBLISH_RULE" \
+   && grep -qF -- 'never update the bound head or payload' "$PUBLISH_RULE" \
+   && grep -qF -- '## Standalone-only fallback: Per-comment posting' "$PUBLISH_RULE"; then
+  check "P14h delegated GitHub publication never escapes reconciliation" PASS
+else
+  check "P14h delegated GitHub publication never escapes reconciliation" FAIL
 fi
 
 echo "----"

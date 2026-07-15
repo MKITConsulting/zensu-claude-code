@@ -67,6 +67,28 @@ file_digest() {
   shasum -a 256 "$1" | awk '{print $1}'
 }
 
+review_operation_key() {
+  local run_id="$1" head_sha="$2"
+  RUN_ID="$run_id" HEAD_SHA="$head_sha" node -e '
+    const crypto = require("crypto");
+    const canonical = value => value && typeof value === "object" && !Array.isArray(value)
+      ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+    const seed = {headSha: process.env.HEAD_SHA.toLowerCase(), runId: process.env.RUN_ID};
+    process.stdout.write(`team-review:v1:${crypto.createHash("sha256").update(canonical(seed)).digest("hex")}`);
+  '
+}
+
+review_marker() {
+  local operation_key="$1" head_sha="$2" payload_digest="$3" part_count="${4:-1}"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" PAYLOAD_DIGEST="$payload_digest" \
+    PART_COUNT="$part_count" node -e '
+      const crypto = require("crypto");
+      const opDigest = crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+      process.stdout.write(`<!-- zensu-review:v1:${opDigest}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:${process.env.PART_COUNT}:part=1/${process.env.PART_COUNT} -->`);
+    '
+}
+
 apply() {
   autopilot_apply_event "$RUN" "$1" "$2" "$3" "$PROJECT" >/dev/null
 }
@@ -166,12 +188,174 @@ apply "evt_gates_001" "GATES_PASSED" "{\"headSha\":\"$HEAD_SHA\"}" || true
 apply "evt_converge_001" "CONVERGENCE_PASSED" '{}' || true
 apply "evt_pr_request_001" "PR_OPEN_REQUESTED" '{"operationKey":"pr:run_primary_001"}' || true
 apply "evt_pr_open_001" "PR_OPENED" "{\"operationKey\":\"pr:run_primary_001\",\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$HEAD_SHA\"}}" || true
-apply "evt_review_request_001" "TEAM_REVIEW_REQUESTED" '{"operationKey":"review:run_primary_001:head"}' || true
-apply "evt_review_publish_001" "TEAM_REVIEW_PUBLISHED" "{\"operationKey\":\"review:run_primary_001:head\",\"marker\":\"zensu-autopilot-review:run_primary_001:head\",\"headSha\":\"$HEAD_SHA\"}" || true
+REVIEW_KEY="$(review_operation_key "$RUN" "$HEAD_SHA")"
+REVIEW_PAYLOAD_DIGEST="$(printf '%s' 'primary-review-payload' | shasum -a 256 | awk '{print $1}')"
+REVIEW_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 1)"
+if command -v autopilot_team_review_operation_key >/dev/null 2>&1 \
+  && [ "$(autopilot_team_review_operation_key "$RUN" "$HEAD_SHA")" = "$REVIEW_KEY" ] \
+  && [ "$(autopilot_team_review_operation_key "$RUN" "$HEAD_SHA_2")" != "$REVIEW_KEY" ]; then
+  check "R1 team-review operation keys are deterministic functions of run plus original head" PASS
+else
+  check "R1 deterministic team-review operation key helper" FAIL
+fi
+
+BEFORE_REVIEW_REQUEST="$(file_digest "$RUN_FILE")"
+WRONG_REVIEW_KEY="$(review_operation_key "$RUN" "$HEAD_SHA_2")"
+if ! apply "evt_review_wrong_key" "TEAM_REVIEW_REQUESTED" \
+    "{\"operationKey\":\"$WRONG_REVIEW_KEY\"}" 2>/dev/null \
+  && [ "$(file_digest "$RUN_FILE")" = "$BEFORE_REVIEW_REQUEST" ]; then
+  check "R2 TEAM_REVIEW_REQUESTED rejects a key not bound to this run and original PR head byte-stably" PASS
+else
+  check "R2 mismatched team-review operation key rejection" FAIL
+fi
+apply "evt_review_request_001" "TEAM_REVIEW_REQUESTED" \
+  "{\"operationKey\":\"$REVIEW_KEY\"}" || true
+
+REVIEW_PAYLOAD_SOURCE="$ROOT/review-payload.json"
+cat > "$REVIEW_PAYLOAD_SOURCE" <<JSON
+{"commit_id":"$HEAD_SHA","event":"COMMENT","body":"Durable review body","comments":[]}
+JSON
+
+if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+    >/dev/null 2>&1; then
+  check "R3 review payload read reports an absent pre-publication snapshot" PASS
+else
+  check "R3 review payload read reports an absent pre-publication snapshot" FAIL
+fi
+
+REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
+  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" "$PROJECT" 2>/dev/null || true)"
+if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
+  && [ "$(stat -c %a "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %Lp "$REVIEW_PAYLOAD_SNAPSHOT")" = 600 ] \
+  && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
+  check "R4 requested review atomically stores one private operation/head-bound payload" PASS
+else
+  check "R4 requested review atomically stores one private operation/head-bound payload" FAIL
+fi
+
+# This is the crash window: the remote write may already have succeeded while
+# TEAM_REVIEW_PUBLISHED is not durable yet. A resumed skill must load the exact
+# immutable snapshot instead of synthesizing a second payload.
+REVIEW_SNAPSHOT_DIGEST="$(file_digest "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || true)"
+printf '%s\n' "{\"commit_id\":\"$HEAD_SHA\",\"event\":\"COMMENT\",\"body\":\"Regenerated and different\",\"comments\":[]}" > "$REVIEW_PAYLOAD_SOURCE"
+if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && ! autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
+      "$REVIEW_PAYLOAD_SOURCE" "$PROJECT" >/dev/null 2>&1 \
+  && [ "$(file_digest "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null)" = "$REVIEW_SNAPSHOT_DIGEST" ] \
+  && grep -qF 'Durable review body' "$REVIEW_PAYLOAD_SNAPSHOT" \
+  && ! grep -qF 'Regenerated and different' "$REVIEW_PAYLOAD_SNAPSHOT"; then
+  check "R5 crash retry reuses the byte-identical snapshot and rejects overwrite conflict" PASS
+else
+  check "R5 crash retry reuses the byte-identical snapshot and rejects overwrite conflict" FAIL
+fi
+
+# link(2) publishes the complete temp inode without replacement. A kill in the
+# tiny window before unlink(temp) leaves exactly the target plus its own
+# `${target}.tmp.XXXXXXXX` alias. A prior kill before link(temp,target) can also
+# leave a separate same-prefix temp inode; recovery must preserve that orphan
+# while accounting for and removing the one true target alias.
+UNRELATED_REVIEW_TEMP="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
+cp "$REVIEW_PAYLOAD_SNAPSHOT" "$UNRELATED_REVIEW_TEMP"
+OWNED_REVIEW_TEMP="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
+rm -f "$OWNED_REVIEW_TEMP"
+ln "$REVIEW_PAYLOAD_SNAPSHOT" "$OWNED_REVIEW_TEMP"
+if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && [ ! -e "$OWNED_REVIEW_TEMP" ] \
+  && [ -f "$UNRELATED_REVIEW_TEMP" ] \
+  && [ "$(stat -c %h "$UNRELATED_REVIEW_TEMP" 2>/dev/null || stat -f %l "$UNRELATED_REVIEW_TEMP")" = 1 ] \
+  && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
+  check "R5a resume heals the real owned alias while preserving an unrelated pre-link temp orphan" PASS
+else
+  check "R5a resume heals the real owned alias while preserving an unrelated pre-link temp orphan" FAIL
+fi
+rm -f "$OWNED_REVIEW_TEMP" "$UNRELATED_REVIEW_TEMP"
+
+MULTI_REVIEW_TEMP_A="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
+MULTI_REVIEW_TEMP_B="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
+rm -f "$MULTI_REVIEW_TEMP_A" "$MULTI_REVIEW_TEMP_B"
+ln "$REVIEW_PAYLOAD_SNAPSHOT" "$MULTI_REVIEW_TEMP_A"
+ln "$REVIEW_PAYLOAD_SNAPSHOT" "$MULTI_REVIEW_TEMP_B"
+if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+    >/dev/null 2>&1 \
+  && [ -e "$MULTI_REVIEW_TEMP_A" ] && [ -e "$MULTI_REVIEW_TEMP_B" ] \
+  && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 3 ]; then
+  check "R5b multiple owned-looking aliases remain fail-closed and untouched" PASS
+else
+  check "R5b multiple owned-looking aliases remain fail-closed and untouched" FAIL
+fi
+rm -f "$MULTI_REVIEW_TEMP_A" "$MULTI_REVIEW_TEMP_B"
+
+if autopilot_read_team_review_payload "$RUN" "$WRONG_REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+    >/dev/null 2>&1 \
+  || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA_2" "$PROJECT" \
+    >/dev/null 2>&1; then
+  check "R6 payload snapshots reject operation/head identity mismatches" FAIL
+else
+  check "R6 payload snapshots reject operation/head identity mismatches" PASS
+fi
+
+REVIEW_PAYLOAD_BACKUP="$ROOT/review-payload-backup.json"
+REVIEW_LINK_GUARDS=false
+if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && cp "$REVIEW_PAYLOAD_SNAPSHOT" "$REVIEW_PAYLOAD_BACKUP" \
+  && rm -f "$REVIEW_PAYLOAD_SNAPSHOT" \
+  && ln -s "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"; then
+  if autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+      >/dev/null 2>&1; then
+    REVIEW_LINK_GUARDS=false
+  else
+    REVIEW_LINK_GUARDS=true
+  fi
+  rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+  if ! ln "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT" \
+    || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+      >/dev/null 2>&1; then
+    REVIEW_LINK_GUARDS=false
+  fi
+  rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+  mv "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+fi
+if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && [ "$REVIEW_LINK_GUARDS" = true ] \
+  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ]; then
+  check "R7 payload snapshot reads fail closed on symlink and hardlink substitution" PASS
+else
+  check "R7 payload snapshot reads fail closed on symlink and hardlink substitution" FAIL
+fi
+
+BEFORE_REVIEW_PUBLISH="$(file_digest "$RUN_FILE")"
+WRONG_OP_MARKER="$(review_marker "$WRONG_REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 1)"
+WRONG_HEAD_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA_2" "$REVIEW_PAYLOAD_DIGEST" 1)"
+BAD_PART_MARKER="${REVIEW_MARKER%part=1/1 -->}part=2/2 -->"
+BAD_COUNT_MARKER="${REVIEW_MARKER%:1:part=1/1 -->}:2:part=1/3 -->"
+REVIEW_REJECTIONS=true
+if apply "evt_review_bad_operation" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$WRONG_REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if apply "evt_review_legacy_marker" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"zensu-autopilot-review:legacy\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if apply "evt_review_wrong_op_digest" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if apply "evt_review_wrong_marker_head" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_HEAD_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if apply "evt_review_nonfirst_part" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_PART_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if apply "evt_review_part_count_mismatch" TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_COUNT_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+if [ "$REVIEW_REJECTIONS" = true ] \
+  && [ "$(file_digest "$RUN_FILE")" = "$BEFORE_REVIEW_PUBLISH" ]; then
+  check "R8 publication requires one exact v1 part-1 marker bound to operation and head, byte-stably" PASS
+else
+  check "R8 strict structured team-review marker validation" FAIL
+fi
+apply "evt_review_publish_001" "TEAM_REVIEW_PUBLISHED" \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}" || true
 apply "evt_findings_clear_001" "FINDINGS_CLEARED" "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":0}" || true
 apply "evt_validate_001" "VALIDATION_PASSED" "{\"headSha\":\"$HEAD_SHA\"}" || true
 
-if json_ok "$RUN_FILE" 'value.stage === "DELIVER" && value.nextActionCode === "DELIVER_PR" && value.effects.prOpen.status === "completed" && value.effects.teamReview.status === "completed" && value.evidence.gates.passed === true && value.evidence.validation.passed === true'; then
+if autopilot_read_active "$PROJECT" > "$ROOT/review-status.json" \
+  && json_ok "$ROOT/review-status.json" 'value.runId === "run_primary_001" && value.ownerSessionId === "session_owner_001" && value.stage === "DELIVER" && value.nextActionCode === "DELIVER_PR" && value.tdd.attempt === 1 && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "completed" && value.effects.teamReview.status === "completed" && value.effects.teamReview.operationKey.startsWith("team-review:v1:") && value.evidence.pr.headSha === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" && value.evidence.review.marker.startsWith("<!-- zensu-review:v1:") && value.evidence.review.headSha === value.evidence.pr.headSha && value.evidence.gates.passed === true && value.evidence.validation.passed === true'; then
   check "T6 happy path reaches DELIVER with durable evidence" PASS
 else
   check "T6 happy path reaches DELIVER with durable evidence" FAIL
@@ -225,8 +409,10 @@ loop_tdd 3
 loop_event loop-converge-pass CONVERGENCE_PASSED '{}'
 loop_event loop-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:return-stages"}'
 loop_event loop-pr-open PR_OPENED "{\"operationKey\":\"pr:return-stages\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$HEAD_SHA\"}}"
-loop_event loop-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:return-stages"}'
-loop_event loop-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:return-stages\",\"marker\":\"zensu-autopilot-review:return-stages\",\"headSha\":\"$HEAD_SHA\"}"
+LOOP_REVIEW_KEY="$(review_operation_key "$LOOP_RUN" "$HEAD_SHA")"
+LOOP_REVIEW_MARKER="$(review_marker "$LOOP_REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 2)"
+loop_event loop-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$LOOP_REVIEW_KEY\"}"
+loop_event loop-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$LOOP_REVIEW_KEY\",\"marker\":\"$LOOP_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}"
 loop_event loop-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":2}"
 json_ok "$LOOP_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "FIX_FINDINGS"' || LOOP_OK=false
 loop_tdd 4
