@@ -1,10 +1,8 @@
 #!/bin/bash
 # PostToolUse hook fired when the Agent (code-reviewer) tool completes.
-# Filters on subagent_type == "zensu:code-reviewer" and routes findings back to
-# the MAIN agent (which runs the /zensu:tdd workflow in-thread) via
-# additionalContext. On PASS / suggestions-only the main agent closes the chain
-# with `zensu-log.sh --chain-done`; on max-rounds this hook sets chainDone
-# itself so the Stop-hook backstop releases.
+# Routes only the consume-mode `zensu:code-reviewer` completion belonging to a
+# live, implementation-complete TDD review chain. Every other Agent completion
+# is a total no-op: it cannot read or mutate the auto-fix counter or chain state.
 #
 # Behavior is configurable via ~/.zensu/config.json (resolution order: env,
 # project-local, global):
@@ -18,7 +16,8 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
-zensu_hook_enabled autoFix || exit 0
+AUTO_FIX_ON=1
+zensu_hook_enabled autoFix || AUTO_FIX_ON=0
 
 INPUT="$(cat)"
 
@@ -36,6 +35,34 @@ SUBAGENT_TYPE="$(node -e '
 if [ "$SUBAGENT_TYPE" != "zensu:code-reviewer" ]; then
   exit 0
 fi
+
+PROMPT_HEADER="$(node -e '
+  let s = "";
+  process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s);
+      const prompt = j.tool_input && j.tool_input.prompt;
+      const lines = typeof prompt === "string" ? prompt.split(/\r?\n/) : [];
+      process.stdout.write((lines[0] || "") + "\n" + (lines[1] || ""));
+    } catch (_) { process.stdout.write("\n"); }
+  });
+' <<<"$INPUT" 2>/dev/null)"
+PROMPT_FIRST_LINE="${PROMPT_HEADER%%$'\n'*}"
+if [ "$PROMPT_FIRST_LINE" = "$PROMPT_HEADER" ]; then
+  PROMPT_SECOND_LINE=""
+else
+  PROMPT_SECOND_LINE="${PROMPT_HEADER#*$'\n'}"
+fi
+
+# This marker is emitted only by /zensu:tdd after the read-only review fan-out.
+# Requiring it on the first line prevents an unrelated standalone reviewer from
+# consuming stale state that happens to share the same Claude session.
+[ "$PROMPT_FIRST_LINE" = "PRE-MERGED FINDINGS (fan-out)" ] || exit 0
+case "$PROMPT_SECOND_LINE" in
+  "REVIEW-TICKET: "*) REVIEW_TICKET="${PROMPT_SECOND_LINE#REVIEW-TICKET: }" ;;
+  *) exit 0 ;;
+esac
 
 SESSION_ID="$(node -e '
   let s = "";
@@ -69,7 +96,26 @@ SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id 
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
 # fix-round directive matches the discipline the session actually runs under.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-if [ "$(tdd_vanilla_mode "$(tdd_state_file "$SESSION_ID")")" = "true" ]; then
+TDD_STATE_FILE="$(tdd_state_file "$SESSION_ID")"
+
+# Validate the public counter location before claiming the ticket. A hostile
+# symlink must remain a total no-op rather than consuming the one-shot event and
+# stranding the chain.
+STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
+if ! _tdd_path_safe "$STATE_DIR" directory "$STATE_DIR" \
+    || ! _tdd_path_safe "$COUNTER_FILE" regular-or-absent "$STATE_DIR"; then
+  echo "zensu post-review hook: refusing unsafe counter storage at $COUNTER_FILE — counter NOT updated" >&2
+  exit 0
+fi
+
+# Claim the one-shot ticket AND increment/persist its round while holding the
+# same per-session mutex. This serializes duplicate deliveries against both the
+# counter and a concurrent --tdd-begin generation reset.
+NEXT="$(tdd_consume_review_ticket "$SESSION_ID" "$REVIEW_TICKET" "$COUNTER_FILE")" || exit 0
+case "$NEXT" in ''|*[!0-9]*) exit 0 ;; esac
+
+if [ "$(tdd_vanilla_mode "$TDD_STATE_FILE")" = "true" ]; then
   FIX_DISCIPLINE_ALL="in vanilla mode by re-entering the /zensu:tdd workflow's vanilla implementation loop (fix each finding directly — no RED→GREEN cycle required, tests at your discretion; keep the structured CHECKPOINT/AUDIT evidence discipline; the phase-gate passes through in this session)"
   FIX_DISCIPLINE_CI="$FIX_DISCIPLINE_ALL"
   FIX_DONE_PHRASE="After the fixes are applied and verified"
@@ -80,52 +126,6 @@ else
 fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
-STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
-if [ -L "$COUNTER_FILE" ]; then
-  echo "zensu post-review hook: refusing to write through symlink at $COUNTER_FILE — counter NOT updated" >&2
-  exit 0
-fi
-if [ -L "$STATE_DIR" ]; then
-  echo "zensu post-review hook: refusing to write under symlinked state dir $STATE_DIR — counter NOT updated" >&2
-  exit 0
-fi
-
-CURRENT="$(node -e '
-  try {
-    const j = JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-    const n = j && j.count;
-    console.log(Number.isInteger(n) && n >= 0 ? String(n) : "0");
-  } catch (_) { console.log("0"); }
-' "$COUNTER_FILE" 2>/dev/null)"
-case "$CURRENT" in
-  ''|*[!0-9]*) CURRENT=0 ;;
-esac
-NEXT=$((CURRENT + 1))
-
-if [ "$(_zensu_log_style)" = "none" ]; then
-  PAYLOAD="$(printf '{"count":%d}' "$NEXT")"
-else
-  PAYLOAD="$(printf '{"count":%d,"ts":"%s"}' "$NEXT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
-fi
-if TMP_FILE="$(mktemp "${STATE_DIR}/rounds-${SESSION_ID}.XXXXXX" 2>/dev/null)"; then
-  if printf '%s\n' "$PAYLOAD" > "$TMP_FILE" \
-     && mv "$TMP_FILE" "$COUNTER_FILE" 2>/dev/null; then
-    :
-  else
-    rm -f "$TMP_FILE" 2>/dev/null
-    echo "zensu post-review hook: failed to persist counter for session ${SESSION_ID} (write/mv)" >&2
-    if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-      echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-    fi
-  fi
-else
-  echo "zensu post-review hook: mktemp failed under ${STATE_DIR} for session ${SESSION_ID}" >&2
-  if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-    echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-  fi
-fi
 
 BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)"
 [ -z "$BYPASSES" ] && BYPASSES="none"
@@ -141,13 +141,26 @@ fi
 # self-review owns the chain terminus (--chain-done) and renders the report.
 SELF_REVIEW_ON=0
 if zensu_hook_enabled selfReview; then SELF_REVIEW_ON=1; fi
+LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+REVIEW_TICKET_Q="$(printf '%q' "$REVIEW_TICKET")"
 
 if [ "$SELF_REVIEW_ON" = "1" ]; then
-  CLOSE_PASS="run 'bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --code-review-done' (PLUGIN_ROOT = contents of ~/.zensu/plugin-root, the value you resolved in Phase 0), then your VERY NEXT action must be the Skill tool with skill='zensu:self-review' — the terminal self-review stage that owns the chain terminus and renders the final CHAIN-END SUMMARY. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the chain."
+  CLOSE_PASS="run this ticket-bound command: bash ${LOG_HELPER_Q} --code-review-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Only if it exits 0, your VERY NEXT action must be the Skill tool with skill='zensu:self-review'. Carry this exact generation line into that skill: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'. The terminal self-review owns the chain terminus and renders the final CHAIN-END SUMMARY. If the command fails, this completion is stale: do NOT invoke self-review, do NOT mutate chain state, and resume the current chain instead. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the matching generation."
   TAIL_DIRECTIVE=""
 else
-  CLOSE_PASS="close the review chain by running 'bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' (PLUGIN_ROOT = contents of ~/.zensu/plugin-root, the value you resolved in Phase 0), then stop."
+  CLOSE_PASS="close only this review generation by running: bash ${LOG_HELPER_Q} --chain-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0; on failure this completion is stale, so leave the current chain untouched and resume it."
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
+fi
+
+if [ "$AUTO_FIX_ON" = "0" ]; then
+  DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
+  node -e '
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{
+      hookEventName:"PostToolUse", additionalContext:process.argv[1]
+    }}));
+  ' "$DISABLED_MSG"
+  echo
+  exit 0
 fi
 
 if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
@@ -156,10 +169,12 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
   # the terminal self-review stage, which owns --chain-done. With self-review
   # disabled, terminate as before (chainDone) so the Stop-hook backstop releases.
   if [ "$SELF_REVIEW_ON" = "1" ]; then
-    bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --code-review-done --session "$SESSION_ID" >/dev/null 2>&1 || true
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry the remaining reviewer findings forward for it under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
+    # The max-round flag write is bound to the ticket claimed above. If a new
+    # chain began in between, this old completion becomes a total no-op.
+    tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || exit 0
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'. Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
   else
-    bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" >/dev/null 2>&1 || true
+    tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
   fi
   node -e '
@@ -176,9 +191,9 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
 fi
 
 if zensu_autofix_include_suggestions; then
-  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ANY findings present (any of Critical, Important, Suggestion, Minor, Nit) — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_ALL}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nInclude EVERY finding the reviewer raised — Critical, Important, Suggestion, Minor, Nit — without filtering (one exception: items annotated '[Panel-FP-neutralized — do not fix]' are judged false positives — never fix those). ${FIX_DONE_PHRASE}, re-run the /zensu:tdd review sequence to re-verify: re-fan-out the five zensu:review-aspect agents, re-merge, re-run the zensu:review-judge second pass when hooks.reviewJudge is enabled, then your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt begins with 'PRE-MERGED FINDINGS (fan-out)' — the Stop-hook backstop enforces this, so do NOT end your turn first. Do NOT mark the chain done in case B. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing all findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case B) | 'No fixes needed: review passed' (case A).${TAIL_DIRECTIVE}"
+  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ANY findings present (any of Critical, Important, Suggestion, Minor, Nit) — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_ALL}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nInclude EVERY finding the reviewer raised — Critical, Important, Suggestion, Minor, Nit — without filtering (one exception: items annotated '[Panel-FP-neutralized — do not fix]' are judged false positives — never fix those). ${FIX_DONE_PHRASE}, re-run the /zensu:tdd review sequence to re-verify: re-fan-out the five zensu:review-aspect agents, re-merge, re-run the zensu:review-judge second pass when hooks.reviewJudge is enabled, then issue a FRESH one-shot ticket by running: bash ${LOG_HELPER_Q} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'. The Stop-hook backstop enforces this, so do NOT end your turn first. Do NOT reuse a prior ticket. Do NOT mark the chain done in case B. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing all findings in-thread, then re-reviewing (round ${NEXT}/${MAX_ROUNDS})' (case B) | 'No fixes needed: review passed' (case A).${TAIL_DIRECTIVE}"
 else
-  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ONLY Suggestions / Minor / Nits (no Critical AND no Important) — do NOT fix. Reply with a status line 'No critical/important findings — suggestions only' followed by the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical OR Important findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical and Important findings. EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain. ${FIX_DONE_PHRASE}, re-run the /zensu:tdd review sequence to re-verify: re-fan-out the five zensu:review-aspect agents, re-merge, re-run the zensu:review-judge second pass when hooks.reviewJudge is enabled, then your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt begins with 'PRE-MERGED FINDINGS (fan-out)' — the Stop-hook backstop enforces this, so do NOT end your turn first. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical+important findings in-thread, then re-reviewing' (case C) | 'No critical/important findings — suggestions only' (case B) | 'No fixes needed: review passed' (case A).${TAIL_DIRECTIVE}"
+  MSG="STOP. The zensu:code-reviewer subagent above just finished. Classify its findings by severity, then act:\n\n(A) Verdict PASS / zero findings — reply 'No fixes needed: review passed', then ${CLOSE_PASS}\n\n(B) ONLY Suggestions / Minor / Nits (no Critical AND no Important) — do NOT fix. Reply with a status line 'No critical/important findings — suggestions only' followed by the bullet list of Suggestions verbatim under the heading '### Suggestions (not auto-fixed)' so they land in the final report, then ${CLOSE_PASS}\n\n(C) ANY Critical OR Important findings present — fix them YOURSELF IN THIS MAIN THREAD ${FIX_DISCIPLINE_CI}. Treat the findings as a feature spec shaped exactly like:\n\nFix the following findings from code review:\n1. <file:line> — <issue description>\n   Fix: <reviewer's fix suggestion>\n2. <file:line> — ...\n   Fix: ...\n\nList ONLY Critical and Important findings. EXCLUDE all Suggestions / Minor / Nits — those are NOT auto-fixed; buffer them in your response under '### Suggestions (deferred, not auto-fixed)' below the status line so the user sees them at the end of the chain. ${FIX_DONE_PHRASE}, re-run the /zensu:tdd review sequence to re-verify: re-fan-out the five zensu:review-aspect agents, re-merge, re-run the zensu:review-judge second pass when hooks.reviewJudge is enabled, then issue a FRESH one-shot ticket by running: bash ${LOG_HELPER_Q} --review-ticket; capture its non-empty stdout as <ticket>. Your NEXT action must be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt starts with EXACTLY these two lines: 'PRE-MERGED FINDINGS (fan-out)' then 'REVIEW-TICKET: <ticket>'. The Stop-hook backstop enforces this, so do NOT end your turn first. Do NOT reuse a prior ticket. Do NOT mark the chain done in case C. Do NOT spawn a tdd subagent — TDD now runs in this main thread.\n\nBegin your next message with one of these status lines: 'Fixing critical+important findings in-thread, then re-reviewing' (case C) | 'No critical/important findings — suggestions only' (case B) | 'No fixes needed: review passed' (case A).${TAIL_DIRECTIVE}"
 fi
 
 EXPANDED_MSG="${MSG//\$\{NEXT\}/$NEXT}"

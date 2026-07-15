@@ -1,74 +1,47 @@
-description: "Happy path: pre-seed two rounds-*.json counter files under .zensu/state/, invoke /zensu:reset-review-limit, verify both removed and the skill prints 'Reset complete' with the deleted paths."
+description: "Containment: sibling rounds files are decoys, not reset targets. Without a consumed terminal ticket for the current session, /zensu:reset-review-limit must fail closed and preserve both files byte-for-byte."
 vars:
   spec_block: |
-    Perform this exact 3-step probe, in this exact order, using the Bash tool for steps 1 and 3:
+    Perform this exact containment probe using the Bash tool for steps 1 and 3:
 
-    1. Pre-seed two counter files (Bash tool):
+    1. Pre-seed two decoy counters that belong to other sessions:
        ```
        mkdir -p .zensu/state
-       printf '{"count":3,"ts":"2026-05-25T10:00:00Z"}\n' > .zensu/state/rounds-eval-sess-A.json
-       printf '{"count":5,"ts":"2026-05-25T10:00:00Z"}\n' > .zensu/state/rounds-eval-sess-B.json
-       ls .zensu/state/
+       printf '{"count":3,"owner":"A"}\n' > .zensu/state/rounds-eval-sess-A.json
+       printf '{"count":5,"owner":"B"}\n' > .zensu/state/rounds-eval-sess-B.json
+       cksum .zensu/state/rounds-eval-sess-A.json .zensu/state/rounds-eval-sess-B.json
        ```
 
-    2. Invoke the `/zensu:reset-review-limit` skill verbatim. The skill MUST execute its Phase 2 bash recipe and print the removed paths.
+    2. Invoke the `/zensu:reset-review-limit` skill verbatim. There is no
+       exhausted ticket-bound generation for the current session, so the skill
+       MUST stop after its official getter fails. It MUST NOT search for, name,
+       delete, or edit either decoy.
 
-    3. Verify by listing the directory (Bash tool):
-       ```
-       ls .zensu/state/ 2>/dev/null || echo "EMPTY"
-       ```
+    3. Re-run the same `cksum` command and compare both values with step 1.
 
-    **CRITICAL OUTPUT REQUIREMENTS** — your final assistant message MUST contain (literal substrings, not paraphrased):
-      - The skill's "Removed:" line for `rounds-eval-sess-A.json`
-      - The skill's "Removed:" line for `rounds-eval-sess-B.json`
-      - A "Reset complete:" summary line with the count of removed files
-      - The post-reset directory listing showing the two counter files are gone
+    Your final message MUST contain these literal lines:
+      - `Current generation rearm: rejected (no consumed terminal ticket)`
+      - `Sibling counters unchanged: yes`
 
-    Do NOT spawn subagents. Do NOT edit any source files. This is a trivial probe of the reset skill.
+    It MUST NOT claim that files were removed or that a reset completed. Do not
+    spawn subagents and do not edit source files.
 assert:
   - type: javascript
     value: |
       const txt = String(output);
-      const hasSkillInvocation = /(?:\/)?zensu:reset-review-limit/.test(txt);
-      return {
-        pass: hasSkillInvocation,
-        score: hasSkillInvocation ? 1 : 0,
-        reason: "Output must reference the zensu:reset-review-limit skill (with or without leading slash — claude's tool_use payload renders the skill name without slash)"
-      };
+      const ok = /(?:\/)?zensu:reset-review-limit/.test(txt);
+      return { pass: ok, score: ok ? 1 : 0, reason: "Must invoke the reset-review-limit skill" };
   - type: javascript
     value: |
       const txt = String(output);
-      const hasRemovedA = /Removed:[^\n]*rounds-eval-sess-A\.json/.test(txt);
-      return {
-        pass: hasRemovedA,
-        score: hasRemovedA ? 1 : 0,
-        reason: "Output must contain 'Removed: <path>/rounds-eval-sess-A.json' line"
-      };
+      const ok = /Current generation rearm: rejected \(no consumed terminal ticket\)/.test(txt);
+      return { pass: ok, score: ok ? 1 : 0, reason: "Must report the fail-closed current-generation rejection" };
   - type: javascript
     value: |
       const txt = String(output);
-      const hasRemovedB = /Removed:[^\n]*rounds-eval-sess-B\.json/.test(txt);
-      return {
-        pass: hasRemovedB,
-        score: hasRemovedB ? 1 : 0,
-        reason: "Output must contain 'Removed: <path>/rounds-eval-sess-B.json' line"
-      };
+      const ok = /Sibling counters unchanged: yes/.test(txt);
+      return { pass: ok, score: ok ? 1 : 0, reason: "Must confirm both sibling counter checksums stayed unchanged" };
   - type: javascript
     value: |
       const txt = String(output);
-      const hasResetComplete = /Reset complete:\s*2 counter file\(s\) deleted/.test(txt);
-      return {
-        pass: hasResetComplete,
-        score: hasResetComplete ? 1 : 0,
-        reason: "Output must contain 'Reset complete: 2 counter file(s) deleted' summary"
-      };
-  - type: javascript
-    value: |
-      const txt = String(output);
-      const postReset = txt.split(/Reset complete/).pop() || "";
-      const confirmsDeletion = /gone|empty|session-id-|removed|deleted/i.test(postReset);
-      return {
-        pass: confirmsDeletion,
-        score: confirmsDeletion ? 1 : 0,
-        reason: "Post-reset section must positively confirm deletion (mention 'gone', 'empty', 'session-id-' survivor, 'removed', or 'deleted'). Free-form narrative or fenced ls block both accepted — the brittle 'no filename in fenced block' negative-match was replaced because claude renders the verification step in either format nondeterministically."
-      };
+      const claimedMutation = /^Removed:|^Reset complete:/m.test(txt);
+      return { pass: !claimedMutation, score: claimedMutation ? 0 : 1, reason: "Must not claim cross-session deletion or reset" };

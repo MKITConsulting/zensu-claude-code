@@ -16,6 +16,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -59,13 +60,28 @@ flag() {  # echoes the boolean value of a state-file flag (or "missing")
 # --- chain #1: normal walk, enforcer releases on chainDone ---
 log --tdd-begin
 log --tdd-complete
+TICKET1="$(CLAUDE_SESSION_ID="$SID" bash "$LOG" --review-ticket 2>>"$LOG_STDERR")"
+[ -n "$TICKET1" ] && check "C0 chain #1 receives a review ticket" PASS \
+                   || check "C0 chain #1 receives a review ticket" FAIL
 D1="$(stop_dec)"
 [ "$D1" = "block" ] && check "C1 chain #1: stop BLOCKS while implComplete && !chainDone" PASS \
                     || check "C1 chain #1: stop decision (got '$D1')" FAIL
 
-log --code-review-done
-log --self-review-fixed
-log --chain-done
+# Route the matching Agent completion through the production PostToolUse hook;
+# this is the official transition that consumes the one-shot ticket and records
+# reviewRound=1 before any ticket-bound terminal flag may be written.
+SID_VALUE="$SID" TICKET="$TICKET1" node -e '
+  process.stdout.write(JSON.stringify({
+    session_id: process.env.SID_VALUE,
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    }
+  }));
+' | bash "$POSTREV" >/dev/null 2>>"$LOG_STDERR"
+log --code-review-done --claimed-review-ticket "$TICKET1"
+log --self-review-fixed --claimed-review-ticket "$TICKET1"
+log --chain-done --claimed-review-ticket "$TICKET1"
 D2="$(stop_dec)"
 [ "$D2" = "allow" ] && check "C2 chain #1: stop allows after --chain-done" PASS \
                     || check "C2 chain #1: stop decision (got '$D2')" FAIL
@@ -79,6 +95,24 @@ for f in implComplete chainDone codeReviewDone selfReviewFixed; do
 done
 [ "$RESET_FAIL" -eq 0 ] && check "C3 begin #2 clears implComplete/chainDone/codeReviewDone/selfReviewFixed" PASS \
                         || check "C3 begin #2 chain-flag reset ($RESET_FAIL stale)" FAIL
+TICKET_RESET="$(flag reviewTicket)"
+CONSUMED_RESET="$(flag reviewTicketConsumed)"
+[ "$TICKET_RESET" = "" ] && [ "$CONSUMED_RESET" = "true" ] \
+  && check "C3a begin #2 invalidates the prior review ticket atomically" PASS \
+  || check "C3a begin #2 review-ticket reset (ticket='$TICKET_RESET' consumed='$CONSUMED_RESET')" FAIL
+
+BEGIN_BRANCH="$(awk '
+  /^[[:space:]]*--tdd-begin\)/ { inside=1 }
+  inside { print }
+  inside && /^[[:space:]]*;;[[:space:]]*$/ { exit }
+' "$LOG")"
+BEGIN_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'tdd_begin_session "$session_val" "$begin_vanilla"')"
+if [ "$BEGIN_CALLS" = "1" ] \
+  && ! printf '%s\n' "$BEGIN_BRANCH" | grep -qE 'tdd_set_flag|tdd_reset_chain_flags'; then
+  check "C3b --tdd-begin uses one atomic state transition" PASS
+else
+  check "C3b --tdd-begin uses one atomic state transition (calls=$BEGIN_CALLS)" FAIL
+fi
 
 D3="$(stop_dec)"
 [ "$D3" = "allow" ] && check "C4 begin #2: stop allows while chain #2 has not completed impl" PASS \

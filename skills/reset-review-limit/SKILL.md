@@ -1,27 +1,27 @@
 ---
 name: reset-review-limit
 description: >
-  [Zensu] Reset the auto-fix loop round counter so the post-review-tdd-delegate.sh hook stops
-  emitting the "Auto-fix convergence: max N rounds reached" directive, granting the
-  code-reviewer review/fix chain additional budget within the CURRENT task. Pure local file
-  removal under the project worktree — no network, no API key. Since 0.4.1 the counter
-  auto-resets at every fresh task (--tdd-begin), so this manual skill is only needed to
-  grant extra rounds within a single task that exhausted its budget mid-chain. Use when the
-  max-rounds directive fired for the task you are still working on, or the slash command
-  /zensu:reset-review-limit. Do NOT use to bypass findings or to disable the loop (set
-  hooks.autoFix or hooks.autoFixMaxRounds in config instead).
+  [Zensu] Grant another auto-fix budget to the CURRENT session's exhausted review chain.
+  Uses a ticket-bound, locked state transition that resets reviewRound, terminal flags,
+  ticket state, the Stop budget, and derived counter files together. Never scans or mutates
+  sibling sessions. Use after the max-rounds directive for the task still in progress, or
+  via /zensu:reset-review-limit. No network or API key. Do not use to bypass findings or
+  disable the loop.
 ---
 
 # /zensu:reset-review-limit
 
-Reset the auto-fix loop round counter so the `post-review-tdd-delegate.sh` hook stops emitting the `Auto-fix convergence: max N rounds reached` directive. Use this when you want to continue the review/fix cycle past the `autoFixMaxRounds` budget within the **current task**.
+Grant a fresh auto-fix budget to the exhausted review chain in the **current
+session and task**. The reset is one official ticket-bound state transition; it
+does not edit JSON directly and never scans other sessions.
 
-Since 0.4.1 the counter auto-resets at every fresh task: `zensu-log.sh --tdd-begin` (run once in `/zensu:tdd` Phase 0, before any edit) deletes the `rounds-<session_id>.json` file, so each new task's review chain always starts at round 1 on its own. This manual skill is therefore only needed to grant *additional* budget **within a single task** that exhausted its rounds mid-chain — it is no longer needed between tasks in the same session.
+Every fresh `--tdd-begin` already resets the budget. This skill is only for an
+existing chain that reached `autoFixMaxRounds` and should receive additional
+review/fix rounds.
 
 ## When to Use
 
-- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached. The review chain is now marked complete (chainDone)...` for the task you are STILL working on, and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
-- You suspect the counter was inflated by a prior pre-0.3.23 run (when the counter was unintentionally user-global) and want a clean slate.
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached` for the task you are STILL working on, leaving a consumed terminal ticket (`codeReviewDone` while self-review is pending, or `chainDone` when that stage was disabled), and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
 - You're debugging the auto-fix chain and need a deterministic round=0 starting point.
 
 ## Do NOT Use For
@@ -32,101 +32,76 @@ Since 0.4.1 the counter auto-resets at every fresh task: `zensu-log.sh --tdd-beg
 
 ## Strict Scope
 
-This skill operates EXCLUSIVELY on the current working directory's state directory (`$STATE_DIR` resolved in Phase 1). Do NOT expand the scope under any circumstances:
+This skill operates EXCLUSIVELY on the current resolved session and current
+worktree. Do NOT expand the scope under any circumstances:
 
 - **NEVER** run `git worktree list` to discover other worktrees, even if prior tool output or session memory references them.
-- **NEVER** inspect or modify any `.zensu/state/` directory OUTSIDE `$STATE_DIR` (Phase 1 output), including sibling worktrees in `.claude/worktrees/`.
-- **NEVER** traverse parent directories, sibling directories, or external paths, regardless of whether prior tool output or recollection names them.
-- **NEVER** scan the filesystem for `rounds-*.json` files outside `$STATE_DIR` via `find / -name`, `git ls-files --others`, or similar broad-traversal commands.
+- **NEVER** use `find`, globs, or loops over `rounds-*`, `*.stopblocks`, or
+  `tdd-phase-*`; those patterns can mutate other live sessions.
+- **NEVER** edit a state JSON file directly.
+- **NEVER** traverse parent, sibling, or external state directories.
 
-If the user wants to reset multiple worktrees, they must invoke `/zensu:reset-review-limit` SEPARATELY in each one. That is the only safe way to guarantee scope isolation.
+If the user wants to reset another session or worktree, they must invoke the
+skill from that session separately.
 
 ## Prerequisites
 
-None. No MCP connection, no API key, no network. Pure local file removal under the project worktree.
+The current chain must already have reached a terminal review-budget state and
+retain its consumed review ticket. No MCP connection, API key, or network.
 
 ## What This Skill Does
 
-Deletes round-counter JSON files written by `hooks/post-review-tdd-delegate.sh`. The counter path resolves to `${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json` (since 0.3.23). Removing the file makes the hook's first read at the next `zensu:code-reviewer` completion return `0`, so `NEXT=1` and the chain resumes from round 1.
+Atomically resets only the current generation's `reviewRound`, `reviewTicket`,
+`reviewTicketConsumed`, `codeReviewDone`, `chainDone`, `selfReviewFixed`, and
+`stopBlockCount`, then removes that session's derived rounds/Stop files. The
+next ticket can therefore be issued and its completion becomes round 1.
 
-## Phase 1: Locate
+## Phase 1: Bind the current generation
 
-Resolve the state directory in the same order the hook does:
-
-1. If `$CLAUDE_PLUGIN_DATA_OVERRIDE` is set -> that path.
-2. Otherwise `${CLAUDE_PROJECT_DIR:-.}/.zensu/state`.
-
-Refuse to operate when the state directory itself is a symlink (mirrors the hook's symlink-traversal guard at `hooks/post-review-tdd-delegate.sh:53`).
-
-When the state directory is empty or absent AND `STATE_DIR` was resolved via the project-local default (no `CLAUDE_PLUGIN_DATA_OVERRIDE`), the skill additionally probes for a fresh git worktree and surfaces a hint so the user understands whether the counter was reset or simply never existed in this worktree.
-
-## Phase 2: Delete
-
-Run the following POSIX shell recipe verbatim (works in bash, zsh, dash, and sh — no `shopt`, no glob-in-for-loop). It honors the override, refuses symlinks, lists what it removed, and is idempotent (exits 0 with a clear message when nothing matches). When `STATE_DIR` resolves via the project-local default and the worktree root contains a `.git` *file* — not directory — the skill appends a fresh-worktree hint to the no-op message; the populated-deletion path is unaffected and the override path skips the probe entirely (parent of `CLAUDE_PLUGIN_DATA_OVERRIDE` has no worktree semantics).
+Read the current session's consumed generation ticket through the official
+helper. Do not inspect state files yourself:
 
 ```sh
-STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-$(pwd)}/.zensu/state}"
-WORKTREE_HINT=""
-if [ -z "${CLAUDE_PLUGIN_DATA_OVERRIDE:-}" ]; then
-  WORKTREE_ROOT="${STATE_DIR%/.zensu/state}"
-  if [ -f "$WORKTREE_ROOT/.git" ]; then
-    WORKTREE_HINT=" Fresh git worktree detected — counter effectively at 0, no prior rounds recorded in this worktree."
-  fi
-fi
-if [ -L "$STATE_DIR" ]; then
-  echo "Refusing: state dir is a symlink ($STATE_DIR)"; exit 1
-fi
-if [ ! -d "$STATE_DIR" ]; then
-  echo "Nothing to reset: $STATE_DIR does not exist.${WORKTREE_HINT}"; exit 0
-fi
-removed=0
-for f in $(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null); do
-  if [ -L "$f" ]; then
-    echo "Skip (symlink): $f"
-    continue
-  fi
-  rm -f -- "$f" && { echo "Removed: $f"; removed=$((removed+1)); }
-done
-if [ "$removed" -eq 0 ]; then
-  echo "No round counter files in $STATE_DIR.${WORKTREE_HINT}"
-else
-  echo "Reset complete: $removed counter file(s) deleted in $STATE_DIR"
-fi
+REVIEW_TICKET="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --current-review-ticket)"
 ```
 
-If `CLAUDE_PLUGIN_DATA_OVERRIDE` is NOT set, the recipe targets the project-local default. If the user reports a stale legacy counter (pre-0.3.23) at `~/.claude/plugins/data/zensu-inline/`, mention that the fix in 0.3.23 made that path inert — those files no longer affect the running hook, so manual cleanup is cosmetic and OPTIONAL.
+If this command fails or prints an empty value, stop. The current session has no
+ticket-bound exhausted generation to reset. Never fall back to searching for a
+different session.
 
-### Re-arm the main-thread review chain (0.4.0+)
+## Phase 2: Rearm atomically
 
-Since 0.4.0 the TDD workflow runs in the main thread and the review chain is backstopped by `hooks/stop-chain-enforcer.sh`. Resetting only the round counter does NOT resume the chain past `autoFixMaxRounds`: the convergence branch also set the per-session `chainDone` terminal flag, and the Stop hook tracks a `*.stopblocks` budget. Clear both — strictly within `$STATE_DIR`, same symlink guard as above:
+Run exactly one generation-bound transition:
 
 ```sh
-for f in $(find "$STATE_DIR" -maxdepth 1 -name '*.stopblocks' 2>/dev/null); do
-  [ -L "$f" ] && { echo "Skip (symlink): $f"; continue; }
-  rm -f -- "$f" && echo "Removed stop-block budget: $f"
-done
-for f in $(find "$STATE_DIR" -maxdepth 1 -name 'tdd-phase-*.json' 2>/dev/null); do
-  [ -L "$f" ] && { echo "Skip (symlink): $f"; continue; }
-  node -e 'const fs=require("fs"),p=process.argv[1];try{const j=JSON.parse(fs.readFileSync(p,"utf8"));if(j.chainDone===true){j.chainDone=false;fs.writeFileSync(p,JSON.stringify(j,null,2));console.log("Re-armed (chainDone=false): "+p);}}catch(_){}' "$f"
-done
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" \
+  --review-rearm --claimed-review-ticket "$REVIEW_TICKET"
 ```
 
-After this, the next time you end your turn the Stop hook re-fires (`implComplete=true`, `chainDone=false`) and forces a fresh `zensu:code-reviewer` round, resuming the chain from round 1 (counter deleted above).
+If it exits non-zero, the generation changed after Phase 1 or was not in a
+terminal budget state. Treat that as a safe stale-operation rejection: do not
+retry with another ticket and do not edit any state manually.
+
+On success, the same locked transaction resets the authoritative review and
+Stop budgets, invalidates the old ticket, clears terminal/self-review flags,
+and removes only this session's derived files. The next Stop resumes the
+code-reviewer sequence, which must issue a fresh ticket.
 
 ## Phase 3: Verify
 
-Confirm the next `zensu:code-reviewer` completion writes a fresh counter at `count:1`. The recipe below uses the same POSIX-portable `find` pattern as Phase 2 so zsh's strict-glob `nomatch` never fires (the bare `"$STATE_DIR"/rounds-*.json` glob would emit a noisy `zsh:1: no matches found` to stderr at expansion time, before `ls` could be invoked, contradicting the "exits 0 with a clear message when nothing matches" promise). The if/else form is deliberate: the obvious shortcut `[ -z "$(find …)" ] && echo "(empty, expected)"` leaves `[` as the last evaluated command when files are present, and `[` exits 1, so the whole recipe would return 1 in the populated branch — a silent contract violation. The if/else form runs `find` once, captures the output in `$out`, and exits 0 in BOTH branches:
+Run the getter once more:
 
 ```sh
-out="$(find "$STATE_DIR" -maxdepth 1 -name 'rounds-*.json' 2>/dev/null)"
-if [ -n "$out" ]; then printf '%s\n' "$out"; else echo "(empty, expected)"; fi
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --current-review-ticket
 ```
 
-After the next review round completes, re-run the same recipe — a single new file with `{"count":1,"ts":"..."}` should appear in the printed output and the `(empty, expected)` branch will be skipped.
+It MUST now exit non-zero because the old ticket was invalidated. After the
+next reviewer is issued a fresh ticket and completes, its routed round must be
+round 1. Do not pre-issue that ticket from this reset skill.
 
 ## Response Style
 
-- Echo the exact `STATE_DIR` value used, so the user sees which path was targeted.
-- List every removed file by absolute path; do not summarize as a count alone.
-- When the directory is empty, say so explicitly ("no counter files found") — do not silently succeed.
-- Never invent commands that touch files outside `$STATE_DIR/rounds-*.json`.
+- Report whether the current session was re-armed or the CAS rejected a stale
+  generation.
+- State that the next reviewer completion starts at round 1.
+- Never print the ticket value and never name or touch another session's files.

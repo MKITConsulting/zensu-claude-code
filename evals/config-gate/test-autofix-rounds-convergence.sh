@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PASS=0; FAIL=0
@@ -25,14 +26,26 @@ trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-with-max-rounds.json"
 
 SID="sess-conv-001"
 COUNTER_FILE="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID}.json"
-printf '{"count":2,"ts":"2026-01-01T00:00:00Z"}\n' > "$COUNTER_FILE"
+bash "$LOG" --tdd-begin --session "$SID" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 
-STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"
+# Prime two completed review generations through the public ticket contract.
+# The rounds file is only a derived compatibility view; reviewRound in the
+# ticket-bound session state is authoritative.
+for _round in 1 2; do
+  PRIME_TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
+  PRIME_STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${PRIME_TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
+  printf '%s' "$PRIME_STDIN" | "$SCRIPT" >/dev/null 2>/dev/null
+done
+
+TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
+STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

@@ -41,10 +41,11 @@ fi
 REQUIRED_SECTIONS=(
   "## When to Use"
   "## Do NOT Use For"
+  "## Strict Scope"
   "## Prerequisites"
   "## What This Skill Does"
-  "## Phase 1: Locate"
-  "## Phase 2: Delete"
+  "## Phase 1: Bind the current generation"
+  "## Phase 2: Rearm atomically"
   "## Phase 3: Verify"
   "## Response Style"
 )
@@ -56,22 +57,25 @@ for section in "${REQUIRED_SECTIONS[@]}"; do
   fi
 done
 
-if grep -qF 'CLAUDE_PLUGIN_DATA_OVERRIDE' "$SKILL_MD"; then
-  check "R4 SKILL.md references CLAUDE_PLUGIN_DATA_OVERRIDE (matches hook precedence)" PASS
+if grep -qF '"${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"' "$SKILL_MD"; then
+  check "R4 SKILL.md invokes the installed plugin helper through CLAUDE_PLUGIN_ROOT" PASS
 else
-  check "R4 SKILL.md references CLAUDE_PLUGIN_DATA_OVERRIDE" FAIL
+  check "R4 SKILL.md invokes the installed plugin helper through CLAUDE_PLUGIN_ROOT" FAIL
 fi
 
-if grep -qF 'rounds-*.json' "$SKILL_MD" || grep -qF 'rounds-' "$SKILL_MD"; then
-  check "R5 SKILL.md targets rounds-*.json files (matches hook output)" PASS
+if grep -qF -- '--current-review-ticket' "$SKILL_MD" \
+  && grep -qF -- '--review-rearm --claimed-review-ticket "$REVIEW_TICKET"' "$SKILL_MD"; then
+  check "R5 SKILL.md binds and rearms through the ticket-bound helper API" PASS
 else
-  check "R5 SKILL.md targets rounds-*.json files" FAIL
+  check "R5 SKILL.md binds and rearms through the ticket-bound helper API" FAIL
 fi
 
-if grep -qF 'symlink' "$SKILL_MD"; then
-  check "R6 SKILL.md documents symlink-traversal guard" PASS
+if grep -qF 'Do not inspect state files yourself' "$SKILL_MD" \
+  && grep -qF 'Never fall back to searching for a' "$SKILL_MD" \
+  && grep -qF 'different session' "$SKILL_MD"; then
+  check "R6 SKILL.md keeps state/path safety inside the official current-session helper" PASS
 else
-  check "R6 SKILL.md documents symlink-traversal guard" FAIL
+  check "R6 SKILL.md keeps state/path safety inside the official current-session helper" FAIL
 fi
 
 if [ ! -f "$PLUGIN_JSON" ]; then
@@ -139,67 +143,175 @@ else
   check "R16 hooks/post-review-tdd-delegate.sh mentions /zensu:reset-review-limit in convergence directive" FAIL
 fi
 
-if grep -qF 'shopt -s nullglob' "$SKILL_MD"; then
-  check "R17 SKILL.md does NOT contain 'shopt -s nullglob' (bash-only builtin broken under zsh)" FAIL
+if grep -qE '(^|[[:space:]])(find|rm)[[:space:]]+-' "$SKILL_MD" \
+  || grep -qE 'for .*(rounds-|tdd-phase-|stopblocks)' "$SKILL_MD"; then
+  check "R17 SKILL.md contains no direct filesystem scan/delete recipe" FAIL
 else
-  check "R17 SKILL.md does NOT contain 'shopt -s nullglob' (bash-only builtin broken under zsh)" PASS
+  check "R17 SKILL.md contains no direct filesystem scan/delete recipe" PASS
 fi
 
-if grep -qF "find \"\$STATE_DIR\" -maxdepth 1 -name 'rounds-*.json'" "$SKILL_MD"; then
-  check "R18 SKILL.md contains POSIX-portable find invocation for rounds-*.json" PASS
+if grep -qF 'NEVER** use `find`, globs, or loops' "$SKILL_MD" \
+  && grep -qF 'NEVER** edit a state JSON file directly' "$SKILL_MD"; then
+  check "R18 Strict Scope explicitly forbids cross-session scans and direct JSON edits" PASS
 else
-  check "R18 SKILL.md contains POSIX-portable find invocation for rounds-*.json" FAIL
+  check "R18 Strict Scope explicitly forbids cross-session scans and direct JSON edits" FAIL
 fi
 
-if grep -qE 'POSIX|bash, zsh|bash/zsh/dash' "$SKILL_MD"; then
-  check "R19 SKILL.md Phase 2 preamble declares POSIX/bash-zsh-dash portability" PASS
+PHASE1_REGION="$(sed -n '/^## Phase 1: Bind the current generation/,/^## Phase 2: Rearm atomically/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE1_REGION" | grep -qF 'REVIEW_TICKET="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --current-review-ticket)"' \
+  && printf '%s\n' "$PHASE1_REGION" | grep -qF 'If this command fails or prints an empty value, stop'; then
+  check "R19 Phase 1 resolves exactly the current consumed generation and fails closed" PASS
 else
-  check "R19 SKILL.md Phase 2 preamble declares POSIX/bash-zsh-dash portability" FAIL
+  check "R19 Phase 1 resolves exactly the current consumed generation and fails closed" FAIL
+fi
+
+PHASE2_REGION="$(sed -n '/^## Phase 2: Rearm atomically/,/^## Phase 3: Verify/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE2_REGION" | grep -qF -- '--review-rearm --claimed-review-ticket "$REVIEW_TICKET"' \
+  && printf '%s\n' "$PHASE2_REGION" | grep -qF 'Treat that as a safe stale-operation rejection'; then
+  check "R20 Phase 2 uses one stale-rejecting generation-bound CAS" PASS
+else
+  check "R20 Phase 2 uses one stale-rejecting generation-bound CAS" FAIL
+fi
+
+if printf '%s\n' "$PHASE2_REGION" | grep -qF 'retry with another ticket' \
+  && printf '%s\n' "$PHASE2_REGION" | grep -qF 'do not edit any state manually'; then
+  check "R21 Phase 2 forbids stale-CAS retry and manual repair" PASS
+else
+  check "R21 Phase 2 forbids stale-CAS retry and manual repair" FAIL
 fi
 
 PHASE3_REGION="$(sed -n '/^## Phase 3: Verify/,/^## Response Style/p' "$SKILL_MD")"
-if printf '%s\n' "$PHASE3_REGION" | grep -qF "find \"\$STATE_DIR\" -maxdepth 1 -name 'rounds-*.json'"; then
-  check "R20 SKILL.md Phase 3 verify recipe uses POSIX-portable find (mirrors R18 for Phase 2)" PASS
+if printf '%s\n' "$PHASE3_REGION" | grep -qF -- '--current-review-ticket' \
+  && printf '%s\n' "$PHASE3_REGION" | grep -qF 'MUST now exit non-zero' \
+  && printf '%s\n' "$PHASE3_REGION" | grep -qF 'round 1'; then
+  check "R22 Phase 3 verifies ticket invalidation and fresh round numbering" PASS
 else
-  check "R20 SKILL.md Phase 3 verify recipe uses POSIX-portable find (mirrors R18 for Phase 2)" FAIL
+  check "R22 Phase 3 verifies ticket invalidation and fresh round numbering" FAIL
 fi
 
-R21_IF=0; R21_PRINTF=0; R21_ELSE=0
-if printf '%s\n' "$PHASE3_REGION" | grep -qF 'if [ -n "$out" ]'; then R21_IF=1; fi
-if printf '%s\n' "$PHASE3_REGION" | grep -qF "printf '%s\\n' \"\$out\""; then R21_PRINTF=1; fi
-if printf '%s\n' "$PHASE3_REGION" | grep -qF 'else echo "(empty, expected)"'; then R21_ELSE=1; fi
-if [ "$R21_IF" = 1 ] && [ "$R21_PRINTF" = 1 ] && [ "$R21_ELSE" = 1 ]; then
-  check "R21 SKILL.md Phase 3 recipe uses if/else form (exit 0 in both branches; no && short-circuit)" PASS
+if grep -qF 'next ticket can therefore be issued' "$SKILL_MD" \
+  && grep -qF 'Do not pre-issue that ticket from this reset skill' "$SKILL_MD"; then
+  check "R23 skill rearms without issuing or consuming the next review ticket" PASS
 else
-  check "R21 SKILL.md Phase 3 recipe uses if/else form (if=$R21_IF printf=$R21_PRINTF else=$R21_ELSE)" FAIL
+  check "R23 skill rearms without issuing or consuming the next review ticket" FAIL
 fi
 
-PHASE2_REGION="$(sed -n '/^## Phase 2: Delete/,/^## Phase 3: Verify/p' "$SKILL_MD")"
-if printf '%s\n' "$PHASE2_REGION" | grep -qF 'Fresh git worktree detected — counter effectively at 0'; then
-  check "R22 SKILL.md Phase 2 contains fresh-worktree hint substring" PASS
+if grep -qF 'NEVER** run `git worktree list`' "$SKILL_MD" \
+  && grep -qF 'current resolved session and current' "$SKILL_MD"; then
+  check "R24 Strict Scope binds the operation to the current session/worktree" PASS
 else
-  check "R22 SKILL.md Phase 2 contains fresh-worktree hint substring" FAIL
+  check "R24 Strict Scope binds the operation to the current session/worktree" FAIL
 fi
 
-R23_DETECT=0; R23_GATE=0
-if printf '%s\n' "$PHASE2_REGION" | grep -qF '[ -f "$WORKTREE_ROOT/.git" ]'; then R23_DETECT=1; fi
-if printf '%s\n' "$PHASE2_REGION" | grep -qF 'if [ -z "${CLAUDE_PLUGIN_DATA_OVERRIDE:-}" ]'; then R23_GATE=1; fi
-if [ "$R23_DETECT" = 1 ] && [ "$R23_GATE" = 1 ]; then
-  check "R23 SKILL.md Phase 2 contains .git-is-file detection idiom AND CLAUDE_PLUGIN_DATA_OVERRIDE override-gate" PASS
+if grep -qF 'Never print the ticket value' "$SKILL_MD" \
+  && grep -qF 'never name or touch another session' "$SKILL_MD"; then
+  check "R25 response contract keeps the capability ticket out of output" PASS
 else
-  check "R23 SKILL.md Phase 2 contains .git-is-file detection + override-gate (detect=$R23_DETECT gate=$R23_GATE)" FAIL
+  check "R25 response contract keeps the capability ticket out of output" FAIL
 fi
 
-if grep -qF "## Strict Scope" "$SKILL_MD"; then
-  check "R24 SKILL.md contains '## Strict Scope' section heading" PASS
+# Runtime contract: the helper performs one generation-bound CAS, rejects a
+# wrong/replayed ticket without mutation, leaves sibling state untouched, and
+# makes the next real reviewer completion round 1.
+RUNTIME_ROOT="$(mktemp -d -t zensu-reset-runtime-XXXXXX)"
+RUNTIME_STATE="$RUNTIME_ROOT/state"
+RUNTIME_PROJECT="$RUNTIME_ROOT/project"
+RUNTIME_CONFIG="$RUNTIME_ROOT/config.json"
+mkdir -p "$RUNTIME_STATE" "$RUNTIME_PROJECT"
+printf '%s\n' '{}' > "$RUNTIME_CONFIG"
+trap 'rm -rf "$RUNTIME_ROOT"' EXIT
+
+runtime_log() {
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RUNTIME_PROJECT" \
+    TDD_STATE_DIR="$RUNTIME_STATE" CLAUDE_PLUGIN_DATA_OVERRIDE="$RUNTIME_STATE" \
+    ZENSU_CONFIG="$RUNTIME_CONFIG" bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" "$@"
+}
+runtime_review() {
+  local sid="$1" ticket="$2"
+  SID="$sid" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_name: "Agent",
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID
+    }));
+  ' | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RUNTIME_PROJECT" \
+    TDD_STATE_DIR="$RUNTIME_STATE" CLAUDE_PLUGIN_DATA_OVERRIDE="$RUNTIME_STATE" \
+    ZENSU_CONFIG="$RUNTIME_CONFIG" bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+}
+
+RUNTIME_SID=reset-runtime
+RUNTIME_OTHER=reset-sibling
+runtime_log --tdd-begin --session "$RUNTIME_SID" >/dev/null
+runtime_log --tdd-complete --session "$RUNTIME_SID" >/dev/null
+RUNTIME_TICKET="$(runtime_log --review-ticket --session "$RUNTIME_SID")"
+runtime_review "$RUNTIME_SID" "$RUNTIME_TICKET" >/dev/null
+runtime_log --code-review-done --session "$RUNTIME_SID" \
+  --claimed-review-ticket "$RUNTIME_TICKET" >/dev/null
+
+RUNTIME_FILE="$RUNTIME_STATE/tdd-phase-${RUNTIME_SID}.json"
+RUNTIME_COUNTER="$RUNTIME_STATE/rounds-${RUNTIME_SID}.json"
+RUNTIME_STOPBLOCKS="${RUNTIME_FILE}.stopblocks"
+printf '%s' xxx > "$RUNTIME_STOPBLOCKS"
+printf '%s\n' sibling > "$RUNTIME_STATE/rounds-${RUNTIME_OTHER}.json"
+SIBLING_BEFORE="$(cksum < "$RUNTIME_STATE/rounds-${RUNTIME_OTHER}.json")"
+STATE_BEFORE_WRONG="$(cksum < "$RUNTIME_FILE")"
+WRONG_TICKET=rt_00000000000000000000000000000000
+if runtime_log --review-rearm --session "$RUNTIME_SID" \
+    --claimed-review-ticket "$WRONG_TICKET" >/dev/null 2>&1; then
+  WRONG_RC=0
 else
-  check "R24 SKILL.md contains '## Strict Scope' section heading" FAIL
+  WRONG_RC=$?
+fi
+STATE_AFTER_WRONG="$(cksum < "$RUNTIME_FILE")"
+if [ "$WRONG_RC" -ne 0 ] && [ "$STATE_BEFORE_WRONG" = "$STATE_AFTER_WRONG" ]; then
+  check "R26 wrong generation ticket is a byte-stable CAS rejection" PASS
+else
+  check "R26 wrong generation ticket is a byte-stable CAS rejection" FAIL
 fi
 
-if grep -qF 'NEVER** run `git worktree list`' "$SKILL_MD"; then
-  check "R25 SKILL.md Strict Scope section prohibits 'git worktree list' (primary cross-worktree traversal vector)" PASS
+if runtime_log --review-rearm --session "$RUNTIME_SID" \
+    --claimed-review-ticket "$RUNTIME_TICKET" >/dev/null; then
+  check "R27 matching consumed terminal generation rearms successfully" PASS
 else
-  check "R25 SKILL.md Strict Scope section prohibits 'git worktree list' (primary cross-worktree traversal vector)" FAIL
+  check "R27 matching consumed terminal generation rearms successfully" FAIL
+fi
+
+if node -e '
+  const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+  const valid = s.reviewRound === 0 && s.reviewTicket === ""
+    && s.reviewTicketConsumed === true && s.codeReviewDone === false
+    && s.chainDone === false && s.selfReviewFixed === false && s.stopBlockCount === 0;
+  process.exit(valid ? 0 : 1);
+' "$RUNTIME_FILE" \
+  && [ ! -e "$RUNTIME_COUNTER" ] && [ ! -e "$RUNTIME_STOPBLOCKS" ]; then
+  check "R28 rearm resets authoritative and derived budgets together" PASS
+else
+  check "R28 rearm resets authoritative and derived budgets together" FAIL
+fi
+
+SIBLING_AFTER="$(cksum < "$RUNTIME_STATE/rounds-${RUNTIME_OTHER}.json")"
+if [ "$SIBLING_BEFORE" = "$SIBLING_AFTER" ] \
+  && ! runtime_log --current-review-ticket --session "$RUNTIME_SID" >/dev/null 2>&1 \
+  && ! runtime_log --review-rearm --session "$RUNTIME_SID" \
+       --claimed-review-ticket "$RUNTIME_TICKET" >/dev/null 2>&1; then
+  check "R29 rearm invalidates replay/getter and never scans sibling counters" PASS
+else
+  check "R29 rearm invalidates replay/getter and never scans sibling counters" FAIL
+fi
+
+RUNTIME_NEXT_TICKET="$(runtime_log --review-ticket --session "$RUNTIME_SID")"
+runtime_review "$RUNTIME_SID" "$RUNTIME_NEXT_TICKET" >/dev/null
+RUNTIME_NEXT_ROUND="$(node -e '
+  try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count)); }
+  catch (_) { process.stdout.write(""); }
+' "$RUNTIME_COUNTER")"
+if [ "$RUNTIME_NEXT_ROUND" = 1 ]; then
+  check "R30 first completion after rearm is round 1" PASS
+else
+  check "R30 first completion after rearm is round 1" FAIL
 fi
 
 echo "----"

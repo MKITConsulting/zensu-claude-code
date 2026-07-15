@@ -1,4 +1,4 @@
-description: "/zensu:reset-review-limit skill eval suite (2 scenarios: happy path + empty-dir idempotency)"
+description: "/zensu:reset-review-limit ticket-bound scope eval (sibling containment + missing current generation)"
 
 providers:
   - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'

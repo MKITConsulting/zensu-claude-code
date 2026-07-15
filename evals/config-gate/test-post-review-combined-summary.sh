@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -25,8 +26,41 @@ trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 export ZENSU_CONFIG="$TMP_CFG"
+
+arm_review() {
+  bash "$LOG" --tdd-begin --session "$1" >/dev/null
+  bash "$LOG" --tdd-complete --session "$1" >/dev/null
+}
+
+review_payload() {
+  local session_id="$1" ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$session_id")" || return 1
+  node -e '
+    const sessionId = process.argv[1];
+    const ticket = process.argv[2];
+    process.stdout.write(JSON.stringify({
+      tool_name: "Agent",
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${ticket}\nfixture`
+      },
+      session_id: sessionId
+    }));
+  ' "$session_id" "$ticket"
+}
+
+prime_review_rounds() {
+  local session_id="$1" rounds="$2" payload _round
+  _round=0
+  while [ "$_round" -lt "$rounds" ]; do
+    payload="$(review_payload "$session_id")" || return 1
+    printf '%s' "$payload" | "$SCRIPT" >/dev/null 2>/dev/null || return 1
+    _round=$((_round + 1))
+  done
+}
 
 # selfReview:false routes the CHAIN-END SUMMARY inline through this hook
 # (TAIL_DIRECTIVE). With selfReview enabled (the 0.5.0 default) the summary is
@@ -36,7 +70,8 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "selfReview": false}}
 EOF
 
-STDIN_A='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-a-001"}'
+arm_review sess-summary-a-001
+STDIN_A="$(review_payload sess-summary-a-001)"
 OUT="$(printf '%s' "$STDIN_A" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -111,7 +146,8 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "combinedSummary": false, "selfReview": false}}
 EOF
 
-STDIN_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-off-001"}'
+arm_review sess-summary-off-001
+STDIN_OFF="$(review_payload sess-summary-off-001)"
 OUT="$(printf '%s' "$STDIN_OFF" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -132,7 +168,8 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true, "selfReview": false}}
 EOF
 
-STDIN_SUGG_ON='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-001"}'
+arm_review sess-summary-sugg-001
+STDIN_SUGG_ON="$(review_payload sess-summary-sugg-001)"
 OUT="$(printf '%s' "$STDIN_SUGG_ON" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -153,7 +190,8 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixIncludeSuggestions": true, "combinedSummary": false, "selfReview": false}}
 EOF
 
-STDIN_SUGG_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-off-001"}'
+arm_review sess-summary-sugg-off-001
+STDIN_SUGG_OFF="$(review_payload sess-summary-sugg-off-001)"
 OUT="$(printf '%s' "$STDIN_SUGG_OFF" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -174,8 +212,9 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "selfReview": false}}
 EOF
 SID_MR_ON="sess-summary-mr-on-001"
-printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_ON}.json"
-STDIN_MR_ON="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_MR_ON}\"}"
+arm_review "$SID_MR_ON"
+prime_review_rounds "$SID_MR_ON" 5
+STDIN_MR_ON="$(review_payload "$SID_MR_ON")"
 OUT="$(printf '%s' "$STDIN_MR_ON" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -203,8 +242,9 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "combinedSummary": false, "selfReview": false}}
 EOF
 SID_MR_OFF="sess-summary-mr-off-001"
-printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_OFF}.json"
-STDIN_MR_OFF="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_MR_OFF}\"}"
+arm_review "$SID_MR_OFF"
+prime_review_rounds "$SID_MR_OFF" 5
+STDIN_MR_OFF="$(review_payload "$SID_MR_OFF")"
 OUT="$(printf '%s' "$STDIN_MR_OFF" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

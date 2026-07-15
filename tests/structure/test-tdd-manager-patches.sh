@@ -163,18 +163,20 @@ else
   check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
 fi
 
-# Round 15 — Plugin root resolution to eliminate helper-discovery improvisation
+# Round 15 — Native plugin root resolution to eliminate cross-session races
 
-if grep -qF '$HOME/.zensu/plugin-root' "$AGENT" && grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
-  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" PASS
+if grep -qF '${CLAUDE_PLUGIN_ROOT}' "$AGENT" \
+  && ! grep -qF '$HOME/.zensu/plugin-root' "$AGENT" \
+  && ! grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
+  check "R15-P1 Phase 0 uses native CLAUDE_PLUGIN_ROOT with no legacy pointer" PASS
 else
-  check "R15-P1 Phase 0 references \$HOME/.zensu/plugin-root and {PLUGIN_ROOT}" FAIL
+  check "R15-P1 Phase 0 uses native CLAUDE_PLUGIN_ROOT with no legacy pointer" FAIL
 fi
 
-if grep -qF 'FATAL: plugin root unresolvable' "$AGENT"; then
-  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" PASS
+if grep -qF 'FATAL: active plugin root unavailable' "$AGENT"; then
+  check "R15-P2 Phase 0 contains FATAL abort message when native plugin root is unavailable" PASS
 else
-  check "R15-P2 Phase 0 contains FATAL abort message when plugin-root file missing" FAIL
+  check "R15-P2 Phase 0 contains FATAL abort message when native plugin root is unavailable" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
@@ -183,44 +185,45 @@ else
   check "R15-P3 Hard Bans section forbids filesystem search for zensu-log.sh" FAIL
 fi
 
-if grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT" | grep -qE '^0$'; then
-  check "R15-P4 zero literal '\$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' invocations remain in agent" PASS
+if grep -qF 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT"; then
+  CNT=$(grep -cF 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT")
+  check "R15-P4 expected 0 unquoted native-root helper calls; found $CNT" FAIL
 else
-  CNT=$(grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT")
-  check "R15-P4 expected 0 \$CLAUDE_PLUGIN_ROOT helper calls; found $CNT" FAIL
+  check "R15-P4 zero unquoted native-root helper calls remain in agent" PASS
 fi
 
-PLACEHOLDER_COUNT=$(grep -cF '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT")
-if [ "$PLACEHOLDER_COUNT" -ge 10 ]; then
-  check "R15-P5 at least 10 '{PLUGIN_ROOT}/hooks/lib/zensu-log.sh' invocations present (got $PLACEHOLDER_COUNT)" PASS
+NATIVE_COUNT=$(grep -cF 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"' "$AGENT")
+if [ "$NATIVE_COUNT" -ge 10 ]; then
+  check "R15-P5 at least 10 quoted native-root helper invocations present (got $NATIVE_COUNT)" PASS
 else
-  check "R15-P5 expected >=10 {PLUGIN_ROOT} helper invocations; got $PLACEHOLDER_COUNT" FAIL
+  check "R15-P5 expected >=10 quoted native-root helper invocations; got $NATIVE_COUNT" FAIL
 fi
 
-# Fix-round 2: finding 2 — Phase 0 Step 1 uses explicit Bash invocation, not ambiguous "Read"
+# Fix-round 2: Phase 0 validates the session-scoped root rather than discovering one
 
-if grep -qF "bash -c 'cat \"\$HOME/.zensu/plugin-root\"'" "$AGENT"; then
-  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" PASS
+if grep -qF '[ -n "${CLAUDE_PLUGIN_ROOT}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" ]' "$AGENT"; then
+  check "F1.a Phase 0 Step 1 validates the native root and helper" PASS
 else
-  check "F1.a Phase 0 Step 1 uses explicit \`bash -c 'cat \"\$HOME/.zensu/plugin-root\"'\` invocation" FAIL
+  check "F1.a Phase 0 Step 1 validates the native root and helper" FAIL
 fi
 
-if grep -qF 'trimmed output' "$AGENT"; then
-  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" PASS
+if grep -qF 'Use the quoted native path in every subsequent helper invocation' "$AGENT" \
+  && grep -qF 'Never discover or persist a replacement root yourself' "$AGENT"; then
+  check "F1.b Phase 0 Step 1 keeps root resolution session-scoped" PASS
 else
-  check "F1.b Phase 0 Step 1 instructs trimmed-output handling (no trailing newline)" FAIL
+  check "F1.b Phase 0 Step 1 keeps root resolution session-scoped" FAIL
 fi
 
-if grep -qF 'hooks.pulseSession is not set to false' "$AGENT"; then
-  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" PASS
+if grep -qF 'start a fresh Claude Code session' "$AGENT"; then
+  check "F1.c Phase 0 Step 1 FATAL message gives the native-root recovery" PASS
 else
-  check "F1.c Phase 0 Step 1 FATAL message mentions hooks.pulseSession" FAIL
+  check "F1.c Phase 0 Step 1 FATAL message gives the native-root recovery" FAIL
 fi
 
-if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; then
-  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" FAIL
+if grep -qF '.zensu/plugin-root' "$AGENT" || grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
+  check "F1.d Phase 0 Step 1 contains no legacy root-pointer contract" FAIL
 else
-  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
+  check "F1.d Phase 0 Step 1 contains no legacy root-pointer contract" PASS
 fi
 
 # 0.4.0 — main-thread deferred-tool loading + correct TaskCreate signature

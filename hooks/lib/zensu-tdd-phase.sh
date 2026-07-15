@@ -20,6 +20,118 @@ tdd_state_file() {
   echo "${dir}/tdd-phase-${sanitized}.json"
 }
 
+# Validate every path component below a trusted project/temp anchor without
+# following symlinks. The leaf contract is explicit so directories, FIFOs,
+# devices, sockets, and hard-linked files cannot masquerade as JSON state.
+#
+# The project root and the OS temp root are trusted entry points: Claude hands
+# us the former and test/runtime temp paths commonly use the latter (including
+# macOS' /var -> /private/var alias). Every component *below* that anchor is
+# checked with lstat. For an explicit state path outside both anchors, the
+# nearest existing, non-symlink ancestor becomes the entry point.
+_tdd_paths_safe() {
+  [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
+  PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}" TEMP_ROOT="${TMPDIR:-/tmp}" HOME_ROOT="${HOME:-}" node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const within = (base, candidate) => {
+        const rel = path.relative(base, candidate);
+        return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+      };
+      const trusted = [process.env.PROJECT_ROOT, process.env.TEMP_ROOT, process.env.HOME_ROOT]
+        .filter(Boolean).map(value => path.resolve(value));
+      const args = process.argv.slice(1);
+      const validModes = new Set(["regular", "regular-or-absent", "directory", "directory-or-absent"]);
+      for (let pair = 0; pair < args.length; pair += 2) {
+        const target = path.resolve(args[pair]);
+        const mode = args[pair + 1];
+        if (!validModes.has(mode)) process.exit(3);
+        const candidates = trusted.filter(value => within(value, target)).sort((a, b) => b.length - a.length);
+        const anchor = candidates[0] || "";
+        if (!anchor) process.exit(3);
+        let physicalAnchor;
+        try { physicalAnchor = fs.realpathSync(anchor); }
+        catch (_) { process.exit(3); }
+        const rel = path.relative(anchor, target);
+        if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) process.exit(3);
+        const parts = rel ? rel.split(path.sep).filter(Boolean) : [];
+        let current = physicalAnchor;
+        let missing = false;
+        for (let i = 0; i < parts.length; i += 1) {
+          current = path.join(current, parts[i]);
+          const leaf = i === parts.length - 1;
+          if (missing) continue;
+          let st;
+          try { st = fs.lstatSync(current); }
+          catch (error) {
+            if (error.code !== "ENOENT") process.exit(3);
+            missing = true;
+            continue;
+          }
+          if (st.isSymbolicLink()) process.exit(3);
+          if (!leaf && !st.isDirectory()) process.exit(3);
+          if (leaf) {
+            if ((mode === "regular" || mode === "regular-or-absent")
+                && (!st.isFile() || st.nlink !== 1)) process.exit(3);
+            if ((mode === "directory" || mode === "directory-or-absent") && !st.isDirectory()) process.exit(3);
+          }
+        }
+        if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
+      }
+    ' "$@" >/dev/null 2>&1
+}
+
+_tdd_path_safe() {
+  local target="${1:-}" mode="${2:-}"
+  [ -n "$target" ] || return 1
+  _tdd_paths_safe "$target" "$mode"
+}
+
+_tdd_state_storage_safe() {
+  local state_file="${1:-}" state_dir
+  [ -n "$state_file" ] || return 1
+  state_dir="$(dirname "$state_file")"
+  _tdd_paths_safe \
+    "$state_dir" directory \
+    "$state_file" regular-or-absent \
+    "${state_file}.lock" regular-or-absent \
+    "${state_file}.lockd" directory-or-absent
+}
+
+_tdd_prepare_directory() {
+  local directory="${1:-}"
+  [ -n "$directory" ] || return 1
+  _tdd_path_safe "$directory" directory-or-absent "$directory" || return 1
+  mkdir -p "$directory" 2>/dev/null || return 1
+  _tdd_path_safe "$directory" directory "$directory"
+}
+
+# `mv file existing-directory` silently moves the source *inside* the
+# directory. rename(2) has the replacement semantics state writes require and
+# rejects a directory leaf. Revalidate the leaf immediately before rename.
+_tdd_atomic_replace_regular() {
+  local source_file="${1:-}" target_file="${2:-}"
+  _tdd_paths_safe "$source_file" regular "$target_file" regular-or-absent || return 1
+  SOURCE_FILE="$source_file" TARGET_FILE="$target_file" node -e '
+    const fs = require("fs");
+    const source = process.env.SOURCE_FILE;
+    const target = process.env.TARGET_FILE;
+    try {
+      const before = fs.lstatSync(source);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) process.exit(3);
+      try {
+        const existing = fs.lstatSync(target);
+        if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) process.exit(3);
+      } catch (error) {
+        if (error.code !== "ENOENT") process.exit(3);
+      }
+      fs.renameSync(source, target);
+      const after = fs.lstatSync(target);
+      if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1) process.exit(3);
+    } catch (_) { process.exit(3); }
+  ' >/dev/null 2>&1
+}
+
 tdd_is_test_path() {
   local path="${1:-}"
   [ -z "$path" ] && { echo "false"; return 0; }
@@ -113,7 +225,8 @@ _tdd_write_phase_critical() {
     return 1
   fi
 
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -123,10 +236,16 @@ _tdd_locked_run() {
 
   local lock_file="${state_file}.lock"
 
+  # Reject unsafe storage before creating either lock representation. The same
+  # check runs again after acquisition so a path swap cannot reach the state
+  # mutation hidden behind the mutex.
+  _tdd_state_storage_safe "$state_file" || return 1
+
   if [ "${TDD_DISABLE_FLOCK:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
     (
       exec 9>>"$lock_file" 2>/dev/null || exit 1
       flock -x 9 2>/dev/null || exit 1
+      _tdd_state_storage_safe "$state_file" || exit 1
       "$@"
     )
     return $?
@@ -164,7 +283,11 @@ _tdd_locked_run() {
     sleep 0.01 2>/dev/null || sleep 1
   done
   echo "$$" > "$lock_dir/owner" 2>/dev/null || true
-  "$@"
+  if _tdd_state_storage_safe "$state_file"; then
+    "$@"
+  else
+    false
+  fi
   local rc=$?
   rm -rf "$lock_dir" 2>/dev/null || true
   return $rc
@@ -180,7 +303,7 @@ tdd_write_phase() {
   state_file=$(tdd_state_file "$session_id")
   local state_dir
   state_dir=$(dirname "$state_file")
-  mkdir -p "$state_dir" 2>/dev/null || true
+  _tdd_prepare_directory "$state_dir" || return 1
 
   local ts=""
   if [ "$(_zensu_log_style)" != "none" ]; then
@@ -231,7 +354,8 @@ _tdd_write_flag_critical() {
     return 1
   fi
 
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -244,7 +368,7 @@ tdd_set_flag() {
 
   local state_file
   state_file=$(tdd_state_file "$session_id")
-  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  _tdd_prepare_directory "$(dirname "$state_file")" || return 1
   command -v node >/dev/null 2>&1 || return 1
 
   _tdd_locked_run "$state_file" \
@@ -267,6 +391,8 @@ _tdd_write_clear_critical() {
     } catch (_) {}
     s.active = false; s.implComplete = false; s.chainDone = false;
     s.codeReviewDone = false; s.selfReviewFixed = false; s.workflowActive = false;
+    s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
+    s.deferredReviewClaim = ""; s.stopBlockCount = 0;
     s.workflowTools = []; s.vanilla = false; s.bypasses = [];
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
@@ -274,7 +400,8 @@ _tdd_write_clear_critical() {
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -303,13 +430,16 @@ _tdd_write_chain_reset_critical() {
     } catch (_) {}
     s.implComplete = false; s.chainDone = false;
     s.codeReviewDone = false; s.selfReviewFixed = false;
+    s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
+    s.deferredReviewClaim = ""; s.stopBlockCount = 0;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -325,6 +455,538 @@ tdd_reset_chain_flags() {
   [ -f "$state_file" ] || return 0
   command -v node >/dev/null 2>&1 || return 1
   _tdd_locked_run "$state_file" _tdd_write_chain_reset_critical "$state_file"
+}
+
+_tdd_begin_session_critical() {
+  local state_file="$1" session_id="$2" vanilla="$3" impl_complete="$4"
+  local require_deferred_eligible="$5" deferred_claim="$6"
+  local counter_file="$7" rounds_state_dir="$8" stopblocks_file="$9" state_dir="${10}" tmp
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$counter_file" regular-or-absent "$rounds_state_dir" || return 1
+  _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" VANILLA="$vanilla" \
+      IMPL_COMPLETE="$impl_complete" REQUIRE_DEFERRED_ELIGIBLE="$require_deferred_eligible" \
+      DEFERRED_CLAIM="$deferred_claim" node -e '
+    const fs = require("fs");
+    let s = {};
+    try {
+      const prev = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+      if (prev && typeof prev === "object" && !Array.isArray(prev)) s = prev;
+    } catch (_) {}
+    if (process.env.REQUIRE_DEFERRED_ELIGIBLE === "true") {
+      const eligible = s.active !== true
+        || (s.active === true && s.implComplete === true && s.chainDone === true);
+      if (!eligible) process.exit(3);
+    }
+    s.session_id = process.env.SID;
+    if (typeof s.phase !== "string") s.phase = "UNINITIALIZED";
+    if (!Array.isArray(s.history)) s.history = [];
+    s.active = true;
+    s.vanilla = process.env.VANILLA === "true";
+    s.implComplete = process.env.IMPL_COMPLETE === "true";
+    s.chainDone = false;
+    s.codeReviewDone = false;
+    s.selfReviewFixed = false;
+    s.reviewTicket = "";
+    s.reviewTicketConsumed = true;
+    s.reviewRound = 0;
+    s.deferredReviewClaim = process.env.DEFERRED_CLAIM || "";
+    s.stopBlockCount = 0;
+    s.bypasses = [];
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+
+  # Keep budget reset in the same session-state critical section as the new
+  # generation and fail closed if either reset cannot be completed. A reviewer
+  # completion that claimed the old ticket must finish its counter write before
+  # this lock holder can reset it; later completions see the cleared ticket.
+  if ! rm -f -- "$counter_file" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    echo "zensu-log --tdd-begin: rounds counter reset failed — session NOT activated" >&2
+    return 1
+  fi
+  if ! rm -f -- "$stopblocks_file" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    echo "zensu-log --tdd-begin: stop-block budget reset failed — session NOT activated" >&2
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$state_dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+# Atomically starts a new chain generation. In particular, the old review
+# ticket and completion flags disappear in the same locked write that marks the
+# new chain active, so a late Agent completion linearizes either before or
+# after the new chain — it can never observe a hybrid state.
+tdd_begin_session() {
+  local session_id="${1:-}" vanilla="${2:-false}" impl_complete="${3:-false}"
+  local require_deferred_eligible="${4:-false}" deferred_claim="${5:-}" state_file state_dir
+  local rounds_state_dir counter_file stopblocks_file
+  [ -n "$session_id" ] || return 1
+  case "$vanilla" in true|false) ;; *) return 1 ;; esac
+  case "$impl_complete" in true|false) ;; *) return 1 ;; esac
+  case "$require_deferred_eligible" in true|false) ;; *) return 1 ;; esac
+  if [ -n "$deferred_claim" ]; then
+    case "$deferred_claim" in dc_*) ;; *) return 1 ;; esac
+    case "$deferred_claim" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+    [ "${#deferred_claim}" -le 96 ] || return 1
+  fi
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  counter_file="${rounds_state_dir}/rounds-${session_id}.json"
+  stopblocks_file="${state_file}.stopblocks"
+  if ! _tdd_prepare_directory "$state_dir" || ! _tdd_prepare_directory "$rounds_state_dir"; then
+    echo "zensu-log --tdd-begin: unsafe session state path — session NOT activated" >&2
+    return 1
+  fi
+  if ! _tdd_state_storage_safe "$state_file" \
+      || ! _tdd_path_safe "$counter_file" regular-or-absent "$rounds_state_dir" \
+      || ! _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir"; then
+    echo "zensu-log --tdd-begin: unsafe session budget state — session NOT activated" >&2
+    return 1
+  fi
+  _tdd_locked_run "$state_file" \
+    _tdd_begin_session_critical "$state_file" "$session_id" "$vanilla" "$impl_complete" \
+      "$require_deferred_eligible" "$deferred_claim" \
+      "$counter_file" "$rounds_state_dir" "$stopblocks_file" "$state_dir"
+}
+
+# --- Consume-mode reviewer ticket -----------------------------------------
+# Every thin code-reviewer spawn gets a fresh, random ticket. The completion
+# hook must atomically claim that exact ticket before it may read or mutate the
+# auto-fix counter. Re-arming a chain clears the ticket, issuing a new ticket
+# invalidates the prior one, and duplicate/late Agent deliveries become no-ops.
+
+_tdd_review_ticket_shape_ok() {
+  local ticket="${1:-}"
+  [ -n "$ticket" ] && [ "${#ticket}" -le 96 ] || return 1
+  case "$ticket" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  return 0
+}
+
+_tdd_issue_review_ticket_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string"
+      && typeof s.reviewTicketConsumed === "boolean"
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+    if (!valid) process.exit(3);
+    s.reviewTicket = process.env.TICKET;
+    s.reviewTicketConsumed = false;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_issue_review_ticket() {
+  local session_id="${1:-}" state_file state_dir ticket
+  [ -n "$session_id" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  ticket="$(node -e 'process.stdout.write("rt_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+
+  if _tdd_locked_run "$state_file" \
+    _tdd_issue_review_ticket_critical "$state_file" "$session_id" "$ticket"; then
+    printf '%s\n' "$ticket"
+    return 0
+  fi
+  return 1
+}
+
+_tdd_consume_review_ticket_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" counter_file="$4"
+  local state_dir counter_dir state_tmp counter_tmp next_file
+  state_dir="$(dirname "$state_file")"
+  counter_dir="$(dirname "$counter_file")"
+  _tdd_paths_safe "$counter_dir" directory "$counter_file" regular-or-absent || return 1
+  state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  counter_tmp="$(mktemp "${counter_file}.XXXXXX" 2>/dev/null)" || {
+    rm -f "$state_tmp" 2>/dev/null
+    return 1
+  }
+  next_file="$(mktemp "${state_file}.next.XXXXXX" 2>/dev/null)" || {
+    rm -f "$state_tmp" "$counter_tmp" 2>/dev/null
+    return 1
+  }
+
+  if ! STATE_FILE="$state_file" COUNTER_FILE="$counter_file" SID="$session_id" TICKET="$ticket" \
+    LOG_STYLE="$(_zensu_log_style)" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string"
+      && s.reviewTicket === process.env.TICKET
+      && typeof s.reviewTicketConsumed === "boolean"
+      && s.reviewTicketConsumed === false
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+    if (!valid) process.exit(3);
+
+    // The ticket-bound chain state is authoritative. The public rounds file is
+    // only a derived compatibility view, so a missing/corrupt/blocked counter
+    // leaf can never reset the review budget to round 1.
+    const next = s.reviewRound + 1;
+    s.reviewTicketConsumed = true;
+    s.reviewRound = next;
+    const counter = {count: next};
+    if (process.env.LOG_STYLE !== "none") counter.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], JSON.stringify(counter) + "\n");
+    fs.writeFileSync(process.argv[3], String(next));
+  ' "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null; then
+    rm -f "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null
+    return 1
+  fi
+
+  if [ ! -s "$state_tmp" ] || [ ! -s "$counter_tmp" ] || [ ! -s "$next_file" ]; then
+    rm -f "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null
+    return 1
+  fi
+
+  # Both renames happen while holding the per-session mutex. The state claim is
+  # authoritative; the rounds file remains the public/resettable budget view.
+  _tdd_atomic_replace_regular "$state_tmp" "$state_file" "$state_dir" || {
+    rm -f "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null
+    return 1
+  }
+  if ! _tdd_atomic_replace_regular "$counter_tmp" "$counter_file" "$counter_dir"; then
+    rm -f "$counter_tmp" 2>/dev/null
+    echo "zensu post-review hook: failed to persist counter for session ${session_id}" >&2
+  fi
+  cat "$next_file"
+  rm -f "$next_file" 2>/dev/null
+}
+
+tdd_consume_review_ticket() {
+  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}"
+  local state_file
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  [ -n "$counter_file" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_locked_run "$state_file" \
+    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file"
+}
+
+_tdd_mark_review_converged_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" key="$4" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" KEY="$key" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const key = process.env.KEY;
+    const validKey = key === "codeReviewDone" || key === "chainDone" || key === "selfReviewFixed";
+    const valid = validKey
+      && s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean"
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
+      && typeof s.reviewTicketConsumed === "boolean" && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+    if (!valid) process.exit(3);
+    if (key === "codeReviewDone" && s.codeReviewDone !== false) process.exit(3);
+    if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
+    s[key] = true;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+# Every reviewer/self-review terminus after the one-shot claim is bound to the
+# same consumed ticket. A concurrent --tdd-begin therefore invalidates stale
+# PASS, max-round, latch, and terminal writes as one generation boundary.
+tdd_mark_review_converged() {
+  local session_id="${1:-}" ticket="${2:-}" key="${3:-}" state_file state_dir
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" \
+    _tdd_mark_review_converged_critical "$state_file" "$session_id" "$ticket" "$key"
+}
+
+_tdd_mark_unclaimed_review_critical() {
+  local state_file="$1" session_id="$2" key="$3" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" KEY="$key" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const key = process.env.KEY;
+    const validKey = key === "codeReviewDone" || key === "chainDone" || key === "selfReviewFixed";
+    const valid = validKey && s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID
+      && s.active === true && s.implComplete === true && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+      && s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+    if (!valid) process.exit(3);
+    if (key === "codeReviewDone" && s.codeReviewDone !== false) process.exit(3);
+    if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
+    s[key] = true;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+# Compatibility for zero-diff and pre-ticket legacy chains. Once a review
+# ticket was issued/consumed, every terminus must carry that ticket; an
+# unqualified stale command is then rejected instead of closing a new chain.
+tdd_mark_unclaimed_review() {
+  local session_id="${1:-}" key="${2:-}" state_file state_dir
+  [ -n "$session_id" ] || return 1
+  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_unclaimed_review_critical \
+    "$state_file" "$session_id" "$key"
+}
+
+_tdd_ensure_self_review_ticket_critical() {
+  local state_file="$1" session_id="$2" candidate="$3" result_file="$4" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" CANDIDATE="$candidate" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const base = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID && s.active === true && s.implComplete === true
+      && s.codeReviewDone === true && s.chainDone === false;
+    if (!base) process.exit(3);
+    let ticket = s.reviewTicket;
+    const alreadyBound = typeof ticket === "string" && ticket.length > 0 && ticket.length <= 96
+      && /^[A-Za-z0-9_-]+$/.test(ticket) && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+    if (!alreadyBound) {
+      const legacy = (ticket === "" || ticket == null)
+        && (s.reviewTicketConsumed === true || s.reviewTicketConsumed == null)
+        && (s.reviewRound === 0 || s.reviewRound == null);
+      if (!legacy) process.exit(3);
+      ticket = process.env.CANDIDATE;
+      s.reviewTicket = ticket;
+      s.reviewTicketConsumed = true;
+      s.reviewRound = 1;
+    }
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], ticket);
+  ' "$tmp" "$result_file" 2>/dev/null; then
+    rm -f "$tmp" "$result_file" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp" "$result_file"; return 1; }
+}
+
+tdd_ensure_self_review_ticket() {
+  local session_id="${1:-}" state_file state_dir candidate result_file
+  [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  candidate="$(node -e 'process.stdout.write("rt_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
+  _tdd_review_ticket_shape_ok "$candidate" || return 1
+  result_file="$(mktemp "${state_file}.self-review-ticket.XXXXXX" 2>/dev/null)" || return 1
+  if _tdd_locked_run "$state_file" _tdd_ensure_self_review_ticket_critical \
+      "$state_file" "$session_id" "$candidate" "$result_file"; then
+    cat "$result_file"
+    rm -f "$result_file" 2>/dev/null
+    return 0
+  fi
+  rm -f "$result_file" 2>/dev/null
+  return 1
+}
+
+_tdd_increment_stop_budget_critical() {
+  local state_file="$1" session_id="$2" budget_file="$3" result_file="$4"
+  local state_dir budget_dir state_tmp budget_tmp
+  state_dir="$(dirname "$state_file")"
+  budget_dir="$(dirname "$budget_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$budget_file" regular-or-absent "$budget_dir" || return 1
+  state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  budget_tmp="$(mktemp "${budget_file}.XXXXXX" 2>/dev/null)" || {
+    rm -f "$state_tmp" 2>/dev/null
+    return 1
+  }
+  if ! STATE_FILE="$state_file" BUDGET_FILE="$budget_file" SID="$session_id" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    if (!s || typeof s !== "object" || Array.isArray(s) || s.session_id !== process.env.SID
+        || s.active !== true || s.implComplete !== true || s.chainDone !== false) process.exit(3);
+    let current = Number.isInteger(s.stopBlockCount) && s.stopBlockCount >= 0 ? s.stopBlockCount : 0;
+    try {
+      const bytes = fs.readFileSync(process.env.BUDGET_FILE);
+      if (bytes.length > current) current = bytes.length;
+    } catch (_) {}
+    if (current > 10000) process.exit(3);
+    const next = current + 1;
+    s.stopBlockCount = next;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], "x".repeat(next));
+    fs.writeFileSync(process.argv[3], String(next));
+  ' "$state_tmp" "$budget_tmp" "$result_file" 2>/dev/null; then
+    rm -f "$state_tmp" "$budget_tmp" "$result_file" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$state_tmp" "$state_file" "$state_dir" || {
+    rm -f "$state_tmp" "$budget_tmp" "$result_file" 2>/dev/null
+    return 1
+  }
+  if ! _tdd_atomic_replace_regular "$budget_tmp" "$budget_file" "$budget_dir"; then
+    rm -f "$budget_tmp" 2>/dev/null
+    echo "zensu chain-enforcer: failed to persist derived Stop budget for ${session_id}" >&2
+  fi
+}
+
+tdd_increment_stop_budget() {
+  local session_id="${1:-}" state_file state_dir budget_file result_file
+  [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  budget_file="${state_file}.stopblocks"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_path_safe "$budget_file" regular-or-absent "$state_dir" || return 1
+  result_file="$(mktemp "${state_file}.stop-count.XXXXXX" 2>/dev/null)" || return 1
+  if _tdd_locked_run "$state_file" _tdd_increment_stop_budget_critical \
+      "$state_file" "$session_id" "$budget_file" "$result_file"; then
+    cat "$result_file"
+    rm -f "$result_file" 2>/dev/null
+    return 0
+  fi
+  rm -f "$result_file" 2>/dev/null
+  return 1
+}
+
+_tdd_rearm_review_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" counter_file="$4" stopblocks_file="$5"
+  local state_dir counter_dir tmp
+  state_dir="$(dirname "$state_file")"
+  counter_dir="$(dirname "$counter_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$counter_file" regular-or-absent "$counter_dir" || return 1
+  _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id === process.env.SID && s.active === true && s.implComplete === true
+      && typeof s.chainDone === "boolean" && typeof s.codeReviewDone === "boolean"
+      && typeof s.selfReviewFixed === "boolean"
+      && (s.chainDone === true || s.codeReviewDone === true)
+      && s.reviewTicket === process.env.TICKET && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+    if (!valid) process.exit(3);
+    s.chainDone = false;
+    s.codeReviewDone = false;
+    s.selfReviewFixed = false;
+    s.reviewTicket = "";
+    s.reviewTicketConsumed = true;
+    s.reviewRound = 0;
+    s.stopBlockCount = 0;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  rm -f -- "$counter_file" "$stopblocks_file" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$state_dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_rearm_review() {
+  local session_id="${1:-}" ticket="${2:-}" state_file state_dir rounds_dir counter_file stopblocks_file
+  [ -n "$session_id" ] || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  rounds_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  counter_file="${rounds_dir}/rounds-${session_id}.json"
+  stopblocks_file="${state_file}.stopblocks"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_path_safe "$rounds_dir" directory "$rounds_dir" || return 1
+  _tdd_path_safe "$counter_file" regular-or-absent "$rounds_dir" || return 1
+  _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_rearm_review_critical \
+    "$state_file" "$session_id" "$ticket" "$counter_file" "$stopblocks_file"
 }
 
 _tdd_write_workflow_begin_critical() {
@@ -359,7 +1021,8 @@ _tdd_write_workflow_begin_critical() {
     return 1
   fi
 
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -368,7 +1031,7 @@ tdd_workflow_begin() {
   local tools="${2:-}"
   local state_file
   state_file=$(tdd_state_file "$session_id")
-  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
+  _tdd_prepare_directory "$(dirname "$state_file")" || return 1
   command -v node >/dev/null 2>&1 || return 1
   _tdd_locked_run "$state_file" \
     _tdd_write_workflow_begin_critical "$state_file" "$session_id" "$tools"
@@ -398,6 +1061,24 @@ tdd_chain_done()        { tdd_get_flag "${1:-}" chainDone; }
 tdd_code_review_done()  { tdd_get_flag "${1:-}" codeReviewDone; }
 tdd_self_review_fixed() { tdd_get_flag "${1:-}" selfReviewFixed; }
 zensu_workflow_active()  { tdd_get_flag "${1:-}" workflowActive; }
+
+tdd_claimed_review_ticket() {
+  local state_file="${1:-}"
+  [ -n "$state_file" ] && _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" \
+    || return 1
+  node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const ticket = s && s.reviewTicket;
+      const valid = typeof ticket === "string" && ticket.length > 0 && ticket.length <= 96
+        && /^[A-Za-z0-9_-]+$/.test(ticket)
+        && s.reviewTicketConsumed === true
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+      if (!valid) process.exit(3);
+      process.stdout.write(ticket);
+    } catch (_) { process.exit(3); }
+  ' "$state_file" 2>/dev/null
+}
 
 zensu_workflow_allows() {
   local sf="${1:-}" tool="${2:-}"
@@ -531,7 +1212,8 @@ _tdd_write_bypass_critical() {
     return 1
   fi
 
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -542,12 +1224,11 @@ tdd_add_bypass() {
 
   local state_file
   state_file=$(tdd_state_file "$session_id")
-  [ -L "$state_file" ] && return 1
-  [ -L "$(dirname "$state_file")" ] && return 1
+  _tdd_prepare_directory "$(dirname "$state_file")" || return 1
+  _tdd_path_safe "$state_file" regular-or-absent "$(dirname "$state_file")" || return 1
   case ", $(tdd_bypasses "$state_file")," in
     *", $gate,"*) return 0 ;;
   esac
-  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
   command -v node >/dev/null 2>&1 || return 1
 
   _tdd_locked_run "$state_file" \
@@ -624,7 +1305,8 @@ _tdd_write_bypass_clear_critical() {
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -679,7 +1361,8 @@ _tdd_write_pending_review_critical() {
     return 1
   fi
 
-  mv "$tmp" "$pf" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$pf" "$(dirname "$pf")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
@@ -690,9 +1373,8 @@ tdd_write_pending_review() {
   pf="$(zensu_pending_review_file)"
   local dir
   dir="$(dirname "$pf")"
-  [ -L "$pf" ] && return 1
-  [ -L "$dir" ] && return 1
-  mkdir -p "$dir" 2>/dev/null || true
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
   command -v node >/dev/null 2>&1 || return 1
   local ts=""
   if [ "$(_zensu_log_style)" != "none" ]; then
@@ -706,16 +1388,398 @@ tdd_clear_pending_review() {
   pf="$(zensu_pending_review_file)"
   local dir
   dir="$(dirname "$pf")"
-  if [ -L "$pf" ]; then
-    echo "zensu: refusing to clear pending-review marker through symlink at $pf" >&2
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_clear_pending_review_critical "$pf"
+}
+
+_tdd_clear_pending_review_critical() {
+  local pf="$1" dir
+  dir="$(dirname "$pf")"
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  # This command is intentionally queue-scoped.  Once a marker has been
+  # adopted, only the owning session may release the retained claim via
+  # tdd_release_pending_review_claim (reset, terminal reconciliation, or cap).
+  rm -f -- "$pf" 2>/dev/null
+}
+
+_tdd_pending_file_stale() {
+  local file="${1:-}" ttl_hours="${2:-}"
+  case "$ttl_hours" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$ttl_hours" -gt 0 ] || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  TTL="$ttl_hours" node -e '
+    try {
+      const fs = require("fs");
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      let t = typeof j.ts === "string" ? Date.parse(j.ts) : NaN;
+      if (!Number.isFinite(t)) t = fs.statSync(process.argv[1]).mtimeMs;
+      const ttl = Number.parseInt(process.env.TTL, 10) * 3600 * 1000;
+      process.exit(Number.isFinite(t) && Date.now() - t >= ttl ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  ' "$file" >/dev/null 2>&1
+}
+
+_tdd_read_pending_claim_metadata() {
+  local claim_file="${1:-}"
+  [ -f "$claim_file" ] && [ ! -L "$claim_file" ] || return 1
+  node -e '
+    try {
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const id = j && j.claimId;
+      const owner = j && j.ownerSessionId;
+      const validId = typeof id === "string" && /^dc_[A-Za-z0-9_-]+$/.test(id) && id.length <= 96;
+      const validOwner = typeof owner === "string" && /^[A-Za-z0-9_-]+$/.test(owner) && owner.length <= 160;
+      if (!validId || !validOwner) process.exit(3);
+      const ownerPid = Number.isInteger(j.ownerPid) && j.ownerPid > 0 ? j.ownerPid : 0;
+      const emitted = j.handoffEmitted === true;
+      process.stdout.write(`${id}\t${owner}\t${ownerPid}\t${emitted}`);
+    } catch (_) { process.exit(3); }
+  ' "$claim_file" 2>/dev/null
+}
+
+_tdd_assign_pending_claim_metadata() {
+  local claim_file="$1" owner_session="$2" owner_pid="$3" dir tmp metadata_file
+  dir="$(dirname "$claim_file")"
+  _tdd_path_safe "$claim_file" regular "$dir" || return 1
+  tmp="$(mktemp "${claim_file}.XXXXXX" 2>/dev/null)" || return 1
+  metadata_file="$(mktemp "${claim_file}.metadata.XXXXXX" 2>/dev/null)" || {
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  }
+  if ! CLAIM_FILE="$claim_file" OWNER_SESSION="$owner_session" OWNER_PID="$owner_pid" \
+      LOG_STYLE="$(_zensu_log_style)" node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    try {
+      const j = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+      let id = j && j.claimId;
+      if (typeof id !== "string" || !/^dc_[A-Za-z0-9_-]+$/.test(id) || id.length > 96) {
+        id = `dc_${crypto.randomBytes(16).toString("hex")}`;
+      }
+      const owner = process.env.OWNER_SESSION;
+      if (!/^[A-Za-z0-9_-]+$/.test(owner) || owner.length > 160) process.exit(3);
+      const ownerPid = Number.parseInt(process.env.OWNER_PID, 10);
+      if (!Number.isInteger(ownerPid) || ownerPid <= 0) process.exit(3);
+      j.claimId = id;
+      j.ownerSessionId = owner;
+      j.ownerPid = ownerPid;
+      j.handoffEmitted = false;
+      // Claim assignment is also a lease renewal.  Timestamp-free logging must
+      // remain timestamp-free: deleting a marker-era ts makes the freshly
+      // replaced claim file mtime the authoritative lease clock instead.
+      if (process.env.LOG_STYLE === "none") delete j.ts;
+      else j.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      fs.writeFileSync(process.argv[1], JSON.stringify(j, null, 2));
+      fs.writeFileSync(process.argv[2], `${id}\t${owner}\t${ownerPid}\tfalse`);
+    } catch (_) { process.exit(3); }
+  ' "$tmp" "$metadata_file" 2>/dev/null; then
+    rm -f "$tmp" "$metadata_file" 2>/dev/null
     return 1
   fi
-  if [ -L "$dir" ]; then
-    echo "zensu: refusing to clear pending-review marker under symlinked dir $dir" >&2
+  _tdd_atomic_replace_regular "$tmp" "$claim_file" "$dir" || {
+    rm -f "$tmp" "$metadata_file" 2>/dev/null
+    return 1
+  }
+  cat "$metadata_file"
+  rm -f "$metadata_file" 2>/dev/null
+}
+
+_tdd_reconcile_seeded_pending_claim_critical() {
+  local state_file="$1" owner_session="$2" current_session="$3" claim_id="$4" claim_file="$5"
+  local owner_alive="$6" handoff_emitted="$7" claim_stale="$8"
+  local claim_dir tmp status_file status
+  claim_dir="$(dirname "$claim_file")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_path_safe "$claim_file" regular "$claim_dir" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  status_file="$(mktemp "${state_file}.claim-status.XXXXXX" 2>/dev/null)" || {
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  }
+  if ! STATE_FILE="$state_file" CLAIM_ID="$claim_id" OWNER_SESSION="$owner_session" \
+      CURRENT_SESSION="$current_session" OWNER_ALIVE="$owner_alive" \
+      HANDOFF_EMITTED="$handoff_emitted" CLAIM_STALE="$claim_stale" node -e '
+    const fs = require("fs");
+    try {
+      const s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+      if (!s || s.deferredReviewClaim !== process.env.CLAIM_ID) {
+        if (process.env.HANDOFF_EMITTED === "true") {
+          fs.writeFileSync(process.argv[2], "cancelled");
+          process.exit(0);
+        }
+        process.exit(3);
+      }
+      let status;
+      if (s.chainDone === true) {
+        status = "done";
+      } else if (process.env.OWNER_SESSION === process.env.CURRENT_SESSION) {
+        status = "current";
+      } else if (process.env.OWNER_ALIVE === "true"
+          || (process.env.HANDOFF_EMITTED === "true" && process.env.CLAIM_STALE !== "true")) {
+        status = "owned";
+      } else {
+        // The project claim lock survived while the original process did not.
+        // Retire that orphaned per-session generation before transferring the
+        // same claim to the current interactive session.
+        status = "transfer";
+        s.active = false;
+        s.implComplete = false;
+        s.chainDone = false;
+        s.codeReviewDone = false;
+        s.selfReviewFixed = false;
+        s.reviewTicket = "";
+        s.reviewTicketConsumed = true;
+        s.reviewRound = 0;
+        s.stopBlockCount = 0;
+        s.deferredReviewClaim = "";
+        fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+      }
+      fs.writeFileSync(process.argv[2], status);
+    } catch (_) { process.exit(3); }
+  ' "$tmp" "$status_file" >/dev/null 2>&1; then
+    rm -f "$tmp" "$status_file" 2>/dev/null
     return 1
   fi
-  rm -f -- "$pf" 2>/dev/null || true
-  return 0
+  status="$(cat "$status_file" 2>/dev/null)"
+  rm -f "$status_file" 2>/dev/null
+  case "$status" in
+    transfer)
+      _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+        || { rm -f "$tmp"; return 1; }
+      ;;
+    current|owned)
+      rm -f "$tmp" 2>/dev/null
+      ;;
+    done|cancelled)
+      rm -f "$tmp" 2>/dev/null
+      rm -f -- "$claim_file" 2>/dev/null || return 1
+      ;;
+    *) rm -f "$tmp" 2>/dev/null; return 1 ;;
+  esac
+  printf '%s\n' "$status"
+}
+
+_tdd_reconcile_seeded_pending_claim() {
+  local owner_session="$1" current_session="$2" claim_id="$3" claim_file="$4"
+  local owner_pid="$5" handoff_emitted="$6" claim_stale="$7" state_file owner_alive=false
+  if [ "$owner_pid" -gt 0 ] 2>/dev/null && kill -0 "$owner_pid" 2>/dev/null; then
+    owner_alive=true
+  fi
+  state_file="$(tdd_state_file "$owner_session")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_reconcile_seeded_pending_claim_critical \
+    "$state_file" "$owner_session" "$current_session" "$claim_id" "$claim_file" \
+    "$owner_alive" "$handoff_emitted" "$claim_stale"
+}
+
+_tdd_adopt_pending_review_critical() {
+  local pf="$1" claim_file="$2" session_id="$3" vanilla="$4" ttl_hours="$5"
+  local dir source metadata claim_id owner_session owner_pid handoff_emitted claim_stale reconcile_status
+  dir="$(dirname "$pf")"
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+
+  # A leftover claim is a crash-recovery record and takes precedence. A newer
+  # pending marker remains queued for the following adoption.
+  if [ -f "$claim_file" ]; then
+    source="$claim_file"
+  elif [ -f "$pf" ]; then
+    source="$pf"
+  else
+    return 2
+  fi
+
+  if [ "$source" = "$pf" ] && _tdd_pending_file_stale "$source" "$ttl_hours"; then
+    rm -f -- "$source" 2>/dev/null || return 1
+    return 2
+  fi
+
+  if [ "$source" = "$pf" ]; then
+    _tdd_atomic_replace_regular "$pf" "$claim_file" "$dir" || return 1
+  fi
+
+  metadata="$(_tdd_read_pending_claim_metadata "$claim_file" 2>/dev/null)" || metadata=""
+  if [ -n "$metadata" ]; then
+    IFS=$'\t' read -r claim_id owner_session owner_pid handoff_emitted <<<"$metadata"
+    claim_stale=false
+    _tdd_pending_file_stale "$claim_file" "$ttl_hours" && claim_stale=true
+    reconcile_status="$(_tdd_reconcile_seeded_pending_claim \
+      "$owner_session" "$session_id" "$claim_id" "$claim_file" \
+      "$owner_pid" "$handoff_emitted" "$claim_stale" 2>/dev/null)" || reconcile_status=""
+    case "$reconcile_status" in
+      current) return 0 ;;
+      owned) return 2 ;;
+      done|cancelled)
+        # The completed ownership record is gone. If a newer marker queued
+        # behind it, claim that marker in the same project-lock transaction so
+        # this terminal Stop cannot silently release with work still pending.
+        if [ -f "$pf" ]; then
+          if _tdd_pending_file_stale "$pf" "$ttl_hours"; then
+            rm -f -- "$pf" 2>/dev/null || return 1
+            return 2
+          fi
+          _tdd_atomic_replace_regular "$pf" "$claim_file" "$dir" || return 1
+          metadata=""
+        else
+          return 2
+        fi
+        ;;
+      transfer) ;;
+      *)
+        if _tdd_pending_file_stale "$claim_file" "$ttl_hours"; then
+          rm -f -- "$claim_file" 2>/dev/null || return 1
+          return 2
+        fi
+        ;;
+    esac
+  fi
+
+  if [ -z "$metadata" ] && _tdd_pending_file_stale "$claim_file" "$ttl_hours"; then
+    rm -f -- "$claim_file" 2>/dev/null || return 1
+    return 2
+  fi
+
+  metadata="$(_tdd_assign_pending_claim_metadata "$claim_file" "$session_id" "$$")" || return 1
+  IFS=$'\t' read -r claim_id owner_session owner_pid handoff_emitted <<<"$metadata"
+
+  if tdd_seed_deferred_review "$session_id" "$vanilla" "$claim_id"; then
+    # Keep the claim as a recovery/ownership record until the Stop hook has
+    # emitted its block handoff and, ultimately, the chain reaches chainDone.
+    return 0
+  fi
+
+  # Preserve retryability. If a newer marker arrived while the claim was being
+  # processed, keep both records; the crash claim is retried first.
+  if [ ! -e "$pf" ] && [ ! -L "$pf" ]; then
+    _tdd_atomic_replace_regular "$claim_file" "$pf" "$dir" 2>/dev/null || true
+  fi
+  return 1
+}
+
+tdd_adopt_pending_review() {
+  local session_id="${1:-}" vanilla="${2:-false}" ttl_hours="${3:-0}" pf dir claim_file
+  [ -n "$session_id" ] || return 1
+  case "$vanilla" in true|false) ;; *) return 1 ;; esac
+  case "$ttl_hours" in ''|*[!0-9]*) ttl_hours=0 ;; esac
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_adopt_pending_review_critical \
+    "$pf" "$claim_file" "$session_id" "$vanilla" "$ttl_hours"
+}
+
+_tdd_mark_pending_handoff_state_critical() {
+  local state_file="$1" claim_file="$2" session_id="$3" claim_id="$4"
+  local owner_pid="$5" log_style="$6" dir tmp
+  dir="$(dirname "$claim_file")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_path_safe "$claim_file" regular "$dir" || return 1
+  STATE_FILE="$state_file" SID="$session_id" CLAIM_ID="$claim_id" node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(process.env.STATE_FILE, "utf8"));
+      const valid = s && s.session_id === process.env.SID && s.active === true
+        && s.implComplete === true && s.chainDone === false
+        && s.deferredReviewClaim === process.env.CLAIM_ID;
+      process.exit(valid ? 0 : 3);
+    } catch (_) { process.exit(3); }
+  ' >/dev/null 2>&1 || return 1
+  tmp="$(mktemp "${claim_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! CLAIM_FILE="$claim_file" SID="$session_id" CLAIM_ID="$claim_id" \
+      OWNER_PID="$owner_pid" LOG_STYLE="$log_style" node -e '
+    const fs = require("fs");
+    try {
+      const j = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+      if (!j || j.ownerSessionId !== process.env.SID || j.claimId !== process.env.CLAIM_ID) process.exit(3);
+      const ownerPid = Number.parseInt(process.env.OWNER_PID, 10);
+      if (!Number.isInteger(ownerPid) || ownerPid <= 0) process.exit(3);
+      j.ownerPid = ownerPid;
+      j.handoffEmitted = true;
+      // Re-acknowledging a seeded claim is also a lease renewal. This closes
+      // the crash window where the state survived, the original hook process
+      // died before output, and a retry in the SAME session has now emitted
+      // the handoff. Timestamp-free logging uses the replacement mtime.
+      if (process.env.LOG_STYLE === "none") delete j.ts;
+      else j.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
+      fs.writeFileSync(process.argv[1], JSON.stringify(j, null, 2));
+    } catch (_) { process.exit(3); }
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$claim_file" "$dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+_tdd_mark_pending_review_handoff_critical() {
+  local pf="$1" claim_file="$2" session_id="$3" metadata claim_id owner_session _owner_pid _emitted
+  [ -f "$claim_file" ] || return 1
+  metadata="$(_tdd_read_pending_claim_metadata "$claim_file")" || return 1
+  IFS=$'\t' read -r claim_id owner_session _owner_pid _emitted <<<"$metadata"
+  [ "$owner_session" = "$session_id" ] || return 1
+  local state_file
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_locked_run "$state_file" _tdd_mark_pending_handoff_state_critical \
+    "$state_file" "$claim_file" "$session_id" "$claim_id" "$$" "$(_zensu_log_style)"
+}
+
+tdd_mark_pending_review_handoff() {
+  local session_id="${1:-}" pf dir claim_file
+  [ -n "$session_id" ] || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_path_safe "$claim_file" regular "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_mark_pending_review_handoff_critical \
+    "$pf" "$claim_file" "$session_id"
+}
+
+_tdd_clear_deferred_claim_state_critical() {
+  local state_file="$1" claim_id="$2" tmp
+  [ -f "$state_file" ] || return 0
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" CLAIM_ID="$claim_id" node -e '
+    const fs = require("fs");
+    try {
+      const s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+      if (s && s.deferredReviewClaim === process.env.CLAIM_ID) s.deferredReviewClaim = "";
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    } catch (_) { process.exit(3); }
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+_tdd_release_pending_review_claim_critical() {
+  local pf="$1" claim_file="$2" session_id="$3" metadata claim_id owner_session _owner_pid _emitted state_file
+  [ -f "$claim_file" ] || return 0
+  metadata="$(_tdd_read_pending_claim_metadata "$claim_file")" || return 1
+  IFS=$'\t' read -r claim_id owner_session _owner_pid _emitted <<<"$metadata"
+  [ "$owner_session" = "$session_id" ] || return 0
+  state_file="$(tdd_state_file "$session_id")"
+  if [ -f "$state_file" ]; then
+    _tdd_locked_run "$state_file" _tdd_clear_deferred_claim_state_critical \
+      "$state_file" "$claim_id" || return 1
+  fi
+  rm -f -- "$claim_file" 2>/dev/null
+}
+
+tdd_release_pending_review_claim() {
+  local session_id="${1:-}" pf dir claim_file
+  [ -n "$session_id" ] || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_paths_safe "$pf" regular-or-absent "$claim_file" regular-or-absent || return 1
+  _tdd_locked_run "$pf" _tdd_release_pending_review_claim_critical \
+    "$pf" "$claim_file" "$session_id"
 }
 
 tdd_pending_review_stale() {
@@ -770,6 +1834,12 @@ _tdd_write_seed_critical() {
       state.active = true;
       state.implComplete = true;
       state.vanilla = (process.env.VANILLA === "true");
+      state.chainDone = false;
+      state.codeReviewDone = false;
+      state.selfReviewFixed = false;
+      state.reviewTicket = "";
+      state.reviewTicketConsumed = true;
+      state.reviewRound = 0;
       state.bypasses = [];
       fs.writeFileSync(process.argv[1], JSON.stringify(state, null, 2));
     ' "$tmp" 2>/dev/null
@@ -779,19 +1849,20 @@ _tdd_write_seed_critical() {
     return 1
   fi
 
-  mv "$tmp" "$state_file" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
   return 0
 }
 
 tdd_seed_deferred_review() {
   local session_id="${1:-unknown}"
   local vanilla="${2:-false}"
+  local deferred_claim="${3:-}"
   case "$vanilla" in true|false) ;; *) vanilla="false" ;; esac
-  local state_file
-  state_file=$(tdd_state_file "$session_id")
-  mkdir -p "$(dirname "$state_file")" 2>/dev/null || true
-  command -v node >/dev/null 2>&1 || return 1
-  _tdd_locked_run "$state_file" _tdd_write_seed_critical "$state_file" "$session_id" "$vanilla"
+  # A deferred review is a fresh, already-implemented chain generation. Reuse
+  # the atomic begin transaction so ticket/flags, round counter, and Stop budget
+  # are reset together even when the previous generation already terminated.
+  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
 }
 
-export -f tdd_state_file tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_write_chain_reset_critical tdd_reset_chain_flags tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+export -f tdd_state_file _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true

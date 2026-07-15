@@ -31,7 +31,17 @@ flag() {
 }
 postrev() {
   local sid="$1" cfg="${2:-}"
-  local payload='{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$sid"'"}'
+  local ticket payload
+  ticket="$(bash "$LOG" --review-ticket --session "$sid" 2>/dev/null)" || return 1
+  payload="$(SID="$sid" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID
+    }));
+  ')"
   if [ -n "$cfg" ]; then
     printf '%s' "$payload" | ZENSU_CONFIG="$cfg" bash "$POSTREV" 2>/dev/null
   else
@@ -52,6 +62,72 @@ else
   check "P3 PASS menu must NOT instruct --chain-done (self-review owns terminus)" PASS
 fi
 echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-loop (case C) reviewer re-spawn still present" PASS || check "P4 case C reviewer respawn" FAIL
+if echo "$CTX_A" | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
+  && ! echo "$CTX_A" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
+  check "P4a PASS handoff embeds the concrete session plugin root" PASS
+else
+  check "P4a PASS handoff embeds the concrete session plugin root" FAIL
+fi
+
+# The model-facing command must remain valid JSON and a single inert shell
+# token even when the active plugin root contains shell metacharacters.
+SPECIAL_BASE="$(mktemp -d -t zensu-postreview-root-XXXXXX)"
+SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch POSTREV_PWNED) `touch POSTREV_TICKED`;touch POSTREV_SEMI; apostrophe'"'"'value quote"back\slash'
+mkdir -p "$SPECIAL_ROOT/hooks" "$SPECIAL_BASE/run"
+cp -R "$PLUGIN_DIR/hooks/lib" "$SPECIAL_ROOT/hooks/lib"
+cp "$POSTREV" "$SPECIAL_ROOT/hooks/post-review-tdd-delegate.sh"
+SPECIAL_LOG="$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
+SPECIAL_SID="postrev-special-root"
+CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-begin --session "$SPECIAL_SID" >/dev/null
+CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-complete --session "$SPECIAL_SID" >/dev/null
+SPECIAL_TICKET="$(CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --review-ticket --session "$SPECIAL_SID" 2>/dev/null)"
+SPECIAL_PAYLOAD="$(SID="$SPECIAL_SID" TICKET="$SPECIAL_TICKET" node -e '
+  process.stdout.write(JSON.stringify({
+    session_id: process.env.SID,
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    }
+  }));
+')"
+SPECIAL_OUT="$(printf '%s' "$SPECIAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" \
+  bash "$SPECIAL_ROOT/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+EXPECTED_Q="$(printf '%q' "$SPECIAL_LOG")"
+SPECIAL_CTX="$(printf '%s' "$SPECIAL_OUT" | node -e '
+  let s=""; process.stdin.on("data", c => s += c);
+  process.stdin.on("end", () => {
+    try {
+      const j = JSON.parse(s);
+      const out = j.hookSpecificOutput || {};
+      if (out.hookEventName !== "PostToolUse" || typeof out.additionalContext !== "string") process.exit(2);
+      process.stdout.write(out.additionalContext);
+    } catch (_) { process.exit(1); }
+  });
+' 2>/dev/null)"
+SPECIAL_PARSE_RC=$?
+(
+  cd "$SPECIAL_BASE/run" || exit 1
+  CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" eval "bash $EXPECTED_Q --review-ticket --session $SPECIAL_SID" >/dev/null 2>&1
+)
+SPECIAL_EXEC_RC=$?
+if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
+  && printf '%s' "$SPECIAL_CTX" | grep -qF "bash $EXPECTED_Q --code-review-done" \
+  && printf '%s' "$SPECIAL_CTX" | grep -qF "bash $EXPECTED_Q --review-ticket" \
+  && ! printf '%s' "$SPECIAL_CTX" | grep -qF '${CLAUDE_PLUGIN_ROOT}' \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_PWNED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_TICKED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_SEMI" ]; then
+  check "P4b special-character root stays valid JSON and inert in review commands" PASS
+else
+  check "P4b special-character root stays valid JSON and inert in review commands" FAIL
+fi
+if grep -qE 'LOG_HELPER_Q=.*printf.*%q.*CLAUDE_PLUGIN_ROOT.*zensu-log\.sh' "$POSTREV" \
+  && grep -qF 'bash ${LOG_HELPER_Q}' "$POSTREV"; then
+  check "P4c generated review commands serialize the active root through printf %q" PASS
+else
+  check "P4c generated review commands serialize the active root through printf %q" FAIL
+fi
+rm -rf "$SPECIAL_BASE"
 
 # --- B: max-rounds -> codeReviewDone set, chainDone NOT set, routes to self-review ---
 SID_B="postrev-maxrounds"
@@ -59,6 +135,10 @@ bash "$LOG" --tdd-begin --session "$SID_B" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null
 mkdir -p "$PROJ/.zensu/state"
 printf '{"count":5,"ts":"x"}' > "$PROJ/.zensu/state/rounds-${SID_B}.json"
+# The ticket-bound state is authoritative; the public rounds file is only a
+# derived compatibility view.
+node -e 'const fs=require("fs"),p=process.argv[1],j=JSON.parse(fs.readFileSync(p));j.reviewRound=5;fs.writeFileSync(p,JSON.stringify(j,null,2));' \
+  "$TDD_STATE_DIR/tdd-phase-${SID_B}.json"
 CTX_B="$(postrev "$SID_B")"
 [ "$(flag "$SID_B" codeReviewDone)" = "true" ] && check "P5 max-rounds sets codeReviewDone" PASS || check "P5 codeReviewDone set" FAIL
 [ "$(flag "$SID_B" chainDone)" = "false" ] && check "P6 max-rounds does NOT set chainDone (self-review owns terminus)" PASS || check "P6 chainDone stays false" FAIL
@@ -76,6 +156,12 @@ if echo "$CTX_C" | grep -qF "skill='zensu:self-review'"; then
   check "P9 selfReview off -> no self-review invoke" FAIL
 else
   check "P9 selfReview off -> no self-review invoke" PASS
+fi
+if echo "$CTX_C" | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
+  && ! echo "$CTX_C" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
+  check "P10 legacy close embeds the concrete session plugin root" PASS
+else
+  check "P10 legacy close embeds the concrete session plugin root" FAIL
 fi
 
 echo "----"

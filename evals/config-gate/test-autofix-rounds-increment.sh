@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PASS=0; FAIL=0
@@ -25,6 +26,7 @@ trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 10}}
@@ -33,7 +35,8 @@ export ZENSU_CONFIG="$TMP_CFG"
 
 SID="sess-incr-xyz"
 COUNTER_FILE="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID}.json"
-STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"
+bash "$LOG" --tdd-begin --session "$SID" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 
 read_count() {
   node -e '
@@ -45,6 +48,8 @@ read_count() {
 }
 
 for i in 1 2 3; do
+  TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
+  STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
   printf '%s' "$STDIN" | "$SCRIPT" >/dev/null 2>&1
   c="$(read_count "$COUNTER_FILE")"
   if [ "$c" = "$i" ]; then

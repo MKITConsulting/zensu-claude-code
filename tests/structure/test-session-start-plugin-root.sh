@@ -1,8 +1,10 @@
 #!/bin/bash
+# Plugin paths are session-native; no global Last-Writer-Wins root pointer.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-HOOK="$PLUGIN_DIR/hooks/session-start-pulse.sh"
+PULSE_HOOK="$PLUGIN_DIR/hooks/session-start-pulse.sh"
+HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
 PASS=0; FAIL=0
 check() {
@@ -11,103 +13,226 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-if [ ! -f "$HOOK" ]; then
-  check "hooks/session-start-pulse.sh exists" FAIL
-  echo "----"
-  echo "test-session-start-plugin-root: $PASS PASS / $FAIL FAIL"
-  exit 1
-fi
-check "hooks/session-start-pulse.sh exists" PASS
-
-if bash -n "$HOOK" 2>/dev/null; then
-  check "PR-S1 bash -n syntax check passes" PASS
+if [ -f "$PULSE_HOOK" ] && bash -n "$PULSE_HOOK" 2>/dev/null; then
+  check "R1 pulse hook exists and parses" PASS
 else
-  check "PR-S1 bash -n syntax check passes" FAIL
+  check "R1 pulse hook exists and parses" FAIL
 fi
 
-if grep -qF '$HOME/.zensu' "$HOOK"; then
-  check "PR-S2 hook source references \$HOME/.zensu directory" PASS
+if grep -qE '\.zensu/plugin-root|\$HOME/\.zensu|plugin-root' "$PULSE_HOOK"; then
+  check "R2 pulse hook contains no legacy root-pointer writer" FAIL
 else
-  check "PR-S2 hook source references \$HOME/.zensu directory" FAIL
+  check "R2 pulse hook contains no legacy root-pointer writer" PASS
 fi
 
-if grep -qF 'plugin-root' "$HOOK"; then
-  check "PR-S3 hook source writes to plugin-root file" PASS
+TMP="$(mktemp -d -t zensu-native-root-XXXXXX)"
+HOME_ON="$TMP/home-on"
+HOME_OFF="$TMP/home-off"
+mkdir -p "$HOME_ON/.zensu" "$HOME_OFF/.zensu"
+trap 'rm -rf "$TMP"' EXIT
+
+printf '%s\n' '/sentinel/must/not/change' > "$HOME_ON/.zensu/plugin-root"
+BEFORE_ON="$(cksum "$HOME_ON/.zensu/plugin-root")"
+HOME="$HOME_ON" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$PULSE_HOOK" >/dev/null 2>&1 || true
+AFTER_ON="$(cksum "$HOME_ON/.zensu/plugin-root")"
+if [ "$BEFORE_ON" = "$AFTER_ON" ]; then
+  check "R3 pulse enabled leaves a pre-existing legacy pointer byte-identical" PASS
 else
-  check "PR-S3 hook source writes to plugin-root file" FAIL
+  check "R3 pulse enabled leaves a pre-existing legacy pointer byte-identical" FAIL
 fi
 
-if grep -qE '(if.*!=.*CLAUDE_PLUGIN_ROOT|current=)' "$HOOK"; then
-  check "PR-S4 hook source contains idempotency guard (current vs new)" PASS
+printf '%s\n' '/sentinel/must/not/change' > "$HOME_OFF/.zensu/plugin-root"
+printf '%s\n' '{"hooks":{"pulseSession":false}}' > "$HOME_OFF/.zensu/config.json"
+BEFORE_OFF="$(cksum "$HOME_OFF/.zensu/plugin-root")"
+HOME="$HOME_OFF" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" bash "$PULSE_HOOK" >/dev/null 2>&1 || true
+AFTER_OFF="$(cksum "$HOME_OFF/.zensu/plugin-root")"
+if [ "$BEFORE_OFF" = "$AFTER_OFF" ]; then
+  check "R4 pulse disabled also leaves the legacy pointer byte-identical" PASS
 else
-  check "PR-S4 hook source contains idempotency guard (current vs new)" FAIL
+  check "R4 pulse disabled also leaves the legacy pointer byte-identical" FAIL
 fi
 
-TMP_HOME="$(mktemp -d -t "ssp-home-XXXXXX")"
-FAKE_PLUGIN_ROOT="$(mktemp -d -t "ssp-plugin-XXXXXX")"
-mkdir -p "$FAKE_PLUGIN_ROOT/hooks/lib"
-cat >"$FAKE_PLUGIN_ROOT/hooks/lib/zensu-config.sh" <<'EOF'
-zensu_hook_enabled() { return 0; }
-EOF
-mkdir -p "$FAKE_PLUGIN_ROOT/hooks"
-cp "$HOOK" "$FAKE_PLUGIN_ROOT/hooks/session-start-pulse.sh"
-
-env -i PATH="$PATH" HOME="$TMP_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_PLUGIN_ROOT" bash "$FAKE_PLUGIN_ROOT/hooks/session-start-pulse.sh" >/dev/null 2>&1
-ROOT_FILE="$TMP_HOME/.zensu/plugin-root"
-if [ -f "$ROOT_FILE" ] && [ "$(cat "$ROOT_FILE")" = "$FAKE_PLUGIN_ROOT" ]; then
-  check "PR-F1 functional: invoking hook creates \$HOME/.zensu/plugin-root with CLAUDE_PLUGIN_ROOT content" PASS
+# Two plugin installs may start concurrently under the same HOME. Each hook
+# must source libraries from its own session-native root; neither may coordinate
+# through or overwrite the historical singleton pointer.
+SHARED_HOME="$TMP/shared-home"
+ROOT_A="$TMP/plugin root A"
+ROOT_B="$TMP/plugin root B"
+mkdir -p "$SHARED_HOME/.zensu" "$ROOT_A/hooks/lib" "$ROOT_B/hooks/lib"
+printf '%s\n' '/sentinel/shared/root' > "$SHARED_HOME/.zensu/plugin-root"
+SHARED_BEFORE="$(cksum "$SHARED_HOME/.zensu/plugin-root")"
+cp "$PULSE_HOOK" "$ROOT_A/hooks/session-start-pulse.sh"
+cp "$PULSE_HOOK" "$ROOT_B/hooks/session-start-pulse.sh"
+cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$ROOT_A/hooks/lib/zensu-config.sh"
+cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$ROOT_B/hooks/lib/zensu-config.sh"
+printf '%s\n' '{"hooks":{"pulseSession":true}}' > "$TMP/two-root-config.json"
+(
+  cd "$PLUGIN_DIR" || exit 1
+  HOME="$SHARED_HOME" CLAUDE_PLUGIN_ROOT="$ROOT_A" CLAUDE_PROJECT_DIR="$PLUGIN_DIR" \
+    ZENSU_CONFIG="$TMP/two-root-config.json" bash "$ROOT_A/hooks/session-start-pulse.sh" \
+    > "$TMP/root-a.out" 2> "$TMP/root-a.err"
+  printf '%s\n' "$?" > "$TMP/root-a.rc"
+) &
+PID_A=$!
+(
+  cd "$PLUGIN_DIR" || exit 1
+  HOME="$SHARED_HOME" CLAUDE_PLUGIN_ROOT="$ROOT_B" CLAUDE_PROJECT_DIR="$PLUGIN_DIR" \
+    ZENSU_CONFIG="$TMP/two-root-config.json" bash "$ROOT_B/hooks/session-start-pulse.sh" \
+    > "$TMP/root-b.out" 2> "$TMP/root-b.err"
+  printf '%s\n' "$?" > "$TMP/root-b.rc"
+) &
+PID_B=$!
+wait "$PID_A" 2>/dev/null || true
+wait "$PID_B" 2>/dev/null || true
+SHARED_AFTER="$(cksum "$SHARED_HOME/.zensu/plugin-root")"
+if [ "$(cat "$TMP/root-a.rc" 2>/dev/null)" = "0" ] \
+  && [ "$(cat "$TMP/root-b.rc" 2>/dev/null)" = "0" ] \
+  && grep -qF 'zensu: pulse session ready' "$TMP/root-a.out" \
+  && grep -qF 'zensu: pulse session ready' "$TMP/root-b.out" \
+  && [ "$SHARED_BEFORE" = "$SHARED_AFTER" ]; then
+  check "R4a concurrent sessions resolve two roots independently without pointer races" PASS
 else
-  check "PR-F1 functional: missing or wrong content (got=$([ -f "$ROOT_FILE" ] && cat "$ROOT_FILE" || echo MISSING))" FAIL
+  check "R4a concurrent sessions resolve two roots independently without pointer races" FAIL
 fi
 
-MTIME_BEFORE=$(stat -c %Y "$ROOT_FILE" 2>/dev/null || stat -f %m "$ROOT_FILE" 2>/dev/null || echo 0)
-sleep 1
-env -i PATH="$PATH" HOME="$TMP_HOME" CLAUDE_PLUGIN_ROOT="$FAKE_PLUGIN_ROOT" bash "$FAKE_PLUGIN_ROOT/hooks/session-start-pulse.sh" >/dev/null 2>&1
-MTIME_AFTER=$(stat -c %Y "$ROOT_FILE" 2>/dev/null || stat -f %m "$ROOT_FILE" 2>/dev/null || echo 0)
-if [ "$MTIME_BEFORE" = "$MTIME_AFTER" ]; then
-  check "PR-F2 idempotent: second invocation with same CLAUDE_PLUGIN_ROOT does not rewrite file (mtime unchanged)" PASS
+if ROOT="$PLUGIN_DIR" node - <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const root = process.env.ROOT;
+const targets = ["hooks", "skills", "agents", "templates", "scripts", "docs", "README.md"];
+const bad = [];
+function scan(p) {
+  const st = fs.statSync(p);
+  if (st.isDirectory()) {
+    for (const name of fs.readdirSync(p)) scan(path.join(p, name));
+    return;
+  }
+  if (!/\.(?:sh|js|json|md)$/.test(p)) return;
+  const text = fs.readFileSync(p, "utf8");
+  if (text.includes(".zensu/plugin-root") || text.includes("{PLUGIN_ROOT}")) {
+    bad.push(path.relative(root, p));
+  }
+}
+for (const rel of targets) {
+  const p = path.join(root, rel);
+  if (fs.existsSync(p)) scan(p);
+}
+if (bad.length) {
+  process.stderr.write(`legacy plugin-root consumers: ${bad.join(", ")}\n`);
+  process.exit(1);
+}
+NODE
+then
+  check "R5 active runtime, skills, templates, and docs contain no legacy pointer consumer" PASS
 else
-  check "PR-F2 idempotent: mtime changed ($MTIME_BEFORE -> $MTIME_AFTER)" FAIL
+  check "R5 active runtime, skills, templates, and docs contain no legacy pointer consumer" FAIL
 fi
 
-DIFFERENT_PLUGIN_ROOT="$(mktemp -d -t "ssp-plugin2-XXXXXX")"
-mkdir -p "$DIFFERENT_PLUGIN_ROOT/hooks/lib"
-cat >"$DIFFERENT_PLUGIN_ROOT/hooks/lib/zensu-config.sh" <<'EOF'
-zensu_hook_enabled() { return 0; }
-EOF
-cp "$HOOK" "$DIFFERENT_PLUGIN_ROOT/hooks/session-start-pulse.sh"
-env -i PATH="$PATH" HOME="$TMP_HOME" CLAUDE_PLUGIN_ROOT="$DIFFERENT_PLUGIN_ROOT" bash "$DIFFERENT_PLUGIN_ROOT/hooks/session-start-pulse.sh" >/dev/null 2>&1
-NEW_CONTENT="$(cat "$ROOT_FILE" 2>/dev/null)"
-if [ "$NEW_CONTENT" = "$DIFFERENT_PLUGIN_ROOT" ]; then
-  check "PR-F3 update path: changed CLAUDE_PLUGIN_ROOT rewrites file to the new value" PASS
+if ROOT="$PLUGIN_DIR" node - <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const root = process.env.ROOT;
+const targets = ["skills", "agents", "templates", "docs", "README.md"];
+const bad = [];
+function scan(p) {
+  const st = fs.statSync(p);
+  if (st.isDirectory()) {
+    for (const name of fs.readdirSync(p)) scan(path.join(p, name));
+    return;
+  }
+  if (!/\.(?:md|json|yaml)$/.test(p)) return;
+  const text = fs.readFileSync(p, "utf8");
+  if (/bash\s+\$(?:\{CLAUDE_PLUGIN_ROOT\}|CLAUDE_PLUGIN_ROOT)\//.test(text)) bad.push(path.relative(root, p));
+}
+for (const rel of targets) {
+  const p = path.join(root, rel);
+  if (fs.existsSync(p)) scan(p);
+}
+if (bad.length) {
+  process.stderr.write(`unquoted component executable paths: ${bad.join(", ")}\n`);
+  process.exit(1);
+}
+NODE
+then
+  check "R6 component executable paths quote native CLAUDE_PLUGIN_ROOT" PASS
 else
-  check "PR-F3 update path: file content mismatch (expected=$DIFFERENT_PLUGIN_ROOT, got=$NEW_CONTENT)" FAIL
+  check "R6 component executable paths quote native CLAUDE_PLUGIN_ROOT" FAIL
 fi
 
-PERSIST_LINE=$(grep -nF 'printf '"'"'%s\n'"'"' "$CLAUDE_PLUGIN_ROOT" > "$HOME/.zensu/plugin-root"' "$HOOK" | head -1 | cut -d: -f1)
-GATE_LINE=$(grep -nF 'zensu_hook_enabled pulseSession' "$HOOK" | head -1 | cut -d: -f1)
-if [ -n "$PERSIST_LINE" ] && [ -n "$GATE_LINE" ] && [ "$PERSIST_LINE" -lt "$GATE_LINE" ]; then
-  check "PR-S5 persist block appears BEFORE pulseSession gate (persist line $PERSIST_LINE < gate line $GATE_LINE)" PASS
+if HOOKS_JSON="$HOOKS_JSON" node - <<'NODE'
+const fs = require("fs");
+const doc = JSON.parse(fs.readFileSync(process.env.HOOKS_JSON, "utf8"));
+const groups = Object.values(doc.hooks || {}).flat();
+const commands = groups.flatMap(group => group.hooks || []).filter(hook => hook.type === "command");
+if (!commands.length) process.exit(1);
+for (const hook of commands) {
+  if (typeof hook.command !== "string" || !/^bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/[^"]+"$/.test(hook.command)) process.exit(2);
+}
+NODE
+then
+  check "R7 hook commands carry a complete quoted native-root invocation" PASS
 else
-  check "PR-S5 persist block appears BEFORE pulseSession gate (persist=$PERSIST_LINE gate=$GATE_LINE)" FAIL
+  check "R7 hook commands carry a complete quoted native-root invocation" FAIL
 fi
 
-TMP_HOME2="$(mktemp -d -t "ssp-home2-XXXXXX")"
-FAKE_PLUGIN_ROOT2="$(mktemp -d -t "ssp-plugin3-XXXXXX")"
-mkdir -p "$FAKE_PLUGIN_ROOT2/hooks/lib"
-cat >"$FAKE_PLUGIN_ROOT2/hooks/lib/zensu-config.sh" <<'EOF'
-zensu_hook_enabled() { return 1; }
-EOF
-cp "$HOOK" "$FAKE_PLUGIN_ROOT2/hooks/session-start-pulse.sh"
-env -i PATH="$PATH" HOME="$TMP_HOME2" CLAUDE_PLUGIN_ROOT="$FAKE_PLUGIN_ROOT2" bash "$FAKE_PLUGIN_ROOT2/hooks/session-start-pulse.sh" >/dev/null 2>&1
-ROOT_FILE2="$TMP_HOME2/.zensu/plugin-root"
-if [ -f "$ROOT_FILE2" ] && [ "$(cat "$ROOT_FILE2")" = "$FAKE_PLUGIN_ROOT2" ]; then
-  check "PR-F4 pulseSession=false still writes plugin-root (persist runs unconditionally)" PASS
+for component in \
+  "$PLUGIN_DIR/skills/autopilot/SKILL.md" \
+  "$PLUGIN_DIR/skills/tdd/SKILL.md" \
+  "$PLUGIN_DIR/skills/pr-team-review/SKILL.md" \
+  "$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md" \
+  "$PLUGIN_DIR/skills/self-review/SKILL.md"
+do
+  if ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$component"; then
+    check "R8 core workflow components use native CLAUDE_PLUGIN_ROOT" FAIL
+    echo "----"
+    echo "test-session-start-plugin-root: $PASS PASS / $FAIL FAIL"
+    exit 1
+  fi
+done
+check "R8 core workflow components use native CLAUDE_PLUGIN_ROOT" PASS
+
+if SKILLS_ROOT="$PLUGIN_DIR/skills" node - <<'NODE'
+const fs = require("fs");
+const path = require("path");
+const root = process.env.SKILLS_ROOT;
+const failures = [];
+
+function visit(p) {
+  const stat = fs.statSync(p);
+  if (stat.isDirectory()) {
+    for (const name of fs.readdirSync(p)) visit(path.join(p, name));
+    return;
+  }
+  if (!p.endsWith(".md") || !p.split(path.sep).includes("rules")) return;
+  const text = fs.readFileSync(p, "utf8");
+  const rel = path.relative(root, p);
+  if (text.includes("${CLAUDE_PLUGIN_ROOT}")) failures.push(`${rel}: raw rule uses component env token`);
+  if (!text.includes("{ACTIVE_PLUGIN_ROOT}")) return;
+
+  const parts = p.split(path.sep);
+  const rulesIndex = parts.lastIndexOf("rules");
+  const skillDir = parts.slice(0, rulesIndex).join(path.sep) || path.sep;
+  const parent = path.join(skillDir, "SKILL.md");
+  let parentText = "";
+  try { parentText = fs.readFileSync(parent, "utf8"); } catch (_) {}
+  if (!parentText.includes("{ACTIVE_PLUGIN_ROOT}")
+      || !parentText.includes("${CLAUDE_PLUGIN_ROOT}")
+      || !parentText.includes("concrete")) {
+    failures.push(`${rel}: registered parent does not map the active root concretely`);
+  }
+}
+
+visit(root);
+if (failures.length) {
+  process.stderr.write(`${failures.join("\n")}\n`);
+  process.exit(1);
+}
+NODE
+then
+  check "R9 raw Read rules use ACTIVE_PLUGIN_ROOT with a concrete parent mapping" PASS
 else
-  check "PR-F4 pulseSession=false but plugin-root missing or wrong (got=$([ -f "$ROOT_FILE2" ] && cat "$ROOT_FILE2" || echo MISSING))" FAIL
+  check "R9 raw Read rules use ACTIVE_PLUGIN_ROOT with a concrete parent mapping" FAIL
 fi
-
-rm -rf "$TMP_HOME" "$FAKE_PLUGIN_ROOT" "$DIFFERENT_PLUGIN_ROOT" "$TMP_HOME2" "$FAKE_PLUGIN_ROOT2"
 
 echo "----"
 echo "test-session-start-plugin-root: $PASS PASS / $FAIL FAIL"

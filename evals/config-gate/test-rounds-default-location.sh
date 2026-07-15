@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -38,7 +39,10 @@ unset CLAUDE_PLUGIN_DATA
 unset CLAUDE_PLUGIN_DATA_OVERRIDE
 
 SID="smoke-rounds-loc"
-STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-begin --session "$SID" >/dev/null
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+TICKET="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --review-ticket --session "$SID")"
+STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
 
 printf '%s' "$STDIN" | CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT" >/dev/null 2>&1
 EXIT=$?
@@ -80,7 +84,10 @@ fi
 
 PLUGIN_DATA_DIR_C6="$(mktemp -d)"
 SID_C6="smoke-rounds-ignore-pluginedata"
-STDIN_C6="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_C6}\"}"
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-begin --session "$SID_C6" >/dev/null
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-complete --session "$SID_C6" >/dev/null
+TICKET_C6="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --review-ticket --session "$SID_C6")"
+STDIN_C6="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_C6}\\nfixture\"},\"session_id\":\"${SID_C6}\"}"
 printf '%s' "$STDIN_C6" | CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_DIR_C6" CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT" >/dev/null 2>&1
 EXIT_C6=$?
 PROJ_LOCAL_C6="$PROJECT_DIR/.zensu/state/rounds-${SID_C6}.json"
@@ -109,7 +116,10 @@ unset CLAUDE_PLUGIN_DATA
 OVERRIDE_DIR_C7="$(mktemp -d)/state"
 mkdir -p "$OVERRIDE_DIR_C7"
 SID_C7="smoke-rounds-override-wins"
-STDIN_C7="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_C7}\"}"
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-begin --session "$SID_C7" >/dev/null
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-complete --session "$SID_C7" >/dev/null
+TICKET_C7="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --review-ticket --session "$SID_C7")"
+STDIN_C7="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_C7}\\nfixture\"},\"session_id\":\"${SID_C7}\"}"
 printf '%s' "$STDIN_C7" | CLAUDE_PLUGIN_DATA_OVERRIDE="$OVERRIDE_DIR_C7" CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT" >/dev/null 2>&1
 OVERRIDE_FILE_C7="$OVERRIDE_DIR_C7/rounds-${SID_C7}.json"
 PROJ_LEAK_C7="$PROJECT_DIR/.zensu/state/rounds-${SID_C7}.json"
@@ -132,7 +142,10 @@ PLUGIN_DATA_DIR_C8="$(mktemp -d)"
 OVERRIDE_DIR_C8="$(mktemp -d)/state"
 mkdir -p "$OVERRIDE_DIR_C8"
 SID_C8="smoke-rounds-override-beats-both"
-STDIN_C8="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_C8}\"}"
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-begin --session "$SID_C8" >/dev/null
+CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --tdd-complete --session "$SID_C8" >/dev/null
+TICKET_C8="$(CLAUDE_PROJECT_DIR="$PROJECT_DIR" bash "$LOG" --review-ticket --session "$SID_C8")"
+STDIN_C8="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_C8}\\nfixture\"},\"session_id\":\"${SID_C8}\"}"
 printf '%s' "$STDIN_C8" | CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_DIR_C8" CLAUDE_PLUGIN_DATA_OVERRIDE="$OVERRIDE_DIR_C8" \
   CLAUDE_PROJECT_DIR="$PROJECT_DIR" "$SCRIPT" >/dev/null 2>&1
 OVERRIDE_FILE_C8="$OVERRIDE_DIR_C8/rounds-${SID_C8}.json"

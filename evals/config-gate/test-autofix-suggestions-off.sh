@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PASS=0; FAIL=0
@@ -30,9 +31,13 @@ EOF
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 export ZENSU_CONFIG="$TMP_CFG"
 
-STDIN_FLAG_ABSENT='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-001"}'
+bash "$LOG" --tdd-begin --session sess-off-001 >/dev/null
+bash "$LOG" --tdd-complete --session sess-off-001 >/dev/null
+TICKET_FLAG_ABSENT="$(bash "$LOG" --review-ticket --session sess-off-001)"
+STDIN_FLAG_ABSENT="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_ABSENT}\\nfixture\"},\"session_id\":\"sess-off-001\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_ABSENT" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -59,7 +64,10 @@ esac
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixIncludeSuggestions": false}}
 EOF
-STDIN_FLAG_FALSE='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-002"}'
+bash "$LOG" --tdd-begin --session sess-off-002 >/dev/null
+bash "$LOG" --tdd-complete --session sess-off-002 >/dev/null
+TICKET_FLAG_FALSE="$(bash "$LOG" --review-ticket --session sess-off-002)"
+STDIN_FLAG_FALSE="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_FALSE}\\nfixture\"},\"session_id\":\"sess-off-002\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_FALSE" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

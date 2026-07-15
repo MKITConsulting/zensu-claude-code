@@ -124,16 +124,27 @@ bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T1 implComplete + !codeReviewDone: Stop BLOCKS" PASS || check "T1 terminus block" FAIL
 case "$(stop_reason)" in *"zensu:code-reviewer"*) check "T2 block reason forces zensu:code-reviewer" PASS ;; *) check "T2 reason code-reviewer" FAIL ;; esac
 # code-reviewer Agent completes -> post-review routes in-thread + counts a round
-CTX="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
+REVIEW_TICKET="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+CTX="$(SID_VALUE="$SID" TICKET="$REVIEW_TICKET" node -e '
+  process.stdout.write(JSON.stringify({
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    },
+    session_id: process.env.SID_VALUE
+  }));
+' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
 echo "$CTX" | grep -q "/zensu:tdd" && check "T3 post-review routes fixes in-thread (/zensu:tdd)" PASS || check "T3 in-thread routing" FAIL
 RCOUNT="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).count)}catch(_){console.log("?")}' "$PROJ/state/rounds-${SID}.json")"
 [ "$RCOUNT" = "1" ] && check "T4 round counter increments (1)" PASS || check "T4 counter=1 (got $RCOUNT)" FAIL
 # reviewer PASS -> code-review chain converges
-bash "$LOG" --code-review-done --session "$SID" >/dev/null
+bash "$LOG" --code-review-done --claimed-review-ticket "$REVIEW_TICKET" \
+  --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T5 codeReviewDone + !chainDone: Stop still BLOCKS" PASS || check "T5 pre-self-review block" FAIL
 case "$(stop_reason)" in *"zensu:self-review"*) check "T6 block reason now forces skill='zensu:self-review'" PASS ;; *) check "T6 reason self-review" FAIL ;; esac
 # self-review owns the terminus
-bash "$LOG" --chain-done --session "$SID" >/dev/null
+bash "$LOG" --chain-done --claimed-review-ticket "$REVIEW_TICKET" \
+  --session "$SID" >/dev/null
 [ "$(stop_dec)" = "allow" ] && check "T7 chainDone: Stop ALLOWS (cycle complete)" PASS || check "T7 terminus allow" FAIL
 
 echo "----"

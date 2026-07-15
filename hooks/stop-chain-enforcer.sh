@@ -70,30 +70,40 @@ if [ "${ZENSU_CHAIN:-}" = "off" ]; then
   exit 0
 fi
 
-# Not active: either stop normally, or adopt a pending-review marker as a
-# review-only chain for THIS interactive session (deferred review fallback).
-if [ "$(tdd_session_active "$STATE_FILE")" != "true" ]; then
-  PENDING_FILE="$(zensu_pending_review_file)"
-  if [ -n "$PENDING_FILE" ] && [ -f "$PENDING_FILE" ] && [ ! -L "$PENDING_FILE" ]; then
-    if [ "$(tdd_pending_review_stale "$(zensu_pending_review_ttl_hours)")" = "true" ]; then
-      tdd_clear_pending_review >/dev/null 2>&1 || true
-      exit 0
-    fi
-    if zensu_tdd_strict_enabled; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
-    if tdd_seed_deferred_review "$SESSION_ID" "$VANILLA_SEED"; then
-      ROUNDS_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-      ROUNDS_FILE="${ROUNDS_DIR}/rounds-${SESSION_ID}.json"
-      if [ ! -L "$ROUNDS_FILE" ] && [ ! -L "$ROUNDS_DIR" ]; then
-        rm -f -- "$ROUNDS_FILE" 2>/dev/null || true
-      fi
-      tdd_clear_pending_review >/dev/null 2>&1 || true
-    else
-      echo "zensu chain-enforcer: failed to seed deferred-review chain-state for ${SESSION_ID}; leaving pending-review marker for retry." >&2
-      exit 0
-    fi
+# An inactive session and a fully terminated prior generation may both adopt a
+# newly queued deferred review. The claim is serialized project-wide by the
+# pending marker lock; only one concurrent interactive session can seed it.
+SESSION_ACTIVE="$(tdd_session_active "$STATE_FILE")"
+SESSION_IMPL_COMPLETE="$(tdd_impl_complete "$STATE_FILE")"
+SESSION_CHAIN_DONE="$(tdd_chain_done "$STATE_FILE")"
+ADOPT_ELIGIBLE=false
+if [ "$SESSION_ACTIVE" != "true" ]; then
+  ADOPT_ELIGIBLE=true
+elif [ "$SESSION_IMPL_COMPLETE" = "true" ] && [ "$SESSION_CHAIN_DONE" = "true" ]; then
+  ADOPT_ELIGIBLE=true
+fi
+
+if [ "$ADOPT_ELIGIBLE" = "true" ]; then
+  if zensu_tdd_strict_enabled; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
+  if tdd_adopt_pending_review "$SESSION_ID" "$VANILLA_SEED" "$(zensu_pending_review_ttl_hours)"; then
+    SESSION_ACTIVE=true
+    SESSION_IMPL_COMPLETE=true
+    SESSION_CHAIN_DONE=false
   else
-    exit 0
+    ADOPT_RC=$?
+    if [ "$ADOPT_RC" -eq 1 ]; then
+      echo "zensu chain-enforcer: failed to claim/seed deferred-review chain-state for ${SESSION_ID}; pending review remains retryable." >&2
+    fi
+    # Eligibility was only a preflight read. A concurrent --tdd-begin may have
+    # won the session CAS; re-read and enforce that new generation instead of
+    # granting this Stop from stale state.
+    SESSION_ACTIVE="$(tdd_session_active "$STATE_FILE")"
+    SESSION_IMPL_COMPLETE="$(tdd_impl_complete "$STATE_FILE")"
+    SESSION_CHAIN_DONE="$(tdd_chain_done "$STATE_FILE")"
+    [ "$SESSION_ACTIVE" = "true" ] || exit 0
   fi
+elif [ "$SESSION_ACTIVE" != "true" ]; then
+  exit 0
 fi
 # Implementation not finished -> do not enforce the review chain yet (allow
 # legit mid-TDD pauses; TDD progression itself is driven by the gate + skill).
@@ -106,28 +116,45 @@ fi
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 case "$MAX_ROUNDS" in ''|*[!0-9]*) MAX_ROUNDS=5 ;; esac
 CAP=$((MAX_ROUNDS + 3))
-BUDGET_FILE="${STATE_FILE}.stopblocks"
-if [ ! -L "$BUDGET_FILE" ]; then
-  printf 'x' >> "$BUDGET_FILE" 2>/dev/null || true
-fi
-BLOCKS=$(wc -c < "$BUDGET_FILE" 2>/dev/null | tr -d '[:space:]')
+BLOCKS="$(tdd_increment_stop_budget "$SESSION_ID" 2>/dev/null)" || BLOCKS=1
 case "$BLOCKS" in ''|*[!0-9]*) BLOCKS=1 ;; esac
 if [ "$BLOCKS" -gt "$CAP" ]; then
-  echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. Run /zensu:reset-review-limit and re-spawn zensu:code-reviewer to continue, or set ZENSU_CHAIN=off." >&2
+  if ! tdd_release_pending_review_claim "$SESSION_ID" 2>/dev/null; then
+    echo "zensu chain-enforcer: failed to release this session's deferred-review claim at the Stop cap; manual state repair may be required." >&2
+  fi
+  if [ "$(tdd_code_review_done "$STATE_FILE")" = "true" ]; then
+    echo "zensu chain-enforcer: terminal self-review did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly." >&2
+  else
+    echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); allowing stop. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly." >&2
+  fi
   exit 0
 fi
 
 # Two-stage terminus: once the code-reviewer chain has converged
 # (codeReviewDone), the terminal self-review stage must run before chainDone.
+# codeReviewDone is the persisted handoff decision made by the post-review hook;
+# do not reinterpret it through a later selfReview config change. Generations
+# that started with selfReview disabled close directly with chainDone instead.
 # The self-review stage is itself a main-thread Skill, so no Agent-completion
 # event fires for it — this Stop hook is its hard backstop too.
 CODE_REVIEW_DONE="$(tdd_code_review_done "$STATE_FILE")"
-if zensu_hook_enabled selfReview && [ "$CODE_REVIEW_DONE" = "true" ]; then
-  REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the chain terminus (it runs 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done'). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run --chain-done yourself — let /zensu:self-review finalize the chain."
+LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+if [ "$CODE_REVIEW_DONE" = "true" ]; then
+  SELF_REVIEW_TICKET="$(tdd_ensure_self_review_ticket "$SESSION_ID" 2>/dev/null)" || SELF_REVIEW_TICKET=""
+  if _tdd_review_ticket_shape_ok "$SELF_REVIEW_TICKET"; then
+    SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
+    REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: bash ${LOG_HELPER_Q} --chain-done --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
+  else
+    REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. Run /zensu:reset-review-limit for this current session, then resume the reviewer chain with a fresh ticket."
+  fi
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt begins with the marker line 'PRE-MERGED FINDINGS (fan-out)' followed by the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done' and then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' whose prompt starts with 'PRE-MERGED FINDINGS (fan-out)' and a second line 'REVIEW-TICKET: <ticket>' followed by the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: bash ${LOG_HELPER_Q} --chain-done; then stop."
 fi
 
 node -e 'process.stdout.write(JSON.stringify({ decision: "block", reason: process.argv[1] }))' "$REASON"
 echo
+# This also re-acknowledges an already-seeded claim after a prior Stop process
+# died before emitting its handoff. The helper is owner/session-bound, so this
+# is a no-op for ordinary TDD sessions and for another session's live claim.
+tdd_mark_pending_review_handoff "$SESSION_ID" 2>/dev/null || true
 exit 0

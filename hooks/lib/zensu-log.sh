@@ -153,83 +153,101 @@ case "${1:-}" in
     esac
     exit $?
     ;;
-  --tdd-begin|--tdd-complete|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
+  --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
     tools_val=""
+    claimed_ticket_val=""
+    claimed_ticket_seen=false
     while [ $# -gt 0 ]; do
       case "$1" in
         --session) session_val="${2:-}"; shift 2 || break ;;
         --tools)   tools_val="${2:-}";   shift 2 || break ;;
+        --claimed-review-ticket)
+          claimed_ticket_seen=true
+          claimed_ticket_val="${2:-}"
+          shift 2 || break
+          ;;
         *) shift ;;
       esac
     done
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
       session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    else
+      # Explicit session values are still untrusted CLI input. Canonicalize
+      # them before they participate in counter or lock paths.
+      session_val="$(zensu_resolve_session_id "$session_val")"
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
       --tdd-begin)
-        tdd_set_flag "$session_val" active true
+        outgoing_bypasses="$(tdd_bypasses "$(tdd_state_file "$session_val")" 2>/dev/null)"
+        if zensu_tdd_strict_enabled; then
+          begin_vanilla=false
+        else
+          begin_vanilla=true
+        fi
+        tdd_begin_session "$session_val" "$begin_vanilla"
         tdd_begin_rc=$?
         if [ "$tdd_begin_rc" -eq 0 ]; then
-          if zensu_tdd_strict_enabled; then
-            if ! tdd_set_flag "$session_val" vanilla false; then
-              echo "zensu-log --tdd-begin: strict flag write failed — a stale vanilla flag may remain" >&2
-              tdd_begin_rc=1
-            fi
-          elif ! tdd_set_flag "$session_val" vanilla true; then
-            echo "zensu-log --tdd-begin: vanilla flag write failed — session runs strict" >&2
-            tdd_begin_rc=1
-          fi
-          if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
+          if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
           else
             echo "mode: strict"
           fi
+          [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
         else
-          echo "zensu-log --tdd-begin: active flag write failed — session NOT activated" >&2
-        fi
-        outgoing_bypasses="$(tdd_bypasses "$(tdd_state_file "$session_val")" 2>/dev/null)"
-        [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses (cleared now): $outgoing_bypasses"
-        tdd_clear_bypasses "$session_val" 2>/dev/null || \
-          echo "zensu-log --tdd-begin: bypass-ledger reset failed — prior entries may persist" >&2
-        tdd_reset_chain_flags "$session_val" || {
-          echo "zensu-log --tdd-begin: chain-flag reset failed — a stale chainDone may keep the Stop backstop released" >&2
-          tdd_begin_rc=1
-        }
-        rounds_state_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-        rounds_counter_file="${rounds_state_dir}/rounds-${session_val}.json"
-        if [ -L "$rounds_counter_file" ]; then
-          echo "zensu-log --tdd-begin: refusing to delete through symlink at $rounds_counter_file — rounds counter NOT reset" >&2
-        elif [ -L "$rounds_state_dir" ]; then
-          echo "zensu-log --tdd-begin: refusing to reset under symlinked state dir $rounds_state_dir — rounds counter NOT reset" >&2
-        else
-          rm -f -- "$rounds_counter_file"
-        fi
-        stopblocks_file="$(tdd_state_file "$session_val").stopblocks"
-        if [ -L "$stopblocks_file" ]; then
-          echo "zensu-log --tdd-begin: refusing to delete through symlink at $stopblocks_file — stop-block budget NOT reset" >&2
-        else
-          rm -f -- "$stopblocks_file"
+          echo "zensu-log --tdd-begin: atomic chain activation failed — session NOT activated" >&2
+          [ -n "$outgoing_bypasses" ] && echo "previous-run bypasses preserved: $outgoing_bypasses" >&2
         fi
         exit "$tdd_begin_rc"
         ;;
       --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
+      --review-ticket) tdd_issue_review_ticket "$session_val" ;;
+      --current-review-ticket) tdd_claimed_review_ticket "$(tdd_state_file "$session_val")" ;;
+      --review-rearm)
+        [ "$claimed_ticket_seen" = "true" ] || {
+          echo "zensu-log.sh --review-rearm requires --claimed-review-ticket <ticket>" >&2
+          exit 2
+        }
+        tdd_rearm_review "$session_val" "$claimed_ticket_val"
+        ;;
       --chain-done)
-        tdd_set_flag "$session_val" chainDone true
+        if [ "$claimed_ticket_seen" = "true" ]; then
+          tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone
+        else
+          tdd_mark_unclaimed_review "$session_val" chainDone
+        fi
         exit $?
         ;;
-      --code-review-done)  tdd_set_flag "$session_val" codeReviewDone true ;;
-      --self-review-fixed) tdd_set_flag "$session_val" selfReviewFixed true ;;
+      --code-review-done)
+        if [ "$claimed_ticket_seen" = "true" ]; then
+          tdd_mark_review_converged "$session_val" "$claimed_ticket_val" codeReviewDone
+        else
+          tdd_mark_unclaimed_review "$session_val" codeReviewDone
+        fi
+        ;;
+      --self-review-fixed)
+        if [ "$claimed_ticket_seen" = "true" ]; then
+          tdd_mark_review_converged "$session_val" "$claimed_ticket_val" selfReviewFixed
+        else
+          tdd_mark_unclaimed_review "$session_val" selfReviewFixed
+        fi
+        ;;
       --workflow-begin)
         tdd_workflow_begin "$session_val" "$tools_val"
         ;;
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
       --tdd-reset)
         tdd_clear_session "$session_val"
+        reset_rc=$?
+        if [ "$reset_rc" -eq 0 ]; then
+          tdd_release_pending_review_claim "$session_val"
+          reset_rc=$?
+        fi
+        exit "$reset_rc"
         ;;
     esac
     exit $?
