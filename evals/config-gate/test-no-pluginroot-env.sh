@@ -15,12 +15,18 @@ unset CLAUDE_PLUGIN_ROOT
 unset ZENSU_CONFIG
 
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
 trap cleanup EXIT
 
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session no-root-review >/dev/null
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-complete --session no-root-review >/dev/null
+TICKET="$(bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --review-ticket --session no-root-review)"
+
 # (post-tdd-review-delegate.sh was removed in the 0.4.0 main-thread migration;
 #  only post-review-tdd-delegate.sh remains.)
-OUT_POSTREVIEW="$(echo '{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"}}' | "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+STDIN_POSTREVIEW="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"no-root-review\"}"
+OUT_POSTREVIEW="$(printf '%s' "$STDIN_POSTREVIEW" | "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
 case "$OUT_POSTREVIEW" in
   *"zensu:code-reviewer"*) check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" PASS ;;
   *)                       check "post-review-tdd-delegate.sh works WITHOUT CLAUDE_PLUGIN_ROOT" FAIL ;;

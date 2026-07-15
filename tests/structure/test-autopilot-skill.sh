@@ -176,11 +176,21 @@ for entry in "${VCS_PINS[@]}"; do
     check "$label" FAIL
   fi
 done
+# The preflight guard itself must validate the helper it executes. A broad skill-
+# wide reference is insufficient because zensu-log.sh also appears later for the
+# bypass ledger and previously masked this mismatch.
+STEP0_SECTION="$(awk '/^## Step 0 — Resolve the VCS driver$/{inside=1} inside{print} /^## Workflow$/{exit}' "$SKILL_MD")"
+if printf '%s' "$STEP0_SECTION" | grep -qF '[ -f "$ROOT/hooks/lib/zensu-vcs.sh" ]' \
+  && ! printf '%s' "$STEP0_SECTION" | grep -qF '[ -f "$ROOT/hooks/lib/zensu-log.sh" ]'; then
+  check "P11g Step 0 preflight validates zensu-vcs.sh, not zensu-log.sh" PASS
+else
+  check "P11g Step 0 preflight validates zensu-vcs.sh, not zensu-log.sh" FAIL
+fi
 # P11g — the raw pre-push `gh pr view <n>` guard must be GONE (routed through --pr-state)
 if grep -qF -- 'gh pr view <n> --json state,mergedAt' "$SKILL_MD"; then
-  check "P11g pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" FAIL
+  check "P11h pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" FAIL
 else
-  check "P11g pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" PASS
+  check "P11h pre-push guard no longer raw 'gh pr view <n>' (driver-routed)" PASS
 fi
 
 echo "----"

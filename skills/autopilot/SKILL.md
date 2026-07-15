@@ -68,8 +68,11 @@ Every git-host call — opening the PR/MR and the pre-push state guard — goes 
 so the forge (GitHub or GitLab) is detected once and each op degrades correctly.
 
 ```bash
-ROOT="$(cat ~/.zensu/plugin-root)"   # empty → ABORT (FATAL): start a fresh session so the
-                                     # SessionStart hook re-writes the plugin-root path.
+ROOT="${CLAUDE_PLUGIN_ROOT}"
+[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-vcs.sh" ] || {
+  echo "FATAL: active plugin root is unavailable — start a fresh Claude Code session" >&2
+  exit 1
+}
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 ```
 
@@ -123,7 +126,7 @@ the detected app type — see `rules/drivers.md`.
 
 **0.C — Plan.** Turn the feature into (shape it on the resolved spec template:
 `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md` when that file
-exists, else `{PLUGIN_ROOT}/templates/autopilot-spec.md`):
+exists, else `${CLAUDE_PLUGIN_ROOT}/templates/autopilot-spec.md`):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
 2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
@@ -187,13 +190,13 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
    Render the body (`$BODY_FILE`, English title + body) from the resolved template
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
-   exists, else `{PLUGIN_ROOT}/templates/autopilot-pr-body.md`): it carries a per-AC checklist table keyed
+   exists, else `${CLAUDE_PLUGIN_ROOT}/templates/autopilot-pr-body.md`): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
    step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
-   each fix loop), run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --bypass-list`
-   (`{PLUGIN_ROOT}` = contents of `~/.zensu/plugin-root`) and union the non-`none` entries —
+   each fix loop), run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list`
+   and union the non-`none` entries —
    each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`
    line in the autopilot plan artifact — the PR body is rendered FROM that line, never from

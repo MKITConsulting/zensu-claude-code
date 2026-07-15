@@ -45,9 +45,17 @@ grep -qiE 'merge' "$SKILL_MD" \
 grep -qiE 'dedup|sort.{0,20}severity|by severity' "$SKILL_MD" \
   && check "F5 skill dedupes / sorts merged findings by severity" PASS || check "F5 dedupe/sort" FAIL
 
-# Thin consume-mode code-reviewer spawn carrying the marker, single hook event per round.
+# Thin consume-mode code-reviewer spawn carrying the exact two-line header and a
+# fresh one-shot ticket, single hook event per round.
 grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$SKILL_MD" \
   && check "F6 skill passes the 'PRE-MERGED FINDINGS (fan-out)' marker" PASS || check "F6 fan-out marker in skill" FAIL
+if grep -qF -- '--review-ticket' "$SKILL_MD" \
+  && grep -qF 'second `REVIEW-TICKET: ${REVIEW_TICKET}`' "$SKILL_MD" \
+  && grep -qF 'Issue a fresh ticket before EVERY verification spawn' "$SKILL_MD"; then
+  check "F6a skill requires an exact second-line fresh review ticket" PASS
+else
+  check "F6a skill requires an exact second-line fresh review ticket" FAIL
+fi
 grep -qF "subagent_type='zensu:code-reviewer'" "$SKILL_MD" \
   && check "F7 skill still spawns zensu:code-reviewer (hook trigger preserved)" PASS || check "F7 code-reviewer spawn preserved" FAIL
 
@@ -61,6 +69,13 @@ grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$REVIEWER_MD" \
   && check "F9 code-reviewer carries the 'PRE-MERGED FINDINGS (fan-out)' marker" PASS || check "F9 fan-out marker in reviewer" FAIL
 grep -qiE 'consume mode|fan-out consume' "$REVIEWER_MD" \
   && check "F10 code-reviewer documents fan-out consume mode" PASS || check "F10 consume mode" FAIL
+if grep -qF 'first line is exactly `PRE-MERGED FINDINGS (fan-out)`' "$REVIEWER_MD" \
+  && grep -qF 'second line is `REVIEW-TICKET: <ticket>`' "$REVIEWER_MD" \
+  && grep -qF 'Merely containing or quoting the marker elsewhere is not consume mode' "$REVIEWER_MD"; then
+  check "F10a reviewer enters consume mode only for the exact two-line contract" PASS
+else
+  check "F10a reviewer enters consume mode only for the exact two-line contract" FAIL
+fi
 # Consume mode short-circuits Phases 1-4 (no re-read, no build, no test).
 grep -qiE 'skip phases 1-4|skip phases 1.{1,4}4|jump (straight )?to phase 5|skip.{0,30}(build|test)' "$REVIEWER_MD" \
   && check "F11 consume mode skips Phases 1-4 (no build/test re-run)" PASS || check "F11 consume skips 1-4" FAIL

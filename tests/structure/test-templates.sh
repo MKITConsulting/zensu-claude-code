@@ -90,7 +90,7 @@ else
 fi
 
 # P3 — resolution contract in consumers
-if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md' "$TDD_MD" && grep -qF 'when that file exists, else the plugin default' "$TDD_MD" && grep -qF '{PLUGIN_ROOT}/templates/tdd-plan.md' "$TDD_MD"; then
+if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md' "$TDD_MD" && grep -qF 'when that file exists, else the plugin default' "$TDD_MD" && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/tdd-plan.md' "$TDD_MD"; then
   check "P3a tdd Phase 2 resolves override then plugin default" PASS
 else
   check "P3a tdd Phase 2 resolves override then plugin default" FAIL
@@ -105,12 +105,12 @@ if ! grep -qF '# TDD Plan: {Feature Title}' "$TDD_MD"; then
 else
   check "P3c inline plan block removed from the tdd skill" FAIL
 fi
-if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md' "$AUTOPILOT_MD" && grep -qF '{PLUGIN_ROOT}/templates/autopilot-spec.md' "$AUTOPILOT_MD" && grep -qF 'when that file' "$AUTOPILOT_MD" && grep -qF 'exists, else' "$AUTOPILOT_MD"; then
+if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md' "$AUTOPILOT_MD" && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/autopilot-spec.md' "$AUTOPILOT_MD" && grep -qF 'when that file' "$AUTOPILOT_MD" && grep -qF 'exists, else' "$AUTOPILOT_MD"; then
   check "P3d autopilot 0.C resolves the spec template" PASS
 else
   check "P3d autopilot 0.C resolves the spec template" FAIL
 fi
-if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md' "$AUTOPILOT_MD" && grep -qF '{PLUGIN_ROOT}/templates/autopilot-pr-body.md' "$AUTOPILOT_MD"; then
+if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md' "$AUTOPILOT_MD" && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/autopilot-pr-body.md' "$AUTOPILOT_MD"; then
   check "P3e autopilot step 3 resolves the pr-body template" PASS
 else
   check "P3e autopilot step 3 resolves the pr-body template" FAIL

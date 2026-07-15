@@ -48,7 +48,7 @@ Validate EVERY inline anchor BEFORE writing the payload, using
 ```bash
 gh pr diff <n> --repo <o>/<r> > "$WORKDIR/_pr.diff"
 [ -s "$WORKDIR/_pr.diff" ] || gh pr diff <n> --repo <o>/<r> > "$WORKDIR/_pr.diff"
-node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"
+node "{ACTIVE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"
 ```
 
 **Quoting is load-bearing:** `<path>` comes from the PR diff — an

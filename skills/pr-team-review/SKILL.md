@@ -44,10 +44,19 @@ Every git-host call goes through the driver so the forge (GitHub or GitLab) is d
 and the publish path degrades correctly.
 
 ```bash
-ROOT="$(cat ~/.zensu/plugin-root)"   # empty → ABORT (FATAL): start a fresh session so the
-                                     # SessionStart hook re-writes the plugin-root path.
+ROOT="${CLAUDE_PLUGIN_ROOT}"
+[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-vcs.sh" ] || {
+  echo "FATAL: active plugin root is unavailable — start a fresh Claude Code session" >&2
+  exit 1
+}
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 ```
+
+`{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read` is a model
+placeholder for the concrete `${CLAUDE_PLUGIN_ROOT}` expanded in this registered
+skill component. Substitute that concrete value before running a referenced command;
+raw `rules/*.md` resources are not plugin components and must not assume the variable
+exists in a later Bash subprocess.
 
 Forge **detection is repo-scoped**, so it runs inside Phase A.1 once the repo root is
 located (`bash "$VCS" --detect --repo "$REPO"`) — not here. Carry `PROVIDER`, `REPOID`, and

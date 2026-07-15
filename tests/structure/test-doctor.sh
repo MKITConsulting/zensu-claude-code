@@ -52,7 +52,7 @@ if grep -qE '^name: doctor$' "$SKILL_MD"; then
 else
   check "P2c skill frontmatter name is doctor" FAIL
 fi
-if grep -qF 'bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh' "$SKILL_MD"; then
+if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
   check "P2d skill runs the helper" PASS
 else
   check "P2d skill runs the helper" FAIL
@@ -90,7 +90,7 @@ else
   check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
 fi
 if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh' "$SKILL_MD"; then
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" PASS
 else
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" FAIL

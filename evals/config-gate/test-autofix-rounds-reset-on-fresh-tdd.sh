@@ -105,8 +105,10 @@ case "$(uname -s)" in
       check "--tdd-begin refuses symlink — link and target both intact" FAIL
     fi
     case "$err" in
-      *symlink*) check "--tdd-begin emits symlink-refusal warning to stderr" PASS ;;
-      *)         check "--tdd-begin emits symlink-refusal warning to stderr (got: $err)" FAIL ;;
+      *"unsafe session budget state"*"session NOT activated"*)
+        check "--tdd-begin emits unsafe-storage refusal to stderr" PASS ;;
+      *)
+        check "--tdd-begin emits unsafe-storage refusal to stderr (got: $err)" FAIL ;;
     esac ;;
 esac
 

@@ -342,7 +342,7 @@ if grep -qF '@latest' "$MCP_JSON"; then
 else
   check "P6b MCP runtime never floats on @latest" PASS
 fi
-if grep -qF 'bash {PLUGIN_ROOT}/scripts/playwright-mcp.sh install-browser' "$SKILL_MD" \
+if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser' "$SKILL_MD" \
   && grep -qF '`browser_install` is not a tool in the pinned' "$SKILL_MD" \
   && grep -qF 'exec "$BIN" "$@"' "$MCP_LAUNCHER"; then
   check "P6f missing browser recovery uses the pinned launcher install-browser command" PASS
@@ -434,7 +434,7 @@ else
 fi
 if grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$DOCTOR_SH" \
   && grep -qF 'valid integrity-locked plugin config + npm present' "$DOCTOR_REPORT" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh' "$DOCTOR_SKILL"; then
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL"; then
   check "P7c doctor validates config without claiming unproven MCP readiness" PASS
 else
   check "P7c doctor validates config without claiming unproven MCP readiness" FAIL
@@ -456,6 +456,15 @@ if grep -rqiE "$GERMAN_RE" "$SKILL_DIR"; then
   check "P8b tracked skill content is English-only" FAIL
 else
   check "P8b tracked skill content is English-only" PASS
+fi
+if grep -qF '`{ACTIVE_PLUGIN_ROOT}` in bundled rules loaded later with `Read`' "$SKILL_MD" \
+  && grep -qF 'concrete `${CLAUDE_PLUGIN_ROOT}`' "$SKILL_MD" \
+  && grep -qF '{ACTIVE_PLUGIN_ROOT}/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
+  && grep -qF '{ACTIVE_PLUGIN_ROOT}/scripts/playwright-mcp.sh' "$ZENSU_MD" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
+  check "P8c registered skill maps native root into the raw Zensu adapter rule" PASS
+else
+  check "P8c registered skill maps native root into the raw Zensu adapter rule" FAIL
 fi
 
 echo "----"

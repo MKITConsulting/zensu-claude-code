@@ -132,7 +132,7 @@ else
   check "P4 Tier-1 transcript-path cwd (got '$P4_OUT' expected '$P4_CWD')" FAIL
 fi
 
-# ── E1 — end to end: --chain-done from a worktree lands where the enforcer reads ─
+# ── E1 — end to end: a valid zero-review chain closes in the recovered project ─
 # Regression for the reported deadlock. CLAUDE_PROJECT_DIR + CLAUDE_SESSION_ID unset,
 # cwd = a worktree that is NOT the project dir. The recovery must anchor the state
 # file to the transcript cwd, and an enforcer-style read (CLAUDE_PROJECT_DIR = that
@@ -144,14 +144,18 @@ E1_NEEDLE="bash $LOG_SH --chain-done"
 plant "$E1_CWD" "$E1_UUID" "$E1_NEEDLE" >/dev/null
 
 ( cd "$E1_WT" && env -u CLAUDE_PROJECT_DIR -u CLAUDE_SESSION_ID \
-    ZENSU_PROJECTS_DIR="$PROJECTS" \
-    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
-    ZENSU_OWN_CMD="$E1_NEEDLE" \
-    bash "$LOG_SH" --chain-done >/dev/null 2>&1 )
+    ZENSU_PROJECTS_DIR="$PROJECTS" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    ZENSU_OWN_CMD="$E1_NEEDLE" bash "$LOG_SH" --tdd-begin >/dev/null 2>&1 )
+( cd "$E1_WT" && env -u CLAUDE_PROJECT_DIR -u CLAUDE_SESSION_ID \
+    ZENSU_PROJECTS_DIR="$PROJECTS" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    ZENSU_OWN_CMD="$E1_NEEDLE" bash "$LOG_SH" --tdd-complete >/dev/null 2>&1 )
+( cd "$E1_WT" && env -u CLAUDE_PROJECT_DIR -u CLAUDE_SESSION_ID \
+    ZENSU_PROJECTS_DIR="$PROJECTS" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    ZENSU_OWN_CMD="$E1_NEEDLE" bash "$LOG_SH" --chain-done >/dev/null 2>&1 )
 
 E1_STATE="$E1_CWD/.zensu/state/tdd-phase-${E1_UUID}.json"
 if [ -f "$E1_STATE" ]; then
-  check "E1a --chain-done anchors the state file to the transcript cwd (not the worktree cwd)" PASS
+  check "E1a valid zero-review chain anchors state to transcript cwd (not worktree cwd)" PASS
 else
   ACTUAL="$(find "$E1_CWD" "$E1_WT" -name 'tdd-phase-*.json' 2>/dev/null | tr '\n' ' ')"
   check "E1a state-file anchored to transcript cwd (expected $E1_STATE; found: ${ACTUAL:-none})" FAIL

@@ -76,27 +76,31 @@ for scenario_file in "$HAPPY" "$EMPTY"; do
 done
 
 if grep -qF 'rounds-eval-sess-A.json' "$HAPPY" && grep -qF 'rounds-eval-sess-B.json' "$HAPPY"; then
-  check "P6 happy scenario pre-seeds two distinct counter files (A + B)" PASS
+  check "P6 containment scenario pre-seeds two sibling counter decoys (A + B)" PASS
 else
-  check "P6 happy scenario pre-seeds two distinct counter files (A + B)" FAIL
+  check "P6 containment scenario pre-seeds two sibling counter decoys (A + B)" FAIL
 fi
 
-if grep -qF 'Removed:' "$HAPPY" && grep -qF 'Reset complete:' "$HAPPY"; then
-  check "P7 happy scenario asserts both 'Removed:' AND 'Reset complete:' literals" PASS
+if grep -qF 'Sibling counters unchanged: yes' "$HAPPY" \
+  && grep -qF 'cksum' "$HAPPY" \
+  && grep -qF 'claimedMutation' "$HAPPY"; then
+  check "P7 containment scenario verifies checksums and forbids mutation claims" PASS
 else
-  check "P7 happy scenario asserts both 'Removed:' AND 'Reset complete:' literals" FAIL
+  check "P7 containment scenario verifies checksums and forbids mutation claims" FAIL
 fi
 
-if grep -qF 'No round counter files in' "$EMPTY" || grep -qF 'does not exist' "$EMPTY"; then
-  check "P8 empty scenario asserts no-op message ('No round counter files in' or 'does not exist')" PASS
+if grep -qF 'Current generation rearm: rejected (no consumed terminal ticket)' "$EMPTY" \
+  && grep -qF -- '--current-review-ticket' "$EMPTY"; then
+  check "P8 clean-session scenario asserts the official getter fails closed" PASS
 else
-  check "P8 empty scenario asserts no-op message" FAIL
+  check "P8 clean-session scenario asserts the official getter fails closed" FAIL
 fi
 
-if grep -qE 'pass:\s*!.*Removed' "$EMPTY" || grep -qE 'claimedRemoval' "$EMPTY"; then
-  check "P9 empty scenario has a must-not-match assert against 'Removed:'" PASS
+if grep -qF 'claimedMutation' "$EMPTY" \
+  && grep -qF 'Do not run `find`, `git worktree list`, globs over state files' "$EMPTY"; then
+  check "P9 clean-session scenario forbids legacy scans and mutation claims" PASS
 else
-  check "P9 empty scenario has a must-not-match assert against 'Removed:'" FAIL
+  check "P9 clean-session scenario forbids legacy scans and mutation claims" FAIL
 fi
 
 if [ -x "$PLUGIN_DIR/scripts/claude-promptfoo-wrapper.sh" ]; then

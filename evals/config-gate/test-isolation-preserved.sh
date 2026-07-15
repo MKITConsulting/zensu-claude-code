@@ -9,6 +9,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_POSTREVIEW="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -27,8 +28,18 @@ check "post-review-tdd-delegate.sh exists and is executable" PASS
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
 trap cleanup EXIT
+
+render_code_reviewer_fixture() {
+  FIXTURE="$EVAL_DIR/fixtures/stdin-code-reviewer.json" REVIEW_TICKET="$1" node -e '
+    const fs = require("fs");
+    const input = JSON.parse(fs.readFileSync(process.env.FIXTURE, "utf8"));
+    input.tool_input.prompt = input.tool_input.prompt.replace("__REVIEW_TICKET__", process.env.REVIEW_TICKET);
+    process.stdout.write(JSON.stringify(input));
+  '
+}
 
 TMP_CFG="/tmp/zensu-isolation-allenabled-$$.json"
 cat > "$TMP_CFG" <<'EOF'
@@ -42,6 +53,9 @@ cat > "$TMP_CFG" <<'EOF'
 }
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
+
+bash "$LOG" --tdd-begin --session fixture-review >/dev/null
+bash "$LOG" --tdd-complete --session fixture-review >/dev/null
 
 OUT_OTHER="$("$SCRIPT_POSTREVIEW" < "$EVAL_DIR/fixtures/stdin-other-agent.json" 2>/dev/null)"
 if [ -z "$OUT_OTHER" ]; then
@@ -57,7 +71,9 @@ else
   check "post-review + tdd-manager subagent: empty stdout (got: $OUT_TDDM)" FAIL
 fi
 
-OUT_OK="$("$SCRIPT_POSTREVIEW" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
+TICKET="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_OK="$(render_code_reviewer_fixture "$TICKET")"
+OUT_OK="$(printf '%s' "$STDIN_OK" | "$SCRIPT_POSTREVIEW" 2>/dev/null)"
 case "$OUT_OK" in
   *"zensu:code-reviewer"*) check "post-review + code-reviewer subagent: routing directive present (re-verify via zensu:code-reviewer)" PASS ;;
   *)                       check "post-review + code-reviewer subagent: routing directive present (got: $OUT_OK)" FAIL ;;

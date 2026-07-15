@@ -53,8 +53,7 @@ files. A configured MCP row remains a warning until the loaded MCP tools are con
 
 ## Phase 1: Run the diagnostics
 
-Resolve `{PLUGIN_ROOT}` = the trimmed contents of `~/.zensu/plugin-root` (the
-same value `/zensu:tdd` Phase 0 resolves). Before invoking the helper, inspect the tools
+Use the session-scoped `${CLAUDE_PLUGIN_ROOT}` supplied by Claude Code. Before invoking the helper, inspect the tools
 already available in this Claude Code session — do not call the browser. Runtime readiness
 requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
 `browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
@@ -65,13 +64,13 @@ set is loaded, pass that signal separately; the helper still
 validates this plugin's pinned MCP declaration before it can emit `ready`:
 
 ```
-ZDOC_PLAYWRIGHT_TOOLS=ready bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh
+ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 Otherwise run, once:
 
 ```
-bash {PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but

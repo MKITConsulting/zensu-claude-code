@@ -1,3 +1,4 @@
+#!/bin/bash
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -40,7 +41,8 @@ mkdir -p "$FAKE_ROOT/hooks/lib"
 printf 'zensu_hook_enabled() { return 1; }\n' > "$FAKE_ROOT/hooks/lib/zensu-config.sh"
 cp "$PULSE" "$FAKE_ROOT/hooks/session-start-pulse.sh"
 FAKE_HOME="$TMP/home"
-mkdir -p "$FAKE_HOME"
+mkdir -p "$FAKE_HOME/.zensu"
+printf '%s\n' '/sentinel/native-root-must-not-change' > "$FAKE_HOME/.zensu/plugin-root"
 
 ROOT_NATIVE="$(native "$FAKE_ROOT")"
 HOME_NATIVE="$(native "$FAKE_HOME")"
@@ -48,10 +50,10 @@ HOME="$HOME_NATIVE" CLAUDE_PLUGIN_ROOT="$ROOT_NATIVE" bash "$FAKE_ROOT/hooks/ses
 
 PR_FILE="$FAKE_HOME/.zensu/plugin-root"
 GOT="$(cat "$PR_FILE" 2>/dev/null || echo MISSING)"
-if [ "$GOT" = "$ROOT_NATIVE" ]; then
-  check "N2 session-start-pulse.sh persists plugin-root under native HOME/CLAUDE_PLUGIN_ROOT (agent-faithful)" PASS
+if [ "$GOT" = "/sentinel/native-root-must-not-change" ]; then
+  check "N2 session-start-pulse.sh leaves legacy pointer untouched on native paths" PASS
 else
-  check "N2 pulse plugin-root persist (got '$GOT' expected '$ROOT_NATIVE')" FAIL
+  check "N2 pulse changed legacy pointer unexpectedly (got '$GOT')" FAIL
 fi
 
 echo "----"

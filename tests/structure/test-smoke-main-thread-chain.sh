@@ -68,7 +68,17 @@ stop_decision() {
 }
 flag() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$SF" "$1"; }
 postrev_ctx() {
-  printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}' \
+  local ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)" || return 1
+  SID_VALUE="$SID" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID_VALUE
+    }));
+  ' \
     | bash "$POSTREV" 2>/dev/null | node -e '
       let s=""; process.stdin.on("data",c=>s+=c);
       process.stdin.on("end",()=>{ try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")} });'
@@ -118,7 +128,17 @@ SF="$SF_BACKUP"
 echo "== 4. post-review routing (in-thread) + max-round chainDone =="
 SID_R="smoke-review"; SF="$TDD_STATE_DIR/tdd-phase-${SID_R}.json"
 postrev_ctx() {
-  printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_R"'"}' \
+  local ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$SID_R" 2>/dev/null)" || return 1
+  SID_VALUE="$SID_R" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID_VALUE
+    }));
+  ' \
     | bash "$POSTREV" 2>/dev/null | node -e '
       let s=""; process.stdin.on("data",c=>s+=c);
       process.stdin.on("end",()=>{ try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")} });'
@@ -132,11 +152,19 @@ echo "$CTX" | grep -q "subagent_type='zensu:code-reviewer'" && check "4c re-veri
 RCOUNT="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).count)}catch(_){console.log("?")}' "$PROJ/.zensu/state/rounds-${SID_R}.json")"
 [ "$RCOUNT" = "1" ] && check "4d round counter increments (1)" PASS || check "4d counter=1 (got $RCOUNT)" FAIL
 [ "$(flag chainDone)" = "false" ] && check "4e chainDone stays false under max" PASS || check "4e chainDone false" FAIL
-# force max rounds (default 5): seed count=5 -> NEXT=6 -> convergence -> hand off to terminal self-review
+# Force max rounds (default 5): reviewRound is authoritative; the public
+# rounds JSON is only its derived compatibility view. Seed both to 5 so the
+# next ticket completion becomes round 6 and converges.
 # (selfReview is on by default; the code-reviewer chain converges via codeReviewDone, and
 # /zensu:self-review owns the final --chain-done. Set hooks.selfReview=false to restore the
 # legacy chainDone-at-max-rounds behavior.)
 printf '{"count":5,"ts":"x"}' > "$PROJ/.zensu/state/rounds-${SID_R}.json"
+STATE_FILE="$SF" node -e '
+  const fs = require("fs");
+  const state = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+  state.reviewRound = 5;
+  fs.writeFileSync(process.env.STATE_FILE, JSON.stringify(state, null, 2));
+'
 CTX2="$(postrev_ctx)"
 echo "$CTX2" | grep -q "max 5 rounds reached" && check "4f max rounds -> convergence directive" PASS || check "4f convergence msg" FAIL
 echo "$CTX2" | grep -qF "skill='zensu:self-review'" && check "4g max rounds -> hands off to terminal self-review" PASS || check "4g self-review handoff" FAIL

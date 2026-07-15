@@ -47,6 +47,19 @@ edited, created, or deleted in this session. Use that knowledge directly.
    risk surfaces — without re-running the code-reviewer.
 5. Owns the chain terminus: runs `--chain-done` and renders the final report.
 
+## Generation guard
+
+The automatic handoff MUST include exactly one line
+`SELF-REVIEW-TICKET: <review-ticket>`. Capture that exact ticket before doing
+anything else. It is the generation token for every state mutation in this
+skill. If the line is missing, malformed, or ambiguous, do not run
+`--self-review-fixed` or `--chain-done`; report that the self-review handoff is
+unbound and let the Stop hook reconstruct the current handoff.
+
+Every command below that shows `<review-ticket>` means the captured value from
+that line. A non-zero exit means this self-review belongs to a stale generation:
+stop without changing or finalizing the current chain.
+
 ## Phase 1: List Changed Files
 
 List every file you changed or created in this session. You know these from your
@@ -54,9 +67,9 @@ own context — no parsing needed. Cross-check with `git diff --name-only HEAD` 
 catch anything you missed.
 
 If there are NO changes this session, run
-`bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done`, state
-"No changes — self-review skipped", and stop. `{PLUGIN_ROOT}` is the value you
-resolved in `/zensu:tdd` Phase 0 (the contents of `~/.zensu/plugin-root`).
+`bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`, state
+"No changes — self-review skipped", and stop. `${CLAUDE_PLUGIN_ROOT}` is the
+session-scoped plugin root supplied by Claude Code.
 
 ## Phase 2: Analyze
 
@@ -94,17 +107,17 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   EXACTLY ONE fix round, in this main thread, under the still-active PreToolUse
   phase-gate. For each must-fix: RED test, then IMPL, then GREEN (re-enter the
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
-  `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --mode` (echoes `vanilla`) — apply each
+  `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Then set the latch with
-  `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --self-review-fixed` and re-run
+  `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). In this branch you MUST NOT:
   - run `--tdd-complete` (implementation is already complete);
   - spawn the `zensu:code-reviewer` agent — self-review is terminal, so do not spawn it;
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Run `bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --chain-done` — this is the chain terminus.
+  1. Run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"` — this is the generation-bound chain terminus.
   2. Render the final report (below), then stop.
 
 ### Final report
@@ -141,7 +154,7 @@ changed (if any), and any advisory findings buffered (not fixed). State whether 
 What is left: any deferred suggestions or max-rounds findings requiring manual fix,
 plus the next step. If nothing is open, say so in one line. Close the section with
 the bypass-ledger audit line: run
-`bash {PLUGIN_ROOT}/hooks/lib/zensu-log.sh --bypass-list` and render its output as
+`bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
 `Gates bypassed during this session: <output>` (the verb echoes `none` when the
 ledger is empty).
 

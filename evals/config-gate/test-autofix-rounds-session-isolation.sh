@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -24,14 +25,21 @@ trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5}}
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
-STDIN_A='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-A"}'
-STDIN_B='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-B"}'
+bash "$LOG" --tdd-begin --session sess-A >/dev/null
+bash "$LOG" --tdd-complete --session sess-A >/dev/null
+bash "$LOG" --tdd-begin --session sess-B >/dev/null
+bash "$LOG" --tdd-complete --session sess-B >/dev/null
+TICKET_A="$(bash "$LOG" --review-ticket --session sess-A)"
+TICKET_B="$(bash "$LOG" --review-ticket --session sess-B)"
+STDIN_A="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_A}\\nfixture\"},\"session_id\":\"sess-A\"}"
+STDIN_B="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_B}\\nfixture\"},\"session_id\":\"sess-B\"}"
 
 printf '%s' "$STDIN_A" | "$SCRIPT" >/dev/null 2>&1
 printf '%s' "$STDIN_B" | "$SCRIPT" >/dev/null 2>&1
@@ -69,6 +77,8 @@ else
   check "session B counter starts at 1 (got '$cB')" FAIL
 fi
 
+TICKET_A="$(bash "$LOG" --review-ticket --session sess-A)"
+STDIN_A="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_A}\\nfixture\"},\"session_id\":\"sess-A\"}"
 printf '%s' "$STDIN_A" | "$SCRIPT" >/dev/null 2>&1
 cA2="$(read_count "$COUNTER_A")"
 cB2="$(read_count "$COUNTER_B")"

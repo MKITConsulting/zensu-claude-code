@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -28,6 +29,7 @@ trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
 mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
@@ -36,14 +38,20 @@ EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
 MALICIOUS_SID="../../../${ESCAPE_PROBE##*/}/escape-XYZ"
+source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
+SAFE_SID="$(zensu_resolve_session_id "$MALICIOUS_SID")"
+bash "$LOG" --tdd-begin --session "$SAFE_SID" >/dev/null
+bash "$LOG" --tdd-complete --session "$SAFE_SID" >/dev/null
+TICKET="$(bash "$LOG" --review-ticket --session "$SAFE_SID")"
 STDIN_JSON="$(node -e '
   const sid = process.argv[1];
+  const ticket = process.argv[2];
   process.stdout.write(JSON.stringify({
-    tool_name: "Task",
-    tool_input: { subagent_type: "zensu:code-reviewer", prompt: "x" },
+    tool_name: "Agent",
+    tool_input: { subagent_type: "zensu:code-reviewer", prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${ticket}\nfixture` },
     session_id: sid
   }));
-' "$MALICIOUS_SID")"
+' "$MALICIOUS_SID" "$TICKET")"
 
 printf '%s' "$STDIN_JSON" | "$SCRIPT" >/dev/null 2>&1
 EXIT_CODE=$?

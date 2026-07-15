@@ -67,6 +67,8 @@ OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"
 { [ "$(printf '%s' "$OUT" | decision)" = "block" ] && [ ! -f "$MARKER" ]; } \
   && check "I1 fresh marker -> adopt -> block + marker cleared" PASS \
   || check "I1 fresh adopt (dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
+bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
+printf '{"session_id":"%s"}' "$SID" | bash "$STOP" >/dev/null 2>&1
 
 # Stale marker -> NOT adopted -> allow (clean exit 0) + cleared
 SID2="ttl-stale"
@@ -85,7 +87,8 @@ OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STO
 [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
   && check "I3 ttl=0 disables guard -> stale marker still adopts (block)" PASS \
   || check "I3 ttl=0 still adopts (dec=$(printf '%s' "$OUT" | decision))" FAIL
-rm -f "$MARKER"
+bash "$LOG" --chain-done --session "$SID3" >/dev/null 2>&1
+printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" >/dev/null 2>&1
 
 # no-ts marker (as timestampStyle:"none" writes) with an OLD file mtime -> NOT
 # adopted, so an abandoned marker from a crashed run cannot hijack a later

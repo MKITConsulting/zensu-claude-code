@@ -99,8 +99,14 @@ rm -rf "$PSTATE"
 # ---- Rounds counter JSON: none omits ts, keeps count ------------------------
 RSTATE="$(mktemp -d)"
 SIDR="rd-none-$$"
-STDINR="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SIDR}\"}"
-printf '%s' "$STDINR" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE" ZENSU_CONFIG="$CFG_NONE" \
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE" TDD_STATE_DIR="$RSTATE" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --tdd-begin --session "$SIDR" >/dev/null
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE" TDD_STATE_DIR="$RSTATE" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --tdd-complete --session "$SIDR" >/dev/null
+TICKETR="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE" TDD_STATE_DIR="$RSTATE" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --review-ticket --session "$SIDR")"
+STDINR="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR}\\nfixture\"},\"session_id\":\"${SIDR}\"}"
+printf '%s' "$STDINR" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE" TDD_STATE_DIR="$RSTATE" ZENSU_CONFIG="$CFG_NONE" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_N=$(node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
@@ -112,8 +118,14 @@ rm -rf "$RSTATE"
 
 RSTATE2="$(mktemp -d)"
 SIDR2="rd-wall-$$"
-STDINR2="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SIDR2}\"}"
-printf '%s' "$STDINR2" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE2" ZENSU_CONFIG="$CFG_WALL" \
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE2" TDD_STATE_DIR="$RSTATE2" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --tdd-begin --session "$SIDR2" >/dev/null
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE2" TDD_STATE_DIR="$RSTATE2" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --tdd-complete --session "$SIDR2" >/dev/null
+TICKETR2="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE2" TDD_STATE_DIR="$RSTATE2" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --review-ticket --session "$SIDR2")"
+STDINR2="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR2}\\nfixture\"},\"session_id\":\"${SIDR2}\"}"
+printf '%s' "$STDINR2" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA_OVERRIDE="$RSTATE2" TDD_STATE_DIR="$RSTATE2" ZENSU_CONFIG="$CFG_WALL" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_W=$(node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));

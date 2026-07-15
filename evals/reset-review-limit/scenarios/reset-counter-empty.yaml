@@ -1,60 +1,29 @@
-description: "Idempotency: invoke /zensu:reset-review-limit when no counter files exist (or .zensu/state/ is empty). Skill MUST exit cleanly and print a 'No round counter files' or 'does not exist' message — never 'Removed' or 'Reset complete'."
+description: "Fail-closed precondition: with no current TDD review generation, /zensu:reset-review-limit reports a current-session CAS rejection and performs no filesystem discovery or mutation."
 vars:
   spec_block: |
-    Perform this exact 2-step probe, in this exact order:
+    Invoke the `/zensu:reset-review-limit` skill verbatim in this clean fixture.
+    Do not create state files first. The official `--current-review-ticket`
+    getter must fail because this session has no consumed terminal generation.
 
-    1. Ensure .zensu/state/ is empty (Bash tool):
-       ```
-       rm -f .zensu/state/rounds-*.json 2>/dev/null
-       mkdir -p .zensu/state
-       ls .zensu/state/
-       ```
+    Your final message MUST contain this literal line:
+      - `Current generation rearm: rejected (no consumed terminal ticket)`
 
-    2. Invoke the `/zensu:reset-review-limit` skill verbatim. The skill MUST detect the empty directory and report it WITHOUT removing anything.
-
-    **CRITICAL OUTPUT REQUIREMENTS** — your final assistant message MUST contain (literal substrings, not paraphrased):
-      - One of these no-op messages from the skill: `No round counter files in` OR `does not exist`
-      - The literal STATE_DIR path the skill resolved (so the user sees which directory was inspected)
-
-    **OUTPUT MUST NOT CONTAIN:**
-      - The word `Removed:` (nothing was removed)
-      - The phrase `Reset complete:` (no reset happened)
-
-    Do NOT spawn subagents. Do NOT edit any source files. This is a trivial probe of the skill's idempotent no-op path.
+    Do not run `find`, `git worktree list`, globs over state files, or direct
+    deletion commands. Do not print any ticket value, spawn subagents, or edit
+    source files.
 assert:
   - type: javascript
     value: |
       const txt = String(output);
-      const hasSkillInvocation = /(?:\/)?zensu:reset-review-limit/.test(txt);
-      return {
-        pass: hasSkillInvocation,
-        score: hasSkillInvocation ? 1 : 0,
-        reason: "Output must reference the zensu:reset-review-limit skill (with or without leading slash — claude's tool_use payload renders the skill name without slash)"
-      };
+      const ok = /(?:\/)?zensu:reset-review-limit/.test(txt);
+      return { pass: ok, score: ok ? 1 : 0, reason: "Must invoke the reset-review-limit skill" };
   - type: javascript
     value: |
       const txt = String(output);
-      const hasNoOpMessage = /No round counter files in|does not exist/i.test(txt);
-      return {
-        pass: hasNoOpMessage,
-        score: hasNoOpMessage ? 1 : 0,
-        reason: "Output must contain the skill's idempotent no-op message ('No round counter files in' or 'does not exist')"
-      };
+      const ok = /Current generation rearm: rejected \(no consumed terminal ticket\)/.test(txt);
+      return { pass: ok, score: ok ? 1 : 0, reason: "Must report the missing current ticket without scanning" };
   - type: javascript
     value: |
       const txt = String(output);
-      const claimedRemoval = /^Removed:/m.test(txt) || /^Reset complete:/m.test(txt);
-      return {
-        pass: !claimedRemoval,
-        score: claimedRemoval ? 0 : 1,
-        reason: "Output must NOT claim removal or completion when the directory was already empty (recipe text inside echo \"...\" doesn't count — the must-not-match is anchored to line start, which catches stdout only)"
-      };
-  - type: javascript
-    value: |
-      const txt = String(output);
-      const hasStateDirPath = /\.zensu\/state/.test(txt);
-      return {
-        pass: hasStateDirPath,
-        score: hasStateDirPath ? 1 : 0,
-        reason: "Output must echo the .zensu/state path the skill inspected"
-      };
+      const claimedMutation = /^Removed:|^Reset complete:/m.test(txt);
+      return { pass: !claimedMutation, score: claimedMutation ? 0 : 1, reason: "Must not claim a filesystem mutation" };

@@ -63,10 +63,20 @@ else
   check "P3d 422 guidance demoted to last-resort" FAIL
 fi
 WF_SECTION="$(awk '/Anchor validation \(mandatory/,/eliminates the 422/' "$WORKFLOW_MD")"
-if grep -qF 'CLAUDE_PLUGIN_ROOT' "$PUBLISH_MD" && printf '%s' "$WF_SECTION" | grep -qF 'valid-diff-lines.js' && printf '%s' "$WF_SECTION" | grep -qF 'CLAUDE_PLUGIN_ROOT'; then
-  check "P3e both validation fences use the resolvable plugin root" PASS
+if grep -qF '{ACTIVE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js' "$PUBLISH_MD" \
+  && printf '%s' "$WF_SECTION" | grep -qF 'valid-diff-lines.js' \
+  && printf '%s' "$WF_SECTION" | grep -qF '{ACTIVE_PLUGIN_ROOT}'; then
+  check "P3e both raw-rule validation fences use the active-root placeholder" PASS
 else
-  check "P3e both validation fences use the resolvable plugin root" FAIL
+  check "P3e both raw-rule validation fences use the active-root placeholder" FAIL
+fi
+if ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$PUBLISH_MD" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$WORKFLOW_MD" \
+  && grep -qF '`{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read`' "$SKILL_MD" \
+  && grep -qF 'concrete `${CLAUDE_PLUGIN_ROOT}`' "$SKILL_MD"; then
+  check "P3e2 registered parent maps native root into raw Read resources" PASS
+else
+  check "P3e2 registered parent maps native root into raw Read resources" FAIL
 fi
 if grep -qF "'<path>'" "$PUBLISH_MD" && grep -qF 'single quotes exactly as shown' "$PUBLISH_MD" && grep -qF 'escape it as' "$PUBLISH_MD"; then
   check "P3f untrusted path is single-quoted with an escape instruction" PASS

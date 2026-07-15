@@ -132,7 +132,7 @@ stateDiagram-v2
 Phase transitions are recorded by invoking the log helper:
 
 ```bash
-bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "..."]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "..."]
 ```
 
 The helper writes both a log line and updates the state file under a `flock` (or `mkdir`-based fallback) mutex.
@@ -288,7 +288,7 @@ Every TDD-Manager task writes to four channels:
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh timestamp $SESSION_EPOCH)" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
+printf '%s%s\n' "$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" timestamp $SESSION_EPOCH)" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
 ```
 
 The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
@@ -296,7 +296,7 @@ The helper resolves the user's configured `logging.timestampStyle` (`wall`, `rel
 Phase transitions are atomic:
 
 ```bash
-bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase {PHASE} --step {step_id} [--reason "{reason}"]
+bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "{reason}"]
 ```
 
 This writes a log line AND updates the state file in a single critical section (under `flock` or mkdir-mutex), preventing concurrent-write races between parallel agents.

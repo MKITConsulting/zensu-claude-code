@@ -70,6 +70,19 @@ hook_ctx() {  # stdin payload, $1 hook script, $2 optional ZENSU_CONFIG override
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}});'
 }
+postreview_ctx() { # $1 session, $2 optional live config; every delivery gets a fresh ticket
+  local sid="$1" cfg="${2:-$ZENSU_CONFIG}" ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$sid" 2>/dev/null)" || return 1
+  SID_VALUE="$sid" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID_VALUE
+    }));
+  ' | hook_ctx "$POSTREV" "$cfg"
+}
 
 echo "== Lib: vanilla flag plumbing =="
 # shellcheck disable=SC1090
@@ -132,7 +145,7 @@ echo "== Begin: failure + robustness paths =="
 touch "$TDD_STATE_DIR/blockfile"
 OUT_A3="$(TDD_STATE_DIR="$TDD_STATE_DIR/blockfile/state" ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "vanilla-fail" 2>"$TDD_STATE_DIR/a3.err")"
 RC_A3=$?
-{ [ "$RC_A3" -ne 0 ] && ! printf '%s' "$OUT_A3" | grep -q "^mode:" && grep -q "active flag write failed" "$TDD_STATE_DIR/a3.err"; } \
+{ [ "$RC_A3" -ne 0 ] && ! printf '%s' "$OUT_A3" | grep -q "^mode:" && grep -q "atomic chain activation failed" "$TDD_STATE_DIR/a3.err"; } \
   && check "A3 unwritable state dir: rc!=0, no mode echo, activation failure on stderr" PASS \
   || check "A3 begin failure path (rc=$RC_A3 stdout='$OUT_A3' err='$(cat "$TDD_STATE_DIR/a3.err")')" FAIL
 SID_A5="vanilla-strtrue"
@@ -247,10 +260,14 @@ echo "== Chain guarantee: vanilla keeps Stop-hook enforcement (live vanilla conf
 bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "block" ] && check "D1 implComplete in vanilla: Stop BLOCKS" PASS || check "D1 vanilla terminus block" FAIL
 case "$(stop_reason "$SID_B" "$CFG_VANILLA")" in *"zensu:code-reviewer"*) check "D2 block reason forces zensu:code-reviewer" PASS ;; *) check "D2 reason code-reviewer" FAIL ;; esac
-bash "$LOG" --code-review-done --session "$SID_B" >/dev/null 2>&1
+postreview_ctx "$SID_B" "$CFG_VANILLA" >/dev/null
+VANILLA_REVIEW_TICKET="$(bash "$LOG" --current-review-ticket --session "$SID_B" 2>/dev/null)"
+bash "$LOG" --code-review-done --claimed-review-ticket "$VANILLA_REVIEW_TICKET" \
+  --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "block" ] && check "D3 codeReviewDone in vanilla: Stop still BLOCKS" PASS || check "D3 pre-self-review block" FAIL
 case "$(stop_reason "$SID_B" "$CFG_VANILLA")" in *"zensu:self-review"*) check "D4 block reason forces skill='zensu:self-review'" PASS ;; *) check "D4 reason self-review" FAIL ;; esac
-bash "$LOG" --chain-done --session "$SID_B" >/dev/null 2>&1
+bash "$LOG" --chain-done --claimed-review-ticket "$VANILLA_REVIEW_TICKET" \
+  --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "allow" ] && check "D5 chainDone in vanilla: Stop ALLOWS" PASS || check "D5 vanilla terminus allow" FAIL
 
 echo "== Ask-hooks: mode-aware directives =="
@@ -284,7 +301,9 @@ RM_D="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanil
   && check "F4b reminder (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F4b reminder default vanilla" FAIL
 
 echo "== Post-review: mode-aware fix directive =="
-PR_V="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_B"'"}' | hook_ctx "$POSTREV")"
+bash "$LOG" --tdd-begin --session "$SID_B" >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null 2>&1
+PR_V="$(postreview_ctx "$SID_B")"
 { printf '%s' "$PR_V" | grep -q "vanilla" \
   && ! printf '%s' "$PR_V" | grep -qF "strict TDD discipline" \
   && ! printf '%s' "$PR_V" | grep -qF "After the fixes are GREEN" \
@@ -293,21 +312,29 @@ PR_V="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"sess
   && printf '%s' "$PR_V" | grep -qF "subagent_type='zensu:code-reviewer'"; } \
   && check "D6 post-review (vanilla session): vanilla fix wording + done-phrase, pinned literals retained" PASS \
   || check "D6 post-review vanilla directive" FAIL
-PR_S="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_A"'"}' | hook_ctx "$POSTREV")"
+ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_A" >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session "$SID_A" >/dev/null 2>&1
+PR_S="$(postreview_ctx "$SID_A")"
 { printf '%s' "$PR_S" | grep -qF "strict TDD discipline" \
   && printf '%s' "$PR_S" | grep -qF "After the fixes are GREEN" \
   && printf '%s' "$PR_S" | grep -qF "subagent_type='zensu:code-reviewer'"; } \
   && check "D7 post-review (strict session): strict fix wording + done-phrase unchanged" PASS \
   || check "D7 post-review strict directive" FAIL
-PR_S2="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_A"'"}' | hook_ctx "$POSTREV" "$CFG_VANILLA")"
+PR_S2="$(postreview_ctx "$SID_A" "$CFG_VANILLA")"
 printf '%s' "$PR_S2" | grep -qF "strict TDD discipline" \
   && check "D8 post-review (strict state, vanilla LIVE config): strict wording — state wins (frozen)" PASS \
   || check "D8 post-review freeze cross-pin" FAIL
 SID_C="vanilla-conv"
 ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_C" >/dev/null 2>&1
-mkdir -p "$PROJ/state"
-printf '%s' '{"count":5}' > "$PROJ/state/rounds-${SID_C}.json"
-PR_CONV="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_C"'"}' | hook_ctx "$POSTREV" "$CFG_VANILLA")"
+bash "$LOG" --tdd-complete --session "$SID_C" >/dev/null 2>&1
+# Drive five real deliveries so state.reviewRound (the authority) and the
+# derived public counter stay consistent before delivery six crosses the cap.
+CONV_ROUND=0
+while [ "$CONV_ROUND" -lt 5 ]; do
+  postreview_ctx "$SID_C" "$CFG_VANILLA" >/dev/null
+  CONV_ROUND=$((CONV_ROUND + 1))
+done
+PR_CONV="$(postreview_ctx "$SID_C" "$CFG_VANILLA")"
 { printf '%s' "$PR_CONV" | grep -qF "Auto-fix convergence" \
   && printf '%s' "$PR_CONV" | grep -qF "skill='zensu:self-review'" \
   && [ "$(tdd_get_flag "$(tdd_state_file "$SID_C")" codeReviewDone)" = "true" ] \
@@ -321,7 +348,11 @@ parity() {
   local f="$1"; shift
   local d
   d="$(mktemp -d "$TDD_STATE_DIR/parity-XXXXXX")"
-  awk -v dir="$d" '{ if ($0 ~ /^cat <<.JSON.$/) { n++; inb=1; next } if ($0 == "JSON") { inb=0 } if (inb) print > (dir "/b" n) }' "$f"
+  awk -v dir="$d" '{
+    if ($0 ~ /^[[:space:]]*cat[[:space:]]+<<\047?JSON\047?([[:space:]]*\|.*)?$/) { n++; inb=1; next }
+    if ($0 ~ /^[[:space:]]*JSON[[:space:]]*$/) { inb=0; next }
+    if (inb) print > (dir "/b" n)
+  }' "$f"
   if [ ! -f "$d/b1" ] || [ ! -f "$d/b2" ]; then echo "MISSING_BLOCKS"; return; fi
   if [ -f "$d/b3" ]; then echo "EXTRA_BLOCKS"; return; fi
   local p

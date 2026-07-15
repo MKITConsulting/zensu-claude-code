@@ -106,6 +106,18 @@ if grep -rqF '~/.claude/skills' "$SKILL_DIR"; then
 else
   check "P7 no hardcoded ~/.claude/skills home path (bundled-path safe)" PASS
 fi
+WORKFLOW_RULE="$SKILL_DIR/rules/workflow.md"
+PUBLISH_RULE="$SKILL_DIR/rules/github-publish.md"
+if grep -qF '`{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read`' "$SKILL_MD" \
+  && grep -qF 'concrete `${CLAUDE_PLUGIN_ROOT}`' "$SKILL_MD" \
+  && grep -qF '{ACTIVE_PLUGIN_ROOT}' "$WORKFLOW_RULE" \
+  && grep -qF '{ACTIVE_PLUGIN_ROOT}' "$PUBLISH_RULE" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$WORKFLOW_RULE" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$PUBLISH_RULE"; then
+  check "P7a registered skill maps native root into raw Read rules" PASS
+else
+  check "P7a registered skill maps native root into raw Read rules" FAIL
+fi
 
 # P8 — plugin.json skills[] registration
 if jq -e '.skills | index("./skills/pr-team-review")' "$PLUGIN_JSON" >/dev/null 2>&1; then

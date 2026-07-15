@@ -31,7 +31,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 ## Workflow
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `bash "$(cat "$HOME/.zensu/plugin-root")/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
 
 ### Step 1: Load Feature Context
 
