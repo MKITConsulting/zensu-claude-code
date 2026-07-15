@@ -21,7 +21,7 @@ zensu-plm                /zensu:tdd         Zensu Dashboard
 
 **Layer 1 — Planning (WHAT is being built?):** Bootstrap a greenfield product from a vision document (`/zensu:bootstrap`), or scan an existing codebase to discover and import undocumented features (`/zensu:ghost-scan`) — or, for a brownfield repo that *also* ships a forward plan doc, run the **hybrid**: ghost-scan what is built, then add the plan's not-yet-built items as `planned` features. All end with features tracked in Zensu with security profiles, user journeys, and pricing tiers. Each discovered feature is seated at a **v1 build-out baseline** (a revision); features grow from there through deeper revisions (stages) and subfeatures (parts).
 
-**Layer 2 — Implementation (HOW is it built securely?):** Strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) enforced by a PreToolUse FSM (Finite State Machine — a discipline tracker with a small set of allowed states and transitions) gate (`pre-edit-tdd-reminder.sh`) that blocks edits outside the declared RED→IMPL→GREEN phase. Followed by 5 sequential specialist code-review perspectives.
+**Layer 2 — Implementation (HOW is it built securely?):** Vanilla by default — implement directly, with the evidence audits and the guaranteed review chain still on. Opt-in strict TDD (Test-Driven Development — write a failing test first, then the minimum implementation to make it pass, then refactor) is enforced by a PreToolUse FSM (Finite State Machine — a discipline tracker with a small set of allowed states and transitions) gate (`pre-edit-tdd-reminder.sh`) that blocks edits outside the declared RED→IMPL→GREEN phase. Followed by 5 parallel specialist code-review perspectives and a second-pass review judge.
 
 **Layer 3 — Tracking (HOW is progress tracked?):** Web dashboard for POs and stakeholders — security scores, tier matrix, journey health, coverage trends. No terminal required.
 
@@ -245,11 +245,11 @@ No configuration needed. When you first use a Zensu tool, Claude Code will autom
 
 ### API Key (CI/CD)
 
-For headless environments where browser login isn't available, authenticate the `zensu` CLI with an API key instead of the OAuth browser flow. Set `ZENSU_API_KEY` and use the CLI's auth command:
+For headless environments where browser login isn't available, authenticate the `zensu` CLI with an API key instead of the OAuth browser flow — pipe it to the token form (a bare `zensu auth login` opens a browser and never reads the env var):
 
 ```bash
-export ZENSU_API_KEY=zsk_...
-zensu auth login   # see `zensu auth --help` for the exact non-interactive / token flags
+# ZENSU_API_KEY from your CI secrets
+echo "$ZENSU_API_KEY" | zensu auth login --with-token -
 ```
 
 Verify the session with `zensu auth status`; clear it with `zensu auth logout`. Run `zensu auth --help` for where the token is cached and the headless-auth options.
@@ -327,7 +327,7 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 
 ### Skills (20)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (20 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (21 skills are registered in `plugin.json`).
 
 | Skill | Description |
 |-------|-------------|
@@ -337,13 +337,13 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:cover` | Author durable, right-level tests (unit → integration → E2E) for a change — generic across stacks. Green-first coverage of existing code, report-only on surfaced bugs; reuses the `zensu:review-aspect` fan-out + `zensu:code-reviewer`. The durable-test complement to `/zensu:autopilot`'s one-shot validation (persist its ACs via `--from-acs`). |
 | `/zensu:verify-feature` | Live-verify an already-built feature against the current worktree or a deployed preview. Builds a diff-grounded P0/P1/P2 matrix, drives the real UI through the pinned, integrity-locked Playwright MCP configuration, and reports DOM/data, visual, console, and network evidence. Credential-blind and report-only: it neither fixes code nor writes committed tests. The exact origin, page routes, and `declared-safe` evidence mode must already be present in the parent navigation policy; unknown dynamic ports require discovery followed by a restarted policy-configured session. First use may require npm/network access to install the locked runtime. |
 | `/zensu:converge` | Bidirectional flow-back audit: evaluate the current code state against the newest plan's `## Requirements` table (stable `AC-###`/`FR-###` IDs), classify gaps (`missing` / `partial` / `contradicts` / `unrequested`), split unrequested work into business rules vs implementation details, and propose plan edits with freshly allocated stable IDs — applied only after explicit user confirmation (report-only in non-interactive runs; legacy plans without a Requirements table stop cleanly). Offered at the `/zensu:tdd` chain end; `/zensu:autopilot` runs it report-only before opening the PR. |
-| `/zensu:tdd` | Strict RED→IMPL→GREEN TDD in the main thread, enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |
+| `/zensu:tdd` | Guided implementation in the main thread — vanilla by default, opt-in strict RED→IMPL→GREEN enforced by the PreToolUse phase-gate; ends by spawning `zensu:code-reviewer` with a Stop-hook-guaranteed auto-fix chain. Invoked by plan-approval (on your confirmation), `/zensu:implement`, or directly. |
 | `/zensu:docs` | Author code-grounded documentation for a tracked feature (or a whole product/component in one batch) so it honestly clears the hardened `docs_complete` release gate — one feature-specific doc per feature from the REAL linked source, published to the wiki (or a per-feature repo file) and linked via `zensu link docs`; forbids placeholder / metadata-dump stubs. Idempotent, batchable, and logs every feature skipped or failed. |
 | `/zensu:wargame` | Wargame a hard mission before a cheaper executor runs it — an executable-blind battle plan (every move + expected observation, likely failure + counter-move, forks, abort conditions, verification runs, red-team pass, graded against an 8-point standard). Also handles `/goal` property-proof contracts; code/feature missions reuse the Zensu review chain to converge. |
-| `/zensu:autopilot` | Take a feature from a plain-language idea to a ready, validated GitHub PR — one interactive planning gate, then an autonomous build via vanilla `/zensu:tdd`, gates, converge report, PR, one `/zensu:pr-team-review` pass, `/zensu:pr-fix-findings`, and a validate↔fix loop driven by a pluggable, credential-blind driver. Stops at a ready PR; never merges or deploys. |
-| `/zensu:pr-fix-findings` | Fix every unresolved review comment on a GitHub PR end-to-end: locate the PR, pull unresolved threads, triage, implement each fix through vanilla `/zensu:tdd`, push, and resolve the threads. Built to run standalone or repeatedly until no unresolved threads remain. |
+| `/zensu:autopilot` | Take a feature from a plain-language idea to a ready, validated GitHub or GitLab pull/merge request — one interactive planning gate, then an autonomous build via vanilla `/zensu:tdd`, gates, converge report, PR/MR via the pluggable VCS driver, one `/zensu:pr-team-review` pass, `/zensu:pr-fix-findings`, and a validate↔fix loop driven by a pluggable, credential-blind driver. Stops at a ready PR; never merges or deploys. |
+| `/zensu:pr-fix-findings` | Fix every unresolved review comment on a GitHub or GitLab pull/merge request end-to-end: locate the PR/MR via the VCS driver, pull unresolved threads, triage, implement each fix through vanilla `/zensu:tdd`, push, and resolve the threads on the forge. Built to run standalone or repeatedly until no unresolved threads remain. |
 | `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
-| `/zensu:pr-team-review` | Multi-agent review of an **existing GitHub PR**: scouts the PR, auto-casts a tailored reviewer team from a 25-persona pool (always-on holistic core: coverage, correctness, maintainability, anti-groupthink), **always runs an explicit test-coverage evaluation that flags uncovered files and paths** (mandatory `### Test Coverage` section; `--coverage-gate` to block on uncovered production files, `--run-coverage` to run the real tool), fetches the PR into an isolated git worktree (main checkout untouched), spawns the reviewers in parallel, runs a debate (with an anti-groupthink challenge round) + synthesis pass, then publishes one consolidated GitHub review (inline comments + overall body) via `gh api` — every inline anchor is pre-validated against the PR diff (`hooks/lib/valid-diff-lines.js`) with nearest-line remap so no finding is lost to a 422. Complements `/zensu:plan-review` (which validates a plan before code exists). |
+| `/zensu:pr-team-review` | Multi-agent review of an **existing GitHub or GitLab PR/MR**: scouts the PR via the VCS driver, auto-casts a tailored reviewer team from a 25-persona pool (always-on holistic core: coverage, correctness, maintainability, anti-groupthink), **always runs an explicit test-coverage evaluation that flags uncovered files and paths** (mandatory `### Test Coverage` section; `--coverage-gate` to block on uncovered production files, `--run-coverage` to run the real tool), fetches the PR into an isolated git worktree (main checkout untouched), spawns the reviewers in parallel, runs a debate (with an anti-groupthink challenge round) + synthesis pass, then publishes one consolidated review — GitHub: one atomic review (inline comments + overall body) via `gh api`; GitLab: a summary note + inline discussions via `glab` — every inline anchor is pre-validated against the PR diff (`hooks/lib/valid-diff-lines.js`) with nearest-line remap so no finding is lost to a 422. Complements `/zensu:plan-review` (which validates a plan before code exists). |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository with a multi-perspective agent fan-out to discover undocumented features, user journeys, and docs, and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
@@ -361,7 +361,7 @@ test remains offline and deterministic for the default repository suite.
 
 A read-only health check for the install, for when something is not firing and you want to see why. `/zensu:doctor` runs `hooks/lib/zensu-doctor.sh` and prints one four-block ✅/⚠️/❌ table:
 
-- **CLI & tooling** — zensu CLI present + authenticated, node version, `gh` present + authenticated, and the pinned, integrity-locked Playwright MCP config used by `/zensu:verify-feature` (plus the `/zensu:autopilot` browser driver). Doctor validates the declaration and lockfile offline without executing `npm`; “configured” remains a warning until loaded MCP tools prove runtime readiness.
+- **CLI & tooling** — zensu CLI present + authenticated, node version, the forge CLI for the detected provider (`gh`/`glab`) present + authenticated, and the pinned, integrity-locked Playwright MCP config used by `/zensu:verify-feature` (plus the `/zensu:autopilot` browser driver). Doctor validates the declaration and lockfile offline without executing `npm`; “configured” remains a warning until loaded MCP tools prove runtime readiness.
 - **Plugin integrity** — every `hooks.json` command resolves to a script on disk (and every hook script is referenced), and `plugin.json` ↔ `marketplace.json` versions agree.
 - **Config** — the effective config files are valid JSON and free of the **quoted-boolean trap**: a value written as the string `"true"`/`"false"` is silently ignored by the strict `=== true` checks, so the feature stays at its default until you drop the quotes. Doctor names each offending key.
 - **Session state** — the state dir is writable, and leftover per-session markers or an expired `pending-review.json` are counted.
@@ -394,8 +394,8 @@ The helper never writes and always exits `0` — a red ❌ is a finding in the r
 ```
 1. /zensu:bootstrap          → Create product, features, journeys, tiers
 2. /zensu:implement ZEN-1    → Load context, plan implementation
-3. /zensu:tdd                → Strict TDD in the main thread (RED→GREEN per step)
-4. @code-reviewer            → 5-perspective sequential review (spawned by /zensu:tdd Phase 6, Stop-hook guaranteed)
+3. /zensu:tdd                → Guided implementation in the main thread (vanilla; opt-in strict RED→GREEN)
+4. review chain              → 5 parallel review-aspect agents + review-judge, merged by code-reviewer (spawned by /zensu:tdd Phase 6, Stop-hook guaranteed)
 5. auto-fix loop             → Critical/Important findings fixed in-thread, then re-reviewed, capped at autoFixMaxRounds
 6. /zensu:security-review    → OWASP, threat model, release gate check
 ```
@@ -430,8 +430,8 @@ No separate skill — the agent runs ghost-scan, then creates the remainder as p
 ## Graceful Degradation
 
 The TDD workflow and code reviewer work **without a Zensu account**. No `zensu` CLI needed for:
-- TDD orchestration (RED→GREEN cycles)
-- Code review (5 sequential specialist perspectives)
+- TDD orchestration (vanilla; opt-in RED→GREEN cycles)
+- Code review (5 parallel review-aspect perspectives + review judge)
 - Progress logging (`.zensu/logs/`)
 
 When the `zensu` CLI is installed and authenticated, additional capabilities activate:
@@ -548,7 +548,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — consumed by the `zensu` CLI's auth (see [Authentication](#authentication)); not needed when using OAuth browser login |
+| `ZENSU_API_KEY` | — | API key for headless/CI-CD auth — piped to `zensu auth login --with-token -` (see [Authentication](#authentication)); not needed when using OAuth browser login |
 | `ZENSU_API_URL` | `https://api.zensu.dev` | Points the `zensu` CLI at a self-hosted Zensu backend (overridden per-invocation by the `--api-url` global flag). See [Self-hosting](#self-hosting). |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits during a main-thread `/zensu:tdd` session. Any other value (or unset) leaves the gate active while the session's chain-state `active` flag is set. |
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the session's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log`. |
@@ -610,7 +610,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 |---------|----------|
 | `zensu` CLI not found | Install the CLI (`curl -fsSL https://zensu.dev/install.sh \| sh`) and ensure it is on `PATH` — the session banner warns when it is missing |
 | Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](#self-hosting)), and that `zensu auth status` shows a logged-in session |
-| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `zensu auth login` — see [API Key (CI/CD)](#api-key-cicd) |
+| Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `echo "$ZENSU_API_KEY" \| zensu auth login --with-token -` — see [API Key (CI/CD)](#api-key-cicd) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
 | Agent triggers on non-Zensu tasks | The `zensu-plm` agent's `description:` frontmatter triggers it on Zensu-related keywords. To avoid this, invoke a specific agent explicitly via `@<agent-name>` or refine your prompt. |
 | OAuth login not opening | Check your default browser settings |

@@ -11,7 +11,7 @@
     {
       "name": "zensu",
       "displayName": "Zensu",
-      "description": "Product Lifecycle Manager — Features as First-Class Citizens. Track features, run strict RED→GREEN TDD, security reviews, and release readiness.",
+      "description": "Product Lifecycle Manager — Features as First-Class Citizens. Track features, implement with a Stop-hook-guaranteed review chain (vanilla by default, opt-in strict RED→GREEN TDD), run security reviews, ship PRs on GitHub or GitLab, and gate release readiness.",
       "author": {
         "name": "Zensu",
         "url": "https://github.com/MKITConsulting/zensu-claude-code"
