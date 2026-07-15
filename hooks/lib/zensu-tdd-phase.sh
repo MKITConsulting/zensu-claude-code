@@ -47,8 +47,24 @@ _tdd_paths_safe() {
         const mode = args[pair + 1];
         if (!validModes.has(mode)) process.exit(3);
         const candidates = trusted.filter(value => within(value, target)).sort((a, b) => b.length - a.length);
-        const anchor = candidates[0] || "";
-        if (!anchor) process.exit(3);
+        let anchor = candidates[0] || "";
+        if (!anchor) {
+          let cursor = path.dirname(target);
+          for (;;) {
+            try {
+              const st = fs.lstatSync(cursor);
+              if (st.isDirectory() && !st.isSymbolicLink()) {
+                anchor = cursor;
+                break;
+              }
+            } catch (error) {
+              if (error.code !== "ENOENT") process.exit(3);
+            }
+            const parent = path.dirname(cursor);
+            if (parent === cursor) process.exit(3);
+            cursor = parent;
+          }
+        }
         let physicalAnchor;
         try { physicalAnchor = fs.realpathSync(anchor); }
         catch (_) { process.exit(3); }

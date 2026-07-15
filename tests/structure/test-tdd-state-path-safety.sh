@@ -128,6 +128,29 @@ else
   check "P7 state.reviewRound remains authoritative over the derived counter" FAIL
 fi
 
+# Explicit state roots may live on a mounted/shared sibling outside the project,
+# configured temp root, and configured home. Only the existing parents are
+# created up front so the validator must select an ancestor and inspect every
+# new component before either override is used.
+P8="$ROOT/project-outside-anchor"
+TMP8="$ROOT/runtime-temp-anchor"
+HOME8="$ROOT/runtime-home-anchor"
+STATE_PARENT8="$ROOT/external-state-parent"
+ROUNDS_PARENT8="$ROOT/external-rounds-parent"
+S8="$STATE_PARENT8/deep/state"
+R8="$ROUNDS_PARENT8/deep/rounds"
+mkdir -p "$P8" "$TMP8" "$HOME8" "$STATE_PARENT8" "$ROUNDS_PARENT8"
+if env TMPDIR="$TMP8" HOME="$HOME8" CLAUDE_PROJECT_DIR="$P8" \
+    TDD_STATE_DIR="$S8" CLAUDE_PLUGIN_DATA_OVERRIDE="$R8" \
+    bash "$LOG" --tdd-begin --session outside-anchor >/dev/null 2>&1 \
+  && [ -f "$S8/tdd-phase-outside-anchor.json" ] \
+  && [ ! -L "$S8/tdd-phase-outside-anchor.json" ] \
+  && [ -d "$R8" ] && [ ! -L "$R8" ]; then
+  check "P8 explicit state roots outside project, temp, and home use a safe existing ancestor" PASS
+else
+  check "P8 explicit outside state roots remain supported" FAIL
+fi
+
 echo "----"
 echo "test-tdd-state-path-safety: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
