@@ -15,6 +15,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+AUTOPILOT_STATE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 
@@ -106,12 +107,17 @@ BEGIN_BRANCH="$(awk '
   inside { print }
   inside && /^[[:space:]]*;;[[:space:]]*$/ { exit }
 ' "$LOG")"
-BEGIN_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'tdd_begin_session "$session_val" "$begin_vanilla"')"
-if [ "$BEGIN_CALLS" = "1" ] \
+STANDALONE_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}"')"
+BOUND_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'autopilot_begin_tdd_attempt "$autopilot_run_val" "$start_event_id"')"
+STANDALONE_CRITICAL="$(awk '/^_autopilot_begin_standalone_tdd_critical\(\)/,/^}/' "$AUTOPILOT_STATE")"
+BOUND_CRITICAL="$(awk '/^_autopilot_begin_tdd_critical\(\)/,/^}/' "$AUTOPILOT_STATE")"
+if [ "$STANDALONE_CALLS" = "1" ] && [ "$BOUND_CALLS" = "1" ] \
+  && printf '%s\n' "$STANDALONE_CRITICAL" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
+  && printf '%s\n' "$BOUND_CRITICAL" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
   && ! printf '%s\n' "$BEGIN_BRANCH" | grep -qE 'tdd_set_flag|tdd_reset_chain_flags'; then
   check "C3b --tdd-begin uses one atomic state transition" PASS
 else
-  check "C3b --tdd-begin uses one atomic state transition (calls=$BEGIN_CALLS)" FAIL
+  check "C3b --tdd-begin uses one atomic state transition (standalone=$STANDALONE_CALLS bound=$BOUND_CALLS)" FAIL
 fi
 
 D3="$(stop_dec)"

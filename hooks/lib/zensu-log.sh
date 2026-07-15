@@ -153,24 +153,209 @@ case "${1:-}" in
     esac
     exit $?
     ;;
+  --autopilot-begin)
+    run_val=""
+    session_val=""
+    cover_val=false
+    validate_val=true
+    seen_run=false
+    seen_session=false
+    seen_cover=false
+    seen_validate=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$seen_run" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --run" >&2; exit 2; }
+          seen_run=true; run_val="$2"; shift 2
+          ;;
+        --session)
+          [ "$seen_session" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --session" >&2; exit 2; }
+          seen_session=true; session_val="$2"; shift 2
+          ;;
+        --cover)
+          [ "$seen_cover" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --cover" >&2; exit 2; }
+          seen_cover=true; cover_val="$2"; shift 2
+          ;;
+        --validate)
+          [ "$seen_validate" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --validate" >&2; exit 2; }
+          seen_validate=true; validate_val="$2"; shift 2
+          ;;
+        *) echo "zensu-log.sh --autopilot-begin: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$seen_run" = true ] || { echo "zensu-log.sh --autopilot-begin requires --run <id>" >&2; exit 2; }
+    if [ "$seen_session" = true ] && [ -z "$session_val" ]; then
+      echo "zensu-log.sh --autopilot-begin: --session must not be empty" >&2
+      exit 2
+    fi
+    case "$cover_val" in true|false) ;; *) echo "zensu-log.sh --autopilot-begin: --cover must be true or false" >&2; exit 2 ;; esac
+    case "$validate_val" in true|false) ;; *) echo "zensu-log.sh --autopilot-begin: --validate must be true or false" >&2; exit 2 ;; esac
+    if [ -z "$session_val" ]; then
+      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-begin --run $run_val}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    else
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_val="$(zensu_resolve_session_id "$session_val")"
+    fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val"
+    exit $?
+    ;;
+  --autopilot-event)
+    run_val=""
+    event_val=""
+    event_id_val=""
+    payload_val='{}'
+    seen_run=false
+    seen_event=false
+    seen_event_id=false
+    seen_payload=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$seen_run" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-event: duplicate/missing --run" >&2; exit 2; }
+          seen_run=true; run_val="$2"; shift 2
+          ;;
+        --event)
+          [ "$seen_event" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-event: duplicate/missing --event" >&2; exit 2; }
+          seen_event=true; event_val="$2"; shift 2
+          ;;
+        --event-id)
+          [ "$seen_event_id" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-event: duplicate/missing --event-id" >&2; exit 2; }
+          seen_event_id=true; event_id_val="$2"; shift 2
+          ;;
+        --payload)
+          [ "$seen_payload" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-event: duplicate/missing --payload" >&2; exit 2; }
+          seen_payload=true; payload_val="$2"; shift 2
+          ;;
+        *) echo "zensu-log.sh --autopilot-event: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$seen_run" = true ] && [ "$seen_event" = true ] && [ "$seen_event_id" = true ] || {
+      echo "zensu-log.sh --autopilot-event requires --run, --event, and --event-id" >&2
+      exit 2
+    }
+    case "$event_val" in
+      TDD_STARTED|TDD_CHAIN_DONE)
+        echo "zensu-log.sh --autopilot-event: $event_val is internal; use the generation-bound TDD commands" >&2
+        exit 2
+        ;;
+    esac
+    export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-event --run $run_val --event $event_val --event-id $event_id_val}"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    caller_session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    autopilot_apply_event "$run_val" "$event_id_val" "$event_val" "$payload_val" \
+      "${CLAUDE_PROJECT_DIR:-.}" "$caller_session_val"
+    exit $?
+    ;;
+  --autopilot-status)
+    [ $# -eq 1 ] || { echo "zensu-log.sh --autopilot-status accepts no arguments" >&2; exit 2; }
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}"
+    exit $?
+    ;;
   --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
     tools_val=""
     claimed_ticket_val=""
     claimed_ticket_seen=false
+    autopilot_run_val=""
+    autopilot_attempt_val=""
+    autopilot_return_stage_val=""
+    chain_id_val=""
+    chain_outcome_val=""
+    seen_session=false
+    seen_tools=false
+    seen_claimed_ticket=false
+    seen_autopilot_run=false
+    seen_autopilot_attempt=false
+    seen_autopilot_return=false
+    seen_chain_id=false
+    seen_outcome=false
+    shift
     while [ $# -gt 0 ]; do
       case "$1" in
-        --session) session_val="${2:-}"; shift 2 || break ;;
-        --tools)   tools_val="${2:-}";   shift 2 || break ;;
+        --session)
+          [ "$seen_session" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --session" >&2; exit 2; }
+          seen_session=true; session_val="$2"; shift 2 ;;
+        --tools)
+          [ "$seen_tools" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --tools" >&2; exit 2; }
+          seen_tools=true; tools_val="$2"; shift 2 ;;
+        --autopilot-run)
+          [ "$seen_autopilot_run" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --autopilot-run" >&2; exit 2; }
+          seen_autopilot_run=true; autopilot_run_val="$2"; shift 2 ;;
+        --autopilot-attempt)
+          [ "$seen_autopilot_attempt" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --autopilot-attempt" >&2; exit 2; }
+          seen_autopilot_attempt=true; autopilot_attempt_val="$2"; shift 2 ;;
+        --autopilot-return-stage)
+          [ "$seen_autopilot_return" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --autopilot-return-stage" >&2; exit 2; }
+          seen_autopilot_return=true; autopilot_return_stage_val="$2"; shift 2 ;;
+        --chain-id)
+          [ "$seen_chain_id" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --chain-id" >&2; exit 2; }
+          seen_chain_id=true; chain_id_val="$2"; shift 2 ;;
+        --outcome)
+          [ "$seen_outcome" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --outcome" >&2; exit 2; }
+          seen_outcome=true; chain_outcome_val="$2"; shift 2 ;;
         --claimed-review-ticket)
+          [ "$seen_claimed_ticket" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --claimed-review-ticket" >&2; exit 2; }
+          seen_claimed_ticket=true
           claimed_ticket_seen=true
-          claimed_ticket_val="${2:-}"
-          shift 2 || break
+          claimed_ticket_val="$2"
+          shift 2
           ;;
-        *) shift ;;
+        *) echo "zensu-log.sh $verb: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
+    if [ "$seen_session" = true ] && [ -z "$session_val" ]; then
+      echo "zensu-log.sh $verb: --session must not be empty" >&2
+      exit 2
+    fi
+    invalid_known_flag=false
+    case "$verb" in
+      --tdd-begin|--tdd-complete)
+        [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
+          && [ "$seen_outcome" = false ] || invalid_known_flag=true
+        ;;
+      --review-ticket|--current-review-ticket|--tdd-reset)
+        [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
+          && [ "$seen_autopilot_run" = false ] && [ "$seen_autopilot_attempt" = false ] \
+          && [ "$seen_autopilot_return" = false ] && [ "$seen_chain_id" = false ] \
+          && [ "$seen_outcome" = false ] || invalid_known_flag=true
+        ;;
+      --review-rearm)
+        [ "$seen_tools" = false ] && [ "$seen_outcome" = false ] || invalid_known_flag=true
+        ;;
+      --chain-done)
+        [ "$seen_tools" = false ] || invalid_known_flag=true
+        ;;
+      --code-review-done|--self-review-fixed)
+        [ "$seen_tools" = false ] && [ "$seen_autopilot_run" = false ] \
+          && [ "$seen_autopilot_attempt" = false ] && [ "$seen_autopilot_return" = false ] \
+          && [ "$seen_chain_id" = false ] && [ "$seen_outcome" = false ] \
+          || invalid_known_flag=true
+        ;;
+      --workflow-begin)
+        [ "$seen_claimed_ticket" = false ] && [ "$seen_autopilot_run" = false ] \
+          && [ "$seen_autopilot_attempt" = false ] && [ "$seen_autopilot_return" = false ] \
+          && [ "$seen_chain_id" = false ] && [ "$seen_outcome" = false ] \
+          || invalid_known_flag=true
+        ;;
+      --workflow-end)
+        [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
+          && [ "$seen_autopilot_run" = false ] && [ "$seen_autopilot_attempt" = false ] \
+          && [ "$seen_autopilot_return" = false ] && [ "$seen_chain_id" = false ] \
+          && [ "$seen_outcome" = false ] || invalid_known_flag=true
+        ;;
+    esac
+    if [ "$invalid_known_flag" = true ]; then
+      echo "zensu-log.sh $verb: option is not valid for this verb" >&2
+      exit 2
+    fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
@@ -189,8 +374,33 @@ case "${1:-}" in
         else
           begin_vanilla=true
         fi
-        tdd_begin_session "$session_val" "$begin_vanilla"
-        tdd_begin_rc=$?
+        if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
+          [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] \
+            && [ -n "$autopilot_return_stage_val" ] && [ -n "$chain_id_val" ] || {
+              echo "zensu-log.sh --tdd-begin: Autopilot linkage requires --autopilot-run, --autopilot-attempt, --autopilot-return-stage, and --chain-id" >&2
+              exit 2
+            }
+        fi
+        if [ -n "$autopilot_run_val" ]; then
+          source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+          start_event_id="$(autopilot_chain_event_id start "$chain_id_val")" || {
+            echo "zensu-log.sh --tdd-begin: invalid Autopilot chain identifier" >&2
+            exit 2
+          }
+          autopilot_begin_tdd_attempt "$autopilot_run_val" "$start_event_id" \
+            "${CLAUDE_PROJECT_DIR:-.}" "$session_val" "$begin_vanilla" \
+            "$autopilot_attempt_val" "$autopilot_return_stage_val" "$chain_id_val"
+          tdd_begin_rc=$?
+        else
+          # The absent/terminal decision and the unbound Inner write are one
+          # Outer -> Inner composite. A resumable BLOCKED run is not terminal,
+          # and a concurrent bound start cannot be overwritten after a stale
+          # preflight read.
+          source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+          autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}" \
+            "$session_val" "$begin_vanilla"
+          tdd_begin_rc=$?
+        fi
         if [ "$tdd_begin_rc" -eq 0 ]; then
           if [ "$begin_vanilla" = "true" ]; then
             echo "mode: vanilla"
@@ -204,7 +414,42 @@ case "${1:-}" in
         fi
         exit "$tdd_begin_rc"
         ;;
-      --tdd-complete) tdd_set_flag "$session_val" implComplete true ;;
+      --tdd-complete)
+        if ! complete_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
+          echo "zensu-log.sh --tdd-complete: corrupt, inactive, or foreign session state" >&2
+          exit 1
+        fi
+        if [ "$complete_ctx" = '{}' ]; then
+          if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
+            echo "zensu-log.sh --tdd-complete: Autopilot binding was supplied for a standalone chain" >&2
+            exit 2
+          fi
+          tdd_mark_impl_complete_standalone "$session_val"
+          exit $?
+        fi
+        [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
+          echo "zensu-log.sh --tdd-complete: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
+          exit 2
+        }
+        complete_link="$(AUTOPILOT_CTX="$complete_ctx" RUN="$autopilot_run_val" \
+          ATTEMPT="$autopilot_attempt_val" CHAIN="$chain_id_val" RETURN_STAGE="$autopilot_return_stage_val" node -e '
+          try {
+            const c=JSON.parse(process.env.AUTOPILOT_CTX);
+            const exact=c.sessionId && c.active===true && c.chainDone===false
+              && c.runId===process.env.RUN && String(c.attempt)===process.env.ATTEMPT
+              && c.chainId===process.env.CHAIN
+              && (!process.env.RETURN_STAGE || c.returnStage===process.env.RETURN_STAGE);
+            if(!exact)process.exit(3);
+            process.stdout.write([c.runId,c.attempt,c.chainId].join("\t"));
+          } catch (_) { process.exit(3); }
+        ' 2>/dev/null)" || {
+          echo "zensu-log.sh --tdd-complete: stale or mismatched Autopilot generation" >&2
+          exit 1
+        }
+        IFS=$'\t' read -r complete_run complete_attempt complete_chain <<<"$complete_link"
+        tdd_mark_impl_complete_bound "$session_val" "$complete_run" "$complete_attempt" "$complete_chain"
+        exit $?
+        ;;
       --review-ticket) tdd_issue_review_ticket "$session_val" ;;
       --current-review-ticket) tdd_claimed_review_ticket "$(tdd_state_file "$session_val")" ;;
       --review-rearm)
@@ -212,14 +457,97 @@ case "${1:-}" in
           echo "zensu-log.sh --review-rearm requires --claimed-review-ticket <ticket>" >&2
           exit 2
         }
-        tdd_rearm_review "$session_val" "$claimed_ticket_val"
+        if ! rearm_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
+          echo "zensu-log.sh --review-rearm: corrupt or incomplete Autopilot linkage" >&2
+          exit 1
+        fi
+        if [ "$rearm_ctx" = '{}' ]; then
+          if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
+            echo "zensu-log.sh --review-rearm: Autopilot binding was supplied for a standalone chain" >&2
+            exit 2
+          fi
+          tdd_rearm_review "$session_val" "$claimed_ticket_val"
+          exit $?
+        fi
+        [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
+          echo "zensu-log.sh --review-rearm: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
+          exit 2
+        }
+        rearm_link="$(AUTOPILOT_CTX="$rearm_ctx" RUN="$autopilot_run_val" \
+          ATTEMPT="$autopilot_attempt_val" CHAIN="$chain_id_val" node -e '
+          try {
+            const c=JSON.parse(process.env.AUTOPILOT_CTX);
+            const exact=c.runId===process.env.RUN && String(c.attempt)===process.env.ATTEMPT
+              && c.chainId===process.env.CHAIN;
+            if(!exact)process.exit(3);
+            process.stdout.write([c.runId,c.attempt,c.chainId].join("\t"));
+          } catch (_) { process.exit(3); }
+        ' 2>/dev/null)" || {
+          echo "zensu-log.sh --review-rearm: stale or mismatched Autopilot generation" >&2
+          exit 1
+        }
+        IFS=$'\t' read -r rearm_run rearm_attempt rearm_chain <<<"$rearm_link"
+        source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+        autopilot_rearm_review "$rearm_run" "${CLAUDE_PROJECT_DIR:-.}" "$session_val" \
+          "$rearm_attempt" "$rearm_chain" "$claimed_ticket_val" || {
+          echo "zensu-log.sh --review-rearm: composite outer/inner rearm rejected stale or corrupt state" >&2
+          exit 1
+        }
+        exit 0
         ;;
       --chain-done)
-        if [ "$claimed_ticket_seen" = "true" ]; then
-          tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone
-        else
-          tdd_mark_unclaimed_review "$session_val" chainDone
+        if ! autopilot_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
+          echo "zensu-log.sh --chain-done: corrupt or incomplete Autopilot linkage" >&2
+          exit 1
         fi
+        if [ "$autopilot_ctx" = '{}' ]; then
+          if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
+            echo "zensu-log.sh --chain-done: Autopilot binding was supplied for a standalone chain" >&2
+            exit 2
+          fi
+          if [ -n "$chain_outcome_val" ]; then
+            echo "zensu-log.sh --chain-done: --outcome requires an Autopilot-bound chain" >&2
+            exit 1
+          fi
+          if [ "$(tdd_chain_done "$(tdd_state_file "$session_val")")" != "true" ]; then
+            if [ "$claimed_ticket_seen" = "true" ]; then
+              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || exit $?
+            else
+              tdd_mark_unclaimed_review "$session_val" chainDone || exit $?
+            fi
+          fi
+          exit 0
+        fi
+        [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
+          echo "zensu-log.sh --chain-done: bound chain requires --autopilot-run, --autopilot-attempt, and --chain-id" >&2
+          exit 2
+        }
+        done_fields="$(AUTOPILOT_CTX="$autopilot_ctx" REQUESTED_OUTCOME="$chain_outcome_val" \
+          RUN="$autopilot_run_val" ATTEMPT="$autopilot_attempt_val" CHAIN="$chain_id_val" \
+          RETURN_STAGE="$autopilot_return_stage_val" node -e '
+          try {
+            const c=JSON.parse(process.env.AUTOPILOT_CTX);
+            const exact=c.active===true && c.implComplete===true
+              && c.runId===process.env.RUN && String(c.attempt)===process.env.ATTEMPT
+              && c.chainId===process.env.CHAIN
+              && (!process.env.RETURN_STAGE || c.returnStage===process.env.RETURN_STAGE);
+            if(!exact)process.exit(3);
+            const outcome=process.env.REQUESTED_OUTCOME||c.outcome||"pass";
+            process.stdout.write([c.runId,c.attempt,c.chainId,outcome].join("\t"));
+          } catch (_) { process.exit(3); }
+        ' 2>/dev/null)" || {
+          echo "zensu-log.sh --chain-done: stale or mismatched Autopilot generation" >&2
+          exit 1
+        }
+        IFS=$'\t' read -r done_run done_attempt done_chain done_outcome <<<"$done_fields"
+        source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+        done_event_id="$(autopilot_chain_event_id "done" "$done_chain")" || {
+          echo "zensu-log.sh --chain-done: invalid Autopilot chain identifier" >&2
+          exit 2
+        }
+        autopilot_finish_tdd_attempt "$done_run" "$done_event_id" \
+          "${CLAUDE_PROJECT_DIR:-.}" "$session_val" "$done_attempt" "$done_chain" \
+          "$done_outcome" "$claimed_ticket_seen" "$claimed_ticket_val"
         exit $?
         ;;
       --code-review-done)
@@ -241,8 +569,34 @@ case "${1:-}" in
         ;;
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
       --tdd-reset)
-        tdd_clear_session "$session_val"
-        reset_rc=$?
+        reset_state="$(tdd_state_file "$session_val")"
+        reset_ctx='{}'
+        if [ -e "$reset_state" ] || [ -L "$reset_state" ]; then
+          reset_ctx="$(tdd_autopilot_context "$reset_state" "$session_val" 2>/dev/null)" || {
+            echo "zensu-log.sh --tdd-reset: corrupt or incomplete Autopilot linkage" >&2
+            exit 1
+          }
+        fi
+        if [ "$reset_ctx" != '{}' ]; then
+          reset_fields="$(AUTOPILOT_CTX="$reset_ctx" node -e '
+            try {
+              const c=JSON.parse(process.env.AUTOPILOT_CTX);
+              process.stdout.write([c.runId,c.attempt,c.chainId].join("\t"));
+            }
+            catch (_) { process.exit(3); }
+          ' 2>/dev/null)" || exit 1
+          IFS=$'\t' read -r reset_run reset_attempt reset_chain <<<"$reset_fields"
+          source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+          if ! autopilot_reset_inner "$reset_run" "${CLAUDE_PROJECT_DIR:-.}" "$session_val" \
+              "$reset_attempt" "$reset_chain"; then
+            echo "zensu-log.sh --tdd-reset: an active or resumable durable outer run owns this chain" >&2
+            exit 1
+          fi
+          reset_rc=0
+        else
+          tdd_clear_standalone_session "$session_val"
+          reset_rc=$?
+        fi
         if [ "$reset_rc" -eq 0 ]; then
           tdd_release_pending_review_claim "$session_val"
           reset_rc=$?

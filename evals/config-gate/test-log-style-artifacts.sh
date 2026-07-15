@@ -9,6 +9,9 @@ LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 CFG_NONE="$EVAL_DIR/fixtures/config-log-none.json"
 CFG_WALL="$EVAL_DIR/fixtures/config-log-wall.json"
+PROJECT_ROOT="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
+trap 'rm -rf "$PROJECT_ROOT"' EXIT
 
 PASS=0; FAIL=0
 check() {

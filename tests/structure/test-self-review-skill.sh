@@ -83,6 +83,28 @@ grep -qF 'git diff --name-only' "$SKILL_MD" && check "V7 lists session changes v
 grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed latch" PASS || check "V8 selfReviewFixed latch" FAIL
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL
+if grep -qF 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' "$SKILL_MD" \
+  && grep -qF -- '--autopilot-status' "$SKILL_MD" \
+  && grep -qF 'never from conversation memory' "$SKILL_MD"; then
+  check "V10a self-review reads and verifies official current Autopilot binding evidence" PASS
+else
+  check "V10a official current Autopilot binding evidence" FAIL
+fi
+if grep -qF -- '--chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' "$SKILL_MD" \
+  && grep -qF 'Standalone handoffs keep the unqualified terminus' "$SKILL_MD"; then
+  check "V10b self-review uses the exact bound terminus without changing standalone" PASS
+else
+  check "V10b exact bound self-review terminus" FAIL
+fi
+PHASE4_REGION="$(sed -n '/^## Phase 4: Fix Round or Finalize/,/^### Final report/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE4_REGION" | grep -qF 'The pass-2 invocation MUST carry the' \
+  && printf '%s\n' "$PHASE4_REGION" | grep -qF 'SELF-REVIEW-TICKET: <review-ticket>' \
+  && printf '%s\n' "$PHASE4_REGION" | grep -qF 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' \
+  && printf '%s\n' "$PHASE4_REGION" | grep -qF 'Do not re-read, re-derive, or omit either generation token'; then
+  check "V10c self-review pass 2 explicitly preserves ticket and Autopilot binding" PASS
+else
+  check "V10c pass-2 generation evidence" FAIL
+fi
 grep -qF '## Self-Review Summary' "$SKILL_MD" && check "V11 renders ## Self-Review Summary report section" PASS || check "V11 Self-Review Summary section" FAIL
 
 for h in "## Problem" "## What I built" "## How I built it" "## Open" "## TL;DR"; do

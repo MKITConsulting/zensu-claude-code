@@ -67,19 +67,25 @@ bash "$LOG" --pending-review-done >/dev/null 2>&1
   || check "D5 --pending-review-done clears marker" PASS
 
 SID_SYM="deferred-symlink"
-rm -f "$MARKER" 2>/dev/null
+# D2 intentionally leaves its adopted claim as a recovery record. Retire that
+# completed fixture before exercising an unrelated unsafe-marker case.
+rm -f "$MARKER" "${MARKER}.claim" 2>/dev/null
 ln -s /etc/hosts "$MARKER" 2>/dev/null || true
 if [ -L "$MARKER" ]; then
   OUT="$(printf '{"session_id":"%s"}' "$SID_SYM" | bash "$STOP" 2>/dev/null)"; RC=$?
-  if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ]; then
-    check "D6 symlinked marker refused (allow, clean exit 0, no adopt-through-symlink)" PASS
+  if [ "$RC" -eq 0 ] \
+    && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
+    && [ -L "$MARKER" ] \
+    && [ ! -e "${MARKER}.claim" ] \
+    && [ ! -e "$TDD_STATE_DIR/tdd-phase-${SID_SYM}.json" ]; then
+    check "D6 symlinked marker fails closed without claim or session mutation" PASS
   else
-    check "D6 symlink refused (rc=$RC out=$OUT)" FAIL
+    check "D6 symlink refused (rc=$RC symlink=$([ -L "$MARKER" ] && echo y || echo n) claim=$([ -e "${MARKER}.claim" ] && echo y || echo n) state=$([ -e "$TDD_STATE_DIR/tdd-phase-${SID_SYM}.json" ] && echo y || echo n) out=$OUT)" FAIL
   fi
 else
   echo "  SKIP  D6 symlink refusal — ln -s did not create a real symlink (Windows/MSYS)"
 fi
-rm -f "$MARKER"
+rm -f "$MARKER" "${MARKER}.claim"
 
 SID_CO="deferred-coexist"
 bash "$LOG" --tdd-begin --session "$SID_CO" >/dev/null 2>&1
@@ -105,10 +111,14 @@ if touch "$TDD_STATE_DIR/.wprobe" 2>/dev/null; then
 else
   OUT="$(printf '{"session_id":"%s"}' "$SID_FAIL" | bash "$STOP" 2>/dev/null)"; RC=$?
   chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
-  if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ -f "$MARKER" ]; then
-    check "D8 seed-write failure -> not adopted (allow) + marker retained for retry" PASS
+  if [ "$RC" -eq 0 ] \
+    && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
+    && [ -f "$MARKER" ] \
+    && [ ! -e "${MARKER}.claim" ] \
+    && [ ! -e "$TDD_STATE_DIR/tdd-phase-${SID_FAIL}.json" ]; then
+    check "D8 seed-write failure fails closed and remains mutation-free for retry" PASS
   else
-    check "D8 seed-failure (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
+    check "D8 seed-failure (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker=$([ -f "$MARKER" ] && echo y || echo n) claim=$([ -e "${MARKER}.claim" ] && echo y || echo n) state=$([ -e "$TDD_STATE_DIR/tdd-phase-${SID_FAIL}.json" ] && echo y || echo n))" FAIL
   fi
 fi
 chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true

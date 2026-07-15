@@ -1,0 +1,1716 @@
+#!/bin/bash
+# Durable, project-local outer state machine for /zensu:autopilot.
+set -u
+
+: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
+
+# Reuse the hardened path, atomic-rename, and flock/mkdir mutex primitives used
+# by the inner TDD state. Autopilot has its own single project-wide lock below.
+# shellcheck source=hooks/lib/zensu-tdd-phase.sh
+# shellcheck disable=SC1091
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+
+_autopilot_project_root() {
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}"
+  ROOT_INPUT="$input" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const logicalRoot = path.resolve(process.env.ROOT_INPUT || ".");
+    if (/[\u0000-\u001f]/.test(logicalRoot)) process.exit(2);
+    let root;
+    try {
+      if (!fs.statSync(logicalRoot).isDirectory()) process.exit(2);
+      root = fs.realpathSync(logicalRoot);
+    } catch (_) { process.exit(2); }
+    process.stdout.write(root);
+  ' 2>/dev/null
+}
+
+_autopilot_identifier_ok() {
+  case "${1:-}" in
+    ''|*[!A-Za-z0-9_.:-]*) return 1 ;;
+  esac
+  case "$1" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+  [ "${#1}" -ge 3 ] && [ "${#1}" -le 128 ]
+}
+
+# Hook session ids predate the durable Autopilot schema and may legitimately be
+# shorter than its three-character identifiers (for example a test/runtime id
+# such as "hx").  A reconciliation caller is used only to compare ownership;
+# it is never persisted unless it already equals the schema-validated owner.
+_autopilot_session_id_ok() {
+  case "${1:-}" in
+    ''|*[!A-Za-z0-9_-]*) return 1 ;;
+  esac
+  [ "${#1}" -le 128 ]
+}
+
+autopilot_active_file() {
+  local root
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  printf '%s\n' "$root/.zensu/state/autopilot-active.json"
+}
+
+autopilot_run_file() {
+  local run_id="${1:-}" root
+  _autopilot_identifier_ok "$run_id" || return 2
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  printf '%s\n' "$root/.zensu/state/autopilot-run-${run_id}.json"
+}
+
+_autopilot_prepare_storage() {
+  local root="$1" state_dir="$1/.zensu/state"
+  CLAUDE_PROJECT_DIR="$root" _tdd_prepare_directory "$state_dir"
+}
+
+_autopilot_storage_safe() {
+  local root="$1" run_id="${2:-}" state_dir="$1/.zensu/state"
+  local active="$state_dir/autopilot-active.json"
+  local sentinel="$state_dir/autopilot"
+  local args=(
+    "$state_dir" directory
+    "$active" regular-or-absent
+    "$sentinel" regular-or-absent
+    "${sentinel}.lock" regular-or-absent
+    "${sentinel}.lockd" directory-or-absent
+  )
+  if [ -n "$run_id" ]; then
+    args+=("$state_dir/autopilot-run-${run_id}.json" regular-or-absent)
+  fi
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "${args[@]}"
+}
+
+_autopilot_read_storage_ready() {
+  local root="$1" run_id="${2:-}" state_dir="$1/.zensu/state"
+  if [ ! -d "$state_dir" ]; then
+    CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$state_dir" directory-or-absent || return 2
+    return 1
+  fi
+  _autopilot_storage_safe "$root" "$run_id" || return 2
+}
+
+_autopilot_locked_run() {
+  local root="$1" run_id="$2"
+  shift 2
+  local sentinel="$root/.zensu/state/autopilot"
+  if [ "${AUTOPILOT_DISABLE_FLOCK:-}" = "1" ]; then
+    CLAUDE_PROJECT_DIR="$root" TDD_DISABLE_FLOCK=1 \
+      _tdd_locked_run "$sentinel" _autopilot_locked_dispatch "$root" "$run_id" "$@"
+  else
+    CLAUDE_PROJECT_DIR="$root" \
+      _tdd_locked_run "$sentinel" _autopilot_locked_dispatch "$root" "$run_id" "$@"
+  fi
+}
+
+_autopilot_locked_dispatch() {
+  local root="$1" run_id="$2"
+  shift 2
+  _autopilot_storage_safe "$root" "$run_id" || return 2
+  "$@"
+}
+
+# All schema and transition decisions live in one worker so every caller uses
+# the same closed vocabulary and canonical payload digest.
+_autopilot_node() {
+  node - "$@" <<'NODE'
+const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
+
+const MAX_BYTES = 1024 * 1024;
+const MAX_EVENTS = 512;
+const args = process.argv.slice(2);
+const mode = args.shift();
+
+const fail = (code, message) => {
+  if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);
+  process.exit(code);
+};
+const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
+const exact = (value, keys) => isObject(value)
+  && Object.keys(value).length === keys.length
+  && keys.every(key => Object.prototype.hasOwnProperty.call(value, key));
+const identifier = value => typeof value === "string"
+  && value.length >= 3 && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+const nullableIdentifier = value => value === null || identifier(value);
+const nonEmpty = (value, max = 512) => typeof value === "string" && value.length > 0 && value.length <= max
+  && !/[\u0000-\u001f]/.test(value);
+const sha = value => typeof value === "string" && /^[a-fA-F0-9]{7,64}$/.test(value);
+const sha256 = value => typeof value === "string" && /^[a-fA-F0-9]{64}$/.test(value);
+const natural = value => Number.isSafeInteger(value) && value >= 0;
+const positive = value => Number.isSafeInteger(value) && value > 0;
+
+const STAGES = new Set([
+  "PLANNING", "AWAIT_TDD", "TDD_RUNNING", "GATES", "CONVERGE", "OPEN_PR",
+  "TEAM_REVIEW", "FIX_FINDINGS", "VALIDATE", "COVER", "DELIVER", "BLOCKED",
+  "DONE", "CANCELLED",
+]);
+const TERMINAL = new Set(["DONE", "CANCELLED"]);
+const STOP_TERMINAL = new Set(["DONE", "BLOCKED", "CANCELLED"]);
+const RETURN_STAGES = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+const HEAD_UPDATE_STAGES = new Set(["FIX_FINDINGS", "VALIDATE", "COVER"]);
+const NEXT_ACTION = Object.freeze({
+  PLANNING: "AWAIT_PLAN_APPROVAL",
+  AWAIT_TDD: "START_TDD",
+  TDD_RUNNING: "AWAIT_TDD_CHAIN",
+  GATES: "RUN_GATES",
+  CONVERGE: "RUN_CONVERGENCE",
+  OPEN_PR: "RECONCILE_PR",
+  TEAM_REVIEW: "RECONCILE_TEAM_REVIEW",
+  FIX_FINDINGS: "FIX_REVIEW_FINDINGS",
+  VALIDATE: "VALIDATE_FEATURE",
+  COVER: "RUN_COVERAGE",
+  DELIVER: "DELIVER_PR",
+  BLOCKED: "AWAIT_RESUME",
+  DONE: "NONE",
+  CANCELLED: "NONE",
+});
+const EVENT_TYPES = new Set([
+  "START", "PLAN_APPROVED", "TDD_STARTED", "TDD_CHAIN_DONE", "GATES_PASSED",
+  "GATES_FAILED", "CONVERGENCE_PASSED", "CONVERGENCE_FAILED", "PR_OPEN_REQUESTED",
+  "PR_OPENED", "TEAM_REVIEW_REQUESTED", "TEAM_REVIEW_PUBLISHED", "FIX_REQUIRED",
+  "FINDINGS_CLEARED", "VALIDATION_FAILED", "VALIDATION_PASSED", "COVERAGE_FAILED",
+  "COVERAGE_PASSED", "PR_HEAD_UPDATED", "DELIVERY_COMPLETE", "BLOCK", "RESUME", "CANCEL",
+  "BYPASS_RECORDED",
+]);
+
+const canonical = value => {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+  if (isObject(value)) return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+  return JSON.stringify(value);
+};
+const digest = payload => crypto.createHash("sha256").update(canonical(payload)).digest("hex");
+
+const regularFile = file => {
+  let stat;
+  try { stat = fs.lstatSync(file); }
+  catch (error) {
+    if (error.code === "ENOENT") return null;
+    fail(2, `cannot inspect ${path.basename(file)}`);
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > MAX_BYTES) {
+    fail(2, `unsafe state file ${path.basename(file)}`);
+  }
+  return stat;
+};
+const readJson = (file, absentCode = 1) => {
+  if (!regularFile(file)) fail(absentCode, `state file absent: ${path.basename(file)}`);
+  try { return JSON.parse(fs.readFileSync(file, "utf8")); }
+  catch (_) { fail(2, `invalid JSON in ${path.basename(file)}`); }
+};
+const writeOutput = (file, value) => {
+  const stat = regularFile(file);
+  if (!stat) fail(5, "output file was not pre-created securely");
+  const body = `${JSON.stringify(value, null, 2)}\n`;
+  if (Buffer.byteLength(body) > MAX_BYTES) fail(2, "state exceeds 1 MiB");
+  try {
+    fs.writeFileSync(file, body, { encoding: "utf8", mode: 0o600 });
+    fs.fsyncSync(fs.openSync(file, "r"));
+  } catch (_) { fail(5, "failed to write state output"); }
+};
+
+const payloadValid = (type, payload) => {
+  if (!isObject(payload)) return false;
+  switch (type) {
+    case "START":
+    case "CONVERGENCE_PASSED":
+    case "RESUME":
+    case "CANCEL":
+      return exact(payload, []);
+    case "PLAN_APPROVED":
+      return exact(payload, ["approvedPlanSha256"]) && sha256(payload.approvedPlanSha256);
+    case "TDD_STARTED":
+      return exact(payload, ["attempt", "chainId", "sessionId"])
+        && positive(payload.attempt) && identifier(payload.chainId) && identifier(payload.sessionId);
+    case "TDD_CHAIN_DONE":
+      return exact(payload, ["attempt", "chainId", "sessionId", "outcome"])
+        && positive(payload.attempt) && identifier(payload.chainId) && identifier(payload.sessionId)
+        && ["pass", "no-changes", "max-rounds"].includes(payload.outcome);
+    case "GATES_PASSED":
+    case "VALIDATION_PASSED":
+    case "COVERAGE_PASSED":
+    case "DELIVERY_COMPLETE":
+      return exact(payload, ["headSha"]) && sha(payload.headSha);
+    case "GATES_FAILED":
+    case "VALIDATION_FAILED":
+    case "COVERAGE_FAILED":
+      return exact(payload, ["headSha", "reason"]) && sha(payload.headSha) && nonEmpty(payload.reason);
+    case "CONVERGENCE_FAILED":
+      return exact(payload, ["reason", "limitReached"])
+        && nonEmpty(payload.reason) && typeof payload.limitReached === "boolean";
+    case "PR_OPEN_REQUESTED":
+    case "TEAM_REVIEW_REQUESTED":
+      return exact(payload, ["operationKey"]) && nonEmpty(payload.operationKey, 256);
+    case "PR_OPENED":
+      return exact(payload, ["operationKey", "pr"]) && nonEmpty(payload.operationKey, 256)
+        && exact(payload.pr, ["number", "url", "headSha"]) && positive(payload.pr.number)
+        && nonEmpty(payload.pr.url, 2048) && /^https:\/\//.test(payload.pr.url) && sha(payload.pr.headSha);
+    case "TEAM_REVIEW_PUBLISHED":
+      return exact(payload, ["operationKey", "marker", "headSha"])
+        && nonEmpty(payload.operationKey, 256) && nonEmpty(payload.marker, 512) && sha(payload.headSha);
+    case "FIX_REQUIRED":
+      return exact(payload, ["headSha", "unresolvedCount"])
+        && sha(payload.headSha) && positive(payload.unresolvedCount);
+    case "FINDINGS_CLEARED":
+      return exact(payload, ["headSha", "unresolvedCount"])
+        && sha(payload.headSha) && payload.unresolvedCount === 0;
+    case "PR_HEAD_UPDATED":
+      return exact(payload, ["previousHeadSha", "headSha", "gatesPassed", "pushCompleted"])
+        && sha(payload.previousHeadSha) && sha(payload.headSha)
+        && payload.gatesPassed === true && payload.pushCompleted === true;
+    case "BLOCK":
+      return exact(payload, ["code"]) && identifier(payload.code);
+    case "BYPASS_RECORDED":
+      return exact(payload, ["gate"]) && identifier(payload.gate);
+    default:
+      return false;
+  }
+};
+
+const effectValid = value => exact(value, ["status", "operationKey"])
+  && ["none", "requested", "completed"].includes(value.status)
+  && (value.operationKey === null || nonEmpty(value.operationKey, 256))
+  && (value.status === "none" ? value.operationKey === null : value.operationKey !== null);
+const evidenceHead = (value, kind) => value === null || (exact(value, [kind, "headSha"])
+  && value[kind] === true && sha(value.headSha));
+const evidenceValid = evidence => exact(evidence, ["pr", "gates", "review", "findings", "validation", "coverage", "delivery"])
+  && (evidence.pr === null || (exact(evidence.pr, ["number", "url", "headSha"])
+    && positive(evidence.pr.number) && nonEmpty(evidence.pr.url, 2048)
+    && /^https:\/\//.test(evidence.pr.url) && sha(evidence.pr.headSha)))
+  && (evidence.gates === null || (exact(evidence.gates, ["passed", "headSha"])
+    && typeof evidence.gates.passed === "boolean" && sha(evidence.gates.headSha)))
+  && (evidence.review === null || (exact(evidence.review, ["published", "marker", "headSha"])
+    && evidence.review.published === true && nonEmpty(evidence.review.marker, 512) && sha(evidence.review.headSha)))
+  && (evidence.findings === null || (exact(evidence.findings, ["cleared", "headSha", "unresolvedCount"])
+    && typeof evidence.findings.cleared === "boolean" && sha(evidence.findings.headSha)
+    && natural(evidence.findings.unresolvedCount)))
+  && evidenceHead(evidence.validation, "passed")
+  && evidenceHead(evidence.coverage, "passed")
+  && evidenceHead(evidence.delivery, "completed");
+
+const eventValid = event => exact(event, ["eventId", "eventType", "payloadDigest", "payload", "fromStage", "toStage"])
+  && identifier(event.eventId) && EVENT_TYPES.has(event.eventType) && sha256(event.payloadDigest)
+  && payloadValid(event.eventType, event.payload) && digest(event.payload) === event.payloadDigest
+  && (event.fromStage === null || STAGES.has(event.fromStage)) && STAGES.has(event.toStage)
+  && (event.eventType === "START" ? event.fromStage === null && event.toStage === "PLANNING" : event.fromStage !== null);
+
+const sameSha = (left, right) => typeof left === "string" && typeof right === "string"
+  && left.toLowerCase() === right.toLowerCase();
+const reviewBelongsToPrGeneration = state => {
+  const prIndex = state.events.findIndex(event => event.eventType === "PR_OPENED");
+  const reviewIndex = state.events.findIndex(event => event.eventType === "TEAM_REVIEW_PUBLISHED");
+  if (prIndex < 0 || reviewIndex <= prIndex || !state.evidence.pr || !state.evidence.review) return false;
+  const prEvent = state.events[prIndex];
+  const reviewEvent = state.events[reviewIndex];
+  if (state.effects.prOpen.operationKey !== prEvent.payload.operationKey
+    || state.effects.teamReview.operationKey !== reviewEvent.payload.operationKey
+    || state.evidence.pr.number !== prEvent.payload.pr.number
+    || state.evidence.pr.url !== prEvent.payload.pr.url
+    || state.evidence.review.marker !== reviewEvent.payload.marker
+    || !sameSha(state.evidence.review.headSha, reviewEvent.payload.headSha)
+    || !sameSha(reviewEvent.payload.headSha, prEvent.payload.pr.headSha)) return false;
+
+  let currentHead = prEvent.payload.pr.headSha;
+  for (const event of state.events.slice(prIndex + 1)) {
+    if (event.eventType !== "PR_HEAD_UPDATED") continue;
+    if (!sameSha(event.payload.previousHeadSha, currentHead)
+      || sameSha(event.payload.headSha, currentHead)
+      || event.payload.gatesPassed !== true || event.payload.pushCompleted !== true) return false;
+    currentHead = event.payload.headSha;
+  }
+  return sameSha(state.evidence.pr.headSha, currentHead);
+};
+
+const deliveryInvariants = state => {
+  const head = state.evidence.pr && state.evidence.pr.headSha;
+  return Boolean(
+    state.effects.prOpen.status === "completed"
+    && state.effects.teamReview.status === "completed"
+    && state.evidence.pr && state.evidence.gates && state.evidence.gates.passed
+    && state.evidence.review && state.evidence.review.published
+    && state.evidence.findings && state.evidence.findings.cleared
+    && state.evidence.findings.unresolvedCount === 0
+    && reviewBelongsToPrGeneration(state)
+    && sameSha(state.evidence.gates.headSha, head)
+    && sameSha(state.evidence.findings.headSha, head)
+    && (!state.options.validate || (state.evidence.validation && state.evidence.validation.passed
+      && sameSha(state.evidence.validation.headSha, head)))
+    && (!state.options.cover || (state.evidence.coverage && state.evidence.coverage.passed
+      && sameSha(state.evidence.coverage.headSha, head)))
+    && ["pass", "no-changes"].includes(state.tdd.outcome)
+  );
+};
+
+let semanticHistoryValid;
+const stateValid = state => {
+  if (!exact(state, ["schemaVersion", "runId", "projectRoot", "ownerSessionId", "stage", "nextActionCode",
+    "approvedPlanSha256", "options", "tdd", "effects", "evidence", "blocked", "bypasses", "stopBudget", "events"])) return false;
+  if (state.schemaVersion !== 1 || !identifier(state.runId) || !nonEmpty(state.projectRoot, 4096)
+    || !identifier(state.ownerSessionId) || !STAGES.has(state.stage) || state.nextActionCode !== NEXT_ACTION[state.stage]) return false;
+  if (!(state.approvedPlanSha256 === null || sha256(state.approvedPlanSha256))) return false;
+  if (!exact(state.options, ["cover", "validate"]) || typeof state.options.cover !== "boolean"
+    || typeof state.options.validate !== "boolean") return false;
+  if (!exact(state.tdd, ["attempt", "chainId", "sessionId", "returnStage", "outcome", "headUpdateRequired"])
+    || !natural(state.tdd.attempt) || !nullableIdentifier(state.tdd.chainId) || !nullableIdentifier(state.tdd.sessionId)
+    || !(state.tdd.returnStage === null || RETURN_STAGES.has(state.tdd.returnStage))
+    || !(state.tdd.outcome === null || ["pass", "no-changes", "max-rounds"].includes(state.tdd.outcome))
+    || typeof state.tdd.headUpdateRequired !== "boolean") return false;
+  if (!exact(state.effects, ["prOpen", "teamReview"]) || !effectValid(state.effects.prOpen)
+    || !effectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
+  if (!exact(state.blocked, ["from", "code"])
+    || !(state.blocked.from === null || STAGES.has(state.blocked.from))
+    || !(state.blocked.code === null || identifier(state.blocked.code))) return false;
+  if (state.stage === "BLOCKED" ? state.blocked.from === null || state.blocked.code === null
+    : state.blocked.from !== null || state.blocked.code !== null) return false;
+  if (state.tdd.headUpdateRequired) {
+    const pendingStage = state.stage === "BLOCKED" ? state.blocked.from : state.stage;
+    if (!HEAD_UPDATE_STAGES.has(pendingStage) || state.tdd.returnStage !== pendingStage
+      || !["pass", "no-changes"].includes(state.tdd.outcome)) return false;
+  }
+  if (!Array.isArray(state.bypasses) || state.bypasses.length > 128
+    || !state.bypasses.every(item => exact(item, ["gate", "stage"]) && identifier(item.gate) && STAGES.has(item.stage))) return false;
+  if (!exact(state.stopBudget, ["stage", "count"]) || state.stopBudget.stage !== state.stage
+    || !natural(state.stopBudget.count)) return false;
+  if (!Array.isArray(state.events) || state.events.length < 1 || state.events.length > MAX_EVENTS
+    || !state.events.every(eventValid)) return false;
+  const ids = new Set();
+  for (let index = 0; index < state.events.length; index += 1) {
+    const event = state.events[index];
+    if (ids.has(event.eventId)) return false;
+    ids.add(event.eventId);
+    if (index > 0 && event.fromStage !== state.events[index - 1].toStage) return false;
+  }
+  if (state.events[0].eventType !== "START" || state.events[state.events.length - 1].toStage !== state.stage) return false;
+  if (!semanticHistoryValid(state)) return false;
+  if (state.stage === "DONE" && (!state.evidence.delivery || !deliveryInvariants(state))) return false;
+  return true;
+};
+
+const pointerValid = pointer => exact(pointer, ["schemaVersion", "runId"])
+  && pointer.schemaVersion === 1 && identifier(pointer.runId);
+const readState = (file, absentCode = 2) => {
+  // A run referenced by an already-valid active pointer is not "no active
+  // run" when its file disappears; it is a corrupt torn state. Direct
+  // read-run lookups may opt back into rc=1 for a genuinely unknown id.
+  const state = readJson(file, absentCode);
+  if (!stateValid(state)) fail(2, `state schema invalid: ${path.basename(file)}`);
+  return state;
+};
+const readPointer = file => {
+  const pointer = readJson(file);
+  if (!pointerValid(pointer)) fail(2, "active pointer schema invalid");
+  return pointer;
+};
+const readRunInventory = (stateDir, expectedProjectRoot) => {
+  let names;
+  try { names = fs.readdirSync(stateDir, { encoding: "utf8" }); }
+  catch (_) { fail(2, "cannot inspect Autopilot run inventory"); }
+
+  const envelope = /^autopilot-run-(.*)\.json$/;
+  return names.sort().flatMap(name => {
+    const match = envelope.exec(name);
+    if (!match) return [];
+    if (!identifier(match[1])) fail(2, `invalid run inventory artifact: ${name}`);
+    const state = readState(path.join(stateDir, name));
+    if (state.runId !== match[1] || state.projectRoot !== expectedProjectRoot) {
+      fail(2, `run inventory identity mismatch: ${name}`);
+    }
+    return [state];
+  });
+};
+
+const move = (state, stage) => {
+  state.stage = stage;
+  state.nextActionCode = NEXT_ACTION[stage];
+  state.stopBudget = { stage, count: 0 };
+};
+const headMatchesPr = (state, headSha) => !state.evidence.pr || sameSha(state.evidence.pr.headSha, headSha);
+const toAwaitTdd = (state, returnStage) => {
+  state.tdd.returnStage = returnStage;
+  state.tdd.chainId = null;
+  state.tdd.sessionId = null;
+  state.tdd.outcome = null;
+  state.tdd.headUpdateRequired = false;
+  move(state, "AWAIT_TDD");
+};
+
+const transition = (state, type, payload, reject = fail) => {
+  const from = state.stage;
+  if (type === "CANCEL") {
+    if (TERMINAL.has(from)) reject(3, "terminal run cannot be cancelled again");
+    state.tdd.headUpdateRequired = false;
+    state.blocked = { from: null, code: null };
+    move(state, "CANCELLED");
+    return;
+  }
+  if (type === "BLOCK") {
+    if (STOP_TERMINAL.has(from)) reject(3, "run cannot be blocked from this stage");
+    state.blocked = { from, code: payload.code };
+    move(state, "BLOCKED");
+    return;
+  }
+  if (type === "RESUME") {
+    if (from !== "BLOCKED") reject(3, "RESUME requires BLOCKED");
+    const target = state.blocked.from;
+    state.blocked = { from: null, code: null };
+    move(state, target);
+    return;
+  }
+  if (type === "BYPASS_RECORDED") {
+    if (TERMINAL.has(from)) reject(3, "terminal run cannot record a bypass");
+    state.bypasses.push({ gate: payload.gate, stage: from });
+    return;
+  }
+  if (state.tdd.headUpdateRequired && type !== "PR_HEAD_UPDATED") {
+    reject(4, "a successful fix must record the pushed, gated PR head before reusing phase evidence");
+  }
+
+  switch (`${from}:${type}`) {
+    case "PLANNING:PLAN_APPROVED":
+      state.approvedPlanSha256 = payload.approvedPlanSha256.toLowerCase();
+      state.tdd.returnStage = "GATES";
+      move(state, "AWAIT_TDD");
+      return;
+    case "AWAIT_TDD:TDD_STARTED":
+      if (payload.attempt !== state.tdd.attempt + 1) reject(4, "TDD attempt is stale or skipped");
+      if (!RETURN_STAGES.has(state.tdd.returnStage)) reject(2, "TDD return stage is missing");
+      state.tdd.attempt = payload.attempt;
+      state.tdd.chainId = payload.chainId;
+      state.tdd.sessionId = payload.sessionId;
+      state.tdd.outcome = null;
+      state.tdd.headUpdateRequired = false;
+      move(state, "TDD_RUNNING");
+      return;
+    case "TDD_RUNNING:TDD_CHAIN_DONE":
+      if (payload.attempt !== state.tdd.attempt || payload.chainId !== state.tdd.chainId
+        || payload.sessionId !== state.tdd.sessionId) reject(4, "TDD completion does not own the active attempt");
+      state.tdd.outcome = payload.outcome;
+      state.tdd.headUpdateRequired = false;
+      if (payload.outcome === "max-rounds") {
+        state.blocked = { from: "AWAIT_TDD", code: "TDD_MAX_ROUNDS" };
+        move(state, "BLOCKED");
+      } else {
+        state.tdd.headUpdateRequired = HEAD_UPDATE_STAGES.has(state.tdd.returnStage);
+        move(state, state.tdd.returnStage);
+      }
+      return;
+    case "GATES:GATES_PASSED":
+      state.evidence.gates = { passed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, "CONVERGE");
+      return;
+    case "GATES:GATES_FAILED":
+      state.evidence.gates = { passed: false, headSha: payload.headSha.toLowerCase() };
+      toAwaitTdd(state, "GATES");
+      return;
+    case "CONVERGE:CONVERGENCE_PASSED":
+      move(state, "OPEN_PR");
+      return;
+    case "CONVERGE:CONVERGENCE_FAILED":
+      if (payload.limitReached) {
+        state.blocked = { from: "CONVERGE", code: "CONVERGENCE_LIMIT" };
+        move(state, "BLOCKED");
+      } else {
+        toAwaitTdd(state, "CONVERGE");
+      }
+      return;
+    case "OPEN_PR:PR_OPEN_REQUESTED":
+      if (state.effects.prOpen.status !== "none") reject(4, "PR open operation already requested");
+      state.effects.prOpen = { status: "requested", operationKey: payload.operationKey };
+      return;
+    case "OPEN_PR:PR_OPENED":
+      if (state.effects.prOpen.status !== "requested"
+        || state.effects.prOpen.operationKey !== payload.operationKey) reject(4, "PR open operation key mismatch");
+      if (state.evidence.gates && state.evidence.gates.headSha !== payload.pr.headSha) reject(4, "PR head differs from gate evidence");
+      state.effects.prOpen = { status: "completed", operationKey: payload.operationKey };
+      state.evidence.pr = { number: payload.pr.number, url: payload.pr.url, headSha: payload.pr.headSha.toLowerCase() };
+      move(state, "TEAM_REVIEW");
+      return;
+    case "TEAM_REVIEW:TEAM_REVIEW_REQUESTED":
+      if (state.effects.teamReview.status !== "none") reject(4, "team review already requested");
+      state.effects.teamReview = { status: "requested", operationKey: payload.operationKey };
+      return;
+    case "TEAM_REVIEW:TEAM_REVIEW_PUBLISHED":
+      if (state.effects.teamReview.status !== "requested"
+        || state.effects.teamReview.operationKey !== payload.operationKey) reject(4, "team-review operation key mismatch");
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "team review targets a stale PR head");
+      state.effects.teamReview = { status: "completed", operationKey: payload.operationKey };
+      state.evidence.review = { published: true, marker: payload.marker, headSha: payload.headSha.toLowerCase() };
+      move(state, "FIX_FINDINGS");
+      return;
+    case "FIX_FINDINGS:FIX_REQUIRED":
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "findings target a stale PR head");
+      state.evidence.findings = { cleared: false, headSha: payload.headSha.toLowerCase(), unresolvedCount: payload.unresolvedCount };
+      toAwaitTdd(state, "FIX_FINDINGS");
+      return;
+    case "FIX_FINDINGS:FINDINGS_CLEARED": {
+      if (state.effects.teamReview.status !== "completed" || !headMatchesPr(state, payload.headSha)) {
+        reject(4, "findings cannot clear before review publication on the current head");
+      }
+      state.evidence.findings = { cleared: true, headSha: payload.headSha.toLowerCase(), unresolvedCount: 0 };
+      move(state, state.options.validate ? "VALIDATE" : (state.options.cover ? "COVER" : "DELIVER"));
+      return;
+    }
+    case "VALIDATE:VALIDATION_FAILED":
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "validation targets a stale PR head");
+      state.evidence.validation = null;
+      toAwaitTdd(state, "VALIDATE");
+      return;
+    case "VALIDATE:VALIDATION_PASSED":
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "validation targets a stale PR head");
+      state.evidence.validation = { passed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, state.options.cover ? "COVER" : "DELIVER");
+      return;
+    case "COVER:COVERAGE_FAILED":
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "coverage targets a stale PR head");
+      state.evidence.coverage = null;
+      toAwaitTdd(state, "COVER");
+      return;
+    case "COVER:COVERAGE_PASSED":
+      if (!headMatchesPr(state, payload.headSha)) reject(4, "coverage targets a stale PR head");
+      state.evidence.coverage = { passed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, "DELIVER");
+      return;
+    case "FIX_FINDINGS:PR_HEAD_UPDATED":
+    case "VALIDATE:PR_HEAD_UPDATED":
+    case "COVER:PR_HEAD_UPDATED": {
+      if (!state.tdd.headUpdateRequired || state.tdd.returnStage !== from
+        || !state.evidence.pr || state.effects.prOpen.status !== "completed") {
+        reject(4, "PR head update is not bound to the completed fix attempt");
+      }
+      const previousHead = payload.previousHeadSha.toLowerCase();
+      const nextHead = payload.headSha.toLowerCase();
+      if (!sameSha(state.evidence.pr.headSha, previousHead)) reject(4, "PR head update starts from a stale head");
+      if (sameSha(previousHead, nextHead)) reject(4, "PR head update must prove a new commit");
+      state.evidence.pr.headSha = nextHead;
+      state.evidence.gates = { passed: true, headSha: nextHead };
+      state.evidence.findings = null;
+      state.evidence.validation = null;
+      state.evidence.coverage = null;
+      state.evidence.delivery = null;
+      state.tdd.headUpdateRequired = false;
+      move(state, "FIX_FINDINGS");
+      return;
+    }
+    case "DELIVER:DELIVERY_COMPLETE":
+      if (!headMatchesPr(state, payload.headSha) || !deliveryInvariants(state)) reject(4, "delivery invariants are incomplete");
+      state.evidence.delivery = { completed: true, headSha: payload.headSha.toLowerCase() };
+      move(state, "DONE");
+      return;
+    default:
+      reject(3, `event ${type} is not allowed from ${from}`);
+  }
+};
+
+// Validate the ledger as executable history, not merely as a chain of
+// well-shaped from/to labels. Replaying through the same closed transition
+// function catches impossible jumps and also proves that every derived state
+// field still agrees with the accepted events. stopBudget.count is deliberately
+// excluded: Stop increments it under the same lock, but those guard attempts are
+// not semantic workflow events.
+semanticHistoryValid = state => {
+  const first = state.events[0];
+  const replay = {
+    schemaVersion: 1,
+    runId: state.runId,
+    projectRoot: state.projectRoot,
+    ownerSessionId: state.ownerSessionId,
+    stage: "PLANNING",
+    nextActionCode: NEXT_ACTION.PLANNING,
+    approvedPlanSha256: null,
+    options: { cover: state.options.cover, validate: state.options.validate },
+    tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
+    effects: {
+      prOpen: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null },
+    },
+    evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
+    blocked: { from: null, code: null },
+    bypasses: [],
+    stopBudget: { stage: "PLANNING", count: 0 },
+    events: [first],
+  };
+  const rejectReplay = (_code, message) => { throw new Error(message || "invalid semantic history"); };
+  try {
+    for (const event of state.events.slice(1)) {
+      if (event.fromStage !== replay.stage) return false;
+      transition(replay, event.eventType, event.payload, rejectReplay);
+      if (event.toStage !== replay.stage) return false;
+      replay.events.push(event);
+    }
+  } catch (_) {
+    return false;
+  }
+  const derived = value => ({
+    stage: value.stage,
+    nextActionCode: value.nextActionCode,
+    approvedPlanSha256: value.approvedPlanSha256,
+    tdd: value.tdd,
+    effects: value.effects,
+    evidence: value.evidence,
+    blocked: value.blocked,
+    bypasses: value.bypasses,
+    stopBudgetStage: value.stopBudget.stage,
+  });
+  return canonical(derived(replay)) === canonical(derived(state));
+};
+
+if (mode === "read-active") {
+  const [activeFile, stateDir, expectedProjectRoot] = args;
+  const activeStat = regularFile(activeFile);
+  const inventory = readRunInventory(stateDir, expectedProjectRoot);
+  if (!activeStat) {
+    const orphan = inventory.find(state => !TERMINAL.has(state.stage));
+    if (orphan) fail(2, `active pointer absent while nonterminal run ${orphan.runId} remains`);
+    fail(1, `state file absent: ${path.basename(activeFile)}`);
+  }
+  const pointer = readPointer(activeFile);
+  const state = inventory.find(candidate => candidate.runId === pointer.runId);
+  if (!state) fail(2, "active pointer references an absent run");
+  if (state.runId !== pointer.runId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "active pointer, run, and physical project root disagree");
+  }
+  const hidden = inventory.find(candidate => candidate.runId !== pointer.runId
+    && !TERMINAL.has(candidate.stage));
+  if (hidden) fail(2, `active pointer hides nonterminal run ${hidden.runId}`);
+  process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+  process.exit(0);
+}
+
+if (mode === "read-run") {
+  const [runFile, expectedRunId, expectedProjectRoot] = args;
+  const state = readState(runFile, 1);
+  if (state.runId !== expectedRunId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "run file identity or physical project root mismatch");
+  }
+  process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+  process.exit(0);
+}
+
+if (mode === "begin") {
+  const [activeFile, runFile, runOutput, activeOutput, runId, ownerSessionId, projectRoot, coverRaw, validateRaw] = args;
+  if (!identifier(runId) || !identifier(ownerSessionId) || !nonEmpty(projectRoot, 4096)
+    || !["true", "false"].includes(coverRaw) || !["true", "false"].includes(validateRaw)) fail(3, "invalid begin arguments");
+  const options = { cover: coverRaw === "true", validate: validateRaw === "true" };
+  const stateDir = path.dirname(activeFile);
+  const inventory = readRunInventory(stateDir, projectRoot);
+  const activeStat = regularFile(activeFile);
+  let pointer = null;
+  let activeRun = null;
+  if (activeStat) {
+    pointer = readPointer(activeFile);
+    activeRun = inventory.find(candidate => candidate.runId === pointer.runId);
+    if (!activeRun) fail(2, "active pointer references an absent run");
+    if (activeRun.projectRoot !== projectRoot) fail(2, "active run belongs to another physical project root");
+  }
+
+  // A torn begin can leave the newly written nonterminal run without its
+  // pointer, or behind the prior terminal pointer. Only an identity- and
+  // option-exact retry of that sole orphan may finish publication. Any other
+  // begin must reject before writing either durable file.
+  const hiddenNonterminal = inventory.filter(candidate => !TERMINAL.has(candidate.stage)
+    && (!pointer || candidate.runId !== pointer.runId));
+  if (hiddenNonterminal.length > 0) {
+    const recoverable = hiddenNonterminal.length === 1
+      && hiddenNonterminal[0].runId === runId
+      && (!activeRun || TERMINAL.has(activeRun.stage));
+    if (!recoverable) fail(4, `nonterminal orphan ${hiddenNonterminal[0].runId} requires exact recovery`);
+  }
+  if (pointer && pointer.runId !== runId && !TERMINAL.has(activeRun.stage)) {
+    fail(4, `active run ${pointer.runId} is not terminal`);
+  }
+
+  const existing = inventory.find(candidate => candidate.runId === runId);
+  if (existing) {
+    if (existing.runId !== runId || existing.ownerSessionId !== ownerSessionId
+      || existing.projectRoot !== projectRoot || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
+    if (activeStat) {
+      if (pointer.runId === runId) process.exit(10);
+    }
+    writeOutput(runOutput, existing);
+    writeOutput(activeOutput, { schemaVersion: 1, runId });
+    process.exit(0);
+  }
+  const startPayload = {};
+  const state = {
+    schemaVersion: 1,
+    runId,
+    projectRoot,
+    ownerSessionId,
+    stage: "PLANNING",
+    nextActionCode: NEXT_ACTION.PLANNING,
+    approvedPlanSha256: null,
+    options,
+    tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
+    effects: {
+      prOpen: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null },
+    },
+    evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
+    blocked: { from: null, code: null },
+    bypasses: [],
+    stopBudget: { stage: "PLANNING", count: 0 },
+    events: [{
+      eventId: "start",
+      eventType: "START",
+      payloadDigest: digest(startPayload),
+      payload: startPayload,
+      fromStage: null,
+      toStage: "PLANNING",
+    }],
+  };
+  if (!stateValid(state)) fail(2, "initial state failed internal validation");
+  writeOutput(runOutput, state);
+  writeOutput(activeOutput, { schemaVersion: 1, runId });
+  process.exit(0);
+}
+
+if (mode === "apply") {
+  const [activeFile, runFile, runOutput, runId, eventId, eventType, payloadJson, expectedProjectRoot,
+    expectedOwnerSessionId = ""] = args;
+  if (!identifier(runId) || !identifier(eventId) || !EVENT_TYPES.has(eventType) || eventType === "START") fail(3, "invalid event identity/type");
+  let payload;
+  try { payload = JSON.parse(payloadJson); } catch (_) { fail(3, "event payload is not JSON"); }
+  if (!payloadValid(eventType, payload)) fail(3, `invalid payload for ${eventType}`);
+  const pointer = readPointer(activeFile);
+  if (pointer.runId !== runId) fail(4, "event does not target the active run");
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "run file identity or physical project root mismatch");
+  }
+  if (expectedOwnerSessionId && state.ownerSessionId !== expectedOwnerSessionId) {
+    fail(4, "event caller does not own the active run");
+  }
+  const payloadDigest = digest(payload);
+  const prior = state.events.find(event => event.eventId === eventId);
+  if (prior) {
+    if (prior.eventType === eventType && prior.payloadDigest === payloadDigest) process.exit(10);
+    fail(4, `eventId conflict: ${eventId}`);
+  }
+  if (TERMINAL.has(state.stage)) fail(3, "terminal run rejects new events");
+  // Reserve two final audit slots: one for a fail-closed BLOCK and one for the
+  // explicit CANCEL that can retire that blocked generation. At exhaustion a
+  // RESUME is deliberately rejected because it would create a live run with no
+  // remaining terminal slot.
+  if (state.events.length >= MAX_EVENTS - 2 && !["BLOCK", "CANCEL"].includes(eventType)) {
+    fail(4, "event ledger exhausted; only BLOCK followed by CANCEL may be recorded");
+  }
+  if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
+  const fromStage = state.stage;
+  transition(state, eventType, payload);
+  state.events.push({ eventId, eventType, payloadDigest, payload, fromStage, toStage: state.stage });
+  if (!stateValid(state)) fail(2, "transition produced invalid state");
+  writeOutput(runOutput, state);
+  process.exit(0);
+}
+
+if (mode === "increment-budget") {
+  const [activeFile, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
+    expectedOwnerSessionId = ""] = args;
+  const pointer = readPointer(activeFile);
+  if (pointer.runId !== runId) fail(4, "budget does not target the active run");
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot
+    || state.stage !== expectedStage || STOP_TERMINAL.has(state.stage)) {
+    fail(4, "stop budget stage is stale or terminal");
+  }
+  if (expectedOwnerSessionId && state.ownerSessionId !== expectedOwnerSessionId) {
+    fail(4, "stop-budget caller does not own the active run");
+  }
+  state.stopBudget.count += 1;
+  if (!stateValid(state)) fail(2, "budget increment produced invalid state");
+  writeOutput(runOutput, state);
+  process.stdout.write(String(state.stopBudget.count));
+  process.exit(0);
+}
+
+if (mode === "increment-budget-capped") {
+  const [activeFile, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
+    expectedOwnerSessionId, capRaw, blockCode] = args;
+  const cap = Number(capRaw);
+  if (!natural(cap) || !identifier(blockCode)) fail(3, "invalid capped-budget arguments");
+  const pointer = readPointer(activeFile);
+  if (pointer.runId !== runId) fail(4, "capped budget does not target the active run");
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot
+    || state.stage !== expectedStage || STOP_TERMINAL.has(state.stage)) {
+    fail(4, "capped stop budget stage is stale or terminal");
+  }
+  if (expectedOwnerSessionId && state.ownerSessionId !== expectedOwnerSessionId) {
+    fail(4, "capped stop-budget caller does not own the active run");
+  }
+  const count = state.stopBudget.count + 1;
+  state.stopBudget.count = count;
+  let blocked = false;
+  if (count > cap) {
+    if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted before capped BLOCK");
+    const payload = { code: blockCode };
+    const fromStage = state.stage;
+    const eventId = `outer-block-${crypto.createHash("sha256").update(canonical([
+      runId, expectedStage, count, blockCode, state.events.length,
+    ])).digest("hex")}`;
+    transition(state, "BLOCK", payload);
+    state.events.push({
+      eventId,
+      eventType: "BLOCK",
+      payloadDigest: digest(payload),
+      payload,
+      fromStage,
+      toStage: state.stage,
+    });
+    blocked = true;
+  }
+  if (!stateValid(state)) fail(2, "capped budget mutation produced invalid state");
+  writeOutput(runOutput, state);
+  process.stdout.write(JSON.stringify({ count, blocked }));
+  process.exit(0);
+}
+
+fail(3, `unknown worker mode: ${mode || "(empty)"}`);
+NODE
+}
+
+_autopilot_begin_critical() {
+  local root="$1" run_id="$2" owner_session_id="$3" cover="$4" validate="$5"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local active_file="$state_dir/autopilot-active.json"
+  local run_tmp active_tmp rc
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  active_tmp="$(mktemp "${active_file}.XXXXXX" 2>/dev/null)" || { rm -f "$run_tmp"; return 5; }
+  _autopilot_node begin "$active_file" "$run_file" "$run_tmp" "$active_tmp" \
+    "$run_id" "$owner_session_id" "$root" "$cover" "$validate"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp" "$active_tmp"
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp" "$active_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp" "$active_tmp"; return 5; }
+  _tdd_atomic_replace_regular "$active_tmp" "$active_file" || { rm -f "$active_tmp"; return 5; }
+}
+
+autopilot_begin_run() {
+  local run_id="${1:-}" owner_session_id="${2:-}" root cover validate
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$owner_session_id" || return 3
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  cover="${4:-false}"
+  validate="${5:-true}"
+  case "$cover:$validate" in
+    true:true|true:false|false:true|false:false) ;;
+    *) return 3 ;;
+  esac
+  _autopilot_prepare_storage "$root" || return 2
+  _autopilot_locked_run "$root" "$run_id" _autopilot_begin_critical \
+    "$root" "$run_id" "$owner_session_id" "$cover" "$validate"
+}
+
+_autopilot_apply_critical() {
+  local root="$1" run_id="$2" event_id="$3" event_type="$4" payload_json="$5"
+  local caller_session_id="${6:-}"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local active_file="$state_dir/autopilot-active.json"
+  local run_tmp rc
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" "$event_type" "$payload_json" "$root" "$caller_session_id"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp"
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+}
+
+autopilot_apply_event() {
+  local run_id="${1:-}" event_id="${2:-}" event_type="${3:-}" payload_json="${4:-}" root
+  local caller_session_id="${6:-}"
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" || return 3
+  if [ -n "$caller_session_id" ]; then
+    _autopilot_identifier_ok "$caller_session_id" || return 3
+  fi
+  root="$(_autopilot_project_root "${5:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_apply_critical \
+    "$root" "$run_id" "$event_id" "$event_type" "$payload_json" "$caller_session_id"
+}
+
+autopilot_read_run() {
+  local run_id="${1:-}" root run_file
+  _autopilot_identifier_ok "$run_id" || return 2
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  run_file="$root/.zensu/state/autopilot-run-${run_id}.json"
+  _autopilot_node read-run "$run_file" "$run_id" "$root"
+}
+
+_autopilot_read_active_critical() {
+  local root="$1" state_dir="$1/.zensu/state"
+  _autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root"
+}
+
+autopilot_read_active() {
+  local root
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" || return $?
+  # Read the pointer and full run inventory under the same project-wide lock
+  # as begin. A healthy begin publishes run then pointer with two renames; a
+  # concurrent hook must wait for both rather than diagnosing that brief,
+  # intentional window as an orphan. If begin crashes, the lock is released
+  # and the durable partial publication is then classified fail-closed.
+  _autopilot_locked_run "$root" "" _autopilot_read_active_critical "$root"
+}
+
+# Chain ids share the 128-character durable identifier contract, while the
+# event ids that carry them must also remain within that same bound. Preserve
+# the readable legacy id for ordinary chains and switch only oversized
+# composites to a deterministic digest.
+autopilot_chain_event_id() {
+  local kind="${1:-}" chain_id="${2:-}" prefix candidate digest
+  _autopilot_identifier_ok "$chain_id" || return 3
+  case "$kind" in
+    start)  prefix="tdd-started" ;;
+    done)   prefix="tdd-done" ;;
+    rearm)  prefix="review-rearm-resume" ;;
+    *) return 3 ;;
+  esac
+  candidate="${prefix}-${chain_id}"
+  if [ "${#candidate}" -le 128 ]; then
+    printf '%s\n' "$candidate"
+    return 0
+  fi
+  digest="$(printf '%s' "$chain_id" | node -e '
+    const crypto=require("crypto"),fs=require("fs");
+    process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));
+  ' 2>/dev/null)" || return 5
+  [ "${#digest}" -eq 64 ] || return 5
+  printf '%s-%s\n' "$prefix" "$digest"
+}
+
+# Starting a standalone inner generation must serialize with every durable
+# outer begin/start. The decision and inner write therefore share the canonical
+# Outer -> Inner lock order. BLOCKED is resumable and still owns the project;
+# only a genuinely absent inventory or a DONE/CANCELLED pointer permits this
+# unbound generation.
+_autopilot_begin_standalone_tdd_critical() {
+  local root="$1" session_id="$2" vanilla="$3" state_dir="$1/.zensu/state"
+  local state read_rc stage
+  if state="$(_autopilot_node read-active \
+      "$state_dir/autopilot-active.json" "$state_dir" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try {
+          const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+          process.stdout.write(s.stage);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in DONE|CANCELLED) ;; *) return 4 ;; esac
+      ;;
+    1) ;;
+    *) return "$read_rc" ;;
+  esac
+  tdd_begin_session "$session_id" "$vanilla" false false ""
+}
+
+autopilot_begin_standalone_tdd() {
+  local root session_id="${2:-}" vanilla="${3:-false}"
+  [ "$#" -eq 3 ] || return 3
+  [ -n "$session_id" ] && [ "${#session_id}" -le 128 ] || return 3
+  case "$session_id" in *[!A-Za-z0-9_-]*) return 3 ;; esac
+  case "$vanilla" in true|false) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_prepare_storage "$root" || return 2
+  _autopilot_locked_run "$root" "" _autopilot_begin_standalone_tdd_critical \
+    "$root" "$session_id" "$vanilla"
+}
+
+# Deferred-review adoption has the same ownership boundary as a standalone TDD
+# begin, but its inner operation first claims the project-wide pending marker.
+# Keep the complete lock order Outer project -> pending marker -> Inner session:
+# a concurrent durable begin must publish both run and pointer before adoption
+# decides, and adoption must finish its claim+seed before the Outer lock releases.
+_autopilot_adopt_pending_review_critical() {
+  local root="$1" session_id="$2" vanilla="$3" ttl_hours="$4"
+  local state_dir="$1/.zensu/state" state read_rc stage adopt_rc
+  if state="$(_autopilot_node read-active \
+      "$state_dir/autopilot-active.json" "$state_dir" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try {
+          const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+          process.stdout.write(s.stage);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in
+        DONE|CANCELLED) ;;
+        *) return 4 ;;
+      esac
+      ;;
+    1) ;;
+    *) return "$read_rc" ;;
+  esac
+  if tdd_adopt_pending_review "$session_id" "$vanilla" "$ttl_hours"; then
+    return 0
+  else
+    adopt_rc=$?
+  fi
+  # Keep Outer corruption/unsafe-storage rc=2 distinct from the Inner API's
+  # legacy rc=2 meaning "no pending marker or recoverable claim".
+  [ "$adopt_rc" -eq 2 ] && return 6
+  # rc=1 from the Inner claim/seed operation is a permanent result for this
+  # transaction (unsafe marker, storage failure, or Inner-lock failure). Keep
+  # it distinct while the Outer lock is still held so the public helper does
+  # not mistake it for Outer-lock contention and retry the whole transaction.
+  [ "$adopt_rc" -eq 1 ] && return 7
+  return "$adopt_rc"
+}
+
+autopilot_adopt_pending_review() {
+  local root session_id="${2:-}" vanilla="${3:-false}" ttl_hours="${4:-0}"
+  local lock_attempt=0 rc
+  [ "$#" -eq 4 ] || return 3
+  _autopilot_session_id_ok "$session_id" || return 3
+  case "$vanilla" in true|false) ;; *) return 3 ;; esac
+  case "$ttl_hours" in ''|*[!0-9]*) return 3 ;; esac
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_prepare_storage "$root" || return 2
+  # The mkdir-lock fallback has a deliberately short per-acquisition timeout.
+  # A burst of Stop hooks can legitimately queue many slow Outer->pending->Inner
+  # composites behind one another, so retry that rc=1 transaction as a whole.
+  # Claim/seed is idempotent and crash-recoverable; unsafe/corrupt/owned/no-work
+  # results have distinct codes and are never retried here.
+  while [ "$lock_attempt" -lt 5 ]; do
+    if _autopilot_locked_run "$root" "" _autopilot_adopt_pending_review_critical \
+        "$root" "$session_id" "$vanilla" "$ttl_hours"; then
+      return 0
+    else
+      rc=$?
+    fi
+    # Preserve the public legacy rc=1 contract for Inner adoption failures,
+    # but do not retry them as though the Outer project lock were contended.
+    [ "$rc" -eq 7 ] && return 1
+    [ "$rc" -eq 1 ] || return "$rc"
+    lock_attempt=$((lock_attempt + 1))
+  done
+  return 1
+}
+
+_autopilot_increment_budget_critical() {
+  local root="$1" run_id="$2" expected_stage="$3" caller_session_id="${4:-}"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local active_file="$state_dir/autopilot-active.json"
+  local run_tmp result rc
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  result="$(_autopilot_node increment-budget "$active_file" "$run_file" "$run_tmp" "$run_id" "$expected_stage" "$root" "$caller_session_id")"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+  printf '%s\n' "$result"
+}
+
+autopilot_increment_stop_budget() {
+  local run_id="${1:-}" expected_stage="${2:-}" root caller_session_id="${4:-}"
+  _autopilot_identifier_ok "$run_id" || return 3
+  if [ -n "$caller_session_id" ]; then
+    _autopilot_identifier_ok "$caller_session_id" || return 3
+  fi
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_increment_budget_critical \
+    "$root" "$run_id" "$expected_stage" "$caller_session_id"
+}
+
+_autopilot_increment_budget_capped_critical() {
+  local root="$1" run_id="$2" expected_stage="$3" caller_session_id="$4"
+  local cap="$5" block_code="$6" state_dir="$1/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local active_file="$state_dir/autopilot-active.json" run_tmp result rc
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  result="$(_autopilot_node increment-budget-capped "$active_file" "$run_file" "$run_tmp" \
+    "$run_id" "$expected_stage" "$root" "$caller_session_id" "$cap" "$block_code")"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+  printf '%s\n' "$result"
+}
+
+autopilot_increment_stop_budget_capped() {
+  local run_id="${1:-}" expected_stage="${2:-}" root caller_session_id="${4:-}"
+  local cap="${5:-}" block_code="${6:-}"
+  [ "$#" -eq 6 ] || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$caller_session_id" \
+    && _autopilot_identifier_ok "$block_code" || return 3
+  case "$cap" in ''|*[!0-9]*) return 3 ;; esac
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_increment_budget_capped_critical \
+    "$root" "$run_id" "$expected_stage" "$caller_session_id" "$cap" "$block_code"
+}
+
+# Caller already holds the project-wide Outer lock. Derive the BLOCK event id
+# from the exact locked generation so crash retries are idempotent and no stale
+# caller can choose a later stage accidentally.
+_autopilot_apply_block_locked() {
+  local root="$1" run_id="$2" block_code="$3" discriminator="$4"
+  local run_file="$root/.zensu/state/autopilot-run-${run_id}.json"
+  local state generation event_id payload
+  state="$(_autopilot_node read-run "$run_file" "$run_id" "$root")" || return $?
+  generation="$(printf '%s' "$state" | node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      process.stdout.write(`${s.stage}:${s.events.length}`);
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null)" || return 2
+  event_id="$(RUN_ID="$run_id" CODE="$block_code" DISC="$discriminator" \
+    GENERATION="$generation" node -e '
+      const crypto=require("crypto");
+      process.stdout.write("outer-block-"+crypto.createHash("sha256").update(JSON.stringify([
+        process.env.RUN_ID,process.env.CODE,process.env.DISC,process.env.GENERATION
+      ])).digest("hex"));
+    ' 2>/dev/null)" || return 5
+  payload="$(CODE="$block_code" node -e '
+    process.stdout.write(JSON.stringify({code:process.env.CODE}));
+  ' 2>/dev/null)" || return 5
+  _autopilot_apply_critical "$root" "$run_id" "$event_id" BLOCK "$payload" ""
+}
+
+_autopilot_reconcile_stop_inner_critical() {
+  local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  local return_stage="$6" state_file="$7" snapshot mode outcome payload event_id
+  if snapshot="$(tdd_chain_snapshot "$state_file" "$session_id" 2>/dev/null)"; then
+    mode="$(printf '%s' "$snapshot" | RUN_ID="$run_id" ATTEMPT="$attempt" \
+      CHAIN_ID="$chain_id" RETURN_STAGE="$return_stage" node -e '
+        try {
+          const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+          const a=s.autopilot;
+          const linked=a && a.runId===process.env.RUN_ID
+            && String(a.attempt)===process.env.ATTEMPT
+            && a.chainId===process.env.CHAIN_ID && a.returnStage===process.env.RETURN_STAGE
+            && s.active===true;
+          if(!linked)process.exit(3);
+          if(s.chainDone===false && (a.outcome==="" || a.outcome==="max-rounds")){
+            process.stdout.write("pending");process.exit(0);
+          }
+          if(s.chainDone===true && s.implComplete===true
+              && ["pass","no-changes","max-rounds"].includes(a.outcome)){
+            process.stdout.write(`done\t${a.outcome}`);process.exit(0);
+          }
+          process.exit(3);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || mode="invalid"
+  else
+    mode="invalid"
+  fi
+
+  case "$mode" in
+    pending)
+      _autopilot_node read-run "$root/.zensu/state/autopilot-run-${run_id}.json" "$run_id" "$root"
+      ;;
+    done$'\t'*)
+      outcome="${mode#*$'\t'}"
+      payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" \
+        OUTCOME="$outcome" node -e '
+          process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),
+            chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
+        ' 2>/dev/null)" || return 5
+      event_id="$(autopilot_chain_event_id "done" "$chain_id")" || return $?
+      _autopilot_apply_critical "$root" "$run_id" "$event_id" \
+        TDD_CHAIN_DONE "$payload" "$session_id" || return $?
+      _autopilot_node read-run "$root/.zensu/state/autopilot-run-${run_id}.json" "$run_id" "$root"
+      ;;
+    *)
+      _autopilot_apply_block_locked "$root" "$run_id" TDD_RECONCILIATION_INVALID \
+        "reconcile-${attempt}-${chain_id}" || return $?
+      _autopilot_node read-run "$root/.zensu/state/autopilot-run-${run_id}.json" "$run_id" "$root"
+      ;;
+  esac
+}
+
+_autopilot_reconcile_stop_critical() {
+  local root="$1" caller_session_id="$2" state_dir="$1/.zensu/state"
+  local state meta run_id owner stage attempt chain_id return_stage state_file
+  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
+    || return $?
+  meta="$(printf '%s' "$state" | node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      process.stdout.write([s.runId,s.ownerSessionId,s.stage,s.tdd.attempt,
+        s.tdd.chainId||"",s.tdd.returnStage||""].join("\t"));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null)" || return 2
+  IFS=$'\t' read -r run_id owner stage attempt chain_id return_stage <<<"$meta"
+  if [ "$owner" != "$caller_session_id" ] || [ "$stage" != "TDD_RUNNING" ]; then
+    printf '%s\n' "$state"
+    return 0
+  fi
+  if ! _autopilot_identifier_ok "$chain_id"; then
+    _autopilot_apply_block_locked "$root" "$run_id" TDD_RECONCILIATION_INVALID \
+      "missing-chain-${attempt}" || return $?
+    _autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root"
+    return $?
+  fi
+  state_file="$(tdd_state_file "$caller_session_id")"
+  if _tdd_locked_run "$state_file" _autopilot_reconcile_stop_inner_critical \
+      "$root" "$run_id" "$caller_session_id" "$attempt" "$chain_id" \
+      "$return_stage" "$state_file"; then
+    return 0
+  fi
+  _autopilot_apply_block_locked "$root" "$run_id" TDD_RECONCILIATION_INVALID \
+    "inner-read-${attempt}-${chain_id}" || return $?
+  _autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root"
+}
+
+autopilot_reconcile_stop_active() {
+  local root caller_session_id="${2:-}"
+  [ "$#" -eq 2 ] || return 3
+  _autopilot_session_id_ok "$caller_session_id" || return 3
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" || return $?
+  _autopilot_locked_run "$root" "" _autopilot_reconcile_stop_critical \
+    "$root" "$caller_session_id"
+}
+
+_autopilot_increment_inner_budget_critical() {
+  local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  local return_stage="$6" cap="$7" block_code="$8" state_file="$9"
+  local budget_file="${10}" result_file="${11}"
+  local count blocked=false
+  _tdd_increment_stop_budget_critical "$state_file" "$session_id" "$budget_file" \
+    "$result_file" "$run_id" "$attempt" "$chain_id" "$return_stage" || return $?
+  count="$(cat "$result_file" 2>/dev/null)" || return 1
+  case "$count" in ''|*[!0-9]*) return 1 ;; esac
+  if [ "$count" -gt "$cap" ]; then
+    STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+      CHAIN_ID="$chain_id" COUNT="$count" node -e '
+        try {
+          const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+          const exact=s.session_id===process.env.SID && s.active===true
+            && s.implComplete===true && s.chainDone===false
+            && s.autopilotRunId===process.env.RUN_ID
+            && s.autopilotAttempt===Number(process.env.ATTEMPT)
+            && s.chainId===process.env.CHAIN_ID
+            && s.stopBlockCount===Number(process.env.COUNT);
+          process.exit(exact?0:3);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null || return 4
+    _autopilot_apply_block_locked "$root" "$run_id" "$block_code" \
+      "inner-cap-${attempt}-${chain_id}-${count}" || return $?
+    blocked=true
+  fi
+  printf '{"count":%s,"blocked":%s}\n' "$count" "$blocked"
+}
+
+_autopilot_increment_inner_budget_outer_critical() {
+  local root="$1" expected_run="$2" expected_stage="$3" expected_events="$4"
+  local expected_attempt="$5" expected_return_stage="$6" expected_chain="$7"
+  local session_id="$8" cap="$9" block_code="${10}" state_dir="$1/.zensu/state"
+  local state meta run_id owner stage events attempt chain_id return_stage tdd_session
+  local state_file state_dir_inner
+  local budget_file result_file result rc
+  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
+    || return $?
+  meta="$(printf '%s' "$state" | node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      process.stdout.write([s.runId,s.ownerSessionId,s.stage,s.events.length,
+        s.tdd.attempt,s.tdd.chainId||"",s.tdd.returnStage||"",s.tdd.sessionId||""].join("\t"));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null)" || return 2
+  IFS=$'\t' read -r run_id owner stage events attempt chain_id return_stage tdd_session <<<"$meta"
+  [ "$run_id" = "$expected_run" ] && [ "$stage" = "$expected_stage" ] \
+    && [ "$events" = "$expected_events" ] && [ "$owner" = "$session_id" ] \
+    && [ "$attempt" = "$expected_attempt" ] && [ "$chain_id" = "$expected_chain" ] \
+    && [ "$return_stage" = "$expected_return_stage" ] \
+    && [ "$stage" = "TDD_RUNNING" ] && [ "$tdd_session" = "$session_id" ] \
+    && _autopilot_identifier_ok "$chain_id" || return 4
+
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir_inner="$(dirname "$state_file")"
+  budget_file="${state_file}.stopblocks"
+  _tdd_path_safe "$state_file" regular "$state_dir_inner" || return 2
+  _tdd_path_safe "$budget_file" regular-or-absent "$state_dir_inner" || return 2
+  result_file="$(mktemp "${state_file}.stop-count.XXXXXX" 2>/dev/null)" || return 5
+  result="$(_tdd_locked_run "$state_file" _autopilot_increment_inner_budget_critical \
+    "$root" "$run_id" "$session_id" "$expected_attempt" "$expected_chain" \
+    "$expected_return_stage" "$cap" "$block_code" \
+    "$state_file" "$budget_file" "$result_file")"
+  rc=$?
+  rm -f "$result_file" 2>/dev/null || true
+  [ "$rc" -eq 0 ] || return "$rc"
+  printf '%s\n' "$result"
+}
+
+autopilot_increment_inner_stop_budget_capped() {
+  local run_id="${1:-}" expected_stage="${2:-}" expected_events="${3:-}" root
+  local expected_attempt="${4:-}" expected_return_stage="${5:-}" expected_chain="${6:-}"
+  local session_id="${8:-}" cap="${9:-}" block_code="${10:-}"
+  [ "$#" -eq 10 ] || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$session_id" \
+    && _autopilot_identifier_ok "$expected_chain" \
+    && _autopilot_identifier_ok "$block_code" || return 3
+  case "$expected_events:$expected_attempt:$cap" in *[!0-9:]*) return 3 ;; esac
+  [ -n "$expected_events" ] && [ -n "$cap" ] || return 3
+  [ "$expected_attempt" -ge 1 ] && [ "$expected_attempt" -le 999 ] || return 3
+  case "$expected_return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${7:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_increment_inner_budget_outer_critical \
+    "$root" "$run_id" "$expected_stage" "$expected_events" "$expected_attempt" \
+    "$expected_return_stage" "$expected_chain" "$session_id" "$cap" "$block_code"
+}
+
+_autopilot_verify_inner_binding_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local return_stage="$5" chain_id="$6"
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
+      const fs=require("fs");
+      let s;
+      try { s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8")); }
+      catch (_) { process.exit(3); }
+      const ok=s && typeof s==="object" && !Array.isArray(s)
+        && s.session_id===process.env.SID && s.active===true
+        && s.autopilotRunId===process.env.RUN_ID
+        && s.autopilotAttempt===Number(process.env.ATTEMPT)
+        && s.autopilotReturnStage===process.env.RETURN_STAGE
+        && s.chainId===process.env.CHAIN_ID
+        && s.chainDone===false && s.chainOutcome==="";
+      process.exit(ok?0:3);
+    ' 2>/dev/null
+}
+
+_autopilot_verify_inner_binding() {
+  local session_id="$1" run_id="$2" attempt="$3" return_stage="$4" chain_id="$5"
+  local state_file
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _autopilot_verify_inner_binding_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$return_stage" "$chain_id"
+}
+
+# Prepare the outer TDD_STARTED transition while holding the one project-wide
+# Autopilot lock, create/reset the matching inner generation under its own lock,
+# then publish the outer state. A concurrent contender therefore fails before
+# touching the inner file. If a process dies after the inner write, retrying the
+# exact event reconstructs the outer side; no conflicting chain may win later.
+_autopilot_begin_tdd_critical() {
+  local root="$1" run_id="$2" event_id="$3" session_id="$4" vanilla="$5"
+  local attempt="$6" return_stage="$7" chain_id="$8"
+  local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  run_file="$state_dir/autopilot-run-${run_id}.json"
+  active_file="$state_dir/autopilot-active.json"
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" node -e '
+    process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID}));
+  ')" || { rm -f "$run_tmp"; return 5; }
+  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" \
+    TDD_STARTED "$payload" "$root" "$session_id"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp"
+    _autopilot_verify_inner_binding "$session_id" "$run_id" "$attempt" "$return_stage" "$chain_id"
+    return $?
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  if ! STATE_FILE="$run_tmp" RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
+      RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
+        try {
+          const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+          const ok=s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
+            && s.stage==="TDD_RUNNING" && s.tdd
+            && s.tdd.attempt===Number(process.env.ATTEMPT)
+            && s.tdd.returnStage===process.env.RETURN_STAGE
+            && s.tdd.chainId===process.env.CHAIN_ID
+            && s.tdd.sessionId===process.env.SID;
+          process.exit(ok?0:3);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null; then
+    rm -f "$run_tmp"
+    return 4
+  fi
+  if ! tdd_begin_session "$session_id" "$vanilla" false false "" \
+      "$run_id" "$attempt" "$return_stage" "$chain_id"; then
+    rm -f "$run_tmp"
+    return 5
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+}
+
+autopilot_begin_tdd_attempt() {
+  local run_id="${1:-}" event_id="${2:-}" root session_id="${4:-}" vanilla="${5:-}"
+  local attempt="${6:-}" return_stage="${7:-}" chain_id="${8:-}"
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" \
+    && _autopilot_identifier_ok "$session_id" && _autopilot_identifier_ok "$chain_id" || return 3
+  case "$vanilla" in true|false) ;; *) return 3 ;; esac
+  case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
+  case "$return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_begin_tdd_critical \
+    "$root" "$run_id" "$event_id" "$session_id" "$vanilla" "$attempt" "$return_stage" "$chain_id"
+}
+
+# TDD_CHAIN_DONE uses the same lock ordering as start: outer project lock first,
+# then the inner session lock. The inner helper commits chainOutcome+chainDone in
+# one CAS write. Only after that succeeds is the prepared outer transition
+# renamed into place. Both helpers accept an exact duplicate as a no-op, which
+# makes the one unavoidable two-file crash window recoverable by retry.
+_autopilot_finish_tdd_critical() {
+  local root="$1" run_id="$2" event_id="$3" session_id="$4" attempt="$5"
+  local chain_id="$6" outcome="$7" claimed_seen="$8" claimed_ticket="${9:-}"
+  local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  run_file="$state_dir/autopilot-run-${run_id}.json"
+  active_file="$state_dir/autopilot-active.json"
+  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" OUTCOME="$outcome" node -e '
+    process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
+  ')" || { rm -f "$run_tmp"; return 5; }
+  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" \
+    TDD_CHAIN_DONE "$payload" "$root" "$session_id"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    # The durable outer event is the acknowledgement record. It was only ever
+    # committed after the matching inner CAS succeeded, so a late exact retry
+    # remains successful even when a newer inner generation now owns the
+    # session file.
+    rm -f "$run_tmp"
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  if [ "$claimed_seen" = "true" ]; then
+    tdd_finish_autopilot_chain "$session_id" "$run_id" "$attempt" "$chain_id" "$outcome" "$claimed_ticket"
+  else
+    tdd_finish_autopilot_chain "$session_id" "$run_id" "$attempt" "$chain_id" "$outcome"
+  fi
+  local finish_rc=$?
+  if [ "$finish_rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$finish_rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+}
+
+autopilot_finish_tdd_attempt() {
+  local run_id="${1:-}" event_id="${2:-}" root session_id="${4:-}" attempt="${5:-}"
+  local chain_id="${6:-}" outcome="${7:-}" claimed_seen="${8:-false}" claimed_ticket="${9:-}"
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" \
+    && _autopilot_identifier_ok "$session_id" && _autopilot_identifier_ok "$chain_id" || return 3
+  case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
+  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 3 ;; esac
+  case "$claimed_seen" in true|false) ;; *) return 3 ;; esac
+  if [ "$claimed_seen" = "true" ]; then
+    _tdd_review_ticket_shape_ok "$claimed_ticket" || return 3
+  elif [ -n "$claimed_ticket" ]; then
+    return 3
+  fi
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_finish_tdd_critical \
+    "$root" "$run_id" "$event_id" "$session_id" "$attempt" "$chain_id" "$outcome" \
+      "$claimed_seen" "$claimed_ticket"
+}
+
+# Rearm one exhausted inner review generation while holding the outer project
+# lock first, then the inner session lock. This shares the exact lock ordering
+# with TDD start/finish, so a concurrent TDD_CHAIN_DONE cannot turn the outer
+# run BLOCKED between the rearm decision and the inner CAS.
+_autopilot_rearm_review_critical() {
+  local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5" ticket="$6"
+  local state_dir="$root/.zensu/state" run_file state_file state mode retire=false
+  local inner_ctx reconcile_fields outcome payload done_event_id rearm_event_id
+  run_file="$state_dir/autopilot-run-${run_id}.json"
+  state_file="$(tdd_state_file "$session_id")"
+  state="$(_autopilot_node read-run "$run_file" "$run_id" "$root")" || return $?
+  mode="$(printf '%s' "$state" | SID="$session_id" RUN_ID="$run_id" \
+    ATTEMPT="$attempt" CHAIN_ID="$chain_id" node -e '
+      try {
+        const fs=require("fs"),s=JSON.parse(fs.readFileSync(0,"utf8"));
+        const exact=s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
+          && s.tdd && s.tdd.sessionId===process.env.SID
+          && s.tdd.attempt===Number(process.env.ATTEMPT) && s.tdd.chainId===process.env.CHAIN_ID;
+        if(!exact)process.exit(3);
+        if(s.stage==="TDD_RUNNING")process.stdout.write("active");
+        else if(s.stage==="BLOCKED" && s.blocked && s.blocked.code==="TDD_MAX_ROUNDS")process.stdout.write("retire-resume");
+        else if(s.stage==="AWAIT_TDD")process.stdout.write("retire-retry");
+        else process.exit(3);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null)" || return 3
+  if [ "$mode" = "active" ]; then
+    inner_ctx="$(tdd_autopilot_context "$state_file" "$session_id" 2>/dev/null)" || return 3
+    reconcile_fields="$(AUTOPILOT_CTX="$inner_ctx" RUN_ID="$run_id" ATTEMPT="$attempt" \
+      CHAIN_ID="$chain_id" node -e '
+        try {
+          const c=JSON.parse(process.env.AUTOPILOT_CTX);
+          const exact=c.runId===process.env.RUN_ID && String(c.attempt)===process.env.ATTEMPT
+            && c.chainId===process.env.CHAIN_ID && c.active===true && c.implComplete===true;
+          if(!exact)process.exit(3);
+          process.stdout.write(`${c.chainDone}\t${c.outcome}`);
+        } catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 3
+    IFS=$'\t' read -r inner_done outcome <<<"$reconcile_fields"
+    if [ "$inner_done" = "true" ]; then
+      case "$outcome" in pass|no-changes|max-rounds) ;; *) return 3 ;; esac
+      payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" OUTCOME="$outcome" node -e '
+        process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
+      ')" || return 5
+      done_event_id="$(autopilot_chain_event_id "done" "$chain_id")" || return $?
+      _autopilot_apply_critical "$root" "$run_id" "$done_event_id" \
+        TDD_CHAIN_DONE "$payload" "$session_id" || return $?
+      # A pass/no-changes receipt has now advanced the outer run and is not a
+      # resettable exhausted generation. max-rounds becomes BLOCKED and must be
+      # retired before the same locked composite resumes a fresh attempt.
+      [ "$outcome" = "max-rounds" ] || return 3
+      mode="retire-resume"
+    fi
+  fi
+  case "$mode" in active) retire=false ;; *) retire=true ;; esac
+  tdd_rearm_autopilot_review "$session_id" "$run_id" "$attempt" "$chain_id" "$ticket" "$retire" \
+    || return $?
+  if [ "$mode" = "retire-resume" ]; then
+    rearm_event_id="$(autopilot_chain_event_id rearm "$chain_id")" || return $?
+    _autopilot_apply_critical "$root" "$run_id" "$rearm_event_id" \
+      RESUME '{}' "$session_id" || return $?
+  fi
+}
+
+autopilot_rearm_review() {
+  local run_id="${1:-}" root session_id="${3:-}" attempt="${4:-}"
+  local chain_id="${5:-}" ticket="${6:-}"
+  [ "$#" -eq 6 ] || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$session_id" \
+    && _autopilot_identifier_ok "$chain_id" || return 3
+  case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
+  _tdd_review_ticket_shape_ok "$ticket" || return 3
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_rearm_review_critical \
+    "$root" "$run_id" "$session_id" "$attempt" "$chain_id" "$ticket"
+}
+
+_autopilot_terminal_inner_matches_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local return_stage="$5" chain_id="$6" snapshot
+  snapshot="$(tdd_chain_snapshot "$state_file" "$session_id" 2>/dev/null)" || return 4
+  printf '%s' "$snapshot" | RUN_ID="$run_id" ATTEMPT="$attempt" \
+    RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
+      try {
+        const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+        const a=s.autopilot;
+        const exact=s.active===true && s.implComplete===true && s.chainDone===false
+          && a && a.runId===process.env.RUN_ID
+          && String(a.attempt)===process.env.ATTEMPT
+          && a.returnStage===process.env.RETURN_STAGE
+          && a.chainId===process.env.CHAIN_ID;
+        process.exit(exact?0:4);
+      } catch (_) { process.exit(4); }
+    ' 2>/dev/null
+}
+
+_autopilot_terminal_owns_inner_critical() {
+  local root="$1" run_id="$2" session_id="$3" attempt="$4"
+  local return_stage="$5" chain_id="$6" state_dir="$1/.zensu/state" state state_file
+  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
+    || return $?
+  printf '%s' "$state" | RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
+    RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
+      try {
+        const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
+        const exact=["DONE","BLOCKED","CANCELLED"].includes(s.stage)
+          && s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
+          && s.tdd && String(s.tdd.attempt)===process.env.ATTEMPT
+          && s.tdd.returnStage===process.env.RETURN_STAGE
+          && s.tdd.chainId===process.env.CHAIN_ID
+          && s.tdd.sessionId===process.env.SID;
+        process.exit(exact?0:4);
+      } catch (_) { process.exit(4); }
+    ' 2>/dev/null || return 4
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 2
+  _tdd_locked_run "$state_file" _autopilot_terminal_inner_matches_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$return_stage" "$chain_id"
+}
+
+# Prove that the *current* project pointer and current Inner still form the
+# same Stop-releasing generation. The project lock remains held while the
+# Inner mutex is acquired, matching every composite Autopilot mutation.
+autopilot_terminal_owns_inner_current() {
+  local run_id="${1:-}" root session_id="${3:-}" attempt="${4:-}"
+  local return_stage="${5:-}" chain_id="${6:-}"
+  [ "$#" -eq 6 ] || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$chain_id" \
+    && _autopilot_session_id_ok "$session_id" || return 3
+  case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
+  case "$return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_terminal_owns_inner_critical \
+    "$root" "$run_id" "$session_id" "$attempt" "$return_stage" "$chain_id"
+}
+
+_autopilot_reset_inner_critical() {
+  local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  local state_dir="$root/.zensu/state" state
+  # Reset is also the terminal Stop release linearization point. Read the
+  # current pointer while the project lock is held; a historical terminal run
+  # file must never authorize clearing or releasing a newer active run.
+  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
+    || return $?
+  printf '%s' "$state" | SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" node -e '
+      try {
+        const fs=require("fs"),s=JSON.parse(fs.readFileSync(0,"utf8"));
+        const exact=["DONE","CANCELLED"].includes(s.stage)
+          && s.runId===process.env.RUN_ID && s.ownerSessionId===process.env.SID
+          && s.tdd && s.tdd.sessionId===process.env.SID
+          && s.tdd.attempt===Number(process.env.ATTEMPT) && s.tdd.chainId===process.env.CHAIN_ID;
+        process.exit(exact?0:3);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null || return 3
+  tdd_clear_autopilot_session "$session_id" "$run_id" "$attempt" "$chain_id"
+}
+
+autopilot_reset_inner() {
+  local run_id="${1:-}" root session_id="${3:-}" attempt="${4:-}" chain_id="${5:-}"
+  [ "$#" -eq 5 ] || return 3
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$session_id" \
+    && _autopilot_identifier_ok "$chain_id" || return 3
+  case "$attempt" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ] || return 3
+  root="$(_autopilot_project_root "${2:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_reset_inner_critical \
+    "$root" "$run_id" "$session_id" "$attempt" "$chain_id"
+}

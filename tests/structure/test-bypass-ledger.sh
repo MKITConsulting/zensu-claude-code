@@ -102,7 +102,9 @@ else
   check "P2c --bypass-list echoes none for an empty ledger" FAIL
 fi
 BEGIN_SESSION_BLOCK="$(awk '/^_tdd_begin_session_critical\(\)/,/^}/' "$PHASE_LIB")"
-if grep -qF 'tdd_begin_session "$session_val" "$begin_vanilla"' "$LOG_SH" \
+STANDALONE_BEGIN_BLOCK="$(awk '/^_autopilot_begin_standalone_tdd_critical\(\)/,/^}/' "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh")"
+if grep -qF 'autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}"' "$LOG_SH" \
+  && printf '%s\n' "$STANDALONE_BEGIN_BLOCK" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
   && printf '%s\n' "$BEGIN_SESSION_BLOCK" | grep -qF 's.bypasses = [];'; then
   check "P2d --tdd-begin resets the ledger inside its atomic transition" PASS
 else

@@ -109,11 +109,59 @@ if ! _tdd_path_safe "$STATE_DIR" directory "$STATE_DIR" \
   exit 0
 fi
 
-# Claim the one-shot ticket AND increment/persist its round while holding the
-# same per-session mutex. This serializes duplicate deliveries against both the
-# counter and a concurrent --tdd-begin generation reset.
-NEXT="$(tdd_consume_review_ticket "$SESSION_ID" "$REVIEW_TICKET" "$COUNTER_FILE")" || exit 0
+# Claim the one-shot ticket, increment its round, and capture the exact
+# fully-validated Autopilot binding from the same locked state read. There is no
+# post-claim linkage reread: partial linkage fails before state/counter mutation,
+# while a concurrent generation reset makes every later bound CAS stale.
+CLAIM_CONTEXT="$(tdd_consume_review_ticket_context \
+  "$SESSION_ID" "$REVIEW_TICKET" "$COUNTER_FILE")" || exit 0
+CLAIM_FIELDS="$(CLAIM_CONTEXT="$CLAIM_CONTEXT" node -e '
+  try {
+    const value = JSON.parse(process.env.CLAIM_CONTEXT);
+    const topKeys = Object.keys(value).sort().join(",");
+    if (topKeys !== "autopilot,next" || !Number.isSafeInteger(value.next) || value.next < 1) {
+      process.exit(3);
+    }
+    if (value.autopilot === null) {
+      process.stdout.write([value.next, "standalone", "-", 0, "-", "-"].join("\t"));
+      process.exit(0);
+    }
+    const binding = value.autopilot;
+    const bindingKeys = binding && typeof binding === "object" && !Array.isArray(binding)
+      ? Object.keys(binding).sort().join(",") : "";
+    const linkId = candidate => typeof candidate === "string"
+      && candidate.length > 0 && candidate.length <= 128
+      && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(candidate);
+    const valid = bindingKeys === "attempt,chainId,outcome,returnStage,runId"
+      && linkId(binding.runId)
+      && Number.isInteger(binding.attempt) && binding.attempt >= 1 && binding.attempt <= 999
+      && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+        .includes(binding.returnStage)
+      && linkId(binding.chainId)
+      && binding.outcome === "";
+    if (!valid) process.exit(3);
+    process.stdout.write([
+      value.next, "bound", binding.runId, binding.attempt, binding.returnStage, binding.chainId
+    ].join("\t"));
+  } catch (_) { process.exit(3); }
+' 2>/dev/null)" || exit 0
+IFS=$'\t' read -r NEXT AUTOPILOT_KIND AUTOPILOT_RUN AUTOPILOT_ATTEMPT \
+  AUTOPILOT_RETURN_STAGE AUTOPILOT_CHAIN <<<"$CLAIM_FIELDS"
 case "$NEXT" in ''|*[!0-9]*) exit 0 ;; esac
+
+AUTOPILOT_BOUND=false
+AUTOPILOT_BOUND_ARGS=""
+AUTOPILOT_BINDING_LINE=""
+if [ "$AUTOPILOT_KIND" = bound ]; then
+  AUTOPILOT_BOUND=true
+  AUTOPILOT_RUN_Q="$(printf '%q' "$AUTOPILOT_RUN")"
+  AUTOPILOT_ATTEMPT_Q="$(printf '%q' "$AUTOPILOT_ATTEMPT")"
+  AUTOPILOT_CHAIN_Q="$(printf '%q' "$AUTOPILOT_CHAIN")"
+  AUTOPILOT_BOUND_ARGS=" --autopilot-run ${AUTOPILOT_RUN_Q} --autopilot-attempt ${AUTOPILOT_ATTEMPT_Q} --chain-id ${AUTOPILOT_CHAIN_Q}"
+  AUTOPILOT_BINDING_LINE=" Carry this exact generation line into self-review: 'AUTOPILOT-BINDING: run=${AUTOPILOT_RUN} attempt=${AUTOPILOT_ATTEMPT} chain=${AUTOPILOT_CHAIN}'."
+elif [ "$AUTOPILOT_KIND" != standalone ]; then
+  exit 0
+fi
 
 if [ "$(tdd_vanilla_mode "$TDD_STATE_FILE")" = "true" ]; then
   FIX_DISCIPLINE_ALL="in vanilla mode by re-entering the /zensu:tdd workflow's vanilla implementation loop (fix each finding directly — no RED→GREEN cycle required, tests at your discretion; keep the structured CHECKPOINT/AUDIT evidence discipline; the phase-gate passes through in this session)"
@@ -145,10 +193,10 @@ LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 REVIEW_TICKET_Q="$(printf '%q' "$REVIEW_TICKET")"
 
 if [ "$SELF_REVIEW_ON" = "1" ]; then
-  CLOSE_PASS="run this ticket-bound command: bash ${LOG_HELPER_Q} --code-review-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Only if it exits 0, your VERY NEXT action must be the Skill tool with skill='zensu:self-review'. Carry this exact generation line into that skill: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'. The terminal self-review owns the chain terminus and renders the final CHAIN-END SUMMARY. If the command fails, this completion is stale: do NOT invoke self-review, do NOT mutate chain state, and resume the current chain instead. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the matching generation."
+  CLOSE_PASS="run this ticket-bound command: bash ${LOG_HELPER_Q} --code-review-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Only if it exits 0, your VERY NEXT action must be the Skill tool with skill='zensu:self-review'. Carry this exact generation line into that skill: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_BINDING_LINE} The terminal self-review owns the chain terminus and renders the final CHAIN-END SUMMARY. If the command fails, this completion is stale: do NOT invoke self-review, do NOT mutate chain state, and resume the current chain instead. Do NOT close the chain yourself, do NOT render the summary here, and do NOT end your turn — self-review finalizes the matching generation."
   TAIL_DIRECTIVE=""
 else
-  CLOSE_PASS="close only this review generation by running: bash ${LOG_HELPER_Q} --chain-done --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0; on failure this completion is stale, so leave the current chain untouched and resume it."
+  CLOSE_PASS="close only this review generation by running: bash ${LOG_HELPER_Q} --chain-done${AUTOPILOT_BOUND_ARGS} --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0; on failure this completion is stale, so leave the current chain untouched and resume it."
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
 fi
 
@@ -169,12 +217,25 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
   # the terminal self-review stage, which owns --chain-done. With self-review
   # disabled, terminate as before (chainDone) so the Stop-hook backstop releases.
   if [ "$SELF_REVIEW_ON" = "1" ]; then
-    # The max-round flag write is bound to the ticket claimed above. If a new
-    # chain began in between, this old completion becomes a total no-op.
-    tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || exit 0
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'. Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
+    # Bound chains land the durable outcome and handoff flag in one exact CAS.
+    # Standalone chains keep the ticket-bound convergence flag transition.
+    if [ "$AUTOPILOT_BOUND" = "true" ]; then
+      tdd_mark_autopilot_max_round_handoff "$SESSION_ID" "$AUTOPILOT_RUN" \
+        "$AUTOPILOT_ATTEMPT" "$AUTOPILOT_RETURN_STAGE" "$AUTOPILOT_CHAIN" \
+        "$REVIEW_TICKET" || exit 0
+    else
+      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" codeReviewDone || exit 0
+    fi
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The code-reviewer chain is marked converged (codeReviewDone). Do NOT spawn zensu:code-reviewer again and do NOT keep fixing its findings. Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — the terminal self-review stage. Carry this exact generation line into it: 'SELF-REVIEW-TICKET: ${REVIEW_TICKET}'.${AUTOPILOT_BINDING_LINE} Carry the remaining reviewer findings forward under '### Findings (max rounds reached, manual fix required)' so they land in the final report. /zensu:self-review owns the ticket-bound chain terminus and renders the final summary — do NOT close the chain yourself. To grant another reviewer budget instead of finalizing, the user can invoke the /zensu:reset-review-limit skill."
   else
-    tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
+    if [ "$AUTOPILOT_BOUND" = "true" ]; then
+      bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --session "$SESSION_ID" \
+        --autopilot-run "$AUTOPILOT_RUN" --autopilot-attempt "$AUTOPILOT_ATTEMPT" \
+        --chain-id "$AUTOPILOT_CHAIN" --claimed-review-ticket "$REVIEW_TICKET" \
+        --outcome max-rounds >/dev/null 2>&1 || exit 0
+    else
+      tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
+    fi
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
   fi
   node -e '
