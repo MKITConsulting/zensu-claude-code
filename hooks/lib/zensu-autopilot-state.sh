@@ -189,10 +189,12 @@ const parseReviewMarker = marker => {
   if (!match || match[4] !== match[5]) return null;
   return { opDigest: match[1], payloadDigest: match[2], headSha: match[3], partCount: Number(match[4]) };
 };
-const reviewMarkerMatches = (marker, operationKey, headSha) => {
+const reviewMarkerMatches = (marker, operationKey, headSha, expectedPayloadDigest = null, expectedPartCount = null) => {
   const parsed = parseReviewMarker(marker);
   return parsed !== null && parsed.opDigest === rawDigest(operationKey)
-    && sameSha(parsed.headSha, headSha) && Number.isSafeInteger(parsed.partCount);
+    && sameSha(parsed.headSha, headSha) && Number.isSafeInteger(parsed.partCount)
+    && (expectedPayloadDigest === null || parsed.payloadDigest === expectedPayloadDigest)
+    && (expectedPartCount === null || parsed.partCount === expectedPartCount);
 };
 
 const regularFile = file => {
@@ -253,14 +255,20 @@ const payloadValid = (type, payload) => {
       return exact(payload, ["reason", "limitReached"])
         && nonEmpty(payload.reason) && typeof payload.limitReached === "boolean";
     case "PR_OPEN_REQUESTED":
-    case "TEAM_REVIEW_REQUESTED":
       return exact(payload, ["operationKey"]) && nonEmpty(payload.operationKey, 256);
+    case "TEAM_REVIEW_REQUESTED":
+      return (exact(payload, ["operationKey"])
+          || (exact(payload, ["operationKey", "provider"])
+            && ["github", "gitlab"].includes(payload.provider)))
+        && nonEmpty(payload.operationKey, 256);
     case "PR_OPENED":
       return exact(payload, ["operationKey", "pr"]) && nonEmpty(payload.operationKey, 256)
         && exact(payload.pr, ["number", "url", "headSha"]) && positive(payload.pr.number)
         && nonEmpty(payload.pr.url, 2048) && /^https:\/\//.test(payload.pr.url) && sha(payload.pr.headSha);
     case "TEAM_REVIEW_PUBLISHED":
-      return exact(payload, ["operationKey", "marker", "headSha"])
+      return (exact(payload, ["operationKey", "marker", "headSha"])
+          || (exact(payload, ["operationKey", "marker", "headSha", "provider"])
+            && ["github", "gitlab"].includes(payload.provider)))
         && nonEmpty(payload.operationKey, 256) && parseReviewMarker(payload.marker) !== null && sha(payload.headSha);
     case "FIX_REQUIRED":
       return exact(payload, ["headSha", "unresolvedCount"])
@@ -285,16 +293,32 @@ const effectValid = value => exact(value, ["status", "operationKey"])
   && ["none", "requested", "completed"].includes(value.status)
   && (value.operationKey === null || nonEmpty(value.operationKey, 256))
   && (value.status === "none" ? value.operationKey === null : value.operationKey !== null);
+const teamReviewEffectValid = value => exact(value, ["status", "operationKey", "provider"])
+  && ["none", "requested", "completed"].includes(value.status)
+  && (value.operationKey === null || nonEmpty(value.operationKey, 256))
+  && (value.provider === null || ["github", "gitlab"].includes(value.provider))
+  && (value.status === "none"
+    ? value.operationKey === null && value.provider === null
+    : value.operationKey !== null);
 const evidenceHead = (value, kind) => value === null || (exact(value, [kind, "headSha"])
   && value[kind] === true && sha(value.headSha));
+const reviewEvidenceValid = value => {
+  if (value === null) return true;
+  if (!exact(value, ["published", "marker", "headSha", "payloadDigest", "partCount", "provider"])
+      || value.published !== true || !sha(value.headSha) || !sha256(value.payloadDigest)
+      || !positive(value.partCount) || value.partCount > 999999
+      || !(value.provider === null || ["github", "gitlab"].includes(value.provider))) return false;
+  const parsed = parseReviewMarker(value.marker);
+  return parsed !== null && sameSha(parsed.headSha, value.headSha)
+    && parsed.payloadDigest === value.payloadDigest && parsed.partCount === value.partCount;
+};
 const evidenceValid = evidence => exact(evidence, ["pr", "gates", "review", "findings", "validation", "coverage", "delivery"])
   && (evidence.pr === null || (exact(evidence.pr, ["number", "url", "headSha"])
     && positive(evidence.pr.number) && nonEmpty(evidence.pr.url, 2048)
     && /^https:\/\//.test(evidence.pr.url) && sha(evidence.pr.headSha)))
   && (evidence.gates === null || (exact(evidence.gates, ["passed", "headSha"])
     && typeof evidence.gates.passed === "boolean" && sha(evidence.gates.headSha)))
-  && (evidence.review === null || (exact(evidence.review, ["published", "marker", "headSha"])
-    && evidence.review.published === true && parseReviewMarker(evidence.review.marker) !== null && sha(evidence.review.headSha)))
+  && reviewEvidenceValid(evidence.review)
   && (evidence.findings === null || (exact(evidence.findings, ["cleared", "headSha", "unresolvedCount"])
     && typeof evidence.findings.cleared === "boolean" && sha(evidence.findings.headSha)
     && natural(evidence.findings.unresolvedCount)))
@@ -324,11 +348,18 @@ const reviewBelongsToPrGeneration = state => {
   if (prIndex < 0 || reviewIndex <= prIndex || !state.evidence.pr || !state.evidence.review) return false;
   const prEvent = state.events[prIndex];
   const reviewEvent = state.events[reviewIndex];
+  const parsedReviewMarker = parseReviewMarker(reviewEvent.payload.marker);
   if (state.effects.prOpen.operationKey !== prEvent.payload.operationKey
     || state.effects.teamReview.operationKey !== reviewEvent.payload.operationKey
     || state.evidence.pr.number !== prEvent.payload.pr.number
     || state.evidence.pr.url !== prEvent.payload.pr.url
     || state.evidence.review.marker !== reviewEvent.payload.marker
+    || !parsedReviewMarker
+    || state.evidence.review.payloadDigest !== parsedReviewMarker.payloadDigest
+    || state.evidence.review.partCount !== parsedReviewMarker.partCount
+    || state.effects.teamReview.provider !== state.evidence.review.provider
+    || state.evidence.review.provider !== (["github", "gitlab"].includes(reviewEvent.payload.provider)
+      ? reviewEvent.payload.provider : null)
     || !sameSha(state.evidence.review.headSha, reviewEvent.payload.headSha)
     || !sameSha(reviewEvent.payload.headSha, prEvent.payload.pr.headSha)) return false;
 
@@ -378,13 +409,15 @@ const stateValid = state => {
     || !(state.tdd.outcome === null || ["pass", "no-changes", "max-rounds"].includes(state.tdd.outcome))
     || typeof state.tdd.headUpdateRequired !== "boolean") return false;
   if (!exact(state.effects, ["prOpen", "teamReview"]) || !effectValid(state.effects.prOpen)
-    || !effectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
+    || !teamReviewEffectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
   if (state.effects.teamReview.status !== "none") {
     if (!state.evidence.pr || state.effects.teamReview.operationKey !== teamReviewOperationKeyForState(state)) return false;
     if (state.effects.teamReview.status === "requested" && state.evidence.review !== null) return false;
     if (state.effects.teamReview.status === "completed"
       && (!state.evidence.review || !reviewMarkerMatches(state.evidence.review.marker,
-        state.effects.teamReview.operationKey, state.evidence.review.headSha))) return false;
+        state.effects.teamReview.operationKey, state.evidence.review.headSha,
+        state.evidence.review.payloadDigest, state.evidence.review.partCount)
+        || state.evidence.review.provider !== state.effects.teamReview.provider)) return false;
   } else if (state.evidence.review !== null) return false;
   if (!exact(state.blocked, ["from", "code"])
     || !(state.blocked.from === null || STAGES.has(state.blocked.from))
@@ -422,6 +455,50 @@ const readState = (file, absentCode = 2) => {
   // run" when its file disappears; it is a corrupt torn state. Direct
   // read-run lookups may opt back into rc=1 for a genuinely unknown id.
   const state = readJson(file, absentCode);
+  // PR #174 wrote schemaVersion 1 review evidence with only
+  // published/marker/headSha. Normalize that deployed shape (and the brief
+  // five-field development shape) from its already-validated marker before
+  // running the current exact-schema and semantic-history checks. Historical
+  // events intentionally remain byte-identical, so their payload digests stay
+  // valid and replay supplies provider=null for the legacy receipt.
+  if (isObject(state.effects) && isObject(state.effects.teamReview)
+      && exact(state.effects.teamReview, ["status", "operationKey"])) {
+    const requestEvent = Array.isArray(state.events)
+      ? state.events.find(event => event && event.eventType === "TEAM_REVIEW_REQUESTED") : null;
+    const publishEvent = Array.isArray(state.events)
+      ? state.events.find(event => event && event.eventType === "TEAM_REVIEW_PUBLISHED") : null;
+    const provider = requestEvent && isObject(requestEvent.payload)
+      && ["github", "gitlab"].includes(requestEvent.payload.provider)
+      ? requestEvent.payload.provider
+      : (publishEvent && isObject(publishEvent.payload)
+        && ["github", "gitlab"].includes(publishEvent.payload.provider)
+        ? publishEvent.payload.provider : null);
+    state.effects.teamReview = { ...state.effects.teamReview, provider };
+  }
+  if (isObject(state.evidence) && isObject(state.evidence.review)) {
+    const review = state.evidence.review;
+    const legacyThree = exact(review, ["published", "marker", "headSha"]);
+    const legacyFive = exact(review, ["published", "marker", "headSha", "payloadDigest", "partCount"]);
+    if (legacyThree || legacyFive) {
+      const parsed = parseReviewMarker(review.marker);
+      if (parsed) {
+        const receiptEvent = Array.isArray(state.events)
+          ? [...state.events].reverse().find(event => event && event.eventType === "TEAM_REVIEW_PUBLISHED")
+          : null;
+        const provider = receiptEvent && isObject(receiptEvent.payload)
+          && ["github", "gitlab"].includes(receiptEvent.payload.provider)
+          ? receiptEvent.payload.provider : null;
+        state.evidence.review = {
+          published: review.published,
+          marker: review.marker,
+          headSha: review.headSha,
+          payloadDigest: legacyFive ? review.payloadDigest : parsed.payloadDigest,
+          partCount: legacyFive ? review.partCount : parsed.partCount,
+          provider,
+        };
+      }
+    }
+  }
   if (!stateValid(state)) fail(2, `state schema invalid: ${path.basename(file)}`);
   return state;
 };
@@ -560,17 +637,42 @@ const transition = (state, type, payload, reject = fail) => {
         || payload.operationKey !== teamReviewOperationKeyForState(state)) {
         reject(4, "team-review operation key is not bound to this run and PR head");
       }
-      state.effects.teamReview = { status: "requested", operationKey: payload.operationKey };
+      state.effects.teamReview = {
+        status: "requested",
+        operationKey: payload.operationKey,
+        provider: ["github", "gitlab"].includes(payload.provider) ? payload.provider : null,
+      };
       return;
     case "TEAM_REVIEW:TEAM_REVIEW_PUBLISHED":
       if (state.effects.teamReview.status !== "requested"
         || state.effects.teamReview.operationKey !== payload.operationKey) reject(4, "team-review operation key mismatch");
+      const receiptProvider = ["github", "gitlab"].includes(payload.provider) ? payload.provider : null;
+      // Completed legacy v1 history replays with null on both sides. An
+      // in-flight legacy request cannot safely learn its forge from the
+      // publication receipt: that would let the caller choose the count and
+      // remote semantics after the durable capability was created.
+      if (state.effects.teamReview.provider !== receiptProvider) {
+        reject(4, "team-review provider does not match its durable request");
+      }
       if (!headMatchesPr(state, payload.headSha)) reject(4, "team review targets a stale PR head");
-      if (!reviewMarkerMatches(payload.marker, payload.operationKey, payload.headSha)) {
+      const parsedReviewMarker = parseReviewMarker(payload.marker);
+      if (!parsedReviewMarker || !reviewMarkerMatches(payload.marker, payload.operationKey, payload.headSha,
+          parsedReviewMarker.payloadDigest, parsedReviewMarker.partCount)) {
         reject(4, "team-review marker does not prove the operation, head, and first publication part");
       }
-      state.effects.teamReview = { status: "completed", operationKey: payload.operationKey };
-      state.evidence.review = { published: true, marker: payload.marker, headSha: payload.headSha.toLowerCase() };
+      state.effects.teamReview = {
+        status: "completed",
+        operationKey: payload.operationKey,
+        provider: state.effects.teamReview.provider,
+      };
+      state.evidence.review = {
+        published: true,
+        marker: payload.marker,
+        headSha: payload.headSha.toLowerCase(),
+        payloadDigest: parsedReviewMarker.payloadDigest,
+        partCount: parsedReviewMarker.partCount,
+        provider: state.effects.teamReview.provider,
+      };
       move(state, "FIX_FINDINGS");
       return;
     case "FIX_FINDINGS:FIX_REQUIRED":
@@ -657,7 +759,7 @@ semanticHistoryValid = state => {
     tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
     effects: {
       prOpen: { status: "none", operationKey: null },
-      teamReview: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null, provider: null },
     },
     evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
     blocked: { from: null, code: null },
@@ -779,7 +881,7 @@ if (mode === "begin") {
     tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
     effects: {
       prOpen: { status: "none", operationKey: null },
-      teamReview: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null, provider: null },
     },
     evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
     blocked: { from: null, code: null },
@@ -822,6 +924,14 @@ if (mode === "apply") {
     if (prior.eventType === eventType && prior.payloadDigest === payloadDigest) process.exit(10);
     fail(4, `eventId conflict: ${eventId}`);
   }
+  // Legacy provider-less request/publication events remain readable and
+  // exactly replayable for schemaVersion 1 history. Every genuinely new
+  // request binds the provider before the remote effect, and publication must
+  // repeat that provider for locked receipt attestation.
+  if (["TEAM_REVIEW_REQUESTED", "TEAM_REVIEW_PUBLISHED"].includes(eventType)
+      && !["github", "gitlab"].includes(payload.provider)) {
+    fail(3, `${eventType} requires a provider-bound payload`);
+  }
   if (TERMINAL.has(state.stage)) fail(3, "terminal run rejects new events");
   // Reserve two final audit slots: one for a fail-closed BLOCK and one for the
   // explicit CANCEL that can retire that blocked generation. At exhaustion a
@@ -836,6 +946,27 @@ if (mode === "apply") {
   state.events.push({ eventId, eventType, payloadDigest, payload, fromStage, toStage: state.stage });
   if (!stateValid(state)) fail(2, "transition produced invalid state");
   writeOutput(runOutput, state);
+  process.exit(0);
+}
+
+if (mode === "team-review-receipt-meta") {
+  const [runFile, expectedRunId, eventId] = args;
+  const state = readState(runFile);
+  const event = state.events[state.events.length - 1];
+  const review = state.evidence.review;
+  if (state.runId !== expectedRunId || !event || event.eventId !== eventId
+      || event.eventType !== "TEAM_REVIEW_PUBLISHED" || !review
+      || event.payload.marker !== review.marker || event.payload.headSha.toLowerCase() !== review.headSha
+      || event.payload.operationKey !== state.effects.teamReview.operationKey
+      || !reviewMarkerMatches(review.marker, event.payload.operationKey, event.payload.headSha,
+        review.payloadDigest, review.partCount)) fail(4, "candidate team-review receipt is inconsistent");
+  process.stdout.write(JSON.stringify({
+    operationKey: event.payload.operationKey,
+    headSha: review.headSha,
+    payloadDigest: review.payloadDigest,
+    partCount: review.partCount,
+    provider: review.provider,
+  }));
   process.exit(0);
 }
 
@@ -943,6 +1074,30 @@ autopilot_begin_run() {
     "$root" "$run_id" "$owner_session_id" "$cover" "$validate"
 }
 
+_autopilot_attest_team_review_publication_critical() {
+  local root="$1" run_id="$2" run_tmp="$3" event_id="$4"
+  local meta tuple operation_key head_sha expected_digest part_count provider snapshot actual_receipt
+  meta="$(_autopilot_node team-review-receipt-meta "$run_tmp" "$run_id" "$event_id")" || return $?
+  tuple="$(printf '%s' "$meta" | node -e '
+    let value;try{value=JSON.parse(require("fs").readFileSync(0,"utf8"));}catch(_){process.exit(2);}
+    if(!value||typeof value!=="object"||Array.isArray(value)
+        ||!/^team-review:v1:[a-f0-9]{64}$/.test(value.operationKey||"")
+        ||!/^[a-f0-9]{7,64}$/.test(value.headSha||"")
+        ||!/^[a-f0-9]{64}$/.test(value.payloadDigest||"")
+        ||!Number.isSafeInteger(value.partCount)||value.partCount<1||value.partCount>999999
+        ||!["github","gitlab"].includes(value.provider))process.exit(2);
+    process.stdout.write([value.operationKey,value.headSha,value.payloadDigest,String(value.partCount),value.provider].join("|"));
+  ' 2>/dev/null)" || return 2
+  IFS='|' read -r operation_key head_sha expected_digest part_count provider <<< "$tuple"
+  [ -n "$operation_key" ] && [ -n "$head_sha" ] && [ -n "$expected_digest" ] \
+    && [ -n "$part_count" ] && [ -n "$provider" ] || return 2
+  snapshot="$(_autopilot_read_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider")" || return $?
+  actual_receipt="$(_autopilot_team_review_payload_inspect \
+    "$snapshot" "$head_sha" true receipt "$provider")" || return $?
+  [ "$actual_receipt" = "$expected_digest|$part_count" ] || return 4
+}
+
 _autopilot_apply_critical() {
   local root="$1" run_id="$2" event_id="$3" event_type="$4" payload_json="$5"
   local caller_session_id="${6:-}"
@@ -960,6 +1115,15 @@ _autopilot_apply_critical() {
   if [ "$rc" -ne 0 ]; then
     rm -f "$run_tmp"
     return "$rc"
+  fi
+  if [ "$event_type" = TEAM_REVIEW_PUBLISHED ]; then
+    _autopilot_attest_team_review_publication_critical \
+      "$root" "$run_id" "$run_tmp" "$event_id"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      rm -f "$run_tmp"
+      return "$rc"
+    fi
   fi
   _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
 }
@@ -1069,14 +1233,15 @@ _autopilot_team_review_payload_target() {
 }
 
 _autopilot_team_review_payload_identity_critical() {
-  local root="$1" run_id="$2" operation_key="$3" head_sha="$4"
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
   local state_dir="$root/.zensu/state" expected_key state
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
   expected_key="$(autopilot_team_review_operation_key "$run_id" "$head_sha")" || return $?
   [ "$operation_key" = "$expected_key" ] || return 4
   state="$(_autopilot_node read-active \
     "$state_dir/autopilot-active.json" "$state_dir" "$root")" || return $?
   printf '%s' "$state" | RUN_ID="$run_id" OPERATION_KEY="$operation_key" \
-    HEAD_SHA="$head_sha" node -e '
+    HEAD_SHA="$head_sha" PROVIDER="$provider" node -e '
       let state;
       try { state = JSON.parse(require("fs").readFileSync(0, "utf8")); }
       catch (_) { process.exit(2); }
@@ -1086,6 +1251,7 @@ _autopilot_team_review_payload_identity_critical() {
       if (!state || state.runId !== process.env.RUN_ID || state.stage !== "TEAM_REVIEW"
           || !review || review.status !== "requested"
           || review.operationKey !== process.env.OPERATION_KEY
+          || review.provider !== process.env.PROVIDER
           || !pr || typeof pr.headSha !== "string" || pr.headSha.toLowerCase() !== head
           || (state.evidence && state.evidence.review !== null)) process.exit(4);
     ' 2>/dev/null
@@ -1095,10 +1261,12 @@ _autopilot_team_review_payload_identity_critical() {
 # permissions. Reading through O_NOFOLLOW and comparing lstat/fstat identities
 # closes the leaf-swap window and rejects hard-linked files.
 _autopilot_team_review_payload_inspect() {
-  local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}"
-  [ "$#" -eq 3 ] || return 3
+  local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}" digest_mode="${4:-raw}" provider="${5:-}"
+  [ "$#" -ge 3 ] && [ "$#" -le 5 ] || return 3
   case "$private" in true|false) ;; *) return 3 ;; esac
-  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" node -e '
+  case "$digest_mode" in raw|canonical) [ -z "$provider" ] || return 3 ;; receipt) case "$provider" in github|gitlab) ;; *) return 3 ;; esac ;; *) return 3 ;; esac
+  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
+    PROVIDER="$provider" node -e '
     const fs = require("fs");
     const crypto = require("crypto");
     const max = 8 * 1024 * 1024;
@@ -1137,6 +1305,19 @@ _autopilot_team_review_payload_inspect() {
             || !["LEFT", "RIGHT"].includes(comment.start_side)
             || comment.start_side !== comment.side)) fail(2);
       }
+      return payload;
+    };
+    const canonical = value => {
+      if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+      if (typeof value === "number") {
+        if (!Number.isFinite(value)) fail(2);
+        return JSON.stringify(value);
+      }
+      if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+      if (typeof value === "object") {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+      }
+      fail(2);
     };
     let fd;
     try {
@@ -1155,8 +1336,16 @@ _autopilot_team_review_payload_inspect() {
       if (data.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
           || after.nlink !== 1 || after.size !== opened.size
           || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) fail(2);
-      validate(data);
-      process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
+      const payload = validate(data);
+      const canonicalDigest = crypto.createHash("sha256").update(canonical(payload)).digest("hex");
+      if (process.env.DIGEST_MODE === "receipt") {
+        const count = process.env.PROVIDER === "github" ? 1 : payload.comments.length + 1;
+        if (!Number.isSafeInteger(count) || count < 1 || count > 999999) fail(2);
+        process.stdout.write(`${canonicalDigest}|${count}`);
+      } else {
+        const digestInput = process.env.DIGEST_MODE === "canonical" ? canonical(payload) : data;
+        process.stdout.write(crypto.createHash("sha256").update(digestInput).digest("hex"));
+      }
     } catch (_) {
       if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
       fail(2);
@@ -1260,10 +1449,10 @@ _autopilot_recover_team_review_payload_alias() {
 }
 
 _autopilot_read_team_review_payload_critical() {
-  local root="$1" run_id="$2" operation_key="$3" head_sha="$4"
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
   local state_dir="$root/.zensu/state" target
   _autopilot_team_review_payload_identity_critical \
-    "$root" "$run_id" "$operation_key" "$head_sha" || return $?
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
   target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
     || return $?
   CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
@@ -1276,21 +1465,22 @@ _autopilot_read_team_review_payload_critical() {
 }
 
 autopilot_read_team_review_payload() {
-  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" root
-  [ "$#" -eq 4 ] && _autopilot_identifier_ok "$run_id" || return 3
-  root="$(_autopilot_project_root "${4:-}")" || return 2
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" provider="${4:-}" root
+  [ "$#" -eq 5 ] && _autopilot_identifier_ok "$run_id" || return 3
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${5:-}")" || return 2
   _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
     >/dev/null || return 3
   _autopilot_read_storage_ready "$root" "$run_id" || return $?
   _autopilot_locked_run "$root" "$run_id" _autopilot_read_team_review_payload_critical \
-    "$root" "$run_id" "$operation_key" "$head_sha"
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider"
 }
 
 _autopilot_store_team_review_payload_critical() {
-  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5"
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5" provider="$6"
   local state_dir="$root/.zensu/state" target tmp rc source_digest target_digest
   _autopilot_team_review_payload_identity_critical \
-    "$root" "$run_id" "$operation_key" "$head_sha" || return $?
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
   target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
     || return $?
   CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
@@ -1386,9 +1576,11 @@ _autopilot_store_team_review_payload_critical() {
 }
 
 autopilot_store_team_review_payload() {
-  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" root
-  [ "$#" -eq 5 ] && _autopilot_identifier_ok "$run_id" || return 3
-  root="$(_autopilot_project_root "${5:-}")" || return 2
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" \
+    provider="${5:-}" root
+  [ "$#" -eq 6 ] && _autopilot_identifier_ok "$run_id" || return 3
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${6:-}")" || return 2
   _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
     >/dev/null || return 3
   source_file="$(SOURCE_FILE="$source_file" node -e '
@@ -1399,7 +1591,7 @@ autopilot_store_team_review_payload() {
   ' 2>/dev/null)" || return 3
   _autopilot_read_storage_ready "$root" "$run_id" || return $?
   _autopilot_locked_run "$root" "$run_id" _autopilot_store_team_review_payload_critical \
-    "$root" "$run_id" "$operation_key" "$head_sha" "$source_file"
+    "$root" "$run_id" "$operation_key" "$head_sha" "$source_file" "$provider"
 }
 
 # Starting a standalone inner generation must serialize with every durable

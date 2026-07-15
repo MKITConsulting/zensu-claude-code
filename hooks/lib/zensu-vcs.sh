@@ -735,7 +735,7 @@ _zensu_vcs_snapshot_review_payload() {
   command -v node >/dev/null 2>&1 || return 1
   [ -n "$source_file" ] && [ -n "$snapshot_file" ] || return 1
   SOURCE_FILE="$source_file" SNAPSHOT_FILE="$snapshot_file" node -e '
-    const fs=require("fs"),max=8*1024*1024;
+    const fs=require("fs"),crypto=require("crypto"),max=8*1024*1024;
     const source=process.env.SOURCE_FILE,snapshot=process.env.SNAPSHOT_FILE;
     let before,sourceFd,opened,after,data,target,targetFd,targetOpened;
     try{
@@ -751,20 +751,31 @@ _zensu_vcs_snapshot_review_payload() {
       targetFd=fs.openSync(snapshot,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));
       targetOpened=fs.fstatSync(targetFd);
       if(!targetOpened.isFile()||targetOpened.nlink!==1||targetOpened.dev!==target.dev||targetOpened.ino!==target.ino)process.exit(1);
-      fs.ftruncateSync(targetFd,0);fs.fchmodSync(targetFd,0o600);fs.writeFileSync(targetFd,data);fs.closeSync(targetFd);targetFd=undefined;
+      fs.ftruncateSync(targetFd,0);fs.fchmodSync(targetFd,0o600);fs.writeFileSync(targetFd,data);fs.fsyncSync(targetFd);
+      const targetAfter=fs.fstatSync(targetFd);fs.closeSync(targetFd);targetFd=undefined;
+      const targetFinal=fs.lstatSync(snapshot);
+      if(targetAfter.dev!==targetOpened.dev||targetAfter.ino!==targetOpened.ino||targetAfter.nlink!==1
+          ||targetAfter.size!==data.length||targetFinal.dev!==targetOpened.dev||targetFinal.ino!==targetOpened.ino
+          ||!targetFinal.isFile()||targetFinal.isSymbolicLink()||targetFinal.nlink!==1
+          ||(targetFinal.mode&0o777)!==0o600||targetFinal.size!==data.length)process.exit(1);
+      process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
     }catch(_){if(sourceFd!==undefined){try{fs.closeSync(sourceFd);}catch(__){}}if(targetFd!==undefined){try{fs.closeSync(targetFd);}catch(__){}}process.exit(1);}
   ' 2>/dev/null
 }
 
 _zensu_vcs_review_payload_meta() {
-  local provider="${1:-}" payload="${2:-}" head="${3:-}" operation_key="${4:-}"
+  local provider="${1:-}" payload="${2:-}" head="${3:-}" operation_key="${4:-}" \
+    expected_raw_digest="${5:-}"
   command -v node >/dev/null 2>&1 || return 1
   case "$provider" in github|gitlab) ;; *) return 1 ;; esac
   [ -f "$payload" ] || return 1
   [ -n "$operation_key" ] || return 1
-  PROVIDER="$provider" PAYLOAD="$payload" HEAD_SHA="$head" OPERATION_KEY="$operation_key" node -e '
-    var fs=require("fs"),crypto=require("crypto");
-    function fail(){process.exit(1);}
+  [ -z "$expected_raw_digest" ] || { [ "${#expected_raw_digest}" -eq 64 ] \
+    && case "$expected_raw_digest" in *[!0-9a-f]*) false ;; *) true ;; esac; } || return 1
+  PROVIDER="$provider" PAYLOAD="$payload" HEAD_SHA="$head" OPERATION_KEY="$operation_key" \
+    EXPECTED_RAW_DIGEST="$expected_raw_digest" node -e '
+    var fs=require("fs"),crypto=require("crypto"),fd;
+    function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
     function digest(s){return crypto.createHash("sha256").update(s).digest("hex");}
     function canonical(v){
       if(v===null||typeof v==="string"||typeof v==="boolean")return JSON.stringify(v);
@@ -773,11 +784,28 @@ _zensu_vcs_review_payload_meta() {
       if(typeof v==="object")return "{"+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+":"+canonical(v[k]);}).join(",")+"}";
       fail();
     }
+    function secureRead(path,max){
+      var before,opened,after,final,data;
+      try{
+        before=fs.lstatSync(path);
+        if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
+        fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+        if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+        data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
+        if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
+            ||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs||after.ctimeMs!==opened.ctimeMs
+            ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()
+            ||final.nlink!==1||final.size!==opened.size)fail();
+        return data;
+      }catch(_){fail();}
+    }
     var head=String(process.env.HEAD_SHA||"").toLowerCase();
     var op=String(process.env.OPERATION_KEY||"");
     var unsafeText=/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
     if(!/^[0-9a-f]{7,64}$/.test(head)||!op||op.length>256||/[\u0000-\u001f\u007f]/.test(op))fail();
-    var p;try{p=JSON.parse(fs.readFileSync(process.env.PAYLOAD,"utf8"));}catch(_){fail();}
+    var bytes=secureRead(process.env.PAYLOAD,8*1024*1024);
+    if(process.env.EXPECTED_RAW_DIGEST&&digest(bytes)!==process.env.EXPECTED_RAW_DIGEST)fail();
+    var p;try{p=JSON.parse(bytes.toString("utf8"));}catch(_){fail();}
     if(!p||Array.isArray(p)||typeof p!=="object")fail();
     if(!Object.keys(p).every(function(k){return ["body","event","comments","commit_id"].includes(k);}))fail();
     if(typeof p.body!=="string"||unsafeText.test(p.body)||!["COMMENT","APPROVE","REQUEST_CHANGES"].includes(p.event)||p.body.indexOf("zensu-review:v1")>=0)fail();
@@ -817,9 +845,13 @@ _zensu_vcs_review_marker() {
 
 _zensu_vcs_review_inventory() {
   local provider="${1:-}" op_digest="${2:-}" payload_digest="${3:-}" head="${4:-}" part_count="${5:-}"
+  local expected_manifest="${6:-}" publisher_id="${7:-}" expected_manifest_digest="${8:-}"
   command -v node >/dev/null 2>&1 || return 1
   case "$provider" in github|gitlab) ;; *) return 1 ;; esac
-  PROVIDER="$provider" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" HEAD_SHA="$head" PART_COUNT="$part_count" node -e '
+  [ -z "$expected_manifest" ] || [ -f "$expected_manifest" ] || return 1
+  PROVIDER="$provider" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" HEAD_SHA="$head" PART_COUNT="$part_count" \
+    EXPECTED_MANIFEST="$expected_manifest" PUBLISHER_ID="$publisher_id" \
+    EXPECTED_MANIFEST_DIGEST="$expected_manifest_digest" node -e '
     var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
       function fail(){process.exit(1);}
       var op=process.env.OP_DIGEST||"",pd=process.env.PAYLOAD_DIGEST||"",head=String(process.env.HEAD_SHA||"").toLowerCase();
@@ -834,13 +866,71 @@ _zensu_vcs_review_inventory() {
         if(typeof v==="object")return "{"+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+":"+canonical(v[k]);}).join(",")+"}";
         fail();
       }
+      var expectedByPart=null,publisher=null,manifestPath=process.env.EXPECTED_MANIFEST||"";
+      var manifestDigest=process.env.EXPECTED_MANIFEST_DIGEST||"";
+      if((manifestPath&&(!process.env.PUBLISHER_ID||!manifestDigest))
+          ||(!manifestPath&&(process.env.PUBLISHER_ID||manifestDigest)))fail();
+      if(manifestPath){
+        if(process.env.PROVIDER!=="gitlab"||!/^[1-9][0-9]*$/.test(process.env.PUBLISHER_ID)
+            ||!Number.isSafeInteger(Number(process.env.PUBLISHER_ID))
+            ||!/^[a-f0-9]{64}$/.test(manifestDigest))fail();
+        publisher=String(Number(process.env.PUBLISHER_ID));
+        var manifest,fd,data;try{
+          var fs=require("fs"),crypto=require("crypto"),before=fs.lstatSync(manifestPath);
+          if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
+              ||(before.mode&0o777)!==0o600||before.size<1||before.size>16*1024*1024)fail();
+          fd=fs.openSync(manifestPath,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+          var opened=fs.fstatSync(fd);
+          if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+              ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+          data=fs.readFileSync(fd);var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
+          var final=fs.lstatSync(manifestPath);
+          if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino
+              ||after.nlink!==1||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs
+              ||after.ctimeMs!==opened.ctimeMs||final.dev!==opened.dev||final.ino!==opened.ino
+              ||!final.isFile()||final.isSymbolicLink()||final.nlink!==1
+              ||crypto.createHash("sha256").update(data).digest("hex")!==manifestDigest)fail();
+          manifest=JSON.parse(data.toString("utf8"));
+        }catch(_){if(fd!==undefined){try{require("fs").closeSync(fd);}catch(__){}}fail();}
+        if(!manifest||Array.isArray(manifest)||typeof manifest!=="object"
+            ||JSON.stringify(Object.keys(manifest).sort())!==JSON.stringify(["parts"])
+            ||!Array.isArray(manifest.parts)||manifest.parts.length!==n)fail();
+        expectedByPart={};
+        manifest.parts.forEach(function(part){
+          if(!part||Array.isArray(part)||typeof part!=="object"
+              ||JSON.stringify(Object.keys(part).sort())!==JSON.stringify(["body","kind","part","position"])
+              ||!Number.isSafeInteger(part.part)||part.part<1||part.part>n||expectedByPart[part.part]
+              ||typeof part.body!=="string"||!["summary","position","general"].includes(part.kind))fail();
+          if((part.kind==="position")!==!!part.position
+              ||(part.position!==null&&(Array.isArray(part.position)||typeof part.position!=="object")))fail();
+          expectedByPart[part.part]=part;
+        });
+        for(var ep=1;ep<=n;ep++)if(!expectedByPart[ep])fail();
+      }
+      function positiveId(value){
+        if((Number.isSafeInteger(value)&&value>0)||(typeof value==="string"&&/^[1-9][0-9]*$/.test(value)&&Number.isSafeInteger(Number(value))))return String(Number(value));
+        fail();
+      }
+      function normalizedPosition(position){
+        if(position===null)return null;
+        if(!position||typeof position!=="object"||Array.isArray(position))fail();
+        return {position_type:position.position_type,base_sha:position.base_sha,start_sha:position.start_sha,
+          head_sha:position.head_sha,old_path:position.old_path,new_path:position.new_path,
+          old_line:position.old_line==null?null:position.old_line,new_line:position.new_line==null?null:position.new_line};
+      }
       function gitlabNoteMeta(note){
         if(!Object.prototype.hasOwnProperty.call(note,"type")
             ||!(note.type===null||typeof note.type==="string"))fail();
         var position=Object.prototype.hasOwnProperty.call(note,"position")?note.position:null;
         if(position!=null&&(!position||typeof position!=="object"||Array.isArray(position)))fail();
         if(note.type!=="DiffNote"&&position!=null)fail();
-        return {type:note.type,position:position,positionKey:canonical(position)};
+        var authorId=null;
+        if(Object.prototype.hasOwnProperty.call(note,"author")){
+          if(!note.author||typeof note.author!=="object"||Array.isArray(note.author)
+              ||!Object.prototype.hasOwnProperty.call(note.author,"id"))fail();
+          authorId=positiveId(note.author.id);
+        }
+        return {type:note.type,position:position,positionKey:canonical(position),authorId:authorId};
       }
       function validGitlabInline(record){
         if(record.noteType==="DiscussionNote")return record.position===null;
@@ -868,12 +958,12 @@ _zensu_vcs_review_inventory() {
         if(Object.prototype.hasOwnProperty.call(seenIds,id)){
           var prev=seenIds[id];if(prev.body!==body||(prev.url&&url&&prev.url!==url))fail();
           if(process.env.PROVIDER==="gitlab"
-              &&(prev.noteType!==meta.type||prev.positionKey!==meta.positionKey))fail();
+              &&(prev.noteType!==meta.type||prev.positionKey!==meta.positionKey||prev.authorId!==meta.authorId))fail();
           if(!prev.url&&url)prev.url=url;prev.kinds[kind]=true;return;
         }
         var record={body:body,url:url,kinds:{}};
         if(process.env.PROVIDER==="gitlab"){
-          record.noteType=meta.type;record.position=meta.position;record.positionKey=meta.positionKey;
+          record.noteType=meta.type;record.position=meta.position;record.positionKey=meta.positionKey;record.authorId=meta.authorId;
         }
         record.kinds[kind]=true;seenIds[id]=record;records.push(record);
       }
@@ -923,6 +1013,18 @@ _zensu_vcs_review_inventory() {
                   ||records[x].kinds.discussion||records[x].kinds.reply||records[x].noteType!==null||records[x].position!==null))
               ||(part>1&&(!records[x].kinds.discussion||records[x].kinds.individual||records[x].kinds.reply
                   ||!validGitlabInline(records[x])))))fail();
+          if(expectedByPart){
+            var expected=expectedByPart[part];
+            if(!expected||body!==expected.body||records[x].authorId!==publisher)fail();
+            if(expected.kind==="summary"){
+              if(part!==1||records[x].noteType!==null||records[x].position!==null)fail();
+            }else if(expected.kind==="position"){
+              if(part===1||records[x].noteType!=="DiffNote"
+                  ||canonical(normalizedPosition(records[x].position))!==canonical(normalizedPosition(expected.position)))fail();
+            }else if(expected.kind==="general"){
+              if(part===1||records[x].noteType!=="DiscussionNote"||records[x].position!==null)fail();
+            }else fail();
+          }
           if(exact[part])fail();exact[part]=1;if(!url)url=records[x].url;
         }
       }
@@ -966,18 +1068,17 @@ _zensu_vcs_review_fetch_inventory() {
       local q='query($owner:String!,$name:String!,$num:Int!,$endCursor:String){repository(owner:$owner,name:$name){pullRequest(number:$num){reviews(first:100,after:$endCursor){nodes{id body url}pageInfo{hasNextPage endCursor}}}}}'
       gh api graphql --paginate --slurp -f query="$q" -f owner="$owner" -f name="$name" -F num="$id" 2>/dev/null ;;
     gitlab)
-      local notes discussions notes_file discussions_file combined
+      local notes discussions
       notes="$(glab api --paginate --output json "projects/$repoid/merge_requests/$id/notes" 2>/dev/null)" || return 1
       discussions="$(glab api --paginate --output json "projects/$repoid/merge_requests/$id/discussions" 2>/dev/null)" || return 1
-      notes_file="$(mktemp "${TMPDIR:-/tmp}/zensu-review-notes.XXXXXXXX")" || return 1
-      discussions_file="$(mktemp "${TMPDIR:-/tmp}/zensu-review-discussions.XXXXXXXX")" || { rm -f "$notes_file"; return 1; }
-      printf '%s' "$notes" > "$notes_file" || { rm -f "$notes_file" "$discussions_file"; return 1; }
-      printf '%s' "$discussions" > "$discussions_file" || { rm -f "$notes_file" "$discussions_file"; return 1; }
-      combined="$(NOTES_FILE="$notes_file" DISCUSSIONS_FILE="$discussions_file" node -e '
-        var fs=require("fs"),n,d;try{n=JSON.parse(fs.readFileSync(process.env.NOTES_FILE,"utf8"));d=JSON.parse(fs.readFileSync(process.env.DISCUSSIONS_FILE,"utf8"));}catch(_){process.exit(1);}
-        process.stdout.write(JSON.stringify({notes:n,discussions:d}));')" || { rm -f "$notes_file" "$discussions_file"; return 1; }
-      rm -f "$notes_file" "$discussions_file"
-      printf '%s' "$combined" ;;
+      printf '%s\0%s' "$notes" "$discussions" | node -e '
+        var chunks=[];
+        process.stdin.on("data",function(c){chunks.push(c);});process.stdin.on("end",function(){
+          var raw=Buffer.concat(chunks),separator=raw.indexOf(0);
+          if(separator<0||raw.indexOf(0,separator+1)>=0||raw.length>32*1024*1024)process.exit(1);
+          var n,d;try{n=JSON.parse(raw.subarray(0,separator).toString("utf8"));d=JSON.parse(raw.subarray(separator+1).toString("utf8"));}catch(_){process.exit(1);}
+          process.stdout.write(JSON.stringify({notes:n,discussions:d}));
+        });' ;;
     *) return 1 ;;
   esac
 }
@@ -1026,14 +1127,49 @@ _zensu_vcs_review_validate_diffrefs() {
 }
 
 _zensu_vcs_review_gitlab_diff_plan() {
-  local payload="${1:-}" diffrefs="${2:-}" head="${3:-}"
+  local payload="${1:-}" diffrefs="${2:-}" head="${3:-}" expected_payload_digest="${4:-}" \
+    target="${5:-}" expected_payload_raw_digest="${6:-}"
   command -v node >/dev/null 2>&1 || return 1
   [ -f "$payload" ] || return 1
-  PAYLOAD="$payload" DIFFREFS="$diffrefs" HEAD_SHA="$head" node -e '
-    var fs=require("fs"),raw="";
+  if [ -n "$target" ]; then
+    [ -n "$expected_payload_digest" ] && [ -n "$expected_payload_raw_digest" ] || return 1
+  fi
+  PAYLOAD="$payload" DIFFREFS="$diffrefs" HEAD_SHA="$head" EXPECTED_PAYLOAD_DIGEST="$expected_payload_digest" \
+    EXPECTED_PAYLOAD_RAW_DIGEST="$expected_payload_raw_digest" PLAN_TARGET="$target" node -e '
+    var fs=require("fs"),crypto=require("crypto"),raw="",fd;
     process.stdin.on("data",function(c){raw+=c;});process.stdin.on("end",function(){
-      function fail(){process.exit(1);}
-      var payload,pages,dr;try{payload=JSON.parse(fs.readFileSync(process.env.PAYLOAD,"utf8"));pages=JSON.parse(raw);dr=JSON.parse(process.env.DIFFREFS);}catch(_){fail();}
+      function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+      function canonical(v){
+        if(v===null||typeof v==="string"||typeof v==="boolean")return JSON.stringify(v);
+        if(typeof v==="number")return Number.isFinite(v)?JSON.stringify(v):fail();
+        if(Array.isArray(v))return "["+v.map(canonical).join(",")+"]";
+        if(v&&typeof v==="object")return "{"+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+":"+canonical(v[k]);}).join(",")+"}";
+        fail();
+      }
+      function secureRead(path,max){
+        var before,opened,after,final,data;
+        try{
+          before=fs.lstatSync(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
+          fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+          if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+          data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
+          if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
+              ||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs||after.ctimeMs!==opened.ctimeMs
+              ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()||final.nlink!==1)fail();
+          return data;
+        }catch(_){fail();}
+      }
+      var payload,pages,dr,payloadBytes;try{
+        payloadBytes=secureRead(process.env.PAYLOAD,8*1024*1024);
+        payload=JSON.parse(payloadBytes.toString("utf8"));
+        pages=JSON.parse(raw);dr=JSON.parse(process.env.DIFFREFS);
+      }catch(_){fail();}
+      if(process.env.EXPECTED_PAYLOAD_RAW_DIGEST
+          &&(!/^[a-f0-9]{64}$/.test(process.env.EXPECTED_PAYLOAD_RAW_DIGEST)
+            ||crypto.createHash("sha256").update(payloadBytes).digest("hex")!==process.env.EXPECTED_PAYLOAD_RAW_DIGEST))fail();
+      if(process.env.EXPECTED_PAYLOAD_DIGEST
+          &&(!/^[a-f0-9]{64}$/.test(process.env.EXPECTED_PAYLOAD_DIGEST)
+            ||crypto.createHash("sha256").update(canonical(payload)).digest("hex")!==process.env.EXPECTED_PAYLOAD_DIGEST))fail();
       if(!payload||typeof payload!=="object"||Array.isArray(payload)||!Array.isArray(payload.comments))fail();
       var hex=/^[0-9a-f]{7,64}$/;
       if(!dr||typeof dr!=="object"||Array.isArray(dr)||!hex.test(dr.head_sha)||dr.head_sha!==process.env.HEAD_SHA)fail();
@@ -1098,56 +1234,191 @@ _zensu_vcs_review_gitlab_diff_plan() {
         if(found.length!==1)return {kind:"general"};
         var a=found[0];return {kind:"position",old_path:a.old_path,new_path:a.new_path,old_line:a.old_line,new_line:a.new_line};
       });
-      process.stdout.write(JSON.stringify({base_sha:base,start_sha:start,head_sha:dr.head_sha,comments:plan}));
+      var body=JSON.stringify({base_sha:base,start_sha:start,head_sha:dr.head_sha,comments:plan});
+      var target=process.env.PLAN_TARGET||"";
+      if(!target){process.stdout.write(body);return;}
+      try{
+        var before=fs.lstatSync(target);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||(before.mode&0o777)!==0o600)fail();
+        fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));var opened=fs.fstatSync(fd);
+        if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600||opened.dev!==before.dev||opened.ino!==before.ino)fail();
+        fs.ftruncateSync(fd,0);fs.writeFileSync(fd,body);fs.fsyncSync(fd);var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
+        var final=fs.lstatSync(target);if(after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
+            ||after.size!==Buffer.byteLength(body)||final.dev!==opened.dev||final.ino!==opened.ino
+            ||!final.isFile()||final.isSymbolicLink()||final.nlink!==1||(final.mode&0o777)!==0o600||final.size!==after.size)fail();
+        process.stdout.write(crypto.createHash("sha256").update(body).digest("hex"));
+      }catch(_){fail();}
+    });'
+}
+
+_zensu_vcs_review_gitlab_manifest() {
+  local payload="${1:-}" plan="${2:-}" op_digest="${3:-}" payload_digest="${4:-}" head="${5:-}" \
+    part_count="${6:-}" target="${7:-}" plan_digest="${8:-}" payload_raw_digest="${9:-}"
+  command -v node >/dev/null 2>&1 || return 1
+  [ -f "$payload" ] && [ -f "$plan" ] || return 1
+  if [ -n "$target" ]; then
+    [ -n "$plan_digest" ] && [ -n "$payload_raw_digest" ] || return 1
+  fi
+  PAYLOAD="$payload" PLAN="$plan" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" \
+    HEAD_SHA="$head" PART_COUNT="$part_count" MANIFEST_TARGET="$target" PLAN_DIGEST="$plan_digest" \
+    PAYLOAD_RAW_DIGEST="$payload_raw_digest" node -e '
+    var fs=require("fs"),crypto=require("crypto"),p,pl,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+    function canonical(v){
+      if(v===null||typeof v==="string"||typeof v==="boolean")return JSON.stringify(v);
+      if(typeof v==="number")return Number.isFinite(v)?JSON.stringify(v):fail();
+      if(Array.isArray(v))return "["+v.map(canonical).join(",")+"]";
+      if(v&&typeof v==="object")return "{"+Object.keys(v).sort().map(function(k){return JSON.stringify(k)+":"+canonical(v[k]);}).join(",")+"}";
+      fail();
+    }
+    function secureRead(path,max){
+      var before,opened,after,final,data;
+      try{
+        before=fs.lstatSync(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
+        fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+        if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+        data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
+        if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
+            ||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs||after.ctimeMs!==opened.ctimeMs
+            ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()||final.nlink!==1)fail();
+        return data;
+      }catch(_){fail();}
+    }
+    var payloadBytes,planBytes;
+    try{
+      payloadBytes=secureRead(process.env.PAYLOAD,8*1024*1024);planBytes=secureRead(process.env.PLAN,16*1024*1024);
+      p=JSON.parse(payloadBytes.toString("utf8"));pl=JSON.parse(planBytes.toString("utf8"));
+    }catch(_){fail();}
+    if(process.env.PAYLOAD_RAW_DIGEST
+        &&(!/^[a-f0-9]{64}$/.test(process.env.PAYLOAD_RAW_DIGEST)
+          ||crypto.createHash("sha256").update(payloadBytes).digest("hex")!==process.env.PAYLOAD_RAW_DIGEST))fail();
+    if(!/^[a-f0-9]{64}$/.test(process.env.PAYLOAD_DIGEST||"")
+        ||crypto.createHash("sha256").update(canonical(p)).digest("hex")!==process.env.PAYLOAD_DIGEST)fail();
+    if(process.env.PLAN_DIGEST
+        &&(!/^[a-f0-9]{64}$/.test(process.env.PLAN_DIGEST)
+          ||crypto.createHash("sha256").update(planBytes).digest("hex")!==process.env.PLAN_DIGEST))fail();
+    var n=Number(process.env.PART_COUNT),comments=p&&p.comments;
+    if(!p||typeof p!=="object"||Array.isArray(p)||typeof p.body!=="string"||typeof p.event!=="string"
+        ||!Array.isArray(comments)||!Number.isSafeInteger(n)||n!==comments.length+1
+        ||!/^[0-9a-f]{64}$/.test(process.env.OP_DIGEST||"")||!/^[0-9a-f]{64}$/.test(process.env.PAYLOAD_DIGEST||"")
+        ||!/^[0-9a-f]{7,64}$/.test(process.env.HEAD_SHA||"")
+        ||!pl||typeof pl!=="object"||Array.isArray(pl)
+        ||JSON.stringify(Object.keys(pl).sort())!==JSON.stringify(["base_sha","comments","head_sha","start_sha"])
+        ||pl.head_sha!==process.env.HEAD_SHA||!Array.isArray(pl.comments)||pl.comments.length!==comments.length)fail();
+    function line(v){return v===null||(Number.isSafeInteger(v)&&v>0);}
+    var parts=[];
+    function marker(part){return "<!-- zensu-review:v1:"+process.env.OP_DIGEST+":"+process.env.PAYLOAD_DIGEST+":"+process.env.HEAD_SHA+":"+n+":part="+part+"/"+n+" -->";}
+    parts.push({part:1,kind:"summary",body:marker(1)+"\n\n_Verdict: "+p.event+"_\n\n"+p.body,position:null});
+    pl.comments.forEach(function(anchor,index){
+      var c=comments[index];
+      if(!c||typeof c!=="object"||Array.isArray(c)||typeof c.body!=="string"||typeof c.path!=="string"
+          ||!anchor||typeof anchor!=="object"||Array.isArray(anchor))fail();
+      var part=index+2,keys=Object.keys(anchor).sort();
+      if(anchor.kind==="general"){
+        if(JSON.stringify(keys)!==JSON.stringify(["kind"]))fail();
+        parts.push({part:part,kind:"general",body:marker(part)+"\n\n`"+c.path+"`: "+c.body,position:null});return;
+      }
+      if(anchor.kind!=="position"||JSON.stringify(keys)!==JSON.stringify(["kind","new_line","new_path","old_line","old_path"])
+          ||typeof anchor.old_path!=="string"||!anchor.old_path||typeof anchor.new_path!=="string"||!anchor.new_path
+          ||!line(anchor.old_line)||!line(anchor.new_line)||(anchor.old_line===null&&anchor.new_line===null)
+          ||typeof pl.base_sha!=="string"||typeof pl.start_sha!=="string")fail();
+      var position={position_type:"text",base_sha:pl.base_sha,start_sha:pl.start_sha,head_sha:pl.head_sha,
+        old_path:anchor.old_path,new_path:anchor.new_path};
+      if(anchor.old_line!==null)position.old_line=anchor.old_line;
+      if(anchor.new_line!==null)position.new_line=anchor.new_line;
+      parts.push({part:part,kind:"position",body:marker(part)+"\n\n"+c.body,position:position});
+    });
+    var body=JSON.stringify({parts:parts}),target=process.env.MANIFEST_TARGET||"";
+    if(!target){process.stdout.write(body);process.exit(0);}
+    try{
+      var before=fs.lstatSync(target);
+      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||(before.mode&0o777)!==0o600)fail();
+      fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));
+      var opened=fs.fstatSync(fd);
+      if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+          ||opened.dev!==before.dev||opened.ino!==before.ino)fail();
+      fs.ftruncateSync(fd,0);fs.writeFileSync(fd,body);fs.fsyncSync(fd);
+      var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
+      var final=fs.lstatSync(target);
+      if(after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1||after.size!==Buffer.byteLength(body)
+          ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()
+          ||final.nlink!==1||(final.mode&0o777)!==0o600||final.size!==after.size)fail();
+      process.stdout.write(crypto.createHash("sha256").update(body).digest("hex"));
+    }catch(_){fail();}'
+}
+
+_zensu_vcs_review_gitlab_publisher_id() {
+  local out
+  out="$(glab api user 2>/dev/null)" || return 1
+  printf '%s' "$out" | node -e '
+    var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
+      var j;try{j=JSON.parse(s);}catch(_){process.exit(1);}
+      if(!j||typeof j!=="object"||Array.isArray(j)
+          ||!((Number.isSafeInteger(j.id)&&j.id>0)||(typeof j.id==="string"&&/^[1-9][0-9]*$/.test(j.id)&&Number.isSafeInteger(Number(j.id)))))process.exit(1);
+      process.stdout.write(String(Number(j.id)));
     });'
 }
 
 _zensu_vcs_review_gitlab_call() {
-  local repoid="${1:-}" id="${2:-}" payload="${3:-}" diffrefs="${4:-}" op_digest="${5:-}" payload_digest="${6:-}" head="${7:-}" part_count="${8:-}" part="${9:-}" plan="${10:-}"
-  PROVIDER=gitlab PAYLOAD="$payload" PLAN="$plan" DIFFREFS="$diffrefs" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" HEAD_SHA="$head" PART_COUNT="$part_count" PART="$part" REPO_ID="$repoid" REVIEW_ID="$id" node -e '
-    var fs=require("fs"),p,pl,dr;function fail(){process.exit(1);}
-    try{p=JSON.parse(fs.readFileSync(process.env.PAYLOAD,"utf8"));pl=JSON.parse(fs.readFileSync(process.env.PLAN,"utf8"));dr=JSON.parse(process.env.DIFFREFS);}catch(_){fail();}
-    var part=Number(process.env.PART),n=Number(process.env.PART_COUNT),comments=p.comments||[];
-    if(!Number.isSafeInteger(part)||part<1||part>n||!dr||dr.head_sha!==process.env.HEAD_SHA
-        ||!pl||typeof pl!=="object"||Array.isArray(pl)||JSON.stringify(Object.keys(pl).sort())!==JSON.stringify(["base_sha","comments","head_sha","start_sha"])
-        ||pl.base_sha!==(dr.base_sha==null?null:dr.base_sha)||pl.start_sha!==(dr.start_sha==null?null:dr.start_sha)||pl.head_sha!==dr.head_sha
-        ||!Array.isArray(pl.comments)||pl.comments.length!==comments.length)fail();
-    function line(v){return v===null||(Number.isSafeInteger(v)&&v>0);}
-    pl.comments.forEach(function(a){
-      if(!a||typeof a!=="object"||Array.isArray(a))fail();
-      var keys=Object.keys(a).sort();
-      if(a.kind==="general"){if(JSON.stringify(keys)!==JSON.stringify(["kind"]))fail();return;}
-      if(a.kind!=="position"||JSON.stringify(keys)!==JSON.stringify(["kind","new_line","new_path","old_line","old_path"]))fail();
-      if(typeof a.old_path!=="string"||!a.old_path||typeof a.new_path!=="string"||!a.new_path
-          ||!line(a.old_line)||!line(a.new_line)||(a.old_line===null&&a.new_line===null))fail();
-    });
-    function san(v){v=String(v);var o="";for(var z=0;z<v.length;z++){var c=v.charCodeAt(z);if(c>31||c===9||c===10||c===13)o+=v[z];}return o;}
-    var marker="<!-- zensu-review:v1:"+process.env.OP_DIGEST+":"+process.env.PAYLOAD_DIGEST+":"+process.env.HEAD_SHA+":"+n+":part="+part+"/"+n+" -->";
-    var path="projects/"+process.env.REPO_ID+"/merge_requests/"+process.env.REVIEW_ID,fields=[];
-    if(part===1){path+="/notes";fields.push(["body",marker+"\n\n_Verdict: "+p.event+"_\n\n"+p.body]);}
-    else{
-      var c=comments[part-2],anchor=pl.comments[part-2];if(!c||!anchor)fail();path+="/discussions";
-      if(anchor.kind==="position"){
-        fields.push(["body",marker+"\n\n"+c.body],["position[position_type]","text"],["position[base_sha]",dr.base_sha||""],["position[start_sha]",dr.start_sha||""],["position[head_sha]",dr.head_sha||""],["position[old_path]",anchor.old_path],["position[new_path]",anchor.new_path]);
-        if(anchor.old_line!==null)fields.push(["position[old_line]",String(anchor.old_line)]);
-        if(anchor.new_line!==null)fields.push(["position[new_line]",String(anchor.new_line)]);
-      }else fields.push(["body",marker+"\n\n`"+(c.path||"")+"`: "+c.body]);
+  local repoid="${1:-}" id="${2:-}" manifest="${3:-}" manifest_digest="${4:-}" part="${5:-}"
+  [ -f "$manifest" ] || return 1
+  MANIFEST="$manifest" MANIFEST_DIGEST="$manifest_digest" PART="$part" REPO_ID="$repoid" REVIEW_ID="$id" node -e '
+    var fs=require("fs"),crypto=require("crypto"),manifest,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+    try{
+      if(!/^[a-f0-9]{64}$/.test(process.env.MANIFEST_DIGEST||""))fail();
+      var before=fs.lstatSync(process.env.MANIFEST);
+      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
+          ||(before.mode&0o777)!==0o600||before.size<1||before.size>16*1024*1024)fail();
+      fd=fs.openSync(process.env.MANIFEST,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+      var opened=fs.fstatSync(fd);
+      if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+          ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+      var data=fs.readFileSync(fd),after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
+      var final=fs.lstatSync(process.env.MANIFEST);
+      if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino
+          ||after.nlink!==1||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs
+          ||after.ctimeMs!==opened.ctimeMs||final.dev!==opened.dev||final.ino!==opened.ino
+          ||!final.isFile()||final.isSymbolicLink()||final.nlink!==1
+          ||crypto.createHash("sha256").update(data).digest("hex")!==process.env.MANIFEST_DIGEST)fail();
+      manifest=JSON.parse(data.toString("utf8"));
+    }catch(_){fail();}
+    var part=Number(process.env.PART);
+    if(!manifest||typeof manifest!=="object"||Array.isArray(manifest)||!Array.isArray(manifest.parts)
+        ||!Number.isSafeInteger(part)||part<1)fail();
+    var matches=manifest.parts.filter(function(item){return item&&item.part===part;});
+    if(matches.length!==1)fail();
+    var item=matches[0],request;
+    if(typeof item.body!=="string")fail();
+    if(item.kind==="summary"){
+      if(part!==1||item.position!==null)fail();request={body:item.body};
+    }else{
+      if(part===1||(item.kind!=="position"&&item.kind!=="general"))fail();
+      if(item.kind==="general"){if(item.position!==null)fail();request={body:item.body};}
+      else{
+        var p=item.position,required=["base_sha","head_sha","new_path","old_path","position_type","start_sha"];
+        if(!p||typeof p!=="object"||Array.isArray(p)||p.position_type!=="text"
+            ||!required.every(function(k){return typeof p[k]==="string"&&p[k].length>0;})
+            ||!Object.keys(p).every(function(k){return required.includes(k)||k==="old_line"||k==="new_line";})
+            ||(p.old_line==null&&p.new_line==null)
+            ||(p.old_line!=null&&(!Number.isSafeInteger(p.old_line)||p.old_line<1))
+            ||(p.new_line!=null&&(!Number.isSafeInteger(p.new_line)||p.new_line<1)))fail();
+        request={body:item.body,position:p};
+      }
     }
-    var zero=String.fromCharCode(0),tokens=["glab","api","--method","POST",path];
-    fields.forEach(function(f){tokens.push("-f");tokens.push(f[0]+"="+san(f[1]));});process.stdout.write(tokens.join(zero)+zero);'
+    process.stdout.write(JSON.stringify(request));'
 }
 
 _zensu_vcs_review_result() {
-  STATUS="${1:-}" MARKER="${2:-}" HEAD_SHA="${3:-}" PART_COUNT="${4:-}" POSTED_COUNT="${5:-}" URL_VALUE="${6:-}" node -e '
+  STATUS="${1:-}" MARKER="${2:-}" HEAD_SHA="${3:-}" PART_COUNT="${4:-}" POSTED_COUNT="${5:-}" \
+    URL_VALUE="${6:-}" PROVIDER="${7:-}" node -e '
     var n=Number(process.env.PART_COUNT),p=Number(process.env.POSTED_COUNT);
     var s=process.env.STATUS;
-    if(!["present","posted","reconciled"].includes(s)||!Number.isSafeInteger(n)||n<1||n>999999||!Number.isSafeInteger(p)||p<0||p>n)process.exit(1);
+    var provider=process.env.PROVIDER;
+    if(!["github","gitlab"].includes(provider)||!["present","posted","reconciled"].includes(s)||!Number.isSafeInteger(n)||n<1||n>999999||!Number.isSafeInteger(p)||p<0||p>n)process.exit(1);
     if((s==="present"&&p!==0)||(s==="posted"&&p!==n)||(s==="reconciled"&&(p<1||p>=n)))process.exit(1);
     var marker=(process.env.MARKER||"").match(/^<!-- zensu-review:v1:([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{7,64}):([1-9][0-9]*):part=1\/([1-9][0-9]*) -->$/);
     if(!marker||marker[3]!==process.env.HEAD_SHA||Number(marker[4])!==n||Number(marker[5])!==n)process.exit(1);
     try{var u=new URL(process.env.URL_VALUE||"");if(/[\s\u0000-\u001f\u007f]/.test(process.env.URL_VALUE)
       ||!["http:","https:"].includes(u.protocol)||!u.hostname||u.username||u.password)process.exit(1);}catch(_){process.exit(1);}
-    process.stdout.write(JSON.stringify({status:process.env.STATUS,marker:process.env.MARKER,headSha:process.env.HEAD_SHA,partCount:n,postedCount:p,url:process.env.URL_VALUE||""}));'
+    process.stdout.write(JSON.stringify({status:process.env.STATUS,marker:process.env.MARKER,headSha:process.env.HEAD_SHA,partCount:n,postedCount:p,url:process.env.URL_VALUE||"",provider:provider}));'
 }
 
 _zensu_vcs_reconcile_review() (
@@ -1177,16 +1448,20 @@ _zensu_vcs_reconcile_review() (
   [ -n "$repoid" ] && [ -n "$payload" ] && [ -n "$operation_key" ] || return 1
   case "$provider" in github) _zensu_vcs_is_gh_repoid "$repoid" || return 1 ;; gitlab) _zensu_vcs_is_gl_repoid "$repoid" || return 1 ;; esac
   expected_head="$(printf '%s' "$expected_head" | tr '[:upper:]' '[:lower:]')"
-  local payload_snapshot gitlab_diffs_file="" gitlab_plan_file=""
+  local payload_snapshot payload_snapshot_digest gitlab_plan_file="" gitlab_manifest_file="" gitlab_plan_digest="" \
+    gitlab_manifest_digest="" gitlab_publisher_id=""
   payload_snapshot="$(mktemp "${TMPDIR:-/tmp}/zensu-review-payload.XXXXXXXX")" || return 1
-  trap 'rm -f -- "$payload_snapshot"; [ -z "$gitlab_diffs_file" ] || rm -f -- "$gitlab_diffs_file"; [ -z "$gitlab_plan_file" ] || rm -f -- "$gitlab_plan_file"' EXIT
+  trap 'rm -f -- "$payload_snapshot"; [ -z "$gitlab_plan_file" ] || rm -f -- "$gitlab_plan_file"; [ -z "$gitlab_manifest_file" ] || rm -f -- "$gitlab_manifest_file"' EXIT
   trap 'exit 129' HUP
   trap 'exit 130' INT
   trap 'exit 143' TERM
-  _zensu_vcs_snapshot_review_payload "$payload" "$payload_snapshot" || return 1
+  payload_snapshot_digest="$(_zensu_vcs_snapshot_review_payload "$payload" "$payload_snapshot")" || return 1
+  [ "${#payload_snapshot_digest}" -eq 64 ] || return 1
+  case "$payload_snapshot_digest" in *[!0-9a-f]*) return 1 ;; esac
   payload="$payload_snapshot"
   local meta op_digest payload_digest head part_count marker
-  meta="$(_zensu_vcs_review_payload_meta "$provider" "$payload" "$expected_head" "$operation_key")" || return 1
+  meta="$(_zensu_vcs_review_payload_meta "$provider" "$payload" "$expected_head" "$operation_key" \
+    "$payload_snapshot_digest")" || return 1
   op_digest="$(printf '%s' "$meta" | _zensu_vcs_json_field opDigest)"
   payload_digest="$(printf '%s' "$meta" | _zensu_vcs_json_field payloadDigest)"
   head="$(printf '%s' "$meta" | _zensu_vcs_json_field headSha)"
@@ -1196,29 +1471,7 @@ _zensu_vcs_reconcile_review() (
   before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
   _zensu_vcs_review_assert_head "$before" "$head" || return 1
   url="$(printf '%s' "$before" | _zensu_vcs_json_field url)"
-  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
-  inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count")" || return 1
-  present="$(printf '%s' "$inventory" | _zensu_vcs_review_present_parts)" || return 1
-  full="$(_zensu_vcs_review_full_parts "$part_count")" || return 1
-
-  if [ "$present" = "$full" ]; then
-    status="present"
-    if [ "$provider" = github ]; then
-      local existing_url; existing_url="$(printf '%s' "$inventory" | _zensu_vcs_json_field url)"; [ -z "$existing_url" ] || url="$existing_url"
-    fi
-  elif [ "$present" = "[]" ] && [ "$provider" = "github" ]; then
-    local post_input post_response post_url
-    before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
-    _zensu_vcs_review_assert_head "$before" "$head" || return 1
-    post_input="$(mktemp "${TMPDIR:-/tmp}/zensu-review.XXXXXXXX")" || return 1
-    if ! PAYLOAD="$payload" MARKER="$marker" HEAD_SHA="$head" node -e '
-      var fs=require("fs"),j;try{j=JSON.parse(fs.readFileSync(process.env.PAYLOAD,"utf8"));}catch(_){process.exit(1);}
-      j.body=process.env.MARKER+"\n\n"+j.body;j.commit_id=process.env.HEAD_SHA;process.stdout.write(JSON.stringify(j));' > "$post_input"; then rm -f "$post_input"; return 1; fi
-    post_response="$(gh api -X POST "repos/$repoid/pulls/$id/reviews" --input "$post_input" 2>/dev/null)" || { rm -f "$post_input"; return 1; }
-    rm -f "$post_input"
-    post_url="$(printf '%s' "$post_response" | _zensu_vcs_json_http_url_field html_url)" || return 1
-    url="$post_url"; status="posted"; posted_count=1
-  elif [ "$provider" = "gitlab" ]; then
+  if [ "$provider" = gitlab ]; then
     if [ -z "$diffrefs" ]; then
       local diff_response diff_attempt=1
       while [ "$diff_attempt" -le 5 ]; do
@@ -1236,25 +1489,81 @@ _zensu_vcs_reconcile_review() (
     fi
     local require_full=0; [ "$part_count" -gt 1 ] && require_full=1
     _zensu_vcs_review_validate_diffrefs "$diffrefs" "$head" "$require_full" || return 1
-    gitlab_diffs_file="$(mktemp "${TMPDIR:-/tmp}/zensu-review-diffs.XXXXXXXX")" || return 1
     gitlab_plan_file="$(mktemp "${TMPDIR:-/tmp}/zensu-review-plan.XXXXXXXX")" || return 1
+    gitlab_manifest_file="$(mktemp "${TMPDIR:-/tmp}/zensu-review-manifest.XXXXXXXX")" || return 1
+    local gitlab_diffs_json
     if [ "$part_count" -gt 1 ]; then
-      glab api --paginate --output json "projects/$repoid/merge_requests/$id/diffs" > "$gitlab_diffs_file" 2>/dev/null || return 1
+      gitlab_diffs_json="$(glab api --paginate --output json \
+        "projects/$repoid/merge_requests/$id/diffs" 2>/dev/null)" || return 1
     else
-      printf '[]' > "$gitlab_diffs_file" || return 1
+      gitlab_diffs_json='[]'
     fi
-    _zensu_vcs_review_gitlab_diff_plan "$payload" "$diffrefs" "$head" < "$gitlab_diffs_file" > "$gitlab_plan_file" || return 1
-    rm -f -- "$gitlab_diffs_file"; gitlab_diffs_file=""
+    gitlab_plan_digest="$(printf '%s' "$gitlab_diffs_json" | \
+      _zensu_vcs_review_gitlab_diff_plan "$payload" "$diffrefs" "$head" \
+        "$payload_digest" "$gitlab_plan_file" "$payload_snapshot_digest")" || return 1
+    [ "${#gitlab_plan_digest}" -eq 64 ] || return 1
+    case "$gitlab_plan_digest" in *[!0-9a-f]*) return 1 ;; esac
+    gitlab_manifest_digest="$(_zensu_vcs_review_gitlab_manifest "$payload" "$gitlab_plan_file" \
+      "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" \
+      "$gitlab_plan_digest" "$payload_snapshot_digest")" || return 1
+    [ "${#gitlab_manifest_digest}" -eq 64 ] || return 1
+    case "$gitlab_manifest_digest" in *[!0-9a-f]*) return 1 ;; esac
+    gitlab_publisher_id="$(_zensu_vcs_review_gitlab_publisher_id)" || return 1
+    rm -f -- "$gitlab_plan_file"
+    gitlab_plan_file=""
+  fi
+  raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
+  if [ "$provider" = gitlab ]; then
+    inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
+  else
+    inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count")" || return 1
+  fi
+  present="$(printf '%s' "$inventory" | _zensu_vcs_review_present_parts)" || return 1
+  full="$(_zensu_vcs_review_full_parts "$part_count")" || return 1
+
+  if [ "$present" = "$full" ]; then
+    status="present"
+    if [ "$provider" = github ]; then
+      local existing_url; existing_url="$(printf '%s' "$inventory" | _zensu_vcs_json_field url)"; [ -z "$existing_url" ] || url="$existing_url"
+    fi
+  elif [ "$present" = "[]" ] && [ "$provider" = "github" ]; then
+    local rendered_review post_response post_url
+    before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
+    _zensu_vcs_review_assert_head "$before" "$head" || return 1
+    rendered_review="$(PAYLOAD="$payload" MARKER="$marker" HEAD_SHA="$head" \
+      EXPECTED_RAW_DIGEST="$payload_snapshot_digest" node -e '
+        var fs=require("fs"),crypto=require("crypto"),fd,j;
+        function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+        try{
+          var before=fs.lstatSync(process.env.PAYLOAD);
+          if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>8*1024*1024)fail();
+          fd=fs.openSync(process.env.PAYLOAD,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));var opened=fs.fstatSync(fd);
+          if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
+          var data=fs.readFileSync(fd),after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;var final=fs.lstatSync(process.env.PAYLOAD);
+          if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
+              ||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs||after.ctimeMs!==opened.ctimeMs
+              ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()||final.nlink!==1
+              ||crypto.createHash("sha256").update(data).digest("hex")!==process.env.EXPECTED_RAW_DIGEST)fail();
+          j=JSON.parse(data.toString("utf8"));
+        }catch(_){fail();}
+        j.body=process.env.MARKER+"\n\n"+j.body;j.commit_id=process.env.HEAD_SHA;process.stdout.write(JSON.stringify(j));')" || return 1
+    post_response="$(printf '%s' "$rendered_review" \
+      | gh api -X POST "repos/$repoid/pulls/$id/reviews" --input - 2>/dev/null)" || return 1
+    post_url="$(printf '%s' "$post_response" | _zensu_vcs_json_http_url_field html_url)" || return 1
+    url="$post_url"; status="posted"; posted_count=1
+  elif [ "$provider" = "gitlab" ]; then
     if [ "$present" = "[]" ]; then status="posted"; else status="reconciled"; fi
     local i=1
     while [ "$i" -le "$part_count" ]; do
       if ! _zensu_vcs_review_has_part "$present" "$i"; then
         before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
         _zensu_vcs_review_assert_head "$before" "$head" || return 1
-        local argv=() token
-        while IFS= read -r -d '' token; do argv[${#argv[@]}]="$token"; done < <(_zensu_vcs_review_gitlab_call "$repoid" "$id" "$payload" "$diffrefs" "$op_digest" "$payload_digest" "$head" "$part_count" "$i" "$gitlab_plan_file")
-        [ "${#argv[@]}" -ge 7 ] || return 1
-        "${argv[@]}" >/dev/null 2>&1 || return 1
+        local request_json endpoint="projects/$repoid/merge_requests/$id/discussions"
+        [ "$i" -ne 1 ] || endpoint="projects/$repoid/merge_requests/$id/notes"
+        request_json="$(_zensu_vcs_review_gitlab_call "$repoid" "$id" \
+          "$gitlab_manifest_file" "$gitlab_manifest_digest" "$i")" || return 1
+        printf '%s' "$request_json" \
+          | glab api --method POST "$endpoint" --input - >/dev/null 2>&1 || return 1
         posted_count=$((posted_count + 1))
       fi
       i=$((i + 1))
@@ -1264,14 +1573,18 @@ _zensu_vcs_reconcile_review() (
 
   if [ "$posted_count" -gt 0 ]; then
     raw="$(_zensu_vcs_review_fetch_inventory "$provider" "$repoid" "$id")" || return 1
-    inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count")" || return 1
+    if [ "$provider" = gitlab ]; then
+      inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count" "$gitlab_manifest_file" "$gitlab_publisher_id" "$gitlab_manifest_digest")" || return 1
+    else
+      inventory="$(printf '%s' "$raw" | _zensu_vcs_review_inventory "$provider" "$op_digest" "$payload_digest" "$head" "$part_count")" || return 1
+    fi
     present="$(printf '%s' "$inventory" | _zensu_vcs_review_present_parts)" || return 1
     [ "$present" = "$full" ] || return 1
   fi
   local after
   after="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
   _zensu_vcs_review_assert_head "$after" "$head" || return 1
-  _zensu_vcs_review_result "$status" "$marker" "$head" "$part_count" "$posted_count" "$url"
+  _zensu_vcs_review_result "$status" "$marker" "$head" "$part_count" "$posted_count" "$url" "$provider"
 )
 
 _zensu_vcs_post_review() {
@@ -1454,7 +1767,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
+export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in

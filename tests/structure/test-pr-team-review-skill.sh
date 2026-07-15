@@ -317,6 +317,7 @@ DELEGATED_NEEDLES=(
   '`effects.prOpen.status == "completed"`'
   '`effects.teamReview.status == "requested"`'
   '`effects.teamReview.operationKey`'
+  '`effects.teamReview.provider`'
 )
 P14A=true
 for needle in "${DELEGATED_NEEDLES[@]}"; do
@@ -326,6 +327,22 @@ if [ "$P14A" = true ]; then
   check "P14a delegated review validates an exact durable envelope and fresh state" PASS
 else
   check "P14a delegated review validates an exact durable envelope and fresh state" FAIL
+fi
+
+PROVIDER_GUARD_LINE="$(grep -nF -- '[ "$DELEGATED" = true ] && [ "$PROVIDER" != "$BOUND_PROVIDER" ]; then' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
+SCOUT_LINE="$(grep -nF -- 'bash "$VCS" --scout-pr --provider "$PROVIDER" <n>' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
+RECONCILE_LINE="$(grep -nF -- 'bash "$VCS" --reconcile-review --provider "$PROVIDER"' "$SKILL_MD" | head -n 1 | cut -d: -f1)"
+if grep -qF -- 'Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`' "$SKILL_MD" \
+   && grep -qF -- 'require `PROVIDER == BOUND_PROVIDER` immediately after detection' "$SKILL_MD" \
+   && grep -qF -- 'before scout, worktree creation, payload access, or any remote write' "$SKILL_MD" \
+   && grep -qF -- 'review-provider-mismatch' "$SKILL_MD" \
+   && grep -qF -- '"$BOUND_HEAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_MD" \
+   && grep -qF -- '"$REVIEW_PAYLOAD" "$BOUND_PROVIDER" "$REPO"' "$SKILL_MD" \
+   && [ -n "$PROVIDER_GUARD_LINE" ] && [ -n "$SCOUT_LINE" ] && [ -n "$RECONCILE_LINE" ] \
+   && [ "$PROVIDER_GUARD_LINE" -lt "$SCOUT_LINE" ] && [ "$PROVIDER_GUARD_LINE" -lt "$RECONCILE_LINE" ]; then
+  check "P14aa delegated review binds the provider before every remote write and payload access" PASS
+else
+  check "P14aa delegated provider drift can reach reconciliation" FAIL
 fi
 
 TEAM_ENVELOPE="$(awk '
@@ -352,7 +369,8 @@ fi
 if grep -qF -- '--reconcile-review --provider "$PROVIDER" --repo-id "$REPOID"' "$SKILL_MD" \
    && grep -qF -- '--expected-head "$BOUND_HEAD"' "$SKILL_MD" \
    && grep -qF -- '<n> "$REVIEW_PAYLOAD" "$OPERATION_KEY"' "$SKILL_MD" \
-   && grep -qF -- '`{status,marker,headSha,partCount,postedCount,url}`' "$SKILL_MD" \
+   && grep -qF -- '`{status,marker,headSha,partCount,postedCount,url,provider}`' "$SKILL_MD" \
+   && grep -qF -- 'Require `provider == PROVIDER`' "$SKILL_MD" \
    && grep -qF -- '`present|posted|reconciled`' "$SKILL_MD" \
    && grep -qF -- '`posted` requires `postedCount == partCount`' "$SKILL_MD" \
    && grep -qF -- '`reconciled` requires `0 < postedCount < partCount`' "$SKILL_MD" \

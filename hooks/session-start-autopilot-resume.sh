@@ -204,7 +204,15 @@ const exact = (value, keys) => value && typeof value === 'object' && !Array.isAr
 const nonEmpty = (value, max) => typeof value === 'string' && value.length > 0
   && value.length <= max && !/[\u0000-\u001f]/.test(value);
 const sha = value => typeof value === 'string' && /^[a-fA-F0-9]{7,64}$/.test(value);
+const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const positive = value => Number.isSafeInteger(value) && value > 0;
+const reviewMarker = value => {
+  if (typeof value !== 'string') return null;
+  const match = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/.exec(value);
+  return match && match[4] === match[5]
+    ? { payloadDigest: match[2], headSha: match[3], partCount: Number(match[4]) }
+    : null;
+};
 const runId = state && state.runId;
 const ownerSessionId = state && state.ownerSessionId;
 const stage = state && state.stage;
@@ -232,9 +240,18 @@ const prEvidenceValid = evidenceShapeValid && (evidence.pr === null
     && positive(evidence.pr.number) && nonEmpty(evidence.pr.url, 2048)
     && /^https:\/\//.test(evidence.pr.url) && sha(evidence.pr.headSha)));
 const reviewEvidenceValid = evidenceShapeValid && (evidence.review === null
-  || (exact(evidence.review, ['published', 'marker', 'headSha'])
+  || (exact(evidence.review, ['published', 'marker', 'headSha', 'payloadDigest', 'partCount', 'provider'])
     && evidence.review.published === true && nonEmpty(evidence.review.marker, 512)
-    && sha(evidence.review.headSha)));
+    && sha(evidence.review.headSha) && sha256(evidence.review.payloadDigest)
+    && positive(evidence.review.partCount) && evidence.review.partCount <= 999999
+    && (evidence.review.provider === null
+      || evidence.review.provider === 'github' || evidence.review.provider === 'gitlab')
+    && (() => {
+      const marker = reviewMarker(evidence.review.marker);
+      return marker !== null && marker.payloadDigest === evidence.review.payloadDigest
+        && marker.headSha === evidence.review.headSha.toLowerCase()
+        && marker.partCount === evidence.review.partCount;
+    })()));
 const valid = token.test(runId || '')
   && token.test(ownerSessionId || '')
   && sessionId.test(currentSessionId)

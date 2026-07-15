@@ -13,11 +13,11 @@ check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else ech
 source "$LIB"
 
 review_marker() {
-  local operation_key="$1" head_sha="$2"
-  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+  local operation_key="$1" head_sha="$2" payload_digest="$3"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" PAYLOAD_DIGEST="$payload_digest" node -e '
     const crypto=require("crypto");
     const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
-    process.stdout.write(`<!-- zensu-review:v1:${op}:${"f".repeat(64)}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
   '
 }
 
@@ -158,9 +158,16 @@ done_plan_event done-converge CONVERGENCE_PASSED '{}'
 done_plan_event done-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:done-plan"}'
 done_plan_event done-pr-open PR_OPENED "{\"operationKey\":\"pr:done-plan\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$DONE_HEAD\"}}"
 DONE_REVIEW_KEY="$(autopilot_team_review_operation_key "$DONE_RUN" "$DONE_HEAD")"
-DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD")"
-done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\"}"
-done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"marker\":\"$DONE_REVIEW_MARKER\",\"headSha\":\"$DONE_HEAD\"}"
+done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"provider\":\"github\"}"
+DONE_REVIEW_PAYLOAD="$TMP/done-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Done fixture review\",\"commit_id\":\"$DONE_HEAD\",\"comments\":[]}" > "$DONE_REVIEW_PAYLOAD"
+DONE_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload "$DONE_RUN" "$DONE_REVIEW_KEY" \
+  "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null || true)"
+[ -n "$DONE_REVIEW_SNAPSHOT" ] || DONE_READY=false
+DONE_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
+  "$DONE_REVIEW_SNAPSHOT" "$DONE_HEAD" true canonical 2>/dev/null || true)"
+DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD" "$DONE_REVIEW_DIGEST")"
+done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"marker\":\"$DONE_REVIEW_MARKER\",\"headSha\":\"$DONE_HEAD\",\"provider\":\"github\"}"
 done_plan_event done-findings FINDINGS_CLEARED "{\"headSha\":\"$DONE_HEAD\",\"unresolvedCount\":0}"
 done_plan_event done-validation VALIDATION_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-delivery DELIVERY_COMPLETE "{\"headSha\":\"$DONE_HEAD\"}"

@@ -136,7 +136,7 @@ markers, the same operation digest with a different payload/head/part count, mal
 markers, an OPEN/head mismatch, or incomplete pagination fail closed without posting.
 
 The structured result has exactly
-`{status,marker,headSha,partCount,postedCount,url}`. The caller validates the operation
+`{status,marker,headSha,partCount,postedCount,url,provider}` with `provider=github`. The caller validates the operation
 digest, payload-digest shape, bound head, `partCount=1`, first-part marker, status/count
 relationship, and non-empty URL before recording durable publication evidence.
 

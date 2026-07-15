@@ -184,7 +184,8 @@ REVIEW_OPERATION_KEY="$(autopilot_team_review_operation_key "$RUN_ID" "$PR_HEAD_
   || { echo "cannot bind team-review operation" >&2; exit 1; }
 ```
 
-Persist `TEAM_REVIEW_REQUESTED` with that key before invoking the skill, then pass the same exact operation key in this four-line envelope:
+Persist `TEAM_REVIEW_REQUESTED` with that key and the already detected VCS `provider`
+(`github` or `gitlab`) before invoking the skill, then pass the same exact operation key in this four-line envelope:
 
 ```text
 /zensu:pr-team-review <pr-url>
@@ -196,7 +197,12 @@ AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>
 
 For this call `<outer-stage>` is exactly `TEAM_REVIEW`. After the skill returns a validated
 structured reconciliation receipt, persist `TEAM_REVIEW_PUBLISHED` with the same exact
-operation key, receipt marker, and bound head.
+operation key, receipt marker, bound head, and receipt `provider`; it must equal the provider
+already bound by `TEAM_REVIEW_REQUESTED`.
+The durable transition re-attests the receipt's canonical payload digest and provider-aware
+expected part count against the immutable stored payload while holding the Autopilot lock,
+then records that digest, part count, and provider as review evidence. Never infer or omit
+the provider; copy it from the structured reconciliation receipt.
 
 The rendered stage line is `AUTOPILOT-STAGE: TEAM_REVIEW`.
 

@@ -10,11 +10,11 @@ PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 source "$LIB"
 review_marker() {
-  local operation_key="$1" head_sha="$2"
-  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+  local operation_key="$1" head_sha="$2" payload_digest="$3"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" PAYLOAD_DIGEST="$payload_digest" node -e '
     const crypto=require("crypto");
     const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
-    process.stdout.write(`<!-- zensu-review:v1:${op}:${"f".repeat(64)}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
   '
 }
 TMP="$(mktemp -d -t zensu-autopilot-stop-XXXXXX)"; trap 'rm -rf "$TMP"' EXIT
@@ -50,9 +50,16 @@ head_event stop-head-converge CONVERGENCE_PASSED '{}'
 head_event stop-head-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:stop-head"}'
 head_event stop-head-pr-open PR_OPENED "{\"operationKey\":\"pr:stop-head\",\"pr\":{\"number\":714,\"url\":\"https://github.com/acme/repo/pull/714\",\"headSha\":\"$HEAD_SHA\"}}"
 HEAD_REVIEW_KEY="$(autopilot_team_review_operation_key stop_run_head "$HEAD_SHA")"
-HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA")"
-head_event stop-head-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$HEAD_REVIEW_KEY\"}"
-head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}"
+head_event stop-head-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"provider\":\"github\"}"
+HEAD_REVIEW_PAYLOAD="$TMP/stop-head-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Stop fixture review\",\"commit_id\":\"$HEAD_SHA\",\"comments\":[]}" > "$HEAD_REVIEW_PAYLOAD"
+HEAD_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload stop_run_head "$HEAD_REVIEW_KEY" \
+  "$HEAD_SHA" "$HEAD_REVIEW_PAYLOAD" github "$P1H" 2>/dev/null || true)"
+[ -n "$HEAD_REVIEW_SNAPSHOT" ] || HEAD_READY=false
+HEAD_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
+  "$HEAD_REVIEW_SNAPSHOT" "$HEAD_SHA" true canonical 2>/dev/null || true)"
+HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA" "$HEAD_REVIEW_DIGEST")"
+head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}"
 head_event stop-head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
 head_event stop-head-tdd-start-2 TDD_STARTED '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head"}'
 head_event stop-head-tdd-done-2 TDD_CHAIN_DONE '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head","outcome":"pass"}'

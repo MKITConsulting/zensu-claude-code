@@ -22,6 +22,10 @@ consumes the **same** `_synthesis.json` payload the GitHub path uses
    - `side=RIGHT` → `position[new_path]` + `position[new_line]`; `side=LEFT` →
      `position[old_path]` + `position[old_line]`.
 
+Each POST is one compact JSON object streamed to `glab api --input -`; review bodies and
+positions are never command-line arguments, so valid multi-megabyte payloads cannot hit
+the platform `ARG_MAX` limit during a partial retry.
+
 For delegated Autopilot reconciliation, that payload coordinate is only the lookup key. The
 driver resolves it against the fully paginated MR diff before rendering the GitLab position:
 added/deleted lines carry the exact old/new path pair and their available line, while an
@@ -88,7 +92,7 @@ Fail closed before posting on a duplicate marker, malformed v1 marker, the same 
 digest bound to a different payload/head/part count, an unexpected part index, incomplete
 pagination, or an MR that is not OPEN at the expected head. Re-read all pages after writes
 and require the complete exact marker set. The structured result has exactly
-`{status,marker,headSha,partCount,postedCount,url}`; `marker` is always the part-1 marker,
+`{status,marker,headSha,partCount,postedCount,url,provider}` with `provider=gitlab`; `marker` is always the part-1 marker,
 which lets Autopilot validate and persist one durable publication receipt.
 Autopilot serializes one operation through its durable owner; the protocol supports
 sequential crash/retry repair, not simultaneous independent writers that bypass that owner.

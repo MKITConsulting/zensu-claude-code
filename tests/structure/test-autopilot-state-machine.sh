@@ -4,6 +4,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+VCS_LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -32,6 +33,8 @@ fi
 
 # shellcheck disable=SC1090
 source "$LIB"
+# shellcheck disable=SC1090
+source "$VCS_LIB"
 
 ROOT="$(mktemp -d -t zensu-autopilot-state-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
@@ -65,6 +68,15 @@ json_ok() {
 
 file_digest() {
   shasum -a 256 "$1" | awk '{print $1}'
+}
+
+json_field_stdin() {
+  FIELD="$1" node -e '
+    let value;try{value=JSON.parse(require("fs").readFileSync(0,"utf8"));}catch(_){process.exit(1);}
+    const field=value[process.env.FIELD];
+    if(typeof field!=="string")process.exit(1);
+    process.stdout.write(field);
+  '
 }
 
 review_operation_key() {
@@ -189,8 +201,6 @@ apply "evt_converge_001" "CONVERGENCE_PASSED" '{}' || true
 apply "evt_pr_request_001" "PR_OPEN_REQUESTED" '{"operationKey":"pr:run_primary_001"}' || true
 apply "evt_pr_open_001" "PR_OPENED" "{\"operationKey\":\"pr:run_primary_001\",\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$HEAD_SHA\"}}" || true
 REVIEW_KEY="$(review_operation_key "$RUN" "$HEAD_SHA")"
-REVIEW_PAYLOAD_DIGEST="$(printf '%s' 'primary-review-payload' | shasum -a 256 | awk '{print $1}')"
-REVIEW_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 1)"
 if command -v autopilot_team_review_operation_key >/dev/null 2>&1 \
   && [ "$(autopilot_team_review_operation_key "$RUN" "$HEAD_SHA")" = "$REVIEW_KEY" ] \
   && [ "$(autopilot_team_review_operation_key "$RUN" "$HEAD_SHA_2")" != "$REVIEW_KEY" ]; then
@@ -202,21 +212,31 @@ fi
 BEFORE_REVIEW_REQUEST="$(file_digest "$RUN_FILE")"
 WRONG_REVIEW_KEY="$(review_operation_key "$RUN" "$HEAD_SHA_2")"
 if ! apply "evt_review_wrong_key" "TEAM_REVIEW_REQUESTED" \
-    "{\"operationKey\":\"$WRONG_REVIEW_KEY\"}" 2>/dev/null \
+    "{\"operationKey\":\"$WRONG_REVIEW_KEY\",\"provider\":\"github\"}" 2>/dev/null \
   && [ "$(file_digest "$RUN_FILE")" = "$BEFORE_REVIEW_REQUEST" ]; then
   check "R2 TEAM_REVIEW_REQUESTED rejects a key not bound to this run and original PR head byte-stably" PASS
 else
   check "R2 mismatched team-review operation key rejection" FAIL
 fi
 apply "evt_review_request_001" "TEAM_REVIEW_REQUESTED" \
-  "{\"operationKey\":\"$REVIEW_KEY\"}" || true
+  "{\"operationKey\":\"$REVIEW_KEY\",\"provider\":\"github\"}" || true
 
 REVIEW_PAYLOAD_SOURCE="$ROOT/review-payload.json"
 cat > "$REVIEW_PAYLOAD_SOURCE" <<JSON
-{"commit_id":"$HEAD_SHA","event":"COMMENT","body":"Durable review body","comments":[]}
+{
+  "comments": [{
+    "path": "hooks/lib/example.sh",
+    "line": 7,
+    "side": "RIGHT",
+    "body": "Durable inline finding"
+  }],
+  "body": "Durable review body",
+  "event": "COMMENT",
+  "commit_id": "$HEAD_SHA"
+}
 JSON
 
-if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
     >/dev/null 2>&1; then
   check "R3 review payload read reports an absent pre-publication snapshot" PASS
 else
@@ -224,9 +244,9 @@ else
 fi
 
 REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
-  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" "$PROJECT" 2>/dev/null || true)"
+  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null || true)"
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
-  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
   && [ "$(stat -c %a "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %Lp "$REVIEW_PAYLOAD_SNAPSHOT")" = 600 ] \
   && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
@@ -235,14 +255,28 @@ else
   check "R4 requested review atomically stores one private operation/head-bound payload" FAIL
 fi
 
+REVIEW_VCS_META="$(_zensu_vcs_review_payload_meta github "$REVIEW_PAYLOAD_SNAPSHOT" "$HEAD_SHA" "$REVIEW_KEY" 2>/dev/null || true)"
+REVIEW_PAYLOAD_DIGEST="$(printf '%s' "$REVIEW_VCS_META" | json_field_stdin payloadDigest 2>/dev/null || true)"
+REVIEW_CANONICAL_DIGEST="$(_autopilot_team_review_payload_inspect \
+  "$REVIEW_PAYLOAD_SNAPSHOT" "$HEAD_SHA" true canonical 2>/dev/null || true)"
+REVIEW_RAW_DIGEST="$(file_digest "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || true)"
+REVIEW_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 1)"
+if [ -n "$REVIEW_CANONICAL_DIGEST" ] \
+  && [ "$REVIEW_CANONICAL_DIGEST" = "$REVIEW_PAYLOAD_DIGEST" ] \
+  && [ "$REVIEW_CANONICAL_DIGEST" != "$REVIEW_RAW_DIGEST" ]; then
+  check "R4a durable payload inspection uses the same canonical digest as remote publication" PASS
+else
+  check "R4a canonical receipt digest parity with the VCS publisher" FAIL
+fi
+
 # This is the crash window: the remote write may already have succeeded while
 # TEAM_REVIEW_PUBLISHED is not durable yet. A resumed skill must load the exact
 # immutable snapshot instead of synthesizing a second payload.
 REVIEW_SNAPSHOT_DIGEST="$(file_digest "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || true)"
 printf '%s\n' "{\"commit_id\":\"$HEAD_SHA\",\"event\":\"COMMENT\",\"body\":\"Regenerated and different\",\"comments\":[]}" > "$REVIEW_PAYLOAD_SOURCE"
-if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && ! autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
-      "$REVIEW_PAYLOAD_SOURCE" "$PROJECT" >/dev/null 2>&1 \
+      "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" >/dev/null 2>&1 \
   && [ "$(file_digest "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null)" = "$REVIEW_SNAPSHOT_DIGEST" ] \
   && grep -qF 'Durable review body' "$REVIEW_PAYLOAD_SNAPSHOT" \
   && ! grep -qF 'Regenerated and different' "$REVIEW_PAYLOAD_SNAPSHOT"; then
@@ -261,7 +295,7 @@ cp "$REVIEW_PAYLOAD_SNAPSHOT" "$UNRELATED_REVIEW_TEMP"
 OWNED_REVIEW_TEMP="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
 rm -f "$OWNED_REVIEW_TEMP"
 ln "$REVIEW_PAYLOAD_SNAPSHOT" "$OWNED_REVIEW_TEMP"
-if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
+if [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ ! -e "$OWNED_REVIEW_TEMP" ] \
   && [ -f "$UNRELATED_REVIEW_TEMP" ] \
   && [ "$(stat -c %h "$UNRELATED_REVIEW_TEMP" 2>/dev/null || stat -f %l "$UNRELATED_REVIEW_TEMP")" = 1 ] \
@@ -277,7 +311,7 @@ MULTI_REVIEW_TEMP_B="$(mktemp "${REVIEW_PAYLOAD_SNAPSHOT}.tmp.XXXXXXXX")"
 rm -f "$MULTI_REVIEW_TEMP_A" "$MULTI_REVIEW_TEMP_B"
 ln "$REVIEW_PAYLOAD_SNAPSHOT" "$MULTI_REVIEW_TEMP_A"
 ln "$REVIEW_PAYLOAD_SNAPSHOT" "$MULTI_REVIEW_TEMP_B"
-if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+if ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
     >/dev/null 2>&1 \
   && [ -e "$MULTI_REVIEW_TEMP_A" ] && [ -e "$MULTI_REVIEW_TEMP_B" ] \
   && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 3 ]; then
@@ -287,9 +321,9 @@ else
 fi
 rm -f "$MULTI_REVIEW_TEMP_A" "$MULTI_REVIEW_TEMP_B"
 
-if autopilot_read_team_review_payload "$RUN" "$WRONG_REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+if autopilot_read_team_review_payload "$RUN" "$WRONG_REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
     >/dev/null 2>&1 \
-  || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA_2" "$PROJECT" \
+  || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA_2" github "$PROJECT" \
     >/dev/null 2>&1; then
   check "R6 payload snapshots reject operation/head identity mismatches" FAIL
 else
@@ -302,7 +336,7 @@ if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cp "$REVIEW_PAYLOAD_SNAPSHOT" "$REVIEW_PAYLOAD_BACKUP" \
   && rm -f "$REVIEW_PAYLOAD_SNAPSHOT" \
   && ln -s "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"; then
-  if autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+  if autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
       >/dev/null 2>&1; then
     REVIEW_LINK_GUARDS=false
   else
@@ -310,7 +344,7 @@ if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   fi
   rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
   if ! ln "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT" \
-    || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" \
+    || autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
       >/dev/null 2>&1; then
     REVIEW_LINK_GUARDS=false
   fi
@@ -319,10 +353,177 @@ if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
 fi
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$REVIEW_LINK_GUARDS" = true ] \
-  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ]; then
+  && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ]; then
   check "R7 payload snapshot reads fail closed on symlink and hardlink substitution" PASS
 else
   check "R7 payload snapshot reads fail closed on symlink and hardlink substitution" FAIL
+fi
+
+receipt_rejected_byte_stably() {
+  local event_id="$1" marker="$2" provider="${3:-github}" before backup accepted=false
+  backup="$ROOT/${event_id}-run-backup.json"
+  cp "$RUN_FILE" "$backup" || return 1
+  before="$(file_digest "$RUN_FILE")"
+  if apply "$event_id" TEAM_REVIEW_PUBLISHED \
+      "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$marker\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"$provider\"}" \
+      >/dev/null 2>&1; then
+    accepted=true
+  fi
+  local unchanged=false
+  [ "$(file_digest "$RUN_FILE")" = "$before" ] && unchanged=true
+  cp "$backup" "$RUN_FILE"
+  [ "$accepted" = false ] && [ "$unchanged" = true ]
+}
+
+UNRELATED_PAYLOAD_DIGEST="$(printf '%064d' 0)"
+[ "$UNRELATED_PAYLOAD_DIGEST" != "$REVIEW_PAYLOAD_DIGEST" ] || UNRELATED_PAYLOAD_DIGEST="$(printf '%064d' 1)"
+UNRELATED_PAYLOAD_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA" "$UNRELATED_PAYLOAD_DIGEST" 1)"
+if receipt_rejected_byte_stably evt_review_unrelated_payload "$UNRELATED_PAYLOAD_MARKER"; then
+  check "R7a publication rejects a receipt digest unrelated to the durable payload" PASS
+else
+  check "R7a publication digest is not bound to the durable payload" FAIL
+fi
+
+# The same immutable payload has one GitHub review object but two GitLab
+# publication parts (summary plus one inline discussion). A caller cannot
+# relabel the valid 1/1 GitHub marker as a GitLab receipt and skip that part.
+if receipt_rejected_byte_stably evt_review_wrong_provider_count "$REVIEW_MARKER" gitlab; then
+  check "R7aa publication provider must match the durable review request" PASS
+else
+  check "R7aa publication can relabel a GitHub request as GitLab" FAIL
+fi
+
+# Build a complete requested-state clone, including its private durable
+# payload, so provider tests cannot pass merely because attestation later finds
+# a missing snapshot.
+prepare_provider_project() {
+  local target="$1" provider="$2" state_dir="$1/.zensu/state" run_file source physical
+  run_file="$state_dir/autopilot-run-${RUN}.json"
+  mkdir -p "$state_dir" || return 1
+  cp "$ACTIVE_FILE" "$state_dir/autopilot-active.json" || return 1
+  cp "$RUN_FILE" "$run_file" || return 1
+  physical="$(cd "$target" && pwd -P)" || return 1
+  PROJECT_PHYSICAL="$physical" REQUEST_PROVIDER="$provider" node -e '
+  const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
+  const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
+    value&&typeof value==="object"?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`:
+    JSON.stringify(value);
+  state.projectRoot=process.env.PROJECT_PHYSICAL;
+  state.effects.teamReview.provider=process.env.REQUEST_PROVIDER;
+  const event=state.events.find(item=>item.eventType==="TEAM_REVIEW_REQUESTED");
+  event.payload.provider=process.env.REQUEST_PROVIDER;
+  event.payloadDigest=crypto.createHash("sha256").update(canonical(event.payload)).digest("hex");
+  fs.writeFileSync(file,JSON.stringify(state,null,2)+"\n");
+' "$run_file" || return 1
+  source="$target/provider-review-source.json"
+  cp "$REVIEW_PAYLOAD_SNAPSHOT" "$source" || return 1
+  chmod 600 "$source" || return 1
+  autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
+    "$source" "$provider" "$target" >/dev/null
+}
+
+# A genuinely GitLab-bound request with one inline finding has a valid two-part
+# receipt. This control proves the cloned state and snapshot are complete.
+GITLAB_CONTROL_PROJECT="$ROOT/gitlab-provider-control"
+GITLAB_MARKER="$(review_marker "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 2)"
+GITLAB_CONTROL_OK=false
+if prepare_provider_project "$GITLAB_CONTROL_PROJECT" gitlab \
+  && autopilot_apply_event "$RUN" evt_review_gitlab_valid TEAM_REVIEW_PUBLISHED \
+    "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$GITLAB_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"gitlab\"}" \
+    "$GITLAB_CONTROL_PROJECT" >/dev/null 2>&1 \
+  && autopilot_read_run "$RUN" "$GITLAB_CONTROL_PROJECT" > "$ROOT/gitlab-provider-control.json" 2>/dev/null \
+  && json_ok "$ROOT/gitlab-provider-control.json" \
+    'value.stage === "FIX_FINDINGS" && value.effects.teamReview.provider === "gitlab" && value.evidence.review.provider === "gitlab" && value.evidence.review.partCount === 2'; then
+  GITLAB_CONTROL_OK=true
+fi
+if [ "$GITLAB_CONTROL_OK" = true ]; then
+  check "R7ab exact provider binding accepts a complete two-part GitLab receipt" PASS
+else
+  check "R7ab exact provider binding rejects its valid GitLab control" FAIL
+fi
+
+# The byte-identical requested state and payload cannot be relabeled as a
+# one-part GitHub publication.
+GITLAB_SPOOF_PROJECT="$ROOT/gitlab-provider-spoof"
+GITLAB_SPOOF_FILE="$GITLAB_SPOOF_PROJECT/.zensu/state/autopilot-run-${RUN}.json"
+GITLAB_SPOOF_READY=false
+if prepare_provider_project "$GITLAB_SPOOF_PROJECT" gitlab \
+  && autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
+    gitlab "$GITLAB_SPOOF_PROJECT" >/dev/null 2>&1 \
+  && ! autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
+    github "$GITLAB_SPOOF_PROJECT" >/dev/null 2>&1; then
+  GITLAB_SPOOF_READY=true
+fi
+GITLAB_BEFORE="$(file_digest "$GITLAB_SPOOF_FILE" 2>/dev/null || true)"
+if [ "$GITLAB_SPOOF_READY" = true ] \
+  && ! autopilot_apply_event "$RUN" evt_review_gitlab_as_github TEAM_REVIEW_PUBLISHED \
+    "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" \
+    "$GITLAB_SPOOF_PROJECT" >/dev/null 2>&1 \
+  && [ "$(file_digest "$GITLAB_SPOOF_FILE")" = "$GITLAB_BEFORE" ]; then
+  check "R7ac GitLab request cannot be relabeled as a one-part GitHub receipt" PASS
+else
+  check "R7ac caller-selected GitHub count bypasses a complete GitLab request" FAIL
+fi
+
+# Deployed v1 completed receipts remain readable below, but an in-flight v1
+# request never had a trusted provider. It must fail closed instead of learning
+# the forge from a new publication event.
+LEGACY_REQUEST_PROJECT="$ROOT/legacy-requested-providerless"
+LEGACY_REQUEST_FILE="$LEGACY_REQUEST_PROJECT/.zensu/state/autopilot-run-${RUN}.json"
+LEGACY_REQUEST_READY=false
+if prepare_provider_project "$LEGACY_REQUEST_PROJECT" github; then
+  node -e '
+    const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
+    const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
+      value&&typeof value==="object"?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`:
+      JSON.stringify(value);
+    delete state.effects.teamReview.provider;
+    const event=state.events.find(item=>item.eventType==="TEAM_REVIEW_REQUESTED");
+    delete event.payload.provider;
+    event.payloadDigest=crypto.createHash("sha256").update(canonical(event.payload)).digest("hex");
+    fs.writeFileSync(file,JSON.stringify(state,null,2)+"\n");
+  ' "$LEGACY_REQUEST_FILE" && LEGACY_REQUEST_READY=true
+fi
+LEGACY_REQUEST_BEFORE="$(file_digest "$LEGACY_REQUEST_FILE" 2>/dev/null || true)"
+if [ "$LEGACY_REQUEST_READY" = true ] \
+  && ! autopilot_apply_event "$RUN" evt_legacy_request_provider_choice TEAM_REVIEW_PUBLISHED \
+    "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" \
+    "$LEGACY_REQUEST_PROJECT" >/dev/null 2>&1 \
+  && [ "$(file_digest "$LEGACY_REQUEST_FILE")" = "$LEGACY_REQUEST_BEFORE" ]; then
+  check "R7ad providerless in-flight v1 request fails closed without learning a forge" PASS
+else
+  check "R7ad providerless in-flight v1 request adopted the publication provider" FAIL
+fi
+
+RECEIPT_GUARDS=true
+RECEIPT_BACKUP="$ROOT/receipt-payload-backup.json"
+mv "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
+receipt_rejected_byte_stably evt_review_missing_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+
+mv "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
+ln -s "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+receipt_rejected_byte_stably evt_review_symlink_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+
+cp "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
+rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+ln "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+receipt_rejected_byte_stably evt_review_hardlink_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+
+mv "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
+printf '%s\n' "{\"commit_id\":\"$HEAD_SHA_2\",\"event\":\"COMMENT\",\"body\":\"stale\",\"comments\":[]}" > "$REVIEW_PAYLOAD_SNAPSHOT"
+chmod 600 "$REVIEW_PAYLOAD_SNAPSHOT"
+receipt_rejected_byte_stably evt_review_stale_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
+mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
+if [ "$RECEIPT_GUARDS" = true ]; then
+  check "R7b publication rejects missing, linked, and stale-head payload snapshots byte-stably" PASS
+else
+  check "R7b unsafe or stale receipt payload snapshots reached durable state" FAIL
 fi
 
 BEFORE_REVIEW_PUBLISH="$(file_digest "$RUN_FILE")"
@@ -332,17 +533,17 @@ BAD_PART_MARKER="${REVIEW_MARKER%part=1/1 -->}part=2/2 -->"
 BAD_COUNT_MARKER="${REVIEW_MARKER%:1:part=1/1 -->}:2:part=1/3 -->"
 REVIEW_REJECTIONS=true
 if apply "evt_review_bad_operation" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$WRONG_REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$WRONG_REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if apply "evt_review_legacy_marker" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"zensu-autopilot-review:legacy\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"zensu-autopilot-review:legacy\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if apply "evt_review_wrong_op_digest" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_OP_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if apply "evt_review_wrong_marker_head" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_HEAD_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$WRONG_HEAD_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if apply "evt_review_nonfirst_part" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_PART_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_PART_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if apply "evt_review_part_count_mismatch" TEAM_REVIEW_PUBLISHED \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_COUNT_MARKER\",\"headSha\":\"$HEAD_SHA\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$BAD_COUNT_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" >/dev/null 2>&1; then REVIEW_REJECTIONS=false; fi
 if [ "$REVIEW_REJECTIONS" = true ] \
   && [ "$(file_digest "$RUN_FILE")" = "$BEFORE_REVIEW_PUBLISH" ]; then
   check "R8 publication requires one exact v1 part-1 marker bound to operation and head, byte-stably" PASS
@@ -350,12 +551,68 @@ else
   check "R8 strict structured team-review marker validation" FAIL
 fi
 apply "evt_review_publish_001" "TEAM_REVIEW_PUBLISHED" \
-  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}" || true
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" || true
+
+# Compatibility fixture for the schemaVersion 1 state emitted by PR #174:
+# its publication event had no provider and evidence.review had only three
+# fields. The reader must normalize it from the marker, and the next ordinary
+# mutation must persist the normalized shape without rewriting history.
+LEGACY_PROJECT="$ROOT/legacy-v1-project"
+LEGACY_STATE_DIR="$LEGACY_PROJECT/.zensu/state"
+LEGACY_RUN_FILE="$LEGACY_STATE_DIR/autopilot-run-${RUN}.json"
+mkdir -p "$LEGACY_STATE_DIR"
+cp "$ACTIVE_FILE" "$LEGACY_STATE_DIR/autopilot-active.json"
+cp "$RUN_FILE" "$LEGACY_RUN_FILE"
+LEGACY_PROJECT_PHYSICAL="$(cd "$LEGACY_PROJECT" && pwd -P)"
+LEGACY_PROJECT_PHYSICAL="$LEGACY_PROJECT_PHYSICAL" node -e '
+  const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
+  const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
+    value&&typeof value==="object"?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`:
+    JSON.stringify(value);
+  state.projectRoot=process.env.LEGACY_PROJECT_PHYSICAL;
+  const review=state.evidence.review;
+  state.evidence.review={published:review.published,marker:review.marker,headSha:review.headSha};
+  delete state.effects.teamReview.provider;
+  const request=state.events.find(item=>item.eventType==="TEAM_REVIEW_REQUESTED");
+  delete request.payload.provider;
+  request.payloadDigest=crypto.createHash("sha256").update(canonical(request.payload)).digest("hex");
+  const event=state.events.find(item=>item.eventType==="TEAM_REVIEW_PUBLISHED");
+  delete event.payload.provider;
+  event.payloadDigest=crypto.createHash("sha256").update(canonical(event.payload)).digest("hex");
+  fs.writeFileSync(file,JSON.stringify(state,null,2)+"\n");
+' "$LEGACY_RUN_FILE"
+LEGACY_READ="$ROOT/legacy-v1-read.json"
+LEGACY_OK=true
+autopilot_read_run "$RUN" "$LEGACY_PROJECT" > "$LEGACY_READ" 2>/dev/null || LEGACY_OK=false
+LEGACY_BEFORE_REPLAY="$(file_digest "$LEGACY_RUN_FILE")"
+autopilot_apply_event "$RUN" evt_review_publish_001 TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}" \
+  "$LEGACY_PROJECT" >/dev/null 2>&1 || LEGACY_OK=false
+[ "$(file_digest "$LEGACY_RUN_FILE")" = "$LEGACY_BEFORE_REPLAY" ] || LEGACY_OK=false
+autopilot_apply_event "$RUN" legacy-review-normalized BYPASS_RECORDED \
+  '{"gate":"legacy-review-migration"}' "$LEGACY_PROJECT" >/dev/null 2>&1 || LEGACY_OK=false
+if [ "$LEGACY_OK" = true ] \
+  && json_ok "$LEGACY_READ" 'value.evidence.review.provider === null && value.evidence.review.payloadDigest === value.evidence.review.marker.split(":")[3] && value.evidence.review.partCount === 1' \
+  && json_ok "$LEGACY_RUN_FILE" 'value.schemaVersion === 1 && value.evidence.review.provider === null && value.evidence.review.payloadDigest === value.evidence.review.marker.split(":")[3] && value.evidence.review.partCount === 1 && value.events.some(event => event.eventId === "legacy-review-normalized")'; then
+  check "R8a legacy schemaVersion 1 review receipt replays, normalizes, and persists safely" PASS
+else
+  check "R8a legacy review evidence becomes corrupt under the current reader" FAIL
+fi
+AFTER_REVIEW_PUBLISH="$(file_digest "$RUN_FILE")"
+mv "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
+if apply "evt_review_publish_001" "TEAM_REVIEW_PUBLISHED" \
+    "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" \
+    && [ "$(file_digest "$RUN_FILE")" = "$AFTER_REVIEW_PUBLISH" ]; then
+  check "R9 exact publication replay stays byte-stable after the snapshot is unavailable" PASS
+else
+  check "R9 duplicate publication replay incorrectly re-attests an advanced stage" FAIL
+fi
+mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
 apply "evt_findings_clear_001" "FINDINGS_CLEARED" "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":0}" || true
 apply "evt_validate_001" "VALIDATION_PASSED" "{\"headSha\":\"$HEAD_SHA\"}" || true
 
 if autopilot_read_active "$PROJECT" > "$ROOT/review-status.json" \
-  && json_ok "$ROOT/review-status.json" 'value.runId === "run_primary_001" && value.ownerSessionId === "session_owner_001" && value.stage === "DELIVER" && value.nextActionCode === "DELIVER_PR" && value.tdd.attempt === 1 && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "completed" && value.effects.teamReview.status === "completed" && value.effects.teamReview.operationKey.startsWith("team-review:v1:") && value.evidence.pr.headSha === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" && value.evidence.review.marker.startsWith("<!-- zensu-review:v1:") && value.evidence.review.headSha === value.evidence.pr.headSha && value.evidence.gates.passed === true && value.evidence.validation.passed === true'; then
+  && json_ok "$ROOT/review-status.json" 'value.runId === "run_primary_001" && value.ownerSessionId === "session_owner_001" && value.stage === "DELIVER" && value.nextActionCode === "DELIVER_PR" && value.tdd.attempt === 1 && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "completed" && value.effects.teamReview.status === "completed" && value.effects.teamReview.operationKey.startsWith("team-review:v1:") && value.evidence.pr.headSha === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" && value.evidence.review.marker.startsWith("<!-- zensu-review:v1:") && value.evidence.review.headSha === value.evidence.pr.headSha && value.evidence.review.payloadDigest === value.evidence.review.marker.split(":")[3] && value.evidence.review.partCount === 1 && value.evidence.review.provider === "github" && value.evidence.gates.passed === true && value.evidence.validation.passed === true'; then
   check "T6 happy path reaches DELIVER with durable evidence" PASS
 else
   check "T6 happy path reaches DELIVER with durable evidence" FAIL
@@ -410,9 +667,15 @@ loop_event loop-converge-pass CONVERGENCE_PASSED '{}'
 loop_event loop-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:return-stages"}'
 loop_event loop-pr-open PR_OPENED "{\"operationKey\":\"pr:return-stages\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$HEAD_SHA\"}}"
 LOOP_REVIEW_KEY="$(review_operation_key "$LOOP_RUN" "$HEAD_SHA")"
-LOOP_REVIEW_MARKER="$(review_marker "$LOOP_REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_DIGEST" 2)"
-loop_event loop-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$LOOP_REVIEW_KEY\"}"
-loop_event loop-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$LOOP_REVIEW_KEY\",\"marker\":\"$LOOP_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\"}"
+loop_event loop-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$LOOP_REVIEW_KEY\",\"provider\":\"github\"}"
+LOOP_REVIEW_PAYLOAD="$ROOT/loop-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Loop review\",\"commit_id\":\"$HEAD_SHA\",\"comments\":[]}" > "$LOOP_REVIEW_PAYLOAD"
+autopilot_store_team_review_payload "$LOOP_RUN" "$LOOP_REVIEW_KEY" "$HEAD_SHA" \
+  "$LOOP_REVIEW_PAYLOAD" github "$PROJECT" >/dev/null || LOOP_OK=false
+LOOP_REVIEW_META="$(_zensu_vcs_review_payload_meta github "$LOOP_REVIEW_PAYLOAD" "$HEAD_SHA" "$LOOP_REVIEW_KEY" 2>/dev/null || true)"
+LOOP_REVIEW_DIGEST="$(printf '%s' "$LOOP_REVIEW_META" | json_field_stdin payloadDigest 2>/dev/null || true)"
+LOOP_REVIEW_MARKER="$(review_marker "$LOOP_REVIEW_KEY" "$HEAD_SHA" "$LOOP_REVIEW_DIGEST" 1)"
+loop_event loop-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$LOOP_REVIEW_KEY\",\"marker\":\"$LOOP_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}"
 loop_event loop-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":2}"
 json_ok "$LOOP_FILE" 'value.stage === "AWAIT_TDD" && value.tdd.returnStage === "FIX_FINDINGS"' || LOOP_OK=false
 loop_tdd 4

@@ -66,11 +66,12 @@ Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"`, read fresh state w
   `evidence.pr.headSha` equals the envelope head.
 - `effects.prOpen.status == "completed"` proves that the durable PR capability finished.
 - `effects.teamReview.status == "requested"` and `effects.teamReview.operationKey` equals
-  the envelope operation key.
+  the envelope operation key; `effects.teamReview.provider` is exactly `github|gitlab`.
 
 Set `BOUND_HEAD` to the validated, lowercased `evidence.pr.headSha`; it is immutable for this
 delegation. Every later checkout, remote guard, marker, and receipt comparison uses this
 capability-bound value.
+Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`; it is equally immutable.
 
 Validate that the operation key itself equals
 `team-review:v1:<sha256(canonical({headSha,runId}))>` using the bound lowercased head and
@@ -88,7 +89,7 @@ Any delegated repository, provider, authentication, authorization, payload-snaps
 product-decision failure must persist `BLOCK` with a stable generation-specific event id,
 report the blocker, and stop without a question. Use the closed codes
 `review-repo-unavailable`, `review-provider-unknown`, `review-auth-unavailable`,
-`review-payload-unsafe`, and `review-decision-required`; never turn one of these failures
+`review-provider-mismatch`, `review-payload-unsafe`, and `review-decision-required`; never turn one of these failures
 into an interactive fallback. Standalone mode retains the explicitly labeled prompts below.
 
 ## Step 0 — Resolve the VCS driver
@@ -147,6 +148,14 @@ CLIREADY="$(printf '%s\n' "$DETECT" | sed -n 's/^cliReady=//p')"
 #     (install `glab` first if missing, e.g. `brew install glab`). Do NOT fall back.
 #   - PROVIDER=unknown → in standalone mode ask the user which forge / remote to target;
 #     in delegated mode persist BLOCK with code review-provider-unknown and report it.
+#   - In delegated mode, require `PROVIDER == BOUND_PROVIDER` immediately after detection,
+#     before scout, worktree creation, payload access, or any remote write. A mismatch persists
+#     BLOCK with code `review-provider-mismatch` and stops without a question. Never learn or
+#     replace the durable provider from current remote configuration.
+if [ "$DELEGATED" = true ] && [ "$PROVIDER" != "$BOUND_PROVIDER" ]; then
+  # Persist BLOCK(review-provider-mismatch) with a stable generation-specific event id.
+  exit 1
+fi
 
 # 4. PR/MR metadata via the driver (normalized {id,url,state,title,body,base,head,author,labels}).
 #    gh/glab read the repo from CWD, so run it from $REPO.
@@ -184,7 +193,7 @@ fi
 git -C "$REPO" worktree add --force --detach "$WORKTREE" "$SHA"
 
 # 8. Persist env for downstream phases (inside the per-run dir)
-printf 'REPO=%s\nWORKDIR=%s\nWORKTREE=%s\nSHA=%s\nBOUND_HEAD=%s\nPROVIDER=%s\nREPOID=%s\n' "$REPO" "$WORKDIR" "$WORKTREE" "$SHA" "$BOUND_HEAD" "$PROVIDER" "$REPOID" > "$WORKDIR/.env"
+printf 'REPO=%s\nWORKDIR=%s\nWORKTREE=%s\nSHA=%s\nBOUND_HEAD=%s\nBOUND_PROVIDER=%s\nPROVIDER=%s\nREPOID=%s\n' "$REPO" "$WORKDIR" "$WORKTREE" "$SHA" "$BOUND_HEAD" "$BOUND_PROVIDER" "$PROVIDER" "$REPOID" > "$WORKDIR/.env"
 
 # 9. Before spawning any delegated reviewer, load an existing immutable payload snapshot.
 #    rc=1 means this operation has no snapshot yet. Every other non-zero result is an unsafe
@@ -195,7 +204,7 @@ if [ "$DELEGATED" = true ]; then
   # shellcheck source=hooks/lib/zensu-autopilot-state.sh
   source "$STATE_LIB"
   if REVIEW_PAYLOAD="$(autopilot_read_team_review_payload \
-      "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$REPO")"; then
+      "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$BOUND_PROVIDER" "$REPO")"; then
     REUSE_DURABLE_PAYLOAD=true
   else
     SNAPSHOT_RC=$?
@@ -373,7 +382,7 @@ the temporary synthesis path in delegated mode.
 REVIEW_PAYLOAD="$WORKDIR/_synthesis.json"
 if [ "$DELEGATED" = true ] && [ "$REUSE_DURABLE_PAYLOAD" != true ]; then
   REVIEW_PAYLOAD="$(autopilot_store_team_review_payload \
-    "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$REVIEW_PAYLOAD" "$REPO")" || {
+    "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$REVIEW_PAYLOAD" "$BOUND_PROVIDER" "$REPO")" || {
       # Persist BLOCK(review-payload-unsafe), report it, and stop without asking.
       exit 1
     }
@@ -412,7 +421,8 @@ Every attempt rechecks `OPEN` plus the immutable bound head; no review part is w
 complete lowercase base/start/head refs are available. Exhaustion blocks the run cleanly.
 
 The delegated result must be one JSON object with exactly
-`{status,marker,headSha,partCount,postedCount,url}`. Accept only status
+`{status,marker,headSha,partCount,postedCount,url,provider}`. Require `provider == PROVIDER`
+(`github` or `gitlab`) and accept only status
 `present|posted|reconciled`; require `headSha == BOUND_HEAD`, `partCount >= 1`, and
 `0 <= postedCount <= partCount`. `present` requires `postedCount == 0`; `posted` requires `postedCount == partCount`; and `reconciled` requires `0 < postedCount < partCount`.
 GitHub requires `partCount == 1` and rejects `reconciled`. GitLab requires `partCount == 1 + comments.length`, using the exact `REVIEW_PAYLOAD` comments array (the
@@ -421,7 +431,7 @@ Validate the marker as
 `<!-- zensu-review:v1:<sha256(operationKey)>:<64-hex-payload-digest>:<headSha>:<N>:part=1/<N> -->`,
 where both head values equal the durable bound head and both `N` values equal
 `partCount`. Reject missing/extra fields, malformed markers, conflicting identities,
-impossible counts, or an empty `url`. Return this exact object to Autopilot; it is the only
+impossible counts, a mismatched provider, or an empty `url`. Return this exact object to Autopilot; it is the only
 receipt allowed to drive `TEAM_REVIEW_PUBLISHED`.
 
 A non-zero reconcile call, malformed output, or rejected receipt blocks the delegated run.
