@@ -12,6 +12,16 @@ check() {
 eq() { local l="$1" g="$2" w="$3"; [ "$g" = "$w" ] && check "$l" PASS || check "$l (got '$g' want '$w')" FAIL; }
 has() { local l="$1" g="$2" n="$3"; case "$g" in *"$n"*) check "$l" PASS ;; *) check "$l (missing '$n')" FAIL ;; esac; }
 jfield() { FIELD="$1" node -e 'var s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{var j=JSON.parse(s);var v=j[process.env.FIELD];process.stdout.write(v==null?"":(typeof v==="object"?JSON.stringify(v):String(v)));}catch(_){process.exit(1);}});'; }
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-reconcile.XXXXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
@@ -151,11 +161,16 @@ else
   check "M15b GitHub range anchors are strict and never silently degraded on GitLab" FAIL
 fi
 SNAPSHOT_TARGET="$(mktemp "$WORK/snapshot.XXXXXXXX")"
-ln -s "$WORK/a.json" "$WORK/payload-link.json"
-if _zensu_vcs_snapshot_review_payload "$WORK/payload-link.json" "$SNAPSHOT_TARGET" >/dev/null 2>&1; then
-  check "M16 payload snapshot rejects symlink sources" FAIL
+if make_file_symlink "$WORK/a.json" "$WORK/payload-link.json"; then
+  if _zensu_vcs_snapshot_review_payload "$WORK/payload-link.json" "$SNAPSHOT_TARGET" >/dev/null 2>&1; then
+    check "M16 payload snapshot rejects symlink sources" FAIL
+  else
+    check "M16 payload snapshot rejects symlink sources" PASS
+  fi
+elif [ "$IS_WINDOWS" = true ]; then
+  check "M16 payload snapshot rejects symlink sources (native file symlinks unavailable)" PASS
 else
-  check "M16 payload snapshot rejects symlink sources" PASS
+  check "M16 payload snapshot rejects symlink sources (fixture creation failed)" FAIL
 fi
 cp "$WORK/a.json" "$WORK/payload-hard.json"; ln "$WORK/payload-hard.json" "$WORK/payload-hard-alias.json"
 if _zensu_vcs_snapshot_review_payload "$WORK/payload-hard.json" "$SNAPSHOT_TARGET" >/dev/null 2>&1; then

@@ -72,7 +72,12 @@ if [ ! -r "$AUTOPILOT_STATE_LIB" ] && [ "$AUTOPILOT_STATE_HINT" = true ]; then
 fi
 
 emit_autopilot_context() {
-  RUN_ID="$1" SESSION_ID="$2" LOG_HELPER_Q="$3" ATTEMPT="$4" RETURN_STAGE="$5" node -e '
+  local msys_env_exclusions="LOG_HELPER_Q"
+  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
+    msys_env_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_env_exclusions}"
+  fi
+  MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" RUN_ID="$1" SESSION_ID="$2" \
+    LOG_HELPER_Q="$3" ATTEMPT="$4" RETURN_STAGE="$5" node -e '
     const run=process.env.RUN_ID;
     const sid=process.env.SESSION_ID;
     const log=process.env.LOG_HELPER_Q;

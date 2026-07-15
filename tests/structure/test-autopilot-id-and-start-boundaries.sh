@@ -17,7 +17,7 @@ trap 'rm -rf "$ROOT"' EXIT
 # shellcheck disable=SC1090
 source "$STATE_LIB"
 
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 field_ok() {
   FILE="$1" EXPR="$2" node -e '
     const value=require(process.env.FILE);

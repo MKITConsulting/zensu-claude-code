@@ -37,7 +37,7 @@ source "$PHASE"
 
 state_file() { tdd_state_file "$1"; }
 counter_file() { printf '%s/rounds-%s.json\n' "$STATE" "$1"; }
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 
 begin_bound() {

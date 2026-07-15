@@ -78,7 +78,7 @@ json_field() {
 }
 
 digest() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
 apply_event() {

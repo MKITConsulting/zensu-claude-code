@@ -219,10 +219,19 @@ const writeOutput = (file, value) => {
   if (!stat) fail(5, "output file was not pre-created securely");
   const body = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(body) > MAX_BYTES) fail(2, "state exceeds 1 MiB");
+  let fd;
   try {
     fs.writeFileSync(file, body, { encoding: "utf8", mode: 0o600 });
-    fs.fsyncSync(fs.openSync(file, "r"));
-  } catch (_) { fail(5, "failed to write state output"); }
+    fd = fs.openSync(file, "r+");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+  } catch (_) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+    fail(5, "failed to write state output");
+  }
 };
 
 const payloadValid = (type, payload) => {
@@ -1319,17 +1328,18 @@ _autopilot_team_review_payload_inspect() {
       }
       fail(2);
     };
+    const privateMode = stat => process.platform === "win32" || (stat.mode & 0o777) === 0o600;
     let fd;
     try {
       const before = fs.lstatSync(file);
       if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
           || before.size < 1 || before.size > max
-          || (requirePrivate && (before.mode & 0o777) !== 0o600)) fail(2);
+          || (requirePrivate && !privateMode(before))) fail(2);
       fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
       const opened = fs.fstatSync(fd);
       if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
           || opened.ino !== before.ino || opened.size !== before.size
-          || (requirePrivate && (opened.mode & 0o777) !== 0o600)) fail(2);
+          || (requirePrivate && !privateMode(opened))) fail(2);
       const data = fs.readFileSync(fd);
       const after = fs.fstatSync(fd);
       fs.closeSync(fd); fd = undefined;
@@ -1371,8 +1381,8 @@ _autopilot_recover_team_review_payload_alias() {
     const expectedTarget = /^autopilot-team-review-payload-[a-f0-9]{64}-[a-f0-9]{7,64}\.json$/;
     const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const expectedTemp = new RegExp(`^${escape(basename)}\\.tmp\\.[A-Za-z0-9]{8}$`);
-    const privateRegular = stat => stat.isFile() && !stat.isSymbolicLink()
-      && (stat.mode & 0o777) === 0o600;
+    const privateMode = stat => process.platform === "win32" || (stat.mode & 0o777) === 0o600;
+    const privateRegular = stat => stat.isFile() && !stat.isSymbolicLink() && privateMode(stat);
     let targetFd, tempFd, directoryFd;
     const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
     const fail = code => {
@@ -1439,11 +1449,16 @@ _autopilot_recover_team_review_payload_alias() {
       close(targetFd); targetFd = undefined;
       close(tempFd); tempFd = undefined;
 
-      directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);
-      try { fs.fsyncSync(directoryFd); } catch (error) {
-        if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+      // Windows does not support opening directories through fs.openSync.
+      // The file/link publication is already durable there; directory fsync
+      // is a POSIX-only strengthening step.
+      if (process.platform !== "win32") {
+        directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);
+        try { fs.fsyncSync(directoryFd); } catch (error) {
+          if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+        }
+        close(directoryFd); directoryFd = undefined;
       }
-      close(directoryFd); directoryFd = undefined;
     } catch (_) { fail(2); }
   ' 2>/dev/null
 }
@@ -1543,14 +1558,16 @@ _autopilot_store_team_review_payload_critical() {
         // overwritten; the shell revalidates any concurrently published file.
         fs.linkSync(temp, target);
         fs.unlinkSync(temp);
-        try {
-          const directoryFd = fs.openSync(require("path").dirname(target), fs.constants.O_RDONLY);
-          try { fs.fsyncSync(directoryFd); } catch (error) {
+        if (process.platform !== "win32") {
+          try {
+            const directoryFd = fs.openSync(require("path").dirname(target), fs.constants.O_RDONLY);
+            try { fs.fsyncSync(directoryFd); } catch (error) {
+              if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+            }
+            fs.closeSync(directoryFd);
+          } catch (error) {
             if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
           }
-          fs.closeSync(directoryFd);
-        } catch (error) {
-          if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
         }
       } catch (error) {
         close(sourceFd); close(tempFd);

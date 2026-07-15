@@ -737,6 +737,7 @@ _zensu_vcs_snapshot_review_payload() {
   SOURCE_FILE="$source_file" SNAPSHOT_FILE="$snapshot_file" node -e '
     const fs=require("fs"),crypto=require("crypto"),max=8*1024*1024;
     const source=process.env.SOURCE_FILE,snapshot=process.env.SNAPSHOT_FILE;
+    const privateMode=stat=>process.platform==="win32"||(stat.mode&0o777)===0o600;
     let before,sourceFd,opened,after,data,target,targetFd,targetOpened;
     try{
       before=fs.lstatSync(source);
@@ -757,7 +758,7 @@ _zensu_vcs_snapshot_review_payload() {
       if(targetAfter.dev!==targetOpened.dev||targetAfter.ino!==targetOpened.ino||targetAfter.nlink!==1
           ||targetAfter.size!==data.length||targetFinal.dev!==targetOpened.dev||targetFinal.ino!==targetOpened.ino
           ||!targetFinal.isFile()||targetFinal.isSymbolicLink()||targetFinal.nlink!==1
-          ||(targetFinal.mode&0o777)!==0o600||targetFinal.size!==data.length)process.exit(1);
+          ||!privateMode(targetFinal)||targetFinal.size!==data.length)process.exit(1);
       process.stdout.write(crypto.createHash("sha256").update(data).digest("hex"));
     }catch(_){if(sourceFd!==undefined){try{fs.closeSync(sourceFd);}catch(__){}}if(targetFd!==undefined){try{fs.closeSync(targetFd);}catch(__){}}process.exit(1);}
   ' 2>/dev/null
@@ -854,6 +855,7 @@ _zensu_vcs_review_inventory() {
     EXPECTED_MANIFEST_DIGEST="$expected_manifest_digest" node -e '
     var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
       function fail(){process.exit(1);}
+      function privateMode(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;}
       var op=process.env.OP_DIGEST||"",pd=process.env.PAYLOAD_DIGEST||"",head=String(process.env.HEAD_SHA||"").toLowerCase();
       var n=Number(process.env.PART_COUNT||"");
       if(!/^[0-9a-f]{64}$/.test(op)||!/^[0-9a-f]{64}$/.test(pd)||!/^[0-9a-f]{7,64}$/.test(head)||!Number.isSafeInteger(n)||n<1||n>999999)fail();
@@ -878,10 +880,10 @@ _zensu_vcs_review_inventory() {
         var manifest,fd,data;try{
           var fs=require("fs"),crypto=require("crypto"),before=fs.lstatSync(manifestPath);
           if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
-              ||(before.mode&0o777)!==0o600||before.size<1||before.size>16*1024*1024)fail();
+              ||!privateMode(before)||before.size<1||before.size>16*1024*1024)fail();
           fd=fs.openSync(manifestPath,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
           var opened=fs.fstatSync(fd);
-          if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+          if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
               ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
           data=fs.readFileSync(fd);var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
           var final=fs.lstatSync(manifestPath);
@@ -1237,14 +1239,15 @@ _zensu_vcs_review_gitlab_diff_plan() {
       var body=JSON.stringify({base_sha:base,start_sha:start,head_sha:dr.head_sha,comments:plan});
       var target=process.env.PLAN_TARGET||"";
       if(!target){process.stdout.write(body);return;}
+      var privateMode=function(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;};
       try{
-        var before=fs.lstatSync(target);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||(before.mode&0o777)!==0o600)fail();
+        var before=fs.lstatSync(target);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||!privateMode(before))fail();
         fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));var opened=fs.fstatSync(fd);
-        if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600||opened.dev!==before.dev||opened.ino!==before.ino)fail();
+        if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)||opened.dev!==before.dev||opened.ino!==before.ino)fail();
         fs.ftruncateSync(fd,0);fs.writeFileSync(fd,body);fs.fsyncSync(fd);var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
         var final=fs.lstatSync(target);if(after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
             ||after.size!==Buffer.byteLength(body)||final.dev!==opened.dev||final.ino!==opened.ino
-            ||!final.isFile()||final.isSymbolicLink()||final.nlink!==1||(final.mode&0o777)!==0o600||final.size!==after.size)fail();
+            ||!final.isFile()||final.isSymbolicLink()||final.nlink!==1||!privateMode(final)||final.size!==after.size)fail();
         process.stdout.write(crypto.createHash("sha256").update(body).digest("hex"));
       }catch(_){fail();}
     });'
@@ -1262,6 +1265,7 @@ _zensu_vcs_review_gitlab_manifest() {
     HEAD_SHA="$head" PART_COUNT="$part_count" MANIFEST_TARGET="$target" PLAN_DIGEST="$plan_digest" \
     PAYLOAD_RAW_DIGEST="$payload_raw_digest" node -e '
     var fs=require("fs"),crypto=require("crypto"),p,pl,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+    function privateMode(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;}
     function canonical(v){
       if(v===null||typeof v==="string"||typeof v==="boolean")return JSON.stringify(v);
       if(typeof v==="number")return Number.isFinite(v)?JSON.stringify(v):fail();
@@ -1330,17 +1334,17 @@ _zensu_vcs_review_gitlab_manifest() {
     if(!target){process.stdout.write(body);process.exit(0);}
     try{
       var before=fs.lstatSync(target);
-      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||(before.mode&0o777)!==0o600)fail();
+      if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||!privateMode(before))fail();
       fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));
       var opened=fs.fstatSync(fd);
-      if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+      if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
           ||opened.dev!==before.dev||opened.ino!==before.ino)fail();
       fs.ftruncateSync(fd,0);fs.writeFileSync(fd,body);fs.fsyncSync(fd);
       var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
       var final=fs.lstatSync(target);
       if(after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1||after.size!==Buffer.byteLength(body)
           ||final.dev!==opened.dev||final.ino!==opened.ino||!final.isFile()||final.isSymbolicLink()
-          ||final.nlink!==1||(final.mode&0o777)!==0o600||final.size!==after.size)fail();
+          ||final.nlink!==1||!privateMode(final)||final.size!==after.size)fail();
       process.stdout.write(crypto.createHash("sha256").update(body).digest("hex"));
     }catch(_){fail();}'
 }
@@ -1362,14 +1366,15 @@ _zensu_vcs_review_gitlab_call() {
   [ -f "$manifest" ] || return 1
   MANIFEST="$manifest" MANIFEST_DIGEST="$manifest_digest" PART="$part" REPO_ID="$repoid" REVIEW_ID="$id" node -e '
     var fs=require("fs"),crypto=require("crypto"),manifest,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
+    function privateMode(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;}
     try{
       if(!/^[a-f0-9]{64}$/.test(process.env.MANIFEST_DIGEST||""))fail();
       var before=fs.lstatSync(process.env.MANIFEST);
       if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
-          ||(before.mode&0o777)!==0o600||before.size<1||before.size>16*1024*1024)fail();
+          ||!privateMode(before)||before.size<1||before.size>16*1024*1024)fail();
       fd=fs.openSync(process.env.MANIFEST,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
       var opened=fs.fstatSync(fd);
-      if(!opened.isFile()||opened.nlink!==1||(opened.mode&0o777)!==0o600
+      if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
           ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
       var data=fs.readFileSync(fd),after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
       var final=fs.lstatSync(process.env.MANIFEST);

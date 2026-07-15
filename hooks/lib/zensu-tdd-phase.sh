@@ -31,6 +31,23 @@ tdd_state_file() {
 # nearest existing, non-symlink ancestor becomes the entry point.
 _tdd_paths_safe() {
   [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
+  local path_args=("$@") index=0 target mode
+  while [ "$index" -lt "${#path_args[@]}" ]; do
+    target="${path_args[$index]}"
+    mode="${path_args[$((index + 1))]}"
+    case "$mode" in
+      regular|regular-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -f "$target" ]; then return 1; fi
+        ;;
+      directory|directory-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -d "$target" ]; then return 1; fi
+        ;;
+      *) return 1 ;;
+    esac
+    index=$((index + 2))
+  done
   PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}" TEMP_ROOT="${TMPDIR:-/tmp}" HOME_ROOT="${HOME:-}" node -e '
       const fs = require("fs");
       const path = require("path");
@@ -94,7 +111,7 @@ _tdd_paths_safe() {
         }
         if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
       }
-    ' "$@" >/dev/null 2>&1
+    ' "${path_args[@]}" >/dev/null 2>&1
 }
 
 _tdd_path_safe() {

@@ -29,6 +29,7 @@ invoke() {
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).decision||"allow")}catch(_){console.log("allow")}})'; }
 context() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){process.exit(1)}})'; }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 
 P1="$TMP/planning"; start "$P1" stop_run_01 stop_session_01
 OUT1="$(invoke "$P1" stop_session_01)"
@@ -114,8 +115,8 @@ OUT6B="$(invoke "$P4" stop_session_cancel)"
   || check "S6b terminal-only history is treated as absent" FAIL
 
 P5="$TMP/owner"; start "$P5" stop_run_owner stop_session_owner
-RF5="$(autopilot_run_file stop_run_owner "$P5")"; BEFORE5="$(shasum -a 256 "$RF5" | awk '{print $1}')"
-OUT7="$(invoke "$P5" foreign_session)"; AFTER5="$(shasum -a 256 "$RF5" | awk '{print $1}')"
+RF5="$(autopilot_run_file stop_run_owner "$P5")"; BEFORE5="$(digest "$RF5")"
+OUT7="$(invoke "$P5" foreign_session)"; AFTER5="$(digest "$RF5")"
 if [ "$(printf '%s' "$OUT7" | decision)" = block ] && [ "$BEFORE5" = "$AFTER5" ]; then
   check "S7 foreign session blocks without mutating owner state" PASS
 else check "S7 foreign session blocks without mutation" FAIL; fi
@@ -457,12 +458,12 @@ else check "S9d reconciled terminal permits Stop" FAIL; fi
 # review marker must remain queued; Stop must never overwrite that binding with
 # an unbound seed merely because chainDone already released the hook.
 TF7R="$P7R/.zensu/state/tdd-phase-stop_session_reconcile.json"
-BEFORE9RB="$(shasum -a 256 "$TF7R" | awk '{print $1}')"
+BEFORE9RB="$(digest "$TF7R")"
 CLAUDE_PROJECT_DIR="$P7R" bash "$LOG" --pending-review --files 'src/blocked-pending.ts' \
   --summary 'must remain queued behind blocked outer' >/dev/null
 PENDING9RB="$(CLAUDE_PROJECT_DIR="$P7R" zensu_pending_review_file)"
 OUT9RB="$(invoke "$P7R" stop_session_reconcile)"
-AFTER9RB="$(shasum -a 256 "$TF7R" | awk '{print $1}')"
+AFTER9RB="$(digest "$TF7R")"
 if [ -z "$OUT9RB" ] && [ "$BEFORE9RB" = "$AFTER9RB" ] && [ -f "$PENDING9RB" ] \
   && field_ok "$TF7R" 'j.autopilotRunId==="stop_run_reconcile"&&j.autopilotAttempt===1&&j.chainId==="chain-reconcile-001"'; then
   check "S9e BLOCKED outer preserves binding and queued deferred review" PASS
@@ -481,9 +482,9 @@ autopilot_apply_event "$R7W" block-after-standalone BLOCK \
   '{"code":"MANUAL_BLOCK"}' "$P7W" >/dev/null
 TF7W="$P7W/.zensu/state/tdd-phase-${S7W}.json"
 RF7W="$(autopilot_run_file "$R7W" "$P7W")"
-BEFORE9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+BEFORE9W="$(digest "$RF7W")"
 OUT9W="$(invoke "$P7W" "$S7W")"
-AFTER9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+AFTER9W="$(digest "$RF7W")"
 if [ "$(printf '%s' "$OUT9W" | decision)" = block ] \
   && printf '%s' "$OUT9W" | grep -qF 'zensu:code-reviewer' \
   && [ "$BEFORE9W" = "$AFTER9W" ] \

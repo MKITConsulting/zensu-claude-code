@@ -34,7 +34,7 @@ mkdir -p "$CLAUDE_PROJECT_DIR" "$TDD_STATE_DIR"
 state_file() { tdd_state_file "$1"; }
 counter_file() { printf '%s/rounds-%s.json\n' "$TDD_STATE_DIR" "$1"; }
 stop_file() { printf '%s.stopblocks\n' "$(state_file "$1")"; }
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 field_ok() {
   FILE="$1" EXPR="$2" node -e '
     const value = require(process.env.FILE);

@@ -63,8 +63,8 @@ postrev_with_ticket() {
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project" bash "$POSTREV" 2>/dev/null \
     | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){process.stdout.write("")}})'
 }
-file_digest() { shasum -a 256 "$1" | awk '{print $1}'; }
-file_inode() { stat -f '%i' "$1"; }
+file_digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
+file_inode() { node -e 'process.stdout.write(String(require("fs").lstatSync(process.argv[1]).ino));' "$1"; }
 exact_line_count() {
   local body="$1" line="$2"
   printf '%s\n' "$body" | awk -v expected="$line" '$0 == expected { count += 1 } END { print count + 0 }'

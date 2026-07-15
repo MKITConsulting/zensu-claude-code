@@ -44,6 +44,13 @@ else
   check "B5 fresh-start source filter (skip resume/compact)" FAIL
 fi
 
+if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$PRIMER" \
+  && grep -qF 'ZENSU_LOG_HELPER_Q' "$PRIMER"; then
+  check "B5a primer preserves its pre-quoted helper token across MSYS env conversion" PASS
+else
+  check "B5a primer preserves its pre-quoted helper token across MSYS env conversion" FAIL
+fi
+
 if grep -qF '/zensu:tdd' "$BANNER" && grep -qF 'Zensu PLM' "$BANNER" && grep -qF 'hooks.sessionBanner=false' "$BANNER"; then
   check "B6 banner mentions Zensu PLM + /zensu:tdd + opt-out hint" PASS
 else

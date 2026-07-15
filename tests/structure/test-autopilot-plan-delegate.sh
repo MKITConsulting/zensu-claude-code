@@ -35,7 +35,7 @@ payload() {
 invoke() {
   printf '%s' "$1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" ZENSU_CONFIG="${3:-$CFG_OFF}" bash "$HOOK" 2>/dev/null
 }
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 RUN_FILE="$(autopilot_run_file "$RUN" "$PROJECT")"
 
 OUT="$(invoke "$(payload "$PLAN" "$SID")" "$PROJECT")"
@@ -43,7 +43,7 @@ if printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);proce
   check "P3 approved Autopilot plan delegates directly without a routine question" PASS
 else check "P3 approved Autopilot plan delegates directly without a routine question" FAIL; fi
 
-EXPECTED_SHA="$(printf '%s' "$PLAN" | shasum -a 256 | awk '{print $1}')"
+EXPECTED_SHA="$(printf '%s' "$PLAN" | node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));')"
 if RUN_FILE="$RUN_FILE" SHA="$EXPECTED_SHA" node -e 'const j=require(process.env.RUN_FILE);process.exit(j.stage==="AWAIT_TDD"&&j.nextActionCode==="START_TDD"&&j.approvedPlanSha256===process.env.SHA?0:1)'; then
   check "P4 approval persists the exact plan digest and AWAIT_TDD stage" PASS
 else check "P4 approval persists the exact plan digest and AWAIT_TDD stage" FAIL; fi
@@ -222,6 +222,13 @@ if grep -qF 'PAYLOAD="$INPUT"' "$HOOK" || grep -qF 'zensu_hook_agent_id "$INPUT"
   check "P14 plan hook copies the full payload into a process environment or argv" FAIL
 else
   check "P14 plan hook streams JSON payloads over stdin" PASS
+fi
+
+if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$HOOK" \
+  && grep -qF 'LOG_HELPER_Q' "$HOOK"; then
+  check "P15 MSYS preserves the already shell-quoted log-helper token" PASS
+else
+  check "P15 MSYS preserves the already shell-quoted log-helper token" FAIL
 fi
 
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

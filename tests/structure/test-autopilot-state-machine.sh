@@ -31,6 +31,21 @@ else
   check "S2 library passes bash syntax validation" FAIL
 fi
 
+if grep -qF 'fd = fs.openSync(file, "r+");' "$LIB" \
+  && grep -qF 'fs.fsyncSync(fd);' "$LIB" \
+  && grep -qF 'fs.closeSync(fd);' "$LIB"; then
+  check "S2b durable state fsync uses a writable descriptor and closes it" PASS
+else
+  check "S2b durable state fsync uses a writable descriptor and closes it" FAIL
+fi
+
+if grep -qF 'if (process.platform !== "win32") {' "$LIB" \
+  && grep -qF 'directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);' "$LIB"; then
+  check "S2c directory fsync remains POSIX-only" PASS
+else
+  check "S2c directory fsync remains POSIX-only" FAIL
+fi
+
 # shellcheck disable=SC1090
 source "$LIB"
 # shellcheck disable=SC1090
@@ -67,7 +82,31 @@ json_ok() {
 }
 
 file_digest() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
+}
+
+private_mode_ok() {
+  node -e 'const fs=require("fs");process.exit(process.platform==="win32"||(fs.statSync(process.argv[1]).mode&0o777)===0o600?0:1);' "$1"
+}
+
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
+make_directory_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"junction":"dir");
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
 }
 
 json_field_stdin() {
@@ -248,7 +287,7 @@ REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
-  && [ "$(stat -c %a "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %Lp "$REVIEW_PAYLOAD_SNAPSHOT")" = 600 ] \
+  && private_mode_ok "$REVIEW_PAYLOAD_SNAPSHOT" \
   && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
   check "R4 requested review atomically stores one private operation/head-bound payload" PASS
 else
@@ -334,12 +373,15 @@ REVIEW_PAYLOAD_BACKUP="$ROOT/review-payload-backup.json"
 REVIEW_LINK_GUARDS=false
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cp "$REVIEW_PAYLOAD_SNAPSHOT" "$REVIEW_PAYLOAD_BACKUP" \
-  && rm -f "$REVIEW_PAYLOAD_SNAPSHOT" \
-  && ln -s "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"; then
-  if autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
-      >/dev/null 2>&1; then
-    REVIEW_LINK_GUARDS=false
-  else
+  && rm -f "$REVIEW_PAYLOAD_SNAPSHOT"; then
+  if make_file_symlink "$REVIEW_PAYLOAD_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"; then
+    if autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" \
+        >/dev/null 2>&1; then
+      REVIEW_LINK_GUARDS=false
+    else
+      REVIEW_LINK_GUARDS=true
+    fi
+  elif [ "$IS_WINDOWS" = true ]; then
     REVIEW_LINK_GUARDS=true
   fi
   rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
@@ -502,8 +544,11 @@ receipt_rejected_byte_stably evt_review_missing_payload "$REVIEW_MARKER" || RECE
 mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
 
 mv "$REVIEW_PAYLOAD_SNAPSHOT" "$RECEIPT_BACKUP"
-ln -s "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
-receipt_rejected_byte_stably evt_review_symlink_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+if make_file_symlink "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"; then
+  receipt_rejected_byte_stably evt_review_symlink_payload "$REVIEW_MARKER" || RECEIPT_GUARDS=false
+elif [ "$IS_WINDOWS" != true ]; then
+  RECEIPT_GUARDS=false
+fi
 rm -f "$REVIEW_PAYLOAD_SNAPSHOT"
 mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
 
@@ -1087,8 +1132,8 @@ fi
 VICTIM="$ROOT/victim"
 LINK_PROJECT="$ROOT/link-project"
 mkdir -p "$VICTIM" "$LINK_PROJECT"
-ln -s "$VICTIM" "$LINK_PROJECT/.zensu"
-if ! autopilot_begin_run "run_symlink_003" "session_owner_003" "$LINK_PROJECT" >/dev/null 2>&1 \
+if make_directory_symlink "$VICTIM" "$LINK_PROJECT/.zensu" \
+  && ! autopilot_begin_run "run_symlink_003" "session_owner_003" "$LINK_PROJECT" >/dev/null 2>&1 \
   && [ -z "$(find "$VICTIM" -mindepth 1 -print -quit 2>/dev/null)" ]; then
   check "S5 symlinked project-state ancestors cannot escape the project" PASS
 else
