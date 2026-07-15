@@ -276,7 +276,7 @@ _tdd_locked_run() {
 
   if [ "${TDD_DISABLE_FLOCK:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
     (
-      exec 9>>"$lock_file" 2>/dev/null || exit 1
+      { exec 9>>"$lock_file"; } 2>/dev/null || exit 1
       flock -x 9 2>/dev/null || exit 1
       _tdd_state_storage_safe "$state_file" || exit 1
       "$@"
@@ -290,9 +290,11 @@ _tdd_locked_run() {
     local dead=0
     local mtime
     mtime=$(stat -c %Y "$lock_dir" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo "")
+    case "$mtime" in ''|*[!0-9]*) mtime="" ;; esac
     if [ -n "$mtime" ]; then
       local now
       now=$(date +%s 2>/dev/null || echo "")
+      case "$now" in ''|*[!0-9]*) now="" ;; esac
       if [ -n "$now" ] && [ "$((now - mtime))" -gt 30 ]; then
         dead=1
       fi

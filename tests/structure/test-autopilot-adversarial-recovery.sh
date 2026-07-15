@@ -383,7 +383,8 @@ CLAUDE_PROJECT_DIR="$P11B" TDD_STATE_DIR="$P11B/.zensu/state" \
   autopilot_adopt_pending_review "$P11B" "$S11B" true 0 >/dev/null 2>&1
 RC11B=$?
 FILES11B="$(find "$P11B/.zensu/state" -maxdepth 1 -type f \
-  ! -name 'autopilot.lock' | wc -l | tr -d '[:space:]')"
+  ! -name 'autopilot.lock' ! -name 'pending-review.json.lock' \
+  | wc -l | tr -d '[:space:]')"
 if [ "$RC11B" = 6 ] && [ "$FILES11B" = 0 ] \
   && [ ! -e "$P11B/.zensu/state/pending-review.json.claim" ] \
   && [ ! -e "$P11B/.zensu/state/tdd-phase-${S11B}.json" ]; then
