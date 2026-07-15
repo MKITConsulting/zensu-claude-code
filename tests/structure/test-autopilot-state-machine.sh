@@ -282,8 +282,16 @@ else
   check "R3 review payload read reports an absent pre-publication snapshot" FAIL
 fi
 
-REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
-  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null || true)"
+if [ "${AUTOPILOT_DEBUG_STORE:-}" = "1" ]; then
+  REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
+    "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT")"
+  REVIEW_STORE_RC=$?
+  printf '[autopilot-store-debug] rc=%s snapshot=%s\n' \
+    "$REVIEW_STORE_RC" "${REVIEW_PAYLOAD_SNAPSHOT:-<empty>}" >&2
+else
+  REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
+    "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null || true)"
+fi
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
@@ -1132,11 +1140,22 @@ fi
 VICTIM="$ROOT/victim"
 LINK_PROJECT="$ROOT/link-project"
 mkdir -p "$VICTIM" "$LINK_PROJECT"
-if make_directory_symlink "$VICTIM" "$LINK_PROJECT/.zensu" \
-  && ! autopilot_begin_run "run_symlink_003" "session_owner_003" "$LINK_PROJECT" >/dev/null 2>&1 \
-  && [ -z "$(find "$VICTIM" -mindepth 1 -print -quit 2>/dev/null)" ]; then
+make_directory_symlink "$VICTIM" "$LINK_PROJECT/.zensu"
+S5_LINK_RC=$?
+S5_BEGIN_RC=99
+if [ "$S5_LINK_RC" -eq 0 ]; then
+  autopilot_begin_run "run_symlink_003" "session_owner_003" "$LINK_PROJECT" >/dev/null 2>&1
+  S5_BEGIN_RC=$?
+fi
+S5_VICTIM_ENTRY="$(find "$VICTIM" -mindepth 1 -print -quit 2>/dev/null)"
+if [ "$S5_LINK_RC" -eq 0 ] && [ "$S5_BEGIN_RC" -ne 0 ] \
+  && [ -z "$S5_VICTIM_ENTRY" ]; then
   check "S5 symlinked project-state ancestors cannot escape the project" PASS
 else
+  if [ "${AUTOPILOT_DEBUG_STORE:-}" = "1" ]; then
+    printf '[autopilot-store-debug] s5_link_rc=%s s5_begin_rc=%s victim_changed=%s\n' \
+      "$S5_LINK_RC" "$S5_BEGIN_RC" "$([ -n "$S5_VICTIM_ENTRY" ] && printf true || printf false)" >&2
+  fi
   check "S5 symlinked project-state ancestors cannot escape the project" FAIL
 fi
 

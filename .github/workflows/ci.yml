@@ -22,6 +22,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: Diagnose Windows Autopilot payload store
+        if: runner.os == 'Windows'
+        env:
+          AUTOPILOT_DEBUG_STORE: "1"
+        run: bash tests/structure/test-autopilot-state-machine.sh
       - run: bash tests/run-all.sh
       - name: Show suite report on failure
         if: failure()
