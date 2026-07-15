@@ -10,8 +10,20 @@ set -u
 # shellcheck disable=SC1091
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
+_autopilot_shell_path() {
+  local value="${1:-}"
+  [ "$#" -eq 1 ] && [ -n "$value" ] || return 2
+  case "$value" in
+    [A-Za-z]:[\\/]*|\\\\*)
+      command -v cygpath >/dev/null 2>&1 || return 2
+      cygpath -u "$value" 2>/dev/null
+      ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
 _autopilot_project_root() {
-  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}"
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root
   ROOT_INPUT="$input" node -e '
     const fs = require("fs");
     const path = require("path");
@@ -22,8 +34,11 @@ _autopilot_project_root() {
       if (!fs.statSync(logicalRoot).isDirectory()) process.exit(2);
       root = fs.realpathSync(logicalRoot);
     } catch (_) { process.exit(2); }
-    process.stdout.write(root);
-  ' 2>/dev/null
+    if (/[\u0000-\u001f]/.test(root)) process.exit(2);
+  ' >/dev/null 2>&1 || return 2
+  root="$(cd -P -- "$input" 2>/dev/null && pwd -P)" || return 2
+  [ -n "$root" ] || return 2
+  printf '%s\n' "$root"
 }
 
 _autopilot_identifier_ok() {
@@ -112,7 +127,23 @@ _autopilot_locked_dispatch() {
 # All schema and transition decisions live in one worker so every caller uses
 # the same closed vocabulary and canonical payload digest.
 _autopilot_node() {
-  node - "$@" <<'NODE'
+  local mode="${1:-}" root_index="" shell_root=""
+  local node_args=("$@") msys_exclusions="ZENSU_AUTOPILOT_PROJECT_ROOT"
+  case "$mode" in
+    read-active|read-run) root_index=3 ;;
+    begin) root_index=7 ;;
+    apply) root_index=8 ;;
+    increment-budget|increment-budget-capped) root_index=6 ;;
+  esac
+  if [ -n "$root_index" ] && [ "${#node_args[@]}" -gt "$root_index" ]; then
+    shell_root="${node_args[$root_index]}"
+    node_args[root_index]='__ZENSU_AUTOPILOT_PROJECT_ROOT_V1__'
+  fi
+  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
+    msys_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_exclusions}"
+  fi
+  ZENSU_AUTOPILOT_PROJECT_ROOT="$shell_root" \
+    MSYS2_ENV_CONV_EXCL="$msys_exclusions" node - "${node_args[@]}" <<'NODE'
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -121,6 +152,19 @@ const MAX_BYTES = 1024 * 1024;
 const MAX_EVENTS = 512;
 const args = process.argv.slice(2);
 const mode = args.shift();
+const rootIndexes = {
+  "read-active": 2,
+  "read-run": 2,
+  begin: 6,
+  apply: 7,
+  "increment-budget": 5,
+  "increment-budget-capped": 5,
+};
+const rootIndex = rootIndexes[mode];
+if (Number.isInteger(rootIndex)
+    && args[rootIndex] === "__ZENSU_AUTOPILOT_PROJECT_ROOT_V1__") {
+  args[rootIndex] = process.env.ZENSU_AUTOPILOT_PROJECT_ROOT || "";
+}
 
 const fail = (code, message) => {
   if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);
@@ -1225,20 +1269,21 @@ autopilot_team_review_operation_key() {
 # operation key. Keep one private immutable snapshot per operation/head pair in
 # the project-local durable state directory.
 _autopilot_team_review_payload_target() {
-  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}"
+  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}" tuple operation_digest head
   [ "$#" -eq 3 ] || return 3
-  ROOT="$root" OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+  tuple="$(OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
     const crypto = require("crypto");
-    const path = require("path");
-    const root = process.env.ROOT;
     const operationKey = process.env.OPERATION_KEY;
     const head = String(process.env.HEAD_SHA || "").toLowerCase();
-    if (!root || !/^team-review:v1:[a-f0-9]{64}$/.test(operationKey)
+    if (!/^team-review:v1:[a-f0-9]{64}$/.test(operationKey)
         || !/^[a-f0-9]{7,64}$/.test(head)) process.exit(3);
     const operationDigest = crypto.createHash("sha256").update(operationKey).digest("hex");
-    process.stdout.write(path.join(root, ".zensu", "state",
-      `autopilot-team-review-payload-${operationDigest}-${head}.json`));
-  ' 2>/dev/null
+    process.stdout.write(`${operationDigest}|${head}`);
+  ' 2>/dev/null)" || return 3
+  IFS='|' read -r operation_digest head <<< "$tuple"
+  [ -n "$root" ] && [ -n "$operation_digest" ] && [ -n "$head" ] || return 3
+  printf '%s/.zensu/state/autopilot-team-review-payload-%s-%s.json\n' \
+    "${root%/}" "$operation_digest" "$head"
 }
 
 _autopilot_team_review_payload_identity_critical() {
@@ -1600,12 +1645,13 @@ autopilot_store_team_review_payload() {
   root="$(_autopilot_project_root "${6:-}")" || return 2
   _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
     >/dev/null || return 3
-  source_file="$(SOURCE_FILE="$source_file" node -e '
+  SOURCE_FILE="$source_file" node -e '
     const path = require("path");
     const source = process.env.SOURCE_FILE;
-    if (!source || /[\u0000-\u001f]/.test(source)) process.exit(3);
-    process.stdout.write(path.resolve(source));
-  ' 2>/dev/null)" || return 3
+    const resolved = path.resolve(source || "");
+    if (!source || /[\u0000-\u001f]/.test(source) || /[\u0000-\u001f]/.test(resolved)) process.exit(3);
+  ' >/dev/null 2>&1 || return 3
+  source_file="$(_autopilot_shell_path "$source_file")" || return 3
   _autopilot_read_storage_ready "$root" "$run_id" || return $?
   _autopilot_locked_run "$root" "$run_id" _autopilot_store_team_review_payload_critical \
     "$root" "$run_id" "$operation_key" "$head_sha" "$source_file" "$provider"
