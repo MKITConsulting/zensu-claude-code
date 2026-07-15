@@ -1552,32 +1552,26 @@ _autopilot_store_team_review_payload_critical() {
       const temp = process.env.TEMP_FILE;
       let sourceFd, tempFd;
       const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
-      const fail = (code, step) => {
-        if (process.env.AUTOPILOT_DEBUG_STORE === "1") {
-          process.stderr.write(`[zensu-autopilot-state] payload-store ${step} rc=${code}\n`);
-        }
-        process.exit(code);
-      };
       try {
         const sourceBefore = fs.lstatSync(source);
-        if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) fail(2, "source-lstat");
+        if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) process.exit(2);
         sourceFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
         const sourceOpen = fs.fstatSync(sourceFd);
         if (!sourceOpen.isFile() || sourceOpen.nlink !== 1 || sourceOpen.dev !== sourceBefore.dev
-            || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) fail(2, "source-open");
+            || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) process.exit(2);
         const data = fs.readFileSync(sourceFd);
         const sourceAfter = fs.fstatSync(sourceFd);
         close(sourceFd); sourceFd = undefined;
         if (data.length !== sourceOpen.size || sourceAfter.size !== sourceOpen.size
-            || sourceAfter.mtimeMs !== sourceOpen.mtimeMs || sourceAfter.ctimeMs !== sourceOpen.ctimeMs) fail(2, "source-stability");
-        if (crypto.createHash("sha256").update(data).digest("hex") !== process.env.EXPECTED_DIGEST) fail(4, "source-digest");
+            || sourceAfter.mtimeMs !== sourceOpen.mtimeMs || sourceAfter.ctimeMs !== sourceOpen.ctimeMs) process.exit(2);
+        if (crypto.createHash("sha256").update(data).digest("hex") !== process.env.EXPECTED_DIGEST) process.exit(4);
 
         const tempBefore = fs.lstatSync(temp);
-        if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) fail(2, "temp-lstat");
+        if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) process.exit(2);
         tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
         const tempOpen = fs.fstatSync(tempFd);
         if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
-            || tempOpen.ino !== tempBefore.ino) fail(2, "temp-open");
+            || tempOpen.ino !== tempBefore.ino) process.exit(2);
         fs.ftruncateSync(tempFd, 0);
         fs.fchmodSync(tempFd, 0o600);
         fs.writeFileSync(tempFd, data);
@@ -1601,13 +1595,10 @@ _autopilot_store_team_review_payload_critical() {
         }
       } catch (error) {
         close(sourceFd); close(tempFd);
-        if (error && error.code === "EEXIST") fail(4, "target-exists");
-        if (process.env.AUTOPILOT_DEBUG_STORE === "1") {
-          process.stderr.write(`[zensu-autopilot-state] payload-store exception code=${error && error.code || "unknown"} syscall=${error && error.syscall || "unknown"}\n`);
-        }
+        if (error && error.code === "EEXIST") process.exit(4);
         process.exit(5);
       }
-    '
+    ' 2>/dev/null
   rc=$?
   rm -f "$tmp"
   if [ "$rc" -eq 4 ]; then
