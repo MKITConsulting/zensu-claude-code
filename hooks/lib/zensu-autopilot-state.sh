@@ -74,7 +74,12 @@ autopilot_run_file() {
 }
 
 _autopilot_prepare_storage() {
-  local root="$1" state_dir="$1/.zensu/state"
+  local root="$1" zensu_dir="$1/.zensu" state_dir="$1/.zensu/state"
+  # Validate the fixed project-local ancestor as its own leaf before mkdir -p.
+  # This prevents a missing state/ leaf behind a Windows junction from being
+  # created before the deeper path check rejects the junction.
+  CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$zensu_dir" directory-or-absent \
+    || return 2
   CLAUDE_PROJECT_DIR="$root" _tdd_prepare_directory "$state_dir"
 }
 
