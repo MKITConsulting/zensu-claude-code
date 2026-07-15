@@ -27,6 +27,7 @@ trap cleanup EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
+export CLAUDE_PROJECT_DIR="$TMP_DIR"
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 10}}

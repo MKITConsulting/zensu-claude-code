@@ -410,6 +410,7 @@ _tdd_write_clear_critical() {
     s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
     s.deferredReviewClaim = ""; s.stopBlockCount = 0;
     s.workflowTools = []; s.vanilla = false; s.bypasses = [];
+    delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -430,6 +431,66 @@ tdd_clear_session() {
   _tdd_locked_run "$state_file" _tdd_write_clear_critical "$state_file"
 }
 
+_tdd_clear_standalone_session_critical() {
+  local state_file="$1" session_id="$2"
+  STATE_FILE="$state_file" SID="$session_id" node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+      const linkKeys=[
+        "autopilotRunId","autopilotAttempt","autopilotReturnStage","chainId","chainOutcome"
+      ];
+      const exact=s && typeof s==="object" && !Array.isArray(s)
+        && s.session_id===process.env.SID
+        && linkKeys.every(key=>!Object.prototype.hasOwnProperty.call(s,key));
+      process.exit(exact?0:3);
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null || return 1
+  _tdd_write_clear_critical "$state_file"
+}
+
+# Production standalone reset re-proves linkage absence under the Inner lock.
+# The generic library clear remains available to trusted internal callers, but
+# a stale `{}` preflight can never deactivate a newly bound Autopilot attempt.
+tdd_clear_standalone_session() {
+  local session_id="${1:-}" state_file
+  [ "$#" -eq 1 ] && [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  [ -f "$state_file" ] || return 0
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_locked_run "$state_file" _tdd_clear_standalone_session_critical \
+    "$state_file" "$session_id"
+}
+
+_tdd_clear_autopilot_session_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" node -e '
+      try {
+        const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+        const exact=s && typeof s==="object" && !Array.isArray(s)
+          && s.session_id===process.env.SID && typeof s.active==="boolean"
+          && s.autopilotRunId===process.env.RUN_ID
+          && s.autopilotAttempt===Number(process.env.ATTEMPT)
+          && s.chainId===process.env.CHAIN_ID;
+        process.exit(exact?0:3);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null || return 1
+  _tdd_write_clear_critical "$state_file"
+}
+
+tdd_clear_autopilot_session() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}" state_file
+  [ "$#" -eq 4 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_clear_autopilot_session_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id"
+}
+
 _tdd_write_chain_reset_critical() {
   local state_file="$1"
   local tmp
@@ -448,6 +509,7 @@ _tdd_write_chain_reset_critical() {
     s.codeReviewDone = false; s.selfReviewFixed = false;
     s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
     s.deferredReviewClaim = ""; s.stopBlockCount = 0;
+    delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null
   if [ ! -s "$tmp" ]; then
@@ -476,14 +538,18 @@ tdd_reset_chain_flags() {
 _tdd_begin_session_critical() {
   local state_file="$1" session_id="$2" vanilla="$3" impl_complete="$4"
   local require_deferred_eligible="$5" deferred_claim="$6"
-  local counter_file="$7" rounds_state_dir="$8" stopblocks_file="$9" state_dir="${10}" tmp
+  local counter_file="$7" rounds_state_dir="$8" stopblocks_file="$9" state_dir="${10}"
+  local autopilot_run_id="${11:-}" autopilot_attempt="${12:-}"
+  local autopilot_return_stage="${13:-}" chain_id="${14:-}" tmp
   _tdd_state_storage_safe "$state_file" || return 1
   _tdd_path_safe "$counter_file" regular-or-absent "$rounds_state_dir" || return 1
   _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   if ! STATE_FILE="$state_file" SID="$session_id" VANILLA="$vanilla" \
       IMPL_COMPLETE="$impl_complete" REQUIRE_DEFERRED_ELIGIBLE="$require_deferred_eligible" \
-      DEFERRED_CLAIM="$deferred_claim" node -e '
+      DEFERRED_CLAIM="$deferred_claim" AUTOPILOT_RUN_ID="$autopilot_run_id" \
+      AUTOPILOT_ATTEMPT="$autopilot_attempt" AUTOPILOT_RETURN_STAGE="$autopilot_return_stage" \
+      CHAIN_ID="$chain_id" node -e '
     const fs = require("fs");
     let s = {};
     try {
@@ -510,6 +576,21 @@ _tdd_begin_session_critical() {
     s.deferredReviewClaim = process.env.DEFERRED_CLAIM || "";
     s.stopBlockCount = 0;
     s.bypasses = [];
+    delete s.reviewRearm;
+    if (process.env.AUTOPILOT_RUN_ID) {
+      const attempt = Number.parseInt(process.env.AUTOPILOT_ATTEMPT, 10);
+      s.autopilotRunId = process.env.AUTOPILOT_RUN_ID;
+      s.autopilotAttempt = attempt;
+      s.autopilotReturnStage = process.env.AUTOPILOT_RETURN_STAGE;
+      s.chainId = process.env.CHAIN_ID;
+      s.chainOutcome = "";
+    } else {
+      delete s.autopilotRunId;
+      delete s.autopilotAttempt;
+      delete s.autopilotReturnStage;
+      delete s.chainId;
+      delete s.chainOutcome;
+    }
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
@@ -541,7 +622,9 @@ _tdd_begin_session_critical() {
 # after the new chain — it can never observe a hybrid state.
 tdd_begin_session() {
   local session_id="${1:-}" vanilla="${2:-false}" impl_complete="${3:-false}"
-  local require_deferred_eligible="${4:-false}" deferred_claim="${5:-}" state_file state_dir
+  local require_deferred_eligible="${4:-false}" deferred_claim="${5:-}"
+  local autopilot_run_id="${6:-}" autopilot_attempt="${7:-}"
+  local autopilot_return_stage="${8:-}" chain_id="${9:-}" state_file state_dir
   local rounds_state_dir counter_file stopblocks_file
   [ -n "$session_id" ] || return 1
   case "$vanilla" in true|false) ;; *) return 1 ;; esac
@@ -551,6 +634,17 @@ tdd_begin_session() {
     case "$deferred_claim" in dc_*) ;; *) return 1 ;; esac
     case "$deferred_claim" in *[!A-Za-z0-9_-]*) return 1 ;; esac
     [ "${#deferred_claim}" -le 96 ] || return 1
+  fi
+  if [ -n "$autopilot_run_id$autopilot_attempt$autopilot_return_stage$chain_id" ]; then
+    case "$autopilot_run_id" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+    case "$autopilot_run_id" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+    [ "${#autopilot_run_id}" -le 128 ] || return 1
+    case "$autopilot_attempt" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$autopilot_attempt" -ge 1 ] && [ "$autopilot_attempt" -le 999 ] || return 1
+    case "$autopilot_return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 1 ;; esac
+    case "$chain_id" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+    case "$chain_id" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+    [ "${#chain_id}" -le 128 ] || return 1
   fi
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")"
@@ -571,7 +665,363 @@ tdd_begin_session() {
   _tdd_locked_run "$state_file" \
     _tdd_begin_session_critical "$state_file" "$session_id" "$vanilla" "$impl_complete" \
       "$require_deferred_eligible" "$deferred_claim" \
-      "$counter_file" "$rounds_state_dir" "$stopblocks_file" "$state_dir"
+      "$counter_file" "$rounds_state_dir" "$stopblocks_file" "$state_dir" \
+      "$autopilot_run_id" "$autopilot_attempt" "$autopilot_return_stage" "$chain_id"
+}
+
+# Emit the exact outer-run linkage for this TDD generation as a compact JSON
+# object. An empty object means the chain is standalone. Callers must treat an
+# invalid/corrupt state as an error rather than guessing a run association.
+tdd_autopilot_context() {
+  local state_file="${1:-}"
+  local expected_session="${2:-}"
+  [ -n "$state_file" ] || return 1
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  STATE_FILE="$state_file" EXPECTED_SESSION="$expected_session" node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(process.env.STATE_FILE, "utf8"));
+      if (!s || typeof s !== "object" || Array.isArray(s)) process.exit(3);
+      const rootValid = typeof s.session_id === "string" && s.session_id.length > 0
+        && typeof s.active === "boolean" && typeof s.implComplete === "boolean"
+        && typeof s.chainDone === "boolean"
+        && (!process.env.EXPECTED_SESSION || s.session_id === process.env.EXPECTED_SESSION);
+      if (!rootValid) process.exit(3);
+      const present = [s.autopilotRunId, s.autopilotAttempt, s.autopilotReturnStage, s.chainId, s.chainOutcome]
+        .some(v => v !== undefined);
+      if (!present) { process.stdout.write("{}"); process.exit(0); }
+      const linkId = v => typeof v === "string" && v.length > 0 && v.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v);
+      const valid = linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && (s.chainOutcome === "" || s.chainOutcome === "pass" || s.chainOutcome === "no-changes" || s.chainOutcome === "max-rounds");
+      if (!valid) process.exit(3);
+      process.stdout.write(JSON.stringify({
+        sessionId:s.session_id,
+        active:s.active,
+        implComplete:s.implComplete,
+        chainDone:s.chainDone,
+        runId:s.autopilotRunId,
+        attempt:s.autopilotAttempt,
+        returnStage:s.autopilotReturnStage,
+        chainId:s.chainId,
+        outcome:s.chainOutcome
+      }));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Return one strictly validated, self-consistent snapshot for Stop decisions.
+# rc=1 means absent; any unsafe path, malformed JSON, partial linkage, or
+# foreign session is rc>1 and must be treated fail-closed by callers.
+tdd_chain_snapshot() {
+  local state_file="${1:-}" expected_session="${2:-}"
+  [ -n "$state_file" ] && [ -n "$expected_session" ] || return 2
+  _tdd_path_safe "$state_file" regular-or-absent "$(dirname "$state_file")" || return 2
+  [ -e "$state_file" ] || return 1
+  STATE_FILE="$state_file" EXPECTED_SESSION="$expected_session" node -e '
+    try {
+      const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
+      const natural=v=>Number.isSafeInteger(v)&&v>=0;
+      const linkId=v=>typeof v==="string"&&v.length>0&&v.length<=128&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v);
+      const root=s&&typeof s==="object"&&!Array.isArray(s)
+        &&s.session_id===process.env.EXPECTED_SESSION&&typeof s.phase==="string"
+        &&Array.isArray(s.history)&&Array.isArray(s.bypasses)
+        &&typeof s.active==="boolean"&&typeof s.vanilla==="boolean"
+        &&typeof s.implComplete==="boolean"&&typeof s.chainDone==="boolean"
+        &&typeof s.codeReviewDone==="boolean"&&typeof s.selfReviewFixed==="boolean"
+        &&typeof s.reviewTicket==="string"&&typeof s.reviewTicketConsumed==="boolean"
+        &&natural(s.reviewRound)&&natural(s.stopBlockCount);
+      if(!root)process.exit(3);
+      const values=[s.autopilotRunId,s.autopilotAttempt,s.autopilotReturnStage,s.chainId,s.chainOutcome];
+      const count=values.filter(v=>v!==undefined).length;
+      let autopilot=null;
+      if(count!==0){
+        const valid=count===values.length&&linkId(s.autopilotRunId)
+          &&Number.isInteger(s.autopilotAttempt)&&s.autopilotAttempt>=1&&s.autopilotAttempt<=999
+          &&["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
+          &&linkId(s.chainId)&&["","pass","no-changes","max-rounds"].includes(s.chainOutcome);
+        if(!valid)process.exit(3);
+        autopilot={runId:s.autopilotRunId,attempt:s.autopilotAttempt,
+          returnStage:s.autopilotReturnStage,chainId:s.chainId,outcome:s.chainOutcome};
+      }
+      process.stdout.write(JSON.stringify({sessionId:s.session_id,active:s.active,
+        implComplete:s.implComplete,chainDone:s.chainDone,codeReviewDone:s.codeReviewDone,
+        selfReviewFixed:s.selfReviewFixed,vanilla:s.vanilla,
+        stopBlockCount:s.stopBlockCount,autopilot}));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Mark implementation complete only for one exact active Autopilot generation.
+# This prevents a delayed attempt-N completion from arming attempt N+1 after a
+# retry or recovery transition reused the same session file.
+_tdd_mark_impl_complete_bound_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
+  local tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" node -e '
+      const fs=require("fs");
+      let s;
+      try { s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8")); }
+      catch (_) { process.exit(3); }
+      const exact=s && typeof s==="object" && !Array.isArray(s)
+        && s.session_id===process.env.SID && s.active===true
+        && typeof s.implComplete==="boolean" && s.chainDone===false && s.chainOutcome===""
+        && s.autopilotRunId===process.env.RUN_ID
+        && s.autopilotAttempt===Number(process.env.ATTEMPT)
+        && s.chainId===process.env.CHAIN_ID;
+      if(!exact)process.exit(3);
+      if(s.implComplete===true)process.exit(10);
+      s.implComplete=true;
+      fs.writeFileSync(process.argv[1],JSON.stringify(s,null,2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then rm -f "$tmp" 2>/dev/null; return 0; fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then rm -f "$tmp" 2>/dev/null; return 1; fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_mark_impl_complete_bound() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}" state_file
+  [ "$#" -eq 4 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_impl_complete_bound_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id"
+}
+
+# Standalone completion is also a generation CAS. A caller may have observed
+# an unbound session immediately before Autopilot replaced the same Inner file;
+# therefore linkage absence is proven again while holding the Inner mutex.
+_tdd_mark_impl_complete_standalone_critical() {
+  local state_file="$1" session_id="$2" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const standalone = s && typeof s === "object" && !Array.isArray(s)
+      && linkKeys.every(key => !Object.prototype.hasOwnProperty.call(s, key));
+    const exact = standalone && s.session_id === process.env.SID
+      && s.active === true && typeof s.implComplete === "boolean"
+      && s.chainDone === false;
+    if (!exact) process.exit(3);
+    if (s.implComplete === true) process.exit(10);
+    s.implComplete = true;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then rm -f "$tmp" 2>/dev/null; return 0; fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then rm -f "$tmp" 2>/dev/null; return 1; fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_mark_impl_complete_standalone() {
+  local session_id="${1:-}" state_file
+  [ "$#" -eq 1 ] && [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_impl_complete_standalone_critical \
+    "$state_file" "$session_id"
+}
+
+_tdd_autopilot_link_id_shape_ok() {
+  local value="${1:-}"
+  [ -n "$value" ] && [ "${#value}" -le 128 ] || return 1
+  case "$value" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+  case "$value" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+  return 0
+}
+
+_tdd_autopilot_attempt_shape_ok() {
+  local attempt="${1:-}"
+  case "$attempt" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ]
+}
+
+# Persist an outcome before the final chain terminus (notably max-rounds before
+# the self-review handoff). A non-empty outcome is immutable for this exact
+# inner generation. Bound calls use:
+#   session outcome run attempt chain [claimed-review-ticket]
+# The legacy two-argument form can only confirm an already-persisted identical
+# outcome; it may never initialize one because it cannot prove generation or
+# ticket ownership.
+_tdd_set_chain_outcome_critical() {
+  local state_file="$1" session_id="$2" outcome="$3" run_id="$4"
+  local attempt="$5" chain_id="$6" ticket="$7" binding_supplied="$8" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" OUTCOME="$outcome" RUN_ID="$run_id" \
+    ATTEMPT="$attempt" CHAIN_ID="$chain_id" TICKET="$ticket" \
+    BINDING_SUPPLIED="$binding_supplied" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string" && outcomes.has(s.chainOutcome);
+      const base = completeLink
+        && s.session_id === process.env.SID
+        && s.active === true && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.reviewTicket === "string"
+        && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      if (!base) process.exit(3);
+
+      // An unbound caller may only observe an identical immutable outcome. It
+      // cannot create one or choose the current generation by accident.
+      if (process.env.BINDING_SUPPLIED !== "true") {
+        process.exit(s.chainOutcome === process.env.OUTCOME ? 10 : 3);
+      }
+      const exactLink = s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exactLink) process.exit(3);
+      const ticket = process.env.TICKET;
+      const ticketOk = ticket
+        ? s.reviewTicket === ticket && s.reviewTicketConsumed === true && s.reviewRound >= 1
+        : s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+      if (!ticketOk) process.exit(3);
+      if (s.chainOutcome === process.env.OUTCOME) process.exit(10);
+      if (s.chainOutcome !== "" || s.chainDone !== false) process.exit(3);
+      s.chainOutcome = process.env.OUTCOME;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_set_chain_outcome() {
+  local session_id="${1:-}" outcome="${2:-}" run_id="${3:-}" attempt="${4:-}"
+  local chain_id="${5:-}" ticket="${6:-}" binding_supplied=false state_file
+  [ "$#" -eq 2 ] || [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac
+  if [ "$#" -ge 5 ]; then
+    _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+    _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+    _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+    if [ -n "$ticket" ]; then _tdd_review_ticket_shape_ok "$ticket" || return 1; fi
+    binding_supplied=true
+  fi
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_set_chain_outcome_critical \
+    "$state_file" "$session_id" "$outcome" "$run_id" "$attempt" "$chain_id" \
+    "$ticket" "$binding_supplied"
+}
+
+# Atomically seal one exact Autopilot-linked inner chain. The outcome and
+# chainDone flag share the same locked write, eliminating the partial state
+# where Stop can observe a completed chain with no durable outcome. Signature:
+#   tdd_finish_autopilot_chain session run attempt chain outcome [claimed-ticket]
+_tdd_finish_autopilot_chain_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local chain_id="$5" outcome="$6" ticket="$7" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" OUTCOME="$outcome" TICKET="$ticket" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string" && outcomes.has(s.chainOutcome);
+      const base = completeLink
+        && s.session_id === process.env.SID
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && s.active === true && typeof s.vanilla === "boolean" && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string"
+        && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      const exactLink = base
+        && s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exactLink) process.exit(3);
+      const ticket = process.env.TICKET;
+      const ticketOk = ticket
+        ? s.reviewTicket === ticket && s.reviewTicketConsumed === true && s.reviewRound >= 1
+        : s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+      if (!ticketOk) process.exit(3);
+
+      // A completed exact retry is a true no-op. Any attempt to reinterpret
+      // that generation with another outcome (or ticket, rejected above) is a
+      // conflict. A pre-persisted matching max-rounds outcome may be sealed.
+      if (s.chainDone === true) process.exit(s.chainOutcome === process.env.OUTCOME ? 10 : 3);
+      if (s.chainDone !== false || (s.chainOutcome !== "" && s.chainOutcome !== process.env.OUTCOME)) {
+        process.exit(3);
+      }
+      s.chainOutcome = process.env.OUTCOME;
+      s.chainDone = true;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_finish_autopilot_chain() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}"
+  local outcome="${5:-}" ticket="${6:-}" state_file
+  [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac
+  if [ -n "$ticket" ]; then _tdd_review_ticket_shape_ok "$ticket" || return 1; fi
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_finish_autopilot_chain_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$outcome" "$ticket"
 }
 
 # --- Consume-mode reviewer ticket -----------------------------------------
@@ -596,6 +1046,21 @@ _tdd_issue_review_ticket_critical() {
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
+    const markerKeys = [
+      "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
+    ];
+    const marker = s && s.reviewRearm;
+    const markerValid = marker === undefined || (marker && typeof marker === "object"
+      && !Array.isArray(marker)
+      && Object.keys(marker).sort().length === markerKeys.length
+      && Object.keys(marker).sort().every((key, index) => key === markerKeys[index])
+      && marker.schemaVersion === 1 && marker.status === "pending"
+      && typeof marker.runId === "string" && marker.runId === s.autopilotRunId
+      && marker.attempt === s.autopilotAttempt
+      && typeof marker.chainId === "string" && marker.chainId === s.chainId
+      && typeof marker.consumedTicketSha256 === "string"
+      && /^[a-f0-9]{64}$/.test(marker.consumedTicketSha256)
+      && marker.retire === false);
     const valid = s && typeof s === "object" && !Array.isArray(s)
       && s.session_id === process.env.SID
       && typeof s.phase === "string"
@@ -609,10 +1074,14 @@ _tdd_issue_review_ticket_critical() {
       && typeof s.selfReviewFixed === "boolean"
       && typeof s.reviewTicket === "string"
       && typeof s.reviewTicketConsumed === "boolean"
-      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0
+      && markerValid;
     if (!valid) process.exit(3);
     s.reviewTicket = process.env.TICKET;
     s.reviewTicketConsumed = false;
+    // Issuing the first post-rearm ticket is forward progress. The old
+    // crash-retry receipt must not survive into another exhausted budget.
+    delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
@@ -665,6 +1134,33 @@ _tdd_consume_review_ticket_critical() {
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const hasOwn = key => Object.prototype.hasOwnProperty.call(s, key);
+    const linkCount = s && typeof s === "object" && !Array.isArray(s)
+      ? linkKeys.filter(hasOwn).length : 0;
+    const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+      && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+    let autopilot = null;
+    if (linkCount !== 0) {
+      const completeLink = linkCount === linkKeys.length
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt)
+        && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+          .includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && s.chainOutcome === "";
+      if (!completeLink) process.exit(3);
+      autopilot = {
+        runId: s.autopilotRunId,
+        attempt: s.autopilotAttempt,
+        returnStage: s.autopilotReturnStage,
+        chainId: s.chainId,
+        outcome: s.chainOutcome
+      };
+    }
     const valid = s && typeof s === "object" && !Array.isArray(s)
       && s.session_id === process.env.SID
       && typeof s.phase === "string"
@@ -680,7 +1176,8 @@ _tdd_consume_review_ticket_critical() {
       && s.reviewTicket === process.env.TICKET
       && typeof s.reviewTicketConsumed === "boolean"
       && s.reviewTicketConsumed === false
-      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
+      && s.reviewRound < Number.MAX_SAFE_INTEGER;
     if (!valid) process.exit(3);
 
     // The ticket-bound chain state is authoritative. The public rounds file is
@@ -693,7 +1190,7 @@ _tdd_consume_review_ticket_critical() {
     if (process.env.LOG_STYLE !== "none") counter.ts = new Date().toISOString().replace(/\.\d{3}Z$/, "Z");
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], JSON.stringify(counter) + "\n");
-    fs.writeFileSync(process.argv[3], String(next));
+    fs.writeFileSync(process.argv[3], JSON.stringify({next, autopilot}));
   ' "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null; then
     rm -f "$state_tmp" "$counter_tmp" "$next_file" 2>/dev/null
     return 1
@@ -718,15 +1215,112 @@ _tdd_consume_review_ticket_critical() {
   rm -f "$next_file" 2>/dev/null
 }
 
-tdd_consume_review_ticket() {
+# Return the review round and the exact fully-validated Autopilot binding from
+# the same locked read that consumes the one-shot ticket. `autopilot:null`
+# denotes a truly standalone chain; partial linkage is rejected pre-mutation.
+tdd_consume_review_ticket_context() {
   local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}"
   local state_file
+  [ -n "$session_id" ] || return 1
   _tdd_review_ticket_shape_ok "$ticket" || return 1
   [ -n "$counter_file" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
   state_file="$(tdd_state_file "$session_id")"
   _tdd_locked_run "$state_file" \
     _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file"
+}
+
+# Compatibility view for existing library callers. The authoritative claim
+# transaction above always returns the structured result; this wrapper exposes
+# only its round number without performing a second state read or claim.
+tdd_consume_review_ticket() {
+  local claim
+  claim="$(tdd_consume_review_ticket_context "$@")" || return 1
+  CLAIM="$claim" node -e '
+    try {
+      const value = JSON.parse(process.env.CLAIM);
+      if (!Number.isSafeInteger(value.next) || value.next < 1) process.exit(3);
+      process.stdout.write(String(value.next));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Atomically persist the bound max-round self-review handoff. The exact
+# postcondition is outcome=max-rounds + codeReviewDone=true while chainDone
+# stays false. Only an exact retry of that complete postcondition is idempotent;
+# every partial result, stale ticket, or changed generation fails closed.
+_tdd_mark_autopilot_max_round_handoff_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local return_stage="$5" chain_id="$6" ticket="$7" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" TICKET="$ticket" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt)
+        && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+          .includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && ["", "pass", "no-changes", "max-rounds"].includes(s.chainOutcome);
+      const exact = completeLink
+        && s.session_id === process.env.SID
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && s.active === true && typeof s.vanilla === "boolean" && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
+        && s.reviewTicketConsumed === true
+        && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 1
+        && s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.autopilotReturnStage === process.env.RETURN_STAGE
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exact) process.exit(3);
+      const completeResult = s.chainOutcome === "max-rounds"
+        && s.codeReviewDone === true && s.chainDone === false && s.selfReviewFixed === false;
+      if (completeResult) process.exit(10);
+      const fresh = s.chainOutcome === "" && s.codeReviewDone === false
+        && s.chainDone === false && s.selfReviewFixed === false;
+      if (!fresh) process.exit(3);
+      s.chainOutcome = "max-rounds";
+      s.codeReviewDone = true;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_mark_autopilot_max_round_handoff() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}"
+  local return_stage="${4:-}" chain_id="${5:-}" ticket="${6:-}" state_file state_dir
+  [ "$#" -eq 6 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  case "$return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 1 ;; esac
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_autopilot_max_round_handoff_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$return_stage" "$chain_id" "$ticket"
 }
 
 _tdd_mark_review_converged_critical() {
@@ -796,7 +1390,12 @@ _tdd_mark_unclaimed_review_critical() {
     catch (_) { process.exit(3); }
     const key = process.env.KEY;
     const validKey = key === "codeReviewDone" || key === "chainDone" || key === "selfReviewFixed";
-    const valid = validKey && s && typeof s === "object" && !Array.isArray(s)
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const standalone = s && typeof s === "object" && !Array.isArray(s)
+      && linkKeys.every(linkKey => !Object.prototype.hasOwnProperty.call(s, linkKey));
+    const valid = validKey && standalone
       && s.session_id === process.env.SID
       && s.active === true && s.implComplete === true && s.chainDone === false
       && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
@@ -885,6 +1484,8 @@ tdd_ensure_self_review_ticket() {
 
 _tdd_increment_stop_budget_critical() {
   local state_file="$1" session_id="$2" budget_file="$3" result_file="$4"
+  local expected_run="${5:-}" expected_attempt="${6:-}" expected_chain="${7:-}"
+  local expected_return_stage="${8:-}"
   local state_dir budget_dir state_tmp budget_tmp
   state_dir="$(dirname "$state_file")"
   budget_dir="$(dirname "$budget_file")"
@@ -895,13 +1496,31 @@ _tdd_increment_stop_budget_critical() {
     rm -f "$state_tmp" 2>/dev/null
     return 1
   }
-  if ! STATE_FILE="$state_file" BUDGET_FILE="$budget_file" SID="$session_id" node -e '
+  if ! STATE_FILE="$state_file" BUDGET_FILE="$budget_file" SID="$session_id" \
+      EXPECTED_RUN="$expected_run" EXPECTED_ATTEMPT="$expected_attempt" \
+      EXPECTED_CHAIN="$expected_chain" EXPECTED_RETURN_STAGE="$expected_return_stage" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
     if (!s || typeof s !== "object" || Array.isArray(s) || s.session_id !== process.env.SID
         || s.active !== true || s.implComplete !== true || s.chainDone !== false) process.exit(3);
+    if (process.env.EXPECTED_RUN) {
+      const normalOutcome = s.chainOutcome === "";
+      const maxHandoff = s.chainOutcome === "max-rounds"
+        && s.codeReviewDone === true
+        && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string"
+        && s.reviewTicket.length > 0 && s.reviewTicket.length <= 96
+        && /^[A-Za-z0-9_-]+$/.test(s.reviewTicket)
+        && s.reviewTicketConsumed === true
+        && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 1;
+      if (s.autopilotRunId !== process.env.EXPECTED_RUN
+          || s.autopilotAttempt !== Number(process.env.EXPECTED_ATTEMPT)
+          || s.chainId !== process.env.EXPECTED_CHAIN
+          || s.autopilotReturnStage !== process.env.EXPECTED_RETURN_STAGE
+          || !(normalOutcome || maxHandoff)) process.exit(3);
+    }
     let current = Number.isInteger(s.stopBlockCount) && s.stopBlockCount >= 0 ? s.stopBlockCount : 0;
     try {
       const bytes = fs.readFileSync(process.env.BUDGET_FILE);
@@ -960,13 +1579,18 @@ _tdd_rearm_review_critical() {
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const fullyStandalone = s && linkKeys.every(key => !Object.prototype.hasOwnProperty.call(s, key));
     const valid = s && typeof s === "object" && !Array.isArray(s)
       && s.session_id === process.env.SID && s.active === true && s.implComplete === true
       && typeof s.chainDone === "boolean" && typeof s.codeReviewDone === "boolean"
       && typeof s.selfReviewFixed === "boolean"
       && (s.chainDone === true || s.codeReviewDone === true)
       && s.reviewTicket === process.env.TICKET && s.reviewTicketConsumed === true
-      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1
+      && fullyStandalone;
     if (!valid) process.exit(3);
     s.chainDone = false;
     s.codeReviewDone = false;
@@ -975,6 +1599,8 @@ _tdd_rearm_review_critical() {
     s.reviewTicketConsumed = true;
     s.reviewRound = 0;
     s.stopBlockCount = 0;
+    delete s.chainOutcome;
+    delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
   ' "$tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
@@ -1003,6 +1629,180 @@ tdd_rearm_review() {
   _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
   _tdd_locked_run "$state_file" _tdd_rearm_review_critical \
     "$state_file" "$session_id" "$ticket" "$counter_file" "$stopblocks_file"
+}
+
+# Rearm one exact Autopilot-linked review generation. The consumed ticket is
+# used as a capability but only its SHA-256 digest is retained in the receipt.
+# Signature:
+#   tdd_rearm_autopilot_review session run attempt chain consumed-ticket [retire]
+#
+# retire=false keeps the current Inner chain active (the TDD_RUNNING and
+# self-review-handoff case). retire=true makes an already Outer-BLOCKED Inner
+# chain inactive so RESUME must start a fresh bound TDD attempt.
+_tdd_rearm_autopilot_review_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local chain_id="$5" ticket="$6" retire="$7" counter_file="$8"
+  local stopblocks_file="$9" state_dir counter_dir tmp node_rc
+  state_dir="$(dirname "$state_file")"
+  counter_dir="$(dirname "$counter_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$counter_file" regular-or-absent "$counter_dir" || return 1
+  _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" TICKET="$ticket" RETIRE="$retire" node -e '
+      const fs = require("fs");
+      const crypto = require("crypto");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const markerKeys = [
+        "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
+      ];
+      const strictMarker = marker => {
+        if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
+        const keys = Object.keys(marker).sort();
+        return keys.length === markerKeys.length
+          && keys.every((key, index) => key === markerKeys[index])
+          && marker.schemaVersion === 1
+          && marker.status === "pending"
+          && linkId(marker.runId)
+          && Number.isInteger(marker.attempt) && marker.attempt >= 1 && marker.attempt <= 999
+          && linkId(marker.chainId)
+          && typeof marker.consumedTicketSha256 === "string"
+          && /^[a-f0-9]{64}$/.test(marker.consumedTicketSha256)
+          && typeof marker.retire === "boolean";
+      };
+      const digest = crypto.createHash("sha256").update(process.env.TICKET, "utf8").digest("hex");
+      const requested = {
+        schemaVersion: 1,
+        status: "pending",
+        runId: process.env.RUN_ID,
+        attempt: Number(process.env.ATTEMPT),
+        chainId: process.env.CHAIN_ID,
+        consumedTicketSha256: digest,
+        retire: process.env.RETIRE === "true"
+      };
+      const markerMatches = marker => strictMarker(marker)
+        && marker.schemaVersion === requested.schemaVersion
+        && marker.status === requested.status
+        && marker.runId === requested.runId
+        && marker.attempt === requested.attempt
+        && marker.chainId === requested.chainId
+        && marker.consumedTicketSha256 === requested.consumedTicketSha256
+        && marker.retire === requested.retire;
+      const rootShape = s && typeof s === "object" && !Array.isArray(s)
+        && s.session_id === process.env.SID
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && typeof s.active === "boolean" && typeof s.vanilla === "boolean"
+        && typeof s.implComplete === "boolean" && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string" && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0
+        && Number.isInteger(s.stopBlockCount) && s.stopBlockCount >= 0
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string";
+      const exactLink = rootShape
+        && s.autopilotRunId === requested.runId
+        && s.autopilotAttempt === requested.attempt
+        && s.chainId === requested.chainId;
+
+      if (s && Object.prototype.hasOwnProperty.call(s, "reviewRearm")) {
+        // A malformed receipt is corruption, never permission to guess or
+        // overwrite. An exact receipt is retryable only while its committed
+        // post-state is still unchanged.
+        if (!strictMarker(s.reviewRearm)) process.exit(3);
+        const postState = exactLink && markerMatches(s.reviewRearm)
+          && s.active === !requested.retire
+          && s.implComplete === !requested.retire
+          && s.chainDone === false && s.codeReviewDone === false && s.selfReviewFixed === false
+          && s.reviewTicket === "" && s.reviewTicketConsumed === true
+          && s.reviewRound === 0 && s.stopBlockCount === 0 && s.chainOutcome === "";
+        process.exit(postState ? 10 : 3);
+      }
+
+      const terminalShape = requested.retire
+        ? s.chainDone === true
+        : s.chainDone === false && s.codeReviewDone === true;
+      const fresh = exactLink
+        && s.active === true && s.implComplete === true
+        && terminalShape
+        && s.reviewTicket === process.env.TICKET && s.reviewTicketConsumed === true
+        && s.reviewRound >= 1 && s.chainOutcome === "max-rounds";
+      if (!fresh) process.exit(3);
+
+      s.active = !requested.retire;
+      s.implComplete = !requested.retire;
+      s.chainDone = false;
+      s.codeReviewDone = false;
+      s.selfReviewFixed = false;
+      s.reviewTicket = "";
+      s.reviewTicketConsumed = true;
+      s.reviewRound = 0;
+      s.stopBlockCount = 0;
+      s.chainOutcome = "";
+      s.reviewRearm = requested;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    rm -f -- "$counter_file" "$stopblocks_file" 2>/dev/null || return 1
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  # Derived budgets are removed under the same per-session lock before the
+  # receipt becomes the authoritative commit record. A crash before rename is
+  # retried from the still-valid old ticket; a crash after rename follows the
+  # exact receipt path above.
+  rm -f -- "$counter_file" "$stopblocks_file" 2>/dev/null || {
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$state_dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_rearm_autopilot_review() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}"
+  local ticket="${5:-}" retire="${6:-false}" state_file state_dir rounds_dir
+  local counter_file stopblocks_file
+  [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  [ "${#session_id}" -le 128 ] || return 1
+  case "$session_id" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  case "$retire" in true|false) ;; *) return 1 ;; esac
+  command -v node >/dev/null 2>&1 || return 1
+
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  rounds_dir="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  counter_file="${rounds_dir}/rounds-${session_id}.json"
+  stopblocks_file="${state_file}.stopblocks"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_path_safe "$rounds_dir" directory "$rounds_dir" || return 1
+  _tdd_path_safe "$counter_file" regular-or-absent "$rounds_dir" || return 1
+  _tdd_path_safe "$stopblocks_file" regular-or-absent "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_rearm_autopilot_review_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$ticket" \
+    "$retire" "$counter_file" "$stopblocks_file"
 }
 
 _tdd_write_workflow_begin_critical() {
@@ -1881,4 +2681,4 @@ tdd_seed_deferred_review() {
   tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
 }
 
-export -f tdd_state_file _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+export -f tdd_state_file _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true

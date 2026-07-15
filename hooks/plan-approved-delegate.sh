@@ -1,20 +1,205 @@
 #!/bin/bash
-# PostToolUse hook fired when ExitPlanMode succeeds (= user approved plan).
-# Returns JSON via stdout that Claude Code injects as additionalContext
-# next to the tool result. By default (autoTdd enabled) the directive tells
-# the main agent to ASK the user — via the AskUserQuestion tool — whether to
-# run the strict /zensu:tdd flow for this plan, then act on the answer IN THE
-# MAIN THREAD (no subagent): run /zensu:tdd on yes, implement directly on no.
-# Fast-paths skip the question — doc-only plans, an explicit TDD preference
-# already stated in the approval message, and non-interactive Auto Mode
-# (which defaults to /zensu:tdd because there is no human to answer).
-#
-# This is a command-type hook (not prompt-type) so the directive reaches
-# the main agent verbatim instead of being summarized by a judge LLM.
-
+# PostToolUse:ExitPlanMode routing. A durable Autopilot run owns its single
+# planning gate and therefore delegates straight into its bound TDD attempt.
+# Standalone plans retain the existing ask-first autoTdd behavior.
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+INPUT="$(cat)"
+
+PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}"
+if [ -z "$PROJECT_ROOT" ]; then
+  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || PROJECT_ROOT=""
+fi
+ACTIVE_POINTER_HINT="${PROJECT_ROOT:+$PROJECT_ROOT/.zensu/state/autopilot-active.json}"
+AUTOPILOT_STATE_HINT=false
+if [ -n "$ACTIVE_POINTER_HINT" ] && { [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; }; then
+  AUTOPILOT_STATE_HINT=true
+fi
+if [ -n "$PROJECT_ROOT" ]; then
+  for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
+    if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
+      AUTOPILOT_STATE_HINT=true
+      break
+    fi
+  done
+fi
+unset _zensu_autopilot_hint
+
+shell_spawned_agent() {
+  [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
+  printf '%s' "$INPUT" | grep -Eq '"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)+"' && return 0
+  printf '%s' "$INPUT" | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"zensu:(code-reviewer|review-aspect|zensu-plm)"'
+}
+
+emit_autopilot_runtime_blocked() {
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=RUNTIME_UNAVAILABLE. A project-local durable Autopilot state artifact exists, but the state runtime is unavailable. Do not implement, start unbound TDD, replace the run, or infer approval; repair the plugin runtime first."}}'
+}
+
+NODE_AVAILABLE=true
+command -v node >/dev/null 2>&1 || NODE_AVAILABLE=false
+
+read_field() {
+  printf '%s' "$INPUT" | FIELD="$1" node -e '
+    try {
+      const j=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
+      const v=j[process.env.FIELD];
+      process.stdout.write(typeof v==="string"?v:"");
+    } catch (_) { process.stdout.write(""); }
+  ' 2>/dev/null
+}
+
+AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+if [ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ]; then
+  # shellcheck disable=SC1090
+  source "$AGENT_CONTEXT_LIB"
+  if [ "$(zensu_is_spawned_agent "$(read_field agent_id)" "$(read_field agent_type)")" = "true" ]; then
+    exit 0
+  fi
+elif shell_spawned_agent; then
+  exit 0
+fi
+
+if [ "$NODE_AVAILABLE" != "true" ]; then
+  [ "$AUTOPILOT_STATE_HINT" = true ] && emit_autopilot_runtime_blocked
+  exit 0
+fi
+
+AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+if [ ! -r "$AUTOPILOT_STATE_LIB" ] && [ "$AUTOPILOT_STATE_HINT" = true ]; then
+  emit_autopilot_runtime_blocked
+  exit 0
+fi
+
+emit_autopilot_context() {
+  RUN_ID="$1" SESSION_ID="$2" LOG_HELPER_Q="$3" ATTEMPT="$4" RETURN_STAGE="$5" node -e '
+    const run=process.env.RUN_ID;
+    const sid=process.env.SESSION_ID;
+    const log=process.env.LOG_HELPER_Q;
+    const attempt=process.env.ATTEMPT;
+    const returnStage=process.env.RETURN_STAGE;
+    const msg = `ZENSU_AUTOPILOT PLAN_APPROVED runId=${run}. This is the one approved planning gate for the durable run. Do not ask another TDD/workflow question. Continue autonomously in this top-level session. Your VERY NEXT workflow action is the Skill tool with skill=\u0027zensu:tdd\u0027, passing the approved plan as the feature specification and the delegated context AUTOPILOT-RUN: ${run}. Before implementation, that delegated skill must create one safe chain id and run exactly: bash ${log} --tdd-begin --session ${sid} --autopilot-run ${run} --autopilot-attempt ${attempt} --autopilot-return-stage ${returnStage} --chain-id <chain-id>. Do not run a standalone unbound TDD generation, do not ask the user, and do not skip the review/self-review chain.`;
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+  '
+}
+
+emit_autopilot_blocked() {
+  CODE="$1" node -e '
+    const code=process.env.CODE;
+    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}. Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
+  '
+}
+
+# Autopilot takes precedence over hooks.autoTdd: its contract already received
+# the user's one interactive approval. Absence (rc 1) falls through to the
+# standalone behavior; corruption (rc 2+) is a visible, fail-closed blocker.
+if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
+  source "$AUTOPILOT_STATE_LIB"
+  ACTIVE_JSON=""
+  if ACTIVE_JSON="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+    ACTIVE_RC=0
+  else
+    ACTIVE_RC=$?
+  fi
+  if [ "$ACTIVE_RC" -gt 1 ]; then
+    emit_autopilot_blocked CORRUPT_ACTIVE_STATE
+    exit 0
+  fi
+  if [ "$ACTIVE_RC" -eq 0 ]; then
+    ACTIVE_STAGE="$(printf '%s' "$ACTIVE_JSON" | node -e '
+      try {
+        const state=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
+        if(typeof state.stage!=="string")process.exit(3);
+        process.stdout.write(state.stage);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null)" || {
+      emit_autopilot_blocked CORRUPT_ACTIVE_STATE
+      exit 0
+    }
+    case "$ACTIVE_STAGE" in
+      DONE|CANCELLED)
+        # Terminal pointers are historical durability records. They no longer
+        # own ExitPlanMode, so ordinary plans use the standalone policy below.
+        ;;
+      PLANNING|AWAIT_TDD)
+    SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if [ ! -r "$SESSION_LIB" ]; then
+      emit_autopilot_runtime_blocked
+      exit 0
+    fi
+    SESSION_ID="$(read_field session_id)"
+    TRANSCRIPT_PATH=""
+    [ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(read_field transcript_path)"
+    source "$SESSION_LIB"
+    SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
+
+    ACTIVE_META="$(printf '%s' "$ACTIVE_JSON" | node -e '
+      let input="";
+      process.stdin.on("data",c=>input+=c);
+      process.stdin.on("end",()=>{ try {
+        const state=JSON.parse(input||"{}");
+        const stages=new Set(["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"]);
+        const attempt=state.stage==="PLANNING" ? 1 : state.tdd&&Number.isInteger(state.tdd.attempt) ? state.tdd.attempt+1 : null;
+        const returnStage=state.stage==="PLANNING" ? "GATES" : state.tdd&&state.tdd.returnStage;
+        if(!Number.isInteger(attempt)||attempt<1||attempt>999||!stages.has(returnStage))process.exit(3);
+        process.stdout.write([state.runId,state.ownerSessionId,state.stage,attempt,returnStage].join("\t"));
+      } catch (_) { process.exit(3); } });
+    ' 2>/dev/null)" || {
+      emit_autopilot_blocked CORRUPT_ACTIVE_STATE
+      exit 0
+    }
+    IFS=$'\t' read -r ACTIVE_RUN ACTIVE_OWNER ACTIVE_STAGE ACTIVE_ATTEMPT ACTIVE_RETURN_STAGE <<<"$ACTIVE_META"
+    PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
+      ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" node -e '
+      const crypto=require("crypto");
+      let raw="";
+      process.stdin.on("data",c=>raw+=c);
+      process.stdin.on("end",()=>{ try {
+        const input=JSON.parse(raw||"{}");
+        const plan=input && input.tool_input && input.tool_input.plan;
+        if (typeof plan!=="string" || !plan) process.exit(3);
+        const matches=[...plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
+        if (matches.length!==1) process.exit(4);
+        if (process.env.ACTIVE_RUN!==matches[0][1]) process.exit(5);
+        if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
+        if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
+        const sha=crypto.createHash("sha256").update(plan,"utf8").digest("hex");
+        process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
+      } catch (_) { process.exit(3); } });
+    ' 2>/dev/null)"
+    META_RC=$?
+    if [ "$META_RC" -ne 0 ]; then
+      case "$META_RC" in
+        4) BLOCK_CODE=PLAN_MARKER_MISSING_OR_AMBIGUOUS ;;
+        5) BLOCK_CODE=PLAN_MARKER_RUN_MISMATCH ;;
+        6) BLOCK_CODE=OWNER_SESSION_MISMATCH ;;
+        7) BLOCK_CODE=PLAN_STAGE_MISMATCH ;;
+        *) BLOCK_CODE=INVALID_PLAN_PAYLOAD ;;
+      esac
+      emit_autopilot_blocked "$BLOCK_CODE"
+      exit 0
+    fi
+    IFS=$'\t' read -r RUN_ID PLAN_SHA <<<"$PLAN_META"
+    PLAN_PAYLOAD="$(PLAN_SHA="$PLAN_SHA" node -e 'process.stdout.write(JSON.stringify({approvedPlanSha256:process.env.PLAN_SHA}))')"
+    if ! autopilot_apply_event "$RUN_ID" "plan-approved-${PLAN_SHA}" PLAN_APPROVED \
+        "$PLAN_PAYLOAD" "$PROJECT_ROOT" "$SESSION_ID" >/dev/null 2>&1; then
+      emit_autopilot_blocked PLAN_TRANSITION_REJECTED
+      exit 0
+    fi
+    LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+    emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_HELPER_Q" \
+      "$ACTIVE_ATTEMPT" "$ACTIVE_RETURN_STAGE"
+    exit 0
+        ;;
+      *)
+        emit_autopilot_blocked PLAN_STAGE_MISMATCH
+        exit 0
+        ;;
+    esac
+  fi
+fi
+
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoTdd || exit 0
 

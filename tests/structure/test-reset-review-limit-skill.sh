@@ -210,6 +210,49 @@ else
   check "R25 response contract keeps the capability ticket out of output" FAIL
 fi
 
+if grep -qF -- '--review-rearm --autopilot-run "$RUN_ID"' "$SKILL_MD" \
+  && grep -qF -- '--autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' "$SKILL_MD" \
+  && grep -qF -- '--claimed-review-ticket "$REVIEW_TICKET"' "$SKILL_MD"; then
+  check "R25a durable reset uses the central exact-bound zensu-log CLI" PASS
+else
+  check "R25a central exact-bound zensu-log CLI" FAIL
+fi
+
+if ! grep -qF 'source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"' "$SKILL_MD" \
+  && ! grep -qF 'tdd_rearm_autopilot_review' "$SKILL_MD" \
+  && ! grep -qF -- '--event RESUME' "$SKILL_MD"; then
+  check "R25b durable reset never composes phase API and RESUME outside zensu-log" PASS
+else
+  check "R25b no direct phase API or separate RESUME" FAIL
+fi
+
+if grep -qF 'SHA-256' "$SKILL_MD" \
+  && grep -qF 'byte-identical binding and old ticket' "$SKILL_MD" \
+  && grep -qF 'idempotent exit 0' "$SKILL_MD"; then
+  check "R25c durable reset limits crash replay to the strict digest receipt" PASS
+else
+  check "R25c durable reset limits crash replay to the strict digest receipt" FAIL
+fi
+
+if grep -qF 'stage=TDD_RUNNING' "$SKILL_MD" \
+  && grep -qF 'blocked.code=TDD_MAX_ROUNDS' "$SKILL_MD" \
+  && grep -qF 'selects rearm versus retire-and-resume internally' "$SKILL_MD" \
+  && grep -qF 'start `ATTEMPT + 1` through the bound `--tdd-begin` form' "$SKILL_MD"; then
+  check "R25d central composite chooses same-chain rearm or fresh bound attempt" PASS
+else
+  check "R25d central composite recovery branches" FAIL
+fi
+
+if grep -qF 'stage=DONE' "$SKILL_MD" \
+  && grep -qF 'stage=CANCELLED' "$SKILL_MD" \
+  && grep -qF 'historical outer pointer' "$SKILL_MD" \
+  && grep -qF 'only its successful exact ticket transition proves standalone status' "$SKILL_MD" \
+  && grep -qF '`BLOCKED` never falls through to' "$SKILL_MD"; then
+  check "R25e terminal outer pointers preserve proven standalone reset semantics" PASS
+else
+  check "R25e terminal-pointer standalone classification" FAIL
+fi
+
 # Runtime contract: the helper performs one generation-bound CAS, rejects a
 # wrong/replayed ticket without mutation, leaves sibling state untouched, and
 # makes the next real reviewer completion round 1.
@@ -244,6 +287,10 @@ runtime_review() {
 
 RUNTIME_SID=reset-runtime
 RUNTIME_OTHER=reset-sibling
+source "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+autopilot_begin_run reset_historical_run reset_historical_owner "$RUNTIME_PROJECT" >/dev/null
+autopilot_apply_event reset_historical_run reset-historical-cancel CANCEL '{}' \
+  "$RUNTIME_PROJECT" >/dev/null
 runtime_log --tdd-begin --session "$RUNTIME_SID" >/dev/null
 runtime_log --tdd-complete --session "$RUNTIME_SID" >/dev/null
 RUNTIME_TICKET="$(runtime_log --review-ticket --session "$RUNTIME_SID")"
@@ -273,10 +320,12 @@ else
 fi
 
 if runtime_log --review-rearm --session "$RUNTIME_SID" \
-    --claimed-review-ticket "$RUNTIME_TICKET" >/dev/null; then
-  check "R27 matching consumed terminal generation rearms successfully" PASS
+    --claimed-review-ticket "$RUNTIME_TICKET" >/dev/null \
+  && node -e 'const j=require(process.argv[1]);process.exit(j.stage==="CANCELLED"?0:1)' \
+       "$(autopilot_run_file reset_historical_run "$RUNTIME_PROJECT")"; then
+  check "R27 matching standalone generation rearms behind a historical terminal pointer" PASS
 else
-  check "R27 matching consumed terminal generation rearms successfully" FAIL
+  check "R27 historical terminal pointer preserves standalone rearm" FAIL
 fi
 
 if node -e '
@@ -303,15 +352,21 @@ else
 fi
 
 RUNTIME_NEXT_TICKET="$(runtime_log --review-ticket --session "$RUNTIME_SID")"
-runtime_review "$RUNTIME_SID" "$RUNTIME_NEXT_TICKET" >/dev/null
+RUNTIME_NEXT_OUTPUT="$(runtime_review "$RUNTIME_SID" "$RUNTIME_NEXT_TICKET")"
 RUNTIME_NEXT_ROUND="$(node -e '
   try { process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count)); }
   catch (_) { process.stdout.write(""); }
 ' "$RUNTIME_COUNTER")"
-if [ "$RUNTIME_NEXT_ROUND" = 1 ]; then
-  check "R30 first completion after rearm is round 1" PASS
+if [ "$RUNTIME_NEXT_ROUND" = 1 ] \
+  && printf '%s' "$RUNTIME_NEXT_OUTPUT" | node -e '
+    try {
+      const j=JSON.parse(require("fs").readFileSync(0,"utf8"));
+      process.exit(j && j.hookSpecificOutput ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  '; then
+  check "R30 first completion after rearm is an actionable round 1" PASS
 else
-  check "R30 first completion after rearm is round 1" FAIL
+  check "R30 first completion after rearm is an actionable round 1" FAIL
 fi
 
 echo "----"

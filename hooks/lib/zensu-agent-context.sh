@@ -1,9 +1,9 @@
 #!/bin/bash
 
 zensu_hook_agent_id() {
-  PAYLOAD="${1:-}" node -e '
+  printf '%s' "${1:-}" | node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const v = j.agent_id;
       process.stdout.write(typeof v === "string" ? v : "");
     } catch (_) { process.stdout.write(""); }
@@ -11,9 +11,9 @@ zensu_hook_agent_id() {
 }
 
 zensu_hook_agent_type() {
-  PAYLOAD="${1:-}" node -e '
+  printf '%s' "${1:-}" | node -e '
     try {
-      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const j = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
       const v = j.agent_type;
       process.stdout.write(typeof v === "string" ? v : "");
     } catch (_) { process.stdout.write(""); }

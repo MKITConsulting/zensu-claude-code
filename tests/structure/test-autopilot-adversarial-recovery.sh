@@ -1,0 +1,574 @@
+#!/bin/bash
+# Adversarial recovery contracts for missing runtime/state and cross-file CAS.
+set -u
+
+PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+
+PASS=0
+FAIL=0
+check() {
+  if [ "$2" = PASS ]; then
+    printf '  PASS  %s\n' "$1"
+    PASS=$((PASS + 1))
+  else
+    printf '  FAIL  %s\n' "$1"
+    FAIL=$((FAIL + 1))
+  fi
+}
+
+if [ ! -r "$STATE_LIB" ] || [ ! -r "$PHASE_LIB" ]; then
+  check "X1 durable state libraries exist" FAIL
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+source "$STATE_LIB"
+
+ROOT="$(mktemp -d -t zensu-autopilot-adversarial-XXXXXX)"
+trap 'rm -rf "$ROOT"' EXIT
+export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+
+decision() {
+  node -e '
+    let input="";
+    process.stdin.on("data", chunk => input += chunk);
+    process.stdin.on("end", () => {
+      try { process.stdout.write(JSON.parse(input).decision || "allow"); }
+      catch (_) { process.stdout.write("allow"); }
+    });
+  '
+}
+
+invoke_stop() {
+  local project="$1" session_id="$2"
+  printf '{"session_id":"%s"}' "$session_id" \
+    | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$ROOT/missing-config.json" \
+      bash "$STOP" 2>/dev/null
+}
+
+field_ok() {
+  FILE="$1" EXPR="$2" node -e '
+    const value = require(process.env.FILE);
+    process.exit(Function("value", `return Boolean(${process.env.EXPR})`)(value) ? 0 : 1);
+  ' 2>/dev/null
+}
+
+pair_ok() {
+  OUTER_FILE="$1" INNER_FILE="$2" EXPR="$3" node -e '
+    const outer = require(process.env.OUTER_FILE);
+    const inner = require(process.env.INNER_FILE);
+    process.exit(Function("outer", "inner", `return Boolean(${process.env.EXPR})`)(outer, inner) ? 0 : 1);
+  ' 2>/dev/null
+}
+
+digest() {
+  shasum -a 256 "$1" | awk '{print $1}'
+}
+
+approve() {
+  local project="$1" run_id="$2" session_id="$3"
+  local plan_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  mkdir -p "$project"
+  autopilot_begin_run "$run_id" "$session_id" "$project" >/dev/null \
+    && autopilot_apply_event "$run_id" "plan-${run_id}" PLAN_APPROVED \
+      "{\"approvedPlanSha256\":\"$plan_sha\"}" "$project" "$session_id" >/dev/null
+}
+
+begin_bound() {
+  local project="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  autopilot_begin_tdd_attempt "$run_id" "tdd-started-${chain_id}" "$project" \
+    "$session_id" true "$attempt" GATES "$chain_id" >/dev/null
+}
+
+mark_complete() {
+  local project="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  CLAUDE_PROJECT_DIR="$project" tdd_mark_impl_complete_bound \
+    "$session_id" "$run_id" "$attempt" "$chain_id" >/dev/null
+}
+
+seed_exhausted_review() {
+  local project="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
+  local ticket counter_file
+  approve "$project" "$run_id" "$session_id" || return 1
+  begin_bound "$project" "$run_id" "$session_id" "$attempt" "$chain_id" || return 1
+  mark_complete "$project" "$run_id" "$session_id" "$attempt" "$chain_id" || return 1
+  ticket="$(CLAUDE_PROJECT_DIR="$project" tdd_issue_review_ticket "$session_id")" || return 1
+  counter_file="$project/.zensu/state/rounds-${session_id}.json"
+  CLAUDE_PROJECT_DIR="$project" tdd_consume_review_ticket \
+    "$session_id" "$ticket" "$counter_file" >/dev/null || return 1
+  CLAUDE_PROJECT_DIR="$project" tdd_set_chain_outcome \
+    "$session_id" max-rounds "$run_id" "$attempt" "$chain_id" "$ticket" >/dev/null || return 1
+  CLAUDE_PROJECT_DIR="$project" tdd_mark_review_converged \
+    "$session_id" "$ticket" codeReviewDone >/dev/null || return 1
+  printf '%s\n' "$ticket"
+}
+
+check "X1 durable state libraries exist" PASS
+
+# A bound Inner generation is proof that an outer run exists. Removing only
+# the project-local active pointer must never turn that proof into "no run",
+# including after the Inner terminus was durably committed first.
+P2="$ROOT/missing-pointer-active"
+R2=adversarial_pointer_active_run
+S2=adversarial_pointer_active_session
+C2=adversarial-pointer-active-chain
+approve "$P2" "$R2" "$S2" && begin_bound "$P2" "$R2" "$S2" 1 "$C2" \
+  && mark_complete "$P2" "$R2" "$S2" 1 "$C2" || exit 1
+rm -f "$(autopilot_active_file "$P2")"
+RF2="$(autopilot_run_file "$R2" "$P2")"
+TF2="$P2/.zensu/state/tdd-phase-${S2}.json"
+BEFORE2_OUTER="$(digest "$RF2")"; BEFORE2_INNER="$(digest "$TF2")"
+OUT2="$(invoke_stop "$P2" "$S2")"
+if [ "$(printf '%s' "$OUT2" | decision)" = block ] \
+  && printf '%s' "$OUT2" | grep -qi 'corrupt' \
+  && [ "$(digest "$RF2")" = "$BEFORE2_OUTER" ] \
+  && [ "$(digest "$TF2")" = "$BEFORE2_INNER" ]; then
+  check "X2 missing pointer plus nonterminal run blocks centrally without mutation" PASS
+else
+  check "X2 missing active pointer cannot release a bound Inner generation" FAIL
+fi
+
+P3="$ROOT/missing-pointer-done"
+R3=adversarial_pointer_done_run
+S3=adversarial_pointer_done_session
+C3=adversarial-pointer-done-chain
+approve "$P3" "$R3" "$S3" && begin_bound "$P3" "$R3" "$S3" 1 "$C3" \
+  && mark_complete "$P3" "$R3" "$S3" 1 "$C3" \
+  && CLAUDE_PROJECT_DIR="$P3" tdd_finish_autopilot_chain \
+    "$S3" "$R3" 1 "$C3" pass >/dev/null || exit 1
+rm -f "$(autopilot_active_file "$P3")"
+RF3="$(autopilot_run_file "$R3" "$P3")"
+TF3="$P3/.zensu/state/tdd-phase-${S3}.json"
+BEFORE3_OUTER="$(digest "$RF3")"; BEFORE3_INNER="$(digest "$TF3")"
+OUT3="$(invoke_stop "$P3" "$S3")"
+if [ "$(printf '%s' "$OUT3" | decision)" = block ] \
+  && printf '%s' "$OUT3" | grep -qi 'corrupt' \
+  && [ "$(digest "$RF3")" = "$BEFORE3_OUTER" ] \
+  && [ "$(digest "$TF3")" = "$BEFORE3_INNER" ] \
+  && field_ok "$TF3" 'value.chainDone === true && value.chainOutcome === "pass"'; then
+  check "X3 chainDone plus orphan outer state blocks centrally without mutation" PASS
+else
+  check "X3 chainDone cannot hide a missing bound active pointer" FAIL
+fi
+
+# Runtime loss must fail closed from the Inner state hint alone. These cases
+# intentionally have no outer pointer and therefore exercise standalone TDD.
+P4="$ROOT/standalone-runtime"
+S4=adversarial_standalone_runtime
+mkdir -p "$P4"
+CLAUDE_PROJECT_DIR="$P4" bash "$LOG" --tdd-begin --session "$S4" >/dev/null \
+  && CLAUDE_PROJECT_DIR="$P4" bash "$LOG" --tdd-complete --session "$S4" >/dev/null \
+  || exit 1
+NO_NODE_PATH="$ROOT/no-node-path"
+mkdir -p "$NO_NODE_PATH"
+for utility in cat grep; do
+  utility_path="$(command -v "$utility")"
+  [ -n "$utility_path" ] && ln -s "$utility_path" "$NO_NODE_PATH/$utility"
+done
+OUT4="$(printf '{"session_id":"%s"}' "$S4" \
+  | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$NO_NODE_PATH" \
+    /bin/bash "$STOP" 2>/dev/null)"
+if [ "$(printf '%s' "$OUT4" | decision)" = block ] \
+  && printf '%s' "$OUT4" | grep -qF 'project-local inner state exists'; then
+  check "X4 missing Node blocks an active standalone Inner chain" PASS
+else
+  check "X4 missing Node cannot release standalone Inner work" FAIL
+fi
+
+MISSING_PHASE_ROOT="$ROOT/missing-phase-root"
+mkdir -p "$MISSING_PHASE_ROOT/hooks/lib"
+for library in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-autopilot-state.sh; do
+  ln -s "$PLUGIN_DIR/hooks/lib/$library" "$MISSING_PHASE_ROOT/hooks/lib/$library"
+done
+OUT5="$(printf '{"session_id":"%s"}' "$S4" \
+  | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$MISSING_PHASE_ROOT" \
+    bash "$STOP" 2>/dev/null)"
+if [ "$(printf '%s' "$OUT5" | decision)" = block ] \
+  && printf '%s' "$OUT5" | grep -qF 'project-local inner state exists'; then
+  check "X5 missing TDD core library blocks an active standalone Inner chain" PASS
+else
+  check "X5 missing core library cannot release standalone Inner work" FAIL
+fi
+
+P6="$ROOT/corrupt-inner"
+S6=adversarial_corrupt_inner
+mkdir -p "$P6"
+CLAUDE_PROJECT_DIR="$P6" bash "$LOG" --tdd-begin --session "$S6" >/dev/null || exit 1
+printf '%s\n' '{not-json' > "$P6/.zensu/state/tdd-phase-${S6}.json"
+OUT6="$(invoke_stop "$P6" "$S6")"
+if [ "$(printf '%s' "$OUT6" | decision)" = block ] \
+  && printf '%s' "$OUT6" | grep -qF 'current-session inner state is corrupt or unsafe'; then
+  check "X6 corrupt current-session Inner JSON blocks Stop" PASS
+else
+  check "X6 corrupt Inner JSON cannot be interpreted as absent" FAIL
+fi
+
+# If the Inner terminus landed but the outer event did not, composite rearm
+# must first preserve that evidence in the outer ledger, then retire and
+# resume. It may not clear chainDone while leaving a BLOCKED outer generation
+# pointing at an active unfinished Inner chain.
+P7="$ROOT/rearm-crash-window"
+R7=adversarial_rearm_crash_run
+S7=adversarial_rearm_crash_session
+C7=adversarial-rearm-crash-chain
+T7="$(seed_exhausted_review "$P7" "$R7" "$S7" 1 "$C7")" || exit 1
+CLAUDE_PROJECT_DIR="$P7" tdd_finish_autopilot_chain \
+  "$S7" "$R7" 1 "$C7" max-rounds "$T7" >/dev/null || exit 1
+RF7="$(autopilot_run_file "$R7" "$P7")"
+TF7="$P7/.zensu/state/tdd-phase-${S7}.json"
+if field_ok "$RF7" 'value.stage === "TDD_RUNNING"' \
+  && field_ok "$TF7" 'value.chainDone === true && value.chainOutcome === "max-rounds"' \
+  && CLAUDE_PROJECT_DIR="$P7" autopilot_rearm_review \
+    "$R7" "$P7" "$S7" 1 "$C7" "$T7" >/dev/null \
+  && pair_ok "$RF7" "$TF7" '
+    outer.stage === "AWAIT_TDD"
+      && inner.active === false && inner.chainDone === false && inner.chainOutcome === ""
+      && inner.reviewRearm && inner.reviewRearm.retire === true
+      && outer.events.some(event => event.eventType === "TDD_CHAIN_DONE"
+        && event.payload && event.payload.chainId === "adversarial-rearm-crash-chain"
+        && event.payload.outcome === "max-rounds")
+      && outer.events.findIndex(event => event.eventType === "TDD_CHAIN_DONE")
+        < outer.events.findIndex(event => event.eventType === "RESUME")
+      && !(outer.stage === "BLOCKED" && inner.active === true && inner.chainDone === false)'; then
+  check "X7 composite rearm preserves chainDone crash evidence before retire-and-resume" PASS
+else
+  check "X7 composite rearm cannot erase unreconciled chainDone evidence" FAIL
+fi
+
+# Race the same composite against a full finish. Both operations acquire the
+# project-wide outer lock first, so the result must match one complete serial
+# order: rearm-first leaves TDD_RUNNING with a freshly armed Inner generation;
+# finish-first is reconciled and retired to AWAIT_TDD.
+P8="$ROOT/rearm-finish-race"
+R8=adversarial_rearm_race_run
+S8=adversarial_rearm_race_session
+C8=adversarial-rearm-race-chain
+T8="$(seed_exhausted_review "$P8" "$R8" "$S8" 1 "$C8")" || exit 1
+(
+  CLAUDE_PROJECT_DIR="$P8" autopilot_rearm_review \
+    "$R8" "$P8" "$S8" 1 "$C8" "$T8" >/dev/null 2>&1
+  printf '%s\n' "$?" > "$P8/rearm.rc"
+) &
+REARM_PID=$!
+(
+  CLAUDE_PROJECT_DIR="$P8" autopilot_finish_tdd_attempt \
+    "$R8" "tdd-done-${C8}" "$P8" "$S8" 1 "$C8" max-rounds true "$T8" \
+    >/dev/null 2>&1
+  printf '%s\n' "$?" > "$P8/finish.rc"
+) &
+FINISH_PID=$!
+wait "$REARM_PID"
+wait "$FINISH_PID"
+RF8="$(autopilot_run_file "$R8" "$P8")"
+TF8="$P8/.zensu/state/tdd-phase-${S8}.json"
+if [ "$(cat "$P8/rearm.rc")" = 0 ] \
+  && pair_ok "$RF8" "$TF8" '
+    !(outer.stage === "BLOCKED" && inner.active === true && inner.chainDone === false)
+      && ((outer.stage === "TDD_RUNNING"
+          && inner.active === true && inner.implComplete === true
+          && inner.chainDone === false && inner.chainOutcome === "")
+        || (outer.stage === "AWAIT_TDD"
+          && inner.active === false && inner.chainDone === false && inner.chainOutcome === ""
+          && outer.events.some(event => event.eventType === "TDD_CHAIN_DONE"
+            && event.payload && event.payload.outcome === "max-rounds")))'; then
+  check "X8 outer-lock serializes parallel finish versus composite rearm" PASS
+else
+  check "X8 parallel finish/rearm cannot create BLOCKED plus active unfinished Inner" FAIL
+fi
+
+# A terminal outer run may clear only the generation it still names. A stale
+# attempt-N reset must lose its CAS once attempt N+1 owns both files.
+P9="$ROOT/stale-reset"
+R9=adversarial_stale_reset_run
+S9=adversarial_stale_reset_session
+C9A=adversarial-stale-reset-chain-a
+C9B=adversarial-stale-reset-chain-b
+HEAD9=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+approve "$P9" "$R9" "$S9" && begin_bound "$P9" "$R9" "$S9" 1 "$C9A" \
+  && mark_complete "$P9" "$R9" "$S9" 1 "$C9A" \
+  && CLAUDE_PROJECT_DIR="$P9" autopilot_finish_tdd_attempt \
+    "$R9" "tdd-done-${C9A}" "$P9" "$S9" 1 "$C9A" pass false >/dev/null \
+  && autopilot_apply_event "$R9" adversarial-gates-failed GATES_FAILED \
+    "{\"headSha\":\"$HEAD9\",\"reason\":\"retry\"}" "$P9" "$S9" >/dev/null \
+  && begin_bound "$P9" "$R9" "$S9" 2 "$C9B" \
+  && autopilot_apply_event "$R9" adversarial-cancel-newer CANCEL '{}' \
+    "$P9" "$S9" >/dev/null || exit 1
+TF9="$P9/.zensu/state/tdd-phase-${S9}.json"
+BEFORE9="$(digest "$TF9")"
+STALE_RESET_REJECTED=true
+CLAUDE_PROJECT_DIR="$P9" tdd_clear_autopilot_session \
+  "$S9" "$R9" 1 "$C9A" >/dev/null 2>&1 && STALE_RESET_REJECTED=false
+CLAUDE_PROJECT_DIR="$P9" autopilot_reset_inner \
+  "$R9" "$P9" "$S9" 1 "$C9A" >/dev/null 2>&1 && STALE_RESET_REJECTED=false
+if [ "$STALE_RESET_REJECTED" = true ] \
+  && [ "$(digest "$TF9")" = "$BEFORE9" ] \
+  && field_ok "$TF9" \
+    'value.active === true && value.autopilotAttempt === 2 && value.chainId === "adversarial-stale-reset-chain-b"' \
+  && CLAUDE_PROJECT_DIR="$P9" autopilot_reset_inner \
+    "$R9" "$P9" "$S9" 2 "$C9B" >/dev/null; then
+  check "X9 bound reset CAS cannot delete a newer attempt" PASS
+else
+  check "X9 stale bound reset leaves the newer attempt byte-stable" FAIL
+fi
+
+# The shared state-verb parser rejects malformed invocations before it resolves
+# a state mutation. In particular, known-but-invalid options are not silently
+# ignored and explicit empty sessions do not fall back to an implicit session.
+P10="$ROOT/strict-cli"
+S10=adversarial_strict_cli_session
+mkdir -p "$P10"
+CLAUDE_PROJECT_DIR="$P10" bash "$LOG" --tdd-begin --session "$S10" >/dev/null \
+  && CLAUDE_PROJECT_DIR="$P10" bash "$LOG" --tdd-complete --session "$S10" >/dev/null \
+  || exit 1
+TF10="$P10/.zensu/state/tdd-phase-${S10}.json"
+BEFORE10="$(digest "$TF10")"
+cli_rc() {
+  CLAUDE_PROJECT_DIR="$P10" bash "$LOG" "$@" >/dev/null 2>&1
+  printf '%s\n' "$?"
+}
+RC10_DUP="$(cli_rc --review-ticket --session "$S10" --session "$S10")"
+RC10_EMPTY="$(cli_rc --review-ticket --session '')"
+RC10_UNKNOWN="$(cli_rc --review-ticket --session "$S10" --not-a-zensu-option value)"
+RC10_INVALID="$(cli_rc --review-ticket --session "$S10" --tools Bash)"
+if [ "$RC10_DUP" = 2 ] && [ "$RC10_EMPTY" = 2 ] \
+  && [ "$RC10_UNKNOWN" = 2 ] && [ "$RC10_INVALID" = 2 ] \
+  && [ "$(digest "$TF10")" = "$BEFORE10" ]; then
+  check "X10 strict CLI rejects duplicate/empty session and invalid flags byte-stably" PASS
+else
+  check "X10 malformed state-verb CLI returns rc=2 without mutation" FAIL
+fi
+
+# Pending-review adoption is a three-lock composite: Outer project inventory,
+# pending marker/claim, then the seeded Inner session. With no outer inventory,
+# the wrapper preserves the existing deferred-review behavior.
+P11="$ROOT/adopt-absent"
+S11=adversarial_adopt_absent_session
+mkdir -p "$P11"
+CLAUDE_PROJECT_DIR="$P11" TDD_STATE_DIR="$P11/.zensu/state" \
+  tdd_write_pending_review absent.ts "absent outer fixture" >/dev/null || exit 1
+if CLAUDE_PROJECT_DIR="$P11" TDD_STATE_DIR="$P11/.zensu/state" \
+    autopilot_adopt_pending_review "$P11" "$S11" true 0 >/dev/null 2>&1 \
+  && [ -f "$P11/.zensu/state/pending-review.json.claim" ] \
+  && [ ! -e "$P11/.zensu/state/pending-review.json" ] \
+  && field_ok "$P11/.zensu/state/tdd-phase-${S11}.json" \
+    'value.active === true && value.implComplete === true && value.chainDone === false'; then
+  check "X11 absent Outer inventory permits composite pending-review adoption" PASS
+else
+  check "X11 absent Outer inventory keeps deferred-review adoption compatible" FAIL
+fi
+
+# The inner API uses rc=2 for "nothing queued", while rc=2 from the Outer read
+# means corrupt/unsafe durable inventory. The composite exposes no-work as rc=6
+# so Stop can distinguish a benign empty queue from fail-closed corruption.
+P11B="$ROOT/adopt-no-marker"
+S11B=adversarial_adopt_no_marker_session
+mkdir -p "$P11B"
+_autopilot_prepare_storage "$P11B" || exit 1
+CLAUDE_PROJECT_DIR="$P11B" TDD_STATE_DIR="$P11B/.zensu/state" \
+  autopilot_adopt_pending_review "$P11B" "$S11B" true 0 >/dev/null 2>&1
+RC11B=$?
+FILES11B="$(find "$P11B/.zensu/state" -maxdepth 1 -type f \
+  ! -name 'autopilot.lock' | wc -l | tr -d '[:space:]')"
+if [ "$RC11B" = 6 ] && [ "$FILES11B" = 0 ] \
+  && [ ! -e "$P11B/.zensu/state/pending-review.json.claim" ] \
+  && [ ! -e "$P11B/.zensu/state/tdd-phase-${S11B}.json" ]; then
+  check "X11b empty pending queue returns distinct no-work rc=6 byte-stably" PASS
+else
+  check "X11b no-work cannot collide with corrupt Outer rc=2 (rc=$RC11B files=$FILES11B)" FAIL
+fi
+
+# Failures inside the pending/Inner layer retain their legacy rc=1 and must not
+# be collapsed into either no-work or corrupt-Outer status.
+P11C="$ROOT/adopt-inner-failure"
+S11C=adversarial_adopt_inner_failure_session
+mkdir -p "$P11C/.zensu/state"
+printf '%s\n' '{"files":["safe.ts"],"summary":"must stay outside"}' > "$P11C/outside-pending.json"
+ln -s "$P11C/outside-pending.json" "$P11C/.zensu/state/pending-review.json"
+BEFORE11C="$(digest "$P11C/outside-pending.json")"
+CLAUDE_PROJECT_DIR="$P11C" TDD_STATE_DIR="$P11C/.zensu/state" \
+  autopilot_adopt_pending_review "$P11C" "$S11C" true 0 >/dev/null 2>&1
+RC11C=$?
+if [ "$RC11C" = 1 ] \
+  && [ "$(digest "$P11C/outside-pending.json")" = "$BEFORE11C" ] \
+  && [ -L "$P11C/.zensu/state/pending-review.json" ] \
+  && [ ! -e "$P11C/.zensu/state/pending-review.json.claim" ] \
+  && [ ! -e "$P11C/.zensu/state/tdd-phase-${S11C}.json" ]; then
+  check "X11c pending/Inner mutation failure remains distinct rc=1" PASS
+else
+  check "X11c inner failure cannot look like no-work or Outer corruption (rc=$RC11C)" FAIL
+fi
+
+# CANCELLED is genuinely terminal and does not retain ownership. It therefore
+# permits a later standalone deferred review, unlike resumable BLOCKED.
+P12="$ROOT/adopt-cancelled"
+R12=adversarial_adopt_cancelled_run
+O12=adversarial_adopt_cancelled_owner
+S12=adversarial_adopt_after_cancel
+mkdir -p "$P12"
+autopilot_begin_run "$R12" "$O12" "$P12" >/dev/null \
+  && autopilot_apply_event "$R12" adversarial-adopt-cancel CANCEL '{}' \
+    "$P12" "$O12" >/dev/null \
+  && CLAUDE_PROJECT_DIR="$P12" TDD_STATE_DIR="$P12/.zensu/state" \
+    tdd_write_pending_review cancelled.ts "cancelled outer fixture" >/dev/null || exit 1
+if CLAUDE_PROJECT_DIR="$P12" TDD_STATE_DIR="$P12/.zensu/state" \
+    autopilot_adopt_pending_review "$P12" "$S12" false 0 >/dev/null 2>&1 \
+  && field_ok "$P12/.zensu/state/tdd-phase-${S12}.json" \
+    'value.active === true && value.implComplete === true && value.chainDone === false' \
+  && field_ok "$(autopilot_run_file "$R12" "$P12")" 'value.stage === "CANCELLED"'; then
+  check "X12 CANCELLED Outer history permits composite pending-review adoption" PASS
+else
+  check "X12 terminal CANCELLED does not suppress a later deferred review" FAIL
+fi
+
+# BLOCKED is resumable and still owns the project. Adoption must return rc=4
+# without moving the marker, writing a claim, seeding Inner, or changing Outer.
+P13="$ROOT/adopt-blocked"
+R13=adversarial_adopt_blocked_run
+O13=adversarial_adopt_blocked_owner
+S13=adversarial_adopt_blocked_contender
+mkdir -p "$P13"
+autopilot_begin_run "$R13" "$O13" "$P13" >/dev/null \
+  && autopilot_apply_event "$R13" adversarial-adopt-block BLOCK \
+    '{"code":"ADOPTION_BLOCKED_FIXTURE"}' "$P13" "$O13" >/dev/null \
+  && CLAUDE_PROJECT_DIR="$P13" TDD_STATE_DIR="$P13/.zensu/state" \
+    tdd_write_pending_review blocked.ts "blocked outer fixture" >/dev/null || exit 1
+RF13="$(autopilot_run_file "$R13" "$P13")"
+PF13="$P13/.zensu/state/pending-review.json"
+BEFORE13_OUTER="$(digest "$RF13")"; BEFORE13_PENDING="$(digest "$PF13")"
+CLAUDE_PROJECT_DIR="$P13" TDD_STATE_DIR="$P13/.zensu/state" \
+  autopilot_adopt_pending_review "$P13" "$S13" true 0 >/dev/null 2>&1
+RC13=$?
+if [ "$RC13" = 4 ] \
+  && [ "$(digest "$RF13")" = "$BEFORE13_OUTER" ] \
+  && [ "$(digest "$PF13")" = "$BEFORE13_PENDING" ] \
+  && [ ! -e "${PF13}.claim" ] \
+  && [ ! -e "$P13/.zensu/state/tdd-phase-${S13}.json" ]; then
+  check "X13 BLOCKED Outer rejects pending adoption byte-stably" PASS
+else
+  check "X13 BLOCKED cannot be mistaken for a terminal adoption window" FAIL
+fi
+
+# Corrupt durable inventory is not absence. The pending marker and every Inner
+# path remain untouched when strict read-active validation fails.
+P14="$ROOT/adopt-corrupt"
+R14=adversarial_adopt_corrupt_run
+O14=adversarial_adopt_corrupt_owner
+S14=adversarial_adopt_corrupt_contender
+mkdir -p "$P14"
+autopilot_begin_run "$R14" "$O14" "$P14" >/dev/null \
+  && CLAUDE_PROJECT_DIR="$P14" TDD_STATE_DIR="$P14/.zensu/state" \
+    tdd_write_pending_review corrupt.ts "corrupt outer fixture" >/dev/null || exit 1
+AF14="$(autopilot_active_file "$P14")"; RF14="$(autopilot_run_file "$R14" "$P14")"
+AF14="$AF14" node -e '
+  const fs=require("fs"),p=process.env.AF14,j=JSON.parse(fs.readFileSync(p));
+  j.extra=true;fs.writeFileSync(p,JSON.stringify(j));
+'
+PF14="$P14/.zensu/state/pending-review.json"
+BEFORE14_ACTIVE="$(digest "$AF14")"; BEFORE14_OUTER="$(digest "$RF14")"
+BEFORE14_PENDING="$(digest "$PF14")"
+CLAUDE_PROJECT_DIR="$P14" TDD_STATE_DIR="$P14/.zensu/state" \
+  autopilot_adopt_pending_review "$P14" "$S14" true 0 >/dev/null 2>&1
+RC14=$?
+if [ "$RC14" = 2 ] \
+  && [ "$(digest "$AF14")" = "$BEFORE14_ACTIVE" ] \
+  && [ "$(digest "$RF14")" = "$BEFORE14_OUTER" ] \
+  && [ "$(digest "$PF14")" = "$BEFORE14_PENDING" ] \
+  && [ ! -e "${PF14}.claim" ] \
+  && [ ! -e "$P14/.zensu/state/tdd-phase-${S14}.json" ]; then
+  check "X14 corrupt Outer inventory fails pending adoption closed" PASS
+else
+  check "X14 corrupt inventory never degrades to absent adoption" FAIL
+fi
+
+# Hold the Outer mutex across begin's run+pointer publication, then start an
+# adopter that signals immediately before it attempts the same mutex. Once the
+# holder releases, adoption must observe the completed nonterminal begin and
+# return rc=4 without consuming the queued marker.
+_adversarial_publish_begin_critical() {
+  local project="$1" run_id="$2" owner="$3" entered="$4" release="$5"
+  : > "$entered"
+  while [ ! -e "$release" ]; do sleep 0.01; done
+  _autopilot_begin_critical "$project" "$run_id" "$owner" false true
+}
+P15="$ROOT/adopt-race"
+R15=adversarial_adopt_race_run
+O15=adversarial_adopt_race_owner
+S15=adversarial_adopt_race_contender
+mkdir -p "$P15"
+P15_CANON="$(_autopilot_project_root "$P15")" || exit 1
+CLAUDE_PROJECT_DIR="$P15" TDD_STATE_DIR="$P15/.zensu/state" \
+  tdd_write_pending_review race.ts "concurrent begin fixture" >/dev/null || exit 1
+PF15="$P15/.zensu/state/pending-review.json"; BEFORE15_PENDING="$(digest "$PF15")"
+_autopilot_prepare_storage "$P15_CANON" || exit 1
+(
+  _autopilot_locked_run "$P15_CANON" "$R15" _adversarial_publish_begin_critical \
+    "$P15_CANON" "$R15" "$O15" "$P15/begin-entered" "$P15/release-begin"
+  printf '%s\n' "$?" > "$P15/begin.rc"
+) & PID15_BEGIN=$!
+for _ in {1..500}; do [ -e "$P15/begin-entered" ] && break; sleep 0.01; done
+(
+  eval "$(declare -f _autopilot_locked_run | sed '1s/_autopilot_locked_run/_adversarial_original_locked_run/')"
+  # This override is invoked indirectly by the public helper.
+  # shellcheck disable=SC2329
+  _autopilot_locked_run() {
+    : > "$P15/adopt-lock-attempted"
+    _adversarial_original_locked_run "$@"
+  }
+  CLAUDE_PROJECT_DIR="$P15" TDD_STATE_DIR="$P15/.zensu/state" \
+    autopilot_adopt_pending_review "$P15" "$S15" true 0 >/dev/null 2>&1
+  printf '%s\n' "$?" > "$P15/adopt.rc"
+) & PID15_ADOPT=$!
+for _ in {1..500}; do
+  [ -e "$P15/adopt-lock-attempted" ] || [ -e "$P15/adopt.rc" ] && break
+  sleep 0.01
+done
+ADOPT_WAITED=true
+[ -e "$P15/adopt.rc" ] && ADOPT_WAITED=false
+: > "$P15/release-begin"
+wait "$PID15_BEGIN"; wait "$PID15_ADOPT"
+if [ "$ADOPT_WAITED" = true ] \
+  && [ "$(cat "$P15/begin.rc")" = 0 ] && [ "$(cat "$P15/adopt.rc")" = 4 ] \
+  && [ "$(digest "$PF15")" = "$BEFORE15_PENDING" ] \
+  && [ ! -e "${PF15}.claim" ] \
+  && [ ! -e "$P15/.zensu/state/tdd-phase-${S15}.json" ] \
+  && field_ok "$(autopilot_run_file "$R15" "$P15")" 'value.stage === "PLANNING"'; then
+  check "X15 Outer lock serializes pending adoption behind concurrent begin" PASS
+else
+  check "X15 concurrent begin wins without pending or Inner split-brain (waited=$ADOPT_WAITED begin=$(cat "$P15/begin.rc" 2>/dev/null) adopt=$(cat "$P15/adopt.rc" 2>/dev/null) lock=$([ -e "$P15/adopt-lock-attempted" ] && echo yes || echo no))" FAIL
+fi
+
+# An Inner claim/seed rc=1 is permanent for the current composite transaction.
+# The critical helper tags it internally so only genuine Outer-lock contention
+# is retried, while the public API keeps its historical rc=1 contract.
+P16="$ROOT/nonretry-inner-failure"
+S16=adversarial_nonretry_inner
+mkdir -p "$P16/.zensu/state"
+tdd_adopt_pending_review() { return 1; }
+if _autopilot_adopt_pending_review_critical "$P16" "$S16" true 0 >/dev/null 2>&1; then
+  INNER_RC16=0
+else
+  INNER_RC16=$?
+fi
+ADOPT_CALLS16=0
+_autopilot_locked_run() {
+  ADOPT_CALLS16=$((ADOPT_CALLS16 + 1))
+  return 7
+}
+if autopilot_adopt_pending_review "$P16" "$S16" true 0 >/dev/null 2>&1; then
+  PUBLIC_RC16=0
+else
+  PUBLIC_RC16=$?
+fi
+if [ "$INNER_RC16" -eq 7 ] && [ "$PUBLIC_RC16" -eq 1 ] \
+  && [ "$ADOPT_CALLS16" -eq 1 ]; then
+  check "X16 permanent Inner adoption failure preserves public rc=1 without transaction retries" PASS
+else
+  check "X16 Inner failure mapping (inner=$INNER_RC16 public=$PUBLIC_RC16 calls=$ADOPT_CALLS16)" FAIL
+fi
+
+printf '%s\n' "----" "test-autopilot-adversarial-recovery: $PASS PASS / $FAIL FAIL"
+[ "$FAIL" -eq 0 ]

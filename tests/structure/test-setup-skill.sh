@@ -55,6 +55,7 @@ fi
 ESSENTIALS=(
   "P3a curated key hooks.tddImplementation|tddImplementation"
   "P3b curated key hooks.chainEnforcer|chainEnforcer"
+  "P3b2 curated key hooks.autopilotEnforcer|autopilotEnforcer"
   "P3c curated key hooks.autoFixMaxRounds|autoFixMaxRounds"
   "P3d curated key context.compactionNudge|compactionNudge"
   "P3e curated key context.nudgeThreshold|nudgeThreshold"

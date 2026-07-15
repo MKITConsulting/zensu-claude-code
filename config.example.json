@@ -3,6 +3,7 @@
     "autoTdd": true,
     "tddImplementation": false,
     "chainEnforcer": true,
+    "autopilotEnforcer": true,
     "autoFix": true,
     "autoFixIncludeSuggestions": false,
     "autoFixMaxRounds": 5,

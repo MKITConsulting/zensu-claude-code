@@ -32,6 +32,7 @@ EOF
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
 export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
+export CLAUDE_PROJECT_DIR="$TMP_DIR"
 export ZENSU_CONFIG="$TMP_CFG"
 
 bash "$LOG" --tdd-begin --session sess-off-001 >/dev/null

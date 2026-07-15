@@ -51,6 +51,7 @@ as it is.
 |---|---|---|---|
 | TDD mode — vanilla vs. strict RED→GREEN | `hooks.tddImplementation` | bool | `false` (vanilla) |
 | Review-chain enforcer | `hooks.chainEnforcer` | bool | `true` |
+| Durable Autopilot enforcer | `hooks.autopilotEnforcer` | bool | `true` |
 | Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `5` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
@@ -104,7 +105,7 @@ prior read of an existing file.
 Ask the curated settings, marking the current value in each option. Group them into at
 most two `AskUserQuestion` calls (≤4 questions each):
 
-- **Booleans** (`tddImplementation`, `chainEnforcer`, `pulseSession`,
+- **Booleans** (`tddImplementation`, `chainEnforcer`, `autopilotEnforcer`, `pulseSession`,
   `compactionNudge`) → two options (on / off), current state labelled.
 - **`autoFixMaxRounds`** → presets `3` / `5` / `8` plus the free-text "Other" (accept
   any integer 1–99).
