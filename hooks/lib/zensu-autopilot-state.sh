@@ -1569,11 +1569,11 @@ _autopilot_store_team_review_payload_critical() {
 
         const tempBefore = fs.lstatSync(temp);
         if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) fail(2, "temp-lstat");
-        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | fs.constants.O_TRUNC
-          | (fs.constants.O_NOFOLLOW || 0));
+        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
         const tempOpen = fs.fstatSync(tempFd);
         if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
             || tempOpen.ino !== tempBefore.ino) fail(2, "temp-open");
+        fs.ftruncateSync(tempFd, 0);
         fs.fchmodSync(tempFd, 0o600);
         fs.writeFileSync(tempFd, data);
         fs.fsyncSync(tempFd);

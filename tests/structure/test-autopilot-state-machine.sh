@@ -45,6 +45,12 @@ if grep -qF 'if (process.platform !== "win32") {' "$LIB" \
 else
   check "S2c directory fsync remains POSIX-only" FAIL
 fi
+if grep -qF 'tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));' "$LIB" \
+  && grep -qF 'fs.ftruncateSync(tempFd, 0);' "$LIB"; then
+  check "S2d payload temp identity is verified before truncation" PASS
+else
+  check "S2d payload temp identity is verified before truncation" FAIL
+fi
 
 # shellcheck disable=SC1090
 source "$LIB"
@@ -1153,8 +1159,8 @@ if [ "$S5_LINK_RC" -eq 0 ] && [ "$S5_BEGIN_RC" -ne 0 ] \
   check "S5 symlinked project-state ancestors cannot escape the project" PASS
 else
   if [ "${AUTOPILOT_DEBUG_STORE:-}" = "1" ]; then
-    printf '[autopilot-store-debug] s5_link_rc=%s s5_begin_rc=%s victim_changed=%s\n' \
-      "$S5_LINK_RC" "$S5_BEGIN_RC" "$([ -n "$S5_VICTIM_ENTRY" ] && printf true || printf false)" >&2
+    printf '[autopilot-store-debug] s5_link_rc=%s s5_begin_rc=%s victim_entry=%s\n' \
+      "$S5_LINK_RC" "$S5_BEGIN_RC" "${S5_VICTIM_ENTRY:-<empty>}" >&2
   fi
   check "S5 symlinked project-state ancestors cannot escape the project" FAIL
 fi
