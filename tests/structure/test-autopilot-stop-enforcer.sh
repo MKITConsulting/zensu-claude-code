@@ -566,10 +566,6 @@ else check "S10b stale outer-cap CAS cannot mutate or describe the old stage" FA
 
 P9="$TMP/runtime-missing"; start "$P9" stop_run_runtime stop_session_runtime
 NO_NODE_PATH="$TMP/no-node-path"; mkdir -p "$NO_NODE_PATH"
-for utility in cat grep; do
-  utility_path="$(command -v "$utility")"
-  [ -n "$utility_path" ] && ln -s "$utility_path" "$NO_NODE_PATH/$utility"
-done
 OUT11="$(printf '%s' '{"session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT11" | decision)" = block ] && printf '%s' "$OUT11" | grep -qF 'durable state runtime is unavailable'; then
   check "S11 missing Node with an active pointer fails closed using shell-only JSON" PASS

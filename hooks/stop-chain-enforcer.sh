@@ -5,7 +5,8 @@
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
-INPUT="$(cat)"
+INPUT=""
+IFS= read -r -d '' INPUT || true
 
 # This response deliberately has no dynamic fields and must remain writable
 # without Node.  A durable pointer or run file is evidence that Stop needs an
@@ -20,8 +21,8 @@ emit_inner_runtime_unavailable_block() {
 
 shell_spawned_agent() {
   [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  printf '%s' "$INPUT" | grep -Eq '"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)+"' && return 0
-  printf '%s' "$INPUT" | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"zensu:(code-reviewer|review-aspect|zensu-plm)"'
+  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
+  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
 }
 
 NODE_AVAILABLE=true

@@ -396,8 +396,6 @@ else
 fi
 
 NO_NODE_BIN="$TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
-ln -s "$(command -v cat)" "$NO_NODE_BIN/cat"
-ln -s "$(command -v grep)" "$NO_NODE_BIN/grep"
 invoke_without_node() {
   local project="$1" payload="$2"
   (

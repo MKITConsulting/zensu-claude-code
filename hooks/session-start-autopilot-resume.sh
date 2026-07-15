@@ -6,7 +6,8 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 
-INPUT="$(cat)"
+INPUT=""
+IFS= read -r -d '' INPUT || true
 
 emit_runtime_unavailable() {
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ZENSU_AUTOPILOT_RESUME RUNTIME_UNAVAILABLE. A project-local durable Autopilot state artifact exists, but the state runtime is unavailable. Do not infer progress, resume effects, or create a replacement run; repair the plugin runtime first."}}'
@@ -18,8 +19,8 @@ emit_corrupt_active_state() {
 
 shell_spawned_agent() {
   [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  printf '%s' "$INPUT" | grep -Eq '"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)+"' && return 0
-  printf '%s' "$INPUT" | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"zensu:(code-reviewer|review-aspect|zensu-plm)"'
+  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
+  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
 }
 
 NODE_AVAILABLE=true

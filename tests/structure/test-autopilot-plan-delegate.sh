@@ -181,8 +181,6 @@ if [ "$DONE_READY" = true ] && printf '%s' "$DONE_ON" | grep -qF 'AskUserQuestio
 else check "P11 DONE pointer does not own or mutate later plans" FAIL; fi
 
 NO_NODE_BIN="$TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
-ln -s "$(command -v cat)" "$NO_NODE_BIN/cat"
-ln -s "$(command -v grep)" "$NO_NODE_BIN/grep"
 invoke_without_node() {
   printf '%s' "$1" | PATH="$NO_NODE_BIN" ZENSU_FORCE_MAIN='' \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" /bin/bash "$HOOK" 2>/dev/null

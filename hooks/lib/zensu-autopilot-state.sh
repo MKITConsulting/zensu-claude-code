@@ -127,23 +127,10 @@ _autopilot_locked_dispatch() {
 # All schema and transition decisions live in one worker so every caller uses
 # the same closed vocabulary and canonical payload digest.
 _autopilot_node() {
-  local mode="${1:-}" root_index="" shell_root=""
-  local node_args=("$@") msys_exclusions="ZENSU_AUTOPILOT_PROJECT_ROOT"
-  case "$mode" in
-    read-active|read-run) root_index=3 ;;
-    begin) root_index=7 ;;
-    apply) root_index=8 ;;
-    increment-budget|increment-budget-capped) root_index=6 ;;
-  esac
-  if [ -n "$root_index" ] && [ "${#node_args[@]}" -gt "$root_index" ]; then
-    shell_root="${node_args[$root_index]}"
-    node_args[root_index]='__ZENSU_AUTOPILOT_PROJECT_ROOT_V1__'
-  fi
-  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
-    msys_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_exclusions}"
-  fi
-  ZENSU_AUTOPILOT_PROJECT_ROOT="$shell_root" \
-    MSYS2_ENV_CONV_EXCL="$msys_exclusions" node - "${node_args[@]}" <<'NODE'
+  # Keep Bash-facing roots in the Git-Bash namespace, but let MSYS translate
+  # the worker arguments for native Node. Durable projectRoot identity and all
+  # filesystem operands then share Node's canonical Windows namespace.
+  node - "$@" <<'NODE'
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -152,19 +139,6 @@ const MAX_BYTES = 1024 * 1024;
 const MAX_EVENTS = 512;
 const args = process.argv.slice(2);
 const mode = args.shift();
-const rootIndexes = {
-  "read-active": 2,
-  "read-run": 2,
-  begin: 6,
-  apply: 7,
-  "increment-budget": 5,
-  "increment-budget-capped": 5,
-};
-const rootIndex = rootIndexes[mode];
-if (Number.isInteger(rootIndex)
-    && args[rootIndex] === "__ZENSU_AUTOPILOT_PROJECT_ROOT_V1__") {
-  args[rootIndex] = process.env.ZENSU_AUTOPILOT_PROJECT_ROOT || "";
-}
 
 const fail = (code, message) => {
   if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);

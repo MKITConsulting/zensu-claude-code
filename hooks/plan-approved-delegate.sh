@@ -5,7 +5,8 @@
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
-INPUT="$(cat)"
+INPUT=""
+IFS= read -r -d '' INPUT || true
 
 PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}"
 if [ -z "$PROJECT_ROOT" ]; then
@@ -28,8 +29,8 @@ unset _zensu_autopilot_hint
 
 shell_spawned_agent() {
   [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  printf '%s' "$INPUT" | grep -Eq '"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)+"' && return 0
-  printf '%s' "$INPUT" | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"zensu:(code-reviewer|review-aspect|zensu-plm)"'
+  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
+  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
 }
 
 emit_autopilot_runtime_blocked() {
