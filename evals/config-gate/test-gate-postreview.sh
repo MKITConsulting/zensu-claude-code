@@ -29,19 +29,36 @@ mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
+render_code_reviewer_fixture() {
+  FIXTURE="$EVAL_DIR/fixtures/stdin-code-reviewer.json" REVIEW_TICKET="$1" node -e '
+    const fs = require("fs");
+    const input = JSON.parse(fs.readFileSync(process.env.FIXTURE, "utf8"));
+    input.tool_input.prompt = input.tool_input.prompt.replace("__REVIEW_TICKET__", process.env.REVIEW_TICKET);
+    process.stdout.write(JSON.stringify(input));
+  '
+}
+
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": false}}
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
-OUT_DISABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
+# shellcheck disable=SC1090
+source "$BASELINE" fixture-review
+bash "$LOG" --tdd-begin --session fixture-review >/dev/null
+bash "$LOG" --tdd-complete --session fixture-review >/dev/null
+
+TICKET_DISABLED="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_DISABLED="$(render_code_reviewer_fixture "$TICKET_DISABLED")"
+OUT_DISABLED="$(printf '%s' "$STDIN_DISABLED" | "$SCRIPT" 2>/dev/null)"
 EXIT_DISABLED=$?
 
-if [ -z "$OUT_DISABLED" ]; then
-  check "autoFix=false + code-reviewer subagent: empty stdout" PASS
+if printf '%s' "$OUT_DISABLED" | grep -qF 'Auto-fix is disabled' \
+  && printf '%s' "$OUT_DISABLED" | grep -qF -- '--claimed-review-ticket'; then
+  check "autoFix=false + scoped code-reviewer: ticket-bound no-fix handoff" PASS
 else
-  check "autoFix=false + code-reviewer subagent: empty stdout" FAIL
+  check "autoFix=false + scoped code-reviewer: ticket-bound no-fix handoff" FAIL
 fi
 
 if [ "$EXIT_DISABLED" = "0" ]; then
@@ -54,10 +71,9 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true}}
 EOF
 
-# shellcheck disable=SC1090
-source "$BASELINE" config-gate-reviewer-v1
-bash "$LOG" --tdd-begin --session "config-gate-reviewer-v1" >/dev/null 2>&1
-OUT_ENABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
+TICKET_ENABLED="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_ENABLED="$(render_code_reviewer_fixture "$TICKET_ENABLED")"
+OUT_ENABLED="$(printf '%s' "$STDIN_ENABLED" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT_ENABLED" in
   *"zensu:code-reviewer"*) check "autoFix=true + code-reviewer: re-verify directive names zensu:code-reviewer" PASS ;;
@@ -75,7 +91,9 @@ unset ZENSU_CONFIG
 NOTHING_CFG="$TMP_DIR/no-config.json"
 rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
-OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
+TICKET_DEFAULT="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_DEFAULT="$(render_code_reviewer_fixture "$TICKET_DEFAULT")"
+OUT_DEFAULT="$(printf '%s' "$STDIN_DEFAULT" | "$SCRIPT" 2>/dev/null)"
 case "$OUT_DEFAULT" in
   *"zensu:code-reviewer"*) check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" PASS ;;
   *)                       check "no config (default): re-verify directive names zensu:code-reviewer (enabled)" FAIL ;;

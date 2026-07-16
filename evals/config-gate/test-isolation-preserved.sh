@@ -35,6 +35,15 @@ mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
+render_code_reviewer_fixture() {
+  FIXTURE="$EVAL_DIR/fixtures/stdin-code-reviewer.json" REVIEW_TICKET="$1" node -e '
+    const fs = require("fs");
+    const input = JSON.parse(fs.readFileSync(process.env.FIXTURE, "utf8"));
+    input.tool_input.prompt = input.tool_input.prompt.replace("__REVIEW_TICKET__", process.env.REVIEW_TICKET);
+    process.stdout.write(JSON.stringify(input));
+  '
+}
+
 TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {
@@ -47,6 +56,11 @@ cat > "$TMP_CFG" <<'EOF'
 }
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
+
+# shellcheck disable=SC1090
+source "$BASELINE" fixture-review
+bash "$LOG" --tdd-begin --session fixture-review >/dev/null
+bash "$LOG" --tdd-complete --session fixture-review >/dev/null
 
 OUT_OTHER="$("$SCRIPT_POSTREVIEW" < "$EVAL_DIR/fixtures/stdin-other-agent.json" 2>/dev/null)"
 if [ -z "$OUT_OTHER" ]; then
@@ -62,10 +76,9 @@ else
   check "post-review + tdd-manager subagent: empty stdout (got: $OUT_TDDM)" FAIL
 fi
 
-# shellcheck disable=SC1090
-source "$BASELINE" config-gate-reviewer-v1
-bash "$LOG" --tdd-begin --session "config-gate-reviewer-v1" >/dev/null 2>&1
-OUT_OK="$("$SCRIPT_POSTREVIEW" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
+TICKET="$(bash "$LOG" --review-ticket --session fixture-review)"
+STDIN_OK="$(render_code_reviewer_fixture "$TICKET")"
+OUT_OK="$(printf '%s' "$STDIN_OK" | "$SCRIPT_POSTREVIEW" 2>/dev/null)"
 case "$OUT_OK" in
   *"zensu:code-reviewer"*) check "post-review + code-reviewer subagent: routing directive present (re-verify via zensu:code-reviewer)" PASS ;;
   *)                       check "post-review + code-reviewer subagent: routing directive present (got: $OUT_OK)" FAIL ;;

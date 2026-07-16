@@ -38,7 +38,7 @@ source "$ROOT/hooks/lib/zensu-tdd-phase.sh"
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1
 for _ in 1 2 3; do tdd_increment_counter "$SID" reviewRound >/dev/null; done
-for _ in 1 2; do tdd_increment_counter "$SID" stopBlocks >/dev/null; done
+for _ in 1 2; do tdd_increment_counter "$SID" stopBlockCount >/dev/null; done
 tdd_set_flag "$SID" chainDone true >/dev/null
 tdd_set_flag "$SID" codeReviewDone true >/dev/null
 tdd_set_flag "$SID" selfReviewFixed true >/dev/null
@@ -63,7 +63,7 @@ AFTER="$(read_state)"
 STATE_CHECK="$(BEFORE_REVISION="$REV_BEFORE" node -e '
   let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
     const j=JSON.parse(s), expected=Number(process.env.BEFORE_REVISION)+1;
-    process.stdout.write(j.revision===expected && j.reviewRound===0 && j.stopBlocks===0
+    process.stdout.write(j.revision===expected && j.reviewRound===0 && j.stopBlockCount===0
       && j.chainDone===false && j.codeReviewDone===false && j.active===true
       && j.selfReviewFixed===false && j.implComplete===true ? "ok" : JSON.stringify(j));
   });
@@ -87,7 +87,17 @@ BYTES_AFTER_STALE="$(file_digest "$STATE_FILE")"
   && check "T4 failed reset preserves exact state bytes and revision" PASS \
   || check "T4 failed reset preserves exact state bytes and revision" FAIL
 
-STDIN="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"$SID\"}"
+TICKET="$(tdd_issue_review_ticket "$SID")"
+STDIN="$(SID="$SID" TICKET="$TICKET" node -e '
+  process.stdout.write(JSON.stringify({
+    tool_name: "Task",
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`,
+    },
+    session_id: process.env.SID,
+  }));
+')"
 OUT="$(printf '%s' "$STDIN" | bash "$POST_REVIEW" 2>/dev/null)"
 case "$OUT" in
   *'zensu:code-reviewer'*'fix them YOURSELF IN THIS MAIN THREAD'*) check "T5 reset re-enables the normal post-review routing" PASS ;;

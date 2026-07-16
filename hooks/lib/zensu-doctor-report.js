@@ -256,7 +256,7 @@ function stateBlock(nowMs) {
     }
     var valid = workflowDocs.length - invalid.length;
     if (valid) {
-      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlocks are integrated fields');
+      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields');
     }
     if (invalid.length) {
       line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));

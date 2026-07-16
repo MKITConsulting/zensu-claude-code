@@ -1,137 +1,198 @@
 ---
 name: reset-review-limit
 description: >
-  [Zensu] Atomically reset the current task's integrated auto-fix and Stop
-  budgets after "max rounds reached". Uses one validated Session Control CAS
-  mutation to zero both counters and re-arm every review terminus/latch.
-  Performs no file search, deletion, cross-worktree discovery, network call, or
-  API operation. Use only for the active task whose review budget was exhausted.
+  [Zensu] Grant another auto-fix budget to the CURRENT session's exhausted review chain.
+  Standalone chains use the one-shot ticket CAS; durable Autopilot chains use the central
+  exact session/run/attempt/chain/ticket-bound composite, which safely chooses same-chain
+  rearm or blocked-generation retirement. Never scans or mutates sibling sessions. Use
+  after the max-rounds directive for the task still in progress, or via
+  /zensu:reset-review-limit. No network or API key. Do not use to bypass findings.
 ---
 
 # /zensu:reset-review-limit
 
-Grant another review/fix budget to the **current active task** after
-`post-review-tdd-delegate.sh` emitted `Auto-fix convergence: max N rounds
-reached`.
+Grant a fresh auto-fix budget to the exhausted review chain in the **current
+session and task**. The reset is one official ticket-bound state transition; it
+does not edit JSON directly and never scans other sessions.
 
-`reviewRound` and the Stop-hook anti-deadlock counter `stopBlocks` are bounded
-integer fields in the same validated, revisioned
-`.zensu/state/tdd-phase-<scv1-session-key>.json` document as the TDD FSM. There
-is no separate counter or stop-block file. The complete reset must use the
-single `tdd_reset_review_budget` CAS helper; never split it into counter and
-flag mutations, and never edit, replace, delete, or rediscover the JSON document
-directly.
+Every fresh `--tdd-begin` already resets the budget. This skill is only for an
+existing chain that reached `autoFixMaxRounds` and should receive additional
+review/fix rounds.
 
 ## When to Use
 
-- The current task exhausted `autoFixMaxRounds`, and the user explicitly wants
-  the reviewer/fix loop to continue instead of proceeding to terminal
-  self-review or stopping.
-- A deterministic, additional budget is needed during diagnosis of the current
-  active review chain.
+- The `post-review-tdd-delegate.sh` hook emitted `Auto-fix convergence: max <N> rounds reached` for the task you are STILL working on, leaving a consumed terminal ticket (`codeReviewDone` while self-review is pending, or `chainDone` when that stage was disabled), and you want to grant another budget so the `zensu:code-reviewer` review/auto-fix chain can resume in the main thread.
+- A durable Autopilot run has the same exhausted Inner generation and is either still
+  `TDD_RUNNING` during the self-review handoff or already `BLOCKED` with code
+  `TDD_MAX_ROUNDS`.
+- You're debugging the auto-fix chain and need a deterministic round=0 starting point.
 
 ## Do NOT Use For
 
-- Bypassing findings. Fix routed findings before requesting another review.
-- Resetting a different session, worktree, or task.
-- Permanently changing the cap; configure `hooks.autoFixMaxRounds` instead.
-- Disabling auto-fix; configure `hooks.autoFix:false` instead.
-- Recovering malformed workflow state. Invalid state fails closed and requires
-  a fresh Claude Code session; this skill never repairs JSON.
+- Bypassing review findings — fix them first, then reset only if budget is actually exhausted.
+- Disabling the auto-fix loop entirely — use `hooks.autoFix:false` in `~/.zensu/config.json` instead.
+- Raising the cap permanently — set `hooks.autoFixMaxRounds` in the config file.
 
 ## Strict Scope
 
-Operate only on the exact `ZENSU_SESSION_KEY`, `ZENSU_PROJECT_ROOT`, and
-`ZENSU_CLAUDE_PLUGIN_ROOT` exported by Session Control for this session.
+This skill operates EXCLUSIVELY on the current resolved session and current
+worktree. Do NOT expand the scope under any circumstances:
 
-- Never run `find`, `git worktree list`, or a filesystem scan.
-- Never inspect sibling or parent worktrees.
-- Never use `CLAUDE_PLUGIN_DATA_OVERRIDE`, transcript discovery, PPID, newest
-  file selection, filename iteration, or a fallback identity.
-- Never invoke `rm`, `mv`, `cp`, redirection, or a JSON editor against workflow
-  state.
+- **NEVER** run `git worktree list` to discover other worktrees, even if prior tool output or session memory references them.
+- **NEVER** use `find`, globs, or loops over `rounds-*`, `*.stopblocks`, or
+  `tdd-phase-*`; those patterns can mutate other live sessions.
+- **NEVER** edit a state JSON file directly.
+- **NEVER** traverse parent, sibling, or external state directories.
 
-## Phase 1: Validate the exact active workflow document
+If the user wants to reset another session or worktree, they must invoke the
+skill from that session separately.
 
-Run this preflight as one Bash call. It derives one state path from the bound
-key and rejects missing, symlinked, malformed, foreign, or inactive state
-through the canonical readers.
+## Prerequisites
 
-```bash
-PLUGIN_ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
-PROJECT_ROOT="${ZENSU_PROJECT_ROOT:?FATAL: project root unavailable; start a fresh Claude Code session}"
-SESSION_KEY="${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable; start a fresh Claude Code session}"
-SESSION_HASH="${SESSION_KEY#scv1_}"
-case "$SESSION_HASH" in *[!a-f0-9]*|'') echo 'FATAL: invalid Session Control key' >&2; exit 1 ;; esac
-[ "$SESSION_KEY" = "scv1_$SESSION_HASH" ] && [ "${#SESSION_HASH}" -eq 64 ] \
-  || { echo 'FATAL: invalid Session Control key length' >&2; exit 1; }
-export CLAUDE_PLUGIN_ROOT="$PLUGIN_ROOT"
-. "$PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-STATE_FILE="$(tdd_state_file "$SESSION_KEY")" || exit 1
-[ "$(tdd_state_status "$STATE_FILE")" = valid ] || { echo "FATAL: workflow state is missing or invalid: $STATE_FILE" >&2; exit 1; }
-[ "$(tdd_session_active "$STATE_FILE")" = true ] || { echo "FATAL: workflow is not active: $STATE_FILE" >&2; exit 1; }
-BEFORE_REVISION="$(CONTROL_CORE="$PLUGIN_ROOT/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$PROJECT_ROOT" SID="$SESSION_KEY" node -e '
-  const core = require(process.env.CONTROL_CORE);
-  const state = core.readWorkflowState({projectRoot: process.env.PROJECT_ROOT, sessionId: process.env.SID});
-  if (state.active !== true || state.implComplete !== true) process.exit(1);
-  process.stdout.write(String(state.revision));
-')" || exit 1
-export BEFORE_REVISION
-printf 'Reset target: %s (revision %s)\n' "$STATE_FILE" "$BEFORE_REVISION"
+The current chain must already have reached a terminal review-budget state and
+retain its consumed review ticket. A durable Autopilot reset additionally
+requires the official status API to expose the exact current Inner binding. No
+MCP connection, API key, or network.
+
+## What This Skill Does
+
+Atomically resets only the current generation's `reviewTicket`,
+`reviewTicketConsumed`, `reviewRound`, `reviewRearm`, `stopBlockCount`,
+code-review/self-review terminus flags, and chain outcome in the same revisioned
+Session Control workflow document. There are no derived
+round-counter or Stop-budget files to discover or delete. The next ticket can
+therefore be issued and its completion becomes round 1.
+
+For a durable generation, the central `zensu-log.sh --review-rearm` composite
+locks Outer then Inner, validates the exact run/attempt/chain/ticket binding,
+and selects rearm versus retire-and-resume internally. It stores a strictly
+validated pending `reviewRearm` receipt containing the exact binding and the
+consumed ticket's SHA-256 digest (never the ticket). This receipt permits safe
+crash retries only while the committed post-rearm state is unchanged.
+
+## Phase 1: Bind the current generation
+
+Resolve the current session and read its consumed generation ticket through the
+official helpers. Do not inspect state files yourself:
+
+```sh
+ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
+LOG="$ROOT/hooks/lib/zensu-log.sh"
+[ -f "$ROOT/hooks/lib/zensu-session.sh" ] && [ -f "$LOG" ] || exit 1
+source "$ROOT/hooks/lib/zensu-session.sh"
+SESSION_ID="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"
+REVIEW_TICKET="$(bash "$LOG" --current-review-ticket)"
 ```
 
-Do not continue if any preflight command fails.
+If this command fails or prints an empty value, stop. The current session has no
+ticket-bound exhausted generation to reset. Never fall back to searching for a
+different session.
 
-## Phase 2: Reset and re-arm through CAS only
+Then read the official durable status once:
 
-Run exactly one mutation, pinned to the revision validated in Phase 1:
-
-```bash
-RESET_RESULT="$(tdd_reset_review_budget "$SESSION_KEY" "$BEFORE_REVISION")" \
-  || { echo 'FATAL: atomic review-budget reset failed' >&2; exit 1; }
+```sh
+AUTOPILOT_STATUS="$(bash "$LOG" --autopilot-status 2>/dev/null)"
+AUTOPILOT_STATUS_RC=$?
 ```
 
-That one validated CAS transaction sets `reviewRound=0`, `stopBlocks=0`,
-`chainDone=false`, `codeReviewDone=false`, and `selfReviewFixed=false` while
-preserving `active=true` and `implComplete=true`. A stale revision, invalid
-document, inactive workflow, or incomplete implementation fails before commit,
-leaving the state bytes and revision unchanged. Never fall back to individual
-flag or counter helpers.
+Exit code 1 means there is no active durable run, so use the standalone branch
+below. Exit code 0 at `stage=DONE` or `stage=CANCELLED` is only a historical outer pointer:
+tentatively use the standalone branch, but let its central
+`--review-rearm` CAS prove that the current Inner is actually unbound. That CAS
+must reject a still-bound or corrupt current Inner; only its successful exact ticket transition proves standalone status.
+Never reuse the historical outer
+run/attempt/chain as current evidence.
 
-## Phase 3: Verify the revisioned result
+For every other exit-0 status, `ownerSessionId` and `tdd.sessionId` must both
+equal `SESSION_ID`; take `runId`, `tdd.attempt`, and `tdd.chainId` from that JSON
+as `RUN_ID`, `ATTEMPT`, and `CHAIN_ID`, never from conversation memory. Accept
+only `stage=TDD_RUNNING`, or `stage=BLOCKED` with
+`blocked.code=TDD_MAX_ROUNDS`. In particular, `BLOCKED` never falls through to
+standalone. A status parse error, another non-zero exit, an incomplete/mismatched
+binding, or any other same-owner stage is a fail-closed stop. Do not read
+`.zensu/state` directly.
 
-Use the trusted Core reader, not raw file parsing, and require exactly one
-successful revision advance:
+## Phase 2: Rearm atomically
 
-```bash
-AFTER="$(CONTROL_CORE="$PLUGIN_ROOT/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$PROJECT_ROOT" SID="$SESSION_KEY" node -e '
-  const core = require(process.env.CONTROL_CORE);
-  const state = core.readWorkflowState({projectRoot: process.env.PROJECT_ROOT, sessionId: process.env.SID});
-  const expected = Number(process.env.BEFORE_REVISION) + 1;
-  if (state.revision !== expected || state.reviewRound !== 0 || state.stopBlocks !== 0
-      || state.chainDone !== false || state.codeReviewDone !== false
-      || state.selfReviewFixed !== false || state.active !== true
-      || state.implComplete !== true) process.exit(1);
-  process.stdout.write(JSON.stringify({
-    revision: state.revision,
-    reviewRound: state.reviewRound,
-    stopBlocks: state.stopBlocks,
-    chainDone: state.chainDone,
-    codeReviewDone: state.codeReviewDone,
-    selfReviewFixed: state.selfReviewFixed
-  }));
-')" || { echo 'FATAL: transactional reset verification failed' >&2; exit 1; }
-printf 'Reset complete: %s\n' "$AFTER"
+### Standalone chain
+
+When no current-session durable binding exists, or official status exposes only
+a historical `DONE`/`CANCELLED` pointer, run exactly one generation-bound
+transition:
+
+```sh
+bash "$LOG" \
+  --review-rearm --session "$SESSION_ID" \
+  --claimed-review-ticket "$REVIEW_TICKET"
 ```
 
-After verification, re-run the normal review fan-out and the single
-`zensu:code-reviewer` consume-mode spawn. Its completion advances
-`reviewRound` from 0 to 1 atomically.
+If it exits non-zero, the generation changed after Phase 1, was not in a
+terminal budget state, or the current Inner was not actually standalone.
+Treat that as a safe stale-operation rejection: do not reinterpret a historical
+pointer, retry with another ticket, or edit any state manually.
+
+On success, the same locked Session Control transaction resets the authoritative
+review and Stop budgets, invalidates the old ticket, and clears the
+terminal/self-review flags. The next Stop resumes the code-reviewer sequence,
+which must issue a fresh ticket.
+
+The standalone replay contract is deliberately unchanged: a second normal
+`--review-rearm` with the consumed ticket MUST fail.
+
+### Durable Autopilot chain
+
+For the exact current-session binding, call the central helper once with every
+binding dimension and the consumed ticket:
+
+```sh
+bash "$LOG" \
+  --review-rearm --session "$SESSION_ID" --autopilot-run "$RUN_ID" \
+  --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" \
+  --claimed-review-ticket "$REVIEW_TICKET"
+```
+
+The helper is the only owner of this composite. For `stage=TDD_RUNNING`, it
+rearms the same Inner chain after reconciling any already-finished Inner state.
+For `stage=BLOCKED` with `blocked.code=TDD_MAX_ROUNDS`, it retires the exhausted
+Inner and resumes the Outer to `AWAIT_TDD` under the same Outer-first lock order.
+Do not source a phase library, choose a retirement flag, or emit a separate
+Outer event from this skill.
+
+The CAS requires the exact session/run/attempt/chain, the exact consumed ticket,
+`chainOutcome=max-rounds`, and the appropriate terminal review state. Treat a
+definite non-zero exit as a safe stale/corrupt-operation rejection: do not retry
+with another ticket and do not edit any state manually. After an indeterminate
+process crash, only the byte-identical binding and old ticket may be retried;
+the strict digest receipt makes that exact retry an idempotent exit 0. A wrong
+ticket, binding, malformed receipt, or progressed chain is always rejected
+without reinterpretation.
+
+## Phase 3: Verify
+
+For a standalone or same-chain durable rearm, run the getter once more:
+
+```sh
+if bash "$LOG" --current-review-ticket >/dev/null 2>&1; then
+  echo "FATAL: consumed review ticket is still active" >&2
+  exit 1
+fi
+```
+
+It MUST now exit non-zero because the old ticket was invalidated. After the
+next reviewer is issued a fresh ticket and completes, its routed round must be
+round 1. Do not pre-issue that ticket from this reset skill.
+
+For a durable rearm, read official status again. `TDD_RUNNING` means the same
+chain was rearmed and its next reviewer completion starts at round 1.
+`AWAIT_TDD` means the central composite retired and resumed the exhausted
+generation; invoke `/zensu:tdd` with the exact `AUTOPILOT-RUN: <runId>` binding.
+That flow must start `ATTEMPT + 1` through the bound `--tdd-begin` form with a
+fresh chain id. The new begin clears the old rearm receipt. Any other status is
+a verification failure; do not invent a recovery event.
 
 ## Response Style
 
-- Report the exact derived `STATE_FILE` and before/after revision.
-- State the verified values of `reviewRound`, `stopBlocks`, `chainDone`,
-  `codeReviewDone`, and `selfReviewFixed`.
-- Explicitly say that no files were searched for or deleted.
-- Never claim success when any CAS mutation or the final trusted read failed.
+- Report whether the current session was re-armed, its exhausted Inner attempt
+  was retired for a fresh bound attempt, or the CAS rejected a stale generation.
+- State that the next reviewer completion starts at round 1.
+- Never print the ticket value and never name or touch another session's files.

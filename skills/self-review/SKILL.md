@@ -35,7 +35,8 @@ edited, created, or deleted in this session. Use that knowledge directly.
 
 - A substitute for the `zensu:code-reviewer` agent — that runs first; this is the
   terminal pass over your own work.
-- Bypassing findings: a must-fix still follows this session's frozen implementation mode (vanilla, or strict TDD when configured).
+- Bypassing findings: a must-fix still follows this session's frozen
+  implementation mode (vanilla, or strict TDD when configured).
 - More than one fix round: the budget is exactly one (a hard latch), then finalize.
 
 ## What This Skill Does
@@ -45,7 +46,55 @@ edited, created, or deleted in this session. Use that knowledge directly.
 3. Emits a Positive / Improvements / Risks reflection.
 4. Takes at most ONE fix round under the still-active TDD phase-gate if a must-fix
    risk surfaces — without re-running the code-reviewer.
-5. Owns the chain terminus: runs `--chain-done` and renders the final report.
+5. Owns the chain terminus: runs the standalone or exact Autopilot-bound
+   `--chain-done` form for the current generation and renders the final report.
+
+## Generation guard
+
+The automatic handoff MUST include exactly one line
+`SELF-REVIEW-TICKET: <review-ticket>`. Capture that exact ticket before doing
+anything else. It is the generation token for every state mutation in this
+skill. If the line is missing, malformed, or ambiguous, do not run
+`--self-review-fixed` or `--chain-done`; report that the self-review handoff is
+unbound and let the Stop hook reconstruct the current handoff.
+
+An Autopilot-bound handoff MUST additionally include exactly one complete
+official three-line envelope, with each line occurring exactly once:
+
+`ZENSU-DELEGATED-CALLER: autopilot`
+`AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>`
+`AUTOPILOT-STAGE: <returnStage>`
+
+The appearance of any one of the three header prefixes activates delegated
+validation. A partial, duplicate, malformed, or conflicting envelope is a stale
+handoff: do not read/change project files and do not run `--self-review-fixed`
+or `--chain-done`. Capture `RUN_ID`, `ATTEMPT`, `CHAIN_ID`, and `RETURN_STAGE`
+only from the accepted envelope, never from conversation memory.
+
+Before reading or changing files, set
+`ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"`,
+require the session helper to be a regular file, source
+`$ROOT/hooks/lib/zensu-session.sh`, and resolve the current session with
+`SESSION_ID="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"`.
+That resolver must preserve the immutable Session Control key. Then run
+`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --autopilot-status`, and
+cross-check the durable result. It must name the captured `runId`, have
+`ownerSessionId` equal to the resolved session, be the current nonterminal
+`stage=TDD_RUNNING` run, and match `tdd.sessionId`, `tdd.attempt`,
+`tdd.chainId`, and `tdd.returnStage` to the resolved session plus the four
+envelope values exactly. The `AUTOPILOT-STAGE: <returnStage>` line therefore
+proves the same value as `tdd.returnStage`; it is not a navigation hint. A
+missing, foreign, terminal, or mismatched status is stale and stops without
+mutation. Conversely, if current status proves an owned `TDD_RUNNING` binding
+but the envelope is absent, fail closed rather than using an unqualified
+terminus. Standalone handoffs omit the entire Autopilot envelope and must have
+no owned `TDD_RUNNING` durable status; their existing unqualified behavior is
+otherwise unchanged.
+
+Every command below that shows `<review-ticket>` means the captured ticket.
+Every bound command uses the same captured run/attempt/chain. A non-zero exit
+means this self-review belongs to a stale generation: stop without changing or
+finalizing the current chain.
 
 ## Phase 1: List Changed Files
 
@@ -53,11 +102,14 @@ List every file you changed or created in this session. You know these from your
 own context — no parsing needed. Cross-check with `git diff --name-only HEAD` to
 catch anything you missed.
 
-If there are NO changes this session, run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done`, state
-"No changes — self-review skipped", and stop. The quoted, session-bound
-`ZENSU_CLAUDE_PLUGIN_ROOT` export is expanded directly by that same command;
-never paste its value into shell source.
+If there are NO changes this session, close only the verified generation. For a
+standalone handoff run
+`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`.
+For an Autopilot-bound handoff run
+`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>" --outcome no-changes`.
+State "No changes — self-review skipped" only after the command succeeds, then
+stop. Every command expands the session-bound `ZENSU_CLAUDE_PLUGIN_ROOT`
+directly inside a quoted shell parameter; never paste its value into shell source.
 
 ## Phase 2: Analyze
 
@@ -98,14 +150,19 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Then set the latch with
-  `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --self-review-fixed` and re-run
-  `/zensu:self-review` (pass 2 to confirm). In this branch you MUST NOT:
+  `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
+  `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
+  same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
+  bound handoff, the same captured official envelope exactly once:
+  `ZENSU-DELEGATED-CALLER: autopilot`,
+  `AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>`, and
+  `AUTOPILOT-STAGE: <returnStage>`. Do not re-read, re-derive, or omit either generation token or any envelope line. In this branch you MUST NOT:
   - run `--tdd-complete` (implementation is already complete);
   - spawn the `zensu:code-reviewer` agent — self-review is terminal, so do not spawn it;
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done` — this is the chain terminus.
+  1. Standalone handoffs keep the unqualified terminus: run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus. If it fails, stop as stale and do not render a successful final report.
   2. Render the final report (below), then stop.
 
 ### Final report
@@ -156,7 +213,8 @@ Exactly ONE sentence, and it is the last section: what shipped and the test verd
   `git worktree list` or traverse sibling worktrees.
 - The latch (`selfReviewFixed`) and the terminus (`--chain-done`) are per-chain —
   each `--tdd-begin` re-arms them, so a later chain in the same session gets its
-  own single fix round. Never touch another session's chain-state.
+  own single fix round. A bound terminus always carries the captured exact
+  run/attempt/chain evidence. Never touch another session's chain-state.
 - Do not fix advisory findings — only a genuine must-fix earns the single fix round.
 
 ## Response Style

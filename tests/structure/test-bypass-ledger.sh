@@ -108,10 +108,14 @@ if grep -qF 'echo "none"' "$LOG_SH"; then
 else
   check "P2c --bypass-list echoes none for an empty ledger" FAIL
 fi
-if grep -qF 'bypasses: [],' "$PHASE_LIB" && grep -qF '_tdd_begin_critical "$state_file" "$session_id" "$vanilla"' "$PHASE_LIB"; then
-  check "P2d --tdd-begin atomically resets the ledger" PASS
+BEGIN_SESSION_BLOCK="$(awk '/^_tdd_begin_session_critical\(\)/,/^}/' "$PHASE_LIB")"
+STANDALONE_BEGIN_BLOCK="$(awk '/^_autopilot_begin_standalone_tdd_critical\(\)/,/^}/' "$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh")"
+if grep -qF 'autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}"' "$LOG_SH" \
+  && printf '%s\n' "$STANDALONE_BEGIN_BLOCK" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
+  && printf '%s\n' "$BEGIN_SESSION_BLOCK" | grep -qF 's.bypasses = [];'; then
+  check "P2d --tdd-begin resets the ledger inside its atomic transition" PASS
 else
-  check "P2d --tdd-begin atomically resets the ledger" FAIL
+  check "P2d --tdd-begin resets the ledger inside its atomic transition" FAIL
 fi
 if grep -qF 'tdd_record_bypass "$session_val" "$gate_val"' "$LOG_SH"; then
   check "P2e --bypass-note routes through the active-scoped recorder" PASS
@@ -210,6 +214,20 @@ if [ -n "$SBOX" ]; then
       ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= \
       env "$var=off" bash "$PLUGIN_DIR/hooks/$hook" 2>/dev/null
   }
+  review_payload() {
+    local sid="$1" ticket
+    ticket="$(run_log --review-ticket --session "$sid" 2>/dev/null)" || return 1
+    SID_VALUE="$sid" TICKET="$ticket" node -e '
+      process.stdout.write(JSON.stringify({
+        session_id: process.env.SID_VALUE,
+        tool_name: "Agent",
+        tool_input: {
+          subagent_type: "zensu:code-reviewer",
+          prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+        }
+      }));
+    '
+  }
 
   start_session fx
   run_log --tdd-begin --session fx >/dev/null 2>&1
@@ -242,13 +260,13 @@ if [ -n "$SBOX" ]; then
   export STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json"
   # shellcheck disable=SC1090
   source "$PHASE_LIB"
-  tdd_increment_counter fx stopBlocks >/dev/null
-  tdd_increment_counter fx stopBlocks >/dev/null
+  tdd_increment_counter fx stopBlockCount >/dev/null
+  tdd_increment_counter fx stopBlockCount >/dev/null
   run_log --tdd-begin --session fx >/dev/null 2>&1
-  if [ "$(tdd_get_counter "$(tdd_state_file fx)" stopBlocks)" = 0 ]; then
-    check "P5c2 --tdd-begin resets integrated stopBlocks" PASS
+  if [ "$(tdd_get_counter "$(tdd_state_file fx)" stopBlockCount)" = 0 ]; then
+    check "P5c2 --tdd-begin resets integrated stopBlockCount" PASS
   else
-    check "P5c2 --tdd-begin resets integrated stopBlocks" FAIL
+    check "P5c2 --tdd-begin resets integrated stopBlockCount" FAIL
   fi
   start_session fx2
   run_log --tdd-begin --session fx2 >/dev/null 2>&1
@@ -491,7 +509,14 @@ if [ -n "$SBOX" ]; then
   start_session "$SEED_SBOX_SID"
   run_log --tdd-begin --session "$SEED_SBOX_SID" >/dev/null 2>&1
   run_log --bypass-note ZENSU_CHAIN --session "$SEED_SBOX_SID" >/dev/null 2>&1
-  ( STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" bash -c "source '$PHASE_LIB'; tdd_seed_deferred_review '$SEED_SBOX_SID' false" ) >/dev/null 2>&1
+  run_log --tdd-complete --session "$SEED_SBOX_SID" >/dev/null 2>&1
+  review_payload "$SEED_SBOX_SID" | run_hook post-review-tdd-delegate.sh >/dev/null
+  SEED_REVIEW_TICKET="$(run_log --current-review-ticket --session "$SEED_SBOX_SID" 2>/dev/null)"
+  run_log --code-review-done --claimed-review-ticket "$SEED_REVIEW_TICKET" \
+    --session "$SEED_SBOX_SID" >/dev/null 2>&1
+  run_log --chain-done --claimed-review-ticket "$SEED_REVIEW_TICKET" \
+    --session "$SEED_SBOX_SID" >/dev/null 2>&1
+  ( TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" bash -c "source '$PHASE_LIB'; tdd_seed_deferred_review '$SEED_SBOX_SID' false" ) >/dev/null 2>&1
   L15="$(run_log --bypass-list --session "$SEED_SBOX_SID" 2>/dev/null)"
   if [ "$L15" = "none" ]; then
     check "P5aa deferred-review seed starts with a clean ledger" PASS
@@ -511,7 +536,8 @@ if [ -n "$SBOX" ]; then
   start_session dx
   run_log --tdd-begin --session dx >/dev/null 2>&1
   run_log --bypass-note ZENSU_TDD_GATE --session dx >/dev/null 2>&1
-  DOUT="$(printf '%s' '{"session_id":"dx","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer"}}' | run_delegate_nosr)"
+  run_log --tdd-complete --session dx >/dev/null 2>&1
+  DOUT="$(review_payload dx | run_delegate_nosr)"
   case "$DOUT" in
     *'Gates bypassed during this session: ZENSU_TDD_GATE'*)
       check "P5w delegate directive carries the actual ledger (selfReview off)" PASS ;;
@@ -520,7 +546,8 @@ if [ -n "$SBOX" ]; then
   esac
   start_session dy
   run_log --tdd-begin --session dy >/dev/null 2>&1
-  DOUT2="$(printf '%s' '{"session_id":"dy","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer"}}' | run_delegate_nosr)"
+  run_log --tdd-complete --session dy >/dev/null 2>&1
+  DOUT2="$(review_payload dy | run_delegate_nosr)"
   case "$DOUT2" in
     *'Gates bypassed during this session: none'*)
       check "P5x delegate attests none on a clean ledger (selfReview off)" PASS ;;
@@ -529,7 +556,7 @@ if [ -n "$SBOX" ]; then
   esac
   printf '{"hooks":{"selfReview":false,"combinedSummary":false}}\n' > "$SBOX/config-doubleoff.json"
   start_session dx
-  DOUT3="$(printf '%s' '{"session_id":"dx","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer"}}' | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  DOUT3="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
   case "$DOUT3" in
     *'Gates bypassed during this session: ZENSU_TDD_GATE'*)
       check "P5x2 ledger line survives combinedSummary:false + selfReview:false" PASS ;;

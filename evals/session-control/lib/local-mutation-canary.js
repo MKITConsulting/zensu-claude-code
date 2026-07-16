@@ -4,6 +4,11 @@
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const {
+  LISTENER_FORBIDDEN_EXIT_CODE,
+  LISTENER_FORBIDDEN_MARKER,
+  isLoopbackListenerForbiddenError,
+} = require('./local-mutation-canary-status.js');
 
 const [readyFile, hitFile] = process.argv.slice(2);
 if (!readyFile || !hitFile) {
@@ -25,6 +30,10 @@ const server = http.createServer((request, response) => {
 });
 
 server.on('error', (error) => {
+  if (isLoopbackListenerForbiddenError(error)) {
+    process.stderr.write(`${LISTENER_FORBIDDEN_MARKER}\n`);
+    process.exit(LISTENER_FORBIDDEN_EXIT_CODE);
+  }
   process.stderr.write(`local mutation canary: ${error.message}\n`);
   process.exit(1);
 });

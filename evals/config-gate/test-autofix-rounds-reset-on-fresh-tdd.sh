@@ -31,8 +31,8 @@ bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
 . "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 tdd_increment_counter "$SID" reviewRound >/dev/null
 tdd_increment_counter "$SID" reviewRound >/dev/null
-tdd_increment_counter "$SID" stopBlocks >/dev/null
-tdd_increment_counter "$SID" stopBlocks >/dev/null
+tdd_increment_counter "$SID" stopBlockCount >/dev/null
+tdd_increment_counter "$SID" stopBlockCount >/dev/null
 tdd_set_flag "$SID" chainDone true >/dev/null
 tdd_set_flag "$SID" codeReviewDone true >/dev/null
 
@@ -55,7 +55,7 @@ AFTER_REV="$(printf '%s' "$AFTER" | node -e 'let s="";process.stdin.on("data",c=
 printf '%s' "$AFTER" | node -e '
   let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{
     const j=JSON.parse(s);
-    process.exit(j.active===true && j.reviewRound===0 && j.stopBlocks===0
+    process.exit(j.active===true && j.reviewRound===0 && j.stopBlockCount===0
       && j.chainDone===false && j.codeReviewDone===false ? 0 : 1);
   });
 ' && check "fresh-task begin resets integrated budgets and re-arms chain flags" PASS \
@@ -93,9 +93,9 @@ case "$(uname -s)" in
     [ -L "${STATE_FILE}.stopblocks" ] && [ "$(<"$TARGET")" = do-not-touch ] \
       && check "retired .stopblocks symlink and target are untouched" PASS \
       || check "retired .stopblocks symlink and target are untouched" FAIL
-    [ "$(tdd_get_counter "$STATE_FILE" stopBlocks)" = 1 ] \
-      && check "Stop increments only the integrated stopBlocks field" PASS \
-      || check "Stop increments only the integrated stopBlocks field" FAIL
+    [ "$(tdd_get_counter "$STATE_FILE" stopBlockCount)" = 1 ] \
+      && check "Stop increments only the integrated stopBlockCount field" PASS \
+      || check "Stop increments only the integrated stopBlockCount field" FAIL
     if rg -qi 'symlink|stopblocks file' "$TMP_DIR/stop.err"; then
       check "Stop emits no sidecar-specific warning" FAIL
     else

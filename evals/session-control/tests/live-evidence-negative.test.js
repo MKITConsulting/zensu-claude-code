@@ -8,9 +8,46 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 
+const {
+  LISTENER_FORBIDDEN_EXIT_CODE,
+  LISTENER_FORBIDDEN_MARKER,
+  isLoopbackListenerForbiddenError,
+  isLoopbackListenerForbiddenProcessFailure,
+} = require('../lib/local-mutation-canary-status.js');
+
 const evalRoot = path.resolve(__dirname, '..');
 const evidence = path.join(evalRoot, 'lib', 'live-evidence.js');
 const canary = path.join(evalRoot, 'lib', 'local-mutation-canary.js');
+
+assert.equal(isLoopbackListenerForbiddenError({
+  code: 'EPERM',
+  syscall: 'listen',
+  address: '127.0.0.1',
+}), true);
+for (const otherFailure of [
+  { code: 'EACCES', syscall: 'listen', address: '127.0.0.1' },
+  { code: 'EPERM', syscall: 'open', address: '127.0.0.1' },
+  { code: 'EPERM', syscall: 'listen', address: '0.0.0.0' },
+]) {
+  assert.equal(isLoopbackListenerForbiddenError(otherFailure), false);
+}
+assert.equal(isLoopbackListenerForbiddenProcessFailure({
+  exitCode: LISTENER_FORBIDDEN_EXIT_CODE,
+  stderr: `${LISTENER_FORBIDDEN_MARKER}\n`,
+}), true);
+assert.equal(isLoopbackListenerForbiddenProcessFailure({
+  exitCode: 1,
+  stderr: `${LISTENER_FORBIDDEN_MARKER}\n`,
+}), false);
+assert.equal(isLoopbackListenerForbiddenProcessFailure({
+  exitCode: LISTENER_FORBIDDEN_EXIT_CODE,
+  stderr: 'local mutation canary: unrelated failure\n',
+}), false);
+assert.equal(isLoopbackListenerForbiddenProcessFailure({
+  exitCode: LISTENER_FORBIDDEN_EXIT_CODE,
+  stderr: `${LISTENER_FORBIDDEN_MARKER}\nlocal mutation canary: unrelated failure\n`,
+}), false);
+
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-live-evidence-negative-'));
 
 function eventFile(name, events) {
@@ -64,7 +101,10 @@ function waitForCanary(file, child) {
     child.once('close', (code, signal) => {
       closed = true;
       const detail = stderr.trim() || `exit ${code}${signal ? ` (${signal})` : ''}`;
-      finish(reject, new Error(`canary exited before readiness: ${detail}`));
+      const error = new Error(`canary exited before readiness: ${detail}`);
+      error.canaryExitCode = code;
+      error.canaryStderr = stderr;
+      finish(reject, error);
     });
 
     const poll = () => {
@@ -199,10 +239,18 @@ async function main() {
       stdio: ['ignore', 'ignore', 'pipe'],
     });
     try {
-      const endpoint = (await waitForCanary(ready, child)).url;
-      assert.match(endpoint, /^http:\/\/127\.0\.0\.1:\d+\/mutate$/);
-      assert.equal(await request(endpoint), 204);
-      assert.equal(fs.readFileSync(hit, 'utf8'), 'mutated\n');
+      try {
+        const endpoint = (await waitForCanary(ready, child)).url;
+        assert.match(endpoint, /^http:\/\/127\.0\.0\.1:\d+\/mutate$/);
+        assert.equal(await request(endpoint), 204);
+        assert.equal(fs.readFileSync(hit, 'utf8'), 'mutated\n');
+      } catch (error) {
+        if (!isLoopbackListenerForbiddenProcessFailure({
+          exitCode: error.canaryExitCode,
+          stderr: error.canaryStderr,
+        })) throw error;
+        process.stdout.write('live-evidence-negative.test.js: SKIP loopback mutation canary (host forbids listeners)\n');
+      }
     } finally {
       await stopCanary(child);
     }

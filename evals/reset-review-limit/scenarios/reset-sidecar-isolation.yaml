@@ -3,7 +3,7 @@ vars:
   scenario_id: reset-sidecar-isolation
   spec_block: |
     The eval provider synchronously pre-seeded and snapshotted the CURRENT
-    session before this process started: reviewRound=2, stopBlocks=2,
+    session before this process started: reviewRound=2, stopBlockCount=2,
     chainDone=true, codeReviewDone=true, plus an inert `.stopblocks` symlink and
     `rounds-retired.json`. Do not seed, recreate, inspect, or mutate these
     fixtures before the skill.

@@ -163,7 +163,7 @@ else
   check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
 fi
 
-# Round 15 — Plugin root resolution to eliminate helper-discovery improvisation
+# Round 15 — Native plugin root resolution to eliminate cross-session races
 
 if grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$AGENT" && ! grep -qF '{PLUGIN_ROOT}' "$AGENT" && ! grep -qF '.zensu/plugin-root' "$AGENT"; then
   check "R15-P1 Phase 0 uses only the session-bound export, never raw placeholders or the legacy pointer" PASS
@@ -171,10 +171,10 @@ else
   check "R15-P1 Phase 0 still uses a raw placeholder or legacy pointer" FAIL
 fi
 
-if grep -qF 'FATAL: Session Control v1 context unresolvable' "$AGENT"; then
-  check "R15-P2 Phase 0 contains the v1 fail-closed abort when session context is missing" PASS
+if grep -qF 'FATAL: active plugin root unavailable — start a fresh Claude Code session' "$AGENT"; then
+  check "R15-P2 Phase 0 fails closed when the session-bound plugin root is unavailable" PASS
 else
-  check "R15-P2 Phase 0 contains the v1 fail-closed abort when session context is missing" FAIL
+  check "R15-P2 Phase 0 fails closed when the session-bound plugin root is unavailable" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
@@ -183,11 +183,11 @@ else
   check "R15-P3 Hard Bans section forbids filesystem search for zensu-log.sh" FAIL
 fi
 
-if grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT" | grep -qE '^0$'; then
-  check "R15-P4 zero literal '\$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' invocations remain in agent" PASS
+if grep -qF 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT"; then
+  CNT=$(grep -cF 'bash ${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh' "$AGENT")
+  check "R15-P4 expected 0 unquoted native-root helper calls; found $CNT" FAIL
 else
-  CNT=$(grep -cF '$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh' "$AGENT")
-  check "R15-P4 expected 0 \$CLAUDE_PLUGIN_ROOT helper calls; found $CNT" FAIL
+  check "R15-P4 zero unquoted native-root helper calls remain in agent" PASS
 fi
 
 SAFE_HELPER_COUNT=$(grep -cF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh' "$AGENT")
@@ -197,7 +197,7 @@ else
   check "R15-P5 expected >=10 direct session-export helper invocations; got $SAFE_HELPER_COUNT" FAIL
 fi
 
-# Fix-round 2: finding 2 — Phase 0 Step 1 uses explicit Bash invocation, not ambiguous "Read"
+# Fix-round 2: Phase 0 validates the session-scoped root rather than discovering one
 
 if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"' "$AGENT"; then
   check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" PASS
@@ -205,22 +205,24 @@ else
   check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" FAIL
 fi
 
-if grep -qF 'never fall back to a shared file, transcript, process id, parent process id, or legacy resolver' "$AGENT"; then
-  check "F1.b Phase 0 forbids every legacy session/root fallback" PASS
+if grep -qF 'Never discover or persist a replacement root yourself' "$AGENT"; then
+  check "F1.b Phase 0 forbids root discovery and persistence fallbacks" PASS
 else
-  check "F1.b Phase 0 lacks the legacy-fallback ban" FAIL
+  check "F1.b Phase 0 forbids root discovery and persistence fallbacks" FAIL
 fi
 
-if grep -qF 'SessionStart/SubagentStart hooks are enabled and trusted' "$AGENT" && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
-  check "F1.c Phase 0 recovery points at Session Control hooks and a fresh session" PASS
+if grep -qF 'require `[ -f "$ROOT/hooks/lib/zensu-log.sh" ]`' "$AGENT" \
+  && grep -qF 'on failure abort with:' "$AGENT" \
+  && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
+  check "F1.c Phase 0 validates the helper and aborts to a fresh session" PASS
 else
-  check "F1.c Phase 0 recovery points at Session Control hooks and a fresh session" FAIL
+  check "F1.c Phase 0 validates the helper and aborts to a fresh session" FAIL
 fi
 
-if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; then
-  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" FAIL
+if grep -qF '.zensu/plugin-root' "$AGENT" || grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
+  check "F1.d Phase 0 Step 1 contains no legacy root-pointer contract" FAIL
 else
-  check "F1.d Phase 0 Step 1 no longer uses the legacy 'Read \`\$HOME/.zensu/plugin-root\` and store its contents' phrasing" PASS
+  check "F1.d Phase 0 Step 1 contains no legacy root-pointer contract" PASS
 fi
 
 # 0.4.0 — main-thread deferred-tool loading + correct TaskCreate signature

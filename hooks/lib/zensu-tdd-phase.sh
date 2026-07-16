@@ -58,46 +58,186 @@ _tdd_bound_project_root() {
   printf '%s\n' "$project_root"
 }
 
-_tdd_begin_critical() {
-  local state_file="$1"
-  local session_id="$2"
-  local vanilla="$3"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" VANILLA="$vanilla" \
-    node -e '
-      const core = require(process.env.CONTROL_CORE);
-      core.mutateWorkflowState({
-        projectRoot: process.env.PROJECT_ROOT,
-        sessionId: process.env.SID,
-        workflowState: "active",
-        event: "tdd-begin",
-      }, () => ({
-        active: true,
-        vanilla: process.env.VANILLA === "true",
-        implComplete: false,
-        chainDone: false,
-        codeReviewDone: false,
-        selfReviewFixed: false,
-        workflowActive: false,
-        workflowTools: [],
-        bypasses: [],
-        reviewRound: 0,
-        stopBlocks: 0,
-        phase: "UNINITIALIZED",
-        step_id: "",
-        history: [],
-      }));
-    ' 2>/dev/null
+# Validate every path component below a trusted project/temp anchor without
+# following symlinks. The leaf contract is explicit so directories, FIFOs,
+# devices, sockets, and hard-linked files cannot masquerade as JSON state.
+#
+# The project root and the OS temp root are trusted entry points: Claude hands
+# us the former and test/runtime temp paths commonly use the latter (including
+# macOS' /var -> /private/var alias). Every component *below* that anchor is
+# checked with lstat. For an explicit state path outside both anchors, the
+# nearest existing, non-symlink ancestor becomes the entry point.
+_tdd_paths_safe() {
+  [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
+  local path_args=("$@") index=0 target mode
+  while [ "$index" -lt "${#path_args[@]}" ]; do
+    target="${path_args[$index]}"
+    mode="${path_args[$((index + 1))]}"
+    case "$mode" in
+      regular|regular-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -f "$target" ]; then return 1; fi
+        ;;
+      directory|directory-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -d "$target" ]; then return 1; fi
+        ;;
+      *) return 1 ;;
+    esac
+    index=$((index + 2))
+  done
+  PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}" TEMP_ROOT="${TMPDIR:-/tmp}" HOME_ROOT="${HOME:-}" node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const within = (base, candidate) => {
+        const rel = path.relative(base, candidate);
+        return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+      };
+      const trusted = [process.env.PROJECT_ROOT, process.env.TEMP_ROOT, process.env.HOME_ROOT]
+        .filter(Boolean).map(value => path.resolve(value));
+      const args = process.argv.slice(1);
+      const validModes = new Set(["regular", "regular-or-absent", "directory", "directory-or-absent"]);
+      for (let pair = 0; pair < args.length; pair += 2) {
+        const target = path.resolve(args[pair]);
+        const mode = args[pair + 1];
+        if (!validModes.has(mode)) process.exit(3);
+        const candidates = trusted.filter(value => within(value, target)).sort((a, b) => b.length - a.length);
+        let anchor = candidates[0] || "";
+        if (!anchor) {
+          let cursor = path.dirname(target);
+          for (;;) {
+            try {
+              const st = fs.lstatSync(cursor);
+              if (st.isDirectory() && !st.isSymbolicLink()) {
+                anchor = cursor;
+                break;
+              }
+            } catch (error) {
+              if (error.code !== "ENOENT") process.exit(3);
+            }
+            const parent = path.dirname(cursor);
+            if (parent === cursor) process.exit(3);
+            cursor = parent;
+          }
+        }
+        let physicalAnchor;
+        try { physicalAnchor = fs.realpathSync(anchor); }
+        catch (_) { process.exit(3); }
+        const rel = path.relative(anchor, target);
+        if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) process.exit(3);
+        const parts = rel ? rel.split(path.sep).filter(Boolean) : [];
+        let current = physicalAnchor;
+        let missing = false;
+        for (let i = 0; i < parts.length; i += 1) {
+          current = path.join(current, parts[i]);
+          const leaf = i === parts.length - 1;
+          if (missing) continue;
+          let st;
+          try { st = fs.lstatSync(current); }
+          catch (error) {
+            if (error.code !== "ENOENT") process.exit(3);
+            missing = true;
+            continue;
+          }
+          if (st.isSymbolicLink()) process.exit(3);
+          if (!leaf && !st.isDirectory()) process.exit(3);
+          if (leaf) {
+            if ((mode === "regular" || mode === "regular-or-absent")
+                && (!st.isFile() || st.nlink !== 1)) process.exit(3);
+            if ((mode === "directory" || mode === "directory-or-absent") && !st.isDirectory()) process.exit(3);
+          }
+        }
+        if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
+      }
+    ' "${path_args[@]}" >/dev/null 2>&1
 }
 
-tdd_begin_session() {
-  local supplied_session="${1:-}" vanilla="${2:-}" session_id state_file
-  case "$vanilla" in true|false) ;; *) return 1 ;; esac
-  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
-  state_file="$(tdd_state_file "$session_id")" || return 1
-  [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  _tdd_begin_critical "$state_file" "$session_id" "$vanilla"
+_tdd_path_safe() {
+  local target="${1:-}" mode="${2:-}"
+  [ -n "$target" ] || return 1
+  _tdd_paths_safe "$target" "$mode"
+}
+
+_tdd_state_storage_safe() {
+  local state_file="${1:-}" state_dir
+  [ -n "$state_file" ] || return 1
+  state_dir="$(dirname "$state_file")"
+  _tdd_paths_safe \
+    "$state_dir" directory \
+    "$state_file" regular-or-absent \
+    "${state_file}.lock" regular-or-absent
+}
+
+_tdd_prepare_directory() {
+  local directory="${1:-}"
+  [ -n "$directory" ] || return 1
+  _tdd_path_safe "$directory" directory-or-absent "$directory" || return 1
+  mkdir -p "$directory" 2>/dev/null || return 1
+  _tdd_path_safe "$directory" directory "$directory"
+}
+
+# `mv file existing-directory` silently moves the source *inside* the
+# directory. rename(2) has the replacement semantics state writes require and
+# rejects a directory leaf. Revalidate the leaf immediately before rename.
+_tdd_atomic_replace_regular() {
+  local source_file="${1:-}" target_file="${2:-}"
+  _tdd_paths_safe "$source_file" regular "$target_file" regular-or-absent || return 1
+  case "$(basename "$target_file")" in
+    tdd-phase-scv1_*.json)
+      local session_key project_root expected_file
+      session_key="$(basename "$target_file")"
+      session_key="${session_key#tdd-phase-}"
+      session_key="${session_key%.json}"
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+      session_key="$(zensu_resolve_session_id "$session_key")" || return 1
+      project_root="$(zensu_resolve_project_dir)" || return 1
+      expected_file="${project_root}/.zensu/state/tdd-phase-${session_key}.json"
+      [ "$target_file" = "$expected_file" ] || return 1
+      CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+        PROJECT_ROOT="$project_root" SID="$session_key" SOURCE_FILE="$source_file" \
+        node -e '
+          const fs = require("node:fs");
+          const core = require(process.env.CONTROL_CORE);
+          try {
+            const draft = JSON.parse(fs.readFileSync(process.env.SOURCE_FILE, "utf8"));
+            const previous = core.readWorkflowState({
+              projectRoot: process.env.PROJECT_ROOT,
+              sessionId: process.env.SID,
+            });
+            if (!Number.isSafeInteger(draft.revision) || draft.revision !== previous.revision) {
+              process.exit(3);
+            }
+            core.mutateWorkflowState({
+              projectRoot: process.env.PROJECT_ROOT,
+              sessionId: process.env.SID,
+              expectedRevision: previous.revision,
+              workflowState: draft.workflow_state,
+              event: "state-update",
+            }, () => draft);
+            fs.unlinkSync(process.env.SOURCE_FILE);
+          } catch (_) { process.exit(3); }
+        ' >/dev/null 2>&1
+      return $?
+      ;;
+  esac
+  SOURCE_FILE="$source_file" TARGET_FILE="$target_file" node -e '
+    const fs = require("fs");
+    const source = process.env.SOURCE_FILE;
+    const target = process.env.TARGET_FILE;
+    try {
+      const before = fs.lstatSync(source);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1) process.exit(3);
+      try {
+        const existing = fs.lstatSync(target);
+        if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink !== 1) process.exit(3);
+      } catch (error) {
+        if (error.code !== "ENOENT") process.exit(3);
+      }
+      fs.renameSync(source, target);
+      const after = fs.lstatSync(target);
+      if (!after.isFile() || after.isSymbolicLink() || after.nlink !== 1) process.exit(3);
+    } catch (_) { process.exit(3); }
+  ' >/dev/null 2>&1
 }
 
 tdd_is_test_path() {
@@ -185,6 +325,138 @@ _tdd_write_phase_critical() {
     ' 2>/dev/null
 }
 
+_tdd_locked_run() {
+  local state_file="$1"
+  shift
+
+  # Every caller uses the Core lease namespace. Selecting different mutexes via
+  # PATH or environment would split mutual exclusion for the same resource.
+  # Recheck storage after acquisition so a path swap cannot reach the mutation.
+  _tdd_state_storage_safe "$state_file" || return 1
+
+  local lock_directory token_file token acquire_rc release_rc
+  lock_directory="$(dirname "$state_file")"
+  token_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-token.XXXXXX" 2>/dev/null)" || {
+    echo "[zensu-tdd-phase] lock token allocation failed for $state_file" >&2
+    return 1
+  }
+  chmod 600 "$token_file" 2>/dev/null || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+  _tdd_path_safe "$token_file" regular || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" TOKEN_FILE="$token_file" \
+    node -e '
+      const fs = require("node:fs");
+      const core = require(process.env.CONTROL_CORE);
+      const sameIdentity = (left, right) => {
+        if (left.ino !== 0 && right.ino !== 0) return left.dev === right.dev && left.ino === right.ino;
+        return left.birthtimeMs === right.birthtimeMs && left.mode === right.mode;
+      };
+      const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+      let descriptor;
+      let lease = null;
+      try {
+        const before = fs.lstatSync(process.env.TOKEN_FILE);
+        if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) throw new Error("unsafe token file");
+        descriptor = fs.openSync(
+          process.env.TOKEN_FILE,
+          fs.constants.O_WRONLY | fs.constants.O_TRUNC | noFollow,
+        );
+        const opened = fs.fstatSync(descriptor);
+        if (!sameIdentity(before, opened)) throw new Error("token file changed before open");
+        lease = core.acquireExternalProcessLock({
+          lockDirectory: process.env.LOCK_DIRECTORY,
+          resourcePath: process.env.RESOURCE_PATH,
+          ownerPid: process.ppid,
+          tokenSink: (token) => {
+            fs.ftruncateSync(descriptor, 0);
+            fs.writeSync(descriptor, token, 0, "utf8");
+            fs.fsyncSync(descriptor);
+          },
+        });
+        const afterDescriptor = fs.fstatSync(descriptor);
+        const afterPath = fs.lstatSync(process.env.TOKEN_FILE);
+        if (
+          afterDescriptor.nlink !== 1
+          || afterPath.isSymbolicLink()
+          || !afterPath.isFile()
+          || afterPath.nlink !== 1
+          || !sameIdentity(afterDescriptor, afterPath)
+        ) throw new Error("token file changed after publication");
+        fs.closeSync(descriptor);
+        descriptor = undefined;
+      } catch (_) {
+        if (descriptor !== undefined) fs.closeSync(descriptor);
+        if (lease) {
+          try {
+            core.releaseExternalProcessLock({
+              lockDirectory: process.env.LOCK_DIRECTORY,
+              resourcePath: process.env.RESOURCE_PATH,
+              ownerPid: process.ppid,
+              token: lease.token,
+            });
+          } catch (_) { /* fail closed below */ }
+        }
+        process.exit(3);
+      }
+    ' >/dev/null 2>&1
+  acquire_rc=$?
+  if _tdd_path_safe "$token_file" regular; then
+    token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
+  else
+    token=""
+  fi
+  if [ "$acquire_rc" -ne 0 ] || [ -z "$token" ]; then
+    if [ -n "$token" ]; then
+      CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+        LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" LOCK_TOKEN="$token" \
+        node -e '
+          const core = require(process.env.CONTROL_CORE);
+          core.releaseExternalProcessLock({
+            lockDirectory: process.env.LOCK_DIRECTORY,
+            resourcePath: process.env.RESOURCE_PATH,
+            ownerPid: process.ppid,
+            token: process.env.LOCK_TOKEN,
+          });
+        ' >/dev/null 2>&1 || true
+    fi
+    rm -f -- "$token_file" 2>/dev/null || true
+    echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
+    return 1
+  fi
+
+  if _tdd_state_storage_safe "$state_file"; then
+    "$@"
+  else
+    false
+  fi
+  local rc=$?
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" LOCK_TOKEN="$token" \
+    node -e '
+      const core = require(process.env.CONTROL_CORE);
+      core.releaseExternalProcessLock({
+        lockDirectory: process.env.LOCK_DIRECTORY,
+        resourcePath: process.env.RESOURCE_PATH,
+        ownerPid: process.ppid,
+        token: process.env.LOCK_TOKEN,
+      });
+    ' >/dev/null 2>&1
+  release_rc=$?
+  rm -f -- "$token_file" 2>/dev/null || true
+  if [ "$release_rc" -ne 0 ]; then
+    echo "[zensu-tdd-phase] lock release failed for $state_file" >&2
+    return 1
+  fi
+  return $rc
+}
+
 tdd_write_phase() {
   local supplied_session="${1:-}"
   local session_id
@@ -245,9 +517,9 @@ _tdd_write_flag_critical() {
         state[process.env.KEY] = value;
         if (process.env.KEY === "active" && value) {
           state.reviewRound = 0;
-          state.stopBlocks = 0;
+          state.stopBlockCount = 0;
         }
-        if (process.env.KEY === "codeReviewDone" && value) state.stopBlocks = 0;
+        if (process.env.KEY === "codeReviewDone" && value) state.stopBlockCount = 0;
         return state;
       });
     ' 2>/dev/null
@@ -260,7 +532,7 @@ _tdd_increment_counter_critical() {
   CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
-      const names = { reviewRound: "review_progress", stopBlocks: "stop_guard" };
+      const names = { reviewRound: "review_progress", stopBlockCount: "stop_guard" };
       if (!Object.prototype.hasOwnProperty.call(names, process.env.KEY)) process.exit(2);
       const next = core.mutateWorkflowState({
         projectRoot: process.env.PROJECT_ROOT,
@@ -274,7 +546,7 @@ _tdd_increment_counter_critical() {
           throw new Error("counter is invalid or exhausted");
         }
         state[process.env.KEY] = current + 1;
-        if (process.env.KEY === "reviewRound") state.stopBlocks = 0;
+        if (process.env.KEY === "reviewRound") state.stopBlockCount = 0;
         return state;
       });
       process.stdout.write(String(next[process.env.KEY]));
@@ -283,7 +555,7 @@ _tdd_increment_counter_critical() {
 
 tdd_increment_counter() {
   local supplied_session="${1:-}" key="${2:-}" session_id state_file
-  case "$key" in reviewRound|stopBlocks) ;; *) return 1 ;; esac
+  case "$key" in reviewRound|stopBlockCount) ;; *) return 1 ;; esac
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   state_file="$(tdd_state_file "$session_id")" || return 1
@@ -342,10 +614,16 @@ _tdd_write_clear_critical() {
       workflowState: "idle",
       event: "session-reset",
     }, (s) => {
+      if (s.deferredReviewClaim !== "") throw new Error("cancel deferred-review claim first");
       s.active = false; s.implComplete = false; s.chainDone = false;
       s.codeReviewDone = false; s.selfReviewFixed = false; s.workflowActive = false;
       s.workflowTools = []; s.vanilla = false; s.bypasses = [];
-      s.reviewRound = 0; s.stopBlocks = 0;
+      s.reviewRound = 0; s.stopBlockCount = 0;
+      s.reviewTicket = ""; s.reviewTicketConsumed = true;
+      s.deferredReviewClaim = ""; s.stopBlockCount = 0;
+      delete s.reviewRearm;
+      delete s.autopilotRunId; delete s.autopilotAttempt;
+      delete s.autopilotReturnStage; delete s.chainId; delete s.chainOutcome;
       s.phase = "UNINITIALIZED"; s.step_id = ""; s.history = [];
       return s;
     });
@@ -364,6 +642,80 @@ tdd_clear_session() {
   _tdd_write_clear_critical "$state_file" "$session_id"
 }
 
+_tdd_clear_standalone_session_critical() {
+  local state_file="$1" session_id="$2" expected_revision="${3:-}"
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" \
+    EXPECTED_REVISION="$expected_revision" node -e '
+    const core=require(process.env.CONTROL_CORE);
+    const linkKeys=["autopilotRunId","autopilotAttempt","autopilotReturnStage","chainId","chainOutcome"];
+    const options={projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID,
+      workflowState:"idle",event:"standalone-reset"};
+    if(process.env.EXPECTED_REVISION)options.expectedRevision=Number(process.env.EXPECTED_REVISION);
+    core.mutateWorkflowState(options,s=>{
+      if(!linkKeys.every(key=>!Object.prototype.hasOwnProperty.call(s,key)))throw new Error("bound generation");
+      if(s.deferredReviewClaim!=="")throw new Error("cancel deferred-review claim first");
+      s.active=false;s.implComplete=false;s.chainDone=false;s.codeReviewDone=false;
+      s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
+      s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
+      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.reviewRearm;
+      s.phase="UNINITIALIZED";s.step_id="";s.history=[];
+      return s;
+    });
+  ' 2>/dev/null
+}
+
+# Production standalone reset re-proves linkage absence under the Inner lock.
+# The generic library clear remains available to trusted internal callers, but
+# a stale `{}` preflight can never deactivate a newly bound Autopilot attempt.
+tdd_clear_standalone_session() {
+  local session_id="${1:-}" state_file
+  [ "$#" -eq 1 ] && [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  [ -f "$state_file" ] || return 0
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  _tdd_clear_standalone_session_critical "$state_file" "$session_id"
+}
+
+_tdd_clear_autopilot_session_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
+  local expected_revision="${6:-}"
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" \
+    RUN_ID="$run_id" ATTEMPT="$attempt" CHAIN_ID="$chain_id" \
+    EXPECTED_REVISION="$expected_revision" node -e '
+    const core=require(process.env.CONTROL_CORE);
+    const options={projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID,
+      workflowState:"idle",event:"autopilot-reset"};
+    if(process.env.EXPECTED_REVISION)options.expectedRevision=Number(process.env.EXPECTED_REVISION);
+    core.mutateWorkflowState(options,s=>{
+      const exact=typeof s.active==="boolean"&&s.autopilotRunId===process.env.RUN_ID
+        &&s.autopilotAttempt===Number(process.env.ATTEMPT)&&s.chainId===process.env.CHAIN_ID;
+      if(!exact)throw new Error("stale autopilot generation");
+      if(s.deferredReviewClaim!=="")throw new Error("cancel deferred-review claim first");
+      s.active=false;s.implComplete=false;s.chainDone=false;s.codeReviewDone=false;
+      s.selfReviewFixed=false;s.workflowActive=false;s.workflowTools=[];s.vanilla=false;
+      s.bypasses=[];s.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=0;
+      s.deferredReviewClaim="";s.stopBlockCount=0;delete s.reviewRearm;
+      delete s.autopilotRunId;delete s.autopilotAttempt;delete s.autopilotReturnStage;
+      delete s.chainId;delete s.chainOutcome;s.phase="UNINITIALIZED";s.step_id="";s.history=[];
+      return s;
+    });
+  ' 2>/dev/null
+}
+
+tdd_clear_autopilot_session() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}" state_file
+  [ "$#" -eq 4 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_clear_autopilot_session_critical "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id"
+}
+
 _tdd_write_chain_reset_critical() {
   local state_file="$1"
   local session_id="$2"
@@ -375,9 +727,12 @@ _tdd_write_chain_reset_critical() {
       workflowState: "chain_reset",
       event: "chain-reset",
     }, (s) => {
+      if (s.deferredReviewClaim !== "") throw new Error("cancel deferred-review claim first");
       s.implComplete = false; s.chainDone = false;
       s.codeReviewDone = false; s.selfReviewFixed = false;
-      s.reviewRound = 0; s.stopBlocks = 0;
+      s.reviewTicket = ""; s.reviewTicketConsumed = true; s.reviewRound = 0;
+      s.deferredReviewClaim = ""; s.stopBlockCount = 0;
+      delete s.reviewRearm;
       return s;
     });
   ' 2>/dev/null
@@ -398,6 +753,1181 @@ tdd_reset_chain_flags() {
   [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
   _tdd_write_chain_reset_critical "$state_file" "$session_id"
+}
+
+_tdd_begin_session_critical() {
+  local state_file="$1" session_id="$2" vanilla="$3" impl_complete="$4"
+  local require_deferred_eligible="$5" deferred_claim="$6"
+  local autopilot_run_id="${7:-}" autopilot_attempt="${8:-}"
+  local autopilot_return_stage="${9:-}" chain_id="${10:-}"
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
+    SID="$session_id" VANILLA="$vanilla" \
+      IMPL_COMPLETE="$impl_complete" REQUIRE_DEFERRED_ELIGIBLE="$require_deferred_eligible" \
+      DEFERRED_CLAIM="$deferred_claim" AUTOPILOT_RUN_ID="$autopilot_run_id" \
+      AUTOPILOT_ATTEMPT="$autopilot_attempt" AUTOPILOT_RETURN_STAGE="$autopilot_return_stage" \
+      CHAIN_ID="$chain_id" node -e '
+    const core = require(process.env.CONTROL_CORE);
+    const deferred = process.env.REQUIRE_DEFERRED_ELIGIBLE === "true";
+    core.mutateWorkflowState({
+      projectRoot: process.env.PROJECT_ROOT,
+      sessionId: process.env.SID,
+      workflowState: deferred ? "deferred_review" : "active",
+      event: deferred ? "deferred-review-begin" : "tdd-begin",
+    }, (s) => {
+      if (deferred) {
+        const eligible = s.active !== true
+          || (s.active === true && s.implComplete === true && s.chainDone === true);
+        if (!eligible) throw new Error("deferred review generation is not eligible");
+        if (s.deferredReviewClaim !== ""
+            && s.deferredReviewClaim !== process.env.DEFERRED_CLAIM) {
+          throw new Error("another deferred-review claim is active");
+        }
+      } else if (s.deferredReviewClaim !== "") {
+        throw new Error("cancel deferred-review claim before starting a new generation");
+      }
+      if (typeof s.phase !== "string") s.phase = "UNINITIALIZED";
+      if (!Array.isArray(s.history)) s.history = [];
+      s.active = true;
+      s.vanilla = process.env.VANILLA === "true";
+      s.implComplete = process.env.IMPL_COMPLETE === "true";
+      s.chainDone = false;
+      s.codeReviewDone = false;
+      s.selfReviewFixed = false;
+      s.reviewTicket = "";
+      s.reviewTicketConsumed = true;
+      s.reviewRound = 0;
+      s.deferredReviewClaim = process.env.DEFERRED_CLAIM || "";
+      s.stopBlockCount = 0;
+      s.bypasses = [];
+      delete s.reviewRearm;
+      if (process.env.AUTOPILOT_RUN_ID) {
+        s.autopilotRunId = process.env.AUTOPILOT_RUN_ID;
+        s.autopilotAttempt = Number.parseInt(process.env.AUTOPILOT_ATTEMPT, 10);
+        s.autopilotReturnStage = process.env.AUTOPILOT_RETURN_STAGE;
+        s.chainId = process.env.CHAIN_ID;
+        s.chainOutcome = "";
+      } else {
+        delete s.autopilotRunId;
+        delete s.autopilotAttempt;
+        delete s.autopilotReturnStage;
+        delete s.chainId;
+        delete s.chainOutcome;
+      }
+      return s;
+    });
+  ' 2>/dev/null
+}
+
+# Atomically starts a new chain generation. In particular, the old review
+# ticket and completion flags disappear in the same locked write that marks the
+# new chain active, so a late Agent completion linearizes either before or
+# after the new chain — it can never observe a hybrid state.
+tdd_begin_session() {
+  local supplied_session="${1:-}" session_id vanilla="${2:-false}" impl_complete="${3:-false}"
+  local require_deferred_eligible="${4:-false}" deferred_claim="${5:-}"
+  local autopilot_run_id="${6:-}" autopilot_attempt="${7:-}"
+  local autopilot_return_stage="${8:-}" chain_id="${9:-}" state_file
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  case "$vanilla" in true|false) ;; *) return 1 ;; esac
+  case "$impl_complete" in true|false) ;; *) return 1 ;; esac
+  case "$require_deferred_eligible" in true|false) ;; *) return 1 ;; esac
+  if [ -n "$deferred_claim" ]; then
+    case "$deferred_claim" in dc_*) ;; *) return 1 ;; esac
+    case "$deferred_claim" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+    [ "${#deferred_claim}" -le 96 ] || return 1
+  fi
+  if [ -n "$autopilot_run_id$autopilot_attempt$autopilot_return_stage$chain_id" ]; then
+    case "$autopilot_run_id" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+    case "$autopilot_run_id" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+    [ "${#autopilot_run_id}" -le 128 ] || return 1
+    case "$autopilot_attempt" in ''|*[!0-9]*) return 1 ;; esac
+    [ "$autopilot_attempt" -ge 1 ] && [ "$autopilot_attempt" -le 999 ] || return 1
+    case "$autopilot_return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 1 ;; esac
+    case "$chain_id" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+    case "$chain_id" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+    [ "${#chain_id}" -le 128 ] || return 1
+  fi
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")" || return 1
+  [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
+  _tdd_begin_session_critical "$state_file" "$session_id" "$vanilla" "$impl_complete" \
+    "$require_deferred_eligible" "$deferred_claim" \
+    "$autopilot_run_id" "$autopilot_attempt" "$autopilot_return_stage" "$chain_id"
+}
+
+# Emit the exact outer-run linkage for this TDD generation as a compact JSON
+# object. An empty object means the chain is standalone. Callers must treat an
+# invalid/corrupt state as an error rather than guessing a run association.
+tdd_autopilot_context() {
+  local state_file="${1:-}"
+  local expected_session="${2:-}"
+  [ -n "$state_file" ] || return 1
+  [ -n "$expected_session" ] || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$expected_session")" \
+    EXPECTED_SESSION="$expected_session" node -e '
+    try {
+      const core = require(process.env.CONTROL_CORE);
+      const s = core.readWorkflowState({
+        projectRoot: process.env.PROJECT_ROOT,
+        sessionId: process.env.EXPECTED_SESSION,
+      });
+      const rootValid = typeof s.active === "boolean" && typeof s.implComplete === "boolean"
+        && typeof s.chainDone === "boolean";
+      if (!rootValid) process.exit(3);
+      const present = [s.autopilotRunId, s.autopilotAttempt, s.autopilotReturnStage, s.chainId, s.chainOutcome]
+        .some(v => v !== undefined);
+      if (!present) { process.stdout.write("{}"); process.exit(0); }
+      const linkId = v => typeof v === "string" && v.length > 0 && v.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v);
+      const valid = linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && (s.chainOutcome === "" || s.chainOutcome === "pass" || s.chainOutcome === "no-changes" || s.chainOutcome === "max-rounds");
+      if (!valid) process.exit(3);
+      process.stdout.write(JSON.stringify({
+        sessionId:process.env.EXPECTED_SESSION,
+        active:s.active,
+        implComplete:s.implComplete,
+        chainDone:s.chainDone,
+        runId:s.autopilotRunId,
+        attempt:s.autopilotAttempt,
+        returnStage:s.autopilotReturnStage,
+        chainId:s.chainId,
+        outcome:s.chainOutcome
+      }));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Return one strictly validated, self-consistent snapshot for Stop decisions.
+# rc=1 means absent; any unsafe path, malformed JSON, partial linkage, or
+# foreign session is rc>1 and must be treated fail-closed by callers.
+tdd_chain_snapshot() {
+  local state_file="${1:-}" expected_session="${2:-}"
+  [ -n "$state_file" ] && [ -n "$expected_session" ] || return 2
+  [ -e "$state_file" ] || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$expected_session")" \
+    EXPECTED_SESSION="$expected_session" node -e '
+    try {
+      const core=require(process.env.CONTROL_CORE);
+      const s=core.readWorkflowState({
+        projectRoot:process.env.PROJECT_ROOT,
+        sessionId:process.env.EXPECTED_SESSION,
+      });
+      const natural=v=>Number.isSafeInteger(v)&&v>=0;
+      const linkId=v=>typeof v==="string"&&v.length>0&&v.length<=128&&/^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(v);
+      const root=s&&typeof s==="object"&&!Array.isArray(s)&&typeof s.phase==="string"
+        &&Array.isArray(s.history)&&Array.isArray(s.bypasses)
+        &&typeof s.active==="boolean"&&typeof s.vanilla==="boolean"
+        &&typeof s.implComplete==="boolean"&&typeof s.chainDone==="boolean"
+        &&typeof s.codeReviewDone==="boolean"&&typeof s.selfReviewFixed==="boolean"
+        &&typeof s.reviewTicket==="string"&&typeof s.reviewTicketConsumed==="boolean"
+        &&natural(s.reviewRound)&&natural(s.stopBlockCount);
+      if(!root)process.exit(3);
+      const values=[s.autopilotRunId,s.autopilotAttempt,s.autopilotReturnStage,s.chainId,s.chainOutcome];
+      const count=values.filter(v=>v!==undefined).length;
+      let autopilot=null;
+      if(count!==0){
+        const valid=count===values.length&&linkId(s.autopilotRunId)
+          &&Number.isInteger(s.autopilotAttempt)&&s.autopilotAttempt>=1&&s.autopilotAttempt<=999
+          &&["GATES","CONVERGE","FIX_FINDINGS","VALIDATE","COVER"].includes(s.autopilotReturnStage)
+          &&linkId(s.chainId)&&["","pass","no-changes","max-rounds"].includes(s.chainOutcome);
+        if(!valid)process.exit(3);
+        autopilot={runId:s.autopilotRunId,attempt:s.autopilotAttempt,
+          returnStage:s.autopilotReturnStage,chainId:s.chainId,outcome:s.chainOutcome};
+      }
+      process.stdout.write(JSON.stringify({sessionId:process.env.EXPECTED_SESSION,active:s.active,
+        implComplete:s.implComplete,chainDone:s.chainDone,codeReviewDone:s.codeReviewDone,
+        selfReviewFixed:s.selfReviewFixed,vanilla:s.vanilla,
+        stopBlockCount:s.stopBlockCount,autopilot}));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Mark implementation complete only for one exact active Autopilot generation.
+# This prevents a delayed attempt-N completion from arming attempt N+1 after a
+# retry or recovery transition reused the same session file.
+_tdd_mark_impl_complete_bound_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
+    SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" node -e '
+      const core=require(process.env.CONTROL_CORE);
+      const current=core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID});
+      const exact=current.active===true&&typeof current.implComplete==="boolean"
+        &&current.chainDone===false&&current.chainOutcome===""
+        &&current.autopilotRunId===process.env.RUN_ID
+        &&current.autopilotAttempt===Number(process.env.ATTEMPT)&&current.chainId===process.env.CHAIN_ID;
+      if(!exact)throw new Error("stale autopilot generation");
+      if(current.implComplete===true)process.exit(0);
+      core.mutateWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID,
+        expectedRevision:current.revision,workflowState:"implementation_complete",event:"implementation-complete"},s=>{
+        const stillExact=s.active===true&&s.implComplete===false&&s.chainDone===false&&s.chainOutcome===""
+          &&s.autopilotRunId===process.env.RUN_ID&&s.autopilotAttempt===Number(process.env.ATTEMPT)
+          &&s.chainId===process.env.CHAIN_ID;
+        if(!stillExact)throw new Error("stale autopilot generation");
+        s.implComplete=true;return s;
+      });
+    ' 2>/dev/null
+}
+
+tdd_mark_impl_complete_bound() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}" state_file
+  [ "$#" -eq 4 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_mark_impl_complete_bound_critical "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id"
+}
+
+# Standalone completion is also a generation CAS. A caller may have observed
+# an unbound session immediately before Autopilot replaced the same Inner file;
+# therefore linkage absence is proven again while holding the Inner mutex.
+_tdd_mark_impl_complete_standalone_critical() {
+  local state_file="$1" session_id="$2"
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
+    const core=require(process.env.CONTROL_CORE);
+    const s=core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID});
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const standalone=linkKeys.every(key=>!Object.prototype.hasOwnProperty.call(s,key));
+    const exact=standalone&&s.active===true&&typeof s.implComplete==="boolean"
+      && s.chainDone === false;
+    if(!exact)throw new Error("stale standalone generation");
+    if(s.implComplete===true)process.exit(0);
+    core.mutateWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID,
+      expectedRevision:s.revision,workflowState:"implementation_complete",event:"implementation-complete"},draft=>{
+      const stillStandalone=linkKeys.every(key=>!Object.prototype.hasOwnProperty.call(draft,key));
+      if(!stillStandalone||draft.active!==true||draft.implComplete!==false||draft.chainDone!==false)
+        throw new Error("stale standalone generation");
+      draft.implComplete=true;return draft;
+    });
+  ' 2>/dev/null
+}
+
+tdd_mark_impl_complete_standalone() {
+  local session_id="${1:-}" state_file
+  [ "$#" -eq 1 ] && [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_mark_impl_complete_standalone_critical "$state_file" "$session_id"
+}
+
+_tdd_autopilot_link_id_shape_ok() {
+  local value="${1:-}"
+  [ -n "$value" ] && [ "${#value}" -le 128 ] || return 1
+  case "$value" in [A-Za-z0-9]*) ;; *) return 1 ;; esac
+  case "$value" in *[!A-Za-z0-9_.:-]*) return 1 ;; esac
+  return 0
+}
+
+_tdd_autopilot_attempt_shape_ok() {
+  local attempt="${1:-}"
+  case "$attempt" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$attempt" -ge 1 ] && [ "$attempt" -le 999 ]
+}
+
+# Persist an outcome before the final chain terminus (notably max-rounds before
+# the self-review handoff). A non-empty outcome is immutable for this exact
+# inner generation. Bound calls use:
+#   session outcome run attempt chain [claimed-review-ticket]
+# The legacy two-argument form can only confirm an already-persisted identical
+# outcome; it may never initialize one because it cannot prove generation or
+# ticket ownership.
+_tdd_set_chain_outcome_critical() {
+  local state_file="$1" session_id="$2" outcome="$3" run_id="$4"
+  local attempt="$5" chain_id="$6" ticket="$7" binding_supplied="$8" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" OUTCOME="$outcome" RUN_ID="$run_id" \
+    ATTEMPT="$attempt" CHAIN_ID="$chain_id" TICKET="$ticket" \
+    BINDING_SUPPLIED="$binding_supplied" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string" && outcomes.has(s.chainOutcome);
+      const base = completeLink
+        && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+        && s.active === true && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.reviewTicket === "string"
+        && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      if (!base) process.exit(3);
+
+      // An unbound caller may only observe an identical immutable outcome. It
+      // cannot create one or choose the current generation by accident.
+      if (process.env.BINDING_SUPPLIED !== "true") {
+        process.exit(s.chainOutcome === process.env.OUTCOME ? 10 : 3);
+      }
+      const exactLink = s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exactLink) process.exit(3);
+      const ticket = process.env.TICKET;
+      const ticketOk = ticket
+        ? s.reviewTicket === ticket && s.reviewTicketConsumed === true && s.reviewRound >= 1
+        : s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+      if (!ticketOk) process.exit(3);
+      if (s.chainOutcome === process.env.OUTCOME) process.exit(10);
+      if (s.chainOutcome !== "" || s.chainDone !== false) process.exit(3);
+      s.chainOutcome = process.env.OUTCOME;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_set_chain_outcome() {
+  local session_id="${1:-}" outcome="${2:-}" run_id="${3:-}" attempt="${4:-}"
+  local chain_id="${5:-}" ticket="${6:-}" binding_supplied=false state_file
+  [ "$#" -eq 2 ] || [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac
+  if [ "$#" -ge 5 ]; then
+    _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+    _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+    _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+    if [ -n "$ticket" ]; then _tdd_review_ticket_shape_ok "$ticket" || return 1; fi
+    binding_supplied=true
+  fi
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_set_chain_outcome_critical \
+    "$state_file" "$session_id" "$outcome" "$run_id" "$attempt" "$chain_id" \
+    "$ticket" "$binding_supplied"
+}
+
+# Atomically seal one exact Autopilot-linked inner chain. The outcome and
+# chainDone flag share the same locked write, eliminating the partial state
+# where Stop can observe a completed chain with no durable outcome. Signature:
+#   tdd_finish_autopilot_chain session run attempt chain outcome [claimed-ticket]
+_tdd_finish_autopilot_chain_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local chain_id="$5" outcome="$6" ticket="$7" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" OUTCOME="$outcome" TICKET="$ticket" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const outcomes = new Set(["", "pass", "no-changes", "max-rounds"]);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string" && outcomes.has(s.chainOutcome);
+      const base = completeLink
+        && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && s.active === true && typeof s.vanilla === "boolean" && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string"
+        && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0;
+      const exactLink = base
+        && s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exactLink) process.exit(3);
+      const ticket = process.env.TICKET;
+      const ticketOk = ticket
+        ? s.reviewTicket === ticket && s.reviewTicketConsumed === true && s.reviewRound >= 1
+        : s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+      if (!ticketOk) process.exit(3);
+
+      // A completed exact retry is a true no-op. Any attempt to reinterpret
+      // that generation with another outcome (or ticket, rejected above) is a
+      // conflict. A pre-persisted matching max-rounds outcome may be sealed.
+      if (s.chainDone === true) process.exit(s.chainOutcome === process.env.OUTCOME ? 10 : 3);
+      if (s.chainDone !== false || (s.chainOutcome !== "" && s.chainOutcome !== process.env.OUTCOME)) {
+        process.exit(3);
+      }
+      s.chainOutcome = process.env.OUTCOME;
+      s.chainDone = true;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_finish_autopilot_chain() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}"
+  local outcome="${5:-}" ticket="${6:-}" state_file
+  [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  case "$outcome" in pass|no-changes|max-rounds) ;; *) return 1 ;; esac
+  if [ -n "$ticket" ]; then _tdd_review_ticket_shape_ok "$ticket" || return 1; fi
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" || return 1
+  _tdd_locked_run "$state_file" _tdd_finish_autopilot_chain_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$outcome" "$ticket"
+}
+
+# --- Consume-mode reviewer ticket -----------------------------------------
+# Every thin code-reviewer spawn gets a fresh, random ticket. The completion
+# hook must atomically claim that exact ticket before it may read or mutate the
+# auto-fix counter. Re-arming a chain clears the ticket, issuing a new ticket
+# invalidates the prior one, and duplicate/late Agent deliveries become no-ops.
+
+_tdd_review_ticket_shape_ok() {
+  local ticket="${1:-}"
+  [ -n "$ticket" ] && [ "${#ticket}" -le 96 ] || return 1
+  case "$ticket" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  return 0
+}
+
+_tdd_issue_review_ticket_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const markerKeys = [
+      "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
+    ];
+    const marker = s && s.reviewRearm;
+    const markerValid = marker === undefined || (marker && typeof marker === "object"
+      && !Array.isArray(marker)
+      && Object.keys(marker).sort().length === markerKeys.length
+      && Object.keys(marker).sort().every((key, index) => key === markerKeys[index])
+      && marker.schemaVersion === 1 && marker.status === "pending"
+      && typeof marker.runId === "string" && marker.runId === s.autopilotRunId
+      && marker.attempt === s.autopilotAttempt
+      && typeof marker.chainId === "string" && marker.chainId === s.chainId
+      && typeof marker.consumedTicketSha256 === "string"
+      && /^[a-f0-9]{64}$/.test(marker.consumedTicketSha256)
+      && marker.retire === false);
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string"
+      && typeof s.reviewTicketConsumed === "boolean"
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 0
+      && markerValid;
+    if (!valid) process.exit(3);
+    s.reviewTicket = process.env.TICKET;
+    s.reviewTicketConsumed = false;
+    // Issuing the first post-rearm ticket is forward progress. The old
+    // crash-retry receipt must not survive into another exhausted budget.
+    delete s.reviewRearm;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_issue_review_ticket() {
+  local supplied_session="${1:-}" session_id state_file state_dir ticket
+  [ -n "$supplied_session" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  ticket="$(node -e 'process.stdout.write("rt_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+
+  if _tdd_locked_run "$state_file" \
+    _tdd_issue_review_ticket_critical "$state_file" "$session_id" "$ticket"; then
+    printf '%s\n' "$ticket"
+    return 0
+  fi
+  return 1
+}
+
+_tdd_consume_review_ticket_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}"
+  local state_dir state_tmp next_file
+  state_dir="$(dirname "$state_file")"
+  state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  next_file="$(mktemp "${state_file}.next.XXXXXX" 2>/dev/null)" || {
+    rm -f "$state_tmp" 2>/dev/null
+    return 1
+  }
+
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const hasOwn = key => Object.prototype.hasOwnProperty.call(s, key);
+    const linkCount = s && typeof s === "object" && !Array.isArray(s)
+      ? linkKeys.filter(hasOwn).length : 0;
+    const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+      && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+    let autopilot = null;
+    if (linkCount !== 0) {
+      const completeLink = linkCount === linkKeys.length
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt)
+        && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+          .includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && s.chainOutcome === "";
+      if (!completeLink) process.exit(3);
+      autopilot = {
+        runId: s.autopilotRunId,
+        attempt: s.autopilotAttempt,
+        returnStage: s.autopilotReturnStage,
+        chainId: s.chainId,
+        outcome: s.chainOutcome
+      };
+    }
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && s.codeReviewDone === false
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string"
+      && s.reviewTicket === process.env.TICKET
+      && typeof s.reviewTicketConsumed === "boolean"
+      && s.reviewTicketConsumed === false
+      && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 0
+      && s.reviewRound < Number.MAX_SAFE_INTEGER;
+    if (!valid) process.exit(3);
+
+    // The ticket-bound Session Control document is the sole review-budget
+    // authority. No parallel rounds file is consulted or written.
+    const next = s.reviewRound + 1;
+    s.reviewTicketConsumed = true;
+    s.reviewRound = next;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], JSON.stringify({next, autopilot}));
+  ' "$state_tmp" "$next_file" 2>/dev/null; then
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  fi
+
+  if [ ! -s "$state_tmp" ] || [ ! -s "$next_file" ]; then
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  fi
+
+  _tdd_atomic_replace_regular "$state_tmp" "$state_file" "$state_dir" || {
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  }
+  cat "$next_file"
+  rm -f "$next_file" 2>/dev/null
+}
+
+# Return the review round and the exact fully-validated Autopilot binding from
+# the same locked read that consumes the one-shot ticket. `autopilot:null`
+# denotes a truly standalone chain; partial linkage is rejected pre-mutation.
+tdd_consume_review_ticket_context() {
+  local session_id="${1:-}" ticket="${2:-}" counter_file="${3:-}"
+  local state_file
+  [ -n "$session_id" ] || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  _tdd_locked_run "$state_file" \
+    _tdd_consume_review_ticket_critical "$state_file" "$session_id" "$ticket" "$counter_file"
+}
+
+# Compatibility view for existing library callers. The authoritative claim
+# transaction above always returns the structured result; this wrapper exposes
+# only its round number without performing a second state read or claim.
+tdd_consume_review_ticket() {
+  local claim
+  claim="$(tdd_consume_review_ticket_context "$@")" || return 1
+  CLAIM="$claim" node -e '
+    try {
+      const value = JSON.parse(process.env.CLAIM);
+      if (!Number.isSafeInteger(value.next) || value.next < 1) process.exit(3);
+      process.stdout.write(String(value.next));
+    } catch (_) { process.exit(3); }
+  ' 2>/dev/null
+}
+
+# Atomically persist the bound max-round self-review handoff. The exact
+# postcondition is outcome=max-rounds + codeReviewDone=true while chainDone
+# stays false. Only an exact retry of that complete postcondition is idempotent;
+# every partial result, stale ticket, or changed generation fails closed.
+_tdd_mark_autopilot_max_round_handoff_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local return_stage="$5" chain_id="$6" ticket="$7" tmp node_rc
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" TICKET="$ticket" node -e '
+      const fs = require("fs");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const completeLink = s && typeof s === "object" && !Array.isArray(s)
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt)
+        && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && ["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]
+          .includes(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && ["", "pass", "no-changes", "max-rounds"].includes(s.chainOutcome);
+      const exact = completeLink
+        && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && s.active === true && typeof s.vanilla === "boolean" && s.implComplete === true
+        && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
+        && s.reviewTicketConsumed === true
+        && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 1
+        && s.autopilotRunId === process.env.RUN_ID
+        && s.autopilotAttempt === Number(process.env.ATTEMPT)
+        && s.autopilotReturnStage === process.env.RETURN_STAGE
+        && s.chainId === process.env.CHAIN_ID;
+      if (!exact) process.exit(3);
+      const completeResult = s.chainOutcome === "max-rounds"
+        && s.codeReviewDone === true && s.chainDone === false && s.selfReviewFixed === false;
+      if (completeResult) process.exit(10);
+      const fresh = s.chainOutcome === "" && s.codeReviewDone === false
+        && s.chainDone === false && s.selfReviewFixed === false;
+      if (!fresh) process.exit(3);
+      s.chainOutcome = "max-rounds";
+      s.codeReviewDone = true;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_mark_autopilot_max_round_handoff() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}"
+  local return_stage="${4:-}" chain_id="${5:-}" ticket="${6:-}" state_file state_dir
+  [ "$#" -eq 6 ] && [ -n "$session_id" ] || return 1
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  case "$return_stage" in GATES|CONVERGE|FIX_FINDINGS|VALIDATE|COVER) ;; *) return 1 ;; esac
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_autopilot_max_round_handoff_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$return_stage" "$chain_id" "$ticket"
+}
+
+_tdd_mark_review_converged_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" key="$4" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" KEY="$key" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const key = process.env.KEY;
+    const validKey = key === "codeReviewDone" || key === "chainDone" || key === "selfReviewFixed";
+    const valid = validKey
+      && s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && typeof s.phase === "string"
+      && Array.isArray(s.history)
+      && Array.isArray(s.bypasses)
+      && typeof s.active === "boolean" && s.active === true
+      && typeof s.vanilla === "boolean"
+      && typeof s.implComplete === "boolean" && s.implComplete === true
+      && typeof s.chainDone === "boolean" && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean"
+      && typeof s.selfReviewFixed === "boolean"
+      && typeof s.reviewTicket === "string" && s.reviewTicket === process.env.TICKET
+      && typeof s.reviewTicketConsumed === "boolean" && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+    if (!valid) process.exit(3);
+    if (key === "codeReviewDone" && s.codeReviewDone !== false) process.exit(3);
+    if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
+    s[key] = true;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  [ -s "$tmp" ] || { rm -f "$tmp" 2>/dev/null; return 1; }
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+# Every reviewer/self-review terminus after the one-shot claim is bound to the
+# same consumed ticket. A concurrent --tdd-begin therefore invalidates stale
+# PASS, max-round, latch, and terminal writes as one generation boundary.
+tdd_mark_review_converged() {
+  local session_id="${1:-}" ticket="${2:-}" key="${3:-}" state_file state_dir
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  command -v node >/dev/null 2>&1 || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" \
+    _tdd_mark_review_converged_critical "$state_file" "$session_id" "$ticket" "$key"
+}
+
+_tdd_mark_unclaimed_review_critical() {
+  local state_file="$1" session_id="$2" key="$3" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" KEY="$key" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const key = process.env.KEY;
+    const validKey = key === "codeReviewDone" || key === "chainDone" || key === "selfReviewFixed";
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const standalone = s && typeof s === "object" && !Array.isArray(s)
+      && linkKeys.every(linkKey => !Object.prototype.hasOwnProperty.call(s, linkKey));
+    const valid = validKey && standalone
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && s.active === true && s.implComplete === true && s.chainDone === false
+      && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+      && s.reviewTicket === "" && s.reviewTicketConsumed === true && s.reviewRound === 0;
+    if (!valid) process.exit(3);
+    if (key === "codeReviewDone" && s.codeReviewDone !== false) process.exit(3);
+    if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
+    s[key] = true;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+# Compatibility for zero-diff and pre-ticket legacy chains. Once a review
+# ticket was issued/consumed, every terminus must carry that ticket; an
+# unqualified stale command is then rejected instead of closing a new chain.
+tdd_mark_unclaimed_review() {
+  local session_id="${1:-}" key="${2:-}" state_file state_dir
+  [ -n "$session_id" ] || return 1
+  case "$key" in codeReviewDone|chainDone|selfReviewFixed) ;; *) return 1 ;; esac
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_mark_unclaimed_review_critical \
+    "$state_file" "$session_id" "$key"
+}
+
+_tdd_ensure_self_review_ticket_critical() {
+  local state_file="$1" session_id="$2" candidate="$3" result_file="$4" tmp
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" CANDIDATE="$candidate" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const base = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && s.active === true && s.implComplete === true
+      && s.codeReviewDone === true && s.chainDone === false;
+    if (!base) process.exit(3);
+    let ticket = s.reviewTicket;
+    const alreadyBound = typeof ticket === "string" && ticket.length > 0 && ticket.length <= 96
+      && /^[A-Za-z0-9_-]+$/.test(ticket) && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+    if (!alreadyBound) {
+      const legacy = (ticket === "" || ticket == null)
+        && (s.reviewTicketConsumed === true || s.reviewTicketConsumed == null)
+        && (s.reviewRound === 0 || s.reviewRound == null);
+      if (!legacy) process.exit(3);
+      ticket = process.env.CANDIDATE;
+      s.reviewTicket = ticket;
+      s.reviewTicketConsumed = true;
+      s.reviewRound = 1;
+    }
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], ticket);
+  ' "$tmp" "$result_file" 2>/dev/null; then
+    rm -f "$tmp" "$result_file" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$(dirname "$state_file")" \
+    || { rm -f "$tmp" "$result_file"; return 1; }
+}
+
+tdd_ensure_self_review_ticket() {
+  local session_id="${1:-}" state_file state_dir candidate result_file
+  [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  candidate="$(node -e 'process.stdout.write("rt_" + require("crypto").randomBytes(16).toString("hex"))' 2>/dev/null)"
+  _tdd_review_ticket_shape_ok "$candidate" || return 1
+  result_file="$(mktemp "${state_file}.self-review-ticket.XXXXXX" 2>/dev/null)" || return 1
+  if _tdd_locked_run "$state_file" _tdd_ensure_self_review_ticket_critical \
+      "$state_file" "$session_id" "$candidate" "$result_file"; then
+    cat "$result_file"
+    rm -f "$result_file" 2>/dev/null
+    return 0
+  fi
+  rm -f "$result_file" 2>/dev/null
+  return 1
+}
+
+_tdd_increment_stop_budget_critical() {
+  local state_file="$1" session_id="$2" _budget_file="${3:-}" result_file="$4"
+  local expected_run="${5:-}" expected_attempt="${6:-}" expected_chain="${7:-}"
+  local expected_return_stage="${8:-}"
+  local state_dir state_tmp
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" \
+      EXPECTED_RUN="$expected_run" EXPECTED_ATTEMPT="$expected_attempt" \
+      EXPECTED_CHAIN="$expected_chain" EXPECTED_RETURN_STAGE="$expected_return_stage" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    if (!s || typeof s !== "object" || Array.isArray(s)
+        || s.session_id_hash !== `sha256:${process.env.SID.slice("scv1_".length)}`
+        || s.active !== true || s.implComplete !== true || s.chainDone !== false) process.exit(3);
+    if (process.env.EXPECTED_RUN) {
+      const normalOutcome = s.chainOutcome === "";
+      const maxHandoff = s.chainOutcome === "max-rounds"
+        && s.codeReviewDone === true
+        && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string"
+        && s.reviewTicket.length > 0 && s.reviewTicket.length <= 96
+        && /^[A-Za-z0-9_-]+$/.test(s.reviewTicket)
+        && s.reviewTicketConsumed === true
+        && Number.isSafeInteger(s.reviewRound) && s.reviewRound >= 1;
+      if (s.autopilotRunId !== process.env.EXPECTED_RUN
+          || s.autopilotAttempt !== Number(process.env.EXPECTED_ATTEMPT)
+          || s.chainId !== process.env.EXPECTED_CHAIN
+          || s.autopilotReturnStage !== process.env.EXPECTED_RETURN_STAGE
+          || !(normalOutcome || maxHandoff)) process.exit(3);
+    }
+    const current = Number.isInteger(s.stopBlockCount) && s.stopBlockCount >= 0
+      ? s.stopBlockCount : 0;
+    if (current > 10000) process.exit(3);
+    const next = current + 1;
+    s.stopBlockCount = next;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    fs.writeFileSync(process.argv[2], String(next));
+  ' "$state_tmp" "$result_file" 2>/dev/null; then
+    rm -f "$state_tmp" "$result_file" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$state_tmp" "$state_file" "$state_dir" || {
+    rm -f "$state_tmp" "$result_file" 2>/dev/null
+    return 1
+  }
+}
+
+tdd_increment_stop_budget() {
+  local session_id="${1:-}" state_file state_dir result_file
+  [ -n "$session_id" ] || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  result_file="$(mktemp "${state_file}.stop-count.XXXXXX" 2>/dev/null)" || return 1
+  if _tdd_locked_run "$state_file" _tdd_increment_stop_budget_critical \
+      "$state_file" "$session_id" "" "$result_file"; then
+    cat "$result_file"
+    rm -f "$result_file" 2>/dev/null
+    return 0
+  fi
+  rm -f "$result_file" 2>/dev/null
+  return 1
+}
+
+_tdd_rearm_review_critical() {
+  local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}" _stopblocks_file="${5:-}"
+  local state_dir tmp
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+    const fs = require("fs");
+    let s;
+    try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+    catch (_) { process.exit(3); }
+    const linkKeys = [
+      "autopilotRunId", "autopilotAttempt", "autopilotReturnStage", "chainId", "chainOutcome"
+    ];
+    const fullyStandalone = s && linkKeys.every(key => !Object.prototype.hasOwnProperty.call(s, key));
+    const valid = s && typeof s === "object" && !Array.isArray(s)
+      && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+      && s.active === true && s.implComplete === true
+      && typeof s.chainDone === "boolean" && typeof s.codeReviewDone === "boolean"
+      && typeof s.selfReviewFixed === "boolean"
+      && (s.chainDone === true || s.codeReviewDone === true)
+      && s.reviewTicket === process.env.TICKET && s.reviewTicketConsumed === true
+      && Number.isInteger(s.reviewRound) && s.reviewRound >= 1
+      && fullyStandalone;
+    if (!valid) process.exit(3);
+    s.chainDone = false;
+    s.codeReviewDone = false;
+    s.selfReviewFixed = false;
+    s.reviewTicket = "";
+    s.reviewTicketConsumed = true;
+    s.reviewRound = 0;
+    s.stopBlockCount = 0;
+    delete s.chainOutcome;
+    delete s.reviewRearm;
+    fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+  ' "$tmp" 2>/dev/null; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$state_dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_rearm_review() {
+  local session_id="${1:-}" ticket="${2:-}" state_file state_dir
+  [ -n "$session_id" ] || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_rearm_review_critical \
+    "$state_file" "$session_id" "$ticket" "" ""
+}
+
+# Rearm one exact Autopilot-linked review generation. The consumed ticket is
+# used as a capability but only its SHA-256 digest is retained in the receipt.
+# Signature:
+#   tdd_rearm_autopilot_review session run attempt chain consumed-ticket [retire]
+#
+# retire=false keeps the current Inner chain active (the TDD_RUNNING and
+# self-review-handoff case). retire=true makes an already Outer-BLOCKED Inner
+# chain inactive so RESUME must start a fresh bound TDD attempt.
+_tdd_rearm_autopilot_review_critical() {
+  local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
+  local chain_id="$5" ticket="$6" retire="$7" _counter_file="${8:-}"
+  local _stopblocks_file="${9:-}" state_dir tmp node_rc
+  state_dir="$(dirname "$state_file")"
+  _tdd_state_storage_safe "$state_file" || return 1
+  tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+
+  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    CHAIN_ID="$chain_id" TICKET="$ticket" RETIRE="$retire" node -e '
+      const fs = require("fs");
+      const crypto = require("crypto");
+      let s;
+      try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
+      catch (_) { process.exit(3); }
+
+      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
+        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
+      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
+      const markerKeys = [
+        "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
+      ];
+      const strictMarker = marker => {
+        if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
+        const keys = Object.keys(marker).sort();
+        return keys.length === markerKeys.length
+          && keys.every((key, index) => key === markerKeys[index])
+          && marker.schemaVersion === 1
+          && marker.status === "pending"
+          && linkId(marker.runId)
+          && Number.isInteger(marker.attempt) && marker.attempt >= 1 && marker.attempt <= 999
+          && linkId(marker.chainId)
+          && typeof marker.consumedTicketSha256 === "string"
+          && /^[a-f0-9]{64}$/.test(marker.consumedTicketSha256)
+          && typeof marker.retire === "boolean";
+      };
+      const digest = crypto.createHash("sha256").update(process.env.TICKET, "utf8").digest("hex");
+      const requested = {
+        schemaVersion: 1,
+        status: "pending",
+        runId: process.env.RUN_ID,
+        attempt: Number(process.env.ATTEMPT),
+        chainId: process.env.CHAIN_ID,
+        consumedTicketSha256: digest,
+        retire: process.env.RETIRE === "true"
+      };
+      const markerMatches = marker => strictMarker(marker)
+        && marker.schemaVersion === requested.schemaVersion
+        && marker.status === requested.status
+        && marker.runId === requested.runId
+        && marker.attempt === requested.attempt
+        && marker.chainId === requested.chainId
+        && marker.consumedTicketSha256 === requested.consumedTicketSha256
+        && marker.retire === requested.retire;
+      const rootShape = s && typeof s === "object" && !Array.isArray(s)
+        && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
+        && typeof s.phase === "string" && Array.isArray(s.history) && Array.isArray(s.bypasses)
+        && typeof s.active === "boolean" && typeof s.vanilla === "boolean"
+        && typeof s.implComplete === "boolean" && typeof s.chainDone === "boolean"
+        && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
+        && typeof s.reviewTicket === "string" && typeof s.reviewTicketConsumed === "boolean"
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 0
+        && Number.isInteger(s.stopBlockCount) && s.stopBlockCount >= 0
+        && linkId(s.autopilotRunId)
+        && Number.isInteger(s.autopilotAttempt) && s.autopilotAttempt >= 1 && s.autopilotAttempt <= 999
+        && returnStages.has(s.autopilotReturnStage)
+        && linkId(s.chainId)
+        && typeof s.chainOutcome === "string";
+      const exactLink = rootShape
+        && s.autopilotRunId === requested.runId
+        && s.autopilotAttempt === requested.attempt
+        && s.chainId === requested.chainId;
+
+      if (s && Object.prototype.hasOwnProperty.call(s, "reviewRearm")) {
+        // A malformed receipt is corruption, never permission to guess or
+        // overwrite. An exact receipt is retryable only while its committed
+        // post-state is still unchanged.
+        if (!strictMarker(s.reviewRearm)) process.exit(3);
+        const postState = exactLink && markerMatches(s.reviewRearm)
+          && s.active === !requested.retire
+          && s.implComplete === !requested.retire
+          && s.chainDone === false && s.codeReviewDone === false && s.selfReviewFixed === false
+          && s.reviewTicket === "" && s.reviewTicketConsumed === true
+          && s.reviewRound === 0 && s.stopBlockCount === 0 && s.chainOutcome === "";
+        process.exit(postState ? 10 : 3);
+      }
+
+      const terminalShape = requested.retire
+        ? s.chainDone === true
+        : s.chainDone === false && s.codeReviewDone === true;
+      const fresh = exactLink
+        && s.active === true && s.implComplete === true
+        && terminalShape
+        && s.reviewTicket === process.env.TICKET && s.reviewTicketConsumed === true
+        && s.reviewRound >= 1 && s.chainOutcome === "max-rounds";
+      if (!fresh) process.exit(3);
+
+      s.active = !requested.retire;
+      s.implComplete = !requested.retire;
+      s.chainDone = false;
+      s.codeReviewDone = false;
+      s.selfReviewFixed = false;
+      s.reviewTicket = "";
+      s.reviewTicketConsumed = true;
+      s.reviewRound = 0;
+      s.stopBlockCount = 0;
+      s.chainOutcome = "";
+      s.reviewRearm = requested;
+      fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+    ' "$tmp" 2>/dev/null
+  node_rc=$?
+
+  if [ "$node_rc" -eq 10 ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 0
+  fi
+  if [ "$node_rc" -ne 0 ] || [ ! -s "$tmp" ]; then
+    rm -f "$tmp" 2>/dev/null
+    return 1
+  fi
+
+  _tdd_atomic_replace_regular "$tmp" "$state_file" "$state_dir" \
+    || { rm -f "$tmp"; return 1; }
+}
+
+tdd_rearm_autopilot_review() {
+  local session_id="${1:-}" run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}"
+  local ticket="${5:-}" retire="${6:-false}" state_file state_dir
+  [ "$#" -eq 5 ] || [ "$#" -eq 6 ] || return 1
+  [ -n "$session_id" ] || return 1
+  [ "${#session_id}" -le 128 ] || return 1
+  case "$session_id" in *[!A-Za-z0-9_-]*) return 1 ;; esac
+  _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+  _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+  _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  _tdd_review_ticket_shape_ok "$ticket" || return 1
+  case "$retire" in true|false) ;; *) return 1 ;; esac
+  command -v node >/dev/null 2>&1 || return 1
+
+  state_file="$(tdd_state_file "$session_id")"
+  state_dir="$(dirname "$state_file")"
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 1
+  _tdd_locked_run "$state_file" _tdd_rearm_autopilot_review_critical \
+    "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$ticket" \
+    "$retire" "" ""
 }
 
 _tdd_write_workflow_begin_critical() {
@@ -547,7 +2077,7 @@ zensu_workflow_active()  { tdd_get_flag "${1:-}" workflowActive; }
 
 tdd_get_counter() {
   local state_file="${1:-}" key="${2:-}" result status value
-  case "$key" in reviewRound|stopBlocks) ;; *) echo "invalid"; return 0 ;; esac
+  case "$key" in reviewRound|stopBlockCount) ;; *) echo "invalid"; return 0 ;; esac
   result="$(_tdd_read_validated_state "$state_file" counter "$key")"
   status="${result%%$'\n'*}"
   case "$status" in
@@ -556,6 +2086,24 @@ tdd_get_counter() {
   esac
   value="${result#*$'\n'}"
   case "$value" in ''|*[!0-9]*) echo "invalid" ;; *) echo "$value" ;; esac
+}
+
+tdd_claimed_review_ticket() {
+  local state_file="${1:-}"
+  [ -n "$state_file" ] && _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" \
+    || return 1
+  node -e '
+    try {
+      const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const ticket = s && s.reviewTicket;
+      const valid = typeof ticket === "string" && ticket.length > 0 && ticket.length <= 96
+        && /^[A-Za-z0-9_-]+$/.test(ticket)
+        && s.reviewTicketConsumed === true
+        && Number.isInteger(s.reviewRound) && s.reviewRound >= 1;
+      if (!valid) process.exit(3);
+      process.stdout.write(ticket);
+    } catch (_) { process.exit(3); }
+  ' "$state_file" 2>/dev/null
 }
 
 zensu_workflow_allows() {
@@ -772,15 +2320,13 @@ _tdd_write_pending_review_critical() {
   local summary="$3"
   local ts="$4"
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" STATE_DIR="$(dirname "$pf")" PENDING_FILE="$pf" FILES="$files" SUMMARY="$summary" TS="$ts" \
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PENDING_FILE="$pf" FILES="$files" SUMMARY="$summary" TS="$ts" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const files = (process.env.FILES || "").split(",").map(s => s.trim()).filter(Boolean);
       const o = { files, summary: process.env.SUMMARY || "" };
       if (process.env.TS) o.ts = process.env.TS;
-      core.withFileLock(process.env.STATE_DIR, "pending-review", () => {
-        core.atomicWriteJson(process.env.PENDING_FILE, o);
-      });
+      core.atomicWriteJson(process.env.PENDING_FILE, o);
     ' 2>/dev/null
 }
 
@@ -791,15 +2337,19 @@ tdd_write_pending_review() {
   pf="$(zensu_pending_review_file)"
   local dir
   dir="$(dirname "$pf")"
-  [ -L "$pf" ] && return 1
-  [ -L "$dir" ] && return 1
-  [ -d "$dir" ] && [ ! -L "$dir" ] || return 1
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
   command -v node >/dev/null 2>&1 || return 1
   local ts=""
   if [ "$(_zensu_log_style)" != "none" ]; then
     ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
   fi
-  _tdd_write_pending_review_critical "$pf" "$files" "$summary" "$ts"
+  # Marker publication, adoption, queue cleanup, handoff acknowledgement, and
+  # claim release share this one project-scoped mutex. A newer marker can queue
+  # behind an adopted claim, but it can never race a rename or cleanup and be
+  # mistaken for (or deleted as) the previous generation.
+  _tdd_locked_run "$pf" _tdd_write_pending_review_critical \
+    "$pf" "$files" "$summary" "$ts"
 }
 
 tdd_clear_pending_review() {
@@ -807,23 +2357,595 @@ tdd_clear_pending_review() {
   pf="$(zensu_pending_review_file)"
   local dir
   dir="$(dirname "$pf")"
-  if [ -L "$pf" ]; then
-    echo "zensu: refusing to clear pending-review marker through symlink at $pf" >&2
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_clear_pending_review_critical "$pf"
+}
+
+_tdd_clear_pending_review_critical() {
+  local pf="$1" dir
+  dir="$(dirname "$pf")"
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  # This command is intentionally queue-scoped.  Once a marker has been
+  # adopted, only the owning session may release the retained claim via
+  # tdd_release_pending_review_claim (reset, terminal reconciliation, or cap).
+  rm -f -- "$pf" 2>/dev/null
+}
+
+_tdd_pending_file_stale() {
+  local file="${1:-}" ttl_hours="${2:-}"
+  case "$ttl_hours" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$ttl_hours" -gt 0 ] || return 1
+  [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  TTL="$ttl_hours" node -e '
+    try {
+      const fs = require("fs");
+      const j = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      let t = typeof j.ts === "string" ? Date.parse(j.ts) : NaN;
+      if (!Number.isFinite(t)) t = fs.statSync(process.argv[1]).mtimeMs;
+      const ttl = Number.parseInt(process.env.TTL, 10) * 3600 * 1000;
+      process.exit(Number.isFinite(t) && Date.now() - t >= ttl ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  ' "$file" >/dev/null 2>&1
+}
+
+_tdd_read_pending_claim_metadata() {
+  local claim_file="${1:-}"
+  [ -f "$claim_file" ] && [ ! -L "$claim_file" ] || return 1
+  node -e '
+    try {
+      const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
+      const id = j && j.claimId;
+      const owner = j && j.ownerSessionId;
+      const validId = typeof id === "string" && /^dc_[A-Za-z0-9_-]+$/.test(id) && id.length <= 96;
+      const validOwner = typeof owner === "string" && /^scv1_[a-f0-9]{64}$/.test(owner);
+      if (!validId || !validOwner) process.exit(3);
+      const ownerPid = Number.isInteger(j.ownerPid) && j.ownerPid > 0 ? j.ownerPid : 0;
+      const identity = j.ownerProcessStartIdentity;
+      if (identity !== null && (typeof identity !== "string" || !/^[a-z0-9._:-]{1,160}$/.test(identity))) process.exit(3);
+      if (ownerPid === 0 || !("ownerProcessStartIdentity" in j)) process.exit(3);
+      const emitted = j.handoffEmitted === true;
+      process.stdout.write(`${id}\t${owner}\t${ownerPid}\t${emitted}`);
+    } catch (_) { process.exit(3); }
+  ' "$claim_file" 2>/dev/null
+}
+
+_tdd_assign_pending_claim_metadata() {
+  local claim_file="$1" owner_session="$2" owner_pid="$3" claim_stale="${4:-false}" project_root
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$owner_session" \
+    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    OWNER_PID="$owner_pid" CLAIM_STALE="$claim_stale" LOG_STYLE="$(_zensu_log_style)" \
+    node -e '
+      try {
+        const core = require(process.env.CONTROL_CORE);
+        const claim = core.assignDeferredReviewClaim({
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+          ownerPid: Number(process.env.OWNER_PID),
+          claimStale: process.env.CLAIM_STALE === "true",
+          logStyle: process.env.LOG_STYLE,
+        });
+        process.stdout.write(`${claim.claimId}\t${claim.ownerSessionId}\t${claim.ownerPid}\tfalse`);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null
+}
+
+_tdd_reconcile_seeded_pending_claim() {
+  local owner_session="$1" current_session="$2" claim_id="$3" claim_file="$4"
+  local _owner_pid="$5" _handoff_emitted="$6" claim_stale="$7" project_root
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$current_session" \
+    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    CLAIM_ID="$claim_id" OWNER_SESSION="$owner_session" CLAIM_STALE="$claim_stale" \
+    node -e '
+      try {
+        const core = require(process.env.CONTROL_CORE);
+        const options = {
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+          claimStale: process.env.CLAIM_STALE === "true",
+        };
+        let inspection = core.inspectDeferredReviewOwner(options);
+        if (
+          inspection.claim.claimId !== process.env.CLAIM_ID
+          || inspection.claim.ownerSessionId !== process.env.OWNER_SESSION
+        ) throw new Error("claim changed during reconciliation");
+        if (inspection.status === "transfer") {
+          const prepared = core.prepareDeferredReviewTransfer(options);
+          const expectedRevision = prepared.transfer.fromOwnerRevision;
+          core.retireDeferredReviewOwner({ ...options, expectedRevision });
+          core.markDeferredReviewOwnerRetired({ ...options, expectedRevision });
+          inspection = core.inspectDeferredReviewOwner(options);
+          if (inspection.status !== "owner-retired") throw new Error("transfer did not converge");
+          process.stdout.write("transfer");
+          process.exit(0);
+        }
+        if (inspection.status === "owner-retired") {
+          // Recovery after the owner CAS but before the receipt acknowledgement:
+          // advance the durable receipt before exposing the claim as assignable.
+          if (inspection.claim.transfer.stage === "prepared") {
+            const expectedRevision = inspection.claim.transfer.fromOwnerRevision;
+            core.markDeferredReviewOwnerRetired({ ...options, expectedRevision });
+            inspection = core.inspectDeferredReviewOwner(options);
+            if (inspection.status !== "owner-retired"
+                || inspection.claim.transfer.stage !== "owner-retired") {
+              throw new Error("retired-owner receipt did not converge");
+            }
+          }
+          process.stdout.write("transfer");
+          process.exit(0);
+        }
+        if (inspection.status === "unseeded") {
+          process.stdout.write("transfer");
+          process.exit(0);
+        }
+        if (inspection.status === "cancelling") {
+          const receipt = inspection.claim.cancellation;
+          if (!receipt) throw new Error("cancelling claim has no receipt");
+          core.cancelDeferredReviewClaim({
+            ...options,
+            mode: receipt.mode,
+            resetBinding: receipt.resetBinding,
+          });
+          process.stdout.write("cancelled");
+          process.exit(0);
+        }
+        if (inspection.status === "done" || inspection.status === "cancelled") {
+          const terminal = core.clearTerminalDeferredReviewClaim(options);
+          process.stdout.write(terminal.status);
+          process.exit(0);
+        }
+        if (inspection.status === "current") {
+          // Recovery after the target seed but before receipt finalization.
+          // Finalization is idempotent and revalidates the exact active claim.
+          if (inspection.claim.transfer) core.finalizeDeferredReviewTransfer(options);
+          process.stdout.write("current");
+          process.exit(0);
+        }
+        if (inspection.status === "owned") {
+          process.stdout.write(inspection.status);
+          process.exit(0);
+        }
+        throw new Error("unsupported reconciliation status");
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null
+}
+
+_tdd_adopt_pending_review_critical() {
+  local pf="$1" claim_file="$2" session_id="$3" vanilla="$4" ttl_hours="$5" adopting_pid="$6"
+  local dir source metadata claim_id owner_session prior_owner_pid handoff_emitted claim_stale reconcile_status
+  claim_stale=false
+  dir="$(dirname "$pf")"
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+
+  # A leftover claim is a crash-recovery record and takes precedence. A newer
+  # pending marker remains queued for the following adoption.
+  if [ -f "$claim_file" ]; then
+    source="$claim_file"
+  elif [ -f "$pf" ]; then
+    source="$pf"
+  else
+    return 2
+  fi
+
+  if [ "$source" = "$pf" ] && _tdd_pending_file_stale "$source" "$ttl_hours"; then
+    rm -f -- "$source" 2>/dev/null || return 1
+    return 2
+  fi
+
+  if [ "$source" = "$pf" ]; then
+    _tdd_atomic_replace_regular "$pf" "$claim_file" "$dir" || return 1
+  fi
+
+  metadata="$(_tdd_read_pending_claim_metadata "$claim_file" 2>/dev/null)" || metadata=""
+  if [ -n "$metadata" ]; then
+    IFS=$'\t' read -r claim_id owner_session prior_owner_pid handoff_emitted <<<"$metadata"
+    claim_stale=false
+    _tdd_pending_file_stale "$claim_file" "$ttl_hours" && claim_stale=true
+    reconcile_status="$(_tdd_reconcile_seeded_pending_claim \
+      "$owner_session" "$session_id" "$claim_id" "$claim_file" \
+      "$prior_owner_pid" "$handoff_emitted" "$claim_stale" 2>/dev/null)" || return 1
+    case "$reconcile_status" in
+      current) return 0 ;;
+      owned) return 2 ;;
+      done|cancelled)
+        # The completed ownership record is gone. If a newer marker queued
+        # behind it, claim that marker in the same project-lock transaction so
+        # this terminal Stop cannot silently release with work still pending.
+        if [ -f "$pf" ]; then
+          if _tdd_pending_file_stale "$pf" "$ttl_hours"; then
+            rm -f -- "$pf" 2>/dev/null || return 1
+            return 2
+          fi
+          _tdd_atomic_replace_regular "$pf" "$claim_file" "$dir" || return 1
+          metadata=""
+        else
+          return 2
+        fi
+        ;;
+      transfer) ;;
+      *) return 1 ;;
+    esac
+  fi
+
+  if [ -z "$metadata" ] && _tdd_pending_file_stale "$claim_file" "$ttl_hours"; then
+    # A stale file with malformed or partial ownership metadata is evidence of
+    # an interrupted or tampered generation, not permission to erase work.
     return 1
   fi
-  if [ -L "$dir" ]; then
-    echo "zensu: refusing to clear pending-review marker under symlinked dir $dir" >&2
-    return 1
+
+  metadata="$(_tdd_assign_pending_claim_metadata "$claim_file" "$session_id" "$adopting_pid" "$claim_stale")" || return 1
+  IFS=$'\t' read -r claim_id owner_session prior_owner_pid handoff_emitted <<<"$metadata"
+
+  if tdd_seed_deferred_review "$session_id" "$vanilla" "$claim_id" \
+      && _tdd_finalize_pending_review_transfer "$claim_file" "$session_id"; then
+    # Keep the claim as a recovery/ownership record until the Stop hook has
+    # emitted its block handoff and, ultimately, the chain reaches chainDone.
+    return 0
   fi
-  [ -d "$dir" ] || return 0
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" STATE_DIR="$dir" PENDING_FILE="$pf" node -e '
-    const fs = require("fs");
-    const core = require(process.env.CONTROL_CORE);
-    core.withFileLock(process.env.STATE_DIR, "pending-review", () => {
-      try { fs.unlinkSync(process.env.PENDING_FILE); }
-      catch (error) { if (error.code !== "ENOENT") throw error; }
-    });
-  ' 2>/dev/null
+
+  # Assignment is already a durable ownership transition. Keep that record at
+  # the claim path when the target seed/finalization fails: it may carry the
+  # only owner-retirement receipt, and queue-scoped cleanup is deliberately
+  # allowed to delete pending-review.json. The next Stop reconciles this claim
+  # first; a concurrently queued marker remains independently retryable at pf.
+  return 1
+}
+
+tdd_adopt_pending_review() {
+  local supplied_session="${1:-}" session_id vanilla="${2:-false}" ttl_hours="${3:-0}" pf dir claim_file
+  local owner_pid="${4:-$$}"
+  [ "$#" -ge 3 ] && [ "$#" -le 4 ] || return 1
+  [ -n "$supplied_session" ] || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  case "$vanilla" in true|false) ;; *) return 1 ;; esac
+  case "$ttl_hours" in ''|*[!0-9]*) ttl_hours=0 ;; esac
+  case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$owner_pid" -gt 0 ] || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_path_safe "$pf" regular-or-absent "$dir" || return 1
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_adopt_pending_review_critical \
+    "$pf" "$claim_file" "$session_id" "$vanilla" "$ttl_hours" "$owner_pid"
+}
+
+_tdd_finalize_pending_review_transfer() {
+  local claim_file="$1" current_session="$2" project_root
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$current_session" \
+    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    node -e '
+      try {
+        const core = require(process.env.CONTROL_CORE);
+        core.finalizeDeferredReviewTransfer({
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+        });
+      } catch (_) { process.exit(3); }
+    ' >/dev/null 2>&1
+}
+
+_tdd_mark_pending_review_handoff_critical() {
+  local _pf="$1" claim_file="$2" session_id="$3" owner_pid="$4" project_root
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  # The pending-review lock held by the caller is the outer lock. Core then
+  # acquires the claim lock followed by the one canonical target-state lock,
+  # atomically validating the generation, finalizing any durable receipt, and
+  # renewing the handoff lease. A normal TDD generation returns a no-op here.
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$session_id" \
+    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    OWNER_PID="$owner_pid" LOG_STYLE="$(_zensu_log_style)" node -e '
+      try {
+        const core = require(process.env.CONTROL_CORE);
+        core.acknowledgeDeferredReviewHandoff({
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+          ownerPid: Number.parseInt(process.env.OWNER_PID, 10),
+          logStyle: process.env.LOG_STYLE,
+        });
+      } catch (_) { process.exit(3); }
+    ' >/dev/null 2>&1
+}
+
+tdd_mark_pending_review_handoff() {
+  local supplied_session="${1:-}" owner_pid="${2:-$$}" session_id pf dir claim_file
+  [ "$#" -ge 1 ] && [ "$#" -le 2 ] || return 1
+  [ -n "$supplied_session" ] || return 1
+  case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$owner_pid" -gt 0 ] || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+  _tdd_locked_run "$pf" _tdd_mark_pending_review_handoff_critical \
+    "$pf" "$claim_file" "$session_id" "$owner_pid"
+}
+
+_tdd_cancel_pending_review_claim_core() {
+  local claim_file="$1" session_id="$2" requested_mode="$3" reset_binding_json="$4" project_root
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$session_id" \
+    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    REQUESTED_MODE="$requested_mode" RESET_BINDING_JSON="$reset_binding_json" node -e '
+      try {
+        const fs = require("node:fs");
+        const path = require("node:path");
+        const core = require(process.env.CONTROL_CORE);
+        const options = {
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+          claimStale: false,
+        };
+        const currentStateFile = path.join(
+          options.projectRoot,
+          ".zensu",
+          "state",
+          `tdd-phase-${options.currentSessionId}.json`,
+        );
+        const readCurrentStateOrNull = () => {
+          try { fs.lstatSync(currentStateFile); }
+          catch (error) {
+            if (error.code === "ENOENT") return null;
+            throw error;
+          }
+          return core.readWorkflowState({
+            projectRoot: options.projectRoot,
+            sessionId: options.currentSessionId,
+          });
+        };
+        let claimExists = true;
+        try { fs.lstatSync(options.claimFile); }
+        catch (error) {
+          if (error.code !== "ENOENT") throw error;
+          claimExists = false;
+        }
+        if (!claimExists) {
+          const currentState = readCurrentStateOrNull();
+          if (!currentState) {
+            process.stdout.write("absent\tnone\tcurrent\t0");
+            process.exit(0);
+          }
+          if (currentState.deferredReviewClaim !== "") {
+            throw new Error("current deferred-review state has no claim artifact");
+          }
+          process.stdout.write(`absent\tnone\tcurrent\t${currentState.revision}`);
+          process.exit(0);
+        }
+        const currentState = readCurrentStateOrNull();
+        const resetBinding = JSON.parse(process.env.RESET_BINDING_JSON || "null");
+        const sameResetBinding = (left, right) => {
+          if (left === null || right === null) return left === right;
+          if (
+            !left || typeof left !== "object" || Array.isArray(left)
+            || !right || typeof right !== "object" || Array.isArray(right)
+          ) return false;
+          return left.runId === right.runId
+            && left.attempt === right.attempt
+            && left.chainId === right.chainId;
+        };
+        const receiptSatisfiesResetRequest = (receipt) => (
+          process.env.REQUESTED_MODE === "reset"
+          && receipt.mode === "reset"
+          && sameResetBinding(receipt.resetBinding, resetBinding)
+        );
+        let inspection = core.inspectDeferredReviewOwner(options);
+        let claim = inspection.claim;
+        let relation = claim.ownerSessionId === options.currentSessionId ? "current" : "foreign";
+        if (claim.cancellation) {
+          const receiptMatchesRequest = receiptSatisfiesResetRequest(claim.cancellation);
+          let linearizedRevision;
+          let outcomeStatus;
+          if (inspection.status === "cancelled") {
+            core.clearTerminalDeferredReviewClaim(options);
+            linearizedRevision = currentState ? currentState.revision : 0;
+            outcomeStatus = "cancelled";
+          } else if (inspection.status === "cancelling") {
+            const cancelled = core.cancelDeferredReviewClaim({
+              ...options,
+              mode: claim.cancellation.mode,
+              resetBinding: claim.cancellation.resetBinding,
+            });
+            outcomeStatus = cancelled.status;
+            linearizedRevision = outcomeStatus === "superseded"
+              ? (currentState ? currentState.revision : 0)
+              : cancelled.clearedOwnerRevision;
+          } else {
+            throw new Error("cancellation receipt is not recoverable");
+          }
+          const expectedRevision = relation === "current"
+            ? linearizedRevision
+            : (currentState ? currentState.revision : 0);
+          const actualMode = receiptMatchesRequest
+            && ["cancelled", "superseded"].includes(outcomeStatus)
+            ? "reset-applied"
+            : claim.cancellation.mode;
+          process.stdout.write(`${outcomeStatus}\t${actualMode}\t${relation}\t${expectedRevision}`);
+          process.exit(0);
+        }
+        if (relation === "foreign") {
+          if (currentState && currentState.deferredReviewClaim !== "") {
+            throw new Error("foreign claim conflicts with current owner state");
+          }
+          process.stdout.write(`absent\tnone\tforeign\t${currentState ? currentState.revision : 0}`);
+          process.exit(0);
+        }
+        if (claim.transfer) {
+          const exactTarget = relation === "current"
+            && claim.ownerSessionId === options.currentSessionId
+            && claim.transfer.stage === "owner-retired"
+            && claim.transfer.toOwnerSessionId === options.currentSessionId;
+          if (inspection.status === "current" && exactTarget) {
+            core.finalizeDeferredReviewTransfer(options);
+            inspection = core.inspectDeferredReviewOwner(options);
+            claim = inspection.claim;
+            relation = claim.ownerSessionId === options.currentSessionId ? "current" : "foreign";
+            if (inspection.status !== "current" || relation !== "current" || claim.transfer) {
+              throw new Error("finalized transfer did not converge to current ownership");
+            }
+          } else if (!(
+            process.env.REQUESTED_MODE === "reset"
+            && inspection.status === "unseeded"
+            && exactTarget
+          )) {
+            throw new Error("transfer must be finalized before cancellation");
+          }
+        }
+        if (
+          process.env.REQUESTED_MODE === "reset"
+          && relation === "current"
+          && ["current", "done", "unseeded"].includes(inspection.status)
+        ) {
+          const result = core.cancelDeferredReviewClaim({
+            ...options,
+            mode: "reset",
+            resetBinding,
+          });
+          const actualMode = ["cancelled", "superseded"].includes(result.status)
+            ? "reset-applied"
+            : result.mode;
+          process.stdout.write(`${result.status}\t${actualMode}\t${relation}\t${result.clearedOwnerRevision}`);
+          process.exit(0);
+        }
+        if (["done", "cancelled"].includes(inspection.status)) {
+          core.clearTerminalDeferredReviewClaim(options);
+          const expectedRevision = currentState ? currentState.revision : 0;
+          process.stdout.write(`cancelled\tterminal\t${relation}\t${expectedRevision}`);
+          process.exit(0);
+        }
+        const result = core.cancelDeferredReviewClaim({
+          ...options,
+          mode: process.env.REQUESTED_MODE,
+          resetBinding,
+        });
+        const expectedRevision = relation === "current"
+          ? result.clearedOwnerRevision
+          : (currentState ? currentState.revision : 0);
+        const actualMode = process.env.REQUESTED_MODE === "reset"
+          && relation === "current"
+          && ["cancelled", "superseded"].includes(result.status)
+          ? "reset-applied"
+          : result.mode;
+        process.stdout.write(`${result.status}\t${actualMode}\t${relation}\t${expectedRevision}`);
+      } catch (_) { process.exit(3); }
+    ' 2>/dev/null
+}
+
+_tdd_release_pending_review_claim_critical() {
+  local _pf="$1" claim_file="$2" session_id="$3" result
+  result="$(_tdd_cancel_pending_review_claim_core \
+    "$claim_file" "$session_id" release-only null)" || return 1
+  case "$result" in
+    absent$'\t'*|cancelled$'\t'*|superseded$'\t'*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+tdd_release_pending_review_claim() {
+  local supplied_session="${1:-}" session_id pf dir claim_file
+  [ -n "$supplied_session" ] || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_paths_safe "$pf" regular-or-absent "$claim_file" regular-or-absent || return 1
+  _tdd_locked_run "$pf" _tdd_release_pending_review_claim_critical \
+    "$pf" "$claim_file" "$session_id"
+}
+
+_tdd_reset_pending_review_claim_critical() {
+  local _pf="$1" claim_file="$2" session_id="$3" run_id="$4" attempt="$5" chain_id="$6"
+  local reset_binding_json result status actual_mode relation expected_revision state_file
+  if [ -n "$run_id" ]; then
+    reset_binding_json="$(RUN_ID="$run_id" ATTEMPT="$attempt" CHAIN_ID="$chain_id" node -e '
+      process.stdout.write(JSON.stringify({
+        runId: process.env.RUN_ID,
+        attempt: Number(process.env.ATTEMPT),
+        chainId: process.env.CHAIN_ID,
+      }));
+    ')" || return 1
+  else
+    reset_binding_json=null
+  fi
+  result="$(_tdd_cancel_pending_review_claim_core \
+    "$claim_file" "$session_id" reset "$reset_binding_json")" || return 1
+  IFS=$'\t' read -r status actual_mode relation expected_revision <<<"$result"
+  case "$status" in absent|cancelled|superseded) ;; *) return 1 ;; esac
+  # Only an exact mode-and-binding reset result is an idempotency receipt for
+  # this request. A recovered receipt for another generation merely removes
+  # that old claim; the initial current revision still needs the generic CAS.
+  if { [ "$status" = cancelled ] || [ "$status" = superseded ]; } \
+    && [ "$actual_mode" = reset-applied ] \
+    && [ "$relation" = current ]; then return 0; fi
+  [ "$expected_revision" = 0 ] && return 0
+  case "$expected_revision" in ''|*[!0-9]*) return 1 ;; esac
+  state_file="$(tdd_state_file "$session_id")" || return 1
+  if [ -n "$run_id" ]; then
+    _tdd_clear_autopilot_session_critical \
+      "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$expected_revision"
+  else
+    _tdd_clear_standalone_session_critical "$state_file" "$session_id" "$expected_revision"
+  fi
+}
+
+tdd_reset_pending_review_claim() {
+  local supplied_session="${1:-}" session_id run_id="${2:-}" attempt="${3:-}" chain_id="${4:-}"
+  local pf dir claim_file
+  [ "$#" -eq 1 ] || [ "$#" -eq 4 ] || return 1
+  [ -n "$supplied_session" ] || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  if [ -n "$run_id" ]; then
+    _tdd_autopilot_link_id_shape_ok "$run_id" || return 1
+    _tdd_autopilot_attempt_shape_ok "$attempt" || return 1
+    _tdd_autopilot_link_id_shape_ok "$chain_id" || return 1
+  fi
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_prepare_directory "$dir" || return 1
+  _tdd_paths_safe "$pf" regular-or-absent "$claim_file" regular-or-absent || return 1
+  _tdd_locked_run "$pf" _tdd_reset_pending_review_claim_critical \
+    "$pf" "$claim_file" "$session_id" "$run_id" "$attempt" "$chain_id"
 }
 
 tdd_pending_review_stale() {
@@ -853,45 +2975,27 @@ tdd_pending_review_stale() {
   [ "$verdict" = "true" ] && echo "true" || echo "false"
 }
 
-_tdd_write_seed_critical() {
-  local state_file="$1"
-  local session_id="$2"
-  local vanilla="$3"
-
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" VANILLA="$vanilla" \
-    node -e '
-      const core = require(process.env.CONTROL_CORE);
-      core.mutateWorkflowState({
-        projectRoot: process.env.PROJECT_ROOT,
-        sessionId: process.env.SID,
-        workflowState: "deferred_review",
-        event: "deferred-review-seed",
-      }, (state) => {
-        if (typeof state.phase !== "string") state.phase = "UNINITIALIZED";
-        if (!Array.isArray(state.history)) state.history = [];
-        state.active = true;
-        state.implComplete = true;
-        state.vanilla = (process.env.VANILLA === "true");
-        state.bypasses = [];
-        state.reviewRound = 0;
-        state.stopBlocks = 0;
-        return state;
-      });
-    ' 2>/dev/null
-}
-
 tdd_seed_deferred_review() {
   local supplied_session="${1:-}"
   local session_id
   local vanilla="${2:-false}"
+  local deferred_claim="${3:-}"
   case "$vanilla" in true|false) ;; *) vanilla="false" ;; esac
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
-  local state_file
-  state_file="$(tdd_state_file "$session_id")" || return 1
-  [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  _tdd_write_seed_critical "$state_file" "$session_id" "$vanilla"
+  # A deferred review is a fresh, already-implemented chain generation. Reuse
+  # the atomic begin transaction so ticket/flags, round counter, and Stop budget
+  # are reset together even when the previous generation already terminated.
+  tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
 }
 
-export -f _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_begin_critical tdd_begin_session tdd_is_test_path tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_write_chain_reset_critical tdd_reset_chain_flags tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+# Git Bash serializes exported functions into the Windows process environment.
+# This library is large enough to exceed CreateProcess' environment limit, so
+# Windows callers source it explicitly instead of inheriting its functions.
+case "${OSTYPE:-}" in
+  msys*|cygwin*|mingw*|win32*) ;;
+  *)
+    export -f _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
+    export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
+    ;;
+esac

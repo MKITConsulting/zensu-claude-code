@@ -103,8 +103,8 @@ REAL_MANIFEST="$(ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown Z
   ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" ZENSU_CONFIG="$PLUGIN_DIR/.no-such-doctor-config" CLAUDE_PROJECT_DIR="$PLUGIN_DIR/.no-such-doctor-project" \
   node "$REPORT" 2>/dev/null)"
 case "$REAL_MANIFEST" in
-  *'hooks wiring: all 16 hooks referenced in hooks.json exist on disk'*) check "P2o real hook manifest pins exactly 16 wired scripts" PASS ;;
-  *) check "P2o real hook manifest count is not exactly 16" FAIL ;;
+  *'hooks wiring: all 17 hooks referenced in hooks.json exist on disk'*) check "P2o real hook manifest pins exactly 17 wired scripts" PASS ;;
+  *) check "P2o real hook manifest count is not exactly 17" FAIL ;;
 esac
 if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
   && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
@@ -115,7 +115,7 @@ fi
 
 PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
 if printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Never delete, rename, rewrite, or enumerate' \
-  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'tdd_reset_review_budget' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'zensu-log.sh --review-rearm' \
   && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'PENDING="$STATE_DIR/pending-review.json"' \
   && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- "$PENDING"' \
   && ! printf '%s\n' "$PHASE3_SKILL" | awk '/^```/{inside=!inside;next} inside{print}' | grep -Eq '(^|[[:space:]])find[[:space:]]'; then
@@ -283,7 +283,7 @@ CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
 # Retired sidecars are inert and must neither be counted nor interpreted.
 : > "$CAS_ST/rounds-retired.json"; : > "$CAS_ST/retired.stopblocks"
 OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
-case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlocks are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
 
 node -e '

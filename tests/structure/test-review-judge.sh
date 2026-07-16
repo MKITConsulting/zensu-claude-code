@@ -98,7 +98,7 @@ if grep -qF "neutralizes the finding it references" "$TDD_MD" && grep -qF "BEFOR
 else
   check "P3c Panel-FP neutralization happens before fix routing" FAIL
 fi
-if grep -qF "including step-4b judge deltas" "$TDD_MD"; then
+if grep -qF "including the step-4b judge deltas" "$TDD_MD"; then
   check "P3d consume-mode reviewer receives merge + judge deltas" PASS
 else
   check "P3d consume-mode reviewer receives merge + judge deltas" FAIL

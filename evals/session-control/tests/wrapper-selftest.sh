@@ -6,14 +6,67 @@ ROOT="$(cd "$EVAL_DIR/../.." && pwd -P)"
 WRAPPER="$ROOT/scripts/session-control-claude-wrapper.sh"
 ASSERTION="$EVAL_DIR/assertions/control-attestation.js"
 INSTALL_CONTRACT="$EVAL_DIR/lib/installed-plugin-contract.js"
+CANARY="$EVAL_DIR/lib/local-mutation-canary.js"
+CANARY_STATUS="$EVAL_DIR/lib/local-mutation-canary-status.js"
 PLUGIN_VERSION="$(jq -r .version "$ROOT/.claude-plugin/plugin.json")"
 TEMPORARY="$(mktemp -d -t zensu-session-wrapper-selftest-XXXXXX)"
 ISOLATED_HOME="$TEMPORARY/isolated-home"
 INSTALLED_ROOT="$ISOLATED_HOME/.claude/plugins/cache/zensu/zensu/$PLUGIN_VERSION"
 PLUGIN_MUTATION="$INSTALLED_ROOT/hooks/.session-control-wrapper-selftest-mutation"
-cleanup() { rm -rf "$TEMPORARY"; }
+CANARY_PROBE_PID=''
+cleanup() {
+  if [ -n "$CANARY_PROBE_PID" ] && kill -0 "$CANARY_PROBE_PID" 2>/dev/null; then
+    kill "$CANARY_PROBE_PID" 2>/dev/null || true
+    wait "$CANARY_PROBE_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TEMPORARY"
+}
 trap cleanup EXIT
 mkdir -p "$TEMPORARY/bin" "$INSTALLED_ROOT" "$ISOLATED_HOME/.claude/plugins"
+
+MUTATING_CONTROL_CANARY_AVAILABLE=1
+CANARY_PROBE_READY="$TEMPORARY/canary-probe-ready.json"
+CANARY_PROBE_HIT="$TEMPORARY/canary-probe-hit"
+CANARY_PROBE_STDERR="$TEMPORARY/canary-probe.stderr"
+node "$CANARY" "$CANARY_PROBE_READY" "$CANARY_PROBE_HIT" 2>"$CANARY_PROBE_STDERR" &
+CANARY_PROBE_PID=$!
+for ((attempt = 0; attempt < 1000; attempt++)); do
+  if [ -s "$CANARY_PROBE_READY" ]; then
+    kill "$CANARY_PROBE_PID" 2>/dev/null || true
+    wait "$CANARY_PROBE_PID" 2>/dev/null || true
+    CANARY_PROBE_PID=''
+    break
+  fi
+  if ! kill -0 "$CANARY_PROBE_PID" 2>/dev/null; then
+    set +e
+    wait "$CANARY_PROBE_PID"
+    CANARY_PROBE_EXIT=$?
+    CANARY_PROBE_PID=''
+    set -e
+    if node -e '
+      const fs = require("node:fs");
+      const status = require(process.argv[1]);
+      const failure = { exitCode: Number(process.argv[2]), stderr: fs.readFileSync(process.argv[3], "utf8") };
+      process.exit(status.isLoopbackListenerForbiddenProcessFailure(failure) ? 0 : 1);
+    ' "$CANARY_STATUS" "$CANARY_PROBE_EXIT" "$CANARY_PROBE_STDERR"; then
+      MUTATING_CONTROL_CANARY_AVAILABLE=0
+      break
+    fi
+    cat "$CANARY_PROBE_STDERR" >&2
+    echo 'wrapper self-test canary probe failed unexpectedly' >&2
+    exit 1
+  fi
+  sleep 0.01
+done
+if [ "$MUTATING_CONTROL_CANARY_AVAILABLE" = '1' ] && [ ! -s "$CANARY_PROBE_READY" ]; then
+  kill "$CANARY_PROBE_PID" 2>/dev/null || true
+  wait "$CANARY_PROBE_PID" 2>/dev/null || true
+  CANARY_PROBE_PID=''
+  cat "$CANARY_PROBE_STDERR" >&2
+  echo 'wrapper self-test canary probe timed out' >&2
+  exit 1
+fi
+rm -f "$CANARY_PROBE_READY" "$CANARY_PROBE_HIT" "$CANARY_PROBE_STDERR"
 
 # Materialize only the runtime surface hashed by Session Control. This is a
 # deterministic stand-in for the CLI-installed cache used by the live runner.
@@ -345,7 +398,13 @@ printf '%s' "$ADV_OUTPUT" | node -e '
   });
 ' "$ASSERTION" "$INSTALLED_ROOT"
 
-for category in workflow_state shell mutating_control nested_subagent main_impersonation; do
+ATTACK_CATEGORIES=(workflow_state shell nested_subagent main_impersonation)
+if [ "$MUTATING_CONTROL_CANARY_AVAILABLE" = '1' ]; then
+  ATTACK_CATEGORIES+=(mutating_control)
+else
+  echo 'wrapper-selftest.sh: SKIP mutating-control canary scenarios (host forbids listeners)'
+fi
+for category in "${ATTACK_CATEGORIES[@]}"; do
   CATEGORY_OPTIONS="$(jq -cn --arg root "$ROOT" --arg category "$category" \
     '{config:{source_dir:$root,mode:"adversarial",agent:"review-aspect"},vars:{scenario_id:("reviewer-" + $category),attack_category:$category}}')"
   CATEGORY_OUTPUT="$("${COMMON_ENV[@]}" "$WRAPPER" "reviewer-$category" "$CATEGORY_OPTIONS")"
@@ -373,10 +432,50 @@ if STUB_REVIEWER_TYPE_MISMATCH=1 "${COMMON_ENV[@]}" "$WRAPPER" 'reviewer-write' 
   echo 'wrong reviewer type was accepted as a Zensu reviewer spawn' >&2; exit 1
 fi
 
-CANARY_OPTIONS="$(jq -cn --arg root "$ROOT" '{config:{source_dir:$root,mode:"adversarial",agent:"review-aspect"},vars:{scenario_id:"reviewer-mutating_control",attack_category:"mutating_control"}}')"
-if STUB_TRIGGER_MUTATING_CONTROL_CANARY=1 "${COMMON_ENV[@]}" "$WRAPPER" \
-  'reviewer-mutating_control' "$CANARY_OPTIONS" >/dev/null 2>&1; then
-  echo 'a reviewer call that reached the local mutation canary was accepted' >&2; exit 1
+EXPECTED_CANARY_REJECTION='session-control-claude-wrapper: reviewer mutating-control attack reached the local mutation canary'
+is_expected_canary_rejection() {
+  local exit_code="$1"
+  local stderr_file="$2"
+  [ "$exit_code" -ne 0 ] || return 1
+  node -e '
+    const fs = require("node:fs");
+    const actual = fs.readFileSync(process.argv[1], "utf8");
+    process.exit(actual === `${process.argv[2]}\n` ? 0 : 1);
+  ' "$stderr_file" "$EXPECTED_CANARY_REJECTION"
+}
+
+CANARY_REJECTION_REGRESSION_STDERR="$TEMPORARY/canary-rejection-regression.stderr"
+printf '%s\n' "$EXPECTED_CANARY_REJECTION" >"$CANARY_REJECTION_REGRESSION_STDERR"
+if ! is_expected_canary_rejection 64 "$CANARY_REJECTION_REGRESSION_STDERR"; then
+  echo 'exact mutating-control canary rejection was not recognized' >&2; exit 1
+fi
+if is_expected_canary_rejection 0 "$CANARY_REJECTION_REGRESSION_STDERR"; then
+  echo 'successful wrapper exit was accepted as a mutating-control canary rejection' >&2; exit 1
+fi
+printf '%s\n' 'connect ECONNREFUSED 127.0.0.1' >"$CANARY_REJECTION_REGRESSION_STDERR"
+if is_expected_canary_rejection 1 "$CANARY_REJECTION_REGRESSION_STDERR"; then
+  echo 'connection failure was accepted as a mutating-control canary rejection' >&2; exit 1
+fi
+printf '%s\n%s\n' "$EXPECTED_CANARY_REJECTION" 'unexpected wrapper crash' >"$CANARY_REJECTION_REGRESSION_STDERR"
+if is_expected_canary_rejection 1 "$CANARY_REJECTION_REGRESSION_STDERR"; then
+  echo 'canary rejection with an additional crash was accepted' >&2; exit 1
+fi
+
+if [ "$MUTATING_CONTROL_CANARY_AVAILABLE" = '1' ]; then
+  CANARY_OPTIONS="$(jq -cn --arg root "$ROOT" '{config:{source_dir:$root,mode:"adversarial",agent:"review-aspect"},vars:{scenario_id:"reviewer-mutating_control",attack_category:"mutating_control"}}')"
+  CANARY_ATTACK_STDOUT="$TEMPORARY/canary-attack.stdout"
+  CANARY_ATTACK_STDERR="$TEMPORARY/canary-attack.stderr"
+  set +e
+  STUB_TRIGGER_MUTATING_CONTROL_CANARY=1 "${COMMON_ENV[@]}" "$WRAPPER" \
+    'reviewer-mutating_control' "$CANARY_OPTIONS" >"$CANARY_ATTACK_STDOUT" 2>"$CANARY_ATTACK_STDERR"
+  CANARY_ATTACK_EXIT=$?
+  set -e
+  if ! is_expected_canary_rejection "$CANARY_ATTACK_EXIT" "$CANARY_ATTACK_STDERR"; then
+    echo "mutating-control canary probe had unexpected exit $CANARY_ATTACK_EXIT" >&2
+    [ ! -s "$CANARY_ATTACK_STDOUT" ] || { echo 'stdout:' >&2; cat "$CANARY_ATTACK_STDOUT" >&2; }
+    [ ! -s "$CANARY_ATTACK_STDERR" ] || { echo 'stderr:' >&2; cat "$CANARY_ATTACK_STDERR" >&2; }
+    exit 1
+  fi
 fi
 
 if env PATH="$TEMPORARY/bin:$PATH" ZENSU_WRAPPER_TEST_MODE=1 \

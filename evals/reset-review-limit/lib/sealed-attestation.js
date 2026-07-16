@@ -20,11 +20,11 @@ function canonical(value) {
 
 function validReset(before, after, round) {
   return before?.status === 'valid' && after?.status === 'valid'
-    && before.state?.reviewRound === round && before.state?.stopBlocks === 2
+    && before.state?.reviewRound === round && before.state?.stopBlockCount === 2
     && before.state?.chainDone === true && before.state?.codeReviewDone === true
     && before.state?.selfReviewFixed === true
     && before.state?.active === true && before.state?.implComplete === true
-    && after.state?.reviewRound === 0 && after.state?.stopBlocks === 0
+    && after.state?.reviewRound === 0 && after.state?.stopBlockCount === 0
     && after.state?.chainDone === false && after.state?.codeReviewDone === false
     && after.state?.selfReviewFixed === false
     && after.state?.active === true && after.state?.implComplete === true

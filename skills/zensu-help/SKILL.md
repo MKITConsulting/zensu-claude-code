@@ -77,7 +77,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook scripts (what each does, when it fires) | `README.md` § Hooks table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
-| Transactionally resetting `reviewRound`/`stopBlocks` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
+| Transactionally resetting `reviewRound`/`stopBlockCount` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
 | Live feature/worktree/preview verification, local vs remote mode, browser evidence, Playwright MCP | `skills/verify-feature/SKILL.md` + `skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof) |
 | Durable unit/integration/E2E test authoring for existing code | `skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |

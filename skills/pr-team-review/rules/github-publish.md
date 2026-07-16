@@ -116,20 +116,40 @@ Capture the response — `id` and `html_url` are the values you return to the us
 
 **Don't** loop over `gh api .../pulls/comments` for each inline — that creates N orphaned comments with no review wrapper.
 
-## Idempotency
+## Idempotency and delegated reconciliation
 
-Re-running the skill on the same PR posts an **additional** review. There's no native idempotency key. If you want to suppress duplicates, hash the synthesis body and check existing reviews before posting:
+Standalone mode keeps the existing behavior: `--post-review` submits a new review, and an
+explicit standalone re-run may therefore create an additional review.
 
-```bash
-HASH=$(jq -r '.body' "$WORKDIR/_synthesis.json" | sha256sum | head -c 8)
-if gh api repos/<o>/<r>/pulls/<n>/reviews | jq -e ".[] | select(.body | contains(\"$HASH\"))" > /dev/null; then
-  echo "Already posted — skipping"
-  exit 0
-fi
-# else inject HASH into body footer and post
+Autopilot delegation never calls that path directly. It calls the VCS driver's
+`--reconcile-review` operation with the durable operation key and expected head. The driver
+adds this marker to the single GitHub review body (`partCount` is always `1`):
+
+```text
+<!-- zensu-review:v1:<sha256(operationKey)>:<payloadDigest>:<headSha>:1:part=1/1 -->
 ```
 
-Default behaviour: post without dedup, accept that re-runs create additional reviews.
+The reconcile read exhausts every page of existing reviews before deciding. Exact marker
+presence returns `present` without a POST; marker absence posts once and returns `posted`;
+`reconciled` is reserved for a provider path that completed missing parts. Duplicate exact
+markers, the same operation digest with a different payload/head/part count, malformed v1
+markers, an OPEN/head mismatch, or incomplete pagination fail closed without posting.
+
+The structured result has exactly
+`{status,marker,headSha,partCount,postedCount,url,provider}` with `provider=github`. The caller validates the operation
+digest, payload-digest shape, bound head, `partCount=1`, first-part marker, status/count
+relationship, and non-empty URL before recording durable publication evidence.
+
+### Delegated failure policy
+
+Delegated mode fails closed on every non-zero or malformed `--reconcile-review` result.
+After a fresh OPEN/bound-head guard, the only safe retry is to retry the complete `--reconcile-review` call with the same operation key, bound head, and byte-identical payload.
+The delegated path must never update the bound head or payload to make a retry pass, and it must never escape to
+`--post-review`, `gh pr review`, a direct review/comment POST, binary-search submission, or
+the standalone fallback below. An ambiguous transport failure is reconciled by the complete
+operation read-before-write path; it is never answered with a raw POST retry.
+The durable owner must serialize calls for one operation; simultaneous independent writers
+outside that contract are not a distributed exactly-once mode.
 
 ## Auth Pre-Check
 
@@ -145,7 +165,10 @@ Required scopes:
 
 If scopes missing: `gh auth refresh -s repo`.
 
-## Failure Modes
+## Standalone failure modes
+
+The remediation table and payload-adjustment retries in this section apply only to the
+standalone `--post-review` path. Delegated mode follows the fail-closed policy above.
 
 | HTTP status | Cause | Fix |
 |---|---|---|
@@ -156,11 +179,11 @@ If scopes missing: `gh auth refresh -s repo`.
 | 422 (commit_id mismatch) | Head SHA changed since fetch | Re-run `git rev-parse pr-<n>-review`, update payload, retry |
 | 500 / 502 | GitHub transient | Wait 30s, retry once |
 
-Last-resort only (a 422 that survives re-validation): identify the offending comment(s) by binary search — `jq 'del(.comments[<i>])' payload.json > shrunk.json` and retry until POST succeeds — and fold whatever was removed into the overall body so no finding is lost.
+Standalone last-resort only (a 422 that survives re-validation): identify the offending comment(s) by binary search — `jq 'del(.comments[<i>])' payload.json > shrunk.json` and retry until POST succeeds — and fold whatever was removed into the overall body so no finding is lost.
 
-## Fallback: Per-Comment Posting
+## Standalone-only fallback: Per-comment posting
 
-If the single-submit fails for non-retryable reasons (e.g. malformed payload), fall back to:
+If a standalone single-submit fails for non-retryable reasons (e.g. malformed payload), fall back to:
 
 ```bash
 # Overall body only

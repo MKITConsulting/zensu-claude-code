@@ -42,21 +42,26 @@ source "$BASELINE" "$SID_R"
 STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
 STATE_R="$STATE_DIR/tdd-phase-${KEY_R}.json"
 bash "$LOG" --tdd-begin --session "$SID_R" >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session "$SID_R" >/dev/null 2>&1
+TICKET_R="$(bash "$LOG" --review-ticket --session "$SID_R")"
 tamper "$STATE_R" reviewRound '"2"'
-PAYLOAD_R="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\"},\"session_id\":\"${SID_R}\"}"
-if printf '%s' "$PAYLOAD_R" | "$POST_REVIEW" >"$TMP_DIR/review.out" 2>"$TMP_DIR/review.err"; then
-  check "string reviewRound makes post-review fail closed" FAIL
-else
+cp "$STATE_R" "$TMP_DIR/review-state-before.json"
+PAYLOAD_R="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_R}\\nfixture\"},\"session_id\":\"${SID_R}\"}"
+printf '%s' "$PAYLOAD_R" | "$POST_REVIEW" >"$TMP_DIR/review.out" 2>"$TMP_DIR/review.err"
+POST_REVIEW_RC=$?
+if [ "$POST_REVIEW_RC" -eq 0 ] && [ ! -s "$TMP_DIR/review.out" ]; then
   check "string reviewRound makes post-review fail closed" PASS
+else
+  check "string reviewRound makes post-review fail closed" FAIL
 fi
 . "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 [ "$(tdd_state_status "$STATE_R")" = invalid ] && check "canonical reader rejects manipulated reviewRound" PASS \
   || check "canonical reader rejects manipulated reviewRound" FAIL
-node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8")); process.exit(s.reviewRound === "2" ? 0 : 1)' "$STATE_R" \
-  && check "failed mutation never sanitizes or overwrites corrupt state" PASS \
-  || check "failed mutation never sanitizes or overwrites corrupt state" FAIL
+cmp -s "$TMP_DIR/review-state-before.json" "$STATE_R" \
+  && check "failed mutation leaves corrupt state byte-identical" PASS \
+  || check "failed mutation leaves corrupt state byte-identical" FAIL
 
-# A negative stopBlocks value must make Stop block on integrity, independently
+# A negative stopBlockCount value must make Stop block on integrity, independently
 # of the normal anti-deadlock budget.
 SID_S="tampered-stop-blocks"
 KEY_S="$(node "$CORE" session-key "$SID_S")"
@@ -66,15 +71,15 @@ source "$BASELINE" "$SID_S"
 STATE_S="$STATE_DIR/tdd-phase-${KEY_S}.json"
 bash "$LOG" --tdd-begin --session "$SID_S" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID_S" >/dev/null 2>&1
-tamper "$STATE_S" stopBlocks '-1'
+tamper "$STATE_S" stopBlockCount '-1'
 PAYLOAD_S="{\"hook_event_name\":\"Stop\",\"session_id\":\"${SID_S}\",\"cwd\":\"${CLAUDE_PROJECT_DIR}\"}"
 STOP_OUT="$(printf '%s' "$PAYLOAD_S" | "$STOP" 2>/dev/null)"
 case "$STOP_OUT" in
-  *'"decision":"block"'*invalid*) check "negative stopBlocks makes Stop fail closed" PASS ;;
-  *) check "negative stopBlocks makes Stop fail closed (got $STOP_OUT)" FAIL ;;
+  *'"decision":"block"'*'corrupt or unsafe'*) check "negative stopBlockCount makes Stop fail closed" PASS ;;
+  *) check "negative stopBlockCount makes Stop fail closed (got $STOP_OUT)" FAIL ;;
 esac
-[ "$(tdd_get_counter "$STATE_S" stopBlocks)" = invalid ] && check "counter reader exposes manipulated stopBlocks only as invalid" PASS \
-  || check "counter reader exposes manipulated stopBlocks only as invalid" FAIL
+[ "$(tdd_get_counter "$STATE_S" stopBlockCount)" = invalid ] && check "counter reader exposes manipulated stopBlockCount only as invalid" PASS \
+  || check "counter reader exposes manipulated stopBlockCount only as invalid" FAIL
 
 # The upper bound is part of the persisted schema, not only the increment path.
 SID_B="tampered-review-bound"

@@ -79,7 +79,7 @@ fi
 SID3="esc-budget-exhausted"
 arm "$SID3"
 for _ in 1 2 3 4 5 6 7 8; do
-  tdd_increment_counter "$SID3" stopBlocks >/dev/null
+  tdd_increment_counter "$SID3" stopBlockCount >/dev/null
 done
 ERR3="$STATE_DIR/e3.err"
 OUT3="$(printf '{"session_id":"%s"}' "$SID3" | bash "$STOP" 2>"$ERR3")"
@@ -94,7 +94,7 @@ fi
 SID4="esc-budget-ok"
 arm "$SID4"
 for _ in 1 2; do
-  tdd_increment_counter "$SID4" stopBlocks >/dev/null
+  tdd_increment_counter "$SID4" stopBlockCount >/dev/null
 done
 OUT4="$(printf '{"session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"
 [ "$(printf '%s' "$OUT4" | decision)" = "block" ] \

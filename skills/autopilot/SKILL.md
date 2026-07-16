@@ -69,14 +69,156 @@ so the forge (GitHub or GitLab) is detected once and each op degrades correctly.
 
 ```bash
 ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
+[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-vcs.sh" ] || {
+  echo "FATAL: active plugin root is unavailable — start a fresh Claude Code session" >&2
+  exit 1
+}
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
-[ -f "$VCS" ] || { echo "FATAL: VCS driver unavailable in the installed plugin" >&2; exit 1; }
 ```
 
 Forge **detection is repo-scoped**, so it runs inside Phase 0.B once the worktree/repo root is
 resolved (`bash "$VCS" --detect --repo "$REPO"`) — not here. Carry `PROVIDER` and `CLIREADY`
 from that detect forward to the PR-open (Phase 1 step 3) and the pre-push guard. (`--detect`
 also emits `repo=`, but autopilot's own driver ops are cwd-inferred, so it needs no repo-id.)
+
+## Durable run protocol (mandatory)
+
+Autopilot progress is a project-local state machine, not conversation memory. Never edit
+`.zensu/state/autopilot-*.json` directly. Resolve the native helper once:
+
+```bash
+LOG="$ROOT/hooks/lib/zensu-log.sh"
+[ -f "$LOG" ] || { echo "FATAL: Session Control helper unavailable" >&2; exit 1; }
+```
+
+Before presenting the Phase-0 plan, generate one token-safe run id (`run_<random-hex>`) and
+persist it from the worktree root:
+
+```bash
+bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
+```
+
+This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
+plan passed to `ExitPlanMode`:
+
+```markdown
+<!-- zensu-autopilot:<RUN_ID> -->
+```
+
+The plan-approval hook verifies the marker, owner session, and plan SHA-256, applies
+`PLAN_APPROVED`, and delegates directly to `/zensu:tdd` without another question. Pass the
+approved spec plus the exact line `AUTOPILOT-RUN: <RUN_ID>` to every initial or fix-loop
+`/zensu:tdd` invocation. The TDD skill reads the durable attempt/return stage, creates a
+fresh chain id, and uses the bound `--tdd-begin` form; its guarded `--chain-done` returns to
+that exact stage. Never start an unbound TDD generation during an active run.
+
+Every other transition goes through the closed API (stable event ids; exact JSON payload):
+
+```bash
+bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
+  --event-id <stable-id> --payload '<exact-json>'
+bash "$LOG" --autopilot-status
+```
+
+The closed stage sequence is `PLANNING → AWAIT_TDD ↔ TDD_RUNNING → GATES → CONVERGE →
+OPEN_PR → TEAM_REVIEW → FIX_FINDINGS → VALIDATE/COVER → DELIVER → DONE`. Gate,
+convergence, findings, validation, or coverage failures use their corresponding `*_FAILED`
+or `FIX_REQUIRED` event and return through a newly bound TDD attempt. Persist `BLOCK` for a
+genuine blocker and `CANCEL` only for an explicit cancellation. Only `DONE`, `BLOCKED`, and
+`CANCELLED` permit the top-level task to stop; inner `chainDone` never does.
+
+Recovery is owner-bound: compaction, resume, or reopening the **same task/session** may
+continue its durable run, but a fresh top-level session cannot take ownership. If the owner
+task is unavailable, do not forge its session id or start a replacement run; return to that
+task to resume/cancel, or stop for explicit manual state recovery. There is currently no
+automatic ownership-transfer command.
+
+A successful TDD return to `FIX_FINDINGS`, `VALIDATE`, or `COVER` arms a mandatory current-head
+handoff. Re-run the gates, push the fix, read the resulting PR head, then apply exactly:
+
+```bash
+bash "$LOG" --autopilot-event --run "$RUN_ID" --event PR_HEAD_UPDATED \
+  --event-id "head:<previous-sha>:<new-sha>" \
+  --payload '{"previousHeadSha":"<previous-sha>","headSha":"<new-sha>","gatesPassed":true,"pushCompleted":true}'
+```
+
+`previousHeadSha` must equal the durable current PR head and `headSha` must be a different,
+successfully pushed commit. Both booleans are literal proofs and must be `true`; extra keys,
+unchanged or stale heads, and phase evidence submitted before this event are rejected. The
+event advances the durable PR head, records the new-head gate pass, clears findings,
+validation, coverage, and delivery evidence from older heads, and returns to `FIX_FINDINGS`
+so those proofs are rebuilt in order. It deliberately preserves the once-only team-review
+publication on the PR's original reviewed head; never run the team review a second time.
+
+State-changing effects use these pairs: `PR_OPEN_REQUESTED` → `PR_OPENED`, then
+`TEAM_REVIEW_REQUESTED` → `TEAM_REVIEW_PUBLISHED`. The request event is written before the
+remote call, and retries reconcile the recorded operation before repeating it. Phase 1
+must also record `GATES_PASSED`/`GATES_FAILED`, `CONVERGENCE_PASSED`/
+`CONVERGENCE_FAILED`, `FIX_REQUIRED`/`FINDINGS_CLEARED`, `VALIDATION_PASSED`/
+`VALIDATION_FAILED`, optional `COVERAGE_PASSED`/`COVERAGE_FAILED`, and finally
+`DELIVERY_COMPLETE`. Delivery requires the PR head, gates, cleared findings, validation, and
+optional coverage to name the same final head. The review need only be the durable once-only
+publication for this PR generation; it is not rewritten to pretend that it reviewed later
+fix commits. The state library rejects unknown events, extra payload keys, stale heads/chains,
+conflicting event ids, and incomplete delivery evidence.
+
+### Delegated review and finding-fix envelopes
+
+Do not delegate either PR skill from conversational context alone. Immediately before each
+delegation, read fresh state with `bash "$LOG" --autopilot-status` and render the envelope
+from the current durable `tdd.attempt` and `tdd.chainId`, the current outer stage, and the
+current durable PR number, URL, and head SHA. The active run must still be owned by this
+task/session; any absent, terminal, corrupt, mismatched, or incomplete value blocks the
+delegation.
+
+The team-review operation key is deterministic:
+`team-review:v1:<sha256(canonical({headSha,runId}))>`. Canonical JSON sorts object keys,
+contains no insignificant whitespace, preserves the exact run id, and lowercases the
+lowercase 7-64 character hexadecimal PR head before hashing. The operation key is deterministic for one run and its
+original review head; never include a timestamp, retry counter, random value, PR title, or
+review payload. Generate it through the state library's canonical helper, never by an
+ad-hoc shell hash:
+
+```bash
+source "$ROOT/hooks/lib/zensu-autopilot-state.sh"
+REVIEW_OPERATION_KEY="$(autopilot_team_review_operation_key "$RUN_ID" "$PR_HEAD_SHA")" \
+  || { echo "cannot bind team-review operation" >&2; exit 1; }
+```
+
+Persist `TEAM_REVIEW_REQUESTED` with that key and the already detected VCS `provider`
+(`github` or `gitlab`) before invoking the skill, then pass the same exact operation key in this four-line envelope:
+
+```text
+/zensu:pr-team-review <pr-url>
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>
+```
+
+For this call `<outer-stage>` is exactly `TEAM_REVIEW`. After the skill returns a validated
+structured reconciliation receipt, persist `TEAM_REVIEW_PUBLISHED` with the same exact
+operation key, receipt marker, bound head, and receipt `provider`; it must equal the provider
+already bound by `TEAM_REVIEW_REQUESTED`.
+The durable transition re-attests the receipt's canonical payload digest and provider-aware
+expected part count against the immutable stored payload while holding the Autopilot lock,
+then records that digest, part count, and provider as review evidence. Never infer or omit
+the provider; copy it from the structured reconciliation receipt.
+
+The rendered stage line is `AUTOPILOT-STAGE: TEAM_REVIEW`.
+
+Fix-findings receives exactly the first three lines and never receives `AUTOPILOT-REVIEW-OP`:
+
+```text
+/zensu:pr-fix-findings <pr-url>
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+```
+
+For that call `<outer-stage>` is exactly `FIX_FINDINGS`. These are capability envelopes,
+not suggestions: never add, duplicate, reorder, or partially forward their lines.
+The rendered stage line is `AUTOPILOT-STAGE: FIX_FINDINGS`.
 
 ## Workflow
 
@@ -123,7 +265,7 @@ the detected app type — see `rules/drivers.md`.
 
 **0.C — Plan.** Turn the feature into (shape it on the resolved spec template:
 `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md` when that file
-exists, else `templates/autopilot-spec.md` under the validated session plugin root):
+exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plugin root):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
 2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
@@ -143,19 +285,24 @@ exists, else `templates/autopilot-spec.md` under the validated session plugin ro
 gates / validate commands the probe chose, so the user sees exactly what will run) via
 **ExitPlanMode**, and wait for approval. If the probe wrote or would write
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
-without the user's explicit OK**.
+without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
+with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
+the plan. Do not proceed if either operation fails.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 
 Run these in order. Implement **via the Zensu workflow** throughout.
 
-1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs as the feature
+1. **Implement** — invoke `/zensu:tdd` (vanilla mode) with the spec + ACs and the exact
+   `AUTOPILOT-RUN: <RUN_ID>` line as the feature
    specification. Let the built-in 5-perspective review chain (conventions, bugs,
    architecture, tests, security) run and address what it raises. Stay in the worktree.
    (Vanilla `/zensu:tdd` may ship thin coverage — `/zensu:cover` on the diff hardens the
    durable test net; opt in with `--cover`, applied in step 6b below.)
 2. **Gates green** — run every command in the resolved `gates:` recipe; all must pass
    before the PR opens (e.g. type-check, lint, unit tests, per-file coverage floor).
+   Persist `GATES_PASSED` with the tested head SHA; on failure persist `GATES_FAILED`, then
+   run the bound `/zensu:tdd` fix attempt and return here.
 2b. **Converge (report-only)** — run `/zensu:converge <session-plan-path>` (always the
    session plan, never mtime-resolved — scoped fix runs write newer plans): a
    `contradicts` finding on an active AC **blocks the PR open** until fixed via
@@ -165,7 +312,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    findings feed the step-6 validate loop; with `--no-validate`, `missing` on an
    active AC also blocks the PR open and `partial` is recorded unvalidated in the
    PR body's per-AC table. Flow-back edit proposals are reported only — never
-   auto-applied in this non-interactive run.
+   auto-applied in this non-interactive run. Persist `CONVERGENCE_PASSED` before PR open;
+   each contradiction uses `CONVERGENCE_FAILED` and the bound TDD return path.
 3. **Open the PR** — commit (Conventional Commits, no watermark), push, then open the PR/MR
    against `--base` **through the driver** (run from `$REPO` so `gh`/`glab` resolve the host;
    GitHub → `gh pr create`, GitLab → `glab mr create` with `--source-branch`/`--target-branch`,
@@ -180,6 +328,8 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    [ -n "$URL" ] || { echo "PR/MR open returned an empty URL — aborting"; exit 1; }
    ```
 
+   Persist `PR_OPEN_REQUESTED` with a deterministic operation key before calling the driver;
+   after success persist `PR_OPENED` with that same key, PR number/URL, and current head.
    `$HEAD` is the worktree's feature branch (already pushed above), `$BASE` the `--base` arg
    (default `main`), `$TITLE`/`$BODY_FILE` the render step below. A failed PR-open (auth
    expired, an MR already exists on the branch, a push race) is a **stop-the-world blocker**
@@ -187,12 +337,12 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
    Render the body (`$BODY_FILE`, English title + body) from the resolved template
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
-   exists, else `templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
+   exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
    step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
-   each fix loop), run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --bypass-list`
+   each fix loop), run `bash "$LOG" --bypass-list`
    and union the non-`none` entries —
    each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`
@@ -200,31 +350,41 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    conversation memory, so a compaction or session restart between chains cannot
    under-report. Render `none` when the union is empty; update the line whenever step 5/6
    pushes.
-4. **Team review — ONCE** — run `/zensu:pr-team-review` on the PR. This is the single deep
+4. **Team review — ONCE** — derive the deterministic key and exact four-line envelope above,
+   persist `TEAM_REVIEW_REQUESTED`, then run `/zensu:pr-team-review` on the PR. Its delegated
+   path reconciles the write-ahead operation remotely and returns the structured receipt;
+   persist `TEAM_REVIEW_PUBLISHED` only after that receipt validates. This is the single deep
    multi-persona pass. It runs **exactly once** and does **not** re-run in the loop.
-5. **Fix the findings** — run `/zensu:pr-fix-findings` and loop it until every review
-   thread from step 4 is resolved. Re-run the step-2 gates, then push so the PR reflects
-   the fixes.
+5. **Fix the findings** — invoke `/zensu:pr-fix-findings` with the exact three-line envelope
+   above. Its delegated path fetches the complete thread set, performs one aggregate bound
+   TDD fix run serially in this task, re-runs the gates, pushes with current-PR guards,
+   advances the durable PR head, and resolves the addressed threads. Repeat only while its
+   authoritative paginated re-fetch still reports unresolved threads. Persist
+   `FINDINGS_CLEARED` only after that count is zero.
 6. **Validate ↔ fix LOOP** — only now exercise the running feature:
    a. Run the resolved validation **driver** (see `rules/drivers.md`), authenticating via
       the credential-blind login script if one is configured (see `rules/auth.md`). Assert
       **every non-deprecated AC by its `AC-###` ID** and capture evidence per AC under that
       ID (ACs marked deprecated are exempt — their rows stay in the table per the
       never-recycle rule).
-   b. Every non-deprecated AC passes + gates green → **exit the loop**.
-   c. Anything off → fix it through `/zensu:tdd` (vanilla, scoped to the failing AC(s)),
+   b. Every non-deprecated AC passes + gates green → persist `VALIDATION_PASSED` and
+      **exit the loop**.
+   c. Anything off → persist `VALIDATION_FAILED`, fix it through `/zensu:tdd` (vanilla,
+      scoped to the failing AC(s), carrying `AUTOPILOT-RUN: <RUN_ID>`),
       re-run the step-2 gates, push to update the PR, then go back to (a).
    d. Repeat (a)–(c) until all non-deprecated ACs pass. `/zensu:pr-team-review` does **not** re-run here.
 6b. **Persist coverage — opt-in `--cover`** — with `--cover`, after the loop exits green,
    invoke `/zensu:cover --from-acs` to emit the now-passing ACs as **durable committed
    tests** (one test per active `AC-###` ID, keyed by the ID; deprecated ACs are skipped),
-   then re-run the step-2 gates and push. This turns the
+   then persist `COVERAGE_PASSED`; on failure use `COVERAGE_FAILED` and the bound TDD
+   return path. This turns the
    throwaway live validation into a permanent regression net in the same PR. Off by default;
    the live validate↔fix loop above is unchanged.
 
 ### Phase 2 — Deliver
 
-Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
+After all delivery invariants and current-head evidence are durable, apply
+`DELIVERY_COMPLETE`. Stop at a **ready, pushed PR** whose body contains a per-AC pass/fail table keyed by the
 stable `AC-###` IDs — one evidence entry per active ID; deprecated rows stay listed with
 status `deprecated`, no evidence — and the `Gates bypassed during build:` audit line
 (the step-3 union, `none` when clean). Then:

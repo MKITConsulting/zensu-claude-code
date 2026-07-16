@@ -2,6 +2,7 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -25,7 +26,9 @@ function fixture(host = 'codex') {
   const projectRoot = path.join(root, 'project');
   const pluginRoot = path.join(root, 'plugin');
   const pluginData = path.join(root, 'plugin-data');
-  const recordsDir = path.join(pluginData, 'session-control', host, 'v1', 'records');
+  const recordsDir = host === 'claude'
+    ? path.join(pluginData, 'session-control', 'v1', 'records')
+    : path.join(pluginData, 'session-control', host, 'v1', 'records');
   fs.mkdirSync(projectRoot, { recursive: true });
   fs.mkdirSync(pluginRoot, { recursive: true });
   fs.mkdirSync(pluginData, { recursive: true });
@@ -81,6 +84,235 @@ function runNode(source, args = []) {
     child.on('error', reject);
     child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+
+function deferredFixture(options = {}) {
+  const f = fixture('claude');
+  if (options.legacyHostSegment === true) {
+    f.recordsDir = path.join(f.pluginData, 'session-control', 'claude', 'v1', 'records');
+  }
+  const currentSessionId = core.sessionKey(options.currentSession || 'deferred-current');
+  const ownerSessionId = core.sessionKey(options.ownerSession || 'deferred-owner');
+  const currentContext = register(f, { sessionId: currentSessionId });
+  const ownerContext = register(f, { sessionId: ownerSessionId });
+  initialize(f, currentSessionId);
+  initialize(f, ownerSessionId);
+  const projectRoot = currentContext.project_root;
+  const stateDirectory = path.join(projectRoot, '.zensu', 'state');
+  const claimFile = path.join(stateDirectory, 'pending-review.json.claim');
+  const currentContextFile = fs.realpathSync.native(path.join(
+    f.recordsDir,
+    `${currentSessionId}.json`,
+  ));
+  const ownerContextFile = fs.realpathSync.native(path.join(
+    f.recordsDir,
+    `${ownerSessionId}.json`,
+  ));
+  return {
+    ...f,
+    projectRoot,
+    pluginRoot: currentContext.plugin_root,
+    pluginData: currentContext.plugin_data,
+    recordsDir: fs.realpathSync.native(f.recordsDir),
+    stateDirectory,
+    claimFile,
+    currentSessionId,
+    ownerSessionId,
+    currentContext,
+    ownerContext,
+    currentContextFile,
+    ownerContextFile,
+    runtimeDigest: currentContext.runtime_digest,
+    claimId: options.claimId || 'dc_unit_deferred_review',
+  };
+}
+
+function seedDeferredOwner(f, overrides = {}) {
+  return core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-seed-deferred',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    codeReviewDone: false,
+    selfReviewFixed: false,
+    reviewTicket: '',
+    reviewTicketConsumed: true,
+    reviewRound: 0,
+    stopBlockCount: 0,
+    deferredReviewClaim: f.claimId,
+    ...overrides,
+  }));
+}
+
+function deferredClaim(f, overrides = {}) {
+  return {
+    claimId: f.claimId,
+    ownerSessionId: f.ownerSessionId,
+    ownerPid: process.pid,
+    ownerProcessStartIdentity: null,
+    handoffEmitted: false,
+    ...overrides,
+  };
+}
+
+function preparedTransfer(f, ownerRevision, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    claimId: f.claimId,
+    fromOwnerRevision: ownerRevision,
+    fromOwnerSessionId: f.ownerSessionId,
+    retiredOwnerRevision: null,
+    stage: 'prepared',
+    toOwnerSessionId: f.currentSessionId,
+    ...overrides,
+  };
+}
+
+function preparedCancellation(f, ownerRevision, overrides = {}) {
+  return {
+    schemaVersion: 1,
+    stage: 'prepared',
+    cancellationId: 'drc_unit_deferred_review',
+    claimId: f.claimId,
+    ownerSessionId: f.ownerSessionId,
+    mode: 'release-only',
+    origin: 'linked',
+    ownerRevision,
+    clearedOwnerRevision: null,
+    resetBinding: null,
+    ...overrides,
+  };
+}
+
+function writeDeferredClaim(f, overrides = {}) {
+  const claim = deferredClaim(f, overrides);
+  core.atomicWriteJson(f.claimFile, claim);
+  return claim;
+}
+
+function inspectDeferredOptions(f, overrides = {}) {
+  return {
+    currentContextFile: f.currentContextFile,
+    currentSessionId: f.currentSessionId,
+    projectRoot: f.projectRoot,
+    pluginRoot: f.pluginRoot,
+    runtimeDigest: f.runtimeDigest,
+    claimFile: f.claimFile,
+    claimStale: false,
+    ...overrides,
+  };
+}
+
+function retireDeferredOptions(f, ownerRevision, overrides = {}) {
+  return {
+    ...inspectDeferredOptions(f),
+    expectedRevision: ownerRevision,
+    ...overrides,
+  };
+}
+
+function assignDeferredOptions(f, overrides = {}) {
+  return {
+    ...inspectDeferredOptions(f),
+    ownerPid: process.pid,
+    logStyle: 'none',
+    ...overrides,
+  };
+}
+
+function currentProcessStartIdentity() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-process-identity-'));
+  const lockFile = path.join(root, '.identity.lock');
+  let identity = null;
+  core.withFileLock(root, 'identity', () => {
+    identity = JSON.parse(fs.readFileSync(lockFile, 'utf8')).process_start_identity;
+  });
+  return identity || null;
+}
+
+function assertClaimBytesUnchanged(f, before) {
+  assert.deepEqual(fs.readFileSync(f.claimFile), before);
+}
+
+async function killDeferredCancellationAt(f, options, killpoint) {
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${options.currentSessionId}.json`);
+  const child = await runNode(`
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const options = JSON.parse(process.argv[1]);
+    const killpoint = process.argv[2];
+    const stateFile = path.resolve(process.argv[3]);
+    const claimFile = path.resolve(process.argv[4]);
+    const originalRename = fs.renameSync;
+    fs.renameSync = function injectedRename(source, destination) {
+      const target = path.resolve(String(destination));
+      let value = null;
+      try { value = JSON.parse(fs.readFileSync(source, 'utf8')); } catch (_) {}
+      const result = originalRename.call(fs, source, destination);
+      const prepared = target === claimFile
+        && value && value.cancellation && value.cancellation.stage === 'prepared';
+      const stateCas = target === stateFile
+        && value && value.deferredReviewClaim === '' && value.deferredReviewCancellation;
+      const stateCleared = target === claimFile
+        && value && value.cancellation && value.cancellation.stage === 'state-cleared';
+      if ((killpoint === 'prepared' && prepared)
+          || (killpoint === 'state-cas' && stateCas)
+          || (killpoint === 'state-cleared' && stateCleared)) {
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return result;
+    };
+    core.cancelDeferredReviewClaim(options);
+  `, [JSON.stringify(options), killpoint, stateFile, f.claimFile]);
+  assert.equal(child.signal, 'SIGKILL', `expected ${killpoint} killpoint, stderr=${child.stderr}`);
+}
+
+function rewriteJson(file, mutation) {
+  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const next = mutation(value) || value;
+  fs.writeFileSync(file, `${JSON.stringify(next, null, 2)}\n`, { mode: 0o600 });
+  return next;
+}
+
+function withAfterFileReadInjection(file, nthRead, injection, action) {
+  const target = path.resolve(file);
+  const originalOpen = fs.openSync;
+  const originalClose = fs.closeSync;
+  const tracked = new Set();
+  let reads = 0;
+  let injected = false;
+  fs.openSync = function patchedOpen(candidate, flags, ...rest) {
+    const descriptor = originalOpen.call(fs, candidate, flags, ...rest);
+    if (path.resolve(String(candidate)) === target) tracked.add(descriptor);
+    return descriptor;
+  };
+  fs.closeSync = function patchedClose(descriptor) {
+    const shouldCount = tracked.delete(descriptor);
+    const result = originalClose.call(fs, descriptor);
+    if (shouldCount) {
+      reads += 1;
+      if (!injected && reads === nthRead) {
+        injected = true;
+        injection();
+      }
+    }
+    return result;
+  };
+  try {
+    const result = action();
+    assert.equal(injected, true, `expected injection after read ${nthRead} of ${file}`);
+    return result;
+  } finally {
+    fs.openSync = originalOpen;
+    fs.closeSync = originalClose;
+  }
 }
 
 test('exports the versioned schemas', () => {
@@ -523,7 +755,7 @@ test('creates one complete project-bound workflow baseline at SessionStart', () 
     workflowTools: baseline.workflowTools,
     bypasses: baseline.bypasses,
     reviewRound: baseline.reviewRound,
-    stopBlocks: baseline.stopBlocks,
+    stopBlockCount: baseline.stopBlockCount,
     phase: baseline.phase,
     step_id: baseline.step_id,
     history: baseline.history,
@@ -538,7 +770,7 @@ test('creates one complete project-bound workflow baseline at SessionStart', () 
     workflowTools: [],
     bypasses: [],
     reviewRound: 0,
-    stopBlocks: 0,
+    stopBlockCount: 0,
     phase: 'UNINITIALIZED',
     step_id: '',
     history: [],
@@ -576,7 +808,7 @@ test('resetReviewBudget re-arms the complete review budget in one CAS revision',
     active: true,
     implComplete: true,
     reviewRound: 3,
-    stopBlocks: 2,
+    stopBlockCount: 2,
     chainDone: true,
     codeReviewDone: true,
     selfReviewFixed: true,
@@ -591,7 +823,7 @@ test('resetReviewBudget re-arms the complete review budget in one CAS revision',
     active: reset.active,
     implComplete: reset.implComplete,
     reviewRound: reset.reviewRound,
-    stopBlocks: reset.stopBlocks,
+    stopBlockCount: reset.stopBlockCount,
     chainDone: reset.chainDone,
     codeReviewDone: reset.codeReviewDone,
     selfReviewFixed: reset.selfReviewFixed,
@@ -599,7 +831,7 @@ test('resetReviewBudget re-arms the complete review budget in one CAS revision',
     active: true,
     implComplete: true,
     reviewRound: 0,
-    stopBlocks: 0,
+    stopBlockCount: 0,
     chainDone: false,
     codeReviewDone: false,
     selfReviewFixed: false,
@@ -991,7 +1223,7 @@ test('resets the complete review budget in one expected-revision CAS', () => {
     active: true,
     implComplete: true,
     reviewRound: 4,
-    stopBlocks: 7,
+    stopBlockCount: 7,
     chainDone: true,
     codeReviewDone: true,
     selfReviewFixed: true,
@@ -1013,7 +1245,7 @@ test('resets the complete review budget in one expected-revision CAS', () => {
   assert.equal(reset.revision, armed.revision + 1);
   assert.equal(reset.workflow_state, 'review_rearmed');
   assert.equal(reset.reviewRound, 0);
-  assert.equal(reset.stopBlocks, 0);
+  assert.equal(reset.stopBlockCount, 0);
   assert.equal(reset.chainDone, false);
   assert.equal(reset.codeReviewDone, false);
   assert.equal(reset.selfReviewFixed, false);
@@ -1145,7 +1377,7 @@ test('serializes concurrent workflow counter increments without lost updates', a
     sessionId: RAW_SESSION,
     workflowState: 'active',
     event: 'activate',
-  }, (state) => ({ ...state, active: true, stopBlocks: 0 }));
+  }, (state) => ({ ...state, active: true, stopBlockCount: 0 }));
   const increment = `
     const core = require(process.env.SESSION_CONTROL_CORE);
     core.mutateWorkflowState({
@@ -1154,7 +1386,7 @@ test('serializes concurrent workflow counter increments without lost updates', a
       workflowState: 'stop_guard',
       event: 'counter-stop_blocks',
     }, (state) => {
-      state.stopBlocks = (state.stopBlocks || 0) + 1;
+      state.stopBlockCount = (state.stopBlockCount || 0) + 1;
       return state;
     });
   `;
@@ -1164,7 +1396,7 @@ test('serializes concurrent workflow counter increments without lost updates', a
   ]);
   assert.deepEqual(results.map((result) => result.code), [0, 0]);
   const final = core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: RAW_SESSION });
-  assert.equal(final.stopBlocks, 2);
+  assert.equal(final.stopBlockCount, 2);
   assert.equal(final.revision, 4);
 });
 
@@ -1177,7 +1409,7 @@ test('rejects malformed or out-of-range workflow counters', () => {
     sessionId: RAW_SESSION,
     workflowState: 'active',
     event: 'activate',
-  }, (state) => ({ ...state, active: true, reviewRound: 0, stopBlocks: 0 }));
+  }, (state) => ({ ...state, active: true, reviewRound: 0, stopBlockCount: 0 }));
   const file = path.join(stateDirectory, `tdd-phase-${core.sessionKey(RAW_SESSION)}.json`);
   const baseline = JSON.parse(fs.readFileSync(file, 'utf8'));
   for (const value of ['5', -1, 1000001, 1.5]) {
@@ -1194,4 +1426,2490 @@ test('rejects multi-linked trusted runtime files', () => {
   const manifest = path.join(f.pluginRoot, f.host === 'codex' ? '.codex-plugin' : '.claude-plugin', 'plugin.json');
   fs.linkSync(manifest, path.join(f.root, 'manifest-alias.json'));
   assert.throws(() => core.computeRuntimeDigest(f.pluginRoot, f.host), /multi-linked/i);
+});
+
+test('stores Claude contexts in the plugin-data v1 records directory without a host segment', () => {
+  const f = fixture('claude');
+  assert.equal(
+    f.recordsDir,
+    path.join(f.pluginData, 'session-control', 'v1', 'records'),
+  );
+  assert.equal(f.recordsDir.split(path.sep).includes('claude'), false);
+});
+
+test('deferred-review cancellation receipts use an exact schema and are exclusive with transfer', () => {
+  const valid = deferredFixture({ ownerSession: 'cancellation-schema-valid' });
+  const owner = seedDeferredOwner(valid);
+  writeDeferredClaim(valid, { cancellation: preparedCancellation(valid, owner.revision) });
+  const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(valid, {
+    currentContextFile: valid.ownerContextFile,
+    currentSessionId: valid.ownerSessionId,
+  }));
+  assert.equal(inspected.status, 'cancelling');
+
+  const invalidReceipts = [
+    (f, revision) => ({ ...preparedCancellation(f, revision), extra: true }),
+    (f, revision) => ({ ...preparedCancellation(f, revision), mode: 'erase-everything' }),
+    (f, revision) => ({
+      ...preparedCancellation(f, revision),
+      stage: 'state-cleared',
+      clearedOwnerRevision: null,
+    }),
+  ];
+  for (const [index, makeReceipt] of invalidReceipts.entries()) {
+    const f = deferredFixture({ ownerSession: `cancellation-schema-invalid-${index}` });
+    const seeded = seedDeferredOwner(f);
+    writeDeferredClaim(f, { cancellation: makeReceipt(f, seeded.revision) });
+    assert.throws(
+      () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f, {
+        currentContextFile: f.ownerContextFile,
+        currentSessionId: f.ownerSessionId,
+      })),
+      /cancellation receipt is invalid/i,
+    );
+  }
+
+  const exclusive = deferredFixture({ ownerSession: 'cancellation-schema-exclusive' });
+  const exclusiveOwner = seedDeferredOwner(exclusive);
+  writeDeferredClaim(exclusive, {
+    cancellation: preparedCancellation(exclusive, exclusiveOwner.revision),
+    transfer: preparedTransfer(exclusive, exclusiveOwner.revision),
+  });
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(exclusive)),
+    /mutually exclusive|cancellation.*transfer/i,
+  );
+});
+
+test('cancels an owned deferred claim in release-only mode with one durable state receipt', () => {
+  const f = deferredFixture({ ownerSession: 'release-only-cancellation' });
+  const owner = seedDeferredOwner(f, {
+    reviewTicket: 'rt_keep_this_generation',
+    reviewTicketConsumed: false,
+    reviewRound: 4,
+    stopBlockCount: 13,
+    phase: 'GREEN_PASS',
+    step_id: 'keep-step',
+  });
+  writeDeferredClaim(f);
+  const options = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'release-only',
+  });
+
+  const cancelled = core.cancelDeferredReviewClaim(options);
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.claimId, f.claimId);
+  assert.equal(cancelled.mode, 'release-only');
+  assert.match(cancelled.cancellationId, /^drc_[a-f0-9]{32}$/);
+  assert.equal(fs.existsSync(f.claimFile), false);
+
+  const state = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+  });
+  assert.equal(state.revision, owner.revision + 1);
+  assert.equal(state.last_event, 'deferred-review-release');
+  assert.equal(state.workflow_state, owner.workflow_state);
+  assert.equal(state.deferredReviewClaim, '');
+  for (const field of [
+    'active', 'implComplete', 'chainDone', 'codeReviewDone', 'selfReviewFixed',
+    'reviewTicket', 'reviewTicketConsumed', 'reviewRound', 'stopBlockCount',
+    'phase', 'step_id',
+  ]) {
+    assert.deepEqual(state[field], owner[field], `release-only must preserve ${field}`);
+  }
+  assert.deepEqual(state.deferredReviewCancellation, {
+    schemaVersion: 1,
+    cancellationId: cancelled.cancellationId,
+    claimId: f.claimId,
+    ownerSessionId: f.ownerSessionId,
+    mode: 'release-only',
+    origin: 'linked',
+    sourceRevision: owner.revision,
+    resultRevision: owner.revision + 1,
+    resetBinding: null,
+  });
+
+  const beforeRepeat = fs.readFileSync(path.join(
+    f.stateDirectory,
+    `tdd-phase-${f.ownerSessionId}.json`,
+  ));
+  assert.equal(core.cancelDeferredReviewClaim(options).status, 'absent');
+  assert.deepEqual(fs.readFileSync(path.join(
+    f.stateDirectory,
+    `tdd-phase-${f.ownerSessionId}.json`,
+  )), beforeRepeat);
+});
+
+test('cancels an owned deferred claim in reset mode to an idle audited state', () => {
+  const f = deferredFixture({ ownerSession: 'reset-cancellation' });
+  const owner = seedDeferredOwner(f, {
+    workflowActive: true,
+    workflowTools: ['Bash'],
+    bypasses: ['unit-bypass'],
+    reviewTicket: 'rt_reset_generation',
+    reviewTicketConsumed: false,
+    reviewRound: 3,
+    stopBlockCount: 7,
+    vanilla: true,
+    phase: 'GREEN_PASS',
+    step_id: 'reset-step',
+    history: [{ step: 'reset-step', phase: 'GREEN_PASS' }],
+  });
+  writeDeferredClaim(f);
+  const cancelled = core.cancelDeferredReviewClaim(inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'reset',
+    resetBinding: null,
+  }));
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.mode, 'reset');
+  assert.equal(fs.existsSync(f.claimFile), false);
+
+  const state = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+  });
+  assert.equal(state.revision, owner.revision + 1);
+  assert.equal(state.last_event, 'deferred-review-reset');
+  assert.equal(state.workflow_state, 'idle');
+  assert.equal(state.deferredReviewClaim, '');
+  assert.equal(state.active, false);
+  assert.equal(state.implComplete, false);
+  assert.equal(state.chainDone, false);
+  assert.equal(state.codeReviewDone, false);
+  assert.equal(state.selfReviewFixed, false);
+  assert.equal(state.workflowActive, false);
+  assert.deepEqual(state.workflowTools, []);
+  assert.deepEqual(state.bypasses, []);
+  assert.equal(state.reviewTicket, '');
+  assert.equal(state.reviewTicketConsumed, true);
+  assert.equal(state.reviewRound, 0);
+  assert.equal(state.stopBlockCount, 0);
+  assert.equal(state.vanilla, false);
+  assert.equal(state.phase, 'UNINITIALIZED');
+  assert.equal(state.step_id, '');
+  assert.deepEqual(state.history, []);
+  assert.equal(state.deferredReviewCancellation.mode, 'reset');
+  assert.equal(state.deferredReviewCancellation.sourceRevision, owner.revision);
+  assert.equal(state.deferredReviewCancellation.resultRevision, owner.revision + 1);
+});
+
+test('owner-only reset cancels an assigned unseeded claim and recovers its prepared receipt', async () => {
+  const f = deferredFixture({ ownerSession: 'reset-unseeded-owner' });
+  writeDeferredClaim(f, { ownerPid: 2147483647, handoffEmitted: false });
+  const ownerOptions = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'reset',
+    resetBinding: null,
+  });
+  assert.equal(core.inspectDeferredReviewOwner(ownerOptions).status, 'unseeded');
+
+  await killDeferredCancellationAt(f, ownerOptions, 'prepared');
+  assert.equal(core.inspectDeferredReviewOwner(ownerOptions).status, 'cancelling');
+  const recovered = core.cancelDeferredReviewClaim(ownerOptions);
+  assert.equal(recovered.status, 'cancelled');
+  assert.equal(recovered.mode, 'reset');
+  assert.equal(fs.existsSync(f.claimFile), false);
+  const state = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+  });
+  assert.equal(state.active, false);
+  assert.equal(state.deferredReviewClaim, '');
+  assert.equal(state.deferredReviewCancellation.sourceRevision, 1);
+  assert.equal(state.deferredReviewCancellation.resultRevision, 2);
+
+  const stale = deferredFixture({ ownerSession: 'reset-unseeded-stale-owner' });
+  writeDeferredClaim(stale, { ownerPid: 2147483647, handoffEmitted: false });
+  const staleOptions = inspectDeferredOptions(stale, {
+    currentContextFile: stale.ownerContextFile,
+    currentSessionId: stale.ownerSessionId,
+    mode: 'reset',
+    resetBinding: null,
+  });
+  await killDeferredCancellationAt(stale, staleOptions, 'prepared');
+  assert.equal(JSON.parse(fs.readFileSync(stale.claimFile, 'utf8')).cancellation.origin, 'unseeded');
+  core.mutateWorkflowState({
+    projectRoot: stale.projectRoot,
+    sessionId: stale.ownerSessionId,
+    workflowState: 'red',
+    event: 'tdd-begin',
+    expectedRevision: 1,
+  }, (current) => ({ ...current, active: true, implComplete: false }));
+  const staleStateFile = path.join(
+    stale.stateDirectory,
+    `tdd-phase-${stale.ownerSessionId}.json`,
+  );
+  const freshState = fs.readFileSync(staleStateFile);
+  assert.equal(core.inspectDeferredReviewOwner(staleOptions).status, 'cancelling');
+  const superseded = core.cancelDeferredReviewClaim(staleOptions);
+  assert.equal(superseded.status, 'superseded');
+  assert.equal(superseded.ownerRevision, 1);
+  assert.equal(superseded.clearedOwnerRevision, 1);
+  assert.equal(fs.existsSync(stale.claimFile), false);
+  assert.deepEqual(fs.readFileSync(staleStateFile), freshState);
+
+  const relinked = deferredFixture({ ownerSession: 'reset-unseeded-relinked-owner' });
+  core.mutateWorkflowState({
+    projectRoot: relinked.projectRoot,
+    sessionId: relinked.ownerSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-relink-unseeded-claim',
+    expectedRevision: 1,
+  }, (current) => ({
+    ...current,
+    active: true,
+    implComplete: true,
+    deferredReviewClaim: relinked.claimId,
+  }));
+  writeDeferredClaim(relinked, {
+    ownerPid: 2147483647,
+    cancellation: preparedCancellation(relinked, 1, {
+      mode: 'reset',
+      origin: 'unseeded',
+    }),
+  });
+  const relinkedBefore = fs.readFileSync(relinked.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(relinked, {
+      currentContextFile: relinked.ownerContextFile,
+      currentSessionId: relinked.ownerSessionId,
+      mode: 'reset',
+      resetBinding: null,
+    })),
+    /cancellation state does not match its receipt/i,
+  );
+  assertClaimBytesUnchanged(relinked, relinkedBefore);
+
+  const incoherent = deferredFixture({ ownerSession: 'reset-unseeded-incoherent-owner' });
+  const incoherentStateFile = path.join(
+    incoherent.stateDirectory,
+    `tdd-phase-${incoherent.ownerSessionId}.json`,
+  );
+  rewriteJson(incoherentStateFile, (current) => ({
+    ...current,
+    active: true,
+    implComplete: false,
+  }));
+  writeDeferredClaim(incoherent, {
+    ownerPid: 2147483647,
+    cancellation: preparedCancellation(incoherent, 1, {
+      mode: 'reset',
+      origin: 'unseeded',
+    }),
+  });
+  const incoherentBefore = fs.readFileSync(incoherent.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(incoherent, {
+      currentContextFile: incoherent.ownerContextFile,
+      currentSessionId: incoherent.ownerSessionId,
+      mode: 'reset',
+      resetBinding: null,
+    })),
+    /cancellation state does not match its receipt/i,
+  );
+  assertClaimBytesUnchanged(incoherent, incoherentBefore);
+
+  const acknowledged = deferredFixture({ ownerSession: 'reset-unseeded-acknowledged-owner' });
+  core.transitionWorkflowState({
+    projectRoot: acknowledged.projectRoot,
+    sessionId: acknowledged.ownerSessionId,
+    workflowState: 'idle',
+    event: 'unit-newer-unlinked-revision',
+    expectedRevision: 1,
+  });
+  writeDeferredClaim(acknowledged, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+    cancellation: preparedCancellation(acknowledged, 1, {
+      mode: 'reset',
+      origin: 'unseeded',
+    }),
+  });
+  const acknowledgedBefore = fs.readFileSync(acknowledged.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(acknowledged, {
+      currentContextFile: acknowledged.ownerContextFile,
+      currentSessionId: acknowledged.ownerSessionId,
+      mode: 'reset',
+      resetBinding: null,
+    })),
+    /cancellation receipt is invalid/i,
+  );
+  assertClaimBytesUnchanged(acknowledged, acknowledgedBefore);
+
+  const foreign = deferredFixture({ ownerSession: 'reset-unseeded-foreign-owner' });
+  writeDeferredClaim(foreign, { ownerPid: 2147483647, handoffEmitted: false });
+  const before = fs.readFileSync(foreign.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim({
+      ...inspectDeferredOptions(foreign),
+      mode: 'reset',
+      resetBinding: null,
+    }),
+    /only the deferred-review owner may cancel/i,
+  );
+  assertClaimBytesUnchanged(foreign, before);
+
+  const done = deferredFixture({ ownerSession: 'reset-unseeded-done-owner' });
+  core.mutateWorkflowState({
+    projectRoot: done.projectRoot,
+    sessionId: done.ownerSessionId,
+    workflowState: 'review_done',
+    event: 'unit-unlinked-done-owner',
+    expectedRevision: 1,
+  }, (current) => ({
+    ...current,
+    active: true,
+    implComplete: true,
+    chainDone: true,
+    deferredReviewClaim: '',
+  }));
+  writeDeferredClaim(done, { ownerPid: 2147483647, handoffEmitted: false });
+  const doneCancelled = core.cancelDeferredReviewClaim(inspectDeferredOptions(done, {
+    currentContextFile: done.ownerContextFile,
+    currentSessionId: done.ownerSessionId,
+    mode: 'reset',
+    resetBinding: null,
+  }));
+  assert.equal(doneCancelled.status, 'cancelled');
+  const resetDoneState = core.readWorkflowState({
+    projectRoot: done.projectRoot,
+    sessionId: done.ownerSessionId,
+  });
+  assert.equal(resetDoneState.active, false);
+  assert.equal(resetDoneState.chainDone, false);
+});
+
+test('reset atomically converts an assigned unseeded target transfer into cancellation', async () => {
+  const f = deferredFixture({
+    currentSession: 'reset-unseeded-transfer-target',
+    ownerSession: 'reset-unseeded-transfer-source',
+  });
+  const source = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const targetOptions = inspectDeferredOptions(f);
+  core.prepareDeferredReviewTransfer(targetOptions);
+  core.retireDeferredReviewOwner(retireDeferredOptions(f, source.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...targetOptions,
+    expectedRevision: source.revision,
+  });
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+  assert.equal(assigned.ownerSessionId, f.currentSessionId);
+  assert.equal(assigned.transfer.stage, 'owner-retired');
+  assert.equal(core.inspectDeferredReviewOwner(targetOptions).status, 'unseeded');
+
+  const cancelled = core.cancelDeferredReviewClaim({
+    ...targetOptions,
+    mode: 'reset',
+    resetBinding: null,
+  });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(cancelled.mode, 'reset');
+  assert.equal(fs.existsSync(f.claimFile), false);
+  const targetState = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+  });
+  assert.equal(targetState.active, false);
+  assert.equal(targetState.deferredReviewClaim, '');
+  assert.equal(targetState.deferredReviewCancellation.claimId, f.claimId);
+  assert.equal(targetState.deferredReviewCancellation.ownerSessionId, f.currentSessionId);
+
+  const stale = deferredFixture({
+    currentSession: 'reset-stale-transfer-target',
+    ownerSession: 'reset-stale-transfer-source',
+  });
+  const staleSource = seedDeferredOwner(stale);
+  writeDeferredClaim(stale, { ownerPid: 2147483647 });
+  const staleTargetOptions = inspectDeferredOptions(stale, {
+    mode: 'reset',
+    resetBinding: null,
+  });
+  core.prepareDeferredReviewTransfer(staleTargetOptions);
+  core.retireDeferredReviewOwner(retireDeferredOptions(stale, staleSource.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...staleTargetOptions,
+    expectedRevision: staleSource.revision,
+  });
+  core.assignDeferredReviewClaim(assignDeferredOptions(stale));
+  await killDeferredCancellationAt(stale, staleTargetOptions, 'prepared');
+  const staleReceipt = JSON.parse(fs.readFileSync(stale.claimFile, 'utf8'));
+  assert.equal(staleReceipt.transfer, undefined);
+  assert.equal(staleReceipt.cancellation.origin, 'unseeded');
+  core.mutateWorkflowState({
+    projectRoot: stale.projectRoot,
+    sessionId: stale.currentSessionId,
+    workflowState: 'red',
+    event: 'tdd-begin',
+    expectedRevision: 1,
+  }, (current) => ({ ...current, active: true, implComplete: false }));
+  const staleTargetStateFile = path.join(
+    stale.stateDirectory,
+    `tdd-phase-${stale.currentSessionId}.json`,
+  );
+  const staleTargetState = fs.readFileSync(staleTargetStateFile);
+  const staleRecovered = core.cancelDeferredReviewClaim(staleTargetOptions);
+  assert.equal(staleRecovered.status, 'superseded');
+  assert.equal(staleRecovered.ownerRevision, 1);
+  assert.equal(fs.existsSync(stale.claimFile), false);
+  assert.deepEqual(fs.readFileSync(staleTargetStateFile), staleTargetState);
+});
+
+test('binds a deferred cancellation state marker to the exact owner state', () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-marker-owner-binding' });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  core.cancelDeferredReviewClaim(inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'release-only',
+  }));
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  rewriteJson(stateFile, (state) => {
+    state.deferredReviewCancellation.ownerSessionId = f.currentSessionId;
+    return state;
+  });
+  assert.throws(
+    () => core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: f.ownerSessionId }),
+    /deferredReviewCancellation marker is invalid/i,
+  );
+});
+
+test('recovers each deferred cancellation killpoint and preserves later legitimate state revisions', async () => {
+  for (const killpoint of ['prepared', 'state-cas', 'state-cleared']) {
+    const f = deferredFixture({ ownerSession: `cancellation-killpoint-${killpoint}` });
+    seedDeferredOwner(f, { reviewTicket: `rt_${killpoint}`, reviewTicketConsumed: false });
+    writeDeferredClaim(f);
+    const options = inspectDeferredOptions(f, {
+      currentContextFile: f.ownerContextFile,
+      currentSessionId: f.ownerSessionId,
+      mode: 'release-only',
+    });
+    await killDeferredCancellationAt(f, options, killpoint);
+
+    const crashedClaim = JSON.parse(fs.readFileSync(f.claimFile, 'utf8'));
+    assert.ok(crashedClaim.cancellation, `${killpoint} must leave a durable receipt`);
+    if (killpoint === 'state-cas') {
+      const afterCas = core.readWorkflowState({
+        projectRoot: f.projectRoot,
+        sessionId: f.ownerSessionId,
+      });
+      assert.equal(afterCas.deferredReviewClaim, '');
+      assert.ok(afterCas.deferredReviewCancellation);
+      core.transitionWorkflowState({
+        projectRoot: f.projectRoot,
+        sessionId: f.ownerSessionId,
+        workflowState: afterCas.workflow_state,
+        event: 'unit-legitimate-post-cancel-revision',
+        expectedRevision: afterCas.revision,
+      });
+    }
+
+    const inspected = core.inspectDeferredReviewOwner({ ...options, claimStale: false });
+    assert.equal(
+      inspected.status,
+      killpoint === 'prepared' ? 'cancelling' : 'cancelled',
+    );
+    const recovered = core.cancelDeferredReviewClaim(options);
+    assert.equal(recovered.status, 'cancelled');
+    assert.equal(fs.existsSync(f.claimFile), false);
+    const final = core.readWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.ownerSessionId,
+    });
+    assert.equal(final.deferredReviewClaim, '');
+    assert.equal(final.deferredReviewCancellation.cancellationId, recovered.cancellationId);
+  }
+});
+
+test('rebases a prepared deferred cancellation receipt after a legitimate linked-state revision', async () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-prepared-rebase' });
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  const options = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'release-only',
+  });
+  await killDeferredCancellationAt(f, options, 'prepared');
+  const advanced = core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+    workflowState: owner.workflow_state,
+    event: 'unit-legitimate-prepared-revision',
+    expectedRevision: owner.revision,
+  });
+  const recovered = core.cancelDeferredReviewClaim(options);
+  assert.equal(recovered.ownerRevision, advanced.revision);
+  assert.equal(recovered.clearedOwnerRevision, advanced.revision + 1);
+  assert.equal(fs.existsSync(f.claimFile), false);
+});
+
+test('allows a related foreign principal to remove an exact post-CAS cancellation receipt', async () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-foreign-recovery' });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  const ownerOptions = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'release-only',
+  });
+  await killDeferredCancellationAt(f, ownerOptions, 'state-cas');
+
+  const foreignOptions = inspectDeferredOptions(f);
+  const inspected = core.inspectDeferredReviewOwner(foreignOptions);
+  assert.equal(inspected.status, 'cancelled');
+  const cleared = core.clearTerminalDeferredReviewClaim(foreignOptions);
+  assert.equal(cleared.status, 'cancelled');
+  assert.equal(cleared.claimId, f.claimId);
+  assert.equal(fs.existsSync(f.claimFile), false);
+});
+
+test('allows a related foreign principal to resume but never initiate cancellation', async () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-foreign-resume' });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  const ownerOptions = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'release-only',
+  });
+  await killDeferredCancellationAt(f, ownerOptions, 'prepared');
+  const pending = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(pending.status, 'cancelling');
+  const resumed = core.cancelDeferredReviewClaim({
+    ...inspectDeferredOptions(f),
+    mode: 'release-only',
+  });
+  assert.equal(resumed.status, 'cancelled');
+  assert.equal(fs.existsSync(f.claimFile), false);
+
+  const notPrepared = deferredFixture({ ownerSession: 'cancellation-foreign-initiate' });
+  seedDeferredOwner(notPrepared);
+  writeDeferredClaim(notPrepared);
+  const before = fs.readFileSync(notPrepared.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim({
+      ...inspectDeferredOptions(notPrepared),
+      mode: 'release-only',
+    }),
+    /only the deferred-review owner may cancel/i,
+  );
+  assertClaimBytesUnchanged(notPrepared, before);
+});
+
+test('deferred-review inspection distinguishes current, live-owned, and dead-owner transfer states', () => {
+  const live = deferredFixture({ ownerSession: 'live-owner' });
+  const liveState = seedDeferredOwner(live);
+  writeDeferredClaim(live);
+  const owned = core.inspectDeferredReviewOwner(inspectDeferredOptions(live));
+  assert.equal(owned.status, 'owned');
+  assert.equal(owned.ownerRevision, liveState.revision);
+  assert.equal(owned.claim.ownerSessionId, live.ownerSessionId);
+
+  const current = core.inspectDeferredReviewOwner(inspectDeferredOptions(live, {
+    currentContextFile: live.ownerContextFile,
+    currentSessionId: live.ownerSessionId,
+  }));
+  assert.equal(current.status, 'current');
+  assert.equal(current.ownerRevision, liveState.revision);
+
+  const dead = deferredFixture({ ownerSession: 'dead-owner' });
+  const deadState = seedDeferredOwner(dead);
+  writeDeferredClaim(dead, { ownerPid: 2147483647 });
+  const transferable = core.inspectDeferredReviewOwner(inspectDeferredOptions(dead));
+  assert.equal(transferable.status, 'transfer');
+  assert.equal(transferable.ownerRevision, deadState.revision);
+});
+
+test('handoff claims stay owned until both the process is dead and the claim is stale', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+  });
+  const fresh = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(fresh.status, 'owned');
+  assert.equal(fresh.ownerRevision, owner.revision);
+  const stale = core.inspectDeferredReviewOwner(inspectDeferredOptions(f, { claimStale: true }));
+  assert.equal(stale.status, 'transfer');
+  assert.equal(stale.ownerRevision, owner.revision);
+});
+
+test('process start identity prevents a live PID reuse from retaining a deferred claim', (t) => {
+  const actualIdentity = currentProcessStartIdentity();
+  if (!actualIdentity) {
+    t.skip('this platform does not expose a portable process start identity');
+    return;
+  }
+  const f = deferredFixture();
+  seedDeferredOwner(f);
+  writeDeferredClaim(f, {
+    ownerPid: process.pid,
+    ownerProcessStartIdentity: 'linux:deliberately-mismatched:1',
+  });
+  assert.equal(core.inspectDeferredReviewOwner(inspectDeferredOptions(f)).status, 'transfer');
+});
+
+test('deferred-review inspection reports done, cancelled, and never-seeded owners explicitly', () => {
+  const done = deferredFixture({ ownerSession: 'done-owner' });
+  const doneState = seedDeferredOwner(done, { chainDone: true });
+  writeDeferredClaim(done, { ownerPid: 2147483647 });
+  const completed = core.inspectDeferredReviewOwner(inspectDeferredOptions(done));
+  assert.equal(completed.status, 'done');
+  assert.equal(completed.ownerRevision, doneState.revision);
+
+  const cancelled = deferredFixture({ ownerSession: 'cancelled-owner' });
+  writeDeferredClaim(cancelled, { handoffEmitted: true });
+  const cancelledResult = core.inspectDeferredReviewOwner(inspectDeferredOptions(cancelled));
+  assert.equal(cancelledResult.status, 'cancelled');
+  assert.equal(cancelledResult.ownerRevision, 1);
+
+  const unseeded = deferredFixture({ ownerSession: 'unseeded-owner' });
+  writeDeferredClaim(unseeded, { ownerPid: 2147483647 });
+  const unseededResult = core.inspectDeferredReviewOwner(inspectDeferredOptions(unseeded));
+  assert.equal(unseededResult.status, 'unseeded');
+  assert.equal(unseededResult.ownerRevision, 1);
+});
+
+test('mismatched live owner state fails closed and preserves exact claim bytes', () => {
+  const f = deferredFixture();
+  core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+    workflowState: 'red',
+    event: 'unit-mismatched-owner',
+    expectedRevision: 1,
+  }, (state) => ({ ...state, active: true, implComplete: false }));
+  writeDeferredClaim(f);
+  const before = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+    /does not match.*workflow state/i,
+  );
+  assertClaimBytesUnchanged(f, before);
+});
+
+test('deferred-review APIs require canonical current and owner principals', () => {
+  const rawCurrent = deferredFixture({ ownerSession: 'canonical-owner-one' });
+  seedDeferredOwner(rawCurrent);
+  writeDeferredClaim(rawCurrent, { ownerPid: 2147483647 });
+  const currentBefore = fs.readFileSync(rawCurrent.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(rawCurrent, {
+      currentSessionId: 'raw-current-principal',
+    })),
+    /current session id.*canonical/i,
+  );
+  assertClaimBytesUnchanged(rawCurrent, currentBefore);
+
+  const rawOwner = deferredFixture({ ownerSession: 'canonical-owner-two' });
+  seedDeferredOwner(rawOwner);
+  writeDeferredClaim(rawOwner, {
+    ownerSessionId: 'raw-owner-principal',
+    ownerPid: 2147483647,
+  });
+  const ownerBefore = fs.readFileSync(rawOwner.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(rawOwner)),
+    /deferred-review owner.*canonical/i,
+  );
+  assertClaimBytesUnchanged(rawOwner, ownerBefore);
+});
+
+test('deferred-review inspection binds exact Claude provenance and preserves the claim on mismatch', () => {
+  const cases = [
+    {
+      label: 'executing runtime digest',
+      prepare(f, options) { options.runtimeDigest = `sha256:${'0'.repeat(64)}`; },
+      pattern: /provenance.*runtime|executing runtime/i,
+    },
+    {
+      label: 'executing plugin root',
+      prepare(f, options) {
+        const other = path.join(f.root, 'other-executing-plugin');
+        fs.mkdirSync(other);
+        options.pluginRoot = other;
+      },
+      pattern: /provenance.*runtime|executing runtime/i,
+    },
+    {
+      label: 'current project root',
+      prepare(f) {
+        const other = path.join(f.root, 'other-current-project');
+        fs.mkdirSync(other);
+        rewriteJson(f.currentContextFile, (context) => ({
+          ...context,
+          project_root: fs.realpathSync.native(other),
+        }));
+      },
+      pattern: /provenance.*runtime|executing runtime/i,
+    },
+    {
+      label: 'owner project root',
+      prepare(f) {
+        const other = path.join(f.root, 'other-owner-project');
+        fs.mkdirSync(other);
+        rewriteJson(f.ownerContextFile, (context) => ({
+          ...context,
+          project_root: fs.realpathSync.native(other),
+        }));
+      },
+      pattern: /owner context project_root.*current context/i,
+    },
+    {
+      label: 'owner plugin data',
+      prepare(f) {
+        const other = path.join(f.root, 'other-owner-plugin-data');
+        fs.mkdirSync(other);
+        rewriteJson(f.ownerContextFile, (context) => ({
+          ...context,
+          plugin_data: fs.realpathSync.native(other),
+        }));
+      },
+      pattern: /owner context plugin_data.*current context/i,
+    },
+    {
+      label: 'owner host',
+      prepare(f) {
+        rewriteJson(f.ownerContextFile, (context) => ({ ...context, host: 'codex' }));
+      },
+      pattern: /context host mismatch/i,
+    },
+    {
+      label: 'owner principal profiles',
+      prepare(f) {
+        rewriteJson(f.ownerContextFile, (context) => ({
+          ...context,
+          principal_profiles: { ...context.principal_profiles, extension: 'forged' },
+        }));
+      },
+      pattern: /principal profiles.*current context/i,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const f = deferredFixture({ ownerSession: `provenance-${testCase.label}` });
+    seedDeferredOwner(f);
+    writeDeferredClaim(f, { ownerPid: 2147483647 });
+    const options = inspectDeferredOptions(f);
+    testCase.prepare(f, options);
+    const before = fs.readFileSync(f.claimFile);
+    assert.throws(
+      () => core.inspectDeferredReviewOwner(options),
+      testCase.pattern,
+      testCase.label,
+    );
+    assertClaimBytesUnchanged(f, before);
+  }
+});
+
+test('rejects the retired host-segment Claude records path without changing the claim', () => {
+  const f = deferredFixture({ legacyHostSegment: true });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const before = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+    /records directory is outside current Claude plugin data/i,
+  );
+  assertClaimBytesUnchanged(f, before);
+});
+
+test('rejects multi-linked current and owner context records without changing the claim', () => {
+  for (const role of ['current', 'owner']) {
+    const f = deferredFixture({ ownerSession: `multi-link-${role}` });
+    seedDeferredOwner(f);
+    writeDeferredClaim(f, { ownerPid: 2147483647 });
+    const contextFile = role === 'current' ? f.currentContextFile : f.ownerContextFile;
+    fs.linkSync(contextFile, path.join(f.root, `${role}-context-alias.json`));
+    const before = fs.readFileSync(f.claimFile);
+    assert.throws(
+      () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+      /multi-link|unsafe/i,
+      role,
+    );
+    assertClaimBytesUnchanged(f, before);
+  }
+});
+
+test('rejects a symlinked current context record without changing the claim', {
+  skip: WINDOWS_SYMLINK_SKIP,
+}, () => {
+  const f = deferredFixture();
+  seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const target = path.join(f.root, 'current-context-target.json');
+  fs.renameSync(f.currentContextFile, target);
+  fs.symlinkSync(target, f.currentContextFile);
+  const before = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+    /current context file is unsafe|symlink/i,
+  );
+  assertClaimBytesUnchanged(f, before);
+});
+
+test('rejects a multi-linked claim artifact fail closed', () => {
+  const multi = deferredFixture({ ownerSession: 'multi-linked-claim' });
+  seedDeferredOwner(multi);
+  writeDeferredClaim(multi, { ownerPid: 2147483647 });
+  fs.linkSync(multi.claimFile, path.join(multi.root, 'claim-alias.json'));
+  const multiBefore = fs.readFileSync(multi.claimFile);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(multi)),
+    /multi-linked/i,
+  );
+  assertClaimBytesUnchanged(multi, multiBefore);
+});
+
+test('rejects a symlinked claim artifact fail closed', {
+  skip: WINDOWS_SYMLINK_SKIP,
+}, () => {
+  const linked = deferredFixture({ ownerSession: 'symlinked-claim' });
+  seedDeferredOwner(linked);
+  writeDeferredClaim(linked, { ownerPid: 2147483647 });
+  const target = path.join(linked.root, 'claim-target.json');
+  fs.renameSync(linked.claimFile, target);
+  fs.symlinkSync(target, linked.claimFile);
+  const targetBefore = fs.readFileSync(target);
+  assert.throws(
+    () => core.inspectDeferredReviewOwner(inspectDeferredOptions(linked)),
+    /claim path is invalid|symlink/i,
+  );
+  assert.deepEqual(fs.readFileSync(target), targetBefore);
+});
+
+test('validates prepared transfer receipts and preserves malformed receipt bytes', () => {
+  const valid = deferredFixture({ ownerSession: 'valid-transfer-receipt' });
+  const validOwner = seedDeferredOwner(valid);
+  writeDeferredClaim(valid, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(valid, validOwner.revision),
+  });
+  const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(valid));
+  assert.equal(inspected.status, 'transfer');
+  assert.deepEqual(inspected.claim.transfer, preparedTransfer(valid, validOwner.revision));
+
+  const malformedReceipts = [
+    {
+      label: 'extra key',
+      build(f, revision) { return preparedTransfer(f, revision, { extra: true }); },
+      pattern: /transfer receipt is invalid/i,
+    },
+    {
+      label: 'claim id mismatch',
+      build(f, revision) { return preparedTransfer(f, revision, { claimId: 'dc_other_claim' }); },
+      pattern: /transfer receipt is invalid/i,
+    },
+    {
+      label: 'raw target owner',
+      build(f, revision) { return preparedTransfer(f, revision, { toOwnerSessionId: 'raw-target-owner' }); },
+      pattern: /transfer target owner.*canonical/i,
+    },
+    {
+      label: 'same source and target',
+      build(f, revision) { return preparedTransfer(f, revision, { toOwnerSessionId: f.ownerSessionId }); },
+      pattern: /ownership is inconsistent/i,
+    },
+    {
+      label: 'unknown stage',
+      build(f, revision) { return preparedTransfer(f, revision, { stage: 'committed' }); },
+      pattern: /transfer receipt is invalid/i,
+    },
+    {
+      label: 'wrong retired revision',
+      build(f, revision) {
+        return preparedTransfer(f, revision, {
+          stage: 'owner-retired',
+          retiredOwnerRevision: revision,
+        });
+      },
+      pattern: /transfer receipt is invalid/i,
+    },
+  ];
+  for (const testCase of malformedReceipts) {
+    const f = deferredFixture({ ownerSession: `malformed-${testCase.label}` });
+    const owner = seedDeferredOwner(f);
+    writeDeferredClaim(f, {
+      ownerPid: 2147483647,
+      transfer: testCase.build(f, owner.revision),
+    });
+    const before = fs.readFileSync(f.claimFile);
+    assert.throws(
+      () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+      testCase.pattern,
+      testCase.label,
+    );
+    assertClaimBytesUnchanged(f, before);
+  }
+});
+
+test('runs the complete durable transfer receipt lifecycle through finalization', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+
+  const prepared = core.prepareDeferredReviewTransfer(inspectDeferredOptions(f));
+  assert.deepEqual(prepared.transfer, preparedTransfer(f, owner.revision));
+  const preparedBytes = fs.readFileSync(f.claimFile);
+  assert.deepEqual(
+    core.prepareDeferredReviewTransfer(inspectDeferredOptions(f)),
+    prepared,
+  );
+  assertClaimBytesUnchanged(f, preparedBytes);
+
+  const retired = core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
+  assert.equal(retired.revision, owner.revision + 1);
+  const acknowledged = core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(f),
+    expectedRevision: owner.revision,
+  });
+  assert.equal(acknowledged.transfer.stage, 'owner-retired');
+  assert.equal(acknowledged.transfer.retiredOwnerRevision, retired.revision);
+  const acknowledgedBytes = fs.readFileSync(f.claimFile);
+  assert.deepEqual(core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(f),
+    expectedRevision: owner.revision,
+  }), acknowledged);
+  assertClaimBytesUnchanged(f, acknowledgedBytes);
+
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+  assert.equal(assigned.ownerSessionId, f.currentSessionId);
+  assert.equal(assigned.ownerPid, process.pid);
+  assert.equal(assigned.handoffEmitted, false);
+  assert.equal(assigned.transfer.stage, 'owner-retired');
+  assert.equal(assigned.transfer.toOwnerSessionId, f.currentSessionId);
+
+  const current = core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-seed-transfer-target',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: assigned.claimId,
+  }));
+  const finalized = core.finalizeDeferredReviewTransfer(inspectDeferredOptions(f));
+  assert.equal(finalized.ownerSessionId, f.currentSessionId);
+  assert.equal(finalized.transfer, undefined);
+  const finalizedBytes = fs.readFileSync(f.claimFile);
+  assert.deepEqual(core.finalizeDeferredReviewTransfer(inspectDeferredOptions(f)), finalized);
+  assertClaimBytesUnchanged(f, finalizedBytes);
+  core.acknowledgeDeferredReviewHandoff({
+    ...inspectDeferredOptions(f),
+    ownerPid: process.pid,
+    logStyle: 'none',
+  });
+
+  const done = core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_done',
+    event: 'unit-complete-transfer-target',
+    expectedRevision: current.revision,
+  }, (state) => ({ ...state, chainDone: true }));
+  const cleared = core.clearTerminalDeferredReviewClaim(inspectDeferredOptions(f));
+  assert.deepEqual(cleared, {
+    status: 'done',
+    claimId: finalized.claimId,
+    resultingOwnerRevision: done.revision + 1,
+  });
+  assert.equal(fs.existsSync(f.claimFile), false);
+});
+
+test('never cancels a transfer source or target before exact finalization', () => {
+  const source = deferredFixture({ ownerSession: 'cancellation-transfer-source' });
+  const sourceOwner = seedDeferredOwner(source);
+  writeDeferredClaim(source, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(source, sourceOwner.revision),
+  });
+  const sourceBefore = fs.readFileSync(source.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(source, {
+      currentContextFile: source.ownerContextFile,
+      currentSessionId: source.ownerSessionId,
+      mode: 'release-only',
+    })),
+    /transfer must be finalized before cancellation/i,
+  );
+  assertClaimBytesUnchanged(source, sourceBefore);
+
+  const target = deferredFixture({ ownerSession: 'cancellation-transfer-target' });
+  const targetOwner = seedDeferredOwner(target);
+  writeDeferredClaim(target, { ownerPid: 2147483647 });
+  core.prepareDeferredReviewTransfer(inspectDeferredOptions(target));
+  core.retireDeferredReviewOwner(retireDeferredOptions(target, targetOwner.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(target),
+    expectedRevision: targetOwner.revision,
+  });
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(target));
+  core.mutateWorkflowState({
+    projectRoot: target.projectRoot,
+    sessionId: target.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-seed-cancellation-transfer-target',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: assigned.claimId,
+  }));
+  const targetBefore = fs.readFileSync(target.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim({
+      ...inspectDeferredOptions(target),
+      mode: 'release-only',
+    }),
+    /transfer must be finalized before cancellation/i,
+  );
+  assertClaimBytesUnchanged(target, targetBefore);
+
+  core.finalizeDeferredReviewTransfer(inspectDeferredOptions(target));
+  const cancelled = core.cancelDeferredReviewClaim({
+    ...inspectDeferredOptions(target),
+    mode: 'release-only',
+  });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal(fs.existsSync(target.claimFile), false);
+});
+
+test('requires the exact reset binding before cancelling a bound deferred claim', () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-reset-binding' });
+  seedDeferredOwner(f, {
+    autopilotRunId: 'run-reset-binding',
+    autopilotAttempt: 2,
+    autopilotReturnStage: 'GATES',
+    chainId: 'chain-reset-binding',
+  });
+  writeDeferredClaim(f);
+  const base = inspectDeferredOptions(f, {
+    currentContextFile: f.ownerContextFile,
+    currentSessionId: f.ownerSessionId,
+    mode: 'reset',
+  });
+  const before = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim({ ...base, resetBinding: null }),
+    /reset binding does not match owner state/i,
+  );
+  assertClaimBytesUnchanged(f, before);
+  const cancelled = core.cancelDeferredReviewClaim({
+    ...base,
+    resetBinding: {
+      runId: 'run-reset-binding',
+      attempt: 2,
+      chainId: 'chain-reset-binding',
+    },
+  });
+  assert.equal(cancelled.status, 'cancelled');
+  const state = core.readWorkflowState({ projectRoot: f.projectRoot, sessionId: f.ownerSessionId });
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'autopilotRunId'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'autopilotAttempt'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(state, 'chainId'), false);
+});
+
+test('cancellation rejects symlink and hardlink claim artifacts without changing their targets', {
+  skip: WINDOWS_SYMLINK_SKIP,
+}, () => {
+  const linked = deferredFixture({ ownerSession: 'cancellation-symlink-claim' });
+  seedDeferredOwner(linked);
+  writeDeferredClaim(linked);
+  const target = path.join(linked.root, 'cancellation-claim-target.json');
+  fs.renameSync(linked.claimFile, target);
+  fs.symlinkSync(target, linked.claimFile);
+  const targetBefore = fs.readFileSync(target);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(linked, {
+      currentContextFile: linked.ownerContextFile,
+      currentSessionId: linked.ownerSessionId,
+      mode: 'release-only',
+    })),
+    /claim path is invalid|symlink/i,
+  );
+  assert.deepEqual(fs.readFileSync(target), targetBefore);
+
+  const multi = deferredFixture({ ownerSession: 'cancellation-hardlink-claim' });
+  seedDeferredOwner(multi);
+  writeDeferredClaim(multi);
+  const alias = path.join(multi.root, 'cancellation-claim-alias.json');
+  fs.linkSync(multi.claimFile, alias);
+  const multiBefore = fs.readFileSync(multi.claimFile);
+  assert.throws(
+    () => core.cancelDeferredReviewClaim(inspectDeferredOptions(multi, {
+      currentContextFile: multi.ownerContextFile,
+      currentSessionId: multi.ownerSessionId,
+      mode: 'release-only',
+    })),
+    /multi-linked/i,
+  );
+  assert.deepEqual(fs.readFileSync(alias), multiBefore);
+});
+
+test('cancellation exact removal preserves a concurrent replacement claim', () => {
+  const f = deferredFixture({ ownerSession: 'cancellation-removal-replacement' });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  const replacement = {
+    files: ['src/queued-after-cancel.js'],
+    summary: 'Queued after cancellation',
+    ts: CREATED_AT,
+  };
+  const originalRename = fs.renameSync;
+  let raced = false;
+  fs.renameSync = function patchedRename(source, destination) {
+    const sourcePath = path.resolve(String(source));
+    const result = originalRename.call(fs, source, destination);
+    if (!raced && sourcePath === path.resolve(f.claimFile) && String(destination).includes('.quarantine')) {
+      raced = true;
+      core.atomicWriteJson(f.claimFile, replacement);
+    }
+    return result;
+  };
+  try {
+    const cancelled = core.cancelDeferredReviewClaim(inspectDeferredOptions(f, {
+      currentContextFile: f.ownerContextFile,
+      currentSessionId: f.ownerSessionId,
+      mode: 'release-only',
+    }));
+    assert.equal(cancelled.status, 'cancelled');
+    assert.equal(raced, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+});
+
+test('claim assignment and handoff acknowledgement reject an already-dead owner PID', () => {
+  const assignment = deferredFixture({ ownerSession: 'dead-pid-assignment' });
+  const marker = {
+    files: ['src/dead-pid.js'],
+    summary: 'Dead PID assignment',
+    ts: CREATED_AT,
+  };
+  core.atomicWriteJson(assignment.claimFile, marker);
+  const assignmentBefore = fs.readFileSync(assignment.claimFile);
+  assert.throws(
+    () => core.assignDeferredReviewClaim(assignDeferredOptions(assignment, {
+      ownerPid: 2147483647,
+    })),
+    /assignee process.*not alive|owner pid.*dead/i,
+  );
+  assertClaimBytesUnchanged(assignment, assignmentBefore);
+
+  const handoff = deferredFixture({ ownerSession: 'dead-pid-handoff' });
+  core.mutateWorkflowState({
+    projectRoot: handoff.projectRoot,
+    sessionId: handoff.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-seed-dead-pid-handoff',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: handoff.claimId,
+  }));
+  writeDeferredClaim(handoff, { ownerSessionId: handoff.currentSessionId });
+  const handoffBefore = fs.readFileSync(handoff.claimFile);
+  assert.throws(
+    () => core.acknowledgeDeferredReviewHandoff({
+      ...inspectDeferredOptions(handoff),
+      ownerPid: 2147483647,
+      logStyle: 'none',
+    }),
+    /handoff process.*not alive|owner pid.*dead/i,
+  );
+  assertClaimBytesUnchanged(handoff, handoffBefore);
+});
+
+test('adopts a fresh unassigned marker only into an idle canonical baseline', () => {
+  const f = deferredFixture();
+  const marker = {
+    files: ['src/feature.js'],
+    summary: 'Implement deferred review',
+    ts: CREATED_AT,
+  };
+  core.atomicWriteJson(f.claimFile, marker);
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+  assert.match(assigned.claimId, /^dc_[a-f0-9]{32}$/);
+  assert.equal(assigned.ownerSessionId, f.currentSessionId);
+  assert.equal(assigned.ownerPid, process.pid);
+  assert.equal(assigned.ownerProcessStartIdentity, core.processStartIdentityForPid(process.pid));
+  assert.equal(assigned.handoffEmitted, false);
+  assert.equal(assigned.ts, undefined);
+  assert.deepEqual(assigned.files, marker.files);
+  assert.equal(assigned.summary, marker.summary);
+  assert.equal(assigned.transfer, undefined);
+  assert.equal(core.processStartIdentityForPid(2147483647), null);
+  assert.throws(() => core.processStartIdentityForPid(0), /process id is invalid/i);
+});
+
+test('claim assignment rejects stale, malformed, non-idle, and already-owned markers byte-identically', () => {
+  const cases = [
+    {
+      label: 'stale unassigned marker',
+      seed(f) {
+        core.atomicWriteJson(f.claimFile, { files: [], summary: 'stale marker' });
+      },
+      options: { claimStale: true },
+      pattern: /stale unassigned.*must not be adopted/i,
+    },
+    {
+      label: 'malformed unassigned marker',
+      seed(f) {
+        core.atomicWriteJson(f.claimFile, { files: ['bad\nfile'], summary: 'invalid marker' });
+      },
+      options: {},
+      pattern: /marker payload is invalid/i,
+    },
+    {
+      label: 'non-idle assignee baseline',
+      seed(f) {
+        core.atomicWriteJson(f.claimFile, { files: [], summary: 'valid marker' });
+        core.mutateWorkflowState({
+          projectRoot: f.projectRoot,
+          sessionId: f.currentSessionId,
+          workflowState: 'red',
+          event: 'unit-nonidle-assignee',
+          expectedRevision: 1,
+        }, (state) => ({ ...state, active: true }));
+      },
+      options: {},
+      pattern: /assignee state cannot begin a new generation/i,
+    },
+    {
+      label: 'live existing owner',
+      seed(f) {
+        seedDeferredOwner(f);
+        writeDeferredClaim(f);
+      },
+      options: {},
+      pattern: /claim is not assignable/i,
+    },
+  ];
+  for (const testCase of cases) {
+    const f = deferredFixture({ ownerSession: `assign-${testCase.label}` });
+    testCase.seed(f);
+    const before = fs.readFileSync(f.claimFile);
+    assert.throws(
+      () => core.assignDeferredReviewClaim(assignDeferredOptions(f, testCase.options)),
+      testCase.pattern,
+      testCase.label,
+    );
+    assertClaimBytesUnchanged(f, before);
+  }
+});
+
+test('transfer preparation, acknowledgement, finalization, and terminal clear reject invalid stages', () => {
+  const live = deferredFixture({ ownerSession: 'prepare-live-owner' });
+  seedDeferredOwner(live);
+  writeDeferredClaim(live);
+  const liveBefore = fs.readFileSync(live.claimFile);
+  assert.throws(
+    () => core.prepareDeferredReviewTransfer(inspectDeferredOptions(live)),
+    /not eligible for transfer preparation/i,
+  );
+  assertClaimBytesUnchanged(live, liveBefore);
+
+  const unretired = deferredFixture({ ownerSession: 'ack-unretired-owner' });
+  const unretiredOwner = seedDeferredOwner(unretired);
+  writeDeferredClaim(unretired, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(unretired, unretiredOwner.revision),
+  });
+  const unretiredBefore = fs.readFileSync(unretired.claimFile);
+  assert.throws(
+    () => core.markDeferredReviewOwnerRetired({
+      ...inspectDeferredOptions(unretired),
+      expectedRevision: unretiredOwner.revision,
+    }),
+    /retirement is not durable/i,
+  );
+  assertClaimBytesUnchanged(unretired, unretiredBefore);
+
+  const unseeded = deferredFixture({ ownerSession: 'finalize-unseeded-target' });
+  const unseededOwner = seedDeferredOwner(unseeded);
+  writeDeferredClaim(unseeded, { ownerPid: 2147483647 });
+  core.prepareDeferredReviewTransfer(inspectDeferredOptions(unseeded));
+  core.retireDeferredReviewOwner(retireDeferredOptions(unseeded, unseededOwner.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(unseeded),
+    expectedRevision: unseededOwner.revision,
+  });
+  core.assignDeferredReviewClaim(assignDeferredOptions(unseeded));
+  const unseededBefore = fs.readFileSync(unseeded.claimFile);
+  assert.throws(
+    () => core.finalizeDeferredReviewTransfer(inspectDeferredOptions(unseeded)),
+    /transfer target was not seeded/i,
+  );
+  assertClaimBytesUnchanged(unseeded, unseededBefore);
+
+  const nonterminal = deferredFixture({ ownerSession: 'clear-nonterminal-owner' });
+  seedDeferredOwner(nonterminal);
+  writeDeferredClaim(nonterminal);
+  const nonterminalBefore = fs.readFileSync(nonterminal.claimFile);
+  assert.throws(
+    () => core.clearTerminalDeferredReviewClaim(inspectDeferredOptions(nonterminal)),
+    /claim is not terminal/i,
+  );
+  assertClaimBytesUnchanged(nonterminal, nonterminalBefore);
+});
+
+test('terminal claim clear never deletes a concurrent replacement', () => {
+  const f = deferredFixture();
+  seedDeferredOwner(f, { chainDone: true });
+  writeDeferredClaim(f, { ownerPid: 2147483647, handoffEmitted: true });
+  const replacement = deferredClaim(f, {
+    claimId: 'dc_terminal_clear_winner',
+    ownerPid: 2147483647,
+  });
+  const originalRename = fs.renameSync;
+  const displaced = path.join(f.root, 'terminal-claim-displaced.json');
+  let injected = false;
+  fs.renameSync = function patchedRename(source, destination) {
+    if (!injected && path.resolve(source) === path.resolve(f.claimFile)) {
+      injected = true;
+      originalRename.call(fs, source, displaced);
+      core.atomicWriteJson(f.claimFile, replacement);
+    }
+    return originalRename.call(fs, source, destination);
+  };
+  try {
+    assert.throws(
+      () => core.clearTerminalDeferredReviewClaim(inspectDeferredOptions(f)),
+      /replacement race|changed before terminal removal/i,
+    );
+    assert.equal(injected, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
+  } finally {
+    fs.renameSync = originalRename;
+  }
+});
+
+test('retirement revalidates live owners and fresh handoff leases before CAS', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, {
+    ownerPid: process.pid,
+    transfer: preparedTransfer(f, owner.revision),
+  });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  const stateBefore = fs.readFileSync(stateFile);
+  const claimBefore = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision)),
+    /owner.*live|not transferable|transfer.*denied/i,
+  );
+  assert.deepEqual(fs.readFileSync(stateFile), stateBefore);
+  assertClaimBytesUnchanged(f, claimBefore);
+
+  const handoff = deferredFixture({ ownerSession: 'fresh-handoff-retirement' });
+  const handoffOwner = seedDeferredOwner(handoff);
+  writeDeferredClaim(handoff, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+    transfer: preparedTransfer(handoff, handoffOwner.revision),
+  });
+  const handoffStateFile = path.join(
+    handoff.stateDirectory,
+    `tdd-phase-${handoff.ownerSessionId}.json`,
+  );
+  const handoffStateBefore = fs.readFileSync(handoffStateFile);
+  const handoffClaimBefore = fs.readFileSync(handoff.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(handoff, handoffOwner.revision)),
+    /handoff lease is fresh|owner.*live/i,
+  );
+  assert.deepEqual(fs.readFileSync(handoffStateFile), handoffStateBefore);
+  assertClaimBytesUnchanged(handoff, handoffClaimBefore);
+  const retired = core.retireDeferredReviewOwner(retireDeferredOptions(
+    handoff,
+    handoffOwner.revision,
+    { claimStale: true },
+  ));
+  assert.equal(retired.revision, handoffOwner.revision + 1);
+});
+
+test('retires a foreign deferred owner with one exact CAS and is idempotent', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  const prepared = preparedTransfer(f, owner.revision);
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    transfer: prepared,
+  });
+  const claimBefore = fs.readFileSync(f.claimFile);
+  const retired = core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
+  assert.equal(retired.revision, owner.revision + 1);
+  assert.equal(retired.last_event, 'deferred-review-transfer');
+  assert.deepEqual({
+    active: retired.active,
+    implComplete: retired.implComplete,
+    chainDone: retired.chainDone,
+    codeReviewDone: retired.codeReviewDone,
+    selfReviewFixed: retired.selfReviewFixed,
+    reviewTicket: retired.reviewTicket,
+    reviewTicketConsumed: retired.reviewTicketConsumed,
+    reviewRound: retired.reviewRound,
+    stopBlockCount: retired.stopBlockCount,
+    deferredReviewClaim: retired.deferredReviewClaim,
+  }, {
+    active: false,
+    implComplete: false,
+    chainDone: false,
+    codeReviewDone: false,
+    selfReviewFixed: false,
+    reviewTicket: '',
+    reviewTicketConsumed: true,
+    reviewRound: 0,
+    stopBlockCount: 0,
+    deferredReviewClaim: '',
+  });
+  assertClaimBytesUnchanged(f, claimBefore);
+
+  const repeated = core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
+  assert.deepEqual(repeated, retired);
+  assertClaimBytesUnchanged(f, claimBefore);
+
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    transfer: {
+      ...prepared,
+      stage: 'owner-retired',
+      retiredOwnerRevision: retired.revision,
+    },
+  });
+  const recovered = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(recovered.status, 'owner-retired');
+  assert.equal(recovered.ownerRevision, retired.revision);
+});
+
+test('retirement rejects a stale owner revision without changing state or claim bytes', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(f, owner.revision),
+  });
+  core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+    workflowState: owner.workflow_state,
+    event: 'unit-owner-race',
+    expectedRevision: owner.revision,
+  });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  const stateBefore = fs.readFileSync(stateFile);
+  const claimBefore = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision)),
+    /owner changed before retirement/i,
+  );
+  assert.deepEqual(fs.readFileSync(stateFile), stateBefore);
+  assertClaimBytesUnchanged(f, claimBefore);
+});
+
+test('retirement rejects a claim swap after inspection and preserves the replacement bytes', () => {
+  const f = deferredFixture();
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(inspected.status, 'transfer');
+
+  const replacementClaimId = 'dc_replacement_claim';
+  f.claimId = replacementClaimId;
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(f, owner.revision),
+  });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  const stateBefore = fs.readFileSync(stateFile);
+  const replacementBefore = fs.readFileSync(f.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(f, inspected.ownerRevision)),
+    /owner changed before retirement/i,
+  );
+  assert.deepEqual(fs.readFileSync(stateFile), stateBefore);
+  assertClaimBytesUnchanged(f, replacementBefore);
+});
+
+test('retirement requires an exact prepared receipt and canonical transfer target', () => {
+  const noReceipt = deferredFixture({ ownerSession: 'retire-without-receipt' });
+  const noReceiptOwner = seedDeferredOwner(noReceipt);
+  writeDeferredClaim(noReceipt, { ownerPid: 2147483647 });
+  const noReceiptBefore = fs.readFileSync(noReceipt.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(noReceipt, noReceiptOwner.revision)),
+    /prepared transfer receipt/i,
+  );
+  assertClaimBytesUnchanged(noReceipt, noReceiptBefore);
+
+  const wrongTarget = deferredFixture({ ownerSession: 'retire-wrong-target' });
+  const wrongTargetOwner = seedDeferredOwner(wrongTarget);
+  writeDeferredClaim(wrongTarget, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(wrongTarget, wrongTargetOwner.revision),
+  });
+  const wrongTargetBefore = fs.readFileSync(wrongTarget.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(wrongTarget, wrongTargetOwner.revision, {
+      currentSessionId: 'raw-transfer-target',
+    })),
+    /prepared transfer receipt|canonical/i,
+  );
+  assertClaimBytesUnchanged(wrongTarget, wrongTargetBefore);
+
+  const committed = deferredFixture({ ownerSession: 'retire-committed-receipt' });
+  const committedOwner = seedDeferredOwner(committed);
+  writeDeferredClaim(committed, {
+    ownerPid: 2147483647,
+    transfer: {
+      ...preparedTransfer(committed, committedOwner.revision),
+      stage: 'owner-retired',
+      retiredOwnerRevision: committedOwner.revision + 1,
+    },
+  });
+  const committedBefore = fs.readFileSync(committed.claimFile);
+  assert.throws(
+    () => core.retireDeferredReviewOwner(retireDeferredOptions(committed, committedOwner.revision)),
+    /prepared transfer receipt/i,
+  );
+  assertClaimBytesUnchanged(committed, committedBefore);
+});
+
+test('claim replacement during inspection is detected without overwriting the winner', () => {
+  const f = deferredFixture();
+  seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const target = fs.realpathSync.native(f.claimFile);
+  const replacement = deferredClaim(f, {
+    claimId: 'dc_concurrent_winner',
+    ownerPid: 2147483647,
+  });
+  const originalOpen = fs.openSync;
+  const originalRead = fs.readSync;
+  let claimDescriptor = null;
+  let raced = false;
+  fs.openSync = function patchedOpen(file, flags, ...rest) {
+    const descriptor = originalOpen.call(fs, file, flags, ...rest);
+    if (path.resolve(String(file)) === path.resolve(target) && typeof flags === 'number') {
+      claimDescriptor = descriptor;
+    }
+    return descriptor;
+  };
+  fs.readSync = function patchedRead(descriptor, ...args) {
+    if (descriptor === claimDescriptor && !raced) {
+      raced = true;
+      core.atomicWriteJson(f.claimFile, replacement);
+    }
+    return originalRead.call(fs, descriptor, ...args);
+  };
+  try {
+    assert.throws(
+      () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
+      /file path changed while reading|file changed while reading/i,
+    );
+    assert.equal(raced, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
+  } finally {
+    fs.openSync = originalOpen;
+    fs.readSync = originalRead;
+  }
+});
+
+test('transfer preparation rejects a concurrent source revision without poisoning later inspection', () => {
+  const f = deferredFixture({ ownerSession: 'prepare-source-revision-race' });
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  let advanced;
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    advanced = core.transitionWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.ownerSessionId,
+      workflowState: owner.workflow_state,
+      event: 'unit-prepare-source-race',
+      expectedRevision: owner.revision,
+    });
+  }, () => {
+    assert.throws(
+      () => core.prepareDeferredReviewTransfer(inspectDeferredOptions(f)),
+      /source state changed before transfer preparation/i,
+    );
+  });
+
+  const persisted = JSON.parse(fs.readFileSync(f.claimFile, 'utf8'));
+  assert.equal(persisted.transfer, undefined);
+  const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(inspected.status, 'transfer');
+  assert.equal(inspected.ownerRevision, advanced.revision);
+});
+
+test('inspection cancels a stale prepared receipt and exposes the current transferable revision', () => {
+  const f = deferredFixture({ ownerSession: 'recover-stale-prepared-receipt' });
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, {
+    ownerPid: 2147483647,
+    transfer: preparedTransfer(f, owner.revision),
+  });
+  const advanced = core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+    workflowState: owner.workflow_state,
+    event: 'unit-stale-prepared-receipt',
+    expectedRevision: owner.revision,
+  });
+
+  const inspected = core.inspectDeferredReviewOwner(inspectDeferredOptions(f));
+  assert.equal(inspected.status, 'transfer');
+  assert.equal(inspected.ownerRevision, advanced.revision);
+  assert.equal(inspected.claim.transfer, undefined);
+  assert.equal(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')).transfer, undefined);
+});
+
+test('terminal clear revalidates the inspected owner revision under the canonical state lock', () => {
+  const f = deferredFixture({ ownerSession: 'terminal-clear-state-race' });
+  const owner = seedDeferredOwner(f, { chainDone: true });
+  writeDeferredClaim(f, { ownerPid: 2147483647, handoffEmitted: true });
+  const claimBefore = fs.readFileSync(f.claimFile);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    core.mutateWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.ownerSessionId,
+      workflowState: owner.workflow_state,
+      event: 'unit-terminal-clear-rearm',
+      expectedRevision: owner.revision,
+    }, (state) => ({ ...state, chainDone: false }));
+  }, () => {
+    assert.throws(
+      () => core.clearTerminalDeferredReviewClaim(inspectDeferredOptions(f)),
+      /owner state changed before terminal removal/i,
+    );
+  });
+
+  assertClaimBytesUnchanged(f, claimBefore);
+  const current = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.ownerSessionId,
+  });
+  assert.equal(current.chainDone, false);
+  assert.equal(current.deferredReviewClaim, f.claimId);
+});
+
+test('recovers a crash after terminal done-state CAS before exact claim removal', async () => {
+  const f = deferredFixture({ ownerSession: 'terminal-done-state-cas-crash' });
+  seedDeferredOwner(f, { chainDone: true });
+  writeDeferredClaim(f, { ownerPid: 2147483647, handoffEmitted: true });
+  const options = inspectDeferredOptions(f);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  const child = await runNode(`
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const options = JSON.parse(process.argv[1]);
+    const stateFile = path.resolve(process.argv[2]);
+    const originalRename = fs.renameSync;
+    fs.renameSync = function injectedRename(source, destination) {
+      let value = null;
+      try { value = JSON.parse(fs.readFileSync(source, 'utf8')); } catch (_) {}
+      const result = originalRename.call(fs, source, destination);
+      if (path.resolve(String(destination)) === stateFile
+          && value && value.last_event === 'deferred-review-complete') {
+        process.kill(process.pid, 'SIGKILL');
+      }
+      return result;
+    };
+    core.clearTerminalDeferredReviewClaim(options);
+  `, [JSON.stringify(options), stateFile]);
+  assert.equal(child.signal, 'SIGKILL');
+  assert.equal(fs.existsSync(f.claimFile), true);
+  const inspected = core.inspectDeferredReviewOwner(options);
+  assert.equal(inspected.status, 'cancelled');
+  assert.deepEqual(core.clearTerminalDeferredReviewClaim(options), {
+    status: 'cancelled',
+    claimId: f.claimId,
+    resultingOwnerRevision: inspected.ownerRevision,
+  });
+  assert.equal(fs.existsSync(f.claimFile), false);
+});
+
+test('transfer finalization revalidates the inspected target revision under the canonical state lock', () => {
+  const f = deferredFixture({ ownerSession: 'finalize-target-state-race' });
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  core.prepareDeferredReviewTransfer(inspectDeferredOptions(f));
+  core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(f),
+    expectedRevision: owner.revision,
+  });
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+  const target = core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-finalize-target-seed',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: assigned.claimId,
+  }));
+  const claimBefore = fs.readFileSync(f.claimFile);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.currentSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    core.mutateWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.currentSessionId,
+      workflowState: 'idle',
+      event: 'unit-finalize-target-reset',
+      expectedRevision: target.revision,
+    }, (state) => ({
+      ...state,
+      active: false,
+      implComplete: false,
+      chainDone: false,
+      deferredReviewClaim: '',
+    }));
+  }, () => {
+    assert.throws(
+      () => core.finalizeDeferredReviewTransfer(inspectDeferredOptions(f)),
+      /target state changed before transfer finalization/i,
+    );
+  });
+
+  assertClaimBytesUnchanged(f, claimBefore);
+  assert.equal(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')).transfer.stage, 'owner-retired');
+});
+
+test('owner retirement revalidates exact claim bytes inside the owner state lock', () => {
+  const f = deferredFixture({ ownerSession: 'retire-same-id-claim-swap' });
+  const owner = seedDeferredOwner(f);
+  const transfer = preparedTransfer(f, owner.revision);
+  writeDeferredClaim(f, { ownerPid: 2147483647, transfer });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.ownerSessionId}.json`);
+  const stateBefore = fs.readFileSync(stateFile);
+  const replacement = deferredClaim(f, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+    ts: CREATED_AT,
+    transfer,
+  });
+
+  withAfterFileReadInjection(stateFile, 2, () => {
+    core.atomicWriteJson(f.claimFile, replacement);
+  }, () => {
+    assert.throws(
+      () => core.retireDeferredReviewOwner(retireDeferredOptions(
+        f,
+        owner.revision,
+        { claimStale: true },
+      )),
+      /claim changed during retirement/i,
+    );
+  });
+
+  assert.deepEqual(fs.readFileSync(stateFile), stateBefore);
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
+});
+
+test('claim assignment revalidates the idle target revision under its canonical state lock', () => {
+  const f = deferredFixture({ currentSession: 'assignment-target-state-race' });
+  const marker = { files: ['src/race.js'], summary: 'assignment race' };
+  core.atomicWriteJson(f.claimFile, marker);
+  const markerBefore = fs.readFileSync(f.claimFile);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.currentSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    core.mutateWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.currentSessionId,
+      workflowState: 'active',
+      event: 'unit-assignment-target-race',
+      expectedRevision: 1,
+    }, (state) => ({ ...state, active: true }));
+  }, () => {
+    assert.throws(
+      () => core.assignDeferredReviewClaim(assignDeferredOptions(f)),
+      /target state changed before claim assignment/i,
+    );
+  });
+
+  assertClaimBytesUnchanged(f, markerBefore);
+});
+
+test('handoff acknowledgement finalizes receipts and writes the lease under the target state lock', () => {
+  const f = deferredFixture({ ownerSession: 'handoff-ack-transfer-owner' });
+  const owner = seedDeferredOwner(f);
+  writeDeferredClaim(f, { ownerPid: 2147483647 });
+  core.prepareDeferredReviewTransfer(inspectDeferredOptions(f));
+  core.retireDeferredReviewOwner(retireDeferredOptions(f, owner.revision));
+  core.markDeferredReviewOwnerRetired({
+    ...inspectDeferredOptions(f),
+    expectedRevision: owner.revision,
+  });
+  const assigned = core.assignDeferredReviewClaim(assignDeferredOptions(f));
+  core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-handoff-ack-seed',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: assigned.claimId,
+  }));
+
+  const acknowledged = core.acknowledgeDeferredReviewHandoff({
+    ...inspectDeferredOptions(f),
+    ownerPid: process.pid,
+    logStyle: 'none',
+  });
+  assert.equal(acknowledged.ownerSessionId, f.currentSessionId);
+  assert.equal(acknowledged.ownerPid, process.pid);
+  assert.equal(acknowledged.ownerProcessStartIdentity, core.processStartIdentityForPid(process.pid));
+  assert.equal(acknowledged.handoffEmitted, true);
+  assert.equal(acknowledged.transfer, undefined);
+  assert.equal(acknowledged.ts, undefined);
+});
+
+test('handoff acknowledgement rejects a concurrent terminal transition without changing the claim', () => {
+  const f = deferredFixture({ currentSession: 'handoff-ack-state-race' });
+  const current = core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-handoff-ack-current',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: f.claimId,
+  }));
+  writeDeferredClaim(f, {
+    ownerSessionId: f.currentSessionId,
+    ownerPid: 2147483647,
+  });
+  const claimBefore = fs.readFileSync(f.claimFile);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.currentSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    core.mutateWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.currentSessionId,
+      workflowState: 'review_done',
+      event: 'unit-handoff-ack-terminal-race',
+      expectedRevision: current.revision,
+    }, (state) => ({ ...state, chainDone: true }));
+  }, () => {
+    assert.throws(
+      () => core.acknowledgeDeferredReviewHandoff({
+        ...inspectDeferredOptions(f),
+        ownerPid: process.pid,
+        logStyle: 'none',
+      }),
+      /target state changed before handoff acknowledgement/i,
+    );
+  });
+
+  assertClaimBytesUnchanged(f, claimBefore);
+});
+
+test('handoff acknowledgement rejects a concurrent target reset without changing the claim', () => {
+  const f = deferredFixture({ currentSession: 'handoff-ack-reset-race' });
+  const current = core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-handoff-ack-before-reset',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: f.claimId,
+  }));
+  writeDeferredClaim(f, {
+    ownerSessionId: f.currentSessionId,
+    ownerPid: 2147483647,
+  });
+  const claimBefore = fs.readFileSync(f.claimFile);
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.currentSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 1, () => {
+    core.mutateWorkflowState({
+      projectRoot: f.projectRoot,
+      sessionId: f.currentSessionId,
+      workflowState: 'idle',
+      event: 'unit-handoff-ack-reset-race',
+      expectedRevision: current.revision,
+    }, (state) => ({
+      ...state,
+      active: false,
+      implComplete: false,
+      chainDone: false,
+      deferredReviewClaim: '',
+    }));
+  }, () => {
+    assert.throws(
+      () => core.acknowledgeDeferredReviewHandoff({
+        ...inspectDeferredOptions(f),
+        ownerPid: process.pid,
+        logStyle: 'none',
+      }),
+      /target state changed before handoff acknowledgement/i,
+    );
+  });
+
+  assertClaimBytesUnchanged(f, claimBefore);
+  const reset = core.readWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+  });
+  assert.equal(reset.active, false);
+  assert.equal(reset.deferredReviewClaim, '');
+});
+
+test('handoff acknowledgement revalidates exact claim bytes inside the target state lock', () => {
+  const f = deferredFixture({ currentSession: 'handoff-ack-claim-swap' });
+  core.mutateWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: f.currentSessionId,
+    workflowState: 'review_pending',
+    event: 'unit-handoff-ack-before-claim-swap',
+    expectedRevision: 1,
+  }, (state) => ({
+    ...state,
+    active: true,
+    implComplete: true,
+    chainDone: false,
+    deferredReviewClaim: f.claimId,
+  }));
+  writeDeferredClaim(f, {
+    ownerSessionId: f.currentSessionId,
+    ownerPid: 2147483647,
+  });
+  const replacement = deferredClaim(f, {
+    ownerSessionId: f.currentSessionId,
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+    ts: CREATED_AT,
+  });
+  const stateFile = path.join(f.stateDirectory, `tdd-phase-${f.currentSessionId}.json`);
+
+  withAfterFileReadInjection(stateFile, 2, () => {
+    core.atomicWriteJson(f.claimFile, replacement);
+  }, () => {
+    assert.throws(
+      () => core.acknowledgeDeferredReviewHandoff({
+        ...inspectDeferredOptions(f),
+        ownerPid: process.pid,
+        logStyle: 'none',
+      }),
+      /claim changed before handoff acknowledgement/i,
+    );
+  });
+
+  assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
+});
+
+test('Darwin process identity invokes trusted ps with a deterministic environment', async (t) => {
+  if (process.platform !== 'darwin') {
+    t.skip('Darwin process identity contract only applies on Darwin');
+    return;
+  }
+  const started = 'Wed Jul 16 12:34:56 2026';
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    let invocation = null;
+    childProcess.execFileSync = (file, args, options) => {
+      invocation = { file, args, options };
+      return ${JSON.stringify(`${started}\n`)};
+    };
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const identity = core.processStartIdentityForPid(process.pid);
+    process.stdout.write(JSON.stringify({ identity, invocation }));
+  `;
+  const result = await runNode(source);
+  assert.equal(result.code, 0, result.stderr);
+  const observed = JSON.parse(result.stdout);
+  const digest = crypto.createHash('sha256')
+    .update('zensu.process-start/darwin-v1\0', 'utf8')
+    .update(started, 'utf8')
+    .digest('hex');
+  assert.equal(observed.identity, `darwin:${digest}`);
+  assert.equal(observed.invocation.file, '/bin/ps');
+  assert.deepEqual(observed.invocation.args, ['-p', String(observed.invocation.args[1]), '-o', 'lstart=']);
+  assert.match(observed.invocation.args[1], /^[1-9][0-9]*$/);
+  assert.deepEqual(observed.invocation.options.env, {
+    PATH: '/usr/bin:/bin',
+    LC_ALL: 'C',
+    LANG: 'C',
+    TZ: 'UTC',
+  });
+  assert.equal(observed.invocation.options.encoding, 'utf8');
+  assert.deepEqual(observed.invocation.options.stdio, ['ignore', 'pipe', 'ignore']);
+  assert.equal(observed.invocation.options.timeout, 1000);
+});
+
+test('Darwin process identity rejects malformed ps output', async (t) => {
+  if (process.platform !== 'darwin') {
+    t.skip('Darwin process identity contract only applies on Darwin');
+    return;
+  }
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    childProcess.execFileSync = () => 'not a process timestamp\n';
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const identity = core.processStartIdentityForPid(process.pid);
+    process.stdout.write(JSON.stringify(identity));
+  `;
+  const result = await runNode(source);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout), null);
+});
+
+test('external process lease release tolerates unavailable identity after direct ownership proof', async (t) => {
+  if (process.platform !== 'darwin') {
+    t.skip('Darwin injection covers transient ps unavailability');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-release-identity-null-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const source = String.raw`
+    const childProcess = require('node:child_process');
+    let calls = 0;
+    childProcess.execFileSync = () => {
+      calls += 1;
+      if (calls === 1) return 'Wed Jul 16 12:34:56 2026\n';
+      throw new Error('transient ps failure');
+    };
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    const lockDirectory = process.argv[1];
+    const resourcePath = process.argv[2];
+    const acquired = core.acquireExternalProcessLock({
+      lockDirectory,
+      resourcePath,
+      ownerPid: process.pid,
+    });
+    core.releaseExternalProcessLock({
+      lockDirectory,
+      resourcePath,
+      ownerPid: process.pid,
+      token: acquired.token,
+    });
+  `;
+  const result = await runNode(source, [root, resourcePath]);
+  assert.equal(result.code, 0, result.stderr);
+});
+
+test('external process lease never steals an old lock from a live owner', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-live-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  const before = fs.readFileSync(acquired.lockFile);
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(acquired.lockFile, old, old);
+  assert.throws(() => core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    attemptLimit: 2,
+  }), /timed out acquiring external process lock/i);
+  assert.deepEqual(fs.readFileSync(acquired.lockFile), before);
+  assert.equal(core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  }), true);
+  assert.equal(fs.existsSync(acquired.lockFile), false);
+});
+
+test('external process lease contention never publishes a candidate against a live lock', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-contention-fast-path-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  let tokenPublications = 0;
+  assert.throws(() => core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    attemptLimit: 3,
+    tokenSink: () => { tokenPublications += 1; },
+  }), /timed out acquiring external process lock/i);
+  assert.equal(tokenPublications, 0);
+  core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  });
+});
+
+test('external process lease acquisition rejects an unrelated live owner PID', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-owner-authority-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  let accidentallyAcquired = null;
+  try {
+    assert.throws(() => {
+      accidentallyAcquired = core.acquireExternalProcessLock({
+        lockDirectory: root,
+        resourcePath,
+        ownerPid: unrelated.pid,
+        attemptLimit: 1,
+      });
+    }, /current process|parent process|owner authority/i);
+  } finally {
+    if (accidentallyAcquired) {
+      core.releaseExternalProcessLock({
+        lockDirectory: root,
+        resourcePath,
+        ownerPid: unrelated.pid,
+        token: accidentallyAcquired.token,
+      });
+    }
+    unrelated.kill('SIGTERM');
+  }
+});
+
+test('external process lease release rejects an unrelated live owner PID', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-release-authority-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const unrelated = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const token = '9'.repeat(48);
+  fs.writeFileSync(lockFile, JSON.stringify({
+    pid: unrelated.pid,
+    token,
+    kind: 'external-process-lock',
+    created_at: new Date().toISOString(),
+    process_start_identity: core.processStartIdentityForPid(unrelated.pid),
+  }), { mode: 0o600 });
+  try {
+    assert.throws(() => core.releaseExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: unrelated.pid,
+      token,
+    }), /current process|parent process|owner authority/i);
+    assert.equal(fs.existsSync(lockFile), true);
+  } finally {
+    unrelated.kill('SIGTERM');
+    if (fs.existsSync(lockFile)) fs.unlinkSync(lockFile);
+  }
+});
+
+test('external process lease binds an absent resource through its canonical parent', () => {
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-absent-'));
+  const root = path.join(outer, 'state');
+  fs.mkdirSync(root);
+  const resourcePath = path.join(root, 'pending-review.json');
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  assert.equal(fs.existsSync(resourcePath), false);
+  assert.equal(path.dirname(acquired.lockFile), fs.realpathSync.native(root));
+  assert.equal(acquired.lockFile, core.externalProcessLockPath({ lockDirectory: root, resourcePath }));
+  core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  });
+});
+
+test('external process lease rejects symlinked resource bindings', (t) => {
+  if (WINDOWS) {
+    t.skip(WINDOWS_SYMLINK_SKIP);
+    return;
+  }
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-symlink-'));
+  const root = path.join(outer, 'state');
+  fs.mkdirSync(root);
+  const target = path.join(outer, 'target.json');
+  const resourcePath = path.join(root, 'pending-review.json');
+  fs.writeFileSync(target, '{}\n');
+  fs.symlinkSync(target, resourcePath);
+  assert.throws(() => core.externalProcessLockPath({
+    lockDirectory: root,
+    resourcePath,
+  }), /symlink|unsafe/i);
+
+  const alias = path.join(outer, 'state-alias');
+  fs.symlinkSync(root, alias, 'dir');
+  assert.throws(() => core.externalProcessLockPath({
+    lockDirectory: root,
+    resourcePath: path.join(alias, 'absent.json'),
+  }), /symlink|unsafe/i);
+});
+
+test('external process lease fails closed when its parent is swapped during acquisition', () => {
+  const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-parent-swap-'));
+  const root = path.join(outer, 'state');
+  const displaced = path.join(outer, 'state-displaced');
+  fs.mkdirSync(root);
+  const resourcePath = path.join(root, 'pending-review.json');
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const originalOpen = fs.openSync;
+  let injected = false;
+  try {
+    fs.openSync = function patchedOpen(file, flags, ...rest) {
+      if (!injected && String(file).endsWith('.candidate')) {
+        injected = true;
+        fs.renameSync(root, displaced);
+        fs.mkdirSync(root);
+        fs.writeFileSync(path.join(root, 'sentinel.txt'), 'replacement\n');
+      }
+      return originalOpen.call(fs, file, flags, ...rest);
+    };
+    assert.throws(() => core.acquireExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      attemptLimit: 1,
+    }), /directory|parent|identity|changed|unsafe/i);
+    assert.equal(injected, true);
+    assert.equal(fs.readFileSync(path.join(root, 'sentinel.txt'), 'utf8'), 'replacement\n');
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    fs.openSync = originalOpen;
+  }
+});
+
+test('external process lease reclaims an artifact left by a killed owner', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-kill-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const source = String.raw`
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    core.acquireExternalProcessLock({
+      lockDirectory: process.argv[1],
+      resourcePath: process.argv[2],
+      ownerPid: process.pid,
+    });
+    process.kill(process.pid, 'SIGKILL');
+  `;
+  const killed = await runNode(source, [root, resourcePath]);
+  assert.notEqual(killed.code, 0);
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  assert.equal(fs.existsSync(lockFile), true);
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  assert.equal(acquired.lockFile, lockFile);
+  assert.equal(core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  }), true);
+  assert.equal(fs.existsSync(lockFile), false);
+});
+
+test('external process lease rejects a wrong release token without changing the lock', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-token-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  const before = fs.readFileSync(acquired.lockFile);
+  assert.throws(() => core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: 'f'.repeat(48),
+  }), /token|ownership/i);
+  assert.deepEqual(fs.readFileSync(acquired.lockFile), before);
+  core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  });
+});
+
+test('external process lease release preserves a racing replacement generation', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-replace-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  const displaced = path.join(root, '.external-original.displaced');
+  const replacement = {
+    pid: process.pid,
+    token: 'e'.repeat(48),
+    kind: 'external-process-lock',
+    created_at: new Date().toISOString(),
+    process_start_identity: core.processStartIdentityForPid(process.pid),
+  };
+  const originalRename = fs.renameSync;
+  let injected = false;
+  try {
+    fs.renameSync = function patchedRename(source, destination) {
+      if (!injected && path.resolve(source) === path.resolve(acquired.lockFile)) {
+        injected = true;
+        originalRename.call(fs, source, displaced);
+        fs.writeFileSync(source, JSON.stringify(replacement), { mode: 0o600 });
+      }
+      return originalRename.call(fs, source, destination);
+    };
+    assert.throws(() => core.releaseExternalProcessLock({
+      lockDirectory: root,
+      resourcePath,
+      ownerPid: process.pid,
+      token: acquired.token,
+    }), /identity changed|ownership changed/i);
+    assert.equal(injected, true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8')), replacement);
+  } finally {
+    fs.renameSync = originalRename;
+    if (fs.existsSync(acquired.lockFile)) fs.unlinkSync(acquired.lockFile);
+    if (fs.existsSync(displaced)) fs.unlinkSync(displaced);
+  }
+});
+
+test('external process lease stays contended when a live owner identity is unavailable', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-null-identity-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  const owner = {
+    pid: process.pid,
+    token: 'a'.repeat(48),
+    kind: 'external-process-lock',
+    created_at: CREATED_AT,
+    process_start_identity: null,
+  };
+  fs.writeFileSync(lockFile, JSON.stringify(owner), { mode: 0o600 });
+  const old = new Date(Date.now() - 60000);
+  fs.utimesSync(lockFile, old, old);
+  assert.throws(() => core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    attemptLimit: 2,
+  }), /timed out acquiring external process lock/i);
+  assert.deepEqual(JSON.parse(fs.readFileSync(lockFile, 'utf8')), owner);
+  fs.unlinkSync(lockFile);
+});
+
+test('external process lease reclaims a live PID with a mismatched start identity', async (t) => {
+  const actualIdentity = core.processStartIdentityForPid(process.pid);
+  if (!actualIdentity) {
+    if (process.platform === 'darwin') {
+      const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-pid-reuse-darwin-'));
+      const resourcePath = path.join(root, 'state.json');
+      fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+      const source = String.raw`
+        const childProcess = require('node:child_process');
+        const fs = require('node:fs');
+        childProcess.execFileSync = () => 'Wed Jul 16 12:34:56 2026\n';
+        const core = require(process.env.SESSION_CONTROL_CORE);
+        const lockDirectory = process.argv[1];
+        const resourcePath = process.argv[2];
+        const lockFile = core.externalProcessLockPath({ lockDirectory, resourcePath });
+        fs.writeFileSync(lockFile, JSON.stringify({
+          pid: process.pid,
+          token: 'b'.repeat(48),
+          kind: 'external-process-lock',
+          created_at: new Date().toISOString(),
+          process_start_identity: 'darwin:' + '0'.repeat(64),
+        }), { mode: 0o600 });
+        const acquired = core.acquireExternalProcessLock({
+          lockDirectory,
+          resourcePath,
+          ownerPid: process.pid,
+        });
+        core.releaseExternalProcessLock({
+          lockDirectory,
+          resourcePath,
+          ownerPid: process.pid,
+          token: acquired.token,
+        });
+      `;
+      const result = await runNode(source, [root, resourcePath]);
+      assert.equal(result.code, 0, result.stderr);
+      return;
+    }
+    t.skip('this platform cannot establish the current process start identity');
+    return;
+  }
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-pid-reuse-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const lockFile = core.externalProcessLockPath({ lockDirectory: root, resourcePath });
+  fs.writeFileSync(lockFile, JSON.stringify({
+    pid: process.pid,
+    token: 'b'.repeat(48),
+    kind: 'external-process-lock',
+    created_at: new Date().toISOString(),
+    process_start_identity: 'darwin:mismatched-process-start',
+  }), { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  assert.notEqual(acquired.token, 'b'.repeat(48));
+  core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  });
 });

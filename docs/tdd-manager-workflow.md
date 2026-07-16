@@ -210,7 +210,7 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-scv1_hash.json<br/>FSM + reviewRound + stopBlocks]
+      State[.zensu/state/<br/>tdd-phase-scv1_hash.json<br/>FSM + reviewRound + stopBlockCount]
       Context[$CLAUDE_PLUGIN_DATA/session-control/v1/<br/>records/scv1_hash.json]
     end
     subgraph Production[Phase 4: Production Artifacts]
@@ -234,7 +234,7 @@ immutable session record lives separately under
 domain-separated `scv1_…` key, contain the matching session hash, and increment
 a monotonic revision on every atomic mutation. The raw host session id is not
 stored. The review-loop budget (`reviewRound`) and Stop anti-deadlock budget
-(`stopBlocks`) are validated bounded integers in this same CAS document. They
+(`stopBlockCount`) are validated bounded integers in this same CAS document. They
 have no independently writable `rounds-*.json` or `*.stopblocks` sidecars.
 
 `SessionStart` is the only context writer. It binds the canonical project and

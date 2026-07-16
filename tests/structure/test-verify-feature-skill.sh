@@ -601,6 +601,17 @@ if grep -rqiE "$GERMAN_RE" "$SKILL_DIR"; then
 else
   check "P8b tracked skill content is English-only" PASS
 fi
+if grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy' "$SKILL_MD" \
+  && grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
+  && grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy' "$ZENSU_MD" \
+  && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
+  && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$SKILL_MD" \
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
+  check "P8c skill and adapter use the fail-closed session-bound plugin root" PASS
+else
+  check "P8c skill and adapter use the fail-closed session-bound plugin root" FAIL
+fi
 
 echo "----"
 echo "test-verify-feature-skill: $PASS PASS / $FAIL FAIL"

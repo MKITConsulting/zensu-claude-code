@@ -120,9 +120,9 @@ If everything is green, say so in one line and stop — there is nothing to do.
 
 Canonical `tdd-phase-<scv1-session-key>.json` files are revisioned CAS workflow
 documents, not leftover markers. Never delete, rename, rewrite, or enumerate
-them for cleanup. Their `reviewRound` and `stopBlocks` fields are reset only by
-`/zensu:reset-review-limit` through the trusted
-`tdd_reset_review_budget` transaction.
+them for cleanup. Their ticket-bound `reviewRound` and `stopBlockCount` fields
+are re-armed only by `/zensu:reset-review-limit` through the trusted
+`zensu-log.sh --review-rearm` composite transaction.
 
 Only when the **Session state** block explicitly reports
 `pending-review.json ... expired`, you MAY offer to remove that one exact file:

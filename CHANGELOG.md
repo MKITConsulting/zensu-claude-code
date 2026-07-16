@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   SCM, cloud, and package-registry credentials at both child boundaries,
   forwards signals, waits for its runtime child, cleans the generation on exit,
   and retains npm's normal SRI-checked content cache.
-- **review state**: Store the auto-fix `reviewRound` and Stop-hook `stopBlocks`
+- **review state**: Store the auto-fix `reviewRound` and Stop-hook `stopBlockCount`
   budgets as bounded fields in the same validated, revisioned Session Control
   workflow document as the TDD FSM. All increments and resets now use the
   per-session CAS transaction; independent `rounds-*.json` and `*.stopblocks`
@@ -51,6 +51,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **isolation**: Stop reading or rewriting the legacy shared plugin-root
   locator, which could be clobbered by another host, plugin version, or
   worktree while a session was still active.
+
+  Existing Claude Code processes must be restarted once so the new
+  SessionStart contract can bind them. The retired `~/.zensu/plugin-root`
+  locator is stale, is never consulted, and may be deleted.
+
+## [0.16.1] - 2026-07-16
+
+### Added
+
+- **autopilot**: Persist durable orchestration state (#174)
+
+### Fixed
+
+- **autopilot**: Reconcile remote review publication (#175)
+- **autopilot**: Isolate review chain state (#173)
 
 ## [0.16.0] - 2026-07-14
 

@@ -9,16 +9,18 @@
 # tdd delegations the designed path).
 #   begin #1: chain walk implComplete -> stop BLOCKS -> chainDone -> stop allows
 #   begin #2: implComplete/chainDone/codeReviewDone/selfReviewFixed all cleared,
-#             integrated reviewRound/stopBlocks reset to zero, and the enforcer
+#             integrated reviewRound/stopBlockCount reset to zero, and the enforcer
 #             BLOCKS again after the second --tdd-complete until a fresh
 #             --chain-done lands
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+AUTOPILOT_STATE="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 TDD_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -37,15 +39,15 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/nul
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
-SID="lifecycle-$$"
-SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
-export ZENSU_SESSION_KEY="$SID_KEY"
+SID_RAW="lifecycle-$$"
 LOG_STDERR="$STATE_DIR/log-stderr.txt"
 # shellcheck disable=SC1090
 source "$TDD_LIB"
 
 # shellcheck disable=SC1090
-source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID_RAW"
+SID="$ZENSU_SESSION_KEY"
+SID_KEY="$SID"
 
 log() { bash "$LOG" "$@" >/dev/null 2>>"$LOG_STDERR"; }
 
@@ -69,25 +71,42 @@ field() {  # echoes a validated state field (or "missing")
 # --- chain #1: normal walk, enforcer releases on chainDone ---
 log --tdd-begin
 log --tdd-complete
+TICKET1="$(CLAUDE_SESSION_ID="$SID" bash "$LOG" --review-ticket 2>>"$LOG_STDERR")"
+[ -n "$TICKET1" ] && check "C0 chain #1 receives a review ticket" PASS \
+                   || check "C0 chain #1 receives a review ticket" FAIL
 D1="$(stop_dec)"
 [ "$D1" = "block" ] && check "C1 chain #1: stop BLOCKS while implComplete && !chainDone" PASS \
                     || check "C1 chain #1: stop decision (got '$D1')" FAIL
 
-log --code-review-done
-log --self-review-fixed
-log --chain-done
-D2="$(stop_dec)"
-[ "$D2" = "allow" ] && check "C2 chain #1: stop allows after --chain-done" PASS \
-                    || check "C2 chain #1: stop decision (got '$D2')" FAIL
+# Route the matching Agent completion through the production PostToolUse hook;
+# this is the official transition that consumes the one-shot ticket and records
+# reviewRound=1 before any ticket-bound terminal flag may be written.
+SID_VALUE="$SID" TICKET="$TICKET1" node -e '
+  process.stdout.write(JSON.stringify({
+    session_id: process.env.SID_VALUE,
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    }
+  }));
+' | bash "$POSTREV" >/dev/null 2>>"$LOG_STDERR"
 
-# Simulate budgets consumed during the first chain; a fresh begin owns their
-# lifecycle and resets both in the same CAS document.
+# Seed first-chain budget/workflow residue while the generation is still live.
+# Terminal CAS states intentionally reject later mutation; the next --tdd-begin
+# must clear this residue atomically with its chain reset.
 tdd_increment_counter "$SID" reviewRound >/dev/null
 tdd_increment_counter "$SID" reviewRound >/dev/null
-tdd_increment_counter "$SID" stopBlocks >/dev/null
+tdd_increment_counter "$SID" stopBlockCount >/dev/null
 log --workflow-begin --tools "link_test,create_revision"
 log --phase IMPL --step stale-step
 tdd_add_bypass "$SID" ZENSU_TDD_GATE >/dev/null
+
+log --code-review-done --claimed-review-ticket "$TICKET1"
+log --self-review-fixed --claimed-review-ticket "$TICKET1"
+log --chain-done --claimed-review-ticket "$TICKET1"
+D2="$(stop_dec)"
+[ "$D2" = "allow" ] && check "C2 chain #1: stop allows after --chain-done" PASS \
+                    || check "C2 chain #1: stop decision (got '$D2')" FAIL
 
 # --- begin #2: the four chain flags and both counters must be reset ---
 BEFORE_SECOND_REVISION="$(field revision)"
@@ -100,23 +119,48 @@ for f in implComplete chainDone codeReviewDone selfReviewFixed; do
 done
 [ "$RESET_FAIL" -eq 0 ] && check "C3 begin #2 clears implComplete/chainDone/codeReviewDone/selfReviewFixed" PASS \
                         || check "C3 begin #2 chain-flag reset ($RESET_FAIL stale)" FAIL
+TICKET_RESET="$(field reviewTicket)"
+CONSUMED_RESET="$(field reviewTicketConsumed)"
+[ "$TICKET_RESET" = "" ] && [ "$CONSUMED_RESET" = "true" ] \
+  && check "C3a begin #2 invalidates the prior review ticket atomically" PASS \
+  || check "C3a begin #2 review-ticket reset (ticket='$TICKET_RESET' consumed='$CONSUMED_RESET')" FAIL
+
+BEGIN_BRANCH="$(awk '
+  /^[[:space:]]*--tdd-begin\)/ { inside=1 }
+  inside { print }
+  inside && /^[[:space:]]*;;[[:space:]]*$/ { exit }
+' "$LOG")"
+STANDALONE_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'autopilot_begin_standalone_tdd "${CLAUDE_PROJECT_DIR:-.}"')"
+BOUND_CALLS="$(printf '%s\n' "$BEGIN_BRANCH" | grep -cF 'autopilot_begin_tdd_attempt "$autopilot_run_val" "$start_event_id"')"
+STANDALONE_CRITICAL="$(awk '/^_autopilot_begin_standalone_tdd_critical\(\)/,/^}/' "$AUTOPILOT_STATE")"
+BOUND_CRITICAL="$(awk '/^_autopilot_begin_tdd_critical\(\)/,/^}/' "$AUTOPILOT_STATE")"
+if [ "$STANDALONE_CALLS" = "1" ] && [ "$BOUND_CALLS" = "1" ] \
+  && printf '%s\n' "$STANDALONE_CRITICAL" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
+  && printf '%s\n' "$BOUND_CRITICAL" | grep -qF 'tdd_begin_session "$session_id" "$vanilla" false false ""' \
+  && ! printf '%s\n' "$BEGIN_BRANCH" | grep -qE 'tdd_set_flag|tdd_reset_chain_flags'; then
+  check "C3b --tdd-begin uses one atomic state transition" PASS
+else
+  check "C3b --tdd-begin uses one atomic state transition (standalone=$STANDALONE_CALLS bound=$BOUND_CALLS)" FAIL
+fi
 
 COUNTER_FAIL=0
-for f in reviewRound stopBlocks; do
+for f in reviewRound stopBlockCount; do
   V="$(field "$f")"
   [ "$V" = "0" ] || { COUNTER_FAIL=$((COUNTER_FAIL+1)); echo "      counter $f not reset (got '$V')"; }
 done
-[ "$COUNTER_FAIL" -eq 0 ] && check "C3b begin #2 resets integrated reviewRound/stopBlocks" PASS \
+[ "$COUNTER_FAIL" -eq 0 ] && check "C3b begin #2 resets integrated reviewRound/stopBlockCount" PASS \
                           || check "C3b begin #2 counter reset ($COUNTER_FAIL stale)" FAIL
 
-ATOMIC_FAIL=0
-for expected in 'phase=UNINITIALIZED' 'step_id=' 'workflowActive=false' 'workflowTools=' 'bypasses=' 'history=' 'vanilla=false'; do
+PRESERVE_FAIL=0
+for expected in 'phase=IMPL' 'step_id=stale-step' 'workflowActive=true' \
+    'workflowTools=link_test,create_revision' 'bypasses=' 'vanilla=false'; do
   key="${expected%%=*}"; value="${expected#*=}"
   actual="$(field "$key")"
-  [ "$actual" = "$value" ] || { ATOMIC_FAIL=$((ATOMIC_FAIL+1)); echo "      field $key not reset (got '$actual')"; }
+  [ "$actual" = "$value" ] || { PRESERVE_FAIL=$((PRESERVE_FAIL+1)); echo "      field $key mismatch (got '$actual')"; }
 done
-[ "$ATOMIC_FAIL" -eq 0 ] && check "C3c begin #2 atomically resets FSM and workflow-window fields" PASS \
-                         || check "C3c begin #2 atomic field reset ($ATOMIC_FAIL stale)" FAIL
+[ "$(field history)" != "" ] || { PRESERVE_FAIL=$((PRESERVE_FAIL+1)); echo "      history unexpectedly cleared"; }
+[ "$PRESERVE_FAIL" -eq 0 ] && check "C3c begin #2 preserves FSM/workflow context while clearing bypasses" PASS \
+                           || check "C3c begin #2 preserve/reset contract ($PRESERVE_FAIL mismatches)" FAIL
 AFTER_SECOND_REVISION="$(field revision)"
 [ "$AFTER_SECOND_REVISION" = "$((BEFORE_SECOND_REVISION + 1))" ] \
   && check "C3d begin #2 performs exactly one CAS revision advance" PASS \

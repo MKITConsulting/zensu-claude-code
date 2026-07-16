@@ -71,7 +71,7 @@ else
 fi
 
 cat > "$WORK/log_helper.txt" <<'EOF'
-tool_call: Bash "bash $CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-log.sh --phase IMPL --step S1"
+tool_call: Bash "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh\" --phase IMPL --step S1"
 EOF
 bash "$ASSERT" "$WORK/log_helper.txt" >/dev/null 2>&1
 RC_LOG=$?

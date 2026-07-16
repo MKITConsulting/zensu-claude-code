@@ -36,10 +36,12 @@ export STATE_DIR="$TMP_DIR/state"
 export ZENSU_CONFIG="$TMP_CFG"
 mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 
-STDIN_FLAG_ABSENT='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-001"}'
 # shellcheck disable=SC1090
 source "$BASELINE" sess-off-001
-bash "$LOG" --tdd-begin --session "sess-off-001" >/dev/null 2>&1
+bash "$LOG" --tdd-begin --session sess-off-001 >/dev/null
+bash "$LOG" --tdd-complete --session sess-off-001 >/dev/null
+TICKET_FLAG_ABSENT="$(bash "$LOG" --review-ticket --session sess-off-001)"
+STDIN_FLAG_ABSENT="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_ABSENT}\\nfixture\"},\"session_id\":\"sess-off-001\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_ABSENT" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -66,10 +68,12 @@ esac
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixIncludeSuggestions": false}}
 EOF
-STDIN_FLAG_FALSE='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-002"}'
 # shellcheck disable=SC1090
 source "$BASELINE" sess-off-002
-bash "$LOG" --tdd-begin --session "sess-off-002" >/dev/null 2>&1
+bash "$LOG" --tdd-begin --session sess-off-002 >/dev/null
+bash "$LOG" --tdd-complete --session sess-off-002 >/dev/null
+TICKET_FLAG_FALSE="$(bash "$LOG" --review-ticket --session sess-off-002)"
+STDIN_FLAG_FALSE="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_FALSE}\\nfixture\"},\"session_id\":\"sess-off-002\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_FALSE" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

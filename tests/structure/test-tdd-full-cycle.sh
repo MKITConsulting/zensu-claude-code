@@ -37,9 +37,11 @@ check() {
 # --- hermetic environment (no CLAUDE_AGENT_TYPE: main-thread chain-state only) --
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-SID="full-cycle"
+SID_RAW="full-cycle"
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID_RAW"
+PROJ="$ZENSU_PROJECT_ROOT"; export CLAUDE_PROJECT_DIR="$PROJ"
+SID="$ZENSU_SESSION_KEY"
 STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
 export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
@@ -47,7 +49,7 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/nul
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
-SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
+SID_KEY="$SID"
 SF="$STATE_DIR/tdd-phase-${SID_KEY}.json"
 
 PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID"'"}'
@@ -130,13 +132,31 @@ echo "== Terminus: implComplete -> review -> self-review -> done =="
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T1 implComplete + !codeReviewDone: Stop BLOCKS" PASS || check "T1 terminus block" FAIL
 case "$(stop_reason)" in *"zensu:code-reviewer"*) check "T2 block reason forces zensu:code-reviewer" PASS ;; *) check "T2 reason code-reviewer" FAIL ;; esac
-case "$(stop_reason)" in *'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'*) check "T2b reviewer Stop directive positively pins the fail-closed helper guard" PASS ;; *) check "T2b reviewer Stop directive lacks helper guard" FAIL ;; esac
+REVIEW_STOP_REASON="$(stop_reason)"
+if printf '%s' "$REVIEW_STOP_REASON" | grep -qF "$LOG" \
+  && ! printf '%s' "$REVIEW_STOP_REASON" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
+  check "T2b reviewer Stop directive embeds the concrete session plugin root" PASS
+else
+  check "T2b reviewer Stop directive lacks the concrete helper path" FAIL
+fi
 # code-reviewer Agent completes -> post-review routes in-thread + counts a round
-CTX="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
+REVIEW_TICKET="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+CTX="$(SID_VALUE="$SID" TICKET="$REVIEW_TICKET" node -e '
+  process.stdout.write(JSON.stringify({
+    tool_input: {
+      subagent_type: "zensu:code-reviewer",
+      prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+    },
+    session_id: process.env.SID_VALUE
+  }));
+' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
 echo "$CTX" | grep -q "/zensu:tdd" && check "T3 post-review routes fixes in-thread (/zensu:tdd)" PASS || check "T3 in-thread routing" FAIL
-printf '%s' "$CTX" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session' \
-  && check "T3b post-review output positively pins the fail-closed helper guard" PASS \
-  || check "T3b post-review output lacks helper guard" FAIL
+if printf '%s' "$CTX" | grep -qF "$LOG" \
+  && ! printf '%s' "$CTX" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
+  check "T3b post-review output embeds the concrete session plugin root" PASS
+else
+  check "T3b post-review output lacks the concrete helper path" FAIL
+fi
 RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$SID" node -e '
   try {
     const core=require(process.env.CONTROL_CORE);
@@ -145,12 +165,20 @@ RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$
 ')"
 [ "$RCOUNT" = "1" ] && check "T4 integrated reviewRound increments (1)" PASS || check "T4 reviewRound=1 (got $RCOUNT)" FAIL
 # reviewer PASS -> code-review chain converges
-bash "$LOG" --code-review-done --session "$SID" >/dev/null
+bash "$LOG" --code-review-done --claimed-review-ticket "$REVIEW_TICKET" \
+  --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T5 codeReviewDone + !chainDone: Stop still BLOCKS" PASS || check "T5 pre-self-review block" FAIL
 case "$(stop_reason)" in *"zensu:self-review"*) check "T6 block reason now forces skill='zensu:self-review'" PASS ;; *) check "T6 reason self-review" FAIL ;; esac
-case "$(stop_reason)" in *'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'*) check "T6b self-review Stop directive positively pins the fail-closed helper guard" PASS ;; *) check "T6b self-review Stop directive lacks helper guard" FAIL ;; esac
+SELF_REVIEW_STOP_REASON="$(stop_reason)"
+if printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF "$LOG" \
+  && ! printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
+  check "T6b self-review Stop directive embeds the concrete session plugin root" PASS
+else
+  check "T6b self-review Stop directive lacks the concrete helper path" FAIL
+fi
 # self-review owns the terminus
-bash "$LOG" --chain-done --session "$SID" >/dev/null
+bash "$LOG" --chain-done --claimed-review-ticket "$REVIEW_TICKET" \
+  --session "$SID" >/dev/null
 [ "$(stop_dec)" = "allow" ] && check "T7 chainDone: Stop ALLOWS (cycle complete)" PASS || check "T7 terminus allow" FAIL
 
 echo "----"

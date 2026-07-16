@@ -11,6 +11,9 @@ BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 CFG_NONE="$EVAL_DIR/fixtures/config-log-none.json"
 CFG_WALL="$EVAL_DIR/fixtures/config-log-wall.json"
+PROJECT_ROOT="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
+trap 'rm -rf "$PROJECT_ROOT"' EXIT
 
 PASS=0; FAIL=0
 check() {
@@ -114,13 +117,17 @@ rm -rf "$PSTATE"
 # ---- Integrated review counter: log style cannot weaken CAS timestamps ------
 RSTATE="$(mktemp -d)"
 SIDR="rd-none-$$"
-STDINR="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SIDR}\"}"
 mkdir -p "$RSTATE/project"
 export CLAUDE_PROJECT_DIR="$RSTATE/project"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SIDR"
 env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
   bash "$LOG" --tdd-begin --session "$SIDR" >/dev/null 2>&1
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --tdd-complete --session "$SIDR" >/dev/null 2>&1
+TICKETR="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
+  bash "$LOG" --review-ticket --session "$SIDR")"
+STDINR="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR}\\nfixture\"},\"session_id\":\"${SIDR}\"}"
 printf '%s' "$STDINR" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_N=$(CORE="$SESSION_CORE" PROJECT_ROOT="$RSTATE/project" SID="$SIDR" node -e '
@@ -140,13 +147,17 @@ rm -rf "$RSTATE"
 
 RSTATE2="$(mktemp -d)"
 SIDR2="rd-wall-$$"
-STDINR2="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SIDR2}\"}"
 mkdir -p "$RSTATE2/project"
 export CLAUDE_PROJECT_DIR="$RSTATE2/project"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SIDR2"
 env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
   bash "$LOG" --tdd-begin --session "$SIDR2" >/dev/null 2>&1
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --tdd-complete --session "$SIDR2" >/dev/null 2>&1
+TICKETR2="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
+  bash "$LOG" --review-ticket --session "$SIDR2")"
+STDINR2="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR2}\\nfixture\"},\"session_id\":\"${SIDR2}\"}"
 printf '%s' "$STDINR2" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_W=$(CORE="$SESSION_CORE" PROJECT_ROOT="$RSTATE2/project" SID="$SIDR2" node -e '

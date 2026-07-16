@@ -23,17 +23,21 @@ mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 printf '%s\n' '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 
 payload() {
-  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"%s"}' "$1"
+  local sid="$1" ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$sid")" || return 1
+  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid"
 }
 # shellcheck disable=SC1090
 source "$BASELINE" sess-A
 SESSION_RECORDS="$(dirname "$ZENSU_SESSION_CONTEXT")"
 bash "$LOG" --tdd-begin --session sess-A >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session sess-A >/dev/null 2>&1
 payload sess-A | "$SCRIPT" >/dev/null 2>&1
 
 # shellcheck disable=SC1090
 source "$BASELINE" sess-B
 bash "$LOG" --tdd-begin --session sess-B >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session sess-B >/dev/null 2>&1
 payload sess-B | "$SCRIPT" >/dev/null 2>&1
 
 export ZENSU_SESSION_KEY="$(node "$CORE" session-key sess-A)"

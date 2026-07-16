@@ -389,7 +389,7 @@ node - "$CORE" "$PROJECT_ROOT" "$SESSION_ID" <<'NODE' \
 const [corePath, projectRoot, sessionId] = process.argv.slice(2);
 const state = require(corePath).readWorkflowState({ projectRoot, sessionId });
 if (state.revision !== 1 || state.active !== false || state.phase !== 'UNINITIALIZED'
-    || state.reviewRound !== 0 || state.stopBlocks !== 0 || state.history.length !== 0) process.exit(1);
+    || state.reviewRound !== 0 || state.stopBlockCount !== 0 || state.history.length !== 0) process.exit(1);
 NODE
 printf '%s' "$PROJECT_STATE_AFTER_HOST" | jq -e --arg state "tdd-phase-${STATE_KEY}.json" '
   keys == [$state] and (.[$state] | test("^sha256:[a-f0-9]{64}$"))

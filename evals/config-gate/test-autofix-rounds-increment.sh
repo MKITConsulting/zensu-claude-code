@@ -44,28 +44,31 @@ read_field() {
 }
 
 BEFORE_REV="$(read_field revision)"
-PAYLOAD="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID}\"}"
 PIDS=""
 for i in $(seq 1 4); do
-  printf '%s' "$PAYLOAD" | "$SCRIPT" >"$TMP_DIR/out.$i" 2>"$TMP_DIR/err.$i" &
+  (
+    # shellcheck disable=SC1090
+    source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+    tdd_increment_counter "$SID" reviewRound
+  ) >"$TMP_DIR/out.$i" 2>"$TMP_DIR/err.$i" &
   PIDS="$PIDS $!"
 done
 FAILED=0
 for pid in $PIDS; do
   wait "$pid" || FAILED=$((FAILED + 1))
 done
-[ "$FAILED" -eq 0 ] && check "four concurrent reviewer completions all succeed" PASS \
-  || check "four concurrent reviewer completions all succeed (failures=$FAILED)" FAIL
+[ "$FAILED" -eq 0 ] && check "four concurrent CAS increments all succeed" PASS \
+  || check "four concurrent CAS increments all succeed (failures=$FAILED)" FAIL
 
 ROUND="$(read_field reviewRound 2>/dev/null || true)"
 AFTER_REV="$(read_field revision 2>/dev/null || true)"
-STOP_BLOCKS="$(read_field stopBlocks 2>/dev/null || true)"
+STOP_BLOCKS="$(read_field stopBlockCount 2>/dev/null || true)"
 [ "$ROUND" = 4 ] && check "CAS reviewRound reaches 4 without a lost update" PASS \
   || check "CAS reviewRound reaches 4 without a lost update (got $ROUND)" FAIL
 [ "$AFTER_REV" = "$((BEFORE_REV + 4))" ] && check "each concurrent increment advances the shared revision exactly once" PASS \
   || check "each concurrent increment advances revision by 4 (before=$BEFORE_REV after=$AFTER_REV)" FAIL
-[ "$STOP_BLOCKS" = 0 ] && check "review progress resets integrated stopBlocks" PASS \
-  || check "review progress resets integrated stopBlocks (got $STOP_BLOCKS)" FAIL
+[ "$STOP_BLOCKS" = 0 ] && check "review progress resets integrated stopBlockCount" PASS \
+  || check "review progress resets integrated stopBlockCount (got $STOP_BLOCKS)" FAIL
 
 if find "$STATE_DIR" -maxdepth 1 \( -name 'rounds-*' -o -name '*.stopblocks' \) | grep -q .; then
   check "no retired rounds/stopblocks sidecar is created" FAIL

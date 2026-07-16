@@ -39,7 +39,7 @@ function projectState(state) {
   return {
     revision: state.revision,
     reviewRound: state.reviewRound,
-    stopBlocks: state.stopBlocks,
+    stopBlockCount: state.stopBlockCount,
     chainDone: state.chainDone,
     codeReviewDone: state.codeReviewDone,
     selfReviewFixed: state.selfReviewFixed,

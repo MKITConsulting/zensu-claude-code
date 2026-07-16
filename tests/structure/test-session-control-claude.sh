@@ -37,9 +37,11 @@ PLUGIN_DATA_B="$TMP/plugin-data-b"
 PLUGIN_COPY="$TMP/plugin-copy"
 PROJECT_A="$TMP/project-a"
 PROJECT_B="$TMP/project-b"
+ENV_FAILURE_DATA="$TMP/env-failure-data"
+ENV_FAILURE_PROJECT="$TMP/env-failure-project"
 ENV_FILE="$TMP/session-env"
 SOURCE_ENV_FILE="$TMP/source-env"
-mkdir -p "$PLUGIN_DATA" "$PROJECT_A" "$PROJECT_B"
+mkdir -p "$PLUGIN_DATA" "$PROJECT_A" "$PROJECT_B" "$ENV_FAILURE_DATA" "$ENV_FAILURE_PROJECT"
 : > "$ENV_FILE"
 : > "$SOURCE_ENV_FILE"
 SID_A='claude/raw session alpha'
@@ -71,6 +73,60 @@ run_copy_hook() {
     bash "$PLUGIN_COPY/hooks/session-start-session-control.sh"
 }
 
+if payload SessionStart 'claude/missing-env-variable' "$ENV_FAILURE_PROJECT" \
+  | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$ENV_FAILURE_DATA" \
+    env -u CLAUDE_ENV_FILE -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    bash "$HOOK" >"$TMP/missing-env-variable.out" 2>"$TMP/missing-env-variable.err"; then
+  check "SessionStart rejects a missing CLAUDE_ENV_FILE" FAIL
+elif grep -qF 'CLAUDE_ENV_FILE is unavailable or unsafe' "$TMP/missing-env-variable.err"; then
+  check "SessionStart rejects a missing CLAUDE_ENV_FILE" PASS
+else
+  check "SessionStart rejects a missing CLAUDE_ENV_FILE" FAIL
+fi
+
+if payload SessionStart 'claude/empty-env-variable' "$ENV_FAILURE_PROJECT" \
+  | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$ENV_FAILURE_DATA" CLAUDE_ENV_FILE='' \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    bash "$HOOK" >"$TMP/empty-env-variable.out" 2>"$TMP/empty-env-variable.err"; then
+  check "SessionStart rejects an empty CLAUDE_ENV_FILE" FAIL
+elif grep -qF 'CLAUDE_ENV_FILE is unavailable or unsafe' "$TMP/empty-env-variable.err"; then
+  check "SessionStart rejects an empty CLAUDE_ENV_FILE" PASS
+else
+  check "SessionStart rejects an empty CLAUDE_ENV_FILE" FAIL
+fi
+
+if payload SessionStart 'claude/missing-env-path' "$ENV_FAILURE_PROJECT" \
+  | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$ENV_FAILURE_DATA" \
+    CLAUDE_ENV_FILE="$TMP/does-not-exist/session-env" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    bash "$HOOK" >"$TMP/missing-env-path.out" 2>"$TMP/missing-env-path.err"; then
+  check "SessionStart rejects a nonexistent CLAUDE_ENV_FILE" FAIL
+elif grep -qF 'CLAUDE_ENV_FILE or its parent does not exist' "$TMP/missing-env-path.err"; then
+  check "SessionStart rejects a nonexistent CLAUDE_ENV_FILE" PASS
+else
+  check "SessionStart rejects a nonexistent CLAUDE_ENV_FILE" FAIL
+fi
+
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) check "unwritable CLAUDE_ENV_FILE assertion skipped only on Windows ACL filesystems" PASS ;;
+  *)
+    READ_ONLY_ENV="$TMP/read-only-session-env"
+    printf '%s\n' sentinel >"$READ_ONLY_ENV"
+    chmod 400 "$READ_ONLY_ENV"
+    if payload SessionStart 'claude/unwritable-env-file' "$ENV_FAILURE_PROJECT" \
+      | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$ENV_FAILURE_DATA" CLAUDE_ENV_FILE="$READ_ONLY_ENV" \
+        env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+        bash "$HOOK" >"$TMP/unwritable-env-file.out" 2>"$TMP/unwritable-env-file.err"; then
+      check "SessionStart rejects an unwritable CLAUDE_ENV_FILE without appending" FAIL
+    elif [ "$(cat "$READ_ONLY_ENV")" = sentinel ]; then
+      check "SessionStart rejects an unwritable CLAUDE_ENV_FILE without appending" PASS
+    else
+      check "SessionStart rejects an unwritable CLAUDE_ENV_FILE without appending" FAIL
+    fi
+    chmod 600 "$READ_ONLY_ENV"
+    ;;
+esac
+
 OUT_A="$(payload SessionStart "$SID_A" "$PROJECT_A" | run_hook 2>"$TMP/start.err")"
 if printf '%s' "$OUT_A" | grep -qF '[zensu-session-context]' && [ -f "$RECORD_A" ]; then
   check "SessionStart registers immutable context and returns main additionalContext" PASS
@@ -84,7 +140,7 @@ if [ -f "$BASELINE_A" ] && node -e '
   const state = core.readWorkflowState({projectRoot: process.argv[2], sessionId: process.argv[3]});
   process.exit(state.revision === 1 && state.active === false
     && state.phase === "UNINITIALIZED" && state.reviewRound === 0
-    && state.stopBlocks === 0 && Array.isArray(state.history) && state.history.length === 0 ? 0 : 1);
+    && state.stopBlockCount === 0 && Array.isArray(state.history) && state.history.length === 0 ? 0 : 1);
 ' "$CORE" "$PROJECT_A" "$SID_A"; then
   check "SessionStart creates the mandatory project-bound baseline CAS state" PASS
 else
@@ -372,7 +428,10 @@ fi
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) check "POSIX 0600 record-mode assertion skipped only on Windows" PASS ;;
   *)
-    [ "$(stat -f '%Lp' "$RECORD_A" 2>/dev/null || stat -c '%a' "$RECORD_A")" = 600 ] \
+    RECORD_PATH="$RECORD_A" node -e '
+      const fs = require("node:fs");
+      process.exit((fs.lstatSync(process.env.RECORD_PATH).mode & 0o777) === 0o600 ? 0 : 1);
+    ' \
       && check "Claude control records are private (0600)" PASS \
       || check "Claude control records are private (0600)" FAIL
     ;;

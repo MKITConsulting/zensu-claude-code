@@ -41,7 +41,7 @@ if (command === 'seed') {
     active: true,
     implComplete: true,
     reviewRound: round,
-    stopBlocks: 2,
+    stopBlockCount: 2,
     chainDone: true,
     codeReviewDone: true,
     selfReviewFixed: true,

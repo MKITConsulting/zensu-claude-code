@@ -2,11 +2,13 @@
 # Test-only fresh-session bootstrap. Source this file so the caller receives
 # the exact exports written by the real Claude SessionStart hook.
 
-_ZENSU_TEST_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 1
+_ZENSU_TEST_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 1
+_ZENSU_TEST_ROOT="${2:-$_ZENSU_TEST_SOURCE_ROOT}"
+_ZENSU_TEST_ROOT="$(cd "$_ZENSU_TEST_ROOT" && pwd -P)" || return 1
 _ZENSU_TEST_PROJECT="${CLAUDE_PROJECT_DIR:?test baseline requires CLAUDE_PROJECT_DIR}"
-_ZENSU_TEST_SESSION="${1:?usage: source initialize-baseline.sh SESSION_ID}"
+_ZENSU_TEST_SESSION="${1:?usage: source initialize-baseline.sh SESSION_ID [PLUGIN_ROOT]}"
 _ZENSU_TEST_DATA="${ZENSU_TEST_PLUGIN_DATA:-$_ZENSU_TEST_PROJECT/.session-control-test/plugin-data}"
-_ZENSU_TEST_ENV="$_ZENSU_TEST_PROJECT/.session-control-test/session.env"
+_ZENSU_TEST_ENV="${ZENSU_TEST_ENV_FILE:-$_ZENSU_TEST_PROJECT/.session-control-test/session.env}"
 mkdir -p "$_ZENSU_TEST_DATA" "$(dirname "$_ZENSU_TEST_ENV")" || return 1
 : >"$_ZENSU_TEST_ENV" || return 1
 
@@ -22,5 +24,5 @@ printf '%s' "$_ZENSU_TEST_PAYLOAD" | \
 # shellcheck disable=SC1090
 . "$_ZENSU_TEST_ENV" || return 1
 export CLAUDE_PLUGIN_DATA="$_ZENSU_TEST_DATA"
-unset _ZENSU_TEST_ROOT _ZENSU_TEST_PROJECT _ZENSU_TEST_SESSION _ZENSU_TEST_DATA \
+unset _ZENSU_TEST_SOURCE_ROOT _ZENSU_TEST_ROOT _ZENSU_TEST_PROJECT _ZENSU_TEST_SESSION _ZENSU_TEST_DATA \
   _ZENSU_TEST_ENV _ZENSU_TEST_PAYLOAD

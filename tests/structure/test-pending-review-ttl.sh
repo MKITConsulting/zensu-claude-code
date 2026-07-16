@@ -31,7 +31,7 @@ start_session() {
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
 }
 
-decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
+decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{const j=JSON.parse(s);if(j&&j.decision==="block"&&typeof j.reason==="string"){console.log("block");return}}catch(_){}console.log("invalid");process.exitCode=2});'; }
 
 start_session ttl-unit
 MARKER="$PROJ/.zensu/state/pending-review.json"
@@ -71,10 +71,12 @@ start_session "$SID"
 
 # Fresh marker -> adopt -> block + cleared (sanity, matches deferred fallback)
 bash "$LOG" --pending-review --files "x.ts" --summary "fresh" >/dev/null 2>&1
-OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"
-{ [ "$(printf '%s' "$OUT" | decision)" = "block" ] && [ ! -f "$MARKER" ]; } \
+OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
+{ [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] && [ ! -f "$MARKER" ]; } \
   && check "I1 fresh marker -> adopt -> block + marker cleared" PASS \
   || check "I1 fresh adopt (dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
+bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
+printf '{"session_id":"%s"}' "$SID" | bash "$STOP" >/dev/null 2>&1
 
 # Stale marker -> NOT adopted -> allow (clean exit 0) + cleared
 SID2="ttl-stale"
@@ -91,11 +93,12 @@ start_session "$SID3"
 CFG_OFF="$STATE_DIR/ttl-off.json"
 printf '%s\n' '{"hooks":{"pendingReviewTtlHours":0}}' > "$CFG_OFF"
 printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER"
-OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"
-[ "$(printf '%s' "$OUT" | decision)" = "block" ] \
+OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"; RC=$?
+[ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
   && check "I3 ttl=0 disables guard -> stale marker still adopts (block)" PASS \
   || check "I3 ttl=0 still adopts (dec=$(printf '%s' "$OUT" | decision))" FAIL
-rm -f "$MARKER"
+bash "$LOG" --chain-done --session "$SID3" >/dev/null 2>&1
+printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" >/dev/null 2>&1
 
 # no-ts marker (as timestampStyle:"none" writes) with an OLD file mtime -> NOT
 # adopted, so an abandoned marker from a crashed run cannot hijack a later

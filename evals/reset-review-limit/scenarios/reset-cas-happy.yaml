@@ -4,7 +4,7 @@ vars:
   spec_block: |
     The eval provider synchronously pre-seeded and snapshotted the CURRENT
     Claude session with an active completed workflow, reviewRound=3,
-    stopBlocks=2, chainDone=true, and codeReviewDone=true before this process
+    stopBlockCount=2, chainDone=true, and codeReviewDone=true before this process
     started. Do not seed, repair, or otherwise mutate state before the skill.
 
     Invoke `/zensu:reset-review-limit` now through exactly one Skill tool call,

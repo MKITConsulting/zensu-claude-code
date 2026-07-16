@@ -32,9 +32,10 @@ export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-with-suggestions.json"
 mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 # shellcheck disable=SC1090
 source "$BASELINE" sess-on-001
-bash "$LOG" --tdd-begin --session "sess-on-001" >/dev/null 2>&1
-
-STDIN='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-on-001"}'
+bash "$LOG" --tdd-begin --session sess-on-001 >/dev/null
+bash "$LOG" --tdd-complete --session sess-on-001 >/dev/null
+TICKET="$(bash "$LOG" --review-ticket --session sess-on-001)"
+STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"sess-on-001\"}"
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

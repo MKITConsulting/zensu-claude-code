@@ -18,8 +18,10 @@ SID="tdd-review-chain-current"
 # shellcheck disable=SC1091
 source "$ROOT/tests/session-control/initialize-baseline.sh" "$SID"
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+REVIEW_TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
 
-PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}'
+PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: '"$REVIEW_TICKET"'\nfixture"},"session_id":"'"$SID"'"}'
 OUT="$(printf '%s' "$PAYLOAD" | bash "$HOOK" 2>/dev/null)"
 printf '%s' "$OUT" | grep -qF '"additionalContext"' \
   && check "code-reviewer completion emits additionalContext" PASS \
@@ -33,9 +35,10 @@ for literal in 'Critical' 'Important' 'Suggestions' 'No fixes needed: review pas
     && check "directive contains: $literal" PASS \
     || check "directive contains: $literal" FAIL
 done
-printf '%s' "$OUT" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session' \
-  && check "directive positively pins the fail-closed helper guard" PASS \
-  || check "directive lacks the fail-closed helper guard" FAIL
+LOG_Q="$(printf '%q' "$LOG")"
+printf '%s' "$OUT" | grep -qF "bash ${LOG_Q} --review-ticket" \
+  && check "directive pins the executing plugin's review-ticket helper" PASS \
+  || check "directive does not pin the executing plugin's review-ticket helper" FAIL
 
 OTHER="$(printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu-plm"},"session_id":"'"$SID"'"}' | bash "$HOOK" 2>/dev/null)"
 [ -z "$OTHER" ] && check "neutral non-reviewer child is isolated" PASS \

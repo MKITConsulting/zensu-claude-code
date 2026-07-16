@@ -22,6 +22,16 @@ consumes the **same** `_synthesis.json` payload the GitHub path uses
    - `side=RIGHT` → `position[new_path]` + `position[new_line]`; `side=LEFT` →
      `position[old_path]` + `position[old_line]`.
 
+Each POST is one compact JSON object streamed to `glab api --input -`; review bodies and
+positions are never command-line arguments, so valid multi-megabyte payloads cannot hit
+the platform `ARG_MAX` limit during a partial retry.
+
+For delegated Autopilot reconciliation, that payload coordinate is only the lookup key. The
+driver resolves it against the fully paginated MR diff before rendering the GitLab position:
+added/deleted lines carry the exact old/new path pair and their available line, while an
+unchanged context line carries **both** `old_line` and `new_line`. Renames therefore use the
+actual `old_path` and `new_path`, not one duplicated payload path.
+
 ## Diff refs (required for inline positions)
 
 GitLab inline discussions need the MR's diff SHAs. Fetch them first and pass them in:
@@ -48,14 +58,44 @@ review. The driver avoids that two ways:
 - **Fail loud before posting.** If any comment *does* need an inline position but the MR's
   `base_sha`/`head_sha` came back empty, `--post-review` returns non-zero **before** posting
   the summary note — nothing is published, so the run is cleanly retryable (no partial post).
+- **Delegated anchor preflight.** Before its first missing-part write, `--reconcile-review`
+  fetches every page of `merge_requests/:iid/diffs` and builds the complete render plan. A
+  non-zero, malformed, truncated, structurally incomplete, or numerically overflowing diff
+  read fails before any write. A valid diff whose individual anchor is missing, ambiguous,
+  collapsed, too large, or not safely parseable degrades that finding deterministically to a
+  positionless discussion.
 
-## Idempotency (marker convention)
+## Idempotency and delegated reconciliation
 
-GitLab publish is **not transactional** — a partial failure can leave some discussions
-posted. Every posted body is prefixed with a hidden marker
-`<!-- zensu:pr<iid>:<hash> -->` (`<hash>` = the first 8 hex of the content SHA-256). On a
-re-run the driver fetches existing notes + discussions and **skips** any whose marker
-already exists, so re-running after a partial failure resolves cleanly without duplicates.
+Standalone `--post-review` retains its existing summary-plus-discussions behavior. An
+Autopilot delegation instead uses `--reconcile-review` with the durable operation key and
+expected head. For `N = 1 + comments.length`, every part carries a unique full marker:
+
+```text
+<!-- zensu-review:v1:<sha256(operationKey)>:<payloadDigest>:<headSha>:<N>:part=<i>/<N> -->
+```
+
+Part 1 is the summary note; parts 2..N are the ordered inline/positionless discussions.
+Before any write, the driver fetches **all** paginated MR notes and discussions. If every
+expected marker is present exactly once, return `present` with `postedCount=0`. If none are
+present, post the ordered parts and return `posted`. If a strict subset is present, post
+only the missing parts and return `reconciled`, so a crash-retry completes without
+duplicates.
+
+New GitLab MRs may expose empty `diff_refs` briefly. Delegated reconcile therefore owns a
+bounded readiness loop, rechecking `OPEN` and the bound head on every attempt, and writes no
+summary/discussion until complete base/start/head refs are available. It then resolves every
+payload coordinate against the current fully paginated MR diff before posting any missing
+part, so context lines and renamed files use the exact GitLab position tuple.
+
+Fail closed before posting on a duplicate marker, malformed v1 marker, the same operation
+digest bound to a different payload/head/part count, an unexpected part index, incomplete
+pagination, or an MR that is not OPEN at the expected head. Re-read all pages after writes
+and require the complete exact marker set. The structured result has exactly
+`{status,marker,headSha,partCount,postedCount,url,provider}` with `provider=gitlab`; `marker` is always the part-1 marker,
+which lets Autopilot validate and persist one durable publication receipt.
+Autopilot serializes one operation through its durable owner; the protocol supports
+sequential crash/retry repair, not simultaneous independent writers that bypass that owner.
 
 ## Verdict / approval — never automatic
 

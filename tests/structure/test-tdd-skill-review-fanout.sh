@@ -45,11 +45,68 @@ grep -qiE 'merge' "$SKILL_MD" \
 grep -qiE 'dedup|sort.{0,20}severity|by severity' "$SKILL_MD" \
   && check "F5 skill dedupes / sorts merged findings by severity" PASS || check "F5 dedupe/sort" FAIL
 
-# Thin consume-mode code-reviewer spawn carrying the marker, single hook event per round.
+# Thin consume-mode code-reviewer spawn carrying the exact two-line header and a
+# fresh one-shot ticket, single hook event per round.
 grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$SKILL_MD" \
   && check "F6 skill passes the 'PRE-MERGED FINDINGS (fan-out)' marker" PASS || check "F6 fan-out marker in skill" FAIL
+if grep -qF -- '--review-ticket' "$SKILL_MD" \
+  && grep -qF 'second `REVIEW-TICKET: ${REVIEW_TICKET}`' "$SKILL_MD" \
+  && grep -qF 'Issue a fresh ticket before EVERY verification spawn' "$SKILL_MD"; then
+  check "F6a skill requires an exact second-line fresh review ticket" PASS
+else
+  check "F6a skill requires an exact second-line fresh review ticket" FAIL
+fi
+if grep -qF 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-BINDING: run=${RUN_ID} attempt=${ATTEMPT} chain=${CHAIN_ID}' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-STAGE: ${RETURN_STAGE}' "$SKILL_MD" \
+  && grep -qiE 'each (official )?(envelope )?line exactly once|three.{0,30}lines exactly once' "$SKILL_MD"; then
+  check "F6b bound reviewer prompt carries the official three-line envelope exactly once" PASS
+else
+  check "F6b official exact-once bound reviewer envelope" FAIL
+fi
+if grep -qiE 'partial.{0,40}duplicate.{0,40}(conflict|mismatch)|duplicate.{0,40}partial.{0,40}(conflict|mismatch)' "$SKILL_MD" \
+  && grep -qiE 'standalone.{0,50}(omit|no|without).{0,30}(envelope|ZENSU-DELEGATED-CALLER)' "$SKILL_MD"; then
+  check "F6c delegated envelope fails closed while standalone stays envelope-free" PASS
+else
+  check "F6c strict delegated/standalone envelope boundary" FAIL
+fi
 grep -qF "subagent_type='zensu:code-reviewer'" "$SKILL_MD" \
   && check "F7 skill still spawns zensu:code-reviewer (hook trigger preserved)" PASS || check "F7 code-reviewer spawn preserved" FAIL
+
+# Once Autopilot has crossed its single planning gate, the delegated TDD chain
+# may report a durable BLOCK but may not open a second interactive decision.
+UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
+  const fs = require("fs");
+  const lines = fs.readFileSync(process.env.SKILL_MD, "utf8").split(/\r?\n/);
+  const interactive = /AskUserQuestion|ask (?:the )?user|ask again|ask anyway|always asks|pause and wait|escalate to (?:the )?user/i;
+  const qualified = /standalone/i;
+  const planGate = /plan-approval hook/i;
+  const prohibition = /(?:do not|never|without)\b.*\bask/i;
+  lines.forEach((line, index) => {
+    if (interactive.test(line) && !qualified.test(line) && !planGate.test(line) && !prohibition.test(line)) {
+      process.stdout.write(`${index + 1}:${line}\n`);
+    }
+  });
+')"
+TDD_BLOCK_CODES=(
+  'coverage-tool-decision-required'
+  'precondition-decision-required'
+  'tdd-retry-limit'
+  'coverage-threshold-decision-required'
+)
+TDD_NO_ASK=true
+for code in "${TDD_BLOCK_CODES[@]}"; do
+  grep -qF -- "$code" "$SKILL_MD" || TDD_NO_ASK=false
+done
+if [ -z "$UNQUALIFIED_ASKS" ] \
+   && [ "$TDD_NO_ASK" = true ] \
+   && grep -qF -- 'persist `BLOCK`' "$SKILL_MD" \
+   && grep -qF -- 'Autopilot has exactly one interactive gate' "$SKILL_MD"; then
+  check "F7a delegated TDD reports durable blockers without opening another question" PASS
+else
+  [ -z "$UNQUALIFIED_ASKS" ] || printf '%s\n' "$UNQUALIFIED_ASKS" >&2
+  check "F7a delegated TDD reports durable blockers without opening another question" FAIL
+fi
 
 # Explicit carve-out to the line-18 "NO parallel tool batches" rule.
 grep -qiE 'sanctioned parallel batch|ONE (sanctioned|allowed) parallel|exception.{0,40}parallel|fan-out is the (one|only)' "$SKILL_MD" \
@@ -61,6 +118,13 @@ grep -qF 'PRE-MERGED FINDINGS (fan-out)' "$REVIEWER_MD" \
   && check "F9 code-reviewer carries the 'PRE-MERGED FINDINGS (fan-out)' marker" PASS || check "F9 fan-out marker in reviewer" FAIL
 grep -qiE 'consume mode|fan-out consume' "$REVIEWER_MD" \
   && check "F10 code-reviewer documents fan-out consume mode" PASS || check "F10 consume mode" FAIL
+if grep -qF 'first line is exactly `PRE-MERGED FINDINGS (fan-out)`' "$REVIEWER_MD" \
+  && grep -qF 'second line is `REVIEW-TICKET: <ticket>`' "$REVIEWER_MD" \
+  && grep -qF 'Merely containing or quoting the marker elsewhere is not consume mode' "$REVIEWER_MD"; then
+  check "F10a reviewer enters consume mode only for the exact two-line contract" PASS
+else
+  check "F10a reviewer enters consume mode only for the exact two-line contract" FAIL
+fi
 # Consume mode short-circuits Phases 1-4 (no re-read, no build, no test).
 grep -qiE 'skip phases 1-4|skip phases 1.{1,4}4|jump (straight )?to phase 5|skip.{0,30}(build|test)' "$REVIEWER_MD" \
   && check "F11 consume mode skips Phases 1-4 (no build/test re-run)" PASS || check "F11 consume skips 1-4" FAIL

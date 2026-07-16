@@ -81,7 +81,17 @@ stop_decision() {
 }
 flag() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$SF" "$1"; }
 postrev_ctx() {
-  printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}' \
+  local ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)" || return 1
+  SID_VALUE="$SID" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID_VALUE
+    }));
+  ' \
     | bash "$POSTREV" 2>/dev/null | node -e '
       let s=""; process.stdin.on("data",c=>s+=c);
       process.stdin.on("end",()=>{ try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")} });'
@@ -132,7 +142,17 @@ SF="$SF_BACKUP"
 echo "== 4. post-review routing (in-thread) + max-round chainDone =="
 SID_R="smoke-review"; SID_R_KEY="$(session_key "$SID_R")"; start_session "$SID_R"; SF="$(tdd_state_file "$SID_R")"
 postrev_ctx() {
-  printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_R"'"}' \
+  local ticket
+  ticket="$(bash "$LOG" --review-ticket --session "$SID_R" 2>/dev/null)" || return 1
+  SID_VALUE="$SID_R" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      },
+      session_id: process.env.SID_VALUE
+    }));
+  ' \
     | bash "$POSTREV" 2>/dev/null | node -e '
       let s=""; process.stdin.on("data",c=>s+=c);
       process.stdin.on("end",()=>{ try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")} });'

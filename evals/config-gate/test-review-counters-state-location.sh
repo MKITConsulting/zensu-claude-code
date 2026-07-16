@@ -23,11 +23,13 @@ export ZENSU_TEST_PLUGIN_DATA="$TMP_DIR/host-plugin-data"
 printf '%s\n' '{"hooks":{"autoFix":true,"autoFixMaxRounds":10}}' > "$ZENSU_CONFIG"
 
 run_review() {
-  local sid="$1"
+  local sid="$1" ticket
   # shellcheck disable=SC1090
   source "$BASELINE" "$sid" || return 1
   bash "$LOG" --tdd-begin --session "$sid" >/dev/null 2>&1 || return 1
-  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"%s"}' "$sid" \
+  bash "$LOG" --tdd-complete --session "$sid" >/dev/null 2>&1 || return 1
+  ticket="$(bash "$LOG" --review-ticket --session "$sid")" || return 1
+  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid" \
     | "$POST_REVIEW" >/dev/null 2>&1
 }
 
