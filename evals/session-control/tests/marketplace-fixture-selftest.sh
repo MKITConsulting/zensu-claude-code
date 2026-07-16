@@ -38,7 +38,10 @@ RESULT="$(node "$GENERATOR" "$SOURCE" "$TARGET" "$REVISION")"
 [ -z "$(git -C "$SOURCE" status --porcelain=v1 --untracked-files=all)" ]
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) printf '%s\n' 'marketplace fixture: SKIP POSIX 0700 assertion on Windows' ;;
-  *) [ "$(stat -f '%Lp' "$TARGET" 2>/dev/null || stat -c '%a' "$TARGET")" = 700 ] ;;
+  *) TARGET_PATH="$TARGET" node -e '
+    const fs = require("node:fs");
+    if ((fs.lstatSync(process.env.TARGET_PATH).mode & 0o777) !== 0o700) process.exit(1);
+  ' ;;
 esac
 
 WRONG_TARGET="$TEMPORARY/targets/wrong-revision"
