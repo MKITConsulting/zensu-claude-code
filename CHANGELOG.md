@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-07-16
+
+### Added
+
+- **autopilot**: Persist durable orchestration state (#174)
+
+### Fixed
+
+- **autopilot**: Reconcile remote review publication (#175)
+- **autopilot**: Isolate review chain state (#173)
+
 ## [0.16.0] - 2026-07-14
 
 ### Added
