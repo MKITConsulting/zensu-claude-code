@@ -59,8 +59,11 @@ as it is.
 | Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `5` |
 | Context compaction nudge | `context.compactionNudge` | bool | `true` |
 | Compaction nudge threshold (%) | `context.nudgeThreshold` | int 1–99 | `50` |
-| Pulse telemetry session | `hooks.pulseSession` | bool | `true` |
+| SessionStart HEAD/branch context | `hooks.pulseSession` | bool | `true` |
 | Log timestamp style | `logging.timestampStyle` | enum `wall` \| `relative` \| `none` | `wall` |
+
+`hooks.pulseSession` controls only local SessionStart context. It never enables
+or disables server-side Pulse tracking; the server privacy setting is authoritative.
 
 ## Phase 0 — Preflight
 

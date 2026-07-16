@@ -3,6 +3,7 @@
 #
 #   (no arg)      DETERMINISTIC suites only — no API spend:
 #                   - every tests/structure/test-*.sh
+#                   - tests/e2e-plm/test-runner.sh (offline harness/oracle self-tests)
 #                   - evals/config-gate/run-eval.sh --self-check (~60 offline gate evals)
 #                   - evals/session-control/run-self-check.sh (Promptfoo contract/wrapper checks)
 #                   - evals/tdd-review-chain/run-self-check.sh
@@ -319,6 +320,11 @@ for t in "$TESTS_DIR"/structure/test-*.sh; do
   esac
   run_suite "structure/$base" bash "$t"
 done
+
+# ── Deterministic: PLM harness/oracle self-tests ─────────────────────
+log ""
+log "▸ PLM harness self-tests (deterministic)"
+run_suite "e2e-plm/test-runner.sh" bash "$TESTS_DIR/e2e-plm/test-runner.sh"
 
 # ── Deterministic: config-gate offline evals ─────────────────────────
 log ""

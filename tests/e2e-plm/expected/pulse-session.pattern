@@ -1,4 +1,12 @@
-# Pulse workflow — must start a session and reference git HEAD or branch.
-# Decision Rule (agents/zensu-plm.md:169): "session start/end / 'what did I work on?' → pulse".
-(pulse_start_session|pulse_session_summary)
+# Pulse workflow — delegate to the Pulse skill and use the minimal CLI response.
+# Decision Rule (agents/zensu-plm.md): session start/end / "what did I work on?" -> Pulse skill.
+(/zensu:pulse|zensu:pulse|Pulse skill)
+zensu pulse start.*--minimal-json
 (git|HEAD|branch|SHA)
+tracking_disabled
+(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never)[^.;!?]{0,80}|(skip(s)?|without([[:space:]]+(running|calling|executing|invoking|using))?)[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+end
+(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never)[^.;!?]{0,80}|(skip(s)?|without([[:space:]]+(running|calling|executing|invoking|using))?)[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+summary|(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never)[^.;!?]{0,80}|skip(s)?[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+end[[:space:]]+(and|or)[[:space:]]+(pulse[[:space:]]+)?summary
+@pulse-disabled-followup-safe
+!pulse_start_session
+!pulse_end_session
+!pulse_session_summary

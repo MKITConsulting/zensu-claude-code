@@ -69,8 +69,11 @@ AskUserQuestion prompt UI, then writing the answers to the chosen `config.json`
 | 2 | Review-chain enforcer | `hooks.chainEnforcer` | bool | `true` |
 | 3 | Auto-fix round budget | `hooks.autoFixMaxRounds` | int 1–99 | `5` |
 | 4 | Compaction nudge + threshold | `context.compactionNudge` + `context.nudgeThreshold` | bool + int 1–99 | `true` / `50` |
-| 5 | Pulse telemetry session | `hooks.pulseSession` | bool | `true` |
+| 5 | SessionStart HEAD/branch context | `hooks.pulseSession` | bool | `true` |
 | 6 | Log timestamp style | `logging.timestampStyle` | enum `wall`\|`relative`\|`none` | `wall` |
+
+`hooks.pulseSession` controls only the local context banner. Server-side Pulse
+tracking remains governed exclusively by the user's privacy setting.
 
 ## Approach
 

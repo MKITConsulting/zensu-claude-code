@@ -2,7 +2,7 @@
 
 Behavioral-contract smoke test for the `zensu-plm` orchestrator agent
 (`agents/zensu-plm.md`). Fires the agent against fixture prompts and asserts
-that the right workflow / MCP tools / Important Rules appear in its text
+that the right workflow, skill delegation, CLI/MCP tools, and Important Rules appear in its text
 output.
 
 This complements `tests/e2e/` (which tests `code-reviewer` + `tdd-manager`
@@ -28,7 +28,7 @@ produce English-only output.
 | `implement` | KEY-N + code: `get_feature`, `analyze_feature_security` / `set_security_classification`, `link_test` / `link_source_files`, `create_revision`, `validate_feature_security`. Stresses Rule 4 (security classification before implementation) only — Rule 2 (`list_features` before guessing an ID) is intentionally NOT re-stressed here; see Known caveats. |
 | `security-review` | Full security sequence: classify → analyze → suggest/add tests → STRIDE → `complete_security_review` |
 | `ghost-scan` | `list_features` first (Rule 7), then `ghost_scan` with `enrich_existing`, candidates, batch review, apply |
-| `pulse-session` | `pulse_start_session` or summary plus git HEAD / branch reference |
+| `pulse-session` | Delegation to `/zensu:pulse`, `zensu pulse start --minimal-json`, git context, and successful `tracking_disabled` no-op without `end`/`summary` |
 | `status-transition` | Agent points to REST API, **must NOT** call `update_feature(...)` with status / "update_feature with ..." narration (Rule 3, two same-line tool-call-shape negative asserts) |
 | `feature-id-guard` | Agent calls `list_features` or asks back for the correct ID — **must NOT** invent ZEN-999 (Rule 2) |
 
@@ -87,6 +87,7 @@ error message.
 
 - `bash` (POSIX-compatible shell)
 - `git` 2.28+ (for `init -b main`)
+- `node` (for the scoped Pulse branch assertion and deterministic fixture helpers)
 - `claude` CLI on `$PATH` (full runs only — not needed for `--self-check`,
   `--offline`, or the test-runner)
 
@@ -96,13 +97,24 @@ codebases.
 ## Pattern File Conventions
 
 One pattern file per scenario in `expected/<scenario>.pattern`. Each
-non-blank line is treated as a regex.
+non-blank line is either a regex assertion or one of the documented semantic
+directives below.
 
-- **Positive assert** (default): the regex MUST match somewhere in the
-  agent's captured output.
-- **Negative assert** (line begins with `!`): the regex MUST NOT match. Used
-  to enforce Important Rules — e.g. `status-transition.pattern` has
-  `!update_feature.*status` because Rule 3 says status changes are NOT MCP.
+- **Positive assert** (default): the regex MUST match either the original
+  line-oriented capture or its whitespace-normalized whole-output form, so
+  harmless model line wrapping does not break a workflow signal.
+- **Negative assert** (line begins with `!`): the regex MUST NOT match the
+  whitespace-normalized whole capture. Used
+  to enforce Important Rules — e.g. `status-transition.pattern` rejects
+  `update_feature(...)` and `update_feature with ...` tool-call shapes because
+  Rule 3 says status changes are NOT MCP.
+- **Pulse branch assert** (`@pulse-disabled-followup-safe`): the scoped
+  semantic check used only by `pulse-session.pattern`. It evaluates each
+  literal or prose `pulse end`/`pulse summary` command in textual order and
+  rejects affirmative follow-ups after `tracking_disabled` unless a preceding
+  positive real-session-ID branch (or a postfix `only if`/`when` condition)
+  scopes that command. Negative/no-ID qualifiers reset the enabled scope;
+  explicit skips remain safe while negated skips remain affirmative.
 - **Comment** (line begins with `# ` — hash + space): skipped by the matcher.
   Use for documenting which Decision Rule or Important Rule the assert is
   testing. Lines starting with `##` are NOT comments (they match Markdown
@@ -137,8 +149,8 @@ Step 1: Call create_product.
 
 ## Known caveats
 
-- **No live Zensu MCP server required.** The default mode asserts only
-  text-output behavior. If the agent's actual MCP tool calls fail because no
+- **No live Zensu backend required.** The default mode asserts only
+  text-output behavior. If the agent's actual CLI or MCP calls fail because no
   Zensu server is reachable, the agent should still describe its plan in
   text — and that text is what the patterns match against.
 - **LLM non-determinism.** The agent's exact phrasing varies between runs.
@@ -146,23 +158,26 @@ Step 1: Call create_product.
 - **Patterns are lower-bound.** A passing pattern proves the workflow signal
   *appeared*. It does not prove the agent's behavior was correct in every
   detail. Treat this as regression smoke, not a correctness oracle.
-- **Status-transition is the only negative-assert in this harness.** It is
-  the canonical example of an Important Rule that *forbids* a specific tool
-  call. If you add more such rules, model the pattern on
-  `status-transition.pattern`.
+- **Status-transition is the only regex negative-assert in this harness.** It
+  is the canonical example of a simple Important Rule that *forbids* a
+  specific tool-call shape. Pulse uses a deliberately narrow semantic branch
+  assertion because regex-only matching could not distinguish disabled and
+  enabled clauses without false positives.
 - **Rule 2 (`list_features` before `get_feature`) is enforced only in
   `feature-id-guard.pattern`.** The `implement` scenario assumes the ID is
   valid and does not re-stress Rule 2 — adding a `list_features` assert there
   would conflate two scenarios and weaken the discriminating power of
   `feature-id-guard`. The implement scenario stresses Rule 4 (security
   classification before implementation) only.
-- **Negative-assert escape forms — three known shapes slip past the harness.**
-  `match_pattern` greps per-line and the shipped `status-transition.pattern`
-  targets only the two most common tool-call shapes
+- **Negative-assert vocabulary gaps — three known shapes slip past the harness.**
+  `match_pattern` normalizes line breaks for negative assertions, but the
+  shipped `status-transition.pattern` intentionally targets only the two most
+  common tool-call shapes
   (`update_feature\s*\(` and `update_feature\s+with`). Three classes of
   adversarial phrasings are known to PASS unflagged:
-  1. **Cross-line splits.** An agent that mentions `update_feature` on line
-     N and `status` on line N+M cannot be caught with a single per-line regex.
+  1. **Cross-line bare serialization.** After normalization, a tool name on
+     line N and a bare `status` field on line N+M still has neither `(` nor
+     `with`, so it remains outside the conservative tool-call shapes.
   2. **Same-line bare juxtaposition.** Tool name and parameter on one line
      with no `(` and no `with`. Example: `update_feature status=released`.
   3. **Same-line YAML-style serialization.** Multi-line YAML where the tool
@@ -230,19 +245,13 @@ Concrete reproductions (verbatim from reviewer):
 - `User paste ZEN-999 metadata first.\nCalling get_feature ZEN-999 anyway.` (alt 14 walk-back)
 - `Cannot call get_feature without product context.\nActually, calling get_feature ZEN-999 anyway.` (alt 16 walk-back)
 
-**Architectural reason.** `grep -E` (and the underlying `match_pattern`
-helper) evaluates each pattern line against each capture line
-independently. Detecting "anchor satisfied on line N AND no walk-back on
-line N+M" semantics requires either:
-
-- `pcregrep -M` (multi-line PCRE) — non-portable across BSD/GNU userlands.
-- `tr '\n' ' '` whole-file slurp — kills line-locality of negative asserts
-  and bloats false-positive surface.
-- A separate `awk`/`bash` stateful pass — re-implements a tiny parser
-  inside a smoke-test harness.
-
-All three are **deliberate non-goals** for this harness. The harness is a
-regression smoke check, not a production-grade enforcer.
+**Architectural reason.** Positive regex assertions remain existence checks:
+matching both the original and whitespace-normalized capture makes wrapping
+tolerant, but it does not establish ordering or prove that an agent did not
+walk the statement back later. A generalized natural-language state machine
+is a deliberate non-goal for this smoke harness. The Pulse fixture has one
+narrow semantic exception because its two branches have a stable discriminator
+(`tracking_disabled`) and a stable enabled-branch proof (a real session ID).
 
 **Mitigation**: End-to-end pattern tests are smoke-level. The intended production guard is the
 Zensu MCP server: when the agent calls `get_feature` with an unknown ID, the server should
@@ -255,8 +264,8 @@ that the agent EMITS Rule-2 signal; runtime correctness is owned elsewhere.
 If you discover a REAL agent regression in production that the existing
 pattern misses — and that regression survives the MCP-boundary check —
 promote the capture into `tests/e2e-plm/fixtures/live-regressions/`. Do
-NOT chase reviewer-synthesized adversarial phrasings down the per-line
-regex hole; they are guaranteed to keep coming.
+NOT chase reviewer-synthesized adversarial phrasings down an open-ended regex
+vocabulary hole; they are guaranteed to keep coming.
 
 ## Live regression corpus
 
