@@ -7,6 +7,7 @@ ADAPTER="$ROOT/hooks/lib/claude-session-control-v1.js"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 SESSION="$ROOT/hooks/lib/zensu-session.sh"
 README="$ROOT/README.md"
+CHANGELOG="$ROOT/CHANGELOG.md"
 PASS=0
 FAIL=0
 check() {
@@ -16,6 +17,25 @@ check() {
 
 for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$ROOT/}" PASS || check "artifact exists: ${artifact#$ROOT/}" FAIL
+done
+
+UNRELEASED_CHANGELOG="$(awk '
+  /^## \[Unreleased\]/ { in_section = 1; next }
+  in_section && /^## \[/ { exit }
+  in_section { print }
+' "$CHANGELOG")"
+UNRELEASED_CHANGELOG_ONELINE="$(printf '%s\n' "$UNRELEASED_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
+for requirement in \
+  'After upgrading, restart every running Claude Code session once' \
+  '`~/.zensu/plugin-root` locator is no longer consulted or updated' \
+  'may be deleted manually once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
+  'the plugin never deletes it automatically'
+do
+  if printf '%s\n' "$UNRELEASED_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
+    check "Unreleased upgrade note: $requirement" PASS
+  else
+    check "Unreleased upgrade note: $requirement" FAIL
+  fi
 done
 
 SAFE_LOG_COMMAND='bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh"'

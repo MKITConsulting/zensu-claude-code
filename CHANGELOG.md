@@ -52,9 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locator, which could be clobbered by another host, plugin version, or
   worktree while a session was still active.
 
-  Existing Claude Code processes must be restarted once so the new
-  SessionStart contract can bind them. The retired `~/.zensu/plugin-root`
-  locator is stale, is never consulted, and may be deleted.
+  After upgrading, restart every running Claude Code session once so the new
+  SessionStart contract can bind it. The retired `~/.zensu/plugin-root` locator
+  is no longer consulted or updated. It may be deleted manually once no Claude
+  Code session from an older Zensu plugin installation is still running in the
+  same home; the plugin never deletes it automatically.
 
 ## [0.16.1] - 2026-07-16
 
