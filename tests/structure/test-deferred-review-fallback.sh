@@ -9,6 +9,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
 PASS=0; FAIL=0
 check() {
@@ -17,17 +18,25 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"
+export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN CLAUDE_SESSION_ID 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
+
+start_session() {
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
+}
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 
-MARKER="$TDD_STATE_DIR/pending-review.json"
+MARKER="$PROJ/.zensu/state/pending-review.json"
 SID="deferred-main"
+SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
+start_session "$SID"
 
 OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ]; then
@@ -53,7 +62,7 @@ fi
   && check "D3 marker cleared after adoption" FAIL \
   || check "D3 marker cleared after adoption" PASS
 
-D4FILE="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+D4FILE="$PROJ/.zensu/state/tdd-phase-${SID_KEY}.json"
 if node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.exit((s.active===true&&s.implComplete===true&&s.vanilla===true)?0:1)' "$D4FILE" 2>/dev/null; then
   check "D4 adopted session seeded active+implComplete+vanilla (default vanilla fork)" PASS
 else
@@ -67,6 +76,7 @@ bash "$LOG" --pending-review-done >/dev/null 2>&1
   || check "D5 --pending-review-done clears marker" PASS
 
 SID_SYM="deferred-symlink"
+start_session "$SID_SYM"
 rm -f "$MARKER" 2>/dev/null
 ln -s /etc/hosts "$MARKER" 2>/dev/null || true
 if [ -L "$MARKER" ]; then
@@ -82,6 +92,7 @@ fi
 rm -f "$MARKER"
 
 SID_CO="deferred-coexist"
+start_session "$SID_CO"
 bash "$LOG" --tdd-begin --session "$SID_CO" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID_CO" >/dev/null 2>&1
 bash "$LOG" --pending-review --files "co.ts" >/dev/null 2>&1
@@ -96,22 +107,23 @@ fi
 bash "$LOG" --pending-review-done >/dev/null 2>&1
 
 SID_FAIL="deferred-seedfail"
+start_session "$SID_FAIL"
 bash "$LOG" --pending-review --files "x.ts" --summary "fresh" >/dev/null 2>&1
-chmod 555 "$TDD_STATE_DIR" 2>/dev/null || true
-if touch "$TDD_STATE_DIR/.wprobe" 2>/dev/null; then
-  rm -f "$TDD_STATE_DIR/.wprobe" 2>/dev/null
-  chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+chmod 555 "$PROJ/.zensu/state" 2>/dev/null || true
+if touch "$PROJ/.zensu/state/.wprobe" 2>/dev/null; then
+  rm -f "$PROJ/.zensu/state/.wprobe" 2>/dev/null
+  chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
   echo "  SKIP  D8 seed-failure — state dir still writable (cannot force failure on this platform)"
 else
   OUT="$(printf '{"session_id":"%s"}' "$SID_FAIL" | bash "$STOP" 2>/dev/null)"; RC=$?
-  chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+  chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
   if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ -f "$MARKER" ]; then
     check "D8 seed-write failure -> not adopted (allow) + marker retained for retry" PASS
   else
     check "D8 seed-failure (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
   fi
 fi
-chmod 755 "$TDD_STATE_DIR" 2>/dev/null || true
+chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
 rm -f "$MARKER"
 
 echo "----"

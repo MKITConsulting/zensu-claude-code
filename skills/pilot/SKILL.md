@@ -59,8 +59,8 @@ Slash form: `/zensu:pilot [<feature>]`.
 
 - Unattended end-to-end builds — that is `/zensu:autopilot` (one planning gate,
   then zero questions). Pilot is the opposite trade: a question at every seam.
-- Product planning, bootstrap, or scans — route to the zensu-plm agent
-  (`/zensu:bootstrap`, `/zensu:ghost-scan`).
+- Product planning, bootstrap, or scans — return to the interactive main thread
+  and invoke `/zensu:bootstrap` or `/zensu:ghost-scan` there.
 - Ad-hoc coding without a tracked feature — use `/zensu:tdd` directly.
 
 ## The loop contract

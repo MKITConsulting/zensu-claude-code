@@ -3,6 +3,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PASS=0; FAIL=0
@@ -20,11 +22,14 @@ if [ ! -x "$SCRIPT" ]; then
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
-cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
+TMP_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
+cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
-TMP_CFG="/tmp/zensu-gate-postreview-disabled-$$.json"
+TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": false}}
 EOF
@@ -49,6 +54,9 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true}}
 EOF
 
+# shellcheck disable=SC1090
+source "$BASELINE" config-gate-reviewer-v1
+bash "$LOG" --tdd-begin --session "config-gate-reviewer-v1" >/dev/null 2>&1
 OUT_ENABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"
 
 case "$OUT_ENABLED" in
@@ -64,7 +72,7 @@ else
 fi
 
 unset ZENSU_CONFIG
-NOTHING_CFG="/tmp/zensu-no-config-postreview-$$.json"
+NOTHING_CFG="$TMP_DIR/no-config.json"
 rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-code-reviewer.json" 2>/dev/null)"

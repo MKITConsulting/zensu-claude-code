@@ -8,9 +8,10 @@ set -u
 # (sandbox, node required): zensu-doctor-report.js renders a four-block table
 # and ALWAYS exits 0 while correctly flagging version mismatch (❌), hooks
 # wired-but-missing (❌) + disk-but-unwired (⚠️), the quoted-boolean config
-# trap (⚠️, real booleans NOT flagged), stale state markers (⚠️), and an
-# expired pending-review marker (⚠️) vs a fresh one (✅); all-green fixture is
-# all ✅. Read-only throughout.
+# trap (⚠️, real booleans NOT flagged), validated CAS workflow documents (✅),
+# malformed workflow integers (❌ / fail closed), and an expired pending-review
+# marker (⚠️) vs a fresh one (✅); all-green fixture is all ✅. Read-only
+# throughout.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
@@ -52,10 +53,13 @@ if grep -qE '^name: doctor$' "$SKILL_MD"; then
 else
   check "P2c skill frontmatter name is doctor" FAIL
 fi
-if grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
-  check "P2d skill runs the helper" PASS
+if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' "$SKILL_MD" \
+  && grep -qF 'bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' "$SKILL_MD" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL:' "$SKILL_MD"; then
+  check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" PASS
 else
-  check "P2d skill runs the helper" FAIL
+  check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" FAIL
 fi
 if grep -qF 'AskUserQuestion' "$SKILL_MD" && grep -qiF 'report-only' "$SKILL_MD"; then
   check "P2e skill gates cleanup (AskUserQuestion + report-only non-interactive)" PASS
@@ -89,11 +93,35 @@ if grep -qF 'Playwright MCP: valid integrity-locked plugin config + npm present'
 else
   check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
 fi
+if ! grep -qF 'Array.isArray(h && h.args)' "$REPORT"; then
+  check "P2n doctor parses only the documented hooks.json command field" PASS
+else
+  check "P2n doctor retains undocumented hooks.json args tolerance" FAIL
+fi
+
+REAL_MANIFEST="$(ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" ZENSU_CONFIG="$PLUGIN_DIR/.no-such-doctor-config" CLAUDE_PROJECT_DIR="$PLUGIN_DIR/.no-such-doctor-project" \
+  node "$REPORT" 2>/dev/null)"
+case "$REAL_MANIFEST" in
+  *'hooks wiring: all 16 hooks referenced in hooks.json exist on disk'*) check "P2o real hook manifest pins exactly 16 wired scripts" PASS ;;
+  *) check "P2o real hook manifest count is not exactly 16" FAIL ;;
+esac
 if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" PASS
 else
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" FAIL
+fi
+
+PHASE3_SKILL="$(sed -n '/^## Phase 3:/,/^## Response Style/p' "$SKILL_MD")"
+if printf '%s\n' "$PHASE3_SKILL" | grep -qF 'Never delete, rename, rewrite, or enumerate' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'tdd_reset_review_budget' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'PENDING="$STATE_DIR/pending-review.json"' \
+  && printf '%s\n' "$PHASE3_SKILL" | grep -qF 'rm -f -- "$PENDING"' \
+  && ! printf '%s\n' "$PHASE3_SKILL" | awk '/^```/{inside=!inside;next} inside{print}' | grep -Eq '(^|[[:space:]])find[[:space:]]'; then
+  check "P2m cleanup protects CAS documents and limits the only write to exact pending-review.json" PASS
+else
+  check "P2m cleanup protects CAS documents and limits the only write to exact pending-review.json" FAIL
 fi
 
 if ! command -v node >/dev/null 2>&1; then
@@ -111,33 +139,36 @@ if [ -z "$SBOX" ]; then
   echo "test-doctor: $PASS PASS / $FAIL FAIL"
   exit 1
 fi
-mkdir -p "$SBOX/plug/.claude-plugin" "$SBOX/plug/hooks" "$SBOX/st"
+STATE_PROJECT="$SBOX/state-project"
+STATE_DIR_CANON="$STATE_PROJECT/.zensu/state"
+EMPTY_PROJECT="$SBOX/empty-project"
+mkdir -p "$SBOX/plug/.claude-plugin" "$SBOX/plug/hooks" "$STATE_DIR_CANON" "$EMPTY_PROJECT"
 
 run_report() {
-  # run_report <plugin_dir> <config|-> <state_dir>  (tool facts fixed absent)
-  local pd="$1" cfg="$2" sd="$3"
+  # run_report <plugin_dir> <config|-> <project_root>  (tool facts fixed absent)
+  local pd="$1" cfg="$2" project="$3"
   local cfgenv=""
   [ "$cfg" != "-" ] && cfgenv="$cfg"
   ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
-  ZENSU_DOCTOR_PLUGIN_DIR="$pd" ZENSU_CONFIG="$cfgenv" TDD_STATE_DIR="$sd" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$pd" ZENSU_CONFIG="$cfgenv" CLAUDE_PROJECT_DIR="$project" \
     node "$REPORT" 2>/dev/null
 }
 
 # --- all-green fixture -----------------------------------------------------
 printf '{"name":"zensu","version":"1.2.3"}\n' > "$SBOX/plug/.claude-plugin/plugin.json"
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
-printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hooks/a.sh"}]}]}}\n' > "$SBOX/plug/hooks/hooks.json"
+printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hooks/a.sh","args":["${CLAUDE_PLUGIN_ROOT}/hooks/ghost.sh"]}]}]}}\n' > "$SBOX/plug/hooks/hooks.json"
 printf '#!/bin/bash\n' > "$SBOX/plug/hooks/a.sh"
 printf '{"hooks":{"reviewJudge":true,"secretScan":false}}\n' > "$SBOX/good-cfg.json"
 
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"; RC=$?
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1a report exits 0 on the green fixture" PASS || check "P1a report exits 0 (rc=$RC)" FAIL
 case "$OUT" in *'version sync: plugin.json and marketplace.json agree'*) check "P1b version sync ✅ when equal" PASS ;; *) check "P1b version sync ✅ when equal" FAIL ;; esac
 case "$OUT" in *'hooks wiring: all 1 hooks'*) check "P1c wiring ✅ when consistent" PASS ;; *) check "P1c wiring ✅ when consistent" FAIL ;; esac
 case "$OUT" in *'no quoted-boolean traps'*) check "P1d config ✅ with real booleans (reviewJudge:true/secretScan:false)" PASS ;; *) check "P1d config ✅ with real booleans" FAIL ;; esac
 # all-green summary only when the tool block is green too (inject authed tools)
 GREEN="$(ZDOC_ZENSU=authed ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=ready ZDOC_PLAYWRIGHT=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$GREEN" in *'all checks green'*) check "P1e summary reports all green when every block is green" PASS ;; *) check "P1e summary all green (got: $GREEN)" FAIL ;; esac
 case "$GREEN" in *'Playwright MCP: loaded and ready (/zensu:verify-feature and autopilot browser driver)'*) check "P1ea runtime-ready Playwright MCP renders green" PASS ;; *) check "P1ea runtime-ready Playwright MCP message (got: $GREEN)" FAIL ;; esac
@@ -169,7 +200,7 @@ ln -s "$(command -v node)" "$FAKE_BIN/node"
 printf '#!/bin/bash\n: > "${FAKE_NPM_MARKER:?}"\nexit 99\n' > "$FAKE_BIN/npm"
 chmod +x "$FAKE_BIN/npm"
 MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   bash "$HELPER" 2>/dev/null)"
 case "$MCP_OUT" in *'Playwright MCP: valid integrity-locked plugin config + npm present'*) check "P1eb helper executes valid MCP declaration path" PASS ;; *) check "P1eb valid MCP declaration path (got: $MCP_OUT)" FAIL ;; esac
 if [ -e "$NPM_MARKER" ]; then
@@ -180,7 +211,7 @@ fi
 printf '%s\n' '{"mcpServers":{"playwright":{"type":"stdio","command":"npx","args":["@playwright/mcp@latest"]}}}' > "$MCP_PLUG/.mcp.json"
 rm -f "$NPM_MARKER"
 BAD_MCP_OUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" FAKE_NPM_MARKER="$NPM_MARKER" ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   bash "$HELPER" 2>/dev/null)"; BAD_MCP_RC=$?
 [ "$BAD_MCP_RC" -eq 0 ] && check "P1ed invalid MCP helper path exits 0" PASS || check "P1ed invalid MCP helper path exits 0 (rc=$BAD_MCP_RC)" FAIL
 case "$BAD_MCP_OUT" in *'Playwright MCP: valid plugin config not detected'*) check "P1ef invalid/floating MCP declaration renders exact warning" PASS ;; *) check "P1ef invalid/floating MCP warning (got: $BAD_MCP_OUT)" FAIL ;; esac
@@ -196,31 +227,31 @@ ln -s "$(command -v node)" "$NO_NPM_BIN/node"
 ln -s "$(command -v dirname)" "$NO_NPM_BIN/dirname"
 DECLARED_OUT="$(PATH="$NO_NPM_BIN" ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" \
   ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE='' \
-  ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
+  ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" /bin/bash "$HELPER" 2>/dev/null)"; DECLARED_RC=$?
 [ "$DECLARED_RC" -eq 0 ] && check "P1eh valid declaration/no-npm helper path exits 0" PASS || check "P1eh valid declaration/no-npm helper path exits 0 (rc=$DECLARED_RC)" FAIL
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) check "P1ei isolated no-npm PATH rendering (covered on macOS/Linux/WSL)" PASS ;;
   *) case "$DECLARED_OUT" in *'Playwright MCP: valid integrity-locked plugin config but npm is missing from PATH'*) check "P1ei valid declaration without npm renders degraded warning" PASS ;; *) check "P1ei declared/no-npm warning (got: $DECLARED_OUT)" FAIL ;; esac ;;
 esac
 READY_HELPER="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT_TOOLS=ready \
-  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$MCP_PLUG" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   bash "$HELPER" 2>/dev/null)"; READY_HELPER_RC=$?
 [ "$READY_HELPER_RC" -eq 0 ] && case "$READY_HELPER" in *'Playwright MCP: loaded and ready'*) check "P1ej helper requires valid plugin config + loaded-tool signal for readiness" PASS ;; *) check "P1ej helper ready message (got: $READY_HELPER)" FAIL ;; esac || check "P1ej helper ready path (rc=$READY_HELPER_RC)" FAIL
 PATH_ONLY="$(ZDOC_ZENSU=authed ZDOC_NODE=vTEST ZDOC_GH=authed ZDOC_PLAYWRIGHT=present \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
   node "$REPORT" 2>/dev/null)"
 case "$PATH_ONLY" in *'PATH binary found, but /zensu:verify-feature requires loaded Playwright MCP tools'*) check "P1ee PATH-only Playwright is a warning, not false green" PASS ;; *) check "P1ee PATH-only Playwright warning (got: $PATH_ONLY)" FAIL ;; esac
 
 # --- version mismatch ------------------------------------------------------
 printf '{"plugins":[{"name":"zensu","version":"9.9.9"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"; RC=$?
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && case "$OUT" in *'version sync: plugin.json 1.2.3 != marketplace.json 9.9.9'*) check "P1f version mismatch ❌ (exit 0)" PASS ;; *) check "P1f version mismatch ❌ (got: $OUT)" FAIL ;; esac || check "P1f version mismatch (rc=$RC)" FAIL
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
 
 # --- hooks wiring both directions -----------------------------------------
 printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hooks/ghost.sh"}]}]}}\n' > "$SBOX/plug/hooks/hooks.json"
 printf '#!/bin/bash\n' > "$SBOX/plug/hooks/orphan.sh"
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'referenced but missing on disk'*ghost.sh*) check "P1g wired-but-missing ❌ names the script" PASS ;; *) check "P1g wired-but-missing ❌ (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'not referenced in hooks.json'*orphan.sh*) check "P1h disk-but-unwired ⚠️ names the script" PASS ;; *) check "P1h disk-but-unwired ⚠️ (got: $OUT)" FAIL ;; esac
 # restore consistent wiring
@@ -229,54 +260,73 @@ rm -f "$SBOX/plug/hooks/orphan.sh"
 
 # --- quoted-boolean trap ---------------------------------------------------
 printf '{"hooks":{"reviewJudge":"true","secretScan":false}}\n' > "$SBOX/bad-cfg.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/bad-cfg.json" "$SBOX/st")"; RC=$?
+OUT="$(run_report "$SBOX/plug" "$SBOX/bad-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1i report exits 0 on quoted-boolean config" PASS || check "P1i report exits 0 (rc=$RC)" FAIL
 case "$OUT" in *'quoted boolean'*'hooks.reviewJudge = "true"'*) check "P1j quoted boolean ⚠️ names the dotted key" PASS ;; *) check "P1j quoted boolean ⚠️ (got: $OUT)" FAIL ;; esac
 case "$OUT" in *secretScan*) check "P1k real boolean secretScan:false NOT flagged" FAIL ;; *) check "P1k real boolean secretScan:false NOT flagged" PASS ;; esac
 
 # --- invalid JSON config ---------------------------------------------------
 printf '{not json' > "$SBOX/broken-cfg.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/broken-cfg.json" "$SBOX/st")"; RC=$?
+OUT="$(run_report "$SBOX/plug" "$SBOX/broken-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && case "$OUT" in *'config: invalid JSON'*) check "P1l invalid config ❌ (exit 0, defaults apply)" PASS ;; *) check "P1l invalid config ❌ (got: $OUT)" FAIL ;; esac || check "P1l invalid config (rc=$RC)" FAIL
 
-# --- state markers ---------------------------------------------------------
-: > "$SBOX/st/tdd-phase-x.json"; : > "$SBOX/st/rounds-x.json"; : > "$SBOX/st/review-pass-x"; : > "$SBOX/st/y.stopblocks"
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"
-case "$OUT" in *'4 per-session marker file(s) present'*'1 tdd-phase, 1 rounds, 1 review-pass, 1 stopblocks'*) check "P1m stale markers ⚠️ with per-type counts" PASS ;; *) check "P1m stale markers ⚠️ (got: $OUT)" FAIL ;; esac
+# --- validated CAS workflow state -----------------------------------------
+CAS_PROJECT="$SBOX/cas-project"
+CAS_ST="$CAS_PROJECT/.zensu/state"
+mkdir -p "$CAS_PROJECT"
+export CLAUDE_PROJECT_DIR="$CAS_PROJECT"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" doctor-valid
+bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session doctor-valid >/dev/null 2>&1
+CAS_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key doctor-valid)"
+CAS_FILE="$CAS_ST/tdd-phase-${CAS_KEY}.json"
+# Retired sidecars are inert and must neither be counted nor interpreted.
+: > "$CAS_ST/rounds-retired.json"; : > "$CAS_ST/retired.stopblocks"
+OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
+case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlocks are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
+
+node -e '
+  const fs=require("fs"), p=process.argv[1], j=JSON.parse(fs.readFileSync(p,"utf8"));
+  j.reviewRound="7"; fs.writeFileSync(p, JSON.stringify(j));
+' "$CAS_FILE"
+OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
+case "$OUT" in *'1 invalid CAS workflow document(s) — hooks fail closed'*"$(basename "$CAS_FILE")"*) check "P1mb malformed integrated integer is a fail-closed doctor error" PASS ;; *) check "P1mb malformed integrated integer fail-closed (got: $OUT)" FAIL ;; esac
 
 # expired vs fresh pending-review.json
-: > "$SBOX/st/pending-review.json"
-touch -t 202001010000 "$SBOX/st/pending-review.json" 2>/dev/null
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"
+: > "$STATE_DIR_CANON/pending-review.json"
+touch -t 202001010000 "$STATE_DIR_CANON/pending-review.json" 2>/dev/null
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json is'*'old (TTL'*'expired'*) check "P1n expired pending-review ⚠️" PASS ;; *) check "P1n expired pending-review ⚠️ (got: $OUT)" FAIL ;; esac
-: > "$SBOX/st/pending-review.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/st")"
+: > "$STATE_DIR_CANON/pending-review.json"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json present and within'*) check "P1o fresh pending-review ✅" PASS ;; *) check "P1o fresh pending-review ✅ (got: $OUT)" FAIL ;; esac
 
 # --- empty state dir -------------------------------------------------------
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'does not exist yet'*) check "P1p missing state dir handled read-only" PASS ;; *) check "P1p missing state dir handled (got: $OUT)" FAIL ;; esac
 
 # --- summary escalation (❌ wins over ⚠️; ⚠️-only is "no blockers") --------
 printf '{"plugins":[{"name":"zensu","version":"9.9.9"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'Summary:'*'resolve the ❌ items first'*) check "P1r summary escalates to ❌ when a red row exists" PASS ;; *) check "P1r summary ❌ (got: $OUT)" FAIL ;; esac
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claude-plugin/marketplace.json"
 # green plugin/config but absent tools (run_report injects absent) -> warn-only
-OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'Summary:'*'no blockers'*) check "P1s summary is warn-only (no blockers) when only ⚠️ rows exist" PASS ;; *) check "P1s summary warn-only (got: $OUT)" FAIL ;; esac
 
 # --- state dir not writable -------------------------------------------------
 # Probe whether chmod actually made the dir read-only; filesystems that ignore
 # Unix mode bits (root, Windows git-bash, some network mounts) cannot simulate
 # this branch, so skip the assertion there instead of failing spuriously.
-mkdir -p "$SBOX/ro-st"; : > "$SBOX/ro-st/tdd-phase-z.json"; chmod 0500 "$SBOX/ro-st" 2>/dev/null
-if ( : > "$SBOX/ro-st/.wtest" ) 2>/dev/null; then
-  rm -f "$SBOX/ro-st/.wtest" 2>/dev/null; chmod 0700 "$SBOX/ro-st" 2>/dev/null
+RO_PROJECT="$SBOX/ro-project"; RO_ST="$RO_PROJECT/.zensu/state"
+mkdir -p "$RO_ST"; : > "$RO_ST/tdd-phase-z.json"; chmod 0500 "$RO_ST" 2>/dev/null
+if ( : > "$RO_ST/.wtest" ) 2>/dev/null; then
+  rm -f "$RO_ST/.wtest" 2>/dev/null; chmod 0700 "$RO_ST" 2>/dev/null
   check "P1t state-not-writable ❌ (skipped: filesystem ignores mode bits)" PASS
 else
-  OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$SBOX/ro-st")"; RC=$?
-  chmod 0700 "$SBOX/ro-st" 2>/dev/null
+  OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$RO_PROJECT")"; RC=$?
+  chmod 0700 "$RO_ST" 2>/dev/null
   [ "$RC" -eq 0 ] && case "$OUT" in *'is not writable'*) check "P1t state-not-writable ❌ (exit 0)" PASS ;; *) check "P1t state-not-writable ❌ (got: $OUT)" FAIL ;; esac || check "P1t state-not-writable (rc=$RC)" FAIL
 fi
 
@@ -284,42 +334,43 @@ fi
 mkdir -p "$SBOX/plug2/.claude-plugin" "$SBOX/plug2/hooks"
 printf '{"hooks":{}}\n' > "$SBOX/plug2/hooks/hooks.json"
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug2/.claude-plugin/marketplace.json"
-OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'plugin.json: missing'*) check "P1u plugin.json missing ❌" PASS ;; *) check "P1u plugin.json missing ❌ (got: $OUT)" FAIL ;; esac
 printf '{"name":"zensu","version":"1.2.3"}\n' > "$SBOX/plug2/.claude-plugin/plugin.json"
 rm -f "$SBOX/plug2/.claude-plugin/marketplace.json"
-OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'marketplace.json: missing'*) check "P1v marketplace.json missing ⚠️" PASS ;; *) check "P1v marketplace.json missing ⚠️ (got: $OUT)" FAIL ;; esac
 printf '{"plugins":[{"name":"other","version":"1.2.3"}]}\n' > "$SBOX/plug2/.claude-plugin/marketplace.json"
-OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'not listed in marketplace.json'*) check "P1w plugin not listed ⚠️" PASS ;; *) check "P1w plugin not listed ⚠️ (got: $OUT)" FAIL ;; esac
 printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug2/.claude-plugin/marketplace.json"
 printf '{bad json' > "$SBOX/plug2/hooks/hooks.json"
-OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'hooks.json: invalid JSON'*) check "P1x hooks.json invalid ❌" PASS ;; *) check "P1x hooks.json invalid ❌ (got: $OUT)" FAIL ;; esac
 
 # --- config-absent (defaults apply) ---------------------------------------
 OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" HOME="$SBOX/nohome" CLAUDE_PROJECT_DIR="$SBOX/noproj" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" HOME="$SBOX/nohome" CLAUDE_PROJECT_DIR="$SBOX/noproj" \
   node "$REPORT" 2>/dev/null)"
 case "$OUT" in *'no config file present'*) check "P1y config-absent falls back to defaults ✅" PASS ;; *) check "P1y config-absent (got: $OUT)" FAIL ;; esac
 
 # --- nested quoted boolean + __proto__ guard -------------------------------
 printf '{"hooks":{"nested":{"flag":"true"}},"__proto__":{"x":"true"}}\n' > "$SBOX/nested-cfg.json"
-OUT="$(run_report "$SBOX/plug" "$SBOX/nested-cfg.json" "$SBOX/empty-st")"
+OUT="$(run_report "$SBOX/plug" "$SBOX/nested-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'hooks.nested.flag = "true"'*) check "P1z nested quoted boolean ⚠️ (recursion)" PASS ;; *) check "P1z nested quoted boolean (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'__proto__'*) check "P1aa __proto__ key not reported (pollution guard)" FAIL ;; *) check "P1aa __proto__ key not reported (pollution guard)" PASS ;; esac
 
 # --- TTL honored from ZDOC_TTL_HOURS (canonical getter value) --------------
 # age ~3548h: default TTL 6 would call it expired; the injected max TTL 8760
 # (!= 6) keeps it fresh — proving ZDOC_TTL_HOURS is the value that is honored.
-mkdir -p "$SBOX/ttl-st"; : > "$SBOX/ttl-st/pending-review.json"
-touch -t 202601010000 "$SBOX/ttl-st/pending-review.json" 2>/dev/null
+TTL_PROJECT="$SBOX/ttl-project"; TTL_ST="$TTL_PROJECT/.zensu/state"
+mkdir -p "$TTL_ST"; : > "$TTL_ST/pending-review.json"
+touch -t 202601010000 "$TTL_ST/pending-review.json" 2>/dev/null
 FAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=8760 ZDOC_NOW_MS=1780000000000 \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/ttl-st" node "$REPORT" 2>/dev/null)"
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$TTL_PROJECT" node "$REPORT" 2>/dev/null)"
 case "$FAR" in *'within its 8760h TTL'*) check "P1ab TTL honored from ZDOC_TTL_HOURS (injected 8760 != default 6)" PASS ;; *) check "P1ab TTL honored (got: $FAR)" FAIL ;; esac
 NEAR="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZDOC_NOW_MS=1780000000000 \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/ttl-st" node "$REPORT" 2>/dev/null)"
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$TTL_PROJECT" node "$REPORT" 2>/dev/null)"
 case "$NEAR" in *'(TTL 6h) — expired'*) check "P1ac default TTL 6h (getter default) marks the same marker expired" PASS ;; *) check "P1ac default TTL 6h expired (got: $NEAR)" FAIL ;; esac
 
 # --- wrapper end-to-end (real toolchain) -----------------------------------
@@ -338,7 +389,7 @@ fi
 forge_report() { # forge_report <provider> <cli> <state> [edition]
   ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_PLAYWRIGHT=absent \
   ZDOC_FORGE_PROVIDER="$1" ZDOC_FORGE_CLI="$2" ZDOC_FORGE_STATE="$3" ZDOC_FORGE_EDITION="${4:-cloud}" \
-  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" TDD_STATE_DIR="$SBOX/empty-st" \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
     node "$REPORT" 2>/dev/null
 }
 case "$(forge_report github gh ready)" in

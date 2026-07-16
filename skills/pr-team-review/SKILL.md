@@ -44,11 +44,9 @@ Every git-host call goes through the driver so the forge (GitHub or GitLab) is d
 and the publish path degrades correctly.
 
 ```bash
-ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"
-[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-log.sh" ] || {
-  echo "FATAL: plugin root unavailable — start a fresh Claude Code session" >&2; exit 1;
-}
+ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
+[ -f "$VCS" ] || { echo "FATAL: VCS driver unavailable in the installed plugin" >&2; exit 1; }
 ```
 
 Forge **detection is repo-scoped**, so it runs inside Phase A.1 once the repo root is

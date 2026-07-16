@@ -1,9 +1,11 @@
-description: "/zensu:reset-review-limit skill eval suite (2 scenarios: happy path + empty-dir idempotency)"
+description: "/zensu:reset-review-limit CAS eval suite (happy path + invalid-state fail-closed + retired-sidecar isolation)"
 
 providers:
-  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
+  - id: 'exec: ./provider.sh'
     config:
       working_dir: ./test-projects/empty-host
+      require_disposable_environment: true
+      init_git: true
 
 prompts:
   - id: reset-review-limit-spec
@@ -15,10 +17,14 @@ defaultTest:
   options:
     transform: |
       return typeof output === 'string' ? output : JSON.stringify(output);
+  assert:
+    - type: javascript
+      value: file://assertions/sealed-attestation.js
 
 tests:
-  - file://scenarios/reset-counter-happy.yaml
-  - file://scenarios/reset-counter-empty.yaml
+  - file://scenarios/reset-cas-happy.yaml
+  - file://scenarios/reset-invalid-state.yaml
+  - file://scenarios/reset-sidecar-isolation.yaml
 
 evaluateOptions:
   maxConcurrency: 2

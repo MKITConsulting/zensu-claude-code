@@ -32,7 +32,7 @@ function sanitize(value) {
 
 function protectFraming(text) {
   return text.replace(
-    /(^|\n)(?=\[(?:assistant_text\]|tool_use:|tool_result:|result\]|stream_warning\]|enrichment_warning\]|fsm-state-(?:invalid|final)\]|fsm-history\]|wrapper_attestation\])|=====)/g,
+    /(^|\n)(?=\[(?:assistant_text\]|tool_use:|tool_result:|result\]|stream_warning\]|enrichment_warning\]|fsm-state-(?:invalid|final)\]|fsm-history\]|wrapper_attestation\]|control-attestation\]|reset-review-limit-attestation\])|=====)/g,
     '$1[content] '
   );
 }

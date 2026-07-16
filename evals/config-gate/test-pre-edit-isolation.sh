@@ -19,9 +19,9 @@ fi
 check "hook script exists and is executable" PASS
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+STATE_DIR="$(mktemp -d)"
+export STATE_DIR
+cleanup() { rm -rf "$STATE_DIR"; }
 trap cleanup EXIT
 
 unset CLAUDE_AGENT_TYPE

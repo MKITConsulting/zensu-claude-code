@@ -3,6 +3,9 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+TDD_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -24,9 +27,17 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
-mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 export ZENSU_CONFIG="$TMP_CFG"
+source "$TDD_LIB"
+
+seed_active() {
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$1"
+  bash "$LOG" --tdd-begin --session "$1" >/dev/null 2>&1
+}
 
 # selfReview:false routes the CHAIN-END SUMMARY inline through this hook
 # (TAIL_DIRECTIVE). With selfReview enabled (the 0.5.0 default) the summary is
@@ -37,6 +48,7 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 
 STDIN_A='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-a-001"}'
+seed_active "sess-summary-a-001"
 OUT="$(printf '%s' "$STDIN_A" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -112,6 +124,7 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 
 STDIN_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-off-001"}'
+seed_active "sess-summary-off-001"
 OUT="$(printf '%s' "$STDIN_OFF" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -133,6 +146,7 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 
 STDIN_SUGG_ON='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-001"}'
+seed_active "sess-summary-sugg-001"
 OUT="$(printf '%s' "$STDIN_SUGG_ON" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -154,6 +168,7 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 
 STDIN_SUGG_OFF='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-summary-sugg-off-001"}'
+seed_active "sess-summary-sugg-off-001"
 OUT="$(printf '%s' "$STDIN_SUGG_OFF" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -174,7 +189,10 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "selfReview": false}}
 EOF
 SID_MR_ON="sess-summary-mr-on-001"
-printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_ON}.json"
+seed_active "$SID_MR_ON"
+for _ in 1 2 3 4 5; do
+  tdd_increment_counter "$SID_MR_ON" reviewRound >/dev/null
+done
 STDIN_MR_ON="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_MR_ON}\"}"
 OUT="$(printf '%s' "$STDIN_MR_ON" | "$SCRIPT" 2>/dev/null)"
 
@@ -203,7 +221,10 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixMaxRounds": 5, "combinedSummary": false, "selfReview": false}}
 EOF
 SID_MR_OFF="sess-summary-mr-off-001"
-printf '{"count":5,"ts":"2026-01-01T00:00:00Z"}\n' > "$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID_MR_OFF}.json"
+seed_active "$SID_MR_OFF"
+for _ in 1 2 3 4 5; do
+  tdd_increment_counter "$SID_MR_OFF" reviewRound >/dev/null
+done
 STDIN_MR_OFF="{\"tool_name\":\"Task\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"x\"},\"session_id\":\"${SID_MR_OFF}\"}"
 OUT="$(printf '%s' "$STDIN_MR_OFF" | "$SCRIPT" 2>/dev/null)"
 

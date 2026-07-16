@@ -1,0 +1,74 @@
+- description: "C01 canonical fresh-session attestation"
+  vars: { scenario_id: canonical-happy, expected_valid: true, expected_host: claude, expected_workflow_state: contract_verified, expected_revision: 2, expected_exit_code: 0 }
+- description: "C02 idempotent immutable context registration"
+  vars: { scenario_id: idempotent-context, expected_valid: true, expected_host: claude, expected_workflow_state: contract_verified, expected_revision: 2, expected_exit_code: 0 }
+- description: "C03 physical worktree plugin root"
+  vars: { scenario_id: worktree-root, expected_valid: true, expected_host: claude, expected_workflow_state: contract_verified, expected_revision: 2, expected_exit_code: 0 }
+- description: "C04 runtime digest is bound"
+  vars: { scenario_id: runtime-digest, expected_valid: true, expected_host: claude, expected_workflow_state: contract_verified, expected_revision: 2, expected_exit_code: 0 }
+- description: "C05 optimistic workflow revision increments"
+  vars: { scenario_id: workflow-revision, expected_valid: true, expected_host: claude, expected_workflow_state: contract_verified, expected_revision: 3, expected_exit_code: 0 }
+- description: "C06 hook sequence is wrapper evidence"
+  vars: { scenario_id: hook-sequence, expected_valid: true, expected_host: claude, expected_hook: 'SessionStart', expected_revision: 2, expected_exit_code: 0 }
+- description: "C07 empty changed-file hash map"
+  vars: { scenario_id: changed-hashes-empty, expected_valid: true, expected_host: claude, expect_no_changes: true, expected_revision: 2, expected_exit_code: 0 }
+- description: "C08 changed-file hashes are canonically sorted"
+  vars: { scenario_id: changed-hashes-sorted, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C09 plugin version is attested"
+  vars: { scenario_id: plugin-version, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C10 exact source revision is attested"
+  vars: { scenario_id: source-revision, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C11 reviewer capability profile is immutable"
+  vars: { scenario_id: reviewer-profile, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C12 model cannot forge the reserved prefix"
+  vars: { scenario_id: model-prefix-spoof, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C13 nonzero wrapper exit is represented, not hidden"
+  vars: { scenario_id: nonzero-exit-attested, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 7 }
+- description: "C14 duplicate authoritative lines are rejected"
+  vars: { scenario_id: duplicate-authoritative, expected_valid: false }
+- description: "C15 missing required field is rejected"
+  vars: { scenario_id: missing-field, expected_valid: false }
+- description: "C16 unknown extra field is rejected"
+  vars: { scenario_id: extra-field, expected_valid: false }
+- description: "C17 raw session id is rejected"
+  vars: { scenario_id: raw-session-id, expected_valid: false }
+- description: "C18 plugin-root mistarget is rejected"
+  vars: { scenario_id: root-mistarget, expected_valid: false }
+- description: "C19 malformed runtime digest is rejected"
+  vars: { scenario_id: digest-malformed, expected_valid: false }
+- description: "C20 zero workflow revision is rejected"
+  vars: { scenario_id: revision-zero, expected_valid: false }
+- description: "C21 non-array hook evidence is rejected"
+  vars: { scenario_id: hook-not-array, expected_valid: false }
+- description: "C22 reviewer capability escalation is rejected"
+  vars: { scenario_id: capability-escalation, expected_valid: false }
+- description: "C23 malformed changed-file hash is rejected"
+  vars: { scenario_id: changed-hash-malformed, expected_valid: false }
+- description: "C24 missing CLI version is rejected"
+  vars: { scenario_id: empty-cli-version, expected_valid: false }
+- description: "C25 wrong source revision is rejected"
+  vars: { scenario_id: wrong-source-revision, expected_valid: false }
+- description: "C26 wrong exit code is rejected by expected contract"
+  vars: { scenario_id: wrong-exit-code, expected_valid: false, expected_exit_code: 0 }
+- description: "C27 missing plugin version is rejected"
+  vars: { scenario_id: plugin-version-missing, expected_valid: false }
+- description: "C28 schema mismatch is rejected"
+  vars: { scenario_id: schema-mismatch, expected_valid: false }
+- description: "C29 noncanonical multiline JSON is rejected"
+  vars: { scenario_id: noncanonical-json, expected_valid: false }
+- description: "C30 invalid JSON is rejected"
+  vars: { scenario_id: invalid-json, expected_valid: false }
+- description: "C31 missing attestation is rejected"
+  vars: { scenario_id: no-attestation, expected_valid: false }
+- description: "C32 reordered canonical fields are rejected"
+  vars: { scenario_id: reordered-fields, expected_valid: false }
+- description: "C33 real bare reviewer agent types receive reviewer-readonly-v1"
+  vars: { scenario_id: bare-reviewer-types, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C34 unknown custom agents receive neutral host-profile-v1"
+  vars: { scenario_id: unknown-neutral-profile, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C35 missing inherited SubagentStart context is denied at PreToolUse"
+  vars: { scenario_id: pretool-missing-context-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C36 tampered inherited SubagentStart context is denied at PreToolUse"
+  vars: { scenario_id: pretool-tampered-context-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C37 deleted project CAS state after activation is denied at PreToolUse"
+  vars: { scenario_id: pretool-deleted-cas-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }

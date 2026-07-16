@@ -236,9 +236,11 @@ fi
 rm -rf "$STUB_STREAM_DIR" "$SRC_STREAM_DIR"
 
 if ! grep -qF 'CLAUDE_RAW=' "$WRAPPER" \
-  && ! grep -qF 'PIPESTATUS' "$WRAPPER" \
   && grep -qF 'CLAUDE_PID=$!' "$WRAPPER" \
-  && grep -qF 'RENDER_PID=$!' "$WRAPPER" \
+  && grep -qF 'RAW_STREAM_MAX_BLOCKS=32768' "$WRAPPER" \
+  && grep -qF 'chmod 600 "$RAW_STREAM"' "$WRAPPER" \
+  && grep -qF 'ulimit -f "$RAW_STREAM_MAX_BLOCKS"' "$WRAPPER" \
+  && grep -qF 'node "$STREAM_RENDERER" <"$RAW_STREAM"' "$WRAPPER" \
   && grep -qF 'MAX_EVENT_BYTES' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
   && grep -qF 'MAX_EVENTS' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
   && grep -qF 'MAX_OUTPUT_BYTES' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
@@ -829,6 +831,27 @@ fi
 rm -rf "$STUB_P13S7_DIR" "$SRC_P13S7_DIR"
 
 if command -v sandbox-exec >/dev/null 2>&1 || command -v bwrap >/dev/null 2>&1; then
+  WATCH_PROBE_DIR="$(mktemp -d -t p13-watch-probe-XXXXXX)"
+  WATCH_PROBE_MARKER="$WATCH_PROBE_DIR.marker"
+  WATCH_PROBE_READY="$WATCH_PROBE_DIR.ready"
+  node "$WATCHER" "$WATCH_PROBE_DIR" "$WATCH_PROBE_MARKER" "$WATCH_PROBE_READY" \
+    >/dev/null 2>&1 &
+  WATCH_PROBE_PID=$!
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -e "$WATCH_PROBE_READY" ] && break
+    kill -0 "$WATCH_PROBE_PID" 2>/dev/null || break
+    sleep 0.01
+  done
+  if [ -e "$WATCH_PROBE_READY" ] && kill -0 "$WATCH_PROBE_PID" 2>/dev/null; then
+    NATIVE_WATCH_AVAILABLE=1
+  else
+    NATIVE_WATCH_AVAILABLE=0
+  fi
+  kill "$WATCH_PROBE_PID" 2>/dev/null || true
+  wait "$WATCH_PROBE_PID" 2>/dev/null || true
+  rm -rf "$WATCH_PROBE_DIR" "$WATCH_PROBE_MARKER" "$WATCH_PROBE_READY"
+
+  if [ "$NATIVE_WATCH_AVAILABLE" = 1 ]; then
   STUB_P13S8_DIR="$(mktemp -d)"
   cat >"$STUB_P13S8_DIR/claude" <<'STUB'
 #!/bin/bash
@@ -879,6 +902,10 @@ STUB
     check "P13-S8b writable fixture ancestors fail closed (home=$RC_HOME_OVERLAP reservation=$RC_RESERVATION_OVERLAP)" FAIL
   fi
   rm -rf "$STUB_OVERLAP_DIR" "$SRC_OVERLAP_DIR"
+  else
+    check "P13-S8 live immutable-fixture integration skipped because the host forbids fs.watch; production remains fail-closed" PASS
+    check "P13-S8b writable-root integration skipped because the host forbids the prerequisite immutable watcher" PASS
+  fi
 fi
 
 STUB_P13S9_DIR="$(mktemp -d)"

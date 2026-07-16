@@ -3,9 +3,9 @@ name: pr-fix-findings
 description: >
   [Zensu] Fix every open review comment / finding on a GitHub or GitLab pull/merge request end-to-end:
   locate the PR for the current branch (or a given number), pull the unresolved
-  review threads, triage them into independent vs dependent work, implement each
-  fix through the Zensu workflow (vanilla `/zensu:tdd` + review chain), fan
-  independent fixes out across parallel workflows where sensible, push, resolve
+  review threads, triage them into independent vs dependent work, use neutral
+  workers only for parallel read-only analysis, implement every fix in the
+  interactive main thread through the Zensu workflow (vanilla `/zensu:tdd` + review chain), push, resolve
   the corresponding threads on the PR, and report a summary back. Use whenever the
   user wants to address, fix, or resolve PR review feedback / review comments /
   reviewer findings, "work through the review", "fix the review notes", "resolve
@@ -15,8 +15,9 @@ description: >
 
 # /zensu:pr-fix-findings
 
-Resolve **every open review comment** on a pull/merge request: implement each fix
-through the Zensu workflow, parallelize independent fixes, push, resolve the threads
+Resolve **every open review comment** on a pull/merge request: analyze independent
+findings in parallel when useful, implement every fix in the main thread through
+the Zensu workflow, push, resolve the threads
 on the PR/MR, and report back. Works on **GitHub or GitLab** — the forge is detected
 via the VCS driver (`hooks/lib/zensu-vcs.sh`) and every git-host call goes through it.
 
@@ -43,11 +44,11 @@ work (use `/zensu:bootstrap`).
 
 ## Procedure
 
-0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
-   `ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"` and verify
-   `[ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-log.sh" ]` — otherwise **ABORT**
-   with a FATAL message and start a fresh Claude Code session. Then
-   `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, run `bash "$VCS" --detect`, and
+0. **Detect the forge (GitHub or GitLab).** Resolve the driver once with the
+   fail-closed guard
+   `ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"`,
+   set `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, require `[ -f "$VCS" ]`, then run
+   `bash "$VCS" --detect`, and
    read `provider` + `cliReady` + `repo` from the `key=value` output.
    - `cliReady=false` → **STOP**: the detected forge's CLI is not ready. Tell the user
      to install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`
@@ -70,19 +71,19 @@ work (use `/zensu:bootstrap`).
      `resolvable && !resolved`).
    - Build a worklist of actionable items. Skip pure praise, already-addressed, and outdated-and-moot threads.
 
-3. **Triage for parallelism.**
-   - Group items by independence. Items touching disjoint files/concerns are
-     independent → safe to fix in parallel. Items on the same file/region or with
-     ordering dependencies → sequential.
-   - When several items are independent, fan them out with the Workflow tool (one
-     agent per item or cluster, `isolation: "worktree"` if they edit files
-     concurrently). A single small item does not need a workflow — fix it inline.
+3. **Triage for analysis parallelism.**
+   - Group items by independence. Neutral workers may inspect disjoint
+     files/concerns in parallel and return read-only analysis packets: root cause,
+     affected files, proposed tests, and constraints.
+   - Workers MUST NOT edit, run `/zensu:tdd`, open workflow windows, commit, push,
+     or resolve threads. Reconcile all packets in the interactive main thread;
+     overlapping or ordered items are analyzed and implemented sequentially there.
 
-4. **Implement each fix via the Zensu workflow.**
-   - Code changes go through the Zensu vanilla workflow (`/zensu:tdd`) so the
-     evidence audit + review chain run. For parallel fan-out, each agent implements
-     its item and returns a structured result (files changed, what was fixed,
-     residual risk).
+4. **Implement each fix in the interactive main thread via the Zensu workflow.**
+   - Code changes go through the Zensu vanilla workflow (`/zensu:tdd`) in this
+     top-level thread so the evidence audit + review chain run under `main-v1`.
+     Use any worker packets only as read-only input; never delegate implementation
+     or `/zensu:tdd` to a neutral child.
    - After edits: run the relevant type-check / tests. Fix what you broke.
 
 5. **Land the changes.**

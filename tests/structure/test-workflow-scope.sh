@@ -2,7 +2,7 @@
 set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+SESSION_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
 
 PASS=0; FAIL=0
 check() {
@@ -12,24 +12,40 @@ check() {
 }
 
 SD="$(mktemp -d -t wfscope-XXXXXX)"
-SF="$SD/state.json"
+SID_DIRECT="scope-direct"
+PROJECT="$SD/project"
+PLUGIN_DATA="$SD/plugin-data"
+ENV_FILE="$SD/session.env"
+mkdir -p "$PROJECT" "$PLUGIN_DATA"
+: >"$ENV_FILE"
+PAYLOAD="$(SID="$SID_DIRECT" PROJECT="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",session_id:process.env.SID,cwd:process.env.PROJECT}));
+')"
+printf '%s' "$PAYLOAD" | CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_ENV_FILE="$ENV_FILE" bash "$CLAUDE_PLUGIN_ROOT/hooks/session-start-session-control.sh" >/dev/null
+# shellcheck disable=SC1090
+source "$ENV_FILE"
+export CLAUDE_PLUGIN_ROOT
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+tdd_workflow_begin "$SID_DIRECT" "link_test,create_revision"
+SF="$(tdd_state_file "$SID_DIRECT")"
 
-printf '{"workflowActive":true,"workflowTools":["link_test","create_revision"]}\n' > "$SF"
 [ "$(zensu_workflow_allows "$SF" link_test)" = "true" ] \
   && check "A1 in-set tool -> allows true" PASS || check "A1 in-set (got '$(zensu_workflow_allows "$SF" link_test)')" FAIL
 
 [ "$(zensu_workflow_allows "$SF" set_security_classification)" = "false" ] \
   && check "A2 out-of-set tool -> allows false" PASS || check "A2 out-of-set" FAIL
 
-printf '{"workflowActive":false,"workflowTools":["link_test"]}\n' > "$SF"
+tdd_set_flag "$SID_DIRECT" workflowActive false
 [ "$(zensu_workflow_allows "$SF" link_test)" = "false" ] \
   && check "A3 inactive -> allows false" PASS || check "A3 inactive" FAIL
 
-printf '{"workflowActive":true,"workflowTools":["link_test"]}\n' > "$SF"
+tdd_workflow_begin "$SID_DIRECT" "link_test"
 [ "$(zensu_workflow_active "$SF")" = "true" ] \
   && check "A7 workflowActive flag set -> active true" PASS || check "A7 active flag" FAIL
 
-[ "$(zensu_workflow_allows "$SD/missing.json" link_test)" = "false" ] \
+MISSING="$PROJECT/.zensu/state/tdd-phase-$(node "$SESSION_CORE" session-key scope-missing).json"
+[ "$(zensu_workflow_allows "$MISSING" link_test)" = "false" ] \
   && check "A8 missing state file -> allows false" PASS || check "A8 missing file" FAIL
 
 [ "$(zensu_workflow_allows "$SF" "")" = "false" ] \
@@ -38,9 +54,8 @@ printf '{"workflowActive":true,"workflowTools":["link_test"]}\n' > "$SF"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 LOGSH="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"
 
-SD2="$(mktemp -d -t wfbegin-XXXXXX)"
-env CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" TDD_STATE_DIR="$SD2" bash "$LOGSH" --workflow-begin --session wfb-test --tools "link_test,create_revision" >/dev/null 2>&1
-SFB="$SD2/tdd-phase-wfb-test.json"
+bash "$LOGSH" --workflow-begin --session "$SID_DIRECT" --tools "link_test,create_revision" >/dev/null 2>&1
+SFB="$SF"
 B1=$(STATE="$SFB" node -e '
   try {
     const j = JSON.parse(require("fs").readFileSync(process.env.STATE, "utf8"));
@@ -51,15 +66,9 @@ B1=$(STATE="$SFB" node -e '
   } catch (e) { console.log("err"); }
 ' 2>/dev/null)
 [ "$B1" = "yes" ] && check "B1 --workflow-begin --tools writes workflowActive + workflowTools" PASS || check "B1 writer (got '$B1')" FAIL
-rm -rf "$SD2"
 
-SD3="$(mktemp -d -t wfclear-XXXXXX)"
-env CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" TDD_STATE_DIR="$SD3" bash -c '
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-  tdd_workflow_begin "clr-test" "link_test,create_revision"
-  tdd_clear_session "clr-test"
-' 2>/dev/null
-SFC="$SD3/tdd-phase-clr-test.json"
+tdd_clear_session "$SID_DIRECT"
+SFC="$SF"
 C1=$(STATE="$SFC" node -e '
   try {
     const j = JSON.parse(require("fs").readFileSync(process.env.STATE, "utf8"));
@@ -71,7 +80,6 @@ C1=$(STATE="$SFC" node -e '
 
 [ "$(zensu_workflow_allows "$SFC" link_test)" = "false" ] \
   && check "C2clr allows false after clear" PASS || check "C2clr after clear" FAIL
-rm -rf "$SD3"
 
 rm -rf "$SD"
 echo "----"

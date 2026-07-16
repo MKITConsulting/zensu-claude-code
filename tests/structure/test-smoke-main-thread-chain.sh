@@ -22,6 +22,8 @@ STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -32,17 +34,28 @@ check() {
 
 # --- hermetic environment -------------------------------------------------
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults
+export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE 2>/dev/null || true   # the whole point: no subagent scoping
 unset ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
+# shellcheck disable=SC1090
+source "$PHASE_LIB"
+
+start_session() {
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
+}
 
 SID="smoke-chain"
-SF="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+session_key() { node "$SESSION_CORE" session-key "$1"; }
+SID_KEY="$(session_key "$SID")"
+start_session "$SID"
+SF="$(tdd_state_file "$SID")"
 
 # --- helpers --------------------------------------------------------------
 gate_decision() {
@@ -95,15 +108,16 @@ bash "$LOG" --phase IMPL --step S1 --session "$SID" >/dev/null
 
 echo "== 2. Witness activation via chain-state =="
 echo '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS"
-WLOG="$PROJ/.zensu/logs/witness-${SID}.log"
+WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
 { [ -f "$WLOG" ] && grep -qF 'cmd="npm test"' "$WLOG"; } && check "2a active session records witness line" PASS || check "2a active witness line" FAIL
 
 SID_INACTIVE="smoke-inactive"
+start_session "$SID_INACTIVE"
 echo '{"tool_input":{"command":"echo hi"},"tool_response":{"exit_code":0,"stdout":"hi"},"session_id":"'"$SID_INACTIVE"'"}' | bash "$WITNESS"
-[ ! -f "$PROJ/.zensu/logs/witness-${SID_INACTIVE}.log" ] && check "2b inactive session writes NO witness" PASS || check "2b inactive witness skipped" FAIL
+[ ! -f "$PROJ/.zensu/logs/witness-$(session_key "$SID_INACTIVE").log" ] && check "2b inactive session writes NO witness" PASS || check "2b inactive witness skipped" FAIL
 
 echo "== 3. Stop-hook block/allow matrix =="
-SID_S="smoke-stop"; export SF_BACKUP="$SF"; SF="$TDD_STATE_DIR/tdd-phase-${SID_S}.json"
+SID_S="smoke-stop"; export SF_BACKUP="$SF"; start_session "$SID_S"; SF="$(tdd_state_file "$SID_S")"
 P_STOP='{"session_id":"'"$SID_S"'"}'
 [ "$(stop_decision "$P_STOP")" = "allow" ] && check "3a no chain-state -> allow stop" PASS || check "3a no chain-state allow" FAIL
 bash "$LOG" --tdd-begin --session "$SID_S" >/dev/null
@@ -116,7 +130,7 @@ bash "$LOG" --chain-done --session "$SID_S" >/dev/null
 SF="$SF_BACKUP"
 
 echo "== 4. post-review routing (in-thread) + max-round chainDone =="
-SID_R="smoke-review"; SF="$TDD_STATE_DIR/tdd-phase-${SID_R}.json"
+SID_R="smoke-review"; SID_R_KEY="$(session_key "$SID_R")"; start_session "$SID_R"; SF="$(tdd_state_file "$SID_R")"
 postrev_ctx() {
   printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_R"'"}' \
     | bash "$POSTREV" 2>/dev/null | node -e '
@@ -129,14 +143,17 @@ CTX="$(postrev_ctx)"
 echo "$CTX" | grep -q "/zensu:tdd" && check "4a routes findings in-thread (/zensu:tdd)" PASS || check "4a in-thread routing" FAIL
 echo "$CTX" | grep -q "subagent_type='zensu:tdd-manager'" && check "4b must NOT spawn tdd-manager subagent" FAIL || check "4b no tdd-manager spawn" PASS
 echo "$CTX" | grep -q "subagent_type='zensu:code-reviewer'" && check "4c re-verify via code-reviewer" PASS || check "4c re-verify reviewer" FAIL
-RCOUNT="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).count)}catch(_){console.log("?")}' "$PROJ/.zensu/state/rounds-${SID_R}.json")"
-[ "$RCOUNT" = "1" ] && check "4d round counter increments (1)" PASS || check "4d counter=1 (got $RCOUNT)" FAIL
+RCOUNT="$(tdd_get_counter "$SF" reviewRound)"
+[ "$RCOUNT" = "1" ] && check "4d integrated reviewRound increments (1)" PASS || check "4d reviewRound=1 (got $RCOUNT)" FAIL
 [ "$(flag chainDone)" = "false" ] && check "4e chainDone stays false under max" PASS || check "4e chainDone false" FAIL
-# force max rounds (default 5): seed count=5 -> NEXT=6 -> convergence -> hand off to terminal self-review
+# Force max rounds (default 5): advance reviewRound from 1 to 5 through the CAS
+# helper; the next reviewer completion becomes 6 and converges.
 # (selfReview is on by default; the code-reviewer chain converges via codeReviewDone, and
 # /zensu:self-review owns the final --chain-done. Set hooks.selfReview=false to restore the
 # legacy chainDone-at-max-rounds behavior.)
-printf '{"count":5,"ts":"x"}' > "$PROJ/.zensu/state/rounds-${SID_R}.json"
+for _ in 2 3 4 5; do
+  tdd_increment_counter "$SID_R" reviewRound >/dev/null
+done
 CTX2="$(postrev_ctx)"
 echo "$CTX2" | grep -q "max 5 rounds reached" && check "4f max rounds -> convergence directive" PASS || check "4f convergence msg" FAIL
 echo "$CTX2" | grep -qF "skill='zensu:self-review'" && check "4g max rounds -> hands off to terminal self-review" PASS || check "4g self-review handoff" FAIL

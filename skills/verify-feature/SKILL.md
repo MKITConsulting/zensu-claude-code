@@ -324,8 +324,10 @@ This plugin ships a pinned, lockfile-backed Playwright runtime behind a Zensu ca
 navigation broker. The broker creates an isolated context and exposes only the exact operations
 listed by `scripts/playwright-mcp-proxy.js`; upstream `browser_evaluate`,
 `browser_run_code_unsafe`, storage/cookie/session getters, file upload/drop, raw request-detail,
-route, and configuration tools are never advertised or callable. First use may require
-npm/network access to install the integrity-locked runtime. For every required browser operation, accept either the
+route, and configuration tools are never advertised or callable. Every MCP server start
+materializes a private generation from the SRI-pinned lockfile outside the plugin root;
+concurrent servers never share `node_modules`. The normal npm cache remains enabled, but a
+cache miss may require network access. For every required browser operation, accept either the
 direct `mcp__playwright__<operation>` name or Claude's plugin namespace
 `mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
 that the plugin MCP server was not loaded and ask the user to restart Claude Code after

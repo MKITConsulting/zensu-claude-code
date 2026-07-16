@@ -2,113 +2,113 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-SCRIPT="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
-  local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1));
+  else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi
 }
-
-if [ ! -f "$SCRIPT" ]; then
-  check "hooks/lib/zensu-log.sh exists" FAIL
-  echo "----"
-  echo "test-autofix-rounds-reset-on-fresh-tdd: $PASS PASS / $FAIL FAIL"
-  exit 1
-fi
 
 TMP_DIR="$(mktemp -d)"
-cleanup() { rm -rf "$TMP_DIR"; }
-trap cleanup EXIT
-
+trap 'rm -rf "$TMP_DIR"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
-export TDD_STATE_DIR="$TMP_DIR/tdd"
-mkdir -p "$CLAUDE_PLUGIN_DATA_OVERRIDE" "$TDD_STATE_DIR"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 
 SID="sess-reset-001"
-COUNTER_FILE="$CLAUDE_PLUGIN_DATA_OVERRIDE/rounds-${SID}.json"
-PHASE_FILE="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+KEY="$(node "$CORE" session-key "$SID")"
+STATE_FILE="$STATE_DIR/tdd-phase-${KEY}.json"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID"
+STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
+STATE_FILE="$STATE_DIR/tdd-phase-${KEY}.json"
+bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
+. "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+tdd_increment_counter "$SID" reviewRound >/dev/null
+tdd_increment_counter "$SID" reviewRound >/dev/null
+tdd_increment_counter "$SID" stopBlocks >/dev/null
+tdd_increment_counter "$SID" stopBlocks >/dev/null
+tdd_set_flag "$SID" chainDone true >/dev/null
+tdd_set_flag "$SID" codeReviewDone true >/dev/null
 
-seed_counter() { printf '{"count":4,"ts":"2026-01-01T00:00:00Z"}\n' > "$COUNTER_FILE"; }
-counter_count() {
-  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(Number.isInteger(j.count)?j.count:"");}catch(_){console.log("");}' "$1" 2>/dev/null
+read_state() {
+  CONTROL_CORE="$CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$SID" node -e '
+    const core = require(process.env.CONTROL_CORE);
+    process.stdout.write(JSON.stringify(core.readWorkflowState({projectRoot: process.env.PROJECT_ROOT, sessionId: process.env.SID})));
+  '
 }
-flag_true() {
-  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log(j[process.argv[2]]===true?"true":"false");}catch(_){console.log("false");}' "$1" "$2" 2>/dev/null
-}
+BEFORE="$(read_state)"
+BEFORE_REV="$(printf '%s' "$BEFORE" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(String(JSON.parse(s).revision)))')"
 
-# --- Case 1: --tdd-begin resets (deletes) the rounds counter ----------------
-seed_counter
-bash "$SCRIPT" --tdd-begin --session "$SID" >/dev/null 2>&1
-begin_rc=$?
-if [ ! -e "$COUNTER_FILE" ]; then
-  check "--tdd-begin deletes pre-existing rounds counter (fresh task -> round 1)" PASS
-else
-  check "--tdd-begin deletes pre-existing rounds counter (fresh task -> round 1)" FAIL
-fi
-if [ "$begin_rc" -eq 0 ]; then
-  check "--tdd-begin exits 0 on success" PASS
-else
-  check "--tdd-begin exits 0 on success (got $begin_rc)" FAIL
-fi
+BEGIN_ERR="$TMP_DIR/begin.err"
+bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>"$BEGIN_ERR"
+BEGIN_RC=$?
+[ "$BEGIN_RC" -eq 0 ] && check "fresh-task begin succeeds through CAS" PASS \
+  || check "fresh-task begin succeeds through CAS (rc=$BEGIN_RC)" FAIL
+AFTER="$(read_state 2>/dev/null || true)"
+AFTER_REV="$(printf '%s' "$AFTER" | node -e 'let s="";process.stdin.on("data",c=>s+=c).on("end",()=>process.stdout.write(String(JSON.parse(s).revision)))' 2>/dev/null)"
+printf '%s' "$AFTER" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c).on("end",()=>{
+    const j=JSON.parse(s);
+    process.exit(j.active===true && j.reviewRound===0 && j.stopBlocks===0
+      && j.chainDone===false && j.codeReviewDone===false ? 0 : 1);
+  });
+' && check "fresh-task begin resets integrated budgets and re-arms chain flags" PASS \
+  || check "fresh-task begin resets integrated budgets and re-arms chain flags" FAIL
+[ "$AFTER_REV" -gt "$BEFORE_REV" ] && check "fresh-task reset advances the workflow revision" PASS \
+  || check "fresh-task reset advances workflow revision (before=$BEFORE_REV after=$AFTER_REV)" FAIL
 
-# --- Case 2: --tdd-begin still sets the active chain-state flag --------------
-if [ "$(flag_true "$PHASE_FILE" active)" = "true" ]; then
-  check "--tdd-begin still sets active=true (primary behavior preserved)" PASS
-else
-  check "--tdd-begin still sets active=true (primary behavior preserved)" FAIL
-fi
+tdd_increment_counter "$SID" reviewRound >/dev/null
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1
+[ "$(tdd_get_counter "$STATE_FILE" reviewRound)" = 1 ] && check "--tdd-complete preserves integrated reviewRound" PASS \
+  || check "--tdd-complete preserves integrated reviewRound" FAIL
+bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
+[ "$(tdd_get_counter "$STATE_FILE" reviewRound)" = 1 ] && check "--chain-done preserves integrated reviewRound" PASS \
+  || check "--chain-done preserves integrated reviewRound" FAIL
 
-# --- Case 3: --tdd-complete preserves the rounds counter --------------------
-seed_counter
-bash "$SCRIPT" --tdd-complete --session "$SID" >/dev/null 2>&1
-if [ -f "$COUNTER_FILE" ] && [ "$(counter_count "$COUNTER_FILE")" = "4" ]; then
-  check "--tdd-complete preserves rounds counter (mid-task, guard intact)" PASS
-else
-  check "--tdd-complete preserves rounds counter (mid-task, guard intact)" FAIL
-fi
-
-# --- Case 4: --chain-done preserves the rounds counter ----------------------
-seed_counter
-bash "$SCRIPT" --chain-done --session "$SID" >/dev/null 2>&1
-if [ -f "$COUNTER_FILE" ] && [ "$(counter_count "$COUNTER_FILE")" = "4" ]; then
-  check "--chain-done preserves rounds counter (mid-task, guard intact)" PASS
-else
-  check "--chain-done preserves rounds counter (mid-task, guard intact)" FAIL
-fi
-
-# --- Case 5: --tdd-begin is idempotent when no counter exists ---------------
-rm -f "$COUNTER_FILE"
-bash "$SCRIPT" --tdd-begin --session "$SID" >/dev/null 2>&1
-rc=$?
-if [ "$rc" -eq 0 ] && [ ! -e "$COUNTER_FILE" ]; then
-  check "--tdd-begin idempotent when counter absent (exit 0, no file created)" PASS
-else
-  check "--tdd-begin idempotent when counter absent (exit 0, no file created)" FAIL
-fi
-
-# --- Case 6: symlink guard — refuse to delete through a symlink -------------
+# A retired sidecar pathname is inert. Neither fresh-task reset nor Stop reads,
+# deletes, follows, or warns about it.
 case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    echo "  SKIP  --tdd-begin symlink refusal (2 checks) — Git Bash cannot create real symlinks" ;;
+  MINGW*|MSYS*|CYGWIN*) echo "  SKIP  inert stopblocks symlink checks — symlinks unavailable" ;;
   *)
-    TARGET="$TMP_DIR/evil-target.json"
-    printf '{"count":99,"ts":"2026-01-01T00:00:00Z"}\n' > "$TARGET"
-    rm -f "$COUNTER_FILE"
-    ln -s "$TARGET" "$COUNTER_FILE"
-    err="$(bash "$SCRIPT" --tdd-begin --session "$SID" 2>&1 >/dev/null)"
-    if [ -L "$COUNTER_FILE" ] && [ -f "$TARGET" ]; then
-      check "--tdd-begin refuses symlink — link and target both intact" PASS
+    TARGET="$TMP_DIR/sidecar-target"
+    printf '%s\n' 'do-not-touch' > "$TARGET"
+    ln -s "$TARGET" "${STATE_FILE}.stopblocks"
+    tdd_set_flag "$SID" chainDone false >/dev/null
+    tdd_set_flag "$SID" codeReviewDone false >/dev/null
+    tdd_set_flag "$SID" implComplete true >/dev/null
+    RESET_REVISION="$(CONTROL_CORE="$CORE" PROJECT_ROOT="$ZENSU_PROJECT_ROOT" SID="$SID" node -e '
+      const core=require(process.env.CONTROL_CORE);
+      process.stdout.write(String(core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID}).revision));
+    ')"
+    tdd_reset_review_budget "$SID" "$RESET_REVISION" >/dev/null
+    PAYLOAD="{\"hook_event_name\":\"Stop\",\"session_id\":\"${SID}\",\"cwd\":\"${CLAUDE_PROJECT_DIR}\"}"
+    STOP_OUT="$(printf '%s' "$PAYLOAD" | "$STOP" 2>"$TMP_DIR/stop.err")"
+    case "$STOP_OUT" in *'"decision":"block"'*) check "Stop still enforces with an inert .stopblocks symlink present" PASS ;; *) check "Stop still enforces with inert sidecar present" FAIL ;; esac
+    [ -L "${STATE_FILE}.stopblocks" ] && [ "$(<"$TARGET")" = do-not-touch ] \
+      && check "retired .stopblocks symlink and target are untouched" PASS \
+      || check "retired .stopblocks symlink and target are untouched" FAIL
+    [ "$(tdd_get_counter "$STATE_FILE" stopBlocks)" = 1 ] \
+      && check "Stop increments only the integrated stopBlocks field" PASS \
+      || check "Stop increments only the integrated stopBlocks field" FAIL
+    if rg -qi 'symlink|stopblocks file' "$TMP_DIR/stop.err"; then
+      check "Stop emits no sidecar-specific warning" FAIL
     else
-      check "--tdd-begin refuses symlink — link and target both intact" FAIL
+      check "Stop emits no sidecar-specific warning" PASS
     fi
-    case "$err" in
-      *symlink*) check "--tdd-begin emits symlink-refusal warning to stderr" PASS ;;
-      *)         check "--tdd-begin emits symlink-refusal warning to stderr (got: $err)" FAIL ;;
-    esac ;;
+    ;;
 esac
+
+if find "$STATE_DIR" -maxdepth 1 -name 'rounds-*' | grep -q .; then
+  check "fresh-task reset creates no rounds sidecar" FAIL
+else
+  check "fresh-task reset creates no rounds sidecar" PASS
+fi
 
 echo "----"
 echo "test-autofix-rounds-reset-on-fresh-tdd: $PASS PASS / $FAIL FAIL"

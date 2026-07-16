@@ -4,6 +4,7 @@
 #   (no arg)      DETERMINISTIC suites only — no API spend:
 #                   - every tests/structure/test-*.sh
 #                   - evals/config-gate/run-eval.sh --self-check (~60 offline gate evals)
+#                   - evals/session-control/run-self-check.sh (Promptfoo contract/wrapper checks)
 #   --self-check  deterministic suites + each live suite's --self-check skeleton (no API)
 #   --live        deterministic suites + LIVE claude --print suites (COSTS API CREDITS):
 #                   - tests/e2e          (code-reviewer guardrails)
@@ -48,6 +49,17 @@ run_suite() {
   fi
 }
 
+# Offline eval runners are part of the deterministic contract. A missing file
+# is a failed suite, never an optional skip that can silently erase coverage.
+run_required_suite() {
+  local label="$1" runner="$2"; shift 2
+  if [ -f "$runner" ]; then
+    run_suite "$label" "$@"
+  else
+    FAIL=$((FAIL+1)); log "  FAIL  $label — runner missing at $runner"
+  fi
+}
+
 log "════════════════════════════════════════════════════════════"
 log "  zensu plugin — run-all  ($TIMESTAMP)  mode=${MODE:-default}"
 log "  plugin v$(node -e 'process.stdout.write(require("'"$ROOT"'/.claude-plugin/plugin.json").version)' 2>/dev/null || echo '?')"
@@ -65,7 +77,13 @@ done
 log ""
 log "▸ Offline evals"
 CG="$ROOT/evals/config-gate/run-eval.sh"
-[ -f "$CG" ] && run_suite "evals/config-gate (--self-check)" bash "$CG" --self-check
+run_required_suite "evals/config-gate (--self-check)" "$CG" bash "$CG" --self-check
+SC="$ROOT/evals/session-control/run-self-check.sh"
+run_required_suite "evals/session-control (self-check)" "$SC" bash "$SC"
+TRC="$ROOT/evals/tdd-review-chain/run-self-check.sh"
+run_required_suite "evals/tdd-review-chain (self-check)" "$TRC" bash "$TRC"
+RRL="$ROOT/evals/reset-review-limit/run-self-check.sh"
+run_required_suite "evals/reset-review-limit (self-check)" "$RRL" bash "$RRL"
 
 # ── Live suites ──────────────────────────────────────────────────────
 if [ "$MODE" = "--live" ]; then

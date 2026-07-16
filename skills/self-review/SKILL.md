@@ -35,7 +35,7 @@ edited, created, or deleted in this session. Use that knowledge directly.
 
 - A substitute for the `zensu:code-reviewer` agent — that runs first; this is the
   terminal pass over your own work.
-- Bypassing findings: a must-fix you surface here still goes through strict TDD.
+- Bypassing findings: a must-fix still follows this session's frozen implementation mode (vanilla, or strict TDD when configured).
 - More than one fix round: the budget is exactly one (a hard latch), then finalize.
 
 ## What This Skill Does

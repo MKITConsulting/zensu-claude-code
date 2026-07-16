@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -13,10 +14,11 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 unset ZENSU_TDD_GATE
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
@@ -38,6 +40,8 @@ decide() {
 }
 
 SID_GP="s-gp-tight-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_GP"
 tdd_write_phase "$SID_GP" "S1" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_GP" "S1" "RED_FAIL" "x" >/dev/null
 tdd_write_phase "$SID_GP" "S1" "IMPL" "" >/dev/null
@@ -58,6 +62,8 @@ else
 fi
 
 SID_RF="s-rf-tight-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_RF"
 tdd_write_phase "$SID_RF" "S1" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_RF" "S1" "RED_FAIL" "x" >/dev/null
 tdd_write_phase "$SID_RF" "S1" "IMPL" "" >/dev/null
@@ -79,6 +85,8 @@ else
 fi
 
 SID_NEXT="s-next-step-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_NEXT"
 tdd_write_phase "$SID_NEXT" "S1" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_NEXT" "S1" "RED_FAIL" "x" >/dev/null
 tdd_write_phase "$SID_NEXT" "S1" "IMPL" "" >/dev/null
@@ -102,6 +110,8 @@ fi
 echo "[INFO] Documenting REFACTOR known-gap: agent trust boundary, not enforced by FSM"
 
 SID_RF_UNINIT="s-rf-uninit-trust-gap"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_RF_UNINIT"
 tdd_write_phase "$SID_RF_UNINIT" "S1" "REFACTOR" "" >/dev/null
 
 DEC7=$(decide '{"tool_name":"Edit","tool_input":{"file_path":"src/anyfile.ts"},"session_id":"'$SID_RF_UNINIT'"}')
@@ -112,6 +122,8 @@ else
 fi
 
 SID_RF_REDFAIL="s-rf-redfail-trust-gap"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_RF_REDFAIL"
 tdd_write_phase "$SID_RF_REDFAIL" "S1" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_RF_REDFAIL" "S1" "RED_FAIL" "x" >/dev/null
 tdd_write_phase "$SID_RF_REDFAIL" "S1" "REFACTOR" "" >/dev/null

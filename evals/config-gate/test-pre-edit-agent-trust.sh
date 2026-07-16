@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -19,10 +20,11 @@ check() {
 # CLAUDE_AGENT_TYPE=zensu:tdd-manager turned the gate on.
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 unset ZENSU_TDD_GATE
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
@@ -60,6 +62,8 @@ unset CLAUDE_AGENT_TYPE
 # ── Active chain-state: gate is ON regardless of env ──
 
 SID_ACTIVE="s-active-uninit"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_ACTIVE"
 tdd_set_flag "$SID_ACTIVE" active true >/dev/null 2>&1
 OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID_ACTIVE"'"}' | "$SCRIPT" 2>/dev/null)
 [ "$(decision "$OUT")" = "deny" ] && check "active chain-state (UNINITIALIZED) + no env: gate ON (deny)" PASS \
@@ -67,6 +71,8 @@ OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session
 
 export CLAUDE_AGENT_TYPE="zensu:code-reviewer"
 SID_ACTIVE2="s-active-envrev"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_ACTIVE2"
 tdd_set_flag "$SID_ACTIVE2" active true >/dev/null 2>&1
 OUT=$(echo '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID_ACTIVE2"'"}' | "$SCRIPT" 2>/dev/null)
 [ "$(decision "$OUT")" = "deny" ] && check "active chain-state + CLAUDE_AGENT_TYPE=code-reviewer: gate ON (env does NOT bypass)" PASS \

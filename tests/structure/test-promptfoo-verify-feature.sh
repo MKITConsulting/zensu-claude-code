@@ -26,6 +26,16 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
+LOOPBACK_AVAILABLE=0
+if node -e '
+  const net = require("node:net");
+  const server = net.createServer();
+  server.once("error", () => process.exit(1));
+  server.listen(0, "127.0.0.1", () => server.close(() => process.exit(0)));
+' >/dev/null 2>&1; then
+  LOOPBACK_AVAILABLE=1
+fi
+
 for file in "$CFG" "$LOCAL" "$REMOTE" "$REMOTE_ACCEPTED" "$REMOTE_PROVIDER" "$RECIPE" "$REMOTE_RECIPE" "$RUNTIME" "$SERVER" "$FIXTURE/public/index.html" "$FIXTURE/CLAUDE.md" "$FIXTURE/.gitignore" "$RUNNER" "$RESERVATION" "$README" "$ASSERTION" "$CONTRACT_TEST"; do
   if [ -f "$file" ]; then
     check "file exists: ${file#$PLUGIN_DIR/}" PASS
@@ -118,6 +128,9 @@ case "$(uname -s)" in
     check "TERM process-group cleanup is covered on macOS/Linux/WSL (native Windows live eval unsupported)" PASS
     ;;
   *)
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "TERM runner integration skipped because the managed host forbids loopback listeners" PASS
+else
 RUNNER_SIGNAL_STUBS="$(mktemp -d -t verify-feature-runner-signal-XXXXXX)"
 RUNNER_SIGNAL_STATE="$RUNNER_SIGNAL_STUBS/state"
 RUNNER_LATE_STATE="$RUNNER_SIGNAL_STUBS/late.pid"
@@ -184,6 +197,7 @@ else
   done
 fi
 rm -rf "$RUNNER_SIGNAL_STUBS"
+fi
     ;;
 esac
 
@@ -281,6 +295,9 @@ case "$(uname -s)" in
     check "fixture lifecycle smoke test (covered on macOS/Linux/WSL)" PASS
     ;;
   *)
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "fixture lifecycle integration skipped because the managed host forbids loopback listeners" PASS
+else
 SMOKE_DIR="$(mktemp -d -t verify-feature-smoke-XXXXXX)"
 cp -R "$FIXTURE/." "$SMOKE_DIR/"
 SMOKE_RUNTIME="$SMOKE_DIR/scripts/fixture-runtime.sh"
@@ -321,6 +338,7 @@ else
   check "fixture lifecycle smoke test serves inventory and removes its exact runtime" FAIL
 fi
 rm -rf "$SMOKE_DIR" "$SMOKE_RESERVATION_DIR"
+fi
     ;;
 esac
 
@@ -335,24 +353,31 @@ if [ "$?" = 2 ]; then
 else
   check "port proxy rejects non-absolute parent contract paths" FAIL
 fi
-node "$RESERVATION" "$NEG_PORT_FILE" "$NEG_HANDOFF" "$NEG_ACK" "$NEG_TOKEN" &
-NEG_PID=$!
-for ((attempt=0; attempt<200; attempt++)); do [ -s "$NEG_PORT_FILE" ] && break; sleep 0.01; done
-printf '{"token":"wrongwrongwrongwrongwrongwrongwr","targetPort":12345}\n' >"$NEG_HANDOFF"
-sleep 0.1
-if kill -0 "$NEG_PID" 2>/dev/null && [ ! -e "$NEG_ACK" ]; then
-  check "port proxy rejects a handoff with the wrong parent token and keeps the reservation" PASS
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "wrong-token proxy integration skipped because the managed host forbids loopback listeners" PASS
 else
-  check "port proxy rejects a handoff with the wrong parent token and keeps the reservation" FAIL
+  node "$RESERVATION" "$NEG_PORT_FILE" "$NEG_HANDOFF" "$NEG_ACK" "$NEG_TOKEN" &
+  NEG_PID=$!
+  for ((attempt=0; attempt<200; attempt++)); do [ -s "$NEG_PORT_FILE" ] && break; sleep 0.01; done
+  printf '{"token":"wrongwrongwrongwrongwrongwrongwr","targetPort":12345}\n' >"$NEG_HANDOFF"
+  sleep 0.1
+  if kill -0 "$NEG_PID" 2>/dev/null && [ ! -e "$NEG_ACK" ]; then
+    check "port proxy rejects a handoff with the wrong parent token and keeps the reservation" PASS
+  else
+    check "port proxy rejects a handoff with the wrong parent token and keeps the reservation" FAIL
+  fi
+  kill "$NEG_PID" 2>/dev/null || true
+  wait "$NEG_PID" 2>/dev/null || true
 fi
-kill "$NEG_PID" 2>/dev/null || true
-wait "$NEG_PID" 2>/dev/null || true
 
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     check "fixture parent-death cleanup (covered on macOS/Linux/WSL)" PASS
     ;;
   *)
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "fixture parent-death integration skipped because the managed host forbids loopback listeners" PASS
+else
 EARLY_DIR="$(mktemp -d -t verify-feature-early-death-XXXXXX)"
 cp -R "$FIXTURE/." "$EARLY_DIR/"
 EARLY_PORT_FILE="$NEG_DIR/early-port"
@@ -376,6 +401,7 @@ else
   check "fixture startup fails closed when the parent proxy dies before acknowledgement" FAIL
 fi
 rm -rf "$NEG_DIR" "$EARLY_DIR"
+fi
     ;;
 esac
 

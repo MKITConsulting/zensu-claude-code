@@ -76,7 +76,8 @@ OUT_START="$(printf '%s' '{"source":"startup"}' | bash "$BANNER" 2>/dev/null)"
 OUT_RESUME="$(printf '%s' '{"source":"resume"}' | bash "$BANNER" 2>/dev/null)"
 [ -z "$OUT_RESUME" ] && check "B11 banner silent on source=resume" PASS || check "B11 banner silent on source=resume" FAIL
 
-if printf '%s' '{"source":"startup"}' | bash "$PRIMER" 2>/dev/null | node -e '
+PRIMER_START="$(printf '%s' '{"source":"startup"}' | bash "$PRIMER" 2>/dev/null)"
+if printf '%s' "$PRIMER_START" | node -e '
   let s=""; process.stdin.on("data",c=>s+=c);
   process.stdin.on("end",()=>{ try { const j=JSON.parse(s);
     const ok = j.hookSpecificOutput && j.hookSpecificOutput.hookEventName==="SessionStart"
@@ -87,6 +88,11 @@ if printf '%s' '{"source":"startup"}' | bash "$PRIMER" 2>/dev/null | node -e '
   check "B12 primer emits valid SessionStart additionalContext JSON on startup" PASS
 else
   check "B12 primer emits valid SessionStart additionalContext JSON on startup" FAIL
+fi
+if printf '%s' "$PRIMER_START" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'; then
+  check "B12b primer output positively pins the fail-closed Session Control helper guard" PASS
+else
+  check "B12b primer output lacks the fail-closed Session Control helper guard" FAIL
 fi
 
 PRIMER_COMPACT="$(printf '%s' '{"source":"compact"}' | bash "$PRIMER" 2>/dev/null)"

@@ -1,12 +1,15 @@
-Judge pass. Files changed: [calc.js]
+Judge pass.
 
-Implementation summary: calc.js was edited in the working tree (uncommitted diff).
-
-Plan baseline: no Requirements table for this fixture run.
-
-MERGED PANEL FINDINGS (from the five aspects):
+REVIEW PACKET v1
+policy: reviewer-readonly-v1
+changed_files: [calc.js]
+implementation_summary: calc.js was edited in the fixture working tree.
+requirements_baseline: none
+diff_summary: arithmetic and array-boundary behavior changed.
+test_evidence: command `node --test`, exit 0, 4/4 pass, witness verified.
+build_evidence: not applicable; plain JavaScript fixture has no build step.
+coverage_evidence: skipped; fixture has no coverage tool.
+merged_panel_findings:
 - [CRITICAL] calc.js:1 — hardcoded AWS secret access key committed in source. Confidence: 90. Fix: remove the credential and rotate it.
-
-Build/test evidence: suite PASS (carried from the Phase 6 audit).
 
 Re-read calc.js fresh and judge: are the panel findings real? Add JUDGE-* deltas for anything the panel missed; flag any false positive with the Panel-FP: protocol.

@@ -32,7 +32,7 @@ zensu_is_spawned_agent() {
     return 0
   fi
   case "$agent_type" in
-    zensu:code-reviewer|zensu:review-aspect|zensu:zensu-plm)
+    zensu:code-reviewer|zensu:review-aspect|zensu:review-judge)
       echo "true"
       return 0
       ;;

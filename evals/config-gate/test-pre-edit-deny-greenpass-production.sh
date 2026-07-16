@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -13,11 +14,12 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 unset ZENSU_TDD_GATE
 
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
@@ -29,6 +31,8 @@ eval "$(declare -f tdd_write_phase | sed '1s/^tdd_write_phase/_zensu_orig_write_
 tdd_write_phase() { tdd_set_flag "$1" active true >/dev/null 2>&1; _zensu_orig_write_phase "$@"; }
 
 SID_GP="s-greenpass-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_GP"
 tdd_write_phase "$SID_GP" "S1" "GREEN_PASS" "" >/dev/null
 
 PAYLOAD_GP_PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/strings.ts"},"session_id":"'$SID_GP'"}'
@@ -64,6 +68,8 @@ else
 fi
 
 SID_RUN="s-redrun-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_RUN"
 tdd_write_phase "$SID_RUN" "S1" "RED_RUN" "" >/dev/null
 PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_RUN'"}'
 OUT_RUN=$(echo "$PAYLOAD" | "$SCRIPT" 2>/dev/null)
@@ -78,6 +84,8 @@ else
 fi
 
 SID_GR="s-greenrun-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_GR"
 tdd_write_phase "$SID_GR" "S1" "GREEN_RUN" "" >/dev/null
 PAYLOAD2='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_GR'"}'
 OUT_GR=$(echo "$PAYLOAD2" | "$SCRIPT" 2>/dev/null)

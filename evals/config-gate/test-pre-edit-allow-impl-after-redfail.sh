@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -13,11 +14,12 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 unset ZENSU_TDD_GATE
 
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
@@ -29,6 +31,8 @@ eval "$(declare -f tdd_write_phase | sed '1s/^tdd_write_phase/_zensu_orig_write_
 tdd_write_phase() { tdd_set_flag "$1" active true >/dev/null 2>&1; _zensu_orig_write_phase "$@"; }
 
 SID_A="s-impl-a"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_A"
 tdd_write_phase "$SID_A" "S3" "RED_WRITE" ""                  >/dev/null
 tdd_write_phase "$SID_A" "S3" "RED_FAIL"  "assertion mismatch" >/dev/null
 tdd_write_phase "$SID_A" "S3" "IMPL"      ""                  >/dev/null
@@ -42,6 +46,8 @@ else
 fi
 
 SID_B="s-impl-b"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_B"
 tdd_write_phase "$SID_B" "S3" "RED_WRITE" ""                  >/dev/null
 tdd_write_phase "$SID_B" "S3" "RED_FAIL"  "..."                >/dev/null
 tdd_write_phase "$SID_B" "S3" "IMPL"      ""                  >/dev/null
@@ -61,6 +67,8 @@ else
 fi
 
 SID_C="s-impl-c"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_C"
 tdd_write_phase "$SID_C" "S3" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_C" "S3" "IMPL"      "" >/dev/null
 

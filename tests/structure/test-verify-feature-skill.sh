@@ -17,6 +17,7 @@ MCP_LOCK="$PLUGIN_DIR/mcp-runtime/package-lock.json"
 MCP_LAUNCHER="$PLUGIN_DIR/scripts/playwright-mcp.sh"
 MCP_PROXY="$PLUGIN_DIR/scripts/playwright-mcp-proxy.js"
 MCP_PROXY_TEST="$PLUGIN_DIR/tests/structure/playwright-mcp-proxy.test.js"
+MCP_RUNTIME_DOC="$PLUGIN_DIR/docs/playwright-mcp-runtime.md"
 RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README_MD="$PLUGIN_DIR/README.md"
@@ -35,7 +36,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$MCP_JSON" "$MCP_PACKAGE" "$MCP_LOCK" "$MCP_LAUNCHER" "$MCP_PROXY" "$MCP_PROXY_TEST" "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" \
+for f in "$SKILL_MD" "$BROWSER_MD" "$ZENSU_MD" "$MCP_JSON" "$MCP_PACKAGE" "$MCP_LOCK" "$MCP_LAUNCHER" "$MCP_PROXY" "$MCP_PROXY_TEST" "$MCP_RUNTIME_DOC" "$RUNTIME_CONTROLLER" "$PLUGIN_JSON" \
   "$README_MD" "$HELP_MD" "$DOCTOR_SH" "$DOCTOR_REPORT" "$DOCTOR_SKILL" \
   "$AUTOPILOT_SKILL" "$AUTOPILOT_AUTH" "$AUTOPILOT_CONFIG"; do
   if [ ! -f "$f" ]; then
@@ -324,8 +325,8 @@ if jq -e '.mcpServers.playwright.command == "${CLAUDE_PLUGIN_ROOT}/scripts/playw
   && jq -e '.mcpServers.playwright.args | index("--caps=storage") | not' "$MCP_JSON" >/dev/null 2>&1 \
   && [ "$(jq -r '.dependencies["@playwright/mcp"]' "$MCP_PACKAGE")" = '0.0.75' ] \
   && jq -e '.packages["node_modules/@playwright/mcp"] | .version == "0.0.75" and (.integrity | startswith("sha512-"))' "$MCP_LOCK" >/dev/null 2>&1 \
-  && grep -qF 'npm ci --prefix "$RUNTIME_DIR" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
-  && grep -qF 'exec node "$PROXY" --runtime-dir "$RUNTIME_DIR"' "$MCP_LAUNCHER"; then
+  && grep -qF 'run_sanitized_child npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
+  && grep -qF 'run_sanitized_child node "$PROXY" --runtime-dir "$RUNTIME_GENERATION"' "$MCP_LAUNCHER"; then
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" PASS
 else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
@@ -344,81 +345,223 @@ else
 fi
 if grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" install-browser' "$SKILL_MD" \
   && grep -qF '`browser_install` is not a tool in the pinned' "$SKILL_MD" \
-  && grep -qF 'exec "$BIN" "$@"' "$MCP_LAUNCHER"; then
+  && grep -qF 'run_sanitized_child "$BIN" install-browser' "$MCP_LAUNCHER"; then
   check "P6f missing browser recovery uses the pinned launcher install-browser command" PASS
 else
   check "P6f missing browser recovery uses the pinned launcher install-browser command" FAIL
 fi
 if grep -qF 'ZENSU_MCP_TEST_MODE' "$MCP_LAUNCHER" \
   && grep -qF 'ZENSU_MCP_TEST_PASSTHROUGH' "$MCP_LAUNCHER" \
+  && grep -qF 'ZENSU_MCP_RUNTIME_DIR_OVERRIDE' "$MCP_LAUNCHER" \
+  && grep -qF 'test-only launcher controls are not supported' "$MCP_LAUNCHER" \
   && ! grep -qF 'RUNTIME_DIR="${ZENSU_MCP_RUNTIME_DIR_OVERRIDE' "$MCP_LAUNCHER"; then
-  check "P6h runtime override is available only behind explicit test mode" PASS
+  check "P6h production launcher rejects every former test override and passthrough" PASS
 else
-  check "P6h runtime override is available only behind explicit test mode" FAIL
+  check "P6h production launcher rejects every former test override and passthrough" FAIL
 fi
-if grep -qF 'INSTALL_LOCK="$RUNTIME_DIR/.install.lock"' "$MCP_LAUNCHER" \
-  && grep -qF 'lockf -k "$INSTALL_LOCK"' "$MCP_LAUNCHER" \
-  && grep -qF 'flock "$INSTALL_LOCK"' "$MCP_LAUNCHER" \
+if grep -qF 'mktemp -d' "$MCP_LAUNCHER" \
+  && grep -qF 'cp "$PACKAGE_FILE" "$RUNTIME_GENERATION/package.json"' "$MCP_LAUNCHER" \
+  && grep -qF 'cp "$LOCK_FILE" "$RUNTIME_GENERATION/package-lock.json"' "$MCP_LAUNCHER" \
   && grep -qF -- '--zensu-install-runtime' "$MCP_LAUNCHER" \
-  && grep -qF 'install_if_needed' "$MCP_LAUNCHER" \
-  && grep -qF 'released automatically' "$MCP_LAUNCHER"; then
-  check "P6d concurrent MCP starts use an auto-released kernel lock and re-check install state" PASS
+  && grep -qF 'materialize_runtime' "$MCP_LAUNCHER" \
+  && grep -qF 'trap cleanup_runtime EXIT' "$MCP_LAUNCHER" \
+  && grep -qF 'run_child' "$MCP_LAUNCHER" \
+  && grep -qF '"$@" <&0 >&1 2>&2 &' "$MCP_LAUNCHER" \
+  && ! grep -qF 'npm ci --prefix "$RUNTIME_DIR"' "$MCP_LAUNCHER" \
+  && ! grep -qF 'INSTALL_LOCK=' "$MCP_LAUNCHER" \
+  && ! grep -qF 'lockf ' "$MCP_LAUNCHER" \
+  && ! grep -qF 'flock ' "$MCP_LAUNCHER" \
+  && ! grep -qF '.zensu-lock-sha256' "$MCP_LAUNCHER" \
+  && ! grep -qF 'needs_install' "$MCP_LAUNCHER"; then
+  check "P6d every MCP start uses a signal-cleaned per-invocation runtime generation without shared install state" PASS
 else
-  check "P6d concurrent MCP starts use an auto-released kernel lock and re-check install state" FAIL
+  check "P6d every MCP start uses a signal-cleaned per-invocation runtime generation without shared install state" FAIL
 fi
 
-if ! command -v lockf >/dev/null 2>&1 && ! command -v flock >/dev/null 2>&1; then
-  check "P6e kernel-lock concurrency behavior (skipped: lockf/flock unavailable on this host)" PASS
-else
-LOCK_TEST_DIR="$(mktemp -d -t zensu-mcp-lock-XXXXXX)"
-LOCK_TEST_RUNTIME="$LOCK_TEST_DIR/runtime"
-LOCK_TEST_BIN="$LOCK_TEST_DIR/bin"
-LOCK_TEST_CALLS="$LOCK_TEST_DIR/npm-calls"
-mkdir -p "$LOCK_TEST_RUNTIME" "$LOCK_TEST_BIN"
-printf '{}\n' >"$LOCK_TEST_RUNTIME/package.json"
-printf '{"lockfileVersion":3}\n' >"$LOCK_TEST_RUNTIME/package-lock.json"
-printf 'abandoned-file-is-inert\n' >"$LOCK_TEST_RUNTIME/.install.lock"
-cat >"$LOCK_TEST_BIN/npm" <<'NPM_STUB'
+ISO_TEST_DIR="$(mktemp -d -t zensu-mcp-isolated-XXXXXX)"
+ISO_TEST_PLUGIN="$ISO_TEST_DIR/plugin"
+ISO_TEST_RUNTIME="$ISO_TEST_PLUGIN/mcp-runtime"
+ISO_TEST_SCRIPTS="$ISO_TEST_PLUGIN/scripts"
+ISO_TEST_LAUNCHER="$ISO_TEST_SCRIPTS/playwright-mcp.sh"
+ISO_TEST_BIN="$ISO_TEST_DIR/bin"
+ISO_TEST_CALLS="$ISO_TEST_DIR/npm-prefixes"
+ISO_TEST_READY="$ISO_TEST_DIR/a-ready"
+ISO_TEST_RELEASE="$ISO_TEST_DIR/a-release"
+ISO_TEST_SIGNAL_READY="$ISO_TEST_DIR/signal-ready"
+ISO_TEST_SIGNAL_SEEN="$ISO_TEST_DIR/signal-seen"
+mkdir -p "$ISO_TEST_RUNTIME" "$ISO_TEST_SCRIPTS" "$ISO_TEST_BIN"
+cp "$MCP_LAUNCHER" "$ISO_TEST_LAUNCHER"
+chmod +x "$ISO_TEST_LAUNCHER"
+printf '{"name":"isolated-fixture","private":true}\n' >"$ISO_TEST_RUNTIME/package.json"
+printf '{"name":"isolated-fixture","lockfileVersion":3}\n' >"$ISO_TEST_RUNTIME/package-lock.json"
+mkdir -p "$ISO_TEST_RUNTIME/node_modules/.bin" "$ISO_TEST_RUNTIME/node_modules/@playwright/mcp"
+cat >"$ISO_TEST_RUNTIME/node_modules/.bin/playwright-mcp" <<'MCP_TAMPERED'
 #!/bin/bash
-set -e
+echo "TAMPERED-RUNTIME $*"
+MCP_TAMPERED
+chmod +x "$ISO_TEST_RUNTIME/node_modules/.bin/playwright-mcp"
+printf 'tampered\n' >"$ISO_TEST_RUNTIME/node_modules/@playwright/mcp/tampered.txt"
+cat >"$ISO_TEST_SCRIPTS/playwright-mcp-proxy.js" <<'PROXY_STUB'
+#!/usr/bin/env node
+'use strict';
+const fs = require('node:fs');
+const path = require('node:path');
+const args = process.argv.slice(2);
+if (args[0] !== '--runtime-dir' || !args[1]) process.exit(80);
+const runtime = args[1];
+const command = args[2] || '';
+const dependency = path.join(runtime, 'node_modules', '@playwright', 'mcp', 'dependency.txt');
+if (command === 'hold') {
+  const before = fs.readFileSync(dependency, 'utf8').trim();
+  process.stdout.write(`before:${before}\n`);
+  fs.writeFileSync(args[3], 'ready\n');
+  while (!fs.existsSync(args[4])) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 20);
+  const after = fs.readFileSync(dependency, 'utf8').trim();
+  process.stdout.write(`after:${after}\n`);
+  process.exit(before === after ? 0 : 1);
+}
+if (command === 'probe') {
+  process.stdout.write(`probe:${fs.readFileSync(dependency, 'utf8').trim()}\n`);
+  process.exit(0);
+}
+if (command === 'stdio') {
+  process.stdout.write(`stdio:${fs.readFileSync(0, 'utf8').trim()}\n`);
+  process.exit(0);
+}
+if (command === 'signal') {
+  process.on('SIGTERM', () => {
+    fs.writeFileSync(args[4], 'seen\n');
+    process.exit(143);
+  });
+  fs.writeFileSync(args[3], 'ready\n');
+  setInterval(() => {}, 50);
+} else {
+  process.exit(0);
+}
+PROXY_STUB
+cat >"$ISO_TEST_BIN/npm" <<'NPM_STUB'
+#!/bin/bash
+set -euo pipefail
+fixture_root="$(cd "$(dirname "$0")/.." && pwd -P)"
+source_runtime="$fixture_root/plugin/mcp-runtime"
+calls_file="$fixture_root/npm-prefixes"
+[ "${1:-}" = "ci" ] || exit 81
 prefix=""
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--prefix" ]; then prefix="$2"; shift 2; else shift; fi
 done
-printf 'npm-ci\n' >>"$LOCK_TEST_CALLS"
-sleep 0.2
-mkdir -p "$prefix/node_modules/.bin"
+[ "$prefix" != "$source_runtime" ] || exit 82
+cmp "$prefix/package.json" "$source_runtime/package.json" >/dev/null || exit 83
+cmp "$prefix/package-lock.json" "$source_runtime/package-lock.json" >/dev/null || exit 84
+printf '%s\n' "$prefix" >>"$calls_file"
+mkdir -p "$prefix/node_modules/.bin" "$prefix/node_modules/@playwright/mcp"
+basename "$prefix" >"$prefix/node_modules/@playwright/mcp/dependency.txt"
 cat >"$prefix/node_modules/.bin/playwright-mcp" <<'MCP_STUB'
 #!/bin/bash
-echo "stub-playwright-mcp $*"
+set -euo pipefail
+dependency="$(cd "$(dirname "$0")/../@playwright/mcp" && pwd)/dependency.txt"
+case "${1:-}" in
+  hold)
+    before="$(cat "$dependency")"
+    printf 'before:%s\n' "$before"
+    : >"$2"
+    while [ ! -f "$3" ]; do sleep 0.02; done
+    after="$(cat "$dependency")"
+    printf 'after:%s\n' "$after"
+    [ "$before" = "$after" ]
+    ;;
+  probe)
+    printf 'probe:%s\n' "$(cat "$dependency")"
+    ;;
+  stdio)
+    IFS= read -r line
+    printf 'stdio:%s\n' "$line"
+    ;;
+  signal)
+    trap ': >"$3"; exit 143' HUP INT TERM
+    : >"$2"
+    while :; do sleep 0.05; done
+    ;;
+  *) printf 'trusted-playwright-mcp %s\n' "$*" ;;
+esac
 MCP_STUB
 chmod +x "$prefix/node_modules/.bin/playwright-mcp"
 NPM_STUB
-chmod +x "$LOCK_TEST_BIN/npm"
-export LOCK_TEST_CALLS
-ZENSU_MCP_TEST_MODE=1 ZENSU_MCP_TEST_PASSTHROUGH=1 ZENSU_MCP_RUNTIME_DIR_OVERRIDE="$LOCK_TEST_RUNTIME" PATH="$LOCK_TEST_BIN:$PATH" "$MCP_LAUNCHER" --help >"$LOCK_TEST_DIR/one.out" 2>"$LOCK_TEST_DIR/one.err" &
-LOCK_TEST_PID_ONE=$!
-ZENSU_MCP_TEST_MODE=1 ZENSU_MCP_TEST_PASSTHROUGH=1 ZENSU_MCP_RUNTIME_DIR_OVERRIDE="$LOCK_TEST_RUNTIME" PATH="$LOCK_TEST_BIN:$PATH" "$MCP_LAUNCHER" --version >"$LOCK_TEST_DIR/two.out" 2>"$LOCK_TEST_DIR/two.err" &
-LOCK_TEST_PID_TWO=$!
-wait "$LOCK_TEST_PID_ONE"; LOCK_TEST_RC_ONE=$?
-wait "$LOCK_TEST_PID_TWO"; LOCK_TEST_RC_TWO=$?
-LOCK_TEST_NPM_COUNT="$(wc -l <"$LOCK_TEST_CALLS" | tr -d ' ')"
-if [ "$LOCK_TEST_RC_ONE" = "0" ] && [ "$LOCK_TEST_RC_TWO" = "0" ] \
-  && [ "$LOCK_TEST_NPM_COUNT" = "1" ] \
-  && [ -f "$LOCK_TEST_RUNTIME/.install.lock" ] \
-  && grep -qF 'stub-playwright-mcp' "$LOCK_TEST_DIR/one.out" \
-  && grep -qF 'stub-playwright-mcp' "$LOCK_TEST_DIR/two.out"; then
-  check "P6e concurrent launchers ignore an inert lock file and execute exactly one install" PASS
+chmod +x "$ISO_TEST_BIN/npm"
+export ISO_TEST_RUNTIME ISO_TEST_CALLS
+PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" hold "$ISO_TEST_READY" "$ISO_TEST_RELEASE" >"$ISO_TEST_DIR/a.out" 2>"$ISO_TEST_DIR/a.err" &
+ISO_TEST_PID_A=$!
+ISO_TEST_WAIT=0
+while [ ! -f "$ISO_TEST_READY" ] && [ "$ISO_TEST_WAIT" -lt 250 ]; do sleep 0.02; ISO_TEST_WAIT=$((ISO_TEST_WAIT+1)); done
+PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" probe >"$ISO_TEST_DIR/b.out" 2>"$ISO_TEST_DIR/b.err"
+ISO_TEST_RC_B=$?
+kill -0 "$ISO_TEST_PID_A" 2>/dev/null; ISO_TEST_A_ALIVE_DURING_B=$?
+: >"$ISO_TEST_RELEASE"
+wait "$ISO_TEST_PID_A"; ISO_TEST_RC_A=$?
+ISO_TEST_BEFORE="$(sed -n 's/^before://p' "$ISO_TEST_DIR/a.out")"
+ISO_TEST_AFTER="$(sed -n 's/^after://p' "$ISO_TEST_DIR/a.out")"
+ISO_TEST_PREFIX_COUNT="$(wc -l <"$ISO_TEST_CALLS" | tr -d ' ')"
+ISO_TEST_GENERATIONS_GONE=true
+while IFS= read -r prefix; do
+  case "$prefix" in "$ISO_TEST_RUNTIME"|"$ISO_TEST_RUNTIME"/*) ISO_TEST_GENERATIONS_GONE=false ;; esac
+  [ ! -e "$prefix" ] || ISO_TEST_GENERATIONS_GONE=false
+done <"$ISO_TEST_CALLS"
+if [ "$ISO_TEST_RC_A" = "0" ] && [ "$ISO_TEST_RC_B" = "0" ] \
+  && [ "$ISO_TEST_A_ALIVE_DURING_B" = "0" ] \
+  && [ "$ISO_TEST_PREFIX_COUNT" = "2" ] \
+  && [ -n "$ISO_TEST_BEFORE" ] && [ "$ISO_TEST_BEFORE" = "$ISO_TEST_AFTER" ] \
+  && [ "$ISO_TEST_GENERATIONS_GONE" = "true" ] \
+  && [ -e "$ISO_TEST_RUNTIME/node_modules/@playwright/mcp/tampered.txt" ] \
+  && grep -qF 'probe:' "$ISO_TEST_DIR/b.out" \
+  && ! grep -qF 'TAMPERED-RUNTIME' "$ISO_TEST_DIR/a.out" \
+  && ! grep -qF 'TAMPERED-RUNTIME' "$ISO_TEST_DIR/b.out"; then
+  check "P6e A keeps its isolated dependency while B materializes; both generations clean up and shared tampering is ignored" PASS
 else
-  check "P6e concurrent launchers ignore an inert lock file and execute exactly one install" FAIL
+  check "P6e A keeps its isolated dependency while B materializes; both generations clean up and shared tampering is ignored" FAIL
 fi
-rm -rf "$LOCK_TEST_DIR"
+
+printf 'inherited-input\n' | PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" stdio >"$ISO_TEST_DIR/stdio.out" 2>"$ISO_TEST_DIR/stdio.err"
+ISO_TEST_STDIO_RC=$?
+ISO_TEST_STDIO_PREFIX="$(tail -n 1 "$ISO_TEST_CALLS")"
+if [ "$ISO_TEST_STDIO_RC" = "0" ] \
+  && grep -qxF 'stdio:inherited-input' "$ISO_TEST_DIR/stdio.out" \
+  && [ ! -e "$ISO_TEST_STDIO_PREFIX" ]; then
+  check "P6k isolated runtime child inherits stdin/stdout/stderr and cleans after EOF" PASS
+else
+  check "P6k isolated runtime child inherits stdin/stdout/stderr and cleans after EOF" FAIL
 fi
+
+PATH="$ISO_TEST_BIN:$PATH" "$ISO_TEST_LAUNCHER" signal "$ISO_TEST_SIGNAL_READY" "$ISO_TEST_SIGNAL_SEEN" >"$ISO_TEST_DIR/signal.out" 2>"$ISO_TEST_DIR/signal.err" &
+ISO_TEST_SIGNAL_PID=$!
+ISO_TEST_WAIT=0
+while [ ! -f "$ISO_TEST_SIGNAL_READY" ] && [ "$ISO_TEST_WAIT" -lt 250 ]; do sleep 0.02; ISO_TEST_WAIT=$((ISO_TEST_WAIT+1)); done
+ISO_TEST_SIGNAL_PREFIX="$(tail -n 1 "$ISO_TEST_CALLS")"
+kill -TERM "$ISO_TEST_SIGNAL_PID" 2>/dev/null || true
+wait "$ISO_TEST_SIGNAL_PID" 2>/dev/null; ISO_TEST_SIGNAL_RC=$?
+if [ "$ISO_TEST_SIGNAL_RC" != "0" ] \
+  && [ -e "$ISO_TEST_SIGNAL_SEEN" ] \
+  && [ ! -e "$ISO_TEST_SIGNAL_PREFIX" ]; then
+  check "P6j TERM is forwarded to the runtime child and its generation is cleaned" PASS
+else
+  check "P6j TERM is forwarded to the runtime child and its generation is cleaned" FAIL
+fi
+rm -rf "$ISO_TEST_DIR"
 if jq -e '.skills | index("./skills/verify-feature")' "$PLUGIN_JSON" >/dev/null 2>&1 \
   && [ "$(jq -r '.mcpServers' "$PLUGIN_JSON" 2>/dev/null)" = './.mcp.json' ]; then
   check "P6c plugin manifest registers skill and MCP file" PASS
 else
   check "P6c plugin manifest registers skill and MCP file" FAIL
+fi
+if grep -qF 'per-invocation runtime generation' "$MCP_RUNTIME_DOC" \
+  && grep -qF 'outside the plugin root' "$MCP_RUNTIME_DOC" \
+  && grep -qF 'signal-safe' "$MCP_RUNTIME_DOC" \
+  && grep -qF 'No executable, dependency tree, or' "$MCP_RUNTIME_DOC" \
+  && grep -qF 'shared `mcp-runtime/node_modules`' "$MCP_RUNTIME_DOC" \
+  && grep -qF '`--check-policy`' "$MCP_RUNTIME_DOC" \
+  && grep -qF 'normal npm content cache' "$MCP_RUNTIME_DOC"; then
+  check "P6i runtime lifecycle documents isolated generations, cleanup, trust, preflight, and cache behavior" PASS
+else
+  check "P6i runtime lifecycle documents isolated generations, cleanup, trust, preflight, and cache behavior" FAIL
 fi
 
 # P7 — docs/help/doctor are synchronized.
@@ -434,7 +577,8 @@ else
 fi
 if grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$DOCTOR_SH" \
   && grep -qF 'valid integrity-locked plugin config + npm present' "$DOCTOR_REPORT" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL"; then
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" \
+  && grep -qF 'Session Control: plugin root unavailable or invalid' "$DOCTOR_SKILL"; then
   check "P7c doctor validates config without claiming unproven MCP readiness" PASS
 else
   check "P7c doctor validates config without claiming unproven MCP readiness" FAIL

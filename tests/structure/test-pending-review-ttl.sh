@@ -18,16 +18,23 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"
+export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN CLAUDE_SESSION_ID 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
+
+start_session() {
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
+}
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 
-MARKER="$TDD_STATE_DIR/pending-review.json"
+start_session ttl-unit
+MARKER="$PROJ/.zensu/state/pending-review.json"
 OLD_TS='2020-01-01T00:00:00Z'
 
 # --- Unit: tdd_pending_review_stale truth table ---
@@ -60,6 +67,7 @@ rm -f "$MARKER"
 
 # --- Integration via stop-chain-enforcer ---
 SID="ttl-main"
+start_session "$SID"
 
 # Fresh marker -> adopt -> block + cleared (sanity, matches deferred fallback)
 bash "$LOG" --pending-review --files "x.ts" --summary "fresh" >/dev/null 2>&1
@@ -70,6 +78,7 @@ OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"
 
 # Stale marker -> NOT adopted -> allow (clean exit 0) + cleared
 SID2="ttl-stale"
+start_session "$SID2"
 printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER"
 OUT="$(printf '{"session_id":"%s"}' "$SID2" | bash "$STOP" 2>/dev/null)"; RC=$?
 { [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ ! -f "$MARKER" ]; } \
@@ -78,7 +87,8 @@ OUT="$(printf '{"session_id":"%s"}' "$SID2" | bash "$STOP" 2>/dev/null)"; RC=$?
 
 # Stale marker but TTL disabled (=0) -> adopt -> block
 SID3="ttl-disabled"
-CFG_OFF="$TDD_STATE_DIR/ttl-off.json"
+start_session "$SID3"
+CFG_OFF="$STATE_DIR/ttl-off.json"
 printf '%s\n' '{"hooks":{"pendingReviewTtlHours":0}}' > "$CFG_OFF"
 printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER"
 OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"
@@ -91,6 +101,7 @@ rm -f "$MARKER"
 # adopted, so an abandoned marker from a crashed run cannot hijack a later
 # session even when ts is absent. This is the end-to-end shape of the TTL bug.
 SID4="ttl-nots-old"
+start_session "$SID4"
 printf '%s\n' '{"files":["x.ts"],"summary":"nots-old"}' > "$MARKER"
 touch -t 202001010000 "$MARKER" 2>/dev/null
 OUT="$(printf '{"session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"; RC=$?

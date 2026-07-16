@@ -1,0 +1,18 @@
+{
+  "name": "zensu-claude-code-evals",
+  "version": "0.0.0",
+  "private": true,
+  "scripts": {
+    "session-control:selfcheck": "bash evals/session-control/run-self-check.sh",
+    "session-control:contract": "bash evals/session-control/run-eval.sh contract",
+    "session-control:live": "bash evals/session-control/run-eval.sh live",
+    "session-control:concurrency": "bash evals/session-control/run-eval.sh concurrency",
+    "session-control:adversarial": "bash evals/session-control/run-eval.sh adversarial",
+    "session-control:release": "bash evals/session-control/run-eval.sh release",
+    "reset-review-limit:eval": "bash evals/reset-review-limit/run-eval.sh"
+  },
+  "devDependencies": {
+    "promptfoo": "0.121.18",
+    "yaml": "2.9.0"
+  }
+}

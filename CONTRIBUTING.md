@@ -33,10 +33,15 @@ You are welcome to clone and run the plugin locally for evaluation or learning p
 ```bash
 git clone https://github.com/MKITConsulting/zensu-claude-code.git
 cd zensu-claude-code
-claude plugin marketplace add .
-claude plugin install zensu --scope project
+claude plugin marketplace add MKITConsulting/zensu-claude-code
+claude plugin install zensu --scope project  # installs the latest gated release tag
 export ZENSU_API_KEY=zsk_...
 ```
+
+To inspect uncommitted local plugin changes, launch a disposable development
+session with `claude --plugin-dir .`; do not replace the production marketplace's
+immutable release ref. The Session Control release/eval path intentionally uses
+an exact clean-commit marketplace fixture instead and never `--plugin-dir`.
 
 ## Code Standards (Internal Reference)
 

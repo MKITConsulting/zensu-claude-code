@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -27,19 +28,22 @@ for fn in tdd_write_phase tdd_phase tdd_step tdd_has_red_fail; do
   fi
 done
 
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 SID="testsession1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID"
 STATE_PATH="$(tdd_state_file "$SID")"
 
 tdd_write_phase "$SID" "S1" "RED_WRITE" "" >/dev/null
 if [ -f "$STATE_PATH" ]; then
-  check "tdd_write_phase creates state file" PASS
+  check "tdd_write_phase updates the SessionStart baseline state file" PASS
 else
-  check "tdd_write_phase creates state file (expected $STATE_PATH)" FAIL
+  check "tdd_write_phase updates the SessionStart baseline state file (expected $STATE_PATH)" FAIL
 fi
 
 GOT_PHASE=$(tdd_phase "$STATE_PATH")
@@ -124,11 +128,12 @@ else
   check "RED_FAIL entry preserves reason text (got: $REASON_FOUND)" FAIL
 fi
 
-PHASE_EMPTY=$(tdd_phase "/nonexistent/path.json")
-if [ "$PHASE_EMPTY" = "UNINITIALIZED" ]; then
-  check "tdd_phase on missing state file returns UNINITIALIZED" PASS
+MISSING_STATE="$CLAUDE_PROJECT_DIR/.zensu/state/tdd-phase-scv1_$(printf '0%.0s' {1..64}).json"
+PHASE_EMPTY=$(tdd_phase "$MISSING_STATE")
+if [ "$PHASE_EMPTY" = "INVALID_STATE" ]; then
+  check "tdd_phase fails closed for an unbound missing state file" PASS
 else
-  check "tdd_phase on missing state file returns UNINITIALIZED (got: $PHASE_EMPTY)" FAIL
+  check "tdd_phase fails closed for an unbound missing state file (got: $PHASE_EMPTY)" FAIL
 fi
 
 echo "----"

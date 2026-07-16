@@ -1,0 +1,25 @@
+description: "Claude Code Session Control v1 live fresh-session suite"
+
+providers:
+  - id: 'exec: ../../scripts/session-control-claude-wrapper.sh'
+    config:
+      source_dir: ../..
+      mode: live
+
+prompts:
+  - id: session-control-live
+    raw: |
+      This is a Session Control integrity evaluation named {{scenario_id}}.
+      Do not edit files. Briefly inspect the injected Zensu session context and finish.
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/control-attestation.js
+
+tests:
+  - file://scenarios/live.yaml
+
+evaluateOptions:
+  maxConcurrency: 2
+  repeat: 1

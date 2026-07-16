@@ -78,7 +78,7 @@ classify() {
 run() {
   local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}"
   local out
-  out="$(payload "$cmd" "$cwd" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  out="$(payload "$cmd" "$cwd" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
         ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
@@ -191,6 +191,17 @@ run "W46 here-string does not swallow next write" "$HS"                         
 
 # escape suppressed by config also covers rule B (escape), not just rule A
 run "W40 escape suppressed by bashWriteGate:false" "printf x >> ../sibling/src/lib.rs" ALLOW "$PROJ" "$CFG_OFF"
+
+# Session Control exports and CLAUDE_ENV_FILE are immutable even when the
+# source-write convention is disabled or an ordinary escape hatch is present.
+run "W63 direct Session Control export assignment" "ZENSU_PROJECT_ROOT=/tmp/other env" DENY
+run "W64 exported Session Control rebind" "export ZENSU_SESSION_CONTEXT=/tmp/other" DENY
+run "W65 unset Session Control export" "unset ZENSU_SESSION_KEY" DENY
+run "W66 printf -v Session Control rebind" "printf -v ZENSU_RUNTIME_DIGEST bad" DENY
+run "W67 append through CLAUDE_ENV_FILE variable" 'printf '\''export ZENSU_PROJECT_ROOT=/tmp/other\n'\'' >> "$CLAUDE_ENV_FILE"' DENY
+run "W68 append through exact CLAUDE_ENV_FILE path" "printf x >> $PROJ/.claude-env" DENY
+run "W69 control rebind ignores bashWriteGate:false" "ZENSU_CLAUDE_PLUGIN_ROOT=/tmp/other env" DENY "$PROJ" "$CFG_OFF"
+run "W70 control rebind ignores inline escape" "ZENSU_BASH_WRITE_GATE=off ZENSU_PROJECT_ROOT=/tmp/other env" DENY
 
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \

@@ -26,13 +26,40 @@
 # /private/tmp, /var/folders). mv/cp are out of scope.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+  exit 2
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
 # Drain stdin before any early exit so an upstream writer never sees a broken
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
 INPUT="$(cat 2>/dev/null || true)"
+
+emit_deny() {
+  REASON="$1" node -e '
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: process.env.REASON
+      }
+    }));
+  '
+  echo
+}
+
+# Session Control export rebinding is a trust-boundary violation, not a
+# configurable source-write convention. Check it before config/escape hatches.
+CONTROL_REASON="$(BSWG_MODE=control PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+if [ -n "$CONTROL_REASON" ]; then
+  emit_deny "$CONTROL_REASON"
+  exit 0
+fi
 
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the escape checks so all Bash gates share the order).
@@ -67,14 +94,5 @@ case "$REASON" in
 esac
 [ -z "$REASON" ] && exit 0
 
-REASON="$REASON" node -e '
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: process.env.REASON
-    }
-  }));
-'
-echo
+emit_deny "$REASON"
 exit 0

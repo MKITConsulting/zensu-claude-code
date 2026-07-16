@@ -17,16 +17,19 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"
+export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN CLAUDE_SESSION_ID 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
 
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 
 arm() {
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
   bash "$LOG" --tdd-begin --session "$1" >/dev/null 2>&1
   bash "$LOG" --tdd-complete --session "$1" >/dev/null 2>&1
 }
@@ -70,7 +73,7 @@ OUT="$(printf '{"session_id":"%s","agent_id":"sub-abc"}' "$SID" | ZENSU_FORCE_MA
   && check "N5 ZENSU_FORCE_MAIN=1 re-enables enforcement despite agent_id" PASS \
   || check "N5 force-main block (out=$OUT)" FAIL
 
-MARKER="$TDD_STATE_DIR/pending-review.json"
+MARKER="$PROJ/.zensu/state/pending-review.json"
 SID_NF="noop-nomutate"
 bash "$LOG" --pending-review --files "x.ts" >/dev/null 2>&1
 OUT="$(printf '{"session_id":"%s","agent_id":"sub-zzz"}' "$SID_NF" | bash "$STOP" 2>/dev/null)"; RC=$?

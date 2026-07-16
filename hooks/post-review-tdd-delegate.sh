@@ -12,11 +12,18 @@
 #   hooks.autoFixIncludeSuggestions=false -> route Critical+Important only (default, backward-compat)
 #   hooks.autoFixMaxRounds=<int 1..99>    -> loop guard (default 5)
 #
-# Counter state lives at ${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}/rounds-<session_id>.json. claude-code's auto-set CLAUDE_PLUGIN_DATA is intentionally IGNORED (use CLAUDE_PLUGIN_DATA_OVERRIDE to relocate).
+# Review-round state is a validated field in the same per-session CAS workflow
+# document as the TDD FSM; there is no independently writable counter file.
 
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+  exit 2
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled autoFix || exit 0
 
@@ -48,22 +55,8 @@ SESSION_ID="$(node -e '
     } catch (_) { console.log(""); }
   });
 ' <<<"$INPUT" 2>/dev/null)"
-TRANSCRIPT_PATH=""
-if [ -z "$SESSION_ID" ]; then
-  TRANSCRIPT_PATH="$(node -e '
-    let s = "";
-    process.stdin.on("data", c => s += c);
-    process.stdin.on("end", () => {
-      try {
-        const j = JSON.parse(s);
-        const tp = j.transcript_path;
-        console.log((typeof tp === "string") ? tp : "");
-      } catch (_) { console.log(""); }
-    });
-  ' <<<"$INPUT" 2>/dev/null)"
-fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 
 # Mode-aware fix discipline: the per-session `vanilla` flag was frozen into the
 # state file by `--tdd-begin`. Read the STATE flag (never live config) so the
@@ -80,52 +73,11 @@ else
 fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
-STATE_DIR="${CLAUDE_PLUGIN_DATA_OVERRIDE:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
-mkdir -p "$STATE_DIR" 2>/dev/null || true
-COUNTER_FILE="$STATE_DIR/rounds-${SESSION_ID}.json"
-if [ -L "$COUNTER_FILE" ]; then
-  echo "zensu post-review hook: refusing to write through symlink at $COUNTER_FILE — counter NOT updated" >&2
-  exit 0
-fi
-if [ -L "$STATE_DIR" ]; then
-  echo "zensu post-review hook: refusing to write under symlinked state dir $STATE_DIR — counter NOT updated" >&2
-  exit 0
-fi
-
-CURRENT="$(node -e '
-  try {
-    const j = JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-    const n = j && j.count;
-    console.log(Number.isInteger(n) && n >= 0 ? String(n) : "0");
-  } catch (_) { console.log("0"); }
-' "$COUNTER_FILE" 2>/dev/null)"
-case "$CURRENT" in
-  ''|*[!0-9]*) CURRENT=0 ;;
-esac
-NEXT=$((CURRENT + 1))
-
-if [ "$(_zensu_log_style)" = "none" ]; then
-  PAYLOAD="$(printf '{"count":%d}' "$NEXT")"
-else
-  PAYLOAD="$(printf '{"count":%d,"ts":"%s"}' "$NEXT" "$(date -u +%Y-%m-%dT%H:%M:%SZ)")"
-fi
-if TMP_FILE="$(mktemp "${STATE_DIR}/rounds-${SESSION_ID}.XXXXXX" 2>/dev/null)"; then
-  if printf '%s\n' "$PAYLOAD" > "$TMP_FILE" \
-     && mv "$TMP_FILE" "$COUNTER_FILE" 2>/dev/null; then
-    :
-  else
-    rm -f "$TMP_FILE" 2>/dev/null
-    echo "zensu post-review hook: failed to persist counter for session ${SESSION_ID} (write/mv)" >&2
-    if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-      echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-    fi
-  fi
-else
-  echo "zensu post-review hook: mktemp failed under ${STATE_DIR} for session ${SESSION_ID}" >&2
-  if ! printf '%s\n' "$PAYLOAD" > "$COUNTER_FILE" 2>/dev/null; then
-    echo "zensu post-review hook: fallback direct write also failed; counter NOT updated" >&2
-  fi
-fi
+NEXT="$(tdd_increment_counter "$SESSION_ID" reviewRound)" || {
+  echo "zensu post-review hook: validated CAS review-round update failed for ${SESSION_ID}" >&2
+  exit 1
+}
+case "$NEXT" in ''|*[!0-9]*) echo "zensu post-review hook: invalid CAS review round" >&2; exit 1 ;; esac
 
 BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)"
 [ -z "$BYPASSES" ] && BYPASSES="none"

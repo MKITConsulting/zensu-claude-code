@@ -219,7 +219,7 @@ printf '{"hooks":{"secretScan":false}}' > "$TMPD/config-off.json"
 
 run_hook() {
   local payload="$1"; shift
-  printf '%s' "$payload" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= TDD_STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" ${1+"$@"} bash "$HOOK" 2>/dev/null
+  printf '%s' "$payload" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" ${1+"$@"} bash "$HOOK" 2>/dev/null
 }
 
 DENY='permissionDecision":"deny'

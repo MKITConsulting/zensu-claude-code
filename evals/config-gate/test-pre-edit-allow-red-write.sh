@@ -13,11 +13,11 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"
+export STATE_DIR
 unset ZENSU_TDD_GATE
 
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$STATE_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"

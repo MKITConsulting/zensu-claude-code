@@ -171,10 +171,10 @@ else
   check "R15-P1 Phase 0 still uses a raw placeholder or legacy pointer" FAIL
 fi
 
-if grep -qF 'FATAL: plugin root unresolvable' "$AGENT"; then
-  check "R15-P2 Phase 0 contains FATAL abort message when the session export is missing" PASS
+if grep -qF 'FATAL: Session Control v1 context unresolvable' "$AGENT"; then
+  check "R15-P2 Phase 0 contains the v1 fail-closed abort when session context is missing" PASS
 else
-  check "R15-P2 Phase 0 contains FATAL abort message when the session export is missing" FAIL
+  check "R15-P2 Phase 0 contains the v1 fail-closed abort when session context is missing" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
@@ -205,16 +205,16 @@ else
   check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" FAIL
 fi
 
-if grep -qF 'never paste a previously returned path into shell source' "$AGENT"; then
-  check "F1.b Phase 0 forbids returned-path interpolation" PASS
+if grep -qF 'never fall back to a shared file, transcript, process id, parent process id, or legacy resolver' "$AGENT"; then
+  check "F1.b Phase 0 forbids every legacy session/root fallback" PASS
 else
-  check "F1.b Phase 0 lacks the returned-path interpolation ban" FAIL
+  check "F1.b Phase 0 lacks the legacy-fallback ban" FAIL
 fi
 
-if grep -qF 'session-start-export-root.sh' "$AGENT" && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
-  check "F1.c Phase 0 recovery points at the SessionStart exporter and a fresh session" PASS
+if grep -qF 'SessionStart/SubagentStart hooks are enabled and trusted' "$AGENT" && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
+  check "F1.c Phase 0 recovery points at Session Control hooks and a fresh session" PASS
 else
-  check "F1.c Phase 0 recovery points at the SessionStart exporter and a fresh session" FAIL
+  check "F1.c Phase 0 recovery points at Session Control hooks and a fresh session" FAIL
 fi
 
 if grep -qF 'Read `$HOME/.zensu/plugin-root` and store its contents' "$AGENT"; then

@@ -1,86 +1,63 @@
 #!/bin/bash
 
-zensu_session_key() {
-  local proc_start proc_hash
-  proc_start="$(ps -o lstart= -p "$PPID" 2>/dev/null)"
-  if [ -n "$proc_start" ]; then
-    proc_hash="$(printf '%s' "$proc_start" | cksum 2>/dev/null | cut -d' ' -f1)"
-  fi
-  if [ -n "${proc_hash:-}" ]; then
-    echo "${PPID}_${proc_hash}"
-  else
-    echo "${PPID}"
-  fi
-}
-
-zensu_resolve_session_via_helper() {
-  local helper_root="${CLAUDE_PLUGIN_ROOT:-}"
-  if [ -z "$helper_root" ]; then
-    helper_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-  fi
-  local helper="${helper_root}/hooks/lib/resolve-session-id.js"
-  [ -f "$helper" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  local out
-  out="$(ZENSU_TRANSCRIPT_PATH="${ZENSU_TRANSCRIPT_PATH:-}" node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
-  out="${out//$'\n'/}"
-  out="${out//$'\r'/}"
-  if [ -n "$out" ]; then
-    local sanitized="${out//[^A-Za-z0-9_-]/_}"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
-    fi
-  fi
-  return 1
-}
-
 zensu_resolve_session_id() {
-  local from_json="${1:-}"
-  local sanitized helper_out
-  if [ -n "$from_json" ]; then
-    sanitized="${from_json//[^A-Za-z0-9_-]/_}"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
-    fi
+  local raw="${1:-}"
+  local lib_dir core resolved injected_key
+  injected_key="${ZENSU_SESSION_KEY:-}"
+  if [ -z "$raw" ]; then
+    raw="$injected_key"
   fi
-  if helper_out="$(zensu_resolve_session_via_helper)"; then
-    if [ -n "$helper_out" ]; then
-      echo "$helper_out"
-      return 0
-    fi
-  fi
-  echo "fallback_$(zensu_session_key)"
-}
-
-# Resolve the active session's project dir (absolute) when CLAUDE_PROJECT_DIR is
-# unavailable — the non-hook Bash-call counterpart to zensu_resolve_session_via_helper.
-# Delegates to resolve-project-dir.js (active-transcript cwd), threading the same
-# ZENSU_TRANSCRIPT_PATH / ZENSU_BASH_START env the session helper uses. Prints an
-# absolute, EXISTING directory on success; returns non-zero (no output) otherwise,
-# so callers can leave CLAUDE_PROJECT_DIR untouched on a miss.
-zensu_resolve_project_dir() {
-  local helper_root="${CLAUDE_PLUGIN_ROOT:-}"
-  if [ -z "$helper_root" ]; then
-    helper_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-  fi
-  local helper="${helper_root}/hooks/lib/resolve-project-dir.js"
-  [ -f "$helper" ] || return 1
+  [ -n "$raw" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  local out
-  out="$(ZENSU_TRANSCRIPT_PATH="${ZENSU_TRANSCRIPT_PATH:-}" node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
-  out="${out//$'\n'/}"
-  out="${out//$'\r'/}"
-  [ -n "$out" ] || return 1
-  # Only adopt an ABSOLUTE, existing directory. The transcript cwd is always an
-  # absolute canonical path, so this never rejects the happy path; it hardens the
-  # value that is about to be exported as CLAUDE_PROJECT_DIR and interpolated into
-  # state-file mkdir/rm paths against a relative or otherwise unexpected result.
-  case "$out" in /*) ;; *) return 1 ;; esac
-  [ -d "$out" ] || return 1
-  echo "$out"
-  return 0
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  core="$lib_dir/session-control-core-v1.js"
+  [ -f "$core" ] || return 1
+  resolved="$(node "$core" session-key "$raw")" || return 1
+  if [ -n "$injected_key" ]; then
+    # SessionStart injects a canonical key. Once present, it is an immutable
+    # binding: explicit raw ids and explicit keys are accepted only when their
+    # normalized key is exactly this session's key. This prevents model-side
+    # helpers from reading or mutating another session's CAS state.
+    [ "$(node "$core" session-key "$injected_key")" = "$injected_key" ] || return 1
+    [ "$resolved" = "$injected_key" ] || return 1
+  fi
+  printf '%s\n' "$resolved"
 }
 
-export -f zensu_session_key zensu_resolve_session_via_helper zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+zensu_session_key() {
+  zensu_resolve_session_id "${1:-}"
+}
+
+zensu_resolve_project_dir() {
+  local candidate="${ZENSU_PROJECT_ROOT:-}"
+  local context_file="${ZENSU_SESSION_CONTEXT:-}"
+  local session_key="${ZENSU_SESSION_KEY:-}"
+  local lib_dir core
+  [ -n "$candidate" ] && [ -n "$context_file" ] && [ -n "$session_key" ] || return 1
+  [ ! -L "$candidate" ] && [ -d "$candidate" ] || return 1
+  [ ! -L "$context_file" ] && [ -f "$context_file" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  core="$lib_dir/session-control-core-v1.js"
+  [ -f "$core" ] || return 1
+  PROJECT_CANDIDATE="$candidate" CONTEXT_FILE="$context_file" SESSION_KEY="$session_key" CORE="$core" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const core = require(process.env.CORE);
+    const key = core.sessionKey(process.env.SESSION_KEY);
+    if (key !== process.env.SESSION_KEY) process.exit(1);
+    const contextFile = path.resolve(process.env.CONTEXT_FILE);
+    if (path.basename(contextFile) !== `${key}.json`) process.exit(1);
+    const stat = fs.lstatSync(contextFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) process.exit(1);
+    if (fs.realpathSync.native(contextFile) !== contextFile) process.exit(1);
+    const recordsDir = path.dirname(contextFile);
+    const context = core.readContext({ recordsDir, sessionId: key });
+    const requested = path.resolve(process.env.PROJECT_CANDIDATE);
+    const canonical = fs.realpathSync.native(requested);
+    if (requested !== canonical || context.project_root !== canonical) process.exit(1);
+    process.stdout.write(canonical);
+  ' 2>/dev/null
+}
+
+export -f zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

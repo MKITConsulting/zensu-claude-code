@@ -102,7 +102,9 @@ if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$TDD_MD"; then
 else
   check "P3l helper-command failure is loudly distinguished" FAIL
 fi
-if grep -qiF 'Trust boundary' "$README" && grep -qiF 'not enforced by the plugin' "$README"; then
+if grep -qiF 'Trust boundary' "$README" \
+  && grep -qF 'Custom personas stay neutral `host-profile-v1`' "$README" \
+  && grep -qF 'ordinary host tools remain governed by their own frontmatter' "$README"; then
   check "P3m README states the persona trust boundary" PASS
 else
   check "P3m README states the persona trust boundary" FAIL

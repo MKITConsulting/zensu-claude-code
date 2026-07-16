@@ -102,9 +102,14 @@ rm -rf "$P9"
 
 # C10 — an active TDD session -> silent (the TDD flow owns the reminder there).
 P10="$(mktemp -d -t tddrem-XXXXXX)"
-mkdir -p "$P10/.zensu/state"
-printf '%s' '{"session_id":"s10","phase":"IMPL","history":[],"active":true}' > "$P10/.zensu/state/tdd-phase-s10.json"
-OUT10="$(payload "add validation to the parser" "s10" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P10" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+OUT10="$(
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P10" ZENSU_CONFIG="$NO_CONFIG"
+  export ZENSU_TEST_PLUGIN_DATA="$P10/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" s10
+  bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session s10 >/dev/null 2>&1
+  payload "add validation to the parser" "s10" | bash "$HOOK" 2>/dev/null | fired
+)"
 [ "$OUT10" = "EMPTY" ] && check "C10 active TDD session -> silent" PASS || check "C10 active-session silence (got '$OUT10')" FAIL
 rm -rf "$P10"
 

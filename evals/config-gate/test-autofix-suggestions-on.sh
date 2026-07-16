@@ -3,7 +3,9 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -24,8 +26,13 @@ cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
 export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-with-suggestions.json"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
+# shellcheck disable=SC1090
+source "$BASELINE" sess-on-001
+bash "$LOG" --tdd-begin --session "sess-on-001" >/dev/null 2>&1
 
 STDIN='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-on-001"}'
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"

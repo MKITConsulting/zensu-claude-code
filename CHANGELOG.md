@@ -9,14 +9,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **runtime**: Bind model-issued helper commands to the exact Claude Code plugin
-  installation for the current session via a shell-safe
-  `ZENSU_CLAUDE_PLUGIN_ROOT` export in `CLAUDE_ENV_FILE`. Hook subprocesses keep
-  resolving independently from `CLAUDE_PLUGIN_ROOT`, so concurrent
-  `SessionStart` hooks do not depend on execution order.
-- **hooks**: Keep complete quoted Bash invocations in Claude Code's supported
-  `command` field and invalidate an older session export before every new root
-  validation, leaving failed resumes fail closed.
+- **runtime**: Replace transcript/PPID/fallback identity discovery with Session
+  Control v1. Fresh sessions bind the exact executed plugin, project, source
+  revision, runtime digest, and domain-separated session hash under
+  `CLAUDE_PLUGIN_DATA`; SubagentStart reuses the immutable parent context.
+- **reviewers**: Enforce `reviewer-readonly-v1` from the trusted hook
+  `agent_type`. Reviewer agents cannot write, mutate workflow state, run free
+  shell or control commands, spawn nested agents, or impersonate the main
+  thread.
+- **evals**: Add pinned Promptfoo contract, live, concurrency, and adversarial
+  validation with wrapper-owned control attestations. Nightly/release now use
+  Claude Code 2.1.211 to install `zensu@zensu` into an isolated user cache,
+  verify source/cache runtime identity, launch without `--plugin-dir`, prove
+  inherited normal/reviewer subagent context, and synchronize 12 processes as
+  three real four-way barrier generations. Upgrade by starting a new Claude
+  Code session; legacy identity artifacts are intentionally ignored.
+- **mcp runtime**: Materialize the pinned Playwright npm graph with `npm ci` in
+  a private OS-temporary generation for every server start and browser
+  installation. Concurrent servers never share `node_modules`; existing
+  plugin-root executables, dependency trees, and self-authored hash stamps are
+  ignored. The launcher has no production test passthrough, scrubs ambient API,
+  SCM, cloud, and package-registry credentials at both child boundaries,
+  forwards signals, waits for its runtime child, cleans the generation on exit,
+  and retains npm's normal SRI-checked content cache.
+- **review state**: Store the auto-fix `reviewRound` and Stop-hook `stopBlocks`
+  budgets as bounded fields in the same validated, revisioned Session Control
+  workflow document as the TDD FSM. All increments and resets now use the
+  per-session CAS transaction; independent `rounds-*.json` and `*.stopblocks`
+  files, location overrides, scans, and deletion-based resets are retired.
+- **release provenance**: Pin the production Claude marketplace source to the
+  immutable `v<plugin version>` GitHub ref. Feature and release-PR merges no
+  longer activate unvalidated main-branch bytes: publish repeats the complete
+  Session Control gate at the exact main SHA, uploads SHA-bound evidence, and
+  only then creates the tag that makes the new source resolvable. Checkout
+  evals retain real `marketplace add` / `plugin install` registry behavior by
+  installing a private clean local clone through an ephemeral `./plugin`
+  marketplace fixture, never `--plugin-dir` or the mutable source worktree.
 
 ### Fixed
 

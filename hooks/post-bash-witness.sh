@@ -1,14 +1,22 @@
 #!/bin/bash
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+  exit 2
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT
 
 # Bypass ledger: the escape stays free, but while a TDD session is active the
 # opt-out is recorded to chain state (fail-open, gate name only; per-gate dedup
-# makes this once per session). The state-dir pre-filter keeps the off-path
+# makes this once per session). The project-bound state pre-filter keeps the off-path
 # free of node spawns when no session was ever armed.
 if [ "${ZENSU_TEST_WITNESS:-}" = "off" ]; then
-  _state_dir="${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}"
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+  _project_root="$(zensu_resolve_project_dir)" || exit 0
+  _state_dir="$_project_root/.zensu/state"
   ls "$_state_dir"/tdd-phase-*.json >/dev/null 2>&1 || exit 0
   command -v node >/dev/null 2>&1 || exit 0
   INPUT="$(cat 2>/dev/null || true)"
@@ -34,16 +42,15 @@ printf '%s' "$INPUT" | node -e '
       const tail = stdout.slice(-200);
       const interrupted = (j.tool_response && j.tool_response.interrupted === true) ? "true" : "false";
       const session = (typeof j.session_id === "string" && j.session_id) ? j.session_id : "";
-      const transcript = (typeof j.transcript_path === "string") ? j.transcript_path : "";
-      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n" + transcript + "\n");
-    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n\n"); }
+      process.stdout.write(JSON.stringify(cmd) + "\n" + exit + "\n" + JSON.stringify(tail) + "\n" + interrupted + "\n" + session + "\n");
+    } catch (_) { process.stdout.write("\"\"\n?\n\"\"\nfalse\n\n"); }
   });
 ' > "$TMP_FIELDS" 2>/dev/null
 
-{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; read -r TRANSCRIPT_PATH; } < "$TMP_FIELDS"
+{ read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-SANITIZED_SESSION="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION")"
+SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")" || exit 0
 
 # Activation: record witness lines only while a main-thread TDD session is active
 # for THIS session (chain-state flag set by `zensu-log.sh --tdd-begin`). Replaces

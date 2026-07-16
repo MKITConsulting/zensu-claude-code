@@ -3,6 +3,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -18,17 +19,20 @@ if [ ! -x "$SCRIPT" ]; then
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 unset ZENSU_TDD_GATE
 
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 # 0.4.0+: the gate activates on chain-state (active=true), not CLAUDE_AGENT_TYPE.
 # Mark the session active with no phase written (UNINITIALIZED), as /zensu:tdd
 # --tdd-begin would before any RED test exists.
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+# shellcheck disable=SC1090
+source "$BASELINE" s-uninit-1
 tdd_set_flag "s-uninit-1" active true >/dev/null 2>&1
 
 PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-uninit-1"}'

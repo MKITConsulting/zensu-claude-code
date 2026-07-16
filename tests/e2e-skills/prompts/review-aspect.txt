@@ -1,1 +1,11 @@
-Perspective: bugs. Files changed: [calc.js]
+Perspective: bugs.
+
+REVIEW PACKET v1
+policy: reviewer-readonly-v1
+changed_files: [calc.js]
+implementation_summary: calc.js changed division and last-item behavior.
+requirements_baseline: none
+diff_summary: the divide guard was removed and the final array index changed.
+test_evidence: command `node --test`, exit 0, 4/4 pass, witness verified.
+build_evidence: not applicable; plain JavaScript fixture has no build step.
+coverage_evidence: skipped; fixture has no coverage tool.

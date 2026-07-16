@@ -1,0 +1,14 @@
+description: "CAS happy path: seed the current active workflow through trusted helpers, invoke /zensu:reset-review-limit, and prove both counters plus every terminus/latch reset in exactly one revision advance."
+vars:
+  scenario_id: reset-cas-happy
+  spec_block: |
+    The eval provider synchronously pre-seeded and snapshotted the CURRENT
+    Claude session with an active completed workflow, reviewRound=3,
+    stopBlocks=2, chainDone=true, and codeReviewDone=true before this process
+    started. Do not seed, repair, or otherwise mutate state before the skill.
+
+    Invoke `/zensu:reset-review-limit` now through exactly one Skill tool call,
+    then follow the loaded skill instructions completely. Do not spawn an agent,
+    search for files, delete files, or edit repository source. Report the
+    resulting canonical state and revision, but note that your prose is not
+    grading evidence; the provider independently verifies before/after CAS state.

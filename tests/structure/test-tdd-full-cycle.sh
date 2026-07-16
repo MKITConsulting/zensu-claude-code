@@ -25,6 +25,7 @@ WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
 PASS=0; FAIL=0
 check() {
@@ -35,17 +36,19 @@ check() {
 
 # --- hermetic environment (no CLAUDE_AGENT_TYPE: main-thread chain-state only) --
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$PROJ/state"
-export ZENSU_CONFIG="$TDD_STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
+SID="full-cycle"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
+STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
+export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
-SID="full-cycle"
-SF="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
+SF="$STATE_DIR/tdd-phase-${SID_KEY}.json"
 
 PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID"'"}'
 TEST='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'"$SID"'"}'
@@ -71,6 +74,10 @@ echo "== Phase 0: plan approval -> begin =="
 grep -qF "skill='zensu:tdd'" "$PLANHOOK" && check "0b plan-approved hook routes to /zensu:tdd skill" PASS || check "0b plan-approved wiring" FAIL
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null
 [ "$(gate "$PROD")" = "deny" ] && check "0c after --tdd-begin: active + UNINITIALIZED -> prod deny" PASS || check "0c begin activates gate" FAIL
+GATE_DIRECTIVE="$(printf '%s' "$PROD" | bash "$GATE" 2>/dev/null)"
+printf '%s' "$GATE_DIRECTIVE" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session' \
+  && check "0d pre-edit deny output positively pins the fail-closed helper guard" PASS \
+  || check "0d pre-edit deny output lacks the fail-closed helper guard" FAIL
 
 echo "== Step S1: RED -> GREEN =="
 phase_step RED_WRITE S1
@@ -105,7 +112,7 @@ phase_step REFACTOR S2
 
 echo "== Witness mid-cycle (active session) =="
 echo '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS" >/dev/null 2>&1
-WLOG="$PROJ/.zensu/logs/witness-${SID}.log"
+WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
 W1_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
 { [ -f "$WLOG" ] && printf '%s' "$W1_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W1_LINE" | grep -qF 'tail="ok"'; } \
   && check "W1 active session records witness line with cmd= + tail=" PASS || check "W1 witness line (tail) got='${W1_LINE}'" FAIL
@@ -123,15 +130,25 @@ echo "== Terminus: implComplete -> review -> self-review -> done =="
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T1 implComplete + !codeReviewDone: Stop BLOCKS" PASS || check "T1 terminus block" FAIL
 case "$(stop_reason)" in *"zensu:code-reviewer"*) check "T2 block reason forces zensu:code-reviewer" PASS ;; *) check "T2 reason code-reviewer" FAIL ;; esac
+case "$(stop_reason)" in *'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'*) check "T2b reviewer Stop directive positively pins the fail-closed helper guard" PASS ;; *) check "T2b reviewer Stop directive lacks helper guard" FAIL ;; esac
 # code-reviewer Agent completes -> post-review routes in-thread + counts a round
 CTX="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID"'"}' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
 echo "$CTX" | grep -q "/zensu:tdd" && check "T3 post-review routes fixes in-thread (/zensu:tdd)" PASS || check "T3 in-thread routing" FAIL
-RCOUNT="$(node -e 'try{console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).count)}catch(_){console.log("?")}' "$PROJ/state/rounds-${SID}.json")"
-[ "$RCOUNT" = "1" ] && check "T4 round counter increments (1)" PASS || check "T4 counter=1 (got $RCOUNT)" FAIL
+printf '%s' "$CTX" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session' \
+  && check "T3b post-review output positively pins the fail-closed helper guard" PASS \
+  || check "T3b post-review output lacks helper guard" FAIL
+RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$SID" node -e '
+  try {
+    const core=require(process.env.CONTROL_CORE);
+    console.log(core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID}).reviewRound);
+  } catch (_) { console.log("?"); }
+')"
+[ "$RCOUNT" = "1" ] && check "T4 integrated reviewRound increments (1)" PASS || check "T4 reviewRound=1 (got $RCOUNT)" FAIL
 # reviewer PASS -> code-review chain converges
 bash "$LOG" --code-review-done --session "$SID" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T5 codeReviewDone + !chainDone: Stop still BLOCKS" PASS || check "T5 pre-self-review block" FAIL
 case "$(stop_reason)" in *"zensu:self-review"*) check "T6 block reason now forces skill='zensu:self-review'" PASS ;; *) check "T6 reason self-review" FAIL ;; esac
+case "$(stop_reason)" in *'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'*) check "T6b self-review Stop directive positively pins the fail-closed helper guard" PASS ;; *) check "T6b self-review Stop directive lacks helper guard" FAIL ;; esac
 # self-review owns the terminus
 bash "$LOG" --chain-done --session "$SID" >/dev/null
 [ "$(stop_dec)" = "allow" ] && check "T7 chainDone: Stop ALLOWS (cycle complete)" PASS || check "T7 terminus allow" FAIL

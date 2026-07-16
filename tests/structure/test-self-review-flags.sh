@@ -17,10 +17,17 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+export CLAUDE_PROJECT_DIR="$STATE_DIR"
+export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+cleanup() { rm -rf "$STATE_DIR"; }
 trap cleanup EXIT
+
+# Establish the same immutable context and revision-one workflow baseline that
+# production receives from SessionStart.
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" flags-test
 
 # shellcheck disable=SC1090
 source "$PHASE_LIB"

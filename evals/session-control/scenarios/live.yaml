@@ -1,0 +1,30 @@
+- description: "L01 fresh main session resolves the executed plugin"
+  vars:
+    scenario_id: live-main-fresh
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: Host:SessionStart
+    expect_no_changes: true
+- description: "L02 fresh reviewer receives parent session control context"
+  vars:
+    scenario_id: live-reviewer-parent
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: HostStream:AgentSpawn:zensu:review-aspect
+    expect_no_changes: true
+- description: "L03 bare PLM subagent inherits neutral context and cannot execute shell"
+  vars:
+    scenario_id: live-neutral-subagent
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: HostStream:NeutralCapability:zensu-plm:host-profile-v1:shell-denied
+    expect_no_changes: true

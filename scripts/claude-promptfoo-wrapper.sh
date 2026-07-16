@@ -15,6 +15,15 @@ SANDBOX_TMP=""
 CLAUDE_PID=""
 RENDER_PID=""
 RENDER_STATUS_DIR=""
+RESET_ATTEST_EVIDENCE=""
+RESET_ATTEST_DIR=""
+RESET_BEFORE_EVIDENCE=""
+RESET_SESSION_ID=""
+RESET_BARRIER_READY=""
+RESET_BARRIER_ACK=""
+RESET_SETTINGS=""
+RESET_BEFORE_DIGEST=""
+RESET_CLAUDE_CLI_VERSION=""
 
 collect_process_tree() {
   local pid="$1" child
@@ -56,13 +65,19 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 PROMPT="${1:-}"
-OPTIONS_JSON="${2:-{}}"
+OPTIONS_JSON="${2:-}"
+[ -n "$OPTIONS_JSON" ] || OPTIONS_JSON='{}'
 
 AGENT="$(echo "$OPTIONS_JSON" | jq -r '.config.agent // ""' 2>/dev/null)"
 WORKDIR="$(echo "$OPTIONS_JSON" | jq -r '.config.working_dir // "."' 2>/dev/null)"
 INIT_GIT="$(echo "$OPTIONS_JSON" | jq -r 'if .config.init_git == true then "true" else "false" end' 2>/dev/null)"
 REQUIRE_DISPOSABLE="$(echo "$OPTIONS_JSON" | jq -r 'if .config.require_disposable_environment == true then "true" else "false" end' 2>/dev/null)"
 [ -z "$WORKDIR" ] && WORKDIR="."
+RESET_ATTEST_MODE="${ZENSU_RESET_REVIEW_LIMIT_ATTESTATION:-0}"
+RESET_ATTEST_SCENARIO="${ZENSU_RESET_REVIEW_LIMIT_SCENARIO:-}"
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  RESET_SESSION_ID="$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')" || exit 69
+fi
 
 if [ "$REQUIRE_DISPOSABLE" = "true" ] && [ "${ZENSU_E2E_DISPOSABLE_ENVIRONMENT:-0}" != "1" ]; then
   echo "claude-promptfoo-wrapper: this unrestricted live eval requires a disposable host; set ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 only inside an environment you accept Claude may fully access." >&2
@@ -106,7 +121,6 @@ else
   ISOLATED_DIR="$(mktemp -d -t "claude-eval-XXXXXX")"
 fi
 cleanup() {
-  exec 3>&- 2>/dev/null || true
   if [ -n "$CLAUDE_PID" ]; then
     terminate_owned_process "$CLAUDE_PID"
   fi
@@ -119,6 +133,7 @@ cleanup() {
     wait "$MUTATION_WATCH_PID" 2>/dev/null || true
   fi
   rm -f "$MUTATION_MARKER" "$MUTATION_READY" "$SANDBOX_PROFILE" 2>/dev/null || true
+  [ -z "$RESET_ATTEST_DIR" ] || rm -rf "$RESET_ATTEST_DIR" 2>/dev/null || true
   [ -z "$RENDER_STATUS_DIR" ] || rm -rf "$RENDER_STATUS_DIR" 2>/dev/null || true
   [ -z "$SANDBOX_TMP" ] || rm -rf "$SANDBOX_TMP" 2>/dev/null || true
   if [ "${KEEP_ISOLATED:-0}" = "1" ]; then
@@ -133,12 +148,50 @@ trap 'exit 143' TERM HUP
 
 CP_CMD=(cp "$CLONE_FLAGS" "$WORKDIR/." "$ISOLATED_DIR/")
 
+RESET_STREAM_EVIDENCE="$SCRIPT_DIR/../evals/reset-review-limit/lib/stream-evidence.js"
+RESET_STATE_SEEDER="$SCRIPT_DIR/../evals/reset-review-limit/lib/seed-state.js"
+RESET_SESSION_BARRIER="$SCRIPT_DIR/../evals/reset-review-limit/lib/session-start-barrier.sh"
+RESET_SEALED_ATTESTOR="$SCRIPT_DIR/../evals/reset-review-limit/lib/sealed-attestation.js"
+RESET_CONTROL_CORE="$SCRIPT_DIR/../hooks/lib/session-control-core-v1.js"
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  case "$RESET_ATTEST_SCENARIO" in
+    reset-cas-happy|reset-invalid-state|reset-sidecar-isolation) ;;
+    *) echo "claude-promptfoo-wrapper: invalid reset-review-limit attestation scenario" >&2; exit 2 ;;
+  esac
+  for required in "$RESET_STREAM_EVIDENCE" "$RESET_STATE_SEEDER" "$RESET_SESSION_BARRIER" \
+    "$RESET_SEALED_ATTESTOR" "$RESET_CONTROL_CORE"; do
+    [ -f "$required" ] || {
+      echo "claude-promptfoo-wrapper: reset-review-limit attestation runtime is unavailable" >&2
+      exit 127
+    }
+  done
+  RESET_ATTEST_DIR="$(mktemp -d -t zensu-reset-review-attestation-XXXXXX)" || exit 69
+  chmod 700 "$RESET_ATTEST_DIR" || exit 69
+  RESET_ATTEST_EVIDENCE="$RESET_ATTEST_DIR/stream-evidence.json"
+  RESET_BEFORE_EVIDENCE="$RESET_ATTEST_DIR/provider-before.json"
+  RESET_BARRIER_READY="$RESET_ATTEST_DIR/session-start.ready"
+  RESET_BARRIER_ACK="$RESET_ATTEST_DIR/provider-snapshot.ack"
+  RESET_SETTINGS="$RESET_ATTEST_DIR/settings.json"
+  export ZENSU_RESET_REVIEW_LIMIT_READY="$RESET_BARRIER_READY"
+  export ZENSU_RESET_REVIEW_LIMIT_ACK="$RESET_BARRIER_ACK"
+  RESET_BARRIER_COMMAND="bash \"$RESET_SESSION_BARRIER\""
+  node -e '
+    const fs=require("node:fs");
+    const value={hooks:{SessionStart:[{hooks:[{type:"command",command:process.argv[2]}]}]}};
+    const fd=fs.openSync(process.argv[1],"wx",0o600);
+    try{fs.writeFileSync(fd,`${JSON.stringify(value)}\n`);fs.fsyncSync(fd);}finally{fs.closeSync(fd);}
+  ' "$RESET_SETTINGS" "$RESET_BARRIER_COMMAND" || exit 69
+fi
+
 # Headless Claude needs non-interactive permissions. Callers that set
 # require_disposable_environment must explicitly acknowledge that this is host access, not a sandbox.
 CMD=(claude --print --output-format stream-json --include-partial-messages --verbose --dangerously-skip-permissions)
 if [ -n "${ZENSU_PLUGIN_DIR_OVERRIDE:-}" ] && [ -d "$ZENSU_PLUGIN_DIR_OVERRIDE" ]; then
+  ZENSU_PLUGIN_DIR_OVERRIDE="$(cd "$ZENSU_PLUGIN_DIR_OVERRIDE" && pwd -P)" || exit 2
   CMD+=(--plugin-dir "$ZENSU_PLUGIN_DIR_OVERRIDE")
 fi
+if [ "$RESET_ATTEST_MODE" = "1" ]; then CMD+=(--session-id "$RESET_SESSION_ID"); fi
+if [ "$RESET_ATTEST_MODE" = "1" ]; then CMD+=(--settings "$RESET_SETTINGS"); fi
 CMD+=("$FULL_PROMPT")
 
 if [ "${DRY_RUN:-0}" = "1" ]; then
@@ -158,6 +211,22 @@ fi
 if ! command -v claude >/dev/null 2>&1; then
   echo "claude-promptfoo-wrapper: claude CLI not found on PATH — install Claude Code CLI." >&2
   exit 127
+fi
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  RESET_CLAUDE_CLI_VERSION="$(claude --version 2>/dev/null | node -e '
+    let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{
+      const match=s.match(/(?:^|\s)(\d+\.\d+\.\d+)(?:\s|$)/);
+      if(!match) process.exit(1);
+      process.stdout.write(match[1]);
+    });
+  ')" || {
+    echo "claude-promptfoo-wrapper: cannot determine Claude Code CLI version" >&2
+    exit 127
+  }
+  [ "$RESET_CLAUDE_CLI_VERSION" = "2.1.211" ] || {
+    echo "claude-promptfoo-wrapper: reset-review-limit eval requires Claude Code CLI 2.1.211 (got $RESET_CLAUDE_CLI_VERSION)" >&2
+    exit 64
+  }
 fi
 if ! command -v node >/dev/null 2>&1 || [ ! -f "$STREAM_RENDERER" ] || [ ! -f "$ENRICH_RENDERER" ] \
   || [ ! -f "$FIXTURE_MANIFEST" ] || [ ! -f "$FIXTURE_MUTATION_WATCH" ] \
@@ -254,6 +323,14 @@ if ! node -e '
   exit 2
 fi
 
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  node "$RESET_STATE_SEEDER" seed "$ISOLATED_REAL" "$RESET_ATTEST_SCENARIO" \
+    "$RESET_SESSION_ID" "$RESET_CONTROL_CORE" || {
+      echo "claude-promptfoo-wrapper: cannot seed provider-owned reset state" >&2
+      exit 2
+    }
+fi
+
 BASELINE_MANIFEST=""
 if [ "$INIT_GIT" = "true" ]; then
   BASELINE_MANIFEST="$(node "$FIXTURE_MANIFEST" "$ISOLATED_REAL" 2>/dev/null)" || {
@@ -266,8 +343,9 @@ if [ "$INIT_GIT" = "true" ]; then
   fi
   MUTATION_MARKER="$(mktemp -u -t zensu-fixture-mutated-XXXXXX)"
   MUTATION_READY="$(mktemp -u -t zensu-fixture-watch-ready-XXXXXX)"
-  node "$FIXTURE_MUTATION_WATCH" "$ISOLATED_REAL" "$MUTATION_MARKER" "$MUTATION_READY" \
-    >/dev/null 2>&1 &
+  WATCH_ARGS=("$ISOLATED_REAL" "$MUTATION_MARKER" "$MUTATION_READY")
+  if [ "${ZENSU_WRAPPER_TEST_MODE:-0}" = "1" ]; then WATCH_ARGS+=(--test-polling); fi
+  node "$FIXTURE_MUTATION_WATCH" "${WATCH_ARGS[@]}" >/dev/null 2>&1 &
   MUTATION_WATCH_PID=$!
   for ((attempt=0; attempt<100; attempt++)); do
     [ -f "$MUTATION_READY" ] && break
@@ -369,24 +447,59 @@ if [ "$INIT_GIT" = "true" ] && [ "${ZENSU_WRAPPER_TEST_MODE:-0}" != "1" ]; then
   esac
 fi
 RENDER_STATUS_DIR="$(mktemp -d -t zensu-render-status-XXXXXX)" || exit 69
-RENDER_STATUS="$RENDER_STATUS_DIR/exit"
-exec 3> >(node "$STREAM_RENDERER"; printf '%s\n' "$?" >"$RENDER_STATUS")
-RENDER_PID=$!
-node "$OWNED_PROCESS" "${EXEC_CMD[@]}" >&3 2>/dev/null &
+RAW_STREAM="$RENDER_STATUS_DIR/claude-stream.jsonl"
+: >"$RAW_STREAM" || exit 69
+chmod 600 "$RAW_STREAM" || exit 69
+# A regular, private spool avoids /dev/fd process substitution (forbidden by
+# some managed hosts) while keeping untrusted Claude output OS-bounded. POSIX
+# ulimit -f is expressed in 512-byte blocks: 32768 blocks = 16 MiB.
+RAW_STREAM_MAX_BLOCKS=32768
+(ulimit -f "$RAW_STREAM_MAX_BLOCKS" || exit 69
+  exec node "$OWNED_PROCESS" "${EXEC_CMD[@]}"
+) >"$RAW_STREAM" 2>/dev/null &
 CLAUDE_PID=$!
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  for ((attempt=0; attempt<1000; attempt++)); do
+    [ -f "$RESET_BARRIER_READY" ] && break
+    kill -0 "$CLAUDE_PID" 2>/dev/null || break
+    sleep 0.01
+  done
+  if [ ! -f "$RESET_BARRIER_READY" ]; then
+    echo "claude-promptfoo-wrapper: reset SessionStart barrier did not become ready" >&2
+    terminate_owned_process "$CLAUDE_PID"
+    CLAUDE_PID=""
+    exit 2
+  fi
+  node "$RESET_STATE_SEEDER" snapshot "$ISOLATED_REAL" "$RESET_ATTEST_SCENARIO" \
+    "$RESET_SESSION_ID" "$RESET_BEFORE_EVIDENCE" "$RESET_CONTROL_CORE" || {
+      echo "claude-promptfoo-wrapper: cannot snapshot provider-owned reset state" >&2
+      terminate_owned_process "$CLAUDE_PID"
+      CLAUDE_PID=""
+      exit 2
+    }
+  RESET_BEFORE_DIGEST="$(node -e '
+    const fs=require("node:fs"),crypto=require("node:crypto");
+    process.stdout.write(`sha256:${crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex")}`);
+  ' "$RESET_BEFORE_EVIDENCE")" || exit 2
+  node -e 'const fs=require("node:fs");const fd=fs.openSync(process.argv[1],"wx",0o600);fs.closeSync(fd)' \
+    "$RESET_BARRIER_ACK" || exit 2
+fi
 wait "$CLAUDE_PID"
 CLAUDE_RC=$?
 CLAUDE_PID=""
-exec 3>&-
-for ((attempt=0; attempt<200; attempt++)); do
-  [ -s "$RENDER_STATUS" ] && break
-  kill -0 "$RENDER_PID" 2>/dev/null || break
-  sleep 0.01
-done
-wait "$RENDER_PID" 2>/dev/null || true
-RENDER_PID=""
-RENDER_RC="$(sed -n '1p' "$RENDER_STATUS" 2>/dev/null || true)"
-case "$RENDER_RC" in ''|*[!0-9]*) RENDER_RC=1 ;; esac
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  set -o pipefail
+  node "$RESET_STREAM_EVIDENCE" "$RESET_ATTEST_SCENARIO" \
+    "$RESET_ATTEST_EVIDENCE" <"$RAW_STREAM" | node "$STREAM_RENDERER"
+  RENDER_RC=$?
+  set +o pipefail
+else
+  node "$STREAM_RENDERER" <"$RAW_STREAM"
+  RENDER_RC=$?
+fi
+case "$RENDER_RC" in
+  ''|*[!0-9]*) RENDER_RC=1 ;;
+esac
 rm -rf "$RENDER_STATUS_DIR"
 RENDER_STATUS_DIR=""
 if [ "$CLAUDE_RC" = "0" ] && [ "$RENDER_RC" != "0" ]; then
@@ -467,6 +580,12 @@ if [ "$INIT_GIT" = "true" ]; then
   fi
 fi
 rm -f "$MUTATION_MARKER" "$MUTATION_READY" 2>/dev/null || true
+if [ "$RESET_ATTEST_MODE" = "1" ]; then
+  node "$RESET_SEALED_ATTESTOR" "$ISOLATED_REAL" "$RESET_ATTEST_SCENARIO" \
+    "$RESET_BEFORE_EVIDENCE" "$RESET_ATTEST_EVIDENCE" "$RESET_CONTROL_CORE" \
+    "$CLAUDE_RC" "$ZENSU_PLUGIN_DIR_OVERRIDE" "$RESET_BEFORE_DIGEST" \
+    "$RESET_CLAUDE_CLI_VERSION"
+fi
 printf '\n===== wrapper attestation =====\n'
 node -e '
   const value = {

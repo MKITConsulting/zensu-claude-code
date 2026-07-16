@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG_SCRIPT="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -13,9 +14,10 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 OUT_TIMESTAMP=$(bash "$LOG_SCRIPT" timestamp "$(date +%s)")
@@ -31,6 +33,8 @@ case "$OUT_STYLE" in
 esac
 
 SID="s-log-phase-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID"
 bash "$LOG_SCRIPT" --phase RED_WRITE --step S1 --session "$SID"
 EXIT_RW=$?
 if [ "$EXIT_RW" = "0" ]; then

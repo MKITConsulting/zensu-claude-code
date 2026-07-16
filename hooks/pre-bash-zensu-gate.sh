@@ -24,7 +24,13 @@
 # replaces (the env/config knob name is kept for backward compatibility).
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+  exit 2
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
@@ -129,13 +135,6 @@ field() {
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled mcpGate || exit 0
 
-# zensu-plm agent is exempt — the gate has no decision point for it, so its
-# escapes are meaningless and never ledgered (checked BEFORE any recording).
-AGENT_TYPE="$(field agent_type)"
-case "$AGENT_TYPE" in
-  *zensu-plm*) exit 0 ;;
-esac
-
 # Bypass ledger: escapes stay free, but while a TDD session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). Inline
 # escapes are reported by the embedded parser itself (__bypass__ marker lines
@@ -167,15 +166,16 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-cli-map.sh"
 [ "${ZENSU_MCP_GATE:-}" = "off" ] && { tdd_record_bypass_payload "$INPUT" ZENSU_MCP_GATE 2>/dev/null || true; record_bypass_markers; exit 0; }
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-SID_PRIMARY="$(zensu_resolve_session_id "$(field session_id)")"
-SID_FALLBACK="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+SID_CURRENT="$(zensu_resolve_session_id "$(field session_id)" 2>/dev/null || true)"
 
-# Returns 0 (allowed) if a workflow declaring $1 is active in either session.
+# Returns 0 (allowed) only when the current hook payload session (or, when the
+# payload omitted it, the exact exported Session Control key) owns a workflow
+# declaring $1. Ambient CLAUDE_SESSION_ID is legacy introspection data and must
+# never donate another session's authorization.
 tool_allowed_by_workflow() {
   local tool="$1"
-  [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_PRIMARY")" "$tool")" = "true" ] && return 0
-  [ -n "$SID_FALLBACK" ] && [ "$SID_FALLBACK" != "$SID_PRIMARY" ] \
-    && [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_FALLBACK")" "$tool")" = "true" ] && return 0
+  [ -n "$SID_CURRENT" ] || return 1
+  [ "$(zensu_workflow_allows "$(tdd_state_file "$SID_CURRENT")" "$tool")" = "true" ] && return 0
   return 1
 }
 
@@ -194,7 +194,7 @@ EOF
 
 [ -z "$DENY_TOOL" ] && { record_bypass_markers; exit 0; }
 
-REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct main-thread \`zensu\` mutation bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) that the skills and the zensu-plm agent enforce. Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — or delegate the whole task to the zensu-plm agent, instead of running the zensu CLI mutation directly. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
+REASON="Zensu state-mutating command (maps to '${DENY_TOOL}') was blocked. A direct command without an active main-thread skill window bypasses the Zensu workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates). Run the matching skill — /zensu:bootstrap or /zensu:ghost-scan (onboarding), /zensu:implement (feature work), /zensu:security-review (classification/review) — in the interactive main thread. For a deliberate one-off, prefix the command with ZENSU_MCP_GATE=off (honored inline); writes targeting a localhost backend (--api-url/ZENSU_API_URL) and --help are never gated."
 
 REASON="$REASON" node -e '
   process.stdout.write(JSON.stringify({

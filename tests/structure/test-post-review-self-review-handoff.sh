@@ -9,6 +9,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -18,16 +20,26 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"   # defaults -> selfReview on
+export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"   # defaults -> selfReview on
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
+# shellcheck disable=SC1090
+source "$PHASE_LIB"
+
+start_session() {
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
+}
 
 flag() {
   local sid="$1" key="$2"
-  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$TDD_STATE_DIR/tdd-phase-${sid}.json" "$key"
+  local session_key
+  session_key="$(node "$SESSION_CORE" session-key "$sid")"
+  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$PROJ/.zensu/state/tdd-phase-${session_key}.json" "$key"
 }
 postrev() {
   local sid="$1" cfg="${2:-}"
@@ -41,6 +53,7 @@ postrev() {
 
 # --- A: normal PASS completion -> hand off to self-review ---
 SID_A="postrev-pass"
+start_session "$SID_A"
 bash "$LOG" --tdd-begin --session "$SID_A" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_A" >/dev/null
 CTX_A="$(postrev "$SID_A")"
@@ -55,10 +68,12 @@ echo "$CTX_A" | grep -qF "subagent_type='zensu:code-reviewer'" && check "P4 fix-
 
 # --- B: max-rounds -> codeReviewDone set, chainDone NOT set, routes to self-review ---
 SID_B="postrev-maxrounds"
+start_session "$SID_B"
 bash "$LOG" --tdd-begin --session "$SID_B" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null
-mkdir -p "$PROJ/.zensu/state"
-printf '{"count":5,"ts":"x"}' > "$PROJ/.zensu/state/rounds-${SID_B}.json"
+for _ in 1 2 3 4 5; do
+  tdd_increment_counter "$SID_B" reviewRound >/dev/null
+done
 CTX_B="$(postrev "$SID_B")"
 [ "$(flag "$SID_B" codeReviewDone)" = "true" ] && check "P5 max-rounds sets codeReviewDone" PASS || check "P5 codeReviewDone set" FAIL
 [ "$(flag "$SID_B" chainDone)" = "false" ] && check "P6 max-rounds does NOT set chainDone (self-review owns terminus)" PASS || check "P6 chainDone stays false" FAIL
@@ -66,7 +81,8 @@ echo "$CTX_B" | grep -qF "skill='zensu:self-review'" && check "P7 max-rounds rou
 
 # --- C: selfReview disabled -> legacy --chain-done close, no self-review ---
 SID_C="postrev-selfreview-off"
-OFFCFG="$TDD_STATE_DIR/selfreview-off.json"
+start_session "$SID_C"
+OFFCFG="$STATE_DIR/selfreview-off.json"
 printf '{"hooks":{"selfReview":false}}' > "$OFFCFG"
 bash "$LOG" --tdd-begin --session "$SID_C" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_C" >/dev/null

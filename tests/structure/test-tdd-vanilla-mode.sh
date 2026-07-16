@@ -25,6 +25,7 @@ PLANHOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 REMINDER="$PLUGIN_DIR/hooks/user-prompt-tdd-reminder.sh"
 BANNER="$PLUGIN_DIR/hooks/session-start-banner.sh"
 PRIMER="$PLUGIN_DIR/hooks/session-start-primer.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
 PASS=0; FAIL=0
 check() {
@@ -35,38 +36,82 @@ check() {
 
 # --- hermetic environment (no CLAUDE_AGENT_TYPE: main-thread chain-state only) --
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
 PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$PROJ/state"
-CFG_DEFAULT="$TDD_STATE_DIR/no-such-config.json"
-CFG_VANILLA="$TDD_STATE_DIR/vanilla-config.json"
+STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
+for BASELINE_SID in \
+  vanilla-lib vanilla-lib-reset vanilla-lib-array vanilla-lib-array-wf vanilla-lib-wf \
+  vanilla-begin-default vanilla-begin-strict vanilla-begin-vanilla vanilla-fail \
+  vanilla-strtrue vanilla-rebegin vanilla-malformed vanilla-conv; do
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
+done
+CFG_DEFAULT="$STATE_DIR/no-such-config.json"
+CFG_VANILLA="$STATE_DIR/vanilla-config.json"
 printf '%s' '{"hooks":{"tddImplementation":false}}' > "$CFG_VANILLA"
-CFG_STRICT="$TDD_STATE_DIR/strict-config.json"
+CFG_STRICT="$STATE_DIR/strict-config.json"
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$CFG_STRICT"
 export ZENSU_CONFIG="$CFG_DEFAULT"
 unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
+
+session_key() { node "$SESSION_CORE" session-key "$1"; }
+# The SessionStart hook exports the canonical realpath. Keep that exact spelling:
+# on macOS, mktemp may expose /var while realpath resolves it to /private/var,
+# and Session Control deliberately rejects a non-canonical context filename.
+SESSION_RECORDS="$(dirname "$ZENSU_SESSION_CONTEXT")"
+activate_session() {
+  local key
+  key="$(session_key "$1")" || return 1
+  export ZENSU_SESSION_KEY="$key"
+  export ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json"
+  [ -f "$ZENSU_SESSION_CONTEXT" ]
+}
+payload_session() {
+  node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
+    try { const p=JSON.parse(s); if (typeof p.session_id === "string") process.stdout.write(p.session_id); }
+    catch (_) {}
+  })'
+}
 
 prod_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"%s"}' "$1"; }
 test_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"%s"}' "$1"; }
 
 gate() {  # echoes allow|deny for a payload; $2 = optional ZENSU_CONFIG override
-  printf '%s' "$1" | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$GATE" 2>/dev/null | node -e '
+  local sid key context
+  sid="$(printf '%s' "$1" | payload_session)"
+  key="$(session_key "$sid")"
+  context="$SESSION_RECORDS/$key.json"
+  printf '%s' "$1" | ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" \
+    ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$GATE" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{const j=JSON.parse(s);console.log(j.hookSpecificOutput&&j.hookSpecificOutput.permissionDecision==="deny"?"deny":"allow")}
       catch(_){console.log("allow")}});'
 }
-stop_dec() { printf '%s' '{"session_id":"'"$1"'"}' | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
+stop_dec() { local key; key="$(session_key "$1")"; printf '%s' '{"session_id":"'"$1"'"}' | \
+  ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json" \
+  ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
-stop_reason() { printf '%s' '{"session_id":"'"$1"'"}' | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
+stop_reason() { local key; key="$(session_key "$1")"; printf '%s' '{"session_id":"'"$1"'"}' | \
+  ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json" \
+  ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).reason||"")}catch(_){console.log("")}});'; }
 hook_ctx() {  # stdin payload, $1 hook script, $2 optional ZENSU_CONFIG override -> echoes additionalContext
-  ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$1" 2>/dev/null | node -e '
+  local payload sid key context
+  payload="$(cat)"
+  sid="$(printf '%s' "$payload" | payload_session)"
+  key="${ZENSU_SESSION_KEY:-}"
+  context="${ZENSU_SESSION_CONTEXT:-}"
+  if [ -n "$sid" ]; then
+    key="$(session_key "$sid")"
+    context="$SESSION_RECORDS/$key.json"
+  fi
+  printf '%s' "$payload" | ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" \
+    ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$1" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}});'
 }
@@ -75,6 +120,7 @@ echo "== Lib: vanilla flag plumbing =="
 # shellcheck disable=SC1090
 source "$PHASE_LIB"
 SID_L="vanilla-lib"
+activate_session "$SID_L"
 SF_L="$(tdd_state_file "$SID_L")"
 tdd_set_flag "$SID_L" vanilla true
 [ "$(tdd_vanilla_mode "$SF_L" 2>/dev/null)" = "true" ] \
@@ -83,25 +129,37 @@ tdd_write_phase "$SID_L" SX GREEN_PASS "" >/dev/null 2>&1
 { [ "$(tdd_get_flag "$SF_L" vanilla)" = "true" ] && [ "$(tdd_phase "$SF_L")" = "GREEN_PASS" ]; } \
   && check "L2 vanilla flag survives --phase state rebuild (write landed)" PASS || check "L2 flag survives phase write" FAIL
 SID_L3="vanilla-lib-reset"
+activate_session "$SID_L3"
 SF_L3="$(tdd_state_file "$SID_L3")"
 tdd_set_flag "$SID_L3" vanilla true
 tdd_clear_session "$SID_L3" >/dev/null 2>&1
 [ "$(tdd_get_flag "$SF_L3" vanilla)" = "false" ] \
   && check "L3 --tdd-reset clears the vanilla flag" PASS || check "L3 reset clears flag" FAIL
 SID_L5="vanilla-lib-array"
+activate_session "$SID_L5"
 SF_L5="$(tdd_state_file "$SID_L5")"
 mkdir -p "$(dirname "$SF_L5")"
 printf '%s' '["corrupt"]' > "$SF_L5"
-tdd_set_flag "$SID_L5" active true >/dev/null 2>&1
-[ "$(tdd_get_flag "$SF_L5" active)" = "true" ] \
-  && check "L5 array-shaped state file: flag write recovers to object and persists" PASS || check "L5 array-shape flag write" FAIL
+if ! tdd_set_flag "$SID_L5" active true >/dev/null 2>&1 \
+  && [ "$(cat "$SF_L5")" = '["corrupt"]' ] \
+  && [ "$(tdd_state_status "$SF_L5")" = "invalid" ]; then
+  check "L5 array-shaped state file: flag write fails closed and preserves evidence" PASS
+else
+  check "L5 array-shaped state file: flag write fails closed and preserves evidence" FAIL
+fi
 SID_L6="vanilla-lib-array-wf"
+activate_session "$SID_L6"
 SF_L6="$(tdd_state_file "$SID_L6")"
 printf '%s' '[1,2]' > "$SF_L6"
-tdd_workflow_begin "$SID_L6" "create_feature" >/dev/null 2>&1
-[ "$(zensu_workflow_active "$SF_L6")" = "true" ] \
-  && check "L6 array-shaped state file: workflow-begin recovers and persists" PASS || check "L6 array-shape workflow write" FAIL
+if ! tdd_workflow_begin "$SID_L6" "create_feature" >/dev/null 2>&1 \
+  && [ "$(cat "$SF_L6")" = '[1,2]' ] \
+  && [ "$(tdd_state_status "$SF_L6")" = "invalid" ]; then
+  check "L6 array-shaped state file: workflow write fails closed and preserves evidence" PASS
+else
+  check "L6 array-shaped state file: workflow write fails closed and preserves evidence" FAIL
+fi
 SID_L4="vanilla-lib-wf"
+activate_session "$SID_L4"
 SF_L4="$(tdd_state_file "$SID_L4")"
 tdd_workflow_begin "$SID_L4" "create_feature,link_test" >/dev/null 2>&1
 tdd_write_phase "$SID_L4" SY IMPL "" >/dev/null 2>&1
@@ -110,45 +168,54 @@ tdd_write_phase "$SID_L4" SY IMPL "" >/dev/null 2>&1
 
 echo "== Begin: mode persist + echo =="
 SID_A0="vanilla-begin-default"
+activate_session "$SID_A0"
 OUT_A0="$(ZENSU_CONFIG="$CFG_DEFAULT" bash "$LOG" --tdd-begin --session "$SID_A0" 2>/dev/null)"
 [ "$OUT_A0" = "mode: vanilla" ] \
   && check "A0 default config (no tddImplementation key): --tdd-begin echoes 'mode: vanilla'" PASS || check "A0 default echo (got '$OUT_A0')" FAIL
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_A0")" vanilla)" = "true" ] \
   && check "A0b default config: state vanilla=true (default flipped to vanilla)" PASS || check "A0b default state" FAIL
 SID_A="vanilla-begin-strict"
+activate_session "$SID_A"
 OUT_A="$(ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_A" 2>/dev/null)"
 [ "$OUT_A" = "mode: strict" ] \
   && check "A1 tddImplementation:true: --tdd-begin echoes 'mode: strict'" PASS || check "A1 strict echo (got '$OUT_A')" FAIL
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_A")" vanilla)" = "false" ] \
   && check "A2 tddImplementation:true: state vanilla=false" PASS || check "A2 strict state" FAIL
 SID_B="vanilla-begin-vanilla"
+activate_session "$SID_B"
 OUT_B="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_B" 2>/dev/null)"
 [ "$OUT_B" = "mode: vanilla" ] \
   && check "B1 tddImplementation:false: --tdd-begin echoes 'mode: vanilla'" PASS || check "B1 vanilla echo (got '$OUT_B')" FAIL
 [ "$(tdd_get_flag "$(tdd_state_file "$SID_B")" vanilla)" = "true" ] \
   && check "B2 tddImplementation:false: state vanilla=true" PASS || check "B2 vanilla state" FAIL
 
-echo "== Begin: failure + robustness paths =="
-touch "$TDD_STATE_DIR/blockfile"
-OUT_A3="$(TDD_STATE_DIR="$TDD_STATE_DIR/blockfile/state" ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "vanilla-fail" 2>"$TDD_STATE_DIR/a3.err")"
+echo "== Begin: project-bound state + robustness paths =="
+activate_session "vanilla-fail"
+OUT_A3="$(STATE_DIR="$STATE_DIR/forbidden-override" ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "vanilla-fail" 2>"$STATE_DIR/a3.err")"
 RC_A3=$?
-{ [ "$RC_A3" -ne 0 ] && ! printf '%s' "$OUT_A3" | grep -q "^mode:" && grep -q "active flag write failed" "$TDD_STATE_DIR/a3.err"; } \
-  && check "A3 unwritable state dir: rc!=0, no mode echo, activation failure on stderr" PASS \
-  || check "A3 begin failure path (rc=$RC_A3 stdout='$OUT_A3' err='$(cat "$TDD_STATE_DIR/a3.err")')" FAIL
+{ [ "$RC_A3" -eq 0 ] && [ "$OUT_A3" = "mode: vanilla" ] && [ -f "$(tdd_state_file vanilla-fail)" ] && [ ! -e "$STATE_DIR/forbidden-override" ]; } \
+  && check "A3 ambient STATE_DIR override is ignored; canonical project state activates" PASS \
+  || check "A3 project-bound state path (rc=$RC_A3 stdout='$OUT_A3' err='$(cat "$STATE_DIR/a3.err")')" FAIL
 SID_A5="vanilla-strtrue"
-CFG_STR="$TDD_STATE_DIR/strtrue-config.json"
+activate_session "$SID_A5"
+CFG_STR="$STATE_DIR/strtrue-config.json"
 printf '%s' '{"hooks":{"tddImplementation":"true"}}' > "$CFG_STR"
 OUT_A5="$(ZENSU_CONFIG="$CFG_STR" bash "$LOG" --tdd-begin --session "$SID_A5" 2>/dev/null)"
 { [ "$OUT_A5" = "mode: vanilla" ] && [ "$(tdd_get_flag "$(tdd_state_file "$SID_A5")" vanilla)" = "true" ]; } \
   && check "A5 non-boolean \"true\" stays vanilla (only boolean true flips to strict)" PASS || check "A5 non-boolean stays vanilla (got '$OUT_A5')" FAIL
 
 echo "== --mode query verb =="
+activate_session "$SID_B"
 [ "$(bash "$LOG" --mode --session "$SID_B" 2>/dev/null)" = "vanilla" ] \
   && check "M1 --mode echoes vanilla for a vanilla session" PASS || check "M1 --mode vanilla" FAIL
+activate_session "$SID_A"
 [ "$(bash "$LOG" --mode --session "$SID_A" 2>/dev/null)" = "strict" ] \
   && check "M2 --mode echoes strict for a strict session" PASS || check "M2 --mode strict" FAIL
-[ "$(bash "$LOG" --mode --session "no-such-session-xyz" 2>/dev/null)" = "strict" ] \
-  && check "M3 --mode defaults to strict with no session state" PASS || check "M3 --mode default" FAIL
+activate_session "$SID_B"
+OUT_M3="$(bash "$LOG" --mode --session "no-such-session-xyz" 2>/dev/null)"
+RC_M3=$?
+{ [ "$RC_M3" -ne 0 ] && [ -z "$OUT_M3" ]; } \
+  && check "M3 cross-session mode query fails closed" PASS || check "M3 cross-session mode query" FAIL
 no_hang() {
   bash "$LOG" "$@" >/dev/null 2>&1 &
   local pid=$!
@@ -171,6 +238,7 @@ no_hang --workflow-begin --session m4c --tools \
 
 echo "== Reset hygiene: vanilla begin -> reset -> strict re-begin (same SID) =="
 SID_G="vanilla-rebegin"
+activate_session "$SID_G"
 ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_G" >/dev/null 2>&1
 bash "$LOG" --tdd-reset --session "$SID_G" >/dev/null 2>&1
 OUT_G="$(ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_G" 2>/dev/null)"
@@ -214,13 +282,13 @@ evil_path_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"
   && check "SP6 case variant .ZENSU/State/ still denied" PASS || check "SP6 case-variant deny" FAIL
 [ "$(gate "$(evil_path_payload "src/../.zensu/state/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
   && check "SP7 traversal src/../.zensu/state/ still denied" PASS || check "SP7 traversal deny" FAIL
-[ "$(gate "$(evil_path_payload "$TDD_STATE_DIR/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
-  && check "SP8 resolved TDD_STATE_DIR override location denied too" PASS || check "SP8 state-dir override deny" FAIL
-ln -s "$TDD_STATE_DIR" "$PROJ/statelink" 2>/dev/null
+[ "$(gate "$(evil_path_payload "$STATE_DIR/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
+  && check "SP8 resolved STATE_DIR override location denied too" PASS || check "SP8 state-dir override deny" FAIL
+ln -s "$STATE_DIR" "$PROJ/statelink" 2>/dev/null
 if [ -L "$PROJ/statelink" ]; then
   [ "$(gate "$(evil_path_payload "$PROJ/statelink/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
     && check "SP9 symlink alias to the state dir denied (realpath-resolved)" PASS || check "SP9 symlink-alias deny" FAIL
-  ln -s "$TDD_STATE_DIR/tdd-phase-${SID_B}.json" "$PROJ/innocent.json" 2>/dev/null
+  ln -s "$STATE_DIR/tdd-phase-$(session_key "$SID_B").json" "$PROJ/innocent.json" 2>/dev/null
   { [ -L "$PROJ/innocent.json" ] && [ "$(gate "$(evil_path_payload "$PROJ/innocent.json" "$SID_B")")" = "deny" ]; } \
     && check "SP10 file symlink to a state file denied (full-path realpath)" PASS || check "SP10 file-symlink deny" FAIL
 else
@@ -229,20 +297,23 @@ else
 fi
 
 echo "== Witness: records in vanilla session (live vanilla config) =="
+activate_session "$SID_B"
 echo '{"tool_input":{"command":"npm test"},"tool_response":{"stdout":"ok"},"session_id":"'"$SID_B"'"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$WITNESS" >/dev/null 2>&1
-WLOG="$PROJ/.zensu/logs/witness-${SID_B}.log"
+WLOG="$PROJ/.zensu/logs/witness-$(session_key "$SID_B").log"
 W_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
 { [ -f "$WLOG" ] && printf '%s' "$W_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W_LINE" | grep -qF 'tail="ok"'; } \
   && check "C1 vanilla session records witness line with cmd= + tail=" PASS || check "C1 witness in vanilla (got '${W_LINE}')" FAIL
 
-echo "== Gate: malformed state degrades open (characterization) =="
+echo "== Gate: malformed state fails closed =="
 SID_MS="vanilla-malformed"
+activate_session "$SID_MS"
 bash "$LOG" --tdd-begin --session "$SID_MS" >/dev/null 2>&1
 printf '%s' 'this is not json{{{' > "$(tdd_state_file "$SID_MS")"
-[ "$(gate "$(prod_payload "$SID_MS")")" = "allow" ] \
-  && check "MS1 corrupt state JSON: gate degrades to pass-through (both modes read false)" PASS || check "MS1 malformed-state degradation" FAIL
+[ "$(gate "$(prod_payload "$SID_MS")")" = "deny" ] \
+  && check "MS1 corrupt state JSON: gate blocks instead of treating it as inactive" PASS || check "MS1 malformed-state fail-closed" FAIL
 
 echo "== Chain guarantee: vanilla keeps Stop-hook enforcement (live vanilla config) =="
+activate_session "$SID_B"
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "allow" ] && check "D0 mid-implementation: Stop allows" PASS || check "D0 mid-impl allow" FAIL
 bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "block" ] && check "D1 implComplete in vanilla: Stop BLOCKS" PASS || check "D1 vanilla terminus block" FAIL
@@ -304,9 +375,11 @@ printf '%s' "$PR_S2" | grep -qF "strict TDD discipline" \
   && check "D8 post-review (strict state, vanilla LIVE config): strict wording — state wins (frozen)" PASS \
   || check "D8 post-review freeze cross-pin" FAIL
 SID_C="vanilla-conv"
+activate_session "$SID_C"
 ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$SID_C" >/dev/null 2>&1
-mkdir -p "$PROJ/state"
-printf '%s' '{"count":5}' > "$PROJ/state/rounds-${SID_C}.json"
+for _ in 1 2 3 4 5; do
+  tdd_increment_counter "$SID_C" reviewRound >/dev/null
+done
 PR_CONV="$(printf '%s' '{"tool_input":{"subagent_type":"zensu:code-reviewer"},"session_id":"'"$SID_C"'"}' | hook_ctx "$POSTREV" "$CFG_VANILLA")"
 { printf '%s' "$PR_CONV" | grep -qF "Auto-fix convergence" \
   && printf '%s' "$PR_CONV" | grep -qF "skill='zensu:self-review'" \
@@ -320,7 +393,7 @@ echo "== Ask-hook heredoc parity (drift guard) =="
 parity() {
   local f="$1"; shift
   local d
-  d="$(mktemp -d "$TDD_STATE_DIR/parity-XXXXXX")"
+  d="$(mktemp -d "$STATE_DIR/parity-XXXXXX")"
   awk -v dir="$d" '{ if ($0 ~ /^cat <<.JSON.$/) { n++; inb=1; next } if ($0 == "JSON") { inb=0 } if (inb) print > (dir "/b" n) }' "$f"
   if [ ! -f "$d/b1" ] || [ ! -f "$d/b2" ]; then echo "MISSING_BLOCKS"; return; fi
   if [ -f "$d/b3" ]; then echo "EXTRA_BLOCKS"; return; fi
@@ -334,7 +407,7 @@ P1="$(parity "$PLANHOOK" "Skipping TDD: docs only" "Skipping TDD: user declined"
 [ "$P1" = "OK" ] && check "P1 plan-approval heredocs: shared invariants present in BOTH branches" PASS || check "P1 plan-approval parity ($P1)" FAIL
 P2="$(parity "$REMINDER" "Skipping TDD: user declined" "AskUserQuestion" "kein tdd" "'use tdd', 'with tdd'" "Auto Mode" "skill='zensu:tdd'" "doc/comment/prose")"
 [ "$P2" = "OK" ] && check "P2 reminder heredocs: shared invariants present in BOTH branches" PASS || check "P2 reminder parity ($P2)" FAIL
-P3="$(parity "$PRIMER" "/zensu:tdd" "Plan mode" "AskUserQuestion" "zensu-plm" "/zensu:bootstrap")"
+P3="$(parity "$PRIMER" "/zensu:tdd" "Plan mode" "AskUserQuestion" "top-level interactive thread" "/zensu:bootstrap")"
 [ "$P3" = "OK" ] && check "P3 primer heredocs: shared invariants present in BOTH branches" PASS || check "P3 primer parity ($P3)" FAIL
 
 echo "== Banner + primer: mode-aware wording =="
@@ -355,6 +428,11 @@ PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_STRICT")"
 printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD" \
   && check "BNR4 primer (tddImplementation:true): strict orientation" PASS || check "BNR4 primer strict wording" FAIL
 PRM_D="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_DEFAULT")"
+if printf '%s\n%s\n' "$PRM_V" "$PRM_S" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session'; then
+  check "F13 strict/vanilla primer outputs positively pin the fail-closed helper guard" PASS
+else
+  check "F13 strict/vanilla primer outputs lack the fail-closed helper guard" FAIL
+fi
 { printf '%s' "$PRM_D" | grep -q "vanilla" && ! printf '%s' "$PRM_D" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR4b primer (default cfg): vanilla orientation — default flipped to vanilla" PASS || check "BNR4b primer default vanilla" FAIL
 

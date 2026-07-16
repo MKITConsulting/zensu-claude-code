@@ -90,7 +90,7 @@ The `coverage-audit` persona is cast on every run and its `### Test Coverage` se
 - **Always `run_in_background: true`**: otherwise the main thread blocks on the first reviewer.
 - **Always pass `team_name` + `name`**: required for `SendMessage` and `TaskUpdate` ownership.
 - **Inject ALL context in the prompt**: the agent starts fresh with no history. Include PR metadata, head SHA, base ref, `$WORKTREE` path, `--context` paths verbatim, `--conversation` text.
-- **Reference the persona template in the prompt**: don't inline the full template — the agent can `Read` `${ROOT:?FATAL: validated session plugin root missing}/skills/pr-team-review/rules/reviewer-personas.md` if it needs the schema. `ROOT` is the value validated from `ZENSU_CLAUDE_PLUGIN_ROOT` in Step 0; never substitute a hook-subprocess-only variable.
+- **Reference the persona template in the prompt**: don't inline the full template. Form the path by appending `/skills/pr-team-review/rules/reviewer-personas.md` to the absolute `ROOT` validated from `ZENSU_CLAUDE_PLUGIN_ROOT` in Step 0, then put that fully expanded absolute path in the reviewer prompt. The reviewer may call `Read` on that concrete path if it needs the schema. Never put a literal `$ROOT`, `${ROOT…}`, or a hook-subprocess-only variable in the `Read` path; tool arguments do not perform shell expansion.
 
 ## Phase C — Debate Strategy
 

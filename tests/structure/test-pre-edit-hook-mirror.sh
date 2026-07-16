@@ -12,13 +12,24 @@ check() {
 }
 
 seed_active() {
-  mkdir -p "$1"
-  if [ -n "${3:-}" ]; then
-    printf '{"session_id":"%s","active":true,"phase":"%s","step_id":"S1","history":[{"step":"S1","phase":"%s","ts":"2026-05-22T00:00:00Z"}]}\n' \
-      "$2" "$3" "$3" > "$1/tdd-phase-$2.json"
-  else
-    printf '{"session_id":"%s","active":true}\n' "$2" > "$1/tdd-phase-$2.json"
-  fi
+  local state_dir="$1" session_id="$2" phase="${3:-}"
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+  export CLAUDE_PROJECT_DIR="$state_dir"
+  export ZENSU_TEST_PLUGIN_DATA="$state_dir/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$session_id" || return 1
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+  tdd_set_flag "$session_id" active true >/dev/null 2>&1 || return 1
+  [ -z "$phase" ] || tdd_write_phase "$session_id" S1 "$phase" "" >/dev/null 2>&1
+}
+
+seed_inactive() {
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+  export CLAUDE_PROJECT_DIR="$1"
+  export ZENSU_TEST_PLUGIN_DATA="$1/plugin-data"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$2"
 }
 
 if [ ! -f "$HOOK" ]; then
@@ -35,6 +46,14 @@ else
   check "C1 bash -n syntax check passes" FAIL
 fi
 
+LOG_COMMAND_DEFINITION_COUNT="$(grep -c '^LOG_COMMAND=' "$HOOK" 2>/dev/null || true)"
+LOG_COMMAND_USE_COUNT="$(grep -cF 'PAYLOAD_LOG_COMMAND="$LOG_COMMAND"' "$HOOK" 2>/dev/null || true)"
+if [ "$LOG_COMMAND_DEFINITION_COUNT" = 1 ] && [ "$LOG_COMMAND_USE_COUNT" = 2 ]; then
+  check "C1b guarded zensu-log command has one definition reused by both denial renderers" PASS
+else
+  check "C1b guarded zensu-log command deduplicated (definitions=$LOG_COMMAND_DEFINITION_COUNT uses=$LOG_COMMAND_USE_COUNT)" FAIL
+fi
+
 PAYLOAD_DENY='{"tool_name":"Edit","tool_input":{"file_path":"/tmp/x.ts"},"session_id":"hookmirror-test"}'
 
 C2_STATE_DIR="$(mktemp -d -t hookmirror-c2-XXXX)"
@@ -42,7 +61,7 @@ C2_LOG="$C2_STATE_DIR/should-not-exist.log"
 seed_active "$C2_STATE_DIR" "hookmirror-test"
 unset ZENSU_HOOK_LOG 2>/dev/null || true
 OUT_C2=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C2_STATE_DIR" bash "$HOOK" 2>&1)
+  STATE_DIR="$C2_STATE_DIR" bash "$HOOK" 2>&1)
 RC_C2=$?
 if [ "$RC_C2" = "0" ] && [ ! -f "$C2_LOG" ]; then
   check "C2 no ZENSU_HOOK_LOG + denial path -> no mirror file" PASS
@@ -63,7 +82,7 @@ cat >"$C3_EXPECTED" <<'EXPECTED'
 [hook: PreToolUse] permissionDecision=deny
 EXPECTED
 OUT_C3=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C3_STATE_DIR" ZENSU_HOOK_LOG="$C3_LOG" bash "$HOOK" 2>&1)
+  STATE_DIR="$C3_STATE_DIR" ZENSU_HOOK_LOG="$C3_LOG" bash "$HOOK" 2>&1)
 RC_C3=$?
 C3_LINES=$(wc -l < "$C3_LOG" 2>/dev/null | tr -d ' ')
 C3_DIFF=$(diff "$C3_EXPECTED" "$C3_LOG" 2>&1)
@@ -80,7 +99,7 @@ C4_LOG="$(mktemp -t hookmirror-c4-log-XXXX)"
 : > "$C4_LOG"
 seed_active "$C4_STATE_DIR" "hookmirror-test" "RED_WRITE"
 OUT_C4=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C4_STATE_DIR" ZENSU_HOOK_LOG="$C4_LOG" bash "$HOOK" 2>&1)
+  STATE_DIR="$C4_STATE_DIR" ZENSU_HOOK_LOG="$C4_LOG" bash "$HOOK" 2>&1)
 RC_C4=$?
 C4_CONTENT="$(cat "$C4_LOG" 2>/dev/null)"
 if [ "$RC_C4" = "0" ] && [ -z "$C4_CONTENT" ]; then
@@ -93,7 +112,7 @@ rm -rf "$C4_STATE_DIR" "$C4_LOG"
 C5_STATE_DIR="$(mktemp -d -t hookmirror-c5-XXXX)"
 seed_active "$C5_STATE_DIR" "hookmirror-test"
 OUT_C5=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C5_STATE_DIR" \
+  STATE_DIR="$C5_STATE_DIR" \
   ZENSU_HOOK_LOG=/dev/null/cannot-write bash "$HOOK" 2>&1)
 RC_C5=$?
 if [ "$RC_C5" = "0" ]; then
@@ -108,7 +127,7 @@ C6_LOG="$(mktemp -t hookmirror-c6-log-XXXX)"
 : > "$C6_LOG"
 seed_active "$C6_STATE_DIR" "hookmirror-test"
 OUT_C6=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C6_STATE_DIR" \
+  STATE_DIR="$C6_STATE_DIR" \
   ZENSU_TDD_GATE=off ZENSU_HOOK_LOG="$C6_LOG" bash "$HOOK" 2>&1)
 RC_C6=$?
 C6_CONTENT="$(cat "$C6_LOG" 2>/dev/null)"
@@ -122,8 +141,9 @@ rm -rf "$C6_STATE_DIR" "$C6_LOG"
 C7_STATE_DIR="$(mktemp -d -t hookmirror-c7-XXXX)"
 C7_LOG="$(mktemp -t hookmirror-c7-log-XXXX)"
 : > "$C7_LOG"
+seed_inactive "$C7_STATE_DIR" "hookmirror-test"
 OUT_C7=$(printf '%s' "$PAYLOAD_DENY" | \
-  TDD_STATE_DIR="$C7_STATE_DIR" ZENSU_HOOK_LOG="$C7_LOG" bash "$HOOK" 2>&1)
+  STATE_DIR="$C7_STATE_DIR" ZENSU_HOOK_LOG="$C7_LOG" bash "$HOOK" 2>&1)
 RC_C7=$?
 C7_CONTENT="$(cat "$C7_LOG" 2>/dev/null)"
 if [ "$RC_C7" = "0" ] && [ -z "$C7_CONTENT" ]; then
@@ -139,7 +159,7 @@ C8_LOG="$(mktemp -t hookmirror-c8-log-XXXX)"
 seed_active "$C8_STATE_DIR" "hookmirror-test"
 PAYLOAD_ZENSU='{"tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_tdd-x.md"},"session_id":"hookmirror-test"}'
 OUT_C8=$(printf '%s' "$PAYLOAD_ZENSU" | \
-  TDD_STATE_DIR="$C8_STATE_DIR" ZENSU_HOOK_LOG="$C8_LOG" bash "$HOOK" 2>&1)
+  STATE_DIR="$C8_STATE_DIR" ZENSU_HOOK_LOG="$C8_LOG" bash "$HOOK" 2>&1)
 RC_C8=$?
 C8_CONTENT="$(cat "$C8_LOG" 2>/dev/null)"
 if [ "$RC_C8" = "0" ] && [ -z "$C8_CONTENT" ] && ! printf '%s' "$OUT_C8" | grep -qF 'permissionDecision'; then
@@ -155,7 +175,7 @@ C9_LOG="$(mktemp -t hookmirror-c9-log-XXXX)"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
 PAYLOAD_TRAVERSAL='{"tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
 OUT_C9=$(printf '%s' "$PAYLOAD_TRAVERSAL" | \
-  TDD_STATE_DIR="$C9_STATE_DIR" ZENSU_HOOK_LOG="$C9_LOG" bash "$HOOK" 2>&1)
+  STATE_DIR="$C9_STATE_DIR" ZENSU_HOOK_LOG="$C9_LOG" bash "$HOOK" 2>&1)
 RC_C9=$?
 C9_CONTENT="$(cat "$C9_LOG" 2>/dev/null)"
 if [ "$RC_C9" = "0" ] && printf '%s' "$OUT_C9" | grep -qF 'permissionDecision' && [ -n "$C9_CONTENT" ]; then

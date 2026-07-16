@@ -3,7 +3,9 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -29,10 +31,15 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$TMP_DIR/state"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
 export ZENSU_CONFIG="$TMP_CFG"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 
 STDIN_FLAG_ABSENT='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-001"}'
+# shellcheck disable=SC1090
+source "$BASELINE" sess-off-001
+bash "$LOG" --tdd-begin --session "sess-off-001" >/dev/null 2>&1
 OUT="$(printf '%s' "$STDIN_FLAG_ABSENT" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -60,6 +67,9 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": true, "autoFixIncludeSuggestions": false}}
 EOF
 STDIN_FLAG_FALSE='{"tool_name":"Task","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"x"},"session_id":"sess-off-002"}'
+# shellcheck disable=SC1090
+source "$BASELINE" sess-off-002
+bash "$LOG" --tdd-begin --session "sess-off-002" >/dev/null 2>&1
 OUT="$(printf '%s' "$STDIN_FLAG_FALSE" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
