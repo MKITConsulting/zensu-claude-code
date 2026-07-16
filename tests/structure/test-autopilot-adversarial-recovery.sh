@@ -66,7 +66,18 @@ pair_ok() {
 }
 
 digest() {
-  shasum -a 256 "$1" | awk '{print $1}'
+  node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
+}
+
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
 }
 
 approve() {
@@ -372,7 +383,8 @@ CLAUDE_PROJECT_DIR="$P11B" TDD_STATE_DIR="$P11B/.zensu/state" \
   autopilot_adopt_pending_review "$P11B" "$S11B" true 0 >/dev/null 2>&1
 RC11B=$?
 FILES11B="$(find "$P11B/.zensu/state" -maxdepth 1 -type f \
-  ! -name 'autopilot.lock' | wc -l | tr -d '[:space:]')"
+  ! -name 'autopilot.lock' ! -name 'pending-review.json.lock' \
+  | wc -l | tr -d '[:space:]')"
 if [ "$RC11B" = 6 ] && [ "$FILES11B" = 0 ] \
   && [ ! -e "$P11B/.zensu/state/pending-review.json.claim" ] \
   && [ ! -e "$P11B/.zensu/state/tdd-phase-${S11B}.json" ]; then
@@ -387,19 +399,25 @@ P11C="$ROOT/adopt-inner-failure"
 S11C=adversarial_adopt_inner_failure_session
 mkdir -p "$P11C/.zensu/state"
 printf '%s\n' '{"files":["safe.ts"],"summary":"must stay outside"}' > "$P11C/outside-pending.json"
-ln -s "$P11C/outside-pending.json" "$P11C/.zensu/state/pending-review.json"
-BEFORE11C="$(digest "$P11C/outside-pending.json")"
-CLAUDE_PROJECT_DIR="$P11C" TDD_STATE_DIR="$P11C/.zensu/state" \
-  autopilot_adopt_pending_review "$P11C" "$S11C" true 0 >/dev/null 2>&1
-RC11C=$?
-if [ "$RC11C" = 1 ] \
-  && [ "$(digest "$P11C/outside-pending.json")" = "$BEFORE11C" ] \
-  && [ -L "$P11C/.zensu/state/pending-review.json" ] \
-  && [ ! -e "$P11C/.zensu/state/pending-review.json.claim" ] \
-  && [ ! -e "$P11C/.zensu/state/tdd-phase-${S11C}.json" ]; then
-  check "X11c pending/Inner mutation failure remains distinct rc=1" PASS
+if make_file_symlink "$P11C/outside-pending.json" \
+    "$P11C/.zensu/state/pending-review.json"; then
+  BEFORE11C="$(digest "$P11C/outside-pending.json")"
+  CLAUDE_PROJECT_DIR="$P11C" TDD_STATE_DIR="$P11C/.zensu/state" \
+    autopilot_adopt_pending_review "$P11C" "$S11C" true 0 >/dev/null 2>&1
+  RC11C=$?
+  if [ "$RC11C" = 1 ] \
+    && [ "$(digest "$P11C/outside-pending.json")" = "$BEFORE11C" ] \
+    && [ -L "$P11C/.zensu/state/pending-review.json" ] \
+    && [ ! -e "$P11C/.zensu/state/pending-review.json.claim" ] \
+    && [ ! -e "$P11C/.zensu/state/tdd-phase-${S11C}.json" ]; then
+    check "X11c pending/Inner mutation failure remains distinct rc=1" PASS
+  else
+    check "X11c inner failure cannot look like no-work or Outer corruption (rc=$RC11C)" FAIL
+  fi
+elif [ "$IS_WINDOWS" = true ]; then
+  check "X11c pending/Inner symlink rejection (native file symlinks unavailable)" PASS
 else
-  check "X11c inner failure cannot look like no-work or Outer corruption (rc=$RC11C)" FAIL
+  check "X11c pending/Inner symlink fixture creation failed" FAIL
 fi
 
 # CANCELLED is genuinely terminal and does not retain ownership. It therefore

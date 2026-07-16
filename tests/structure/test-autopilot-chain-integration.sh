@@ -21,6 +21,7 @@ approve() {
     && autopilot_apply_event "$run" "plan-${run}" PLAN_APPROVED "{\"approvedPlanSha256\":\"$sha\"}" "$project" >/dev/null
 }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 
 P1="$TMP/pass"; mkdir -p "$P1"; R1=chain_run_pass; S1=chain_session_pass; C1=chain-pass-001
 approve "$P1" "$R1" "$S1" || exit 1
@@ -41,11 +42,11 @@ if field_ok "$RF1" 'j.stage==="GATES"&&j.tdd.outcome==="pass"' && field_ok "$TF1
   check "C2 guarded inner terminus returns to the exact outer stage" PASS
 else check "C2 guarded inner terminus returns to the exact outer stage" FAIL; fi
 
-BEFORE_DUP="$(shasum -a 256 "$RF1" | awk '{print $1}')"
+BEFORE_DUP="$(digest "$RF1")"
 if CLAUDE_PROJECT_DIR="$P1" bash "$LOG" --chain-done --session "$S1" \
     --autopilot-run "$R1" --autopilot-attempt 1 --autopilot-return-stage GATES \
     --chain-id "$C1" --outcome pass >/dev/null \
-  && [ "$(shasum -a 256 "$RF1" | awk '{print $1}')" = "$BEFORE_DUP" ]; then
+  && [ "$(digest "$RF1")" = "$BEFORE_DUP" ]; then
   check "C3 repeated guarded terminus reconciles idempotently" PASS
 else
   check "C3 repeated guarded terminus reconciles idempotently" FAIL
@@ -216,11 +217,11 @@ CLAUDE_PROJECT_DIR="$P11" bash "$LOG" --tdd-begin --session "$S11" \
   --autopilot-run "$R11" --autopilot-attempt 2 --autopilot-return-stage GATES \
   --chain-id "$C11B" >/dev/null
 
-BEFORE_STALE_COMPLETE="$(shasum -a 256 "$TF11" | awk '{print $1}')"
+BEFORE_STALE_COMPLETE="$(digest "$TF11")"
 if ! CLAUDE_PROJECT_DIR="$P11" bash "$LOG" --tdd-complete --session "$S11" \
     --autopilot-run "$R11" --autopilot-attempt 1 --autopilot-return-stage GATES \
     --chain-id "$C11A" >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF11" | awk '{print $1}')" = "$BEFORE_STALE_COMPLETE" ] \
+  && [ "$(digest "$TF11")" = "$BEFORE_STALE_COMPLETE" ] \
   && field_ok "$TF11" 'j.autopilotAttempt===2&&j.chainId==="chain-generation-attempt-2"&&j.implComplete===false&&j.chainDone===false'; then
   check "C14 stale completion cannot arm a newer Autopilot attempt" PASS
 else check "C14 stale completion leaves attempt 2 unchanged" FAIL; fi
@@ -228,23 +229,23 @@ else check "C14 stale completion leaves attempt 2 unchanged" FAIL; fi
 CLAUDE_PROJECT_DIR="$P11" bash "$LOG" --tdd-complete --session "$S11" \
   --autopilot-run "$R11" --autopilot-attempt 2 --autopilot-return-stage GATES \
   --chain-id "$C11B" >/dev/null
-BEFORE_STALE_DONE_INNER="$(shasum -a 256 "$TF11" | awk '{print $1}')"
-BEFORE_STALE_DONE_OUTER="$(shasum -a 256 "$RF11" | awk '{print $1}')"
+BEFORE_STALE_DONE_INNER="$(digest "$TF11")"
+BEFORE_STALE_DONE_OUTER="$(digest "$RF11")"
 if ! CLAUDE_PROJECT_DIR="$P11" bash "$LOG" --chain-done --session "$S11" \
     --autopilot-run "$R11" --autopilot-attempt 1 --autopilot-return-stage GATES \
     --chain-id "$C11A" --outcome pass >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF11" | awk '{print $1}')" = "$BEFORE_STALE_DONE_INNER" ] \
-  && [ "$(shasum -a 256 "$RF11" | awk '{print $1}')" = "$BEFORE_STALE_DONE_OUTER" ] \
+  && [ "$(digest "$TF11")" = "$BEFORE_STALE_DONE_INNER" ] \
+  && [ "$(digest "$RF11")" = "$BEFORE_STALE_DONE_OUTER" ] \
   && field_ok "$TF11" 'j.autopilotAttempt===2&&j.implComplete===true&&j.chainDone===false&&j.chainOutcome===""' \
   && field_ok "$RF11" 'j.stage==="TDD_RUNNING"&&j.tdd.attempt===2&&j.tdd.chainId==="chain-generation-attempt-2"'; then
   check "C15 stale terminus cannot close a newer Autopilot attempt" PASS
 else check "C15 stale terminus leaves attempt 2 unchanged" FAIL; fi
 
-BEFORE_RESET_INNER="$(shasum -a 256 "$TF11" | awk '{print $1}')"
-BEFORE_RESET_OUTER="$(shasum -a 256 "$RF11" | awk '{print $1}')"
+BEFORE_RESET_INNER="$(digest "$TF11")"
+BEFORE_RESET_OUTER="$(digest "$RF11")"
 if ! CLAUDE_PROJECT_DIR="$P11" bash "$LOG" --tdd-reset --session "$S11" >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF11" | awk '{print $1}')" = "$BEFORE_RESET_INNER" ] \
-  && [ "$(shasum -a 256 "$RF11" | awk '{print $1}')" = "$BEFORE_RESET_OUTER" ]; then
+  && [ "$(digest "$TF11")" = "$BEFORE_RESET_INNER" ] \
+  && [ "$(digest "$RF11")" = "$BEFORE_RESET_OUTER" ]; then
   check "C16 reset cannot sever an active durable outer run" PASS
 else check "C16 active outer ownership survives reset" FAIL; fi
 
@@ -261,11 +262,11 @@ CLAUDE_PROJECT_DIR="$P12" bash "$LOG" --chain-done --session "$S12" \
   --autopilot-run "$R12" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C12" --outcome max-rounds >/dev/null
 RF12="$(autopilot_run_file "$R12" "$P12")"; TF12="$P12/.zensu/state/tdd-phase-${S12}.json"
-BEFORE_RESET_BLOCKED_INNER="$(shasum -a 256 "$TF12" | awk '{print $1}')"
-BEFORE_RESET_BLOCKED_OUTER="$(shasum -a 256 "$RF12" | awk '{print $1}')"
+BEFORE_RESET_BLOCKED_INNER="$(digest "$TF12")"
+BEFORE_RESET_BLOCKED_OUTER="$(digest "$RF12")"
 if ! CLAUDE_PROJECT_DIR="$P12" bash "$LOG" --tdd-reset --session "$S12" >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF12" | awk '{print $1}')" = "$BEFORE_RESET_BLOCKED_INNER" ] \
-  && [ "$(shasum -a 256 "$RF12" | awk '{print $1}')" = "$BEFORE_RESET_BLOCKED_OUTER" ] \
+  && [ "$(digest "$TF12")" = "$BEFORE_RESET_BLOCKED_INNER" ] \
+  && [ "$(digest "$RF12")" = "$BEFORE_RESET_BLOCKED_OUTER" ] \
   && field_ok "$RF12" 'j.stage==="BLOCKED"&&j.blocked.code==="TDD_MAX_ROUNDS"'; then
   check "C17 reset cannot sever a resumable durable outer run" PASS
 else check "C17 resumable outer ownership survives reset" FAIL; fi
@@ -284,29 +285,29 @@ CLAUDE_PROJECT_DIR="$P13" bash "$LOG" --tdd-begin --session "$S13" \
   --autopilot-run "$R13" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C13" >/dev/null || exit 1
 TF13="$P13/.zensu/state/tdd-phase-${S13}.json"
-BEFORE_STALE_STANDALONE_COMPLETE="$(shasum -a 256 "$TF13" | awk '{print $1}')"
+BEFORE_STALE_STANDALONE_COMPLETE="$(digest "$TF13")"
 if [ "$STANDALONE_CTX13" = '{}' ] \
   && declare -F tdd_mark_impl_complete_standalone >/dev/null \
   && grep -qF 'tdd_mark_impl_complete_standalone "$session_val"' "$LOG" \
   && ! CLAUDE_PROJECT_DIR="$P13" tdd_mark_impl_complete_standalone "$S13" >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF13" | awk '{print $1}')" = "$BEFORE_STALE_STANDALONE_COMPLETE" ] \
+  && [ "$(digest "$TF13")" = "$BEFORE_STALE_STANDALONE_COMPLETE" ] \
   && field_ok "$TF13" 'j.autopilotAttempt===1&&j.chainId==="chain-standalone-race-bound"&&j.implComplete===false'; then
   check "C18 stale standalone completion cannot arm a newly bound generation" PASS
 else check "C18 standalone completion must use an atomic linkage-absent CAS" FAIL; fi
 
 CLAUDE_PROJECT_DIR="$P13" tdd_mark_impl_complete_bound "$S13" "$R13" 1 "$C13" || exit 1
-BEFORE_STALE_STANDALONE_DONE="$(shasum -a 256 "$TF13" | awk '{print $1}')"
+BEFORE_STALE_STANDALONE_DONE="$(digest "$TF13")"
 if ! CLAUDE_PROJECT_DIR="$P13" tdd_mark_unclaimed_review "$S13" chainDone >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF13" | awk '{print $1}')" = "$BEFORE_STALE_STANDALONE_DONE" ] \
+  && [ "$(digest "$TF13")" = "$BEFORE_STALE_STANDALONE_DONE" ] \
   && field_ok "$TF13" 'j.autopilotAttempt===1&&j.chainId==="chain-standalone-race-bound"&&j.implComplete===true&&j.chainDone===false'; then
   check "C19 stale standalone unclaimed terminus cannot close a bound generation" PASS
 else check "C19 unclaimed terminus must prove linkage absence under lock" FAIL; fi
 
-BEFORE_STALE_STANDALONE_RESET="$(shasum -a 256 "$TF13" | awk '{print $1}')"
+BEFORE_STALE_STANDALONE_RESET="$(digest "$TF13")"
 if declare -F tdd_clear_standalone_session >/dev/null \
   && grep -qF 'tdd_clear_standalone_session "$session_val"' "$LOG" \
   && ! CLAUDE_PROJECT_DIR="$P13" tdd_clear_standalone_session "$S13" >/dev/null 2>&1 \
-  && [ "$(shasum -a 256 "$TF13" | awk '{print $1}')" = "$BEFORE_STALE_STANDALONE_RESET" ] \
+  && [ "$(digest "$TF13")" = "$BEFORE_STALE_STANDALONE_RESET" ] \
   && field_ok "$TF13" 'j.active===true&&j.autopilotAttempt===1&&j.chainId==="chain-standalone-race-bound"&&j.implComplete===true'; then
   check "C20 stale standalone reset cannot deactivate a newly bound generation" PASS
 else check "C20 standalone reset must use an atomic linkage-absent clear CAS" FAIL; fi

@@ -105,27 +105,49 @@ fails "G11 post-review unknown provider"        --post-review --provider bogus -
 # ---- normalizers (source + fixtures) ----
 source "$LIB" >/dev/null 2>&1
 
-GH_SCOUT='{"number":42,"url":"u","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"},{"name":"p1"}]}'
-eq "N1 normalize_scout github" "$(printf '%s' "$GH_SCOUT" | _zensu_vcs_normalize_scout github)" '{"id":"42","url":"u","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug","p1"]}'
+GH_SCOUT='{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","headRefName":"feat","baseRefName":"main","author":{"login":"alice"},"labels":[{"name":"bug"},{"name":"p1"}]}'
+eq "N1 normalize_scout github" "$(printf '%s' "$GH_SCOUT" | _zensu_vcs_normalize_scout github)" '{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","title":"T","body":"B","base":"main","head":"feat","author":"alice","labels":["bug","p1"]}'
 
-GL_SCOUT='{"iid":7,"web_url":"w","state":"opened","title":"T","description":"D","source_branch":"s","target_branch":"t","author":{"username":"carol"},"labels":["nit","backend"]}'
-eq "N2 normalize_scout gitlab" "$(printf '%s' "$GL_SCOUT" | _zensu_vcs_normalize_scout gitlab)" '{"id":"7","url":"w","state":"OPEN","title":"T","body":"D","base":"t","head":"s","author":"carol","labels":["nit","backend"]}'
+GL_SCOUT='{"iid":7,"web_url":"https://gitlab.test/grp/proj/-/merge_requests/7","state":"opened","title":"T","description":"D","source_branch":"s","target_branch":"t","author":{"username":"carol"},"labels":["nit","backend"]}'
+eq "N2 normalize_scout gitlab" "$(printf '%s' "$GL_SCOUT" | _zensu_vcs_normalize_scout gitlab)" '{"id":"7","url":"https://gitlab.test/grp/proj/-/merge_requests/7","state":"OPEN","title":"T","body":"D","base":"t","head":"s","author":"carol","labels":["nit","backend"]}'
 
-eq "N3 scout gitlab state merged" "$(printf '%s' '{"iid":1,"state":"merged"}' | _zensu_vcs_normalize_scout gitlab)" '{"id":"1","url":"","state":"MERGED","title":"","body":"","base":"","head":"","author":"","labels":[]}'
-eq "N4 scout gitlab state closed" "$(printf '%s' '{"iid":1,"state":"closed"}' | _zensu_vcs_normalize_scout gitlab | sed 's/.*"state":"\([A-Z]*\)".*/\1/')" "CLOSED"
-eq "N5 scout gitlab state locked->OPEN" "$(printf '%s' '{"iid":1,"state":"locked"}' | _zensu_vcs_normalize_scout gitlab | sed 's/.*"state":"\([A-Z]*\)".*/\1/')" "OPEN"
+eq "N3 scout gitlab state merged" "$(printf '%s' "${GL_SCOUT/\"opened\"/\"merged\"}" | _zensu_vcs_normalize_scout gitlab | sed 's/.*"state":"\([A-Z]*\)".*/\1/')" "MERGED"
+eq "N4 scout gitlab state closed" "$(printf '%s' "${GL_SCOUT/\"opened\"/\"closed\"}" | _zensu_vcs_normalize_scout gitlab | sed 's/.*"state":"\([A-Z]*\)".*/\1/')" "CLOSED"
+eq "N5 scout gitlab state locked->OPEN" "$(printf '%s' "${GL_SCOUT/\"opened\"/\"locked\"}" | _zensu_vcs_normalize_scout gitlab | sed 's/.*"state":"\([A-Z]*\)".*/\1/')" "OPEN"
 
 eq "N6 normalize_diff_refs github (headRefOid)" "$(printf '%s' '{"headRefOid":"deadbeef"}' | _zensu_vcs_normalize_diff_refs github)" '{"base_sha":"","start_sha":"","head_sha":"deadbeef"}'
-eq "N7 normalize_diff_refs gitlab (diff_refs)"  "$(printf '%s' '{"diff_refs":{"base_sha":"b","start_sha":"s","head_sha":"h"}}' | _zensu_vcs_normalize_diff_refs gitlab)" '{"base_sha":"b","start_sha":"s","head_sha":"h"}'
+eq "N7 normalize_diff_refs gitlab (diff_refs)"  "$(printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}' | _zensu_vcs_normalize_diff_refs gitlab)" '{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}'
 
-eq "N8 normalize_scout malformed -> empty obj" "$(printf '%s' 'not json' | _zensu_vcs_normalize_scout github)" '{"id":"","url":"","state":"","title":"","body":"","base":"","head":"","author":"","labels":[]}'
-eq "N9 normalize_diff_refs malformed -> empty"  "$(printf '%s' 'not json' | _zensu_vcs_normalize_diff_refs gitlab)" '{"base_sha":"","start_sha":"","head_sha":""}'
+if printf '%s' 'not json' | _zensu_vcs_normalize_scout github >/dev/null 2>&1; then check "N8 normalize_scout malformed -> non-zero" FAIL; else check "N8 normalize_scout malformed -> non-zero" PASS; fi
+if printf '%s' 'not json' | _zensu_vcs_normalize_diff_refs gitlab >/dev/null 2>&1; then check "N9 normalize_diff_refs malformed -> non-zero" FAIL; else check "N9 normalize_diff_refs malformed -> non-zero" PASS; fi
+if printf '%s' '{"number":42,"url":{},"state":"OPEN","title":[],"body":"B","headRefName":"feat","baseRefName":"main","author":{},"labels":[]}' | _zensu_vcs_normalize_scout github >/dev/null 2>&1; then
+  check "N9a scout normalization rejects composite remote fields" FAIL
+else
+  check "N9a scout normalization rejects composite remote fields" PASS
+fi
+if printf '%s' '{"headRefOid":{}}' | _zensu_vcs_normalize_diff_refs github >/dev/null 2>&1; then
+  check "N9b diff-ref normalization rejects composite SHA values" FAIL
+else
+  check "N9b diff-ref normalization rejects composite SHA values" PASS
+fi
+if node -e 'process.stdout.write(JSON.stringify({iid:7,web_url:"https://gitlab.test/g/p/-/merge_requests/7",state:"opened",title:"T",description:"x".repeat(70000),source_branch:"s",target_branch:"t",author:{username:"a"},labels:[]}))' \
+  | _zensu_vcs_normalize_scout gitlab >/dev/null 2>&1; then
+  check "N9c valid GitLab descriptions above 64 KiB remain scoutable" PASS
+else
+  check "N9c valid GitLab descriptions above 64 KiB remain scoutable" FAIL
+fi
 
 BASH_ABS="$(command -v bash)"
-N10="$(PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_scout github' 2>/dev/null)"
-eq "N10 normalize_scout no-node -> empty" "$N10" ""
-N11="$(PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_diff_refs gitlab' 2>/dev/null)"
-eq "N11 normalize_diff_refs no-node -> empty" "$N11" ""
+if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_scout github' >/dev/null 2>&1; then
+  check "N10 normalize_scout without Node fails closed" FAIL
+else
+  check "N10 normalize_scout without Node fails closed" PASS
+fi
+if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_diff_refs gitlab' >/dev/null 2>&1; then
+  check "N11 normalize_diff_refs without Node fails closed" FAIL
+else
+  check "N11 normalize_diff_refs without Node fails closed" PASS
+fi
 
 # ---- summary-note-only path (comments:[]) — the common COMMENT verdict with zero inline ----
 cat > "$WORK/empty.json" <<'JSON'
@@ -182,6 +204,20 @@ has    "A17c line-less comment keeps the path in body"    "$GLL" "uncovered/File
 fails "G12 post-review requires payload"    --post-review --provider github --repo-id acme/widget 42
 fails "G13 diff-refs github non-numeric id"  --diff-refs --provider github abc
 fails "G14 diff-refs gitlab bad repo-id charset" --diff-refs --provider gitlab --repo-id 'grp/proj' 7
+fails "G15 post-review github rejects extra repo path" --post-review --provider github --repo-id acme/widget/extra 42 "$PAY"
+
+mkdir -p "$WORK/bin"
+cat > "$WORK/bin/glab" <<'FAKE'
+#!/bin/bash
+printf '%s' '{"diff_refs":{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}}'
+exit 23
+FAKE
+chmod +x "$WORK/bin/glab"
+if PATH="$WORK/bin:$PATH" _zensu_vcs_post_review_gitlab grp%2Fproj 7 "$PAY" "" >/dev/null 2>&1; then
+  check "G16 legacy GitLab diff-ref read preserves producer failure" FAIL
+else
+  check "G16 legacy GitLab diff-ref read preserves producer failure" PASS
+fi
 
 rm -rf "$WORK"
 

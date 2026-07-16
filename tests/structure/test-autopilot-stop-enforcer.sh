@@ -9,6 +9,14 @@ LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 source "$LIB"
+review_marker() {
+  local operation_key="$1" head_sha="$2" payload_digest="$3"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" PAYLOAD_DIGEST="$payload_digest" node -e '
+    const crypto=require("crypto");
+    const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  '
+}
 TMP="$(mktemp -d -t zensu-autopilot-stop-XXXXXX)"; trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
@@ -19,7 +27,9 @@ invoke() {
     ZENSU_CHAIN="$chain" ZENSU_AUTOPILOT="$autopilot" bash "$STOP" 2>/dev/null
 }
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).decision||"allow")}catch(_){console.log("allow")}})'; }
+context() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){process.exit(1)}})'; }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 
 P1="$TMP/planning"; start "$P1" stop_run_01 stop_session_01
 OUT1="$(invoke "$P1" stop_session_01)"
@@ -40,8 +50,17 @@ head_event stop-head-gates GATES_PASSED "{\"headSha\":\"$HEAD_SHA\"}"
 head_event stop-head-converge CONVERGENCE_PASSED '{}'
 head_event stop-head-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:stop-head"}'
 head_event stop-head-pr-open PR_OPENED "{\"operationKey\":\"pr:stop-head\",\"pr\":{\"number\":714,\"url\":\"https://github.com/acme/repo/pull/714\",\"headSha\":\"$HEAD_SHA\"}}"
-head_event stop-head-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:stop-head"}'
-head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:stop-head\",\"marker\":\"zensu-autopilot-review:stop-head\",\"headSha\":\"$HEAD_SHA\"}"
+HEAD_REVIEW_KEY="$(autopilot_team_review_operation_key stop_run_head "$HEAD_SHA")"
+head_event stop-head-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"provider\":\"github\"}"
+HEAD_REVIEW_PAYLOAD="$TMP/stop-head-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Stop fixture review\",\"commit_id\":\"$HEAD_SHA\",\"comments\":[]}" > "$HEAD_REVIEW_PAYLOAD"
+HEAD_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload stop_run_head "$HEAD_REVIEW_KEY" \
+  "$HEAD_SHA" "$HEAD_REVIEW_PAYLOAD" github "$P1H" 2>/dev/null || true)"
+[ -n "$HEAD_REVIEW_SNAPSHOT" ] || HEAD_READY=false
+HEAD_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
+  "$HEAD_REVIEW_SNAPSHOT" "$HEAD_SHA" true canonical 2>/dev/null || true)"
+HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA" "$HEAD_REVIEW_DIGEST")"
+head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}"
 head_event stop-head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
 head_event stop-head-tdd-start-2 TDD_STARTED '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head"}'
 head_event stop-head-tdd-done-2 TDD_CHAIN_DONE '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head","outcome":"pass"}'
@@ -96,8 +115,8 @@ OUT6B="$(invoke "$P4" stop_session_cancel)"
   || check "S6b terminal-only history is treated as absent" FAIL
 
 P5="$TMP/owner"; start "$P5" stop_run_owner stop_session_owner
-RF5="$(autopilot_run_file stop_run_owner "$P5")"; BEFORE5="$(shasum -a 256 "$RF5" | awk '{print $1}')"
-OUT7="$(invoke "$P5" foreign_session)"; AFTER5="$(shasum -a 256 "$RF5" | awk '{print $1}')"
+RF5="$(autopilot_run_file stop_run_owner "$P5")"; BEFORE5="$(digest "$RF5")"
+OUT7="$(invoke "$P5" foreign_session)"; AFTER5="$(digest "$RF5")"
 if [ "$(printf '%s' "$OUT7" | decision)" = block ] && [ "$BEFORE5" = "$AFTER5" ]; then
   check "S7 foreign session blocks without mutating owner state" PASS
 else check "S7 foreign session blocks without mutation" FAIL; fi
@@ -183,9 +202,13 @@ CLAUDE_PROJECT_DIR="$P7" bash "$LOG" --tdd-complete --session stop_session_prior
   --autopilot-run stop_run_priority --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-priority-001 >/dev/null
 OUT9="$(invoke "$P7" stop_session_priority)"
+CTX9="$(printf '%s' "$OUT9" | context)"
 if [ "$(printf '%s' "$OUT9" | decision)" = block ] \
   && printf '%s' "$OUT9" | grep -qF 'zensu:code-reviewer' \
   && printf '%s' "$OUT9" | grep -qF -- '--outcome no-changes' \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'ZENSU-DELEGATED-CALLER: autopilot')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'AUTOPILOT-BINDING: run=stop_run_priority attempt=1 chain=chain-priority-001')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9" | grep -cFx 'AUTOPILOT-STAGE: GATES')" -eq 1 ] \
   && ! printf '%s' "$OUT9" | grep -qF 'nextActionCode=AWAIT_TDD_CHAIN'; then
   check "S9 inner review routing has priority over outer-stage routing" PASS
 else check "S9 inner review routing has priority" FAIL; fi
@@ -223,8 +246,12 @@ OUT9F="$(printf '%s' '{"session_id":"stop_session_fresh"}' \
   | CLAUDE_PROJECT_DIR="$P7F" CLAUDE_PLUGIN_ROOT="$FRESH_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_FRESH_REVIEW_TICKET="$TICKET9F" \
     bash "$STOP" 2>/dev/null)"
+CTX9F="$(printf '%s' "$OUT9F" | context)"
 if [ "$(printf '%s' "$OUT9F" | decision)" = block ] \
   && printf '%s' "$OUT9F" | grep -qF "skill='zensu:self-review'" \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'ZENSU-DELEGATED-CALLER: autopilot')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'AUTOPILOT-BINDING: run=stop_run_fresh attempt=1 chain=chain-fresh-001')" -eq 1 ] \
+  && [ "$(printf '%s\n' "$CTX9F" | grep -cFx 'AUTOPILOT-STAGE: GATES')" -eq 1 ] \
   && ! printf '%s' "$OUT9F" | grep -qF "subagent_type='zensu:code-reviewer'"; then
   check "S9a fresh codeReviewDone routes self-review after the budget CAS" PASS
 else check "S9a fresh prompt snapshot owns reviewer vs self-review routing" FAIL; fi
@@ -431,12 +458,12 @@ else check "S9d reconciled terminal permits Stop" FAIL; fi
 # review marker must remain queued; Stop must never overwrite that binding with
 # an unbound seed merely because chainDone already released the hook.
 TF7R="$P7R/.zensu/state/tdd-phase-stop_session_reconcile.json"
-BEFORE9RB="$(shasum -a 256 "$TF7R" | awk '{print $1}')"
+BEFORE9RB="$(digest "$TF7R")"
 CLAUDE_PROJECT_DIR="$P7R" bash "$LOG" --pending-review --files 'src/blocked-pending.ts' \
   --summary 'must remain queued behind blocked outer' >/dev/null
 PENDING9RB="$(CLAUDE_PROJECT_DIR="$P7R" zensu_pending_review_file)"
 OUT9RB="$(invoke "$P7R" stop_session_reconcile)"
-AFTER9RB="$(shasum -a 256 "$TF7R" | awk '{print $1}')"
+AFTER9RB="$(digest "$TF7R")"
 if [ -z "$OUT9RB" ] && [ "$BEFORE9RB" = "$AFTER9RB" ] && [ -f "$PENDING9RB" ] \
   && field_ok "$TF7R" 'j.autopilotRunId==="stop_run_reconcile"&&j.autopilotAttempt===1&&j.chainId==="chain-reconcile-001"'; then
   check "S9e BLOCKED outer preserves binding and queued deferred review" PASS
@@ -455,9 +482,9 @@ autopilot_apply_event "$R7W" block-after-standalone BLOCK \
   '{"code":"MANUAL_BLOCK"}' "$P7W" >/dev/null
 TF7W="$P7W/.zensu/state/tdd-phase-${S7W}.json"
 RF7W="$(autopilot_run_file "$R7W" "$P7W")"
-BEFORE9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+BEFORE9W="$(digest "$RF7W")"
 OUT9W="$(invoke "$P7W" "$S7W")"
-AFTER9W="$(shasum -a 256 "$RF7W" | awk '{print $1}')"
+AFTER9W="$(digest "$RF7W")"
 if [ "$(printf '%s' "$OUT9W" | decision)" = block ] \
   && printf '%s' "$OUT9W" | grep -qF 'zensu:code-reviewer' \
   && [ "$BEFORE9W" = "$AFTER9W" ] \
@@ -539,10 +566,6 @@ else check "S10b stale outer-cap CAS cannot mutate or describe the old stage" FA
 
 P9="$TMP/runtime-missing"; start "$P9" stop_run_runtime stop_session_runtime
 NO_NODE_PATH="$TMP/no-node-path"; mkdir -p "$NO_NODE_PATH"
-for utility in cat grep; do
-  utility_path="$(command -v "$utility")"
-  [ -n "$utility_path" ] && ln -s "$utility_path" "$NO_NODE_PATH/$utility"
-done
 OUT11="$(printf '%s' '{"session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT11" | decision)" = block ] && printf '%s' "$OUT11" | grep -qF 'durable state runtime is unavailable'; then
   check "S11 missing Node with an active pointer fails closed using shell-only JSON" PASS

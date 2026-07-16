@@ -41,7 +41,10 @@ has "A6b fetch github reviewThreads"     "$GHF" "reviewThreads"
 has "A6c fetch github owner var"         "$GHF" "owner=acme"
 has "A6d fetch github name var"          "$GHF" "name=widget"
 has "A6e fetch github num var"           "$GHF" "num=42"
-eq  "A7 fetch gitlab -> discussions"     "$(argv --fetch-threads --provider gitlab --repo-id grp%2Fproj 7)" "glab api --paginate projects/grp%2Fproj/merge_requests/7/discussions"
+has "A6f fetch github exhausts pagination" "$GHF" "--paginate --slurp"
+has "A6g fetch github query exposes pageInfo" "$GHF" "pageInfo{hasNextPage endCursor}"
+has "A6h fetch github query accepts cursor" "$GHF" 'after:$endCursor'
+eq  "A7 fetch gitlab -> paginated JSON discussions" "$(argv --fetch-threads --provider gitlab --repo-id grp%2Fproj 7)" "glab api --paginate --output json projects/grp%2Fproj/merge_requests/7/discussions"
 
 GHR="$(argv --resolve-thread --provider github --repo-id acme/widget --reply 'fixed in abc' 42 RT_1 111)"
 has "A8a resolve github mutation"        "$GHR" "resolveReviewThread"
@@ -66,6 +69,9 @@ fails "G2 unknown provider -> non-zero"          --pr-state --provider bogus 42
 fails "G3 non-numeric id rejected (fetch)"       --fetch-threads --provider gitlab --repo-id x 'ev?a=b'
 fails "G4 github repo-id without slash rejected" --fetch-threads --provider github --repo-id noslash 42
 fails "G5 non-id thread rejected (resolve)"      --resolve-thread --provider gitlab --repo-id x 7 'd?x=1'
+fails "G6 github repo-id rejects extra path segments" --fetch-threads --provider github --repo-id acme/widget/extra 42
+fails "G7 gitlab repo-id rejects malformed percent escapes" --fetch-threads --provider gitlab --repo-id 'grp%ZZproj' 7
+fails "G8 gitlab repo-id rejects traversal-like dot pairs" --resolve-thread --provider gitlab --repo-id 'grp..proj' 7 d1
 
 GHRN="$(argv --resolve-thread --provider github --repo-id acme/widget 42 RT_1 111)"
 has    "A10 resolve github no-reply -> mutation"     "$GHRN" "resolveReviewThread"
@@ -108,14 +114,14 @@ eq "U4 extract https fallback (no PR url)" "$(printf 'created: https://example.t
 eq "U5 extract strips control/ANSI bytes"  "$(printf 'https://github.com/acme/widget/pull/9%b[0m\n' '\033' | _zensu_vcs_extract_url)" "https://github.com/acme/widget/pull/9[0m"
 eq "U6 extract empty on no url"     "$(printf 'no url here\n' | _zensu_vcs_extract_url)" ""
 
-GH_THREADS='{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_1","isResolved":false,"comments":{"nodes":[{"databaseId":111,"body":"fix this","path":"a.js","line":10,"author":{"login":"alice"}}]}},{"id":"RT_2","isResolved":true,"comments":{"nodes":[{"databaseId":222,"body":"done","path":"b.js","line":5,"author":{"login":"bob"}}]}}]}}}}}'
+GH_THREADS='[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_1","isResolved":false,"comments":{"nodes":[{"databaseId":111,"body":"fix this","path":"a.js","line":10,"author":{"login":"alice"}}]}}],"pageInfo":{"hasNextPage":true,"endCursor":"c1"}}}}}},{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_2","isResolved":true,"comments":{"nodes":[{"databaseId":222,"body":"done","path":"b.js","line":5,"author":{"login":"bob"}}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
 N1="$(printf '%s' "$GH_THREADS" | _zensu_vcs_normalize_threads github)"
 eq     "N1 github normalize (unresolved only)" "$N1" '[{"threadId":"RT_1","replyTo":"111","path":"a.js","line":10,"body":"fix this","author":"alice"}]'
 nothas "N1b github filters resolved RT_2"      "$N1" "RT_2"
 has    "N1c github surfaces threadId"          "$N1" '"threadId":"RT_1"'
 has    "N1d github surfaces replyTo"           "$N1" '"replyTo":"111"'
 
-GL_THREADS='[{"id":"d1","resolvable":true,"resolved":false,"notes":[{"body":"nit","author":{"username":"carol"},"position":{"new_path":"c.rb","new_line":7}}]},{"id":"d2","resolvable":true,"resolved":true,"notes":[{"body":"ok"}]},{"id":"d3","resolvable":false,"resolved":false,"notes":[{"body":"x"}]}]'
+GL_THREADS='[[{"id":"d1","notes":[{"id":101,"resolvable":true,"resolved":false,"body":"nit","author":{"username":"carol"},"position":{"old_path":"c.rb","old_line":7}}]},{"id":"d2","notes":[{"id":202,"resolvable":true,"resolved":true,"body":"ok"}]},{"id":"d3","notes":[{"id":303,"resolvable":false,"resolved":false,"body":"x"}]}],[{"id":"d1","notes":[{"id":101,"resolvable":true,"resolved":false,"body":"nit","author":{"username":"carol"},"position":{"old_path":"c.rb","old_line":7}}]}]]'
 N2="$(printf '%s' "$GL_THREADS" | _zensu_vcs_normalize_threads gitlab)"
 eq     "N2 gitlab normalize (resolvable & unresolved)" "$N2" '[{"threadId":"d1","replyTo":"d1","path":"c.rb","line":7,"body":"nit","author":"carol"}]'
 nothas "N2b gitlab filters resolved d2"        "$N2" '"d2"'
@@ -127,22 +133,129 @@ eq "N4 map_state gitlab opened"  "$(printf '%s' '{"state":"opened"}'  | _zensu_v
 eq "N5 map_state gitlab closed"  "$(printf '%s' '{"state":"closed"}'  | _zensu_vcs_map_state gitlab)" "CLOSED"
 eq "N5b map_state gitlab locked" "$(printf '%s' '{"state":"locked"}'  | _zensu_vcs_map_state gitlab)" "OPEN"
 
-eq "N6 normalize_pr github" "$(printf '%s' '{"number":42,"url":"u","state":"OPEN","headRefName":"feat","baseRefName":"main"}' | _zensu_vcs_normalize_pr github)" '{"id":"42","url":"u","state":"OPEN","base":"main","head":"feat"}'
-eq "N7 normalize_pr gitlab" "$(printf '%s' '{"iid":7,"web_url":"w","state":"merged","source_branch":"s","target_branch":"t"}' | _zensu_vcs_normalize_pr gitlab)" '{"id":"7","url":"w","state":"MERGED","base":"t","head":"s"}'
+eq "N6 normalize_pr github" "$(printf '%s' '{"number":42,"url":"https://github.test/acme/widget/pull/42","state":"OPEN","headRefName":"feat","baseRefName":"main"}' | _zensu_vcs_normalize_pr github)" '{"id":"42","url":"https://github.test/acme/widget/pull/42","state":"OPEN","base":"main","head":"feat"}'
+eq "N7 normalize_pr gitlab" "$(printf '%s' '{"iid":7,"web_url":"https://gitlab.test/grp/proj/-/merge_requests/7","state":"merged","source_branch":"s","target_branch":"t"}' | _zensu_vcs_normalize_pr gitlab)" '{"id":"7","url":"https://gitlab.test/grp/proj/-/merge_requests/7","state":"MERGED","base":"t","head":"s"}'
 
 BASH_ABS="$(command -v bash)"
-N8="$(PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_threads github' 2>/dev/null)"
-eq "N8 normalize_threads no-node -> []" "$N8" "[]"
+if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{}" | _zensu_vcs_normalize_threads github' >/dev/null 2>&1; then
+  check "N8 normalize_threads without Node fails closed" FAIL
+else
+  check "N8 normalize_threads without Node fails closed" PASS
+fi
+if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{\"state\":\"OPEN\"}" | _zensu_vcs_map_state github' >/dev/null 2>&1; then
+  check "N8b map_state without Node fails closed" FAIL
+else
+  check "N8b map_state without Node fails closed" PASS
+fi
+if PATH=/dev/null "$BASH_ABS" -c 'source '"$LIB"'; printf "%s" "{\"html_url\":\"https://x\"}" | _zensu_vcs_json_field html_url' >/dev/null 2>&1; then
+  check "N8c JSON extraction without Node fails closed" FAIL
+else
+  check "N8c JSON extraction without Node fails closed" PASS
+fi
 
-eq "N9 map_state unknown -> empty" "$(printf '%s' '{"state":"draft"}' | _zensu_vcs_map_state github)" ""
-eq "N10 map_state empty -> empty"  "$(printf '%s' '{}' | _zensu_vcs_map_state gitlab)" ""
-eq "N11 normalize_pr closed"       "$(printf '%s' '{"number":9,"url":"u","state":"closed","headRefName":"h","baseRefName":"b"}' | _zensu_vcs_normalize_pr github)" '{"id":"9","url":"u","state":"CLOSED","base":"b","head":"h"}'
-eq "N12 normalize_pr empty input"  "$(printf '%s' '{}' | _zensu_vcs_normalize_pr github)" '{"id":"","url":"","state":"","base":"","head":""}'
-eq "N13 normalize_threads malformed -> []" "$(printf '%s' 'not json' | _zensu_vcs_normalize_threads github)" "[]"
+if printf '%s' '{"state":"draft"}' | _zensu_vcs_map_state github >/dev/null 2>&1; then check "N9 map_state unknown -> non-zero" FAIL; else check "N9 map_state unknown -> non-zero" PASS; fi
+if printf '%s' '{}' | _zensu_vcs_map_state gitlab >/dev/null 2>&1; then check "N10 map_state missing state -> non-zero" FAIL; else check "N10 map_state missing state -> non-zero" PASS; fi
+eq "N11 normalize_pr closed"       "$(printf '%s' '{"number":9,"url":"https://github.test/acme/widget/pull/9","state":"closed","headRefName":"h","baseRefName":"b"}' | _zensu_vcs_normalize_pr github)" '{"id":"9","url":"https://github.test/acme/widget/pull/9","state":"CLOSED","base":"b","head":"h"}'
+if printf '%s' '{}' | _zensu_vcs_normalize_pr github >/dev/null 2>&1; then check "N12 normalize_pr incomplete input -> non-zero" FAIL; else check "N12 normalize_pr incomplete input -> non-zero" PASS; fi
+if printf '%s' 'not json' | _zensu_vcs_normalize_threads github >/dev/null 2>&1; then
+  check "N13 normalize_threads malformed -> non-zero" FAIL
+else
+  check "N13 normalize_threads malformed -> non-zero" PASS
+fi
+GH_THREADS_TRUNCATED='[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":true,"endCursor":"next"}}}}}}]'
+if printf '%s' "$GH_THREADS_TRUNCATED" | _zensu_vcs_normalize_threads github >/dev/null 2>&1; then
+  check "N13b normalize_threads rejects a truncated final page" FAIL
+else
+  check "N13b normalize_threads rejects a truncated final page" PASS
+fi
+GH_THREADS_DUP_CONFLICT='[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_DUP","isResolved":false,"comments":{"nodes":[{"databaseId":1,"body":"first","path":"a.js","line":1,"author":{"login":"alice"}}]}}],"pageInfo":{"hasNextPage":true,"endCursor":"next"}}}}}},{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_DUP","isResolved":false,"comments":{"nodes":[{"databaseId":1,"body":"changed","path":"a.js","line":1,"author":{"login":"alice"}}]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
+if printf '%s' "$GH_THREADS_DUP_CONFLICT" | _zensu_vcs_normalize_threads github >/dev/null 2>&1; then
+  check "N13c conflicting duplicate GitHub thread fails closed" FAIL
+else
+  check "N13c conflicting duplicate GitHub thread fails closed" PASS
+fi
+GL_THREADS_DUP_CONFLICT='[[{"id":"d-conflict-a","notes":[{"id":707,"resolvable":true,"resolved":false,"body":"first","position":{"new_path":"a.rb","new_line":7}}]},{"id":"d-conflict-b","notes":[{"id":707,"resolvable":true,"resolved":false,"body":"changed","position":{"new_path":"b.rb","new_line":8}}]}]]'
+if printf '%s' "$GL_THREADS_DUP_CONFLICT" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13d conflicting duplicate GitLab note fails closed" FAIL
+else
+  check "N13d conflicting duplicate GitLab note fails closed" PASS
+fi
+GL_DISCUSSION_STATE_CONFLICT='[[{"id":"d-state","resolvable":true,"resolved":false,"notes":[{"id":808,"body":"same","position":{"new_path":"a.rb","new_line":8}}]},{"id":"d-state","resolvable":true,"resolved":true,"notes":[{"id":808,"body":"same","position":{"new_path":"a.rb","new_line":8}}]}]]'
+if printf '%s' "$GL_DISCUSSION_STATE_CONFLICT" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13e conflicting duplicate GitLab discussion state fails closed" FAIL
+else
+  check "N13e conflicting duplicate GitLab discussion state fails closed" PASS
+fi
+if printf '%s' '{"html_url":{}}' | _zensu_vcs_json_field html_url >/dev/null 2>&1 \
+  || printf '%s' '{"html_url":[]}' | _zensu_vcs_json_field html_url >/dev/null 2>&1; then
+  check "N13f JSON field extraction rejects composite values" FAIL
+else
+  check "N13f JSON field extraction rejects composite values" PASS
+fi
+GH_THREADS_ERRORS='[{"errors":[{"message":"partial data"}],"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
+if printf '%s' "$GH_THREADS_ERRORS" | _zensu_vcs_normalize_threads github >/dev/null 2>&1; then
+  check "N13g GitHub GraphQL errors fail closed despite partial data" FAIL
+else
+  check "N13g GitHub GraphQL errors fail closed despite partial data" PASS
+fi
+GH_THREAD_NO_ROOT='[{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[{"id":"RT_EMPTY","isResolved":false,"comments":{"nodes":[]}}],"pageInfo":{"hasNextPage":false,"endCursor":null}}}}}}]'
+if printf '%s' "$GH_THREAD_NO_ROOT" | _zensu_vcs_normalize_threads github >/dev/null 2>&1; then
+  check "N13h unresolved GitHub thread without a valid root comment fails closed" FAIL
+else
+  check "N13h unresolved GitHub thread without a valid root comment fails closed" PASS
+fi
+GL_LATE_BAD_NOTE='[[{"id":"d-late","notes":[{"id":901,"resolvable":true,"resolved":false,"body":"valid","position":{"new_path":"a.rb","new_line":9}},{"id":902,"resolvable":true,"resolved":false,"body":{"bad":true},"position":{"new_path":"b.rb","new_line":10}}]}]]'
+if printf '%s' "$GL_LATE_BAD_NOTE" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13i later malformed GitLab note cannot hide behind the chosen root" FAIL
+else
+  check "N13i later malformed GitLab note cannot hide behind the chosen root" PASS
+fi
+if printf '%s' '{"number":42,"url":{},"state":"OPEN","headRefName":[],"baseRefName":"main"}' | _zensu_vcs_normalize_pr github >/dev/null 2>&1; then
+  check "N13j PR normalization rejects composite URL and branch values" FAIL
+else
+  check "N13j PR normalization rejects composite URL and branch values" PASS
+fi
+GL_STRING_STATE='[[{"id":"d-string","notes":[{"id":910,"resolvable":"true","resolved":"false","body":"hidden"}]}]]'
+if printf '%s' "$GL_STRING_STATE" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13k GitLab resolution flags must be booleans" FAIL
+else
+  check "N13k GitLab resolution flags must be booleans" PASS
+fi
+GL_MISSING_STATE='[[{"id":"d-missing","notes":[{"id":911,"body":"hidden"}]}]]'
+if printf '%s' "$GL_MISSING_STATE" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13l GitLab findings cannot hide behind absent resolution state" FAIL
+else
+  check "N13l GitLab findings cannot hide behind absent resolution state" PASS
+fi
+GL_CROSS_DISCUSSION_NOTE='[[{"id":"d-one","notes":[{"id":912,"resolvable":true,"resolved":false,"body":"same"}]},{"id":"d-two","notes":[{"id":912,"resolvable":true,"resolved":false,"body":"same"}]}]]'
+if printf '%s' "$GL_CROSS_DISCUSSION_NOTE" | _zensu_vcs_normalize_threads gitlab >/dev/null 2>&1; then
+  check "N13m one GitLab note ID cannot belong to two discussions" FAIL
+else
+  check "N13m one GitLab note ID cannot belong to two discussions" PASS
+fi
 
 ( export ZENSU_VCS_TEST=1 ZENSU_VCS_PRINT_ARGV=1; _zensu_vcs_dry ) && check "N14a dry: both set -> dry" PASS || check "N14a dry: both set -> dry" FAIL
 ( export ZENSU_VCS_PRINT_ARGV=1; _zensu_vcs_dry ) && check "N14b dry: TEST unset -> NOT dry" FAIL || check "N14b dry: TEST unset -> NOT dry" PASS
 ( export ZENSU_VCS_TEST=1; _zensu_vcs_dry ) && check "N14c dry: PRINT unset -> NOT dry" FAIL || check "N14c dry: PRINT unset -> NOT dry" PASS
+
+# A producer that emits valid JSON and then exits non-zero must never be
+# laundered into success by a downstream normalizer.
+PIPE_WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-pipeline.XXXXXXXX")"
+cat > "$PIPE_WORK/gh" <<'FAKE'
+#!/bin/bash
+printf '%s' '{"state":"OPEN","number":42,"url":"https://github.test/acme/widget/pull/42","headRefName":"feat","baseRefName":"main","headRefOid":"abcdef0","title":"T","body":"B","author":{"login":"a"},"labels":[]}'
+exit 23
+FAKE
+chmod +x "$PIPE_WORK/gh"
+producer_failure() {
+  local label="$1"; shift
+  if PATH="$PIPE_WORK:$PATH" "$@" >/dev/null 2>&1; then check "$label" FAIL; else check "$label" PASS; fi
+}
+producer_failure "N15 pr-state preserves CLI failure after valid JSON" _zensu_vcs_pr_state --provider github 42
+producer_failure "N16 locate-pr preserves CLI failure after valid JSON" _zensu_vcs_locate_pr --provider github 42
+producer_failure "N17 scout-pr preserves CLI failure after valid JSON" _zensu_vcs_scout_pr --provider github 42
+producer_failure "N18 diff-refs preserves CLI failure after valid JSON" _zensu_vcs_diff_refs --provider github 42
+rm -rf "$PIPE_WORK"
 
 echo "----"
 echo "test-vcs-pr-ops: $PASS PASS / $FAIL FAIL"

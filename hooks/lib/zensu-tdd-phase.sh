@@ -31,6 +31,23 @@ tdd_state_file() {
 # nearest existing, non-symlink ancestor becomes the entry point.
 _tdd_paths_safe() {
   [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
+  local path_args=("$@") index=0 target mode
+  while [ "$index" -lt "${#path_args[@]}" ]; do
+    target="${path_args[$index]}"
+    mode="${path_args[$((index + 1))]}"
+    case "$mode" in
+      regular|regular-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -f "$target" ]; then return 1; fi
+        ;;
+      directory|directory-or-absent)
+        [ ! -L "$target" ] || return 1
+        if [ -e "$target" ] && [ ! -d "$target" ]; then return 1; fi
+        ;;
+      *) return 1 ;;
+    esac
+    index=$((index + 2))
+  done
   PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}" TEMP_ROOT="${TMPDIR:-/tmp}" HOME_ROOT="${HOME:-}" node -e '
       const fs = require("fs");
       const path = require("path");
@@ -94,7 +111,7 @@ _tdd_paths_safe() {
         }
         if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
       }
-    ' "$@" >/dev/null 2>&1
+    ' "${path_args[@]}" >/dev/null 2>&1
 }
 
 _tdd_path_safe() {
@@ -259,7 +276,7 @@ _tdd_locked_run() {
 
   if [ "${TDD_DISABLE_FLOCK:-}" != "1" ] && command -v flock >/dev/null 2>&1; then
     (
-      exec 9>>"$lock_file" 2>/dev/null || exit 1
+      { exec 9>>"$lock_file"; } 2>/dev/null || exit 1
       flock -x 9 2>/dev/null || exit 1
       _tdd_state_storage_safe "$state_file" || exit 1
       "$@"
@@ -273,9 +290,11 @@ _tdd_locked_run() {
     local dead=0
     local mtime
     mtime=$(stat -c %Y "$lock_dir" 2>/dev/null || stat -f %m "$lock_dir" 2>/dev/null || echo "")
+    case "$mtime" in ''|*[!0-9]*) mtime="" ;; esac
     if [ -n "$mtime" ]; then
       local now
       now=$(date +%s 2>/dev/null || echo "")
+      case "$now" in ''|*[!0-9]*) now="" ;; esac
       if [ -n "$now" ] && [ "$((now - mtime))" -gt 30 ]; then
         dead=1
       fi
@@ -2681,4 +2700,12 @@ tdd_seed_deferred_review() {
   tdd_begin_session "$session_id" "$vanilla" true true "$deferred_claim"
 }
 
-export -f tdd_state_file _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+# Git Bash serializes exported functions into the Windows process environment.
+# This library is large enough to exceed CreateProcess' environment limit, so
+# Windows callers source it explicitly instead of inheriting its functions.
+case "${OSTYPE:-}" in
+  msys*|cygwin*|mingw*|win32*) ;;
+  *)
+    export -f tdd_state_file _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale _tdd_write_seed_critical tdd_seed_deferred_review 2>/dev/null || true
+    ;;
+esac

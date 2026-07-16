@@ -6,7 +6,8 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
 
-INPUT="$(cat)"
+INPUT=""
+IFS= read -r -d '' INPUT || true
 
 emit_runtime_unavailable() {
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ZENSU_AUTOPILOT_RESUME RUNTIME_UNAVAILABLE. A project-local durable Autopilot state artifact exists, but the state runtime is unavailable. Do not infer progress, resume effects, or create a replacement run; repair the plugin runtime first."}}'
@@ -18,8 +19,8 @@ emit_corrupt_active_state() {
 
 shell_spawned_agent() {
   [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  printf '%s' "$INPUT" | grep -Eq '"agent_id"[[:space:]]*:[[:space:]]*"([^"\\]|\\.)+"' && return 0
-  printf '%s' "$INPUT" | grep -Eq '"agent_type"[[:space:]]*:[[:space:]]*"zensu:(code-reviewer|review-aspect|zensu-plm)"'
+  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
+  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
 }
 
 NODE_AVAILABLE=true
@@ -204,7 +205,15 @@ const exact = (value, keys) => value && typeof value === 'object' && !Array.isAr
 const nonEmpty = (value, max) => typeof value === 'string' && value.length > 0
   && value.length <= max && !/[\u0000-\u001f]/.test(value);
 const sha = value => typeof value === 'string' && /^[a-fA-F0-9]{7,64}$/.test(value);
+const sha256 = value => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
 const positive = value => Number.isSafeInteger(value) && value > 0;
+const reviewMarker = value => {
+  if (typeof value !== 'string') return null;
+  const match = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/.exec(value);
+  return match && match[4] === match[5]
+    ? { payloadDigest: match[2], headSha: match[3], partCount: Number(match[4]) }
+    : null;
+};
 const runId = state && state.runId;
 const ownerSessionId = state && state.ownerSessionId;
 const stage = state && state.stage;
@@ -232,9 +241,18 @@ const prEvidenceValid = evidenceShapeValid && (evidence.pr === null
     && positive(evidence.pr.number) && nonEmpty(evidence.pr.url, 2048)
     && /^https:\/\//.test(evidence.pr.url) && sha(evidence.pr.headSha)));
 const reviewEvidenceValid = evidenceShapeValid && (evidence.review === null
-  || (exact(evidence.review, ['published', 'marker', 'headSha'])
+  || (exact(evidence.review, ['published', 'marker', 'headSha', 'payloadDigest', 'partCount', 'provider'])
     && evidence.review.published === true && nonEmpty(evidence.review.marker, 512)
-    && sha(evidence.review.headSha)));
+    && sha(evidence.review.headSha) && sha256(evidence.review.payloadDigest)
+    && positive(evidence.review.partCount) && evidence.review.partCount <= 999999
+    && (evidence.review.provider === null
+      || evidence.review.provider === 'github' || evidence.review.provider === 'gitlab')
+    && (() => {
+      const marker = reviewMarker(evidence.review.marker);
+      return marker !== null && marker.payloadDigest === evidence.review.payloadDigest
+        && marker.headSha === evidence.review.headSha.toLowerCase()
+        && marker.partCount === evidence.review.partCount;
+    })()));
 const valid = token.test(runId || '')
   && token.test(ownerSessionId || '')
   && sessionId.test(currentSessionId)

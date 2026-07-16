@@ -90,6 +90,21 @@ if grep -qF 'AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>' "
 else
   check "V10a official current Autopilot binding evidence" FAIL
 fi
+if grep -qF 'ZENSU-DELEGATED-CALLER: autopilot' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-STAGE: <returnStage>' "$SKILL_MD" \
+  && grep -qiE 'exactly one.{0,50}(caller|binding|stage)|each.{0,50}exactly once' "$SKILL_MD" \
+  && grep -qiE 'partial.{0,50}duplicate.{0,50}(conflict|mismatch)|duplicate.{0,50}partial.{0,50}(conflict|mismatch)' "$SKILL_MD"; then
+  check "V10aa self-review accepts only one complete non-conflicting official envelope" PASS
+else
+  check "V10aa strict official self-review envelope" FAIL
+fi
+if grep -qF 'ownerSessionId' "$SKILL_MD" \
+  && grep -qF 'tdd.returnStage' "$SKILL_MD" \
+  && grep -qF 'AUTOPILOT-STAGE: <returnStage>' "$SKILL_MD"; then
+  check "V10ab fresh status validates owner and exact return-stage evidence" PASS
+else
+  check "V10ab fresh owner/stage validation" FAIL
+fi
 if grep -qF -- '--chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' "$SKILL_MD" \
   && grep -qF 'Standalone handoffs keep the unqualified terminus' "$SKILL_MD"; then
   check "V10b self-review uses the exact bound terminus without changing standalone" PASS

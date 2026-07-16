@@ -10,8 +10,20 @@ set -u
 # shellcheck disable=SC1091
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
+_autopilot_shell_path() {
+  local value="${1:-}"
+  [ "$#" -eq 1 ] && [ -n "$value" ] || return 2
+  case "$value" in
+    [A-Za-z]:[\\/]*|\\\\*)
+      command -v cygpath >/dev/null 2>&1 || return 2
+      cygpath -u "$value" 2>/dev/null
+      ;;
+    *) printf '%s\n' "$value" ;;
+  esac
+}
+
 _autopilot_project_root() {
-  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}"
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root
   ROOT_INPUT="$input" node -e '
     const fs = require("fs");
     const path = require("path");
@@ -22,8 +34,11 @@ _autopilot_project_root() {
       if (!fs.statSync(logicalRoot).isDirectory()) process.exit(2);
       root = fs.realpathSync(logicalRoot);
     } catch (_) { process.exit(2); }
-    process.stdout.write(root);
-  ' 2>/dev/null
+    if (/[\u0000-\u001f]/.test(root)) process.exit(2);
+  ' >/dev/null 2>&1 || return 2
+  root="$(cd -P -- "$input" 2>/dev/null && pwd -P)" || return 2
+  [ -n "$root" ] || return 2
+  printf '%s\n' "$root"
 }
 
 _autopilot_identifier_ok() {
@@ -59,7 +74,12 @@ autopilot_run_file() {
 }
 
 _autopilot_prepare_storage() {
-  local root="$1" state_dir="$1/.zensu/state"
+  local root="$1" zensu_dir="$1/.zensu" state_dir="$1/.zensu/state"
+  # Validate the fixed project-local ancestor as its own leaf before mkdir -p.
+  # This prevents a missing state/ leaf behind a Windows junction from being
+  # created before the deeper path check rejects the junction.
+  CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$zensu_dir" directory-or-absent \
+    || return 2
   CLAUDE_PROJECT_DIR="$root" _tdd_prepare_directory "$state_dir"
 }
 
@@ -112,6 +132,9 @@ _autopilot_locked_dispatch() {
 # All schema and transition decisions live in one worker so every caller uses
 # the same closed vocabulary and canonical payload digest.
 _autopilot_node() {
+  # Keep Bash-facing roots in the Git-Bash namespace, but let MSYS translate
+  # the worker arguments for native Node. Durable projectRoot identity and all
+  # filesystem operands then share Node's canonical Windows namespace.
   node - "$@" <<'NODE'
 const crypto = require("crypto");
 const fs = require("fs");
@@ -180,6 +203,22 @@ const canonical = value => {
   return JSON.stringify(value);
 };
 const digest = payload => crypto.createHash("sha256").update(canonical(payload)).digest("hex");
+const rawDigest = value => crypto.createHash("sha256").update(value).digest("hex");
+const teamReviewOperationKey = (runId, headSha) =>
+  `team-review:v1:${digest({ headSha: headSha.toLowerCase(), runId })}`;
+const parseReviewMarker = marker => {
+  if (typeof marker !== "string") return null;
+  const match = /^<!-- zensu-review:v1:([a-f0-9]{64}):([a-f0-9]{64}):([a-f0-9]{7,64}):([1-9][0-9]{0,5}):part=1\/([1-9][0-9]{0,5}) -->$/.exec(marker);
+  if (!match || match[4] !== match[5]) return null;
+  return { opDigest: match[1], payloadDigest: match[2], headSha: match[3], partCount: Number(match[4]) };
+};
+const reviewMarkerMatches = (marker, operationKey, headSha, expectedPayloadDigest = null, expectedPartCount = null) => {
+  const parsed = parseReviewMarker(marker);
+  return parsed !== null && parsed.opDigest === rawDigest(operationKey)
+    && sameSha(parsed.headSha, headSha) && Number.isSafeInteger(parsed.partCount)
+    && (expectedPayloadDigest === null || parsed.payloadDigest === expectedPayloadDigest)
+    && (expectedPartCount === null || parsed.partCount === expectedPartCount);
+};
 
 const regularFile = file => {
   let stat;
@@ -203,10 +242,19 @@ const writeOutput = (file, value) => {
   if (!stat) fail(5, "output file was not pre-created securely");
   const body = `${JSON.stringify(value, null, 2)}\n`;
   if (Buffer.byteLength(body) > MAX_BYTES) fail(2, "state exceeds 1 MiB");
+  let fd;
   try {
     fs.writeFileSync(file, body, { encoding: "utf8", mode: 0o600 });
-    fs.fsyncSync(fs.openSync(file, "r"));
-  } catch (_) { fail(5, "failed to write state output"); }
+    fd = fs.openSync(file, "r+");
+    fs.fsyncSync(fd);
+    fs.closeSync(fd);
+    fd = undefined;
+  } catch (_) {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch (_) {}
+    }
+    fail(5, "failed to write state output");
+  }
 };
 
 const payloadValid = (type, payload) => {
@@ -239,15 +287,21 @@ const payloadValid = (type, payload) => {
       return exact(payload, ["reason", "limitReached"])
         && nonEmpty(payload.reason) && typeof payload.limitReached === "boolean";
     case "PR_OPEN_REQUESTED":
-    case "TEAM_REVIEW_REQUESTED":
       return exact(payload, ["operationKey"]) && nonEmpty(payload.operationKey, 256);
+    case "TEAM_REVIEW_REQUESTED":
+      return (exact(payload, ["operationKey"])
+          || (exact(payload, ["operationKey", "provider"])
+            && ["github", "gitlab"].includes(payload.provider)))
+        && nonEmpty(payload.operationKey, 256);
     case "PR_OPENED":
       return exact(payload, ["operationKey", "pr"]) && nonEmpty(payload.operationKey, 256)
         && exact(payload.pr, ["number", "url", "headSha"]) && positive(payload.pr.number)
         && nonEmpty(payload.pr.url, 2048) && /^https:\/\//.test(payload.pr.url) && sha(payload.pr.headSha);
     case "TEAM_REVIEW_PUBLISHED":
-      return exact(payload, ["operationKey", "marker", "headSha"])
-        && nonEmpty(payload.operationKey, 256) && nonEmpty(payload.marker, 512) && sha(payload.headSha);
+      return (exact(payload, ["operationKey", "marker", "headSha"])
+          || (exact(payload, ["operationKey", "marker", "headSha", "provider"])
+            && ["github", "gitlab"].includes(payload.provider)))
+        && nonEmpty(payload.operationKey, 256) && parseReviewMarker(payload.marker) !== null && sha(payload.headSha);
     case "FIX_REQUIRED":
       return exact(payload, ["headSha", "unresolvedCount"])
         && sha(payload.headSha) && positive(payload.unresolvedCount);
@@ -271,16 +325,32 @@ const effectValid = value => exact(value, ["status", "operationKey"])
   && ["none", "requested", "completed"].includes(value.status)
   && (value.operationKey === null || nonEmpty(value.operationKey, 256))
   && (value.status === "none" ? value.operationKey === null : value.operationKey !== null);
+const teamReviewEffectValid = value => exact(value, ["status", "operationKey", "provider"])
+  && ["none", "requested", "completed"].includes(value.status)
+  && (value.operationKey === null || nonEmpty(value.operationKey, 256))
+  && (value.provider === null || ["github", "gitlab"].includes(value.provider))
+  && (value.status === "none"
+    ? value.operationKey === null && value.provider === null
+    : value.operationKey !== null);
 const evidenceHead = (value, kind) => value === null || (exact(value, [kind, "headSha"])
   && value[kind] === true && sha(value.headSha));
+const reviewEvidenceValid = value => {
+  if (value === null) return true;
+  if (!exact(value, ["published", "marker", "headSha", "payloadDigest", "partCount", "provider"])
+      || value.published !== true || !sha(value.headSha) || !sha256(value.payloadDigest)
+      || !positive(value.partCount) || value.partCount > 999999
+      || !(value.provider === null || ["github", "gitlab"].includes(value.provider))) return false;
+  const parsed = parseReviewMarker(value.marker);
+  return parsed !== null && sameSha(parsed.headSha, value.headSha)
+    && parsed.payloadDigest === value.payloadDigest && parsed.partCount === value.partCount;
+};
 const evidenceValid = evidence => exact(evidence, ["pr", "gates", "review", "findings", "validation", "coverage", "delivery"])
   && (evidence.pr === null || (exact(evidence.pr, ["number", "url", "headSha"])
     && positive(evidence.pr.number) && nonEmpty(evidence.pr.url, 2048)
     && /^https:\/\//.test(evidence.pr.url) && sha(evidence.pr.headSha)))
   && (evidence.gates === null || (exact(evidence.gates, ["passed", "headSha"])
     && typeof evidence.gates.passed === "boolean" && sha(evidence.gates.headSha)))
-  && (evidence.review === null || (exact(evidence.review, ["published", "marker", "headSha"])
-    && evidence.review.published === true && nonEmpty(evidence.review.marker, 512) && sha(evidence.review.headSha)))
+  && reviewEvidenceValid(evidence.review)
   && (evidence.findings === null || (exact(evidence.findings, ["cleared", "headSha", "unresolvedCount"])
     && typeof evidence.findings.cleared === "boolean" && sha(evidence.findings.headSha)
     && natural(evidence.findings.unresolvedCount)))
@@ -296,17 +366,32 @@ const eventValid = event => exact(event, ["eventId", "eventType", "payloadDigest
 
 const sameSha = (left, right) => typeof left === "string" && typeof right === "string"
   && left.toLowerCase() === right.toLowerCase();
+const originalPrHead = state => {
+  const opened = state.events.find(event => event.eventType === "PR_OPENED");
+  return opened && opened.payload && opened.payload.pr && opened.payload.pr.headSha;
+};
+const teamReviewOperationKeyForState = state => {
+  const head = originalPrHead(state);
+  return head ? teamReviewOperationKey(state.runId, head) : null;
+};
 const reviewBelongsToPrGeneration = state => {
   const prIndex = state.events.findIndex(event => event.eventType === "PR_OPENED");
   const reviewIndex = state.events.findIndex(event => event.eventType === "TEAM_REVIEW_PUBLISHED");
   if (prIndex < 0 || reviewIndex <= prIndex || !state.evidence.pr || !state.evidence.review) return false;
   const prEvent = state.events[prIndex];
   const reviewEvent = state.events[reviewIndex];
+  const parsedReviewMarker = parseReviewMarker(reviewEvent.payload.marker);
   if (state.effects.prOpen.operationKey !== prEvent.payload.operationKey
     || state.effects.teamReview.operationKey !== reviewEvent.payload.operationKey
     || state.evidence.pr.number !== prEvent.payload.pr.number
     || state.evidence.pr.url !== prEvent.payload.pr.url
     || state.evidence.review.marker !== reviewEvent.payload.marker
+    || !parsedReviewMarker
+    || state.evidence.review.payloadDigest !== parsedReviewMarker.payloadDigest
+    || state.evidence.review.partCount !== parsedReviewMarker.partCount
+    || state.effects.teamReview.provider !== state.evidence.review.provider
+    || state.evidence.review.provider !== (["github", "gitlab"].includes(reviewEvent.payload.provider)
+      ? reviewEvent.payload.provider : null)
     || !sameSha(state.evidence.review.headSha, reviewEvent.payload.headSha)
     || !sameSha(reviewEvent.payload.headSha, prEvent.payload.pr.headSha)) return false;
 
@@ -356,7 +441,16 @@ const stateValid = state => {
     || !(state.tdd.outcome === null || ["pass", "no-changes", "max-rounds"].includes(state.tdd.outcome))
     || typeof state.tdd.headUpdateRequired !== "boolean") return false;
   if (!exact(state.effects, ["prOpen", "teamReview"]) || !effectValid(state.effects.prOpen)
-    || !effectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
+    || !teamReviewEffectValid(state.effects.teamReview) || !evidenceValid(state.evidence)) return false;
+  if (state.effects.teamReview.status !== "none") {
+    if (!state.evidence.pr || state.effects.teamReview.operationKey !== teamReviewOperationKeyForState(state)) return false;
+    if (state.effects.teamReview.status === "requested" && state.evidence.review !== null) return false;
+    if (state.effects.teamReview.status === "completed"
+      && (!state.evidence.review || !reviewMarkerMatches(state.evidence.review.marker,
+        state.effects.teamReview.operationKey, state.evidence.review.headSha,
+        state.evidence.review.payloadDigest, state.evidence.review.partCount)
+        || state.evidence.review.provider !== state.effects.teamReview.provider)) return false;
+  } else if (state.evidence.review !== null) return false;
   if (!exact(state.blocked, ["from", "code"])
     || !(state.blocked.from === null || STAGES.has(state.blocked.from))
     || !(state.blocked.code === null || identifier(state.blocked.code))) return false;
@@ -393,6 +487,50 @@ const readState = (file, absentCode = 2) => {
   // run" when its file disappears; it is a corrupt torn state. Direct
   // read-run lookups may opt back into rc=1 for a genuinely unknown id.
   const state = readJson(file, absentCode);
+  // PR #174 wrote schemaVersion 1 review evidence with only
+  // published/marker/headSha. Normalize that deployed shape (and the brief
+  // five-field development shape) from its already-validated marker before
+  // running the current exact-schema and semantic-history checks. Historical
+  // events intentionally remain byte-identical, so their payload digests stay
+  // valid and replay supplies provider=null for the legacy receipt.
+  if (isObject(state.effects) && isObject(state.effects.teamReview)
+      && exact(state.effects.teamReview, ["status", "operationKey"])) {
+    const requestEvent = Array.isArray(state.events)
+      ? state.events.find(event => event && event.eventType === "TEAM_REVIEW_REQUESTED") : null;
+    const publishEvent = Array.isArray(state.events)
+      ? state.events.find(event => event && event.eventType === "TEAM_REVIEW_PUBLISHED") : null;
+    const provider = requestEvent && isObject(requestEvent.payload)
+      && ["github", "gitlab"].includes(requestEvent.payload.provider)
+      ? requestEvent.payload.provider
+      : (publishEvent && isObject(publishEvent.payload)
+        && ["github", "gitlab"].includes(publishEvent.payload.provider)
+        ? publishEvent.payload.provider : null);
+    state.effects.teamReview = { ...state.effects.teamReview, provider };
+  }
+  if (isObject(state.evidence) && isObject(state.evidence.review)) {
+    const review = state.evidence.review;
+    const legacyThree = exact(review, ["published", "marker", "headSha"]);
+    const legacyFive = exact(review, ["published", "marker", "headSha", "payloadDigest", "partCount"]);
+    if (legacyThree || legacyFive) {
+      const parsed = parseReviewMarker(review.marker);
+      if (parsed) {
+        const receiptEvent = Array.isArray(state.events)
+          ? [...state.events].reverse().find(event => event && event.eventType === "TEAM_REVIEW_PUBLISHED")
+          : null;
+        const provider = receiptEvent && isObject(receiptEvent.payload)
+          && ["github", "gitlab"].includes(receiptEvent.payload.provider)
+          ? receiptEvent.payload.provider : null;
+        state.evidence.review = {
+          published: review.published,
+          marker: review.marker,
+          headSha: review.headSha,
+          payloadDigest: legacyFive ? review.payloadDigest : parsed.payloadDigest,
+          partCount: legacyFive ? review.partCount : parsed.partCount,
+          provider,
+        };
+      }
+    }
+  }
   if (!stateValid(state)) fail(2, `state schema invalid: ${path.basename(file)}`);
   return state;
 };
@@ -527,14 +665,46 @@ const transition = (state, type, payload, reject = fail) => {
       return;
     case "TEAM_REVIEW:TEAM_REVIEW_REQUESTED":
       if (state.effects.teamReview.status !== "none") reject(4, "team review already requested");
-      state.effects.teamReview = { status: "requested", operationKey: payload.operationKey };
+      if (!state.evidence.pr
+        || payload.operationKey !== teamReviewOperationKeyForState(state)) {
+        reject(4, "team-review operation key is not bound to this run and PR head");
+      }
+      state.effects.teamReview = {
+        status: "requested",
+        operationKey: payload.operationKey,
+        provider: ["github", "gitlab"].includes(payload.provider) ? payload.provider : null,
+      };
       return;
     case "TEAM_REVIEW:TEAM_REVIEW_PUBLISHED":
       if (state.effects.teamReview.status !== "requested"
         || state.effects.teamReview.operationKey !== payload.operationKey) reject(4, "team-review operation key mismatch");
+      const receiptProvider = ["github", "gitlab"].includes(payload.provider) ? payload.provider : null;
+      // Completed legacy v1 history replays with null on both sides. An
+      // in-flight legacy request cannot safely learn its forge from the
+      // publication receipt: that would let the caller choose the count and
+      // remote semantics after the durable capability was created.
+      if (state.effects.teamReview.provider !== receiptProvider) {
+        reject(4, "team-review provider does not match its durable request");
+      }
       if (!headMatchesPr(state, payload.headSha)) reject(4, "team review targets a stale PR head");
-      state.effects.teamReview = { status: "completed", operationKey: payload.operationKey };
-      state.evidence.review = { published: true, marker: payload.marker, headSha: payload.headSha.toLowerCase() };
+      const parsedReviewMarker = parseReviewMarker(payload.marker);
+      if (!parsedReviewMarker || !reviewMarkerMatches(payload.marker, payload.operationKey, payload.headSha,
+          parsedReviewMarker.payloadDigest, parsedReviewMarker.partCount)) {
+        reject(4, "team-review marker does not prove the operation, head, and first publication part");
+      }
+      state.effects.teamReview = {
+        status: "completed",
+        operationKey: payload.operationKey,
+        provider: state.effects.teamReview.provider,
+      };
+      state.evidence.review = {
+        published: true,
+        marker: payload.marker,
+        headSha: payload.headSha.toLowerCase(),
+        payloadDigest: parsedReviewMarker.payloadDigest,
+        partCount: parsedReviewMarker.partCount,
+        provider: state.effects.teamReview.provider,
+      };
       move(state, "FIX_FINDINGS");
       return;
     case "FIX_FINDINGS:FIX_REQUIRED":
@@ -621,7 +791,7 @@ semanticHistoryValid = state => {
     tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
     effects: {
       prOpen: { status: "none", operationKey: null },
-      teamReview: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null, provider: null },
     },
     evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
     blocked: { from: null, code: null },
@@ -743,7 +913,7 @@ if (mode === "begin") {
     tdd: { attempt: 0, chainId: null, sessionId: null, returnStage: null, outcome: null, headUpdateRequired: false },
     effects: {
       prOpen: { status: "none", operationKey: null },
-      teamReview: { status: "none", operationKey: null },
+      teamReview: { status: "none", operationKey: null, provider: null },
     },
     evidence: { pr: null, gates: null, review: null, findings: null, validation: null, coverage: null, delivery: null },
     blocked: { from: null, code: null },
@@ -786,6 +956,14 @@ if (mode === "apply") {
     if (prior.eventType === eventType && prior.payloadDigest === payloadDigest) process.exit(10);
     fail(4, `eventId conflict: ${eventId}`);
   }
+  // Legacy provider-less request/publication events remain readable and
+  // exactly replayable for schemaVersion 1 history. Every genuinely new
+  // request binds the provider before the remote effect, and publication must
+  // repeat that provider for locked receipt attestation.
+  if (["TEAM_REVIEW_REQUESTED", "TEAM_REVIEW_PUBLISHED"].includes(eventType)
+      && !["github", "gitlab"].includes(payload.provider)) {
+    fail(3, `${eventType} requires a provider-bound payload`);
+  }
   if (TERMINAL.has(state.stage)) fail(3, "terminal run rejects new events");
   // Reserve two final audit slots: one for a fail-closed BLOCK and one for the
   // explicit CANCEL that can retire that blocked generation. At exhaustion a
@@ -800,6 +978,27 @@ if (mode === "apply") {
   state.events.push({ eventId, eventType, payloadDigest, payload, fromStage, toStage: state.stage });
   if (!stateValid(state)) fail(2, "transition produced invalid state");
   writeOutput(runOutput, state);
+  process.exit(0);
+}
+
+if (mode === "team-review-receipt-meta") {
+  const [runFile, expectedRunId, eventId] = args;
+  const state = readState(runFile);
+  const event = state.events[state.events.length - 1];
+  const review = state.evidence.review;
+  if (state.runId !== expectedRunId || !event || event.eventId !== eventId
+      || event.eventType !== "TEAM_REVIEW_PUBLISHED" || !review
+      || event.payload.marker !== review.marker || event.payload.headSha.toLowerCase() !== review.headSha
+      || event.payload.operationKey !== state.effects.teamReview.operationKey
+      || !reviewMarkerMatches(review.marker, event.payload.operationKey, event.payload.headSha,
+        review.payloadDigest, review.partCount)) fail(4, "candidate team-review receipt is inconsistent");
+  process.stdout.write(JSON.stringify({
+    operationKey: event.payload.operationKey,
+    headSha: review.headSha,
+    payloadDigest: review.payloadDigest,
+    partCount: review.partCount,
+    provider: review.provider,
+  }));
   process.exit(0);
 }
 
@@ -907,6 +1106,30 @@ autopilot_begin_run() {
     "$root" "$run_id" "$owner_session_id" "$cover" "$validate"
 }
 
+_autopilot_attest_team_review_publication_critical() {
+  local root="$1" run_id="$2" run_tmp="$3" event_id="$4"
+  local meta tuple operation_key head_sha expected_digest part_count provider snapshot actual_receipt
+  meta="$(_autopilot_node team-review-receipt-meta "$run_tmp" "$run_id" "$event_id")" || return $?
+  tuple="$(printf '%s' "$meta" | node -e '
+    let value;try{value=JSON.parse(require("fs").readFileSync(0,"utf8"));}catch(_){process.exit(2);}
+    if(!value||typeof value!=="object"||Array.isArray(value)
+        ||!/^team-review:v1:[a-f0-9]{64}$/.test(value.operationKey||"")
+        ||!/^[a-f0-9]{7,64}$/.test(value.headSha||"")
+        ||!/^[a-f0-9]{64}$/.test(value.payloadDigest||"")
+        ||!Number.isSafeInteger(value.partCount)||value.partCount<1||value.partCount>999999
+        ||!["github","gitlab"].includes(value.provider))process.exit(2);
+    process.stdout.write([value.operationKey,value.headSha,value.payloadDigest,String(value.partCount),value.provider].join("|"));
+  ' 2>/dev/null)" || return 2
+  IFS='|' read -r operation_key head_sha expected_digest part_count provider <<< "$tuple"
+  [ -n "$operation_key" ] && [ -n "$head_sha" ] && [ -n "$expected_digest" ] \
+    && [ -n "$part_count" ] && [ -n "$provider" ] || return 2
+  snapshot="$(_autopilot_read_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider")" || return $?
+  actual_receipt="$(_autopilot_team_review_payload_inspect \
+    "$snapshot" "$head_sha" true receipt "$provider")" || return $?
+  [ "$actual_receipt" = "$expected_digest|$part_count" ] || return 4
+}
+
 _autopilot_apply_critical() {
   local root="$1" run_id="$2" event_id="$3" event_type="$4" payload_json="$5"
   local caller_session_id="${6:-}"
@@ -924,6 +1147,15 @@ _autopilot_apply_critical() {
   if [ "$rc" -ne 0 ]; then
     rm -f "$run_tmp"
     return "$rc"
+  fi
+  if [ "$event_type" = TEAM_REVIEW_PUBLISHED ]; then
+    _autopilot_attest_team_review_publication_critical \
+      "$root" "$run_id" "$run_tmp" "$event_id"
+    rc=$?
+    if [ "$rc" -ne 0 ]; then
+      rm -f "$run_tmp"
+      return "$rc"
+    fi
   fi
   _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
 }
@@ -991,6 +1223,417 @@ autopilot_chain_event_id() {
   ' 2>/dev/null)" || return 5
   [ "${#digest}" -eq 64 ] || return 5
   printf '%s-%s\n' "$prefix" "$digest"
+}
+
+# Produce the only TEAM_REVIEW_REQUESTED operation key accepted by the durable
+# transition: a fixed-size digest of the run id plus the original lowercase PR
+# head. Callers persist this write-ahead key before attempting remote publish.
+autopilot_team_review_operation_key() {
+  local run_id="${1:-}" head_sha="${2:-}"
+  [ "$#" -eq 2 ] && _autopilot_identifier_ok "$run_id" || return 3
+  RUN_ID="$run_id" HEAD_SHA="$head_sha" node -e '
+    const crypto=require("crypto");
+    const head=process.env.HEAD_SHA;
+    if(!/^[a-fA-F0-9]{7,64}$/.test(head))process.exit(3);
+    const canonical=value => value && typeof value === "object" && !Array.isArray(value)
+      ? `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`
+      : JSON.stringify(value);
+    const seed={headSha:head.toLowerCase(),runId:process.env.RUN_ID};
+    process.stdout.write(`team-review:v1:${crypto.createHash("sha256").update(canonical(seed)).digest("hex")}`);
+  ' 2>/dev/null
+}
+
+# The delegated review body is a remote-write input, so a crash after the forge
+# accepted it must not allow a retry to synthesize different bytes for the same
+# operation key. Keep one private immutable snapshot per operation/head pair in
+# the project-local durable state directory.
+_autopilot_team_review_payload_target() {
+  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}" tuple operation_digest head
+  [ "$#" -eq 3 ] || return 3
+  tuple="$(OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+    const crypto = require("crypto");
+    const operationKey = process.env.OPERATION_KEY;
+    const head = String(process.env.HEAD_SHA || "").toLowerCase();
+    if (!/^team-review:v1:[a-f0-9]{64}$/.test(operationKey)
+        || !/^[a-f0-9]{7,64}$/.test(head)) process.exit(3);
+    const operationDigest = crypto.createHash("sha256").update(operationKey).digest("hex");
+    process.stdout.write(`${operationDigest}|${head}`);
+  ' 2>/dev/null)" || return 3
+  IFS='|' read -r operation_digest head <<< "$tuple"
+  [ -n "$root" ] && [ -n "$operation_digest" ] && [ -n "$head" ] || return 3
+  printf '%s/.zensu/state/autopilot-team-review-payload-%s-%s.json\n' \
+    "${root%/}" "$operation_digest" "$head"
+}
+
+_autopilot_team_review_payload_identity_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
+  local state_dir="$root/.zensu/state" expected_key state
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
+  expected_key="$(autopilot_team_review_operation_key "$run_id" "$head_sha")" || return $?
+  [ "$operation_key" = "$expected_key" ] || return 4
+  state="$(_autopilot_node read-active \
+    "$state_dir/autopilot-active.json" "$state_dir" "$root")" || return $?
+  printf '%s' "$state" | RUN_ID="$run_id" OPERATION_KEY="$operation_key" \
+    HEAD_SHA="$head_sha" PROVIDER="$provider" node -e '
+      let state;
+      try { state = JSON.parse(require("fs").readFileSync(0, "utf8")); }
+      catch (_) { process.exit(2); }
+      const head = String(process.env.HEAD_SHA || "").toLowerCase();
+      const review = state && state.effects && state.effects.teamReview;
+      const pr = state && state.evidence && state.evidence.pr;
+      if (!state || state.runId !== process.env.RUN_ID || state.stage !== "TEAM_REVIEW"
+          || !review || review.status !== "requested"
+          || review.operationKey !== process.env.OPERATION_KEY
+          || review.provider !== process.env.PROVIDER
+          || !pr || typeof pr.headSha !== "string" || pr.headSha.toLowerCase() !== head
+          || (state.evidence && state.evidence.review !== null)) process.exit(4);
+    ' 2>/dev/null
+}
+
+# Securely inspect a payload. The target variant additionally requires private
+# permissions. Reading through O_NOFOLLOW and comparing lstat/fstat identities
+# closes the leaf-swap window and rejects hard-linked files.
+_autopilot_team_review_payload_inspect() {
+  local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}" digest_mode="${4:-raw}" provider="${5:-}"
+  [ "$#" -ge 3 ] && [ "$#" -le 5 ] || return 3
+  case "$private" in true|false) ;; *) return 3 ;; esac
+  case "$digest_mode" in raw|canonical) [ -z "$provider" ] || return 3 ;; receipt) case "$provider" in github|gitlab) ;; *) return 3 ;; esac ;; *) return 3 ;; esac
+  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
+    PROVIDER="$provider" node -e '
+    const fs = require("fs");
+    const crypto = require("crypto");
+    const max = 8 * 1024 * 1024;
+    const file = process.env.PAYLOAD_FILE;
+    const head = String(process.env.HEAD_SHA || "").toLowerCase();
+    const requirePrivate = process.env.PRIVATE === "true";
+    const unsafe = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/;
+    const fail = code => process.exit(code);
+    const validate = data => {
+      let payload;
+      try { payload = JSON.parse(data.toString("utf8")); } catch (_) { fail(2); }
+      if (!payload || Array.isArray(payload) || typeof payload !== "object") fail(2);
+      const keys = Object.keys(payload).sort().join(",");
+      if (keys !== "body,comments,commit_id,event") fail(2);
+      if (typeof payload.body !== "string" || unsafe.test(payload.body)
+          || payload.body.includes("zensu-review:v1")
+          || !["COMMENT", "APPROVE", "REQUEST_CHANGES"].includes(payload.event)
+          || typeof payload.commit_id !== "string"
+          || payload.commit_id.toLowerCase() !== head
+          || !Array.isArray(payload.comments) || payload.comments.length > 999998) fail(2);
+      for (const comment of payload.comments) {
+        if (!comment || Array.isArray(comment) || typeof comment !== "object"
+            || !Object.keys(comment).every(key =>
+              ["body", "path", "line", "side", "start_line", "start_side"].includes(key))
+            || typeof comment.body !== "string" || unsafe.test(comment.body)
+            || comment.body.includes("zensu-review:v1")
+            || typeof comment.path !== "string" || !comment.path || unsafe.test(comment.path)
+            || comment.path.includes("zensu-review:v1")) fail(2);
+        if (comment.side != null && !["LEFT", "RIGHT"].includes(comment.side)) fail(2);
+        if (comment.line != null && (!Number.isSafeInteger(comment.line) || comment.line < 1)) fail(2);
+        const hasStartLine = comment.start_line != null;
+        const hasStartSide = comment.start_side != null;
+        if (hasStartLine !== hasStartSide) fail(2);
+        if (hasStartLine && (!Number.isSafeInteger(comment.start_line) || comment.start_line < 1
+            || !Number.isSafeInteger(comment.line) || comment.start_line > comment.line
+            || !["LEFT", "RIGHT"].includes(comment.start_side)
+            || comment.start_side !== comment.side)) fail(2);
+      }
+      return payload;
+    };
+    const canonical = value => {
+      if (value === null || typeof value === "string" || typeof value === "boolean") return JSON.stringify(value);
+      if (typeof value === "number") {
+        if (!Number.isFinite(value)) fail(2);
+        return JSON.stringify(value);
+      }
+      if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
+      if (typeof value === "object") {
+        return `{${Object.keys(value).sort().map(key => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
+      }
+      fail(2);
+    };
+    const privateMode = stat => process.platform === "win32" || (stat.mode & 0o777) === 0o600;
+    let fd;
+    try {
+      const before = fs.lstatSync(file);
+      if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
+          || before.size < 1 || before.size > max
+          || (requirePrivate && !privateMode(before))) fail(2);
+      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const opened = fs.fstatSync(fd);
+      if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
+          || opened.ino !== before.ino || opened.size !== before.size
+          || (requirePrivate && !privateMode(opened))) fail(2);
+      const data = fs.readFileSync(fd);
+      const after = fs.fstatSync(fd);
+      fs.closeSync(fd); fd = undefined;
+      if (data.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
+          || after.nlink !== 1 || after.size !== opened.size
+          || after.mtimeMs !== opened.mtimeMs || after.ctimeMs !== opened.ctimeMs) fail(2);
+      const payload = validate(data);
+      const canonicalDigest = crypto.createHash("sha256").update(canonical(payload)).digest("hex");
+      if (process.env.DIGEST_MODE === "receipt") {
+        const count = process.env.PROVIDER === "github" ? 1 : payload.comments.length + 1;
+        if (!Number.isSafeInteger(count) || count < 1 || count > 999999) fail(2);
+        process.stdout.write(`${canonicalDigest}|${count}`);
+      } else {
+        const digestInput = process.env.DIGEST_MODE === "canonical" ? canonical(payload) : data;
+        process.stdout.write(crypto.createHash("sha256").update(digestInput).digest("hex"));
+      }
+    } catch (_) {
+      if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} }
+      fail(2);
+    }
+  ' 2>/dev/null
+}
+
+# Recover the sole crash shape produced by the atomic no-replace publication:
+# link(temp, target) succeeded, but the process died before unlink(temp). This
+# runs only while the project-wide Autopilot lock is held. Exactly two links
+# must exist and both must be the deterministic target plus one mktemp-shaped
+# sibling pointing at the same private inode. Anything ambiguous stays
+# fail-closed and untouched.
+_autopilot_recover_team_review_payload_alias() {
+  local target="${1:-}"
+  [ "$#" -eq 1 ] && [ -n "$target" ] || return 3
+  TARGET_FILE="$target" node -e '
+    const fs = require("fs");
+    const path = require("path");
+    const target = process.env.TARGET_FILE;
+    const directory = path.dirname(target);
+    const basename = path.basename(target);
+    const expectedTarget = /^autopilot-team-review-payload-[a-f0-9]{64}-[a-f0-9]{7,64}\.json$/;
+    const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const expectedTemp = new RegExp(`^${escape(basename)}\\.tmp\\.[A-Za-z0-9]{8}$`);
+    const privateMode = stat => process.platform === "win32" || (stat.mode & 0o777) === 0o600;
+    const privateRegular = stat => stat.isFile() && !stat.isSymbolicLink() && privateMode(stat);
+    let targetFd, tempFd, directoryFd;
+    const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
+    const fail = code => {
+      close(targetFd); close(tempFd); close(directoryFd);
+      process.exit(code);
+    };
+    if (!expectedTarget.test(basename)) fail(3);
+    let targetBefore;
+    try { targetBefore = fs.lstatSync(target); }
+    catch (error) {
+      if (error.code === "ENOENT") process.exit(0);
+      fail(2);
+    }
+    if (!privateRegular(targetBefore)) fail(2);
+    if (targetBefore.nlink === 1) process.exit(0);
+    if (targetBefore.nlink !== 2) fail(2);
+
+    let names, aliases;
+    try {
+      names = fs.readdirSync(directory).filter(name => expectedTemp.test(name));
+      aliases = names.filter(name => {
+        const stat = fs.lstatSync(path.join(directory, name));
+        return stat.dev === targetBefore.dev && stat.ino === targetBefore.ino;
+      });
+    } catch (_) { fail(2); }
+    // A pre-link crash can leave unrelated private temp files with the same
+    // prefix. Ignore and preserve them; only same-inode aliases account for
+    // targetBefore.nlink. nlink=2 plus one such alias is the sole healable case.
+    if (aliases.length !== 1) fail(2);
+    const temp = path.join(directory, aliases[0]);
+
+    try {
+      const tempBefore = fs.lstatSync(temp);
+      if (!privateRegular(tempBefore) || tempBefore.nlink !== 2
+          || tempBefore.dev !== targetBefore.dev || tempBefore.ino !== targetBefore.ino) fail(2);
+      targetFd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      const targetOpen = fs.fstatSync(targetFd);
+      const tempOpen = fs.fstatSync(tempFd);
+      if (!privateRegular(targetOpen) || !privateRegular(tempOpen)
+          || targetOpen.nlink !== 2 || tempOpen.nlink !== 2
+          || targetOpen.dev !== targetBefore.dev || targetOpen.ino !== targetBefore.ino
+          || tempOpen.dev !== targetOpen.dev || tempOpen.ino !== targetOpen.ino) fail(2);
+
+      // Re-account both names immediately before removal. nlink=2 plus these
+      // two same-inode directory entries proves that no foreign link exists.
+      const targetFinal = fs.lstatSync(target);
+      const tempFinal = fs.lstatSync(temp);
+      if (!privateRegular(targetFinal) || !privateRegular(tempFinal)
+          || targetFinal.nlink !== 2 || tempFinal.nlink !== 2
+          || targetFinal.dev !== targetOpen.dev || targetFinal.ino !== targetOpen.ino
+          || tempFinal.dev !== targetOpen.dev || tempFinal.ino !== targetOpen.ino) fail(2);
+      fs.unlinkSync(temp);
+
+      const targetAfterOpen = fs.fstatSync(targetFd);
+      const tempAfterOpen = fs.fstatSync(tempFd);
+      const targetAfter = fs.lstatSync(target);
+      if (!privateRegular(targetAfterOpen) || !privateRegular(tempAfterOpen)
+          || !privateRegular(targetAfter) || targetAfterOpen.nlink !== 1
+          || tempAfterOpen.nlink !== 1 || targetAfter.nlink !== 1
+          || targetAfterOpen.dev !== targetOpen.dev || targetAfterOpen.ino !== targetOpen.ino
+          || tempAfterOpen.dev !== targetOpen.dev || tempAfterOpen.ino !== targetOpen.ino
+          || targetAfter.dev !== targetOpen.dev || targetAfter.ino !== targetOpen.ino) fail(2);
+      close(targetFd); targetFd = undefined;
+      close(tempFd); tempFd = undefined;
+
+      // Windows does not support opening directories through fs.openSync.
+      // The file/link publication is already durable there; directory fsync
+      // is a POSIX-only strengthening step.
+      if (process.platform !== "win32") {
+        directoryFd = fs.openSync(directory, fs.constants.O_RDONLY);
+        try { fs.fsyncSync(directoryFd); } catch (error) {
+          if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+        }
+        close(directoryFd); directoryFd = undefined;
+      }
+    } catch (_) { fail(2); }
+  ' 2>/dev/null
+}
+
+_autopilot_read_team_review_payload_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
+  local state_dir="$root/.zensu/state" target
+  _autopilot_team_review_payload_identity_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
+  target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
+    || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
+  _autopilot_recover_team_review_payload_alias "$target" || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe \
+    "$state_dir" directory "$target" regular-or-absent || return 2
+  [ -e "$target" ] || return 1
+  _autopilot_team_review_payload_inspect "$target" "$head_sha" true >/dev/null || return $?
+  printf '%s\n' "$target"
+}
+
+autopilot_read_team_review_payload() {
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" provider="${4:-}" root
+  [ "$#" -eq 5 ] && _autopilot_identifier_ok "$run_id" || return 3
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${5:-}")" || return 2
+  _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
+    >/dev/null || return 3
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_read_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider"
+}
+
+_autopilot_store_team_review_payload_critical() {
+  local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5" provider="$6"
+  local state_dir="$root/.zensu/state" target tmp rc source_digest target_digest
+  _autopilot_team_review_payload_identity_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
+  target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
+    || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$state_dir" directory || return 2
+  _autopilot_recover_team_review_payload_alias "$target" || return $?
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe \
+    "$state_dir" directory "$source_file" regular "$target" regular-or-absent || return 2
+  source_digest="$(_autopilot_team_review_payload_inspect \
+    "$source_file" "$head_sha" false)" || return $?
+
+  # Existing snapshots are immutable. A byte-identical replay is idempotent;
+  # every other payload (including unsafe identity/mode changes) is a conflict.
+  if [ -e "$target" ]; then
+    target_digest="$(_autopilot_team_review_payload_inspect \
+      "$target" "$head_sha" true)" || return $?
+    [ "$source_digest" = "$target_digest" ] || return 4
+    printf '%s\n' "$target"
+    return 0
+  fi
+
+  tmp="$(mktemp "${target}.tmp.XXXXXXXX" 2>/dev/null)" || return 5
+  CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$tmp" regular "$target" regular-or-absent \
+    || { rm -f "$tmp"; return 2; }
+  SOURCE_FILE="$source_file" TARGET_FILE="$target" TEMP_FILE="$tmp" \
+    EXPECTED_DIGEST="$source_digest" \
+    node -e '
+      const fs = require("fs");
+      const crypto = require("crypto");
+      const source = process.env.SOURCE_FILE;
+      const target = process.env.TARGET_FILE;
+      const temp = process.env.TEMP_FILE;
+      let sourceFd, tempFd;
+      const close = fd => { if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) {} } };
+      try {
+        const sourceBefore = fs.lstatSync(source);
+        if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) process.exit(2);
+        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        const sourceOpen = fs.fstatSync(sourceFd);
+        if (!sourceOpen.isFile() || sourceOpen.nlink !== 1 || sourceOpen.dev !== sourceBefore.dev
+            || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) process.exit(2);
+        const data = fs.readFileSync(sourceFd);
+        const sourceAfter = fs.fstatSync(sourceFd);
+        close(sourceFd); sourceFd = undefined;
+        if (data.length !== sourceOpen.size || sourceAfter.size !== sourceOpen.size
+            || sourceAfter.mtimeMs !== sourceOpen.mtimeMs || sourceAfter.ctimeMs !== sourceOpen.ctimeMs) process.exit(2);
+        if (crypto.createHash("sha256").update(data).digest("hex") !== process.env.EXPECTED_DIGEST) process.exit(4);
+
+        const tempBefore = fs.lstatSync(temp);
+        if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) process.exit(2);
+        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
+        const tempOpen = fs.fstatSync(tempFd);
+        if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
+            || tempOpen.ino !== tempBefore.ino) process.exit(2);
+        fs.ftruncateSync(tempFd, 0);
+        fs.fchmodSync(tempFd, 0o600);
+        fs.writeFileSync(tempFd, data);
+        fs.fsyncSync(tempFd);
+        close(tempFd); tempFd = undefined;
+
+        // link(2) is an atomic no-replace publication. EEXIST is never
+        // overwritten; the shell revalidates any concurrently published file.
+        fs.linkSync(temp, target);
+        fs.unlinkSync(temp);
+        if (process.platform !== "win32") {
+          try {
+            const directoryFd = fs.openSync(require("path").dirname(target), fs.constants.O_RDONLY);
+            try { fs.fsyncSync(directoryFd); } catch (error) {
+              if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+            }
+            fs.closeSync(directoryFd);
+          } catch (error) {
+            if (!["EINVAL", "ENOTSUP", "EBADF"].includes(error.code)) throw error;
+          }
+        }
+      } catch (error) {
+        close(sourceFd); close(tempFd);
+        if (error && error.code === "EEXIST") process.exit(4);
+        process.exit(5);
+      }
+    ' 2>/dev/null
+  rc=$?
+  rm -f "$tmp"
+  if [ "$rc" -eq 4 ]; then
+    CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$target" regular-or-absent || return 2
+    [ -e "$target" ] || return 4
+    target_digest="$(_autopilot_team_review_payload_inspect \
+      "$target" "$head_sha" true)" || return $?
+    [ "$source_digest" = "$target_digest" ] || return 4
+  elif [ "$rc" -ne 0 ]; then
+    return "$rc"
+  fi
+  target_digest="$(_autopilot_team_review_payload_inspect \
+    "$target" "$head_sha" true)" || return $?
+  [ "$source_digest" = "$target_digest" ] || return 4
+  printf '%s\n' "$target"
+}
+
+autopilot_store_team_review_payload() {
+  local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" \
+    provider="${5:-}" root
+  [ "$#" -eq 6 ] && _autopilot_identifier_ok "$run_id" || return 3
+  case "$provider" in github|gitlab) ;; *) return 3 ;; esac
+  root="$(_autopilot_project_root "${6:-}")" || return 2
+  _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
+    >/dev/null || return 3
+  SOURCE_FILE="$source_file" node -e '
+    const path = require("path");
+    const source = process.env.SOURCE_FILE;
+    const resolved = path.resolve(source || "");
+    if (!source || /[\u0000-\u001f]/.test(source) || /[\u0000-\u001f]/.test(resolved)) process.exit(3);
+  ' >/dev/null 2>&1 || return 3
+  source_file="$(_autopilot_shell_path "$source_file")" || return 3
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_store_team_review_payload_critical \
+    "$root" "$run_id" "$operation_key" "$head_sha" "$source_file" "$provider"
 }
 
 # Starting a standalone inner generation must serialize with every durable

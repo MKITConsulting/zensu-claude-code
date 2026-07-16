@@ -1,20 +1,14 @@
 ---
 name: pr-team-review
 description: >
-  [Zensu] Orchestrate a multi-agent PR review on GitHub or GitLab: scout the PR/MR, auto-cast a tailored
-  reviewer team from a 25-persona pool (DDD strategic/tactical, backend, persistence,
-  security, REST API, tests, coverage audit, bug-hunter, maintainability, adversarial,
-  observability, supply-chain, resilience, api-compat, data-privacy, domain refiner,
-  frontend component/UX, accessibility, concurrency, IaC, CI/CD, performance, docs),
-  ALWAYS run an explicit test-coverage evaluation that
-  flags uncovered files and paths, spawn them in parallel, run a debate (with an
-  anti-groupthink challenge round) + synthesis phase, and publish one consolidated
-  review with inline comments + overall body via the VCS driver (GitHub: one atomic
-  review; GitLab: a summary note + inline discussions). Use whenever the user wants a comprehensive multi-perspective PR review:
-  triggers include "team review", "multi-agent PR review", "horde review",
-  "agent-team review", "reviewer consensus", "PR debate", "publish team feedback
-  to GitHub", a shared GitHub PR URL with the word "review", or the slash command
-  /zensu:pr-team-review. Skill drives the workflow end-to-end and posts the result.
+  [Zensu] Orchestrate a comprehensive multi-agent PR/MR review on GitHub or GitLab:
+  scout the change, auto-cast a tailored team from a 25-persona engineering pool,
+  always evaluate changed-code test coverage, run reviewers in parallel, challenge
+  groupthink, synthesize the findings, and publish one consolidated review with inline
+  comments through the VCS driver. Use for "team review", "multi-agent PR review",
+  "horde review", "agent-team review", "reviewer consensus", "PR debate",
+  "publish team feedback", a GitHub/GitLab PR URL paired with a review request, or
+  /zensu:pr-team-review. Drives the workflow end-to-end and posts the result.
 ---
 
 # /zensu:pr-team-review
@@ -36,7 +30,67 @@ Parse from the user prompt. Slash form: `/zensu:pr-team-review <pr-url> [--flag=
 | `--run-coverage` | no | off | Opt-in: actually run the repo's coverage tool in the worktree for true line/branch data. Off = static mapping + ingest an existing report only (fast). |
 | `--coverage-gate` | no | off | When set, uncovered changed **production** files escalate the final verdict to `REQUEST_CHANGES`. Off = coverage is reported but advisory (verdict unchanged). |
 
-If `<pr-url>` is missing, ask the user via `AskUserQuestion`.
+If `<pr-url>` is missing in standalone mode, ask the user via `AskUserQuestion`. A delegated
+invocation with no URL is malformed and must abort without asking.
+
+## Invocation modes and delegated envelope
+
+Standalone mode remains interactive and retains the cast confirmation, body preview,
+cleanup/ref-deletion choice, next-step offer, and the existing `--post-review` publish path.
+
+Delegated mode is activated when the invocation contains any delegated-envelope header.
+It requires exactly the following four contiguous lines with no intervening or additional delegated headers. They appear in this order, each exactly once and with no surrounding text
+on the line:
+
+```text
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>
+```
+
+Require caller `autopilot`, `<outer-stage>` equal to `TEAM_REVIEW`, a positive integer
+attempt, valid durable identifiers for run/chain, a `team-review:v1:` operation key with a
+64-lowercase-hex suffix, and a hexadecimal head between 7 and 64 characters, matching the
+durable state/helper SHA domain. If any envelope header is present, a partial, duplicate, malformed, or conflicting envelope is a hard error; non-contiguous or extended envelopes
+fail identically before worktree creation or
+any forge write. Never reinterpret it as standalone input.
+
+Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"`, read fresh state with
+`bash "$LOG" --autopilot-status`, and resolve the current session id through
+`hooks/lib/zensu-session.sh`. Fail closed unless all of these match exactly:
+
+- `ownerSessionId` equals the current task/session and `tdd.sessionId` equals that same current session id; `runId`, `tdd.attempt`, and `tdd.chainId` equal the envelope binding.
+- `stage` equals both the envelope stage and `TEAM_REVIEW`.
+- `evidence.pr.number` and `evidence.pr.url` equal the invoked PR URL/number, and
+  `evidence.pr.headSha` equals the envelope head.
+- `effects.prOpen.status == "completed"` proves that the durable PR capability finished.
+- `effects.teamReview.status == "requested"` and `effects.teamReview.operationKey` equals
+  the envelope operation key; `effects.teamReview.provider` is exactly `github|gitlab`.
+
+Set `BOUND_HEAD` to the validated, lowercased `evidence.pr.headSha`; it is immutable for this
+delegation. Every later checkout, remote guard, marker, and receipt comparison uses this
+capability-bound value.
+Set `BOUND_PROVIDER` to the validated `effects.teamReview.provider`; it is equally immutable.
+
+Validate that the operation key itself equals
+`team-review:v1:<sha256(canonical({headSha,runId}))>` using the bound lowercased head and
+exact run id. Then scout the remote PR from `$REPO`: it must still be `OPEN`, its URL/number
+must match durable state, and its remote head must equal the bound head. Repeat this
+OPEN/current-head check immediately before the reconcile call. Any mismatch blocks; never
+review a successor commit under the old capability.
+
+Delegated mode MUST NOT ask for cast confirmation, body preview, cleanup/ref deletion, or a
+next-step choice. Auto-cast the mandatory team, publish without a preview pause, remove the
+temporary worktree automatically, keep the local review ref, and return the structured
+receipt to Autopilot.
+
+Any delegated repository, provider, authentication, authorization, payload-snapshot, or
+product-decision failure must persist `BLOCK` with a stable generation-specific event id,
+report the blocker, and stop without a question. Use the closed codes
+`review-repo-unavailable`, `review-provider-unknown`, `review-auth-unavailable`,
+`review-provider-mismatch`, `review-payload-unsafe`, and `review-decision-required`; never turn one of these failures
+into an interactive fallback. Standalone mode retains the explicitly labeled prompts below.
 
 ## Step 0 — Resolve the VCS driver
 
@@ -50,6 +104,7 @@ ROOT="${CLAUDE_PLUGIN_ROOT}"
   exit 1
 }
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
+STATE_LIB="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 ```
 
 `{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read` is a model
@@ -76,7 +131,8 @@ Five phases. Track each as a task with `TaskCreate`/`TaskUpdate`.
 ```bash
 # 1. Locate repo-root for <owner>/<repo> (GitHub) or <group>/<project> (GitLab). If the
 #    current CWD is not that repo, search standard paths (~/IdeaProjects/<repo>,
-#    ~/code/<repo>) or ask the user via AskUserQuestion.
+#    ~/code/<repo>); in standalone mode only, ask the user via AskUserQuestion if unresolved.
+#    In delegated mode persist BLOCK with code review-repo-unavailable and report it.
 REPO=<repo-root-absolute-path>
 
 # 2. Verify it's a git repo
@@ -90,7 +146,16 @@ CLIREADY="$(printf '%s\n' "$DETECT" | sed -n 's/^cliReady=//p')"
 #   - CLIREADY=false → STOP: the detected forge's CLI is not ready. Tell the user to
 #     install/authenticate it — GitHub: `gh auth login`; GitLab: `glab auth login`
 #     (install `glab` first if missing, e.g. `brew install glab`). Do NOT fall back.
-#   - PROVIDER=unknown → ask the user which forge / remote to target.
+#   - PROVIDER=unknown → in standalone mode ask the user which forge / remote to target;
+#     in delegated mode persist BLOCK with code review-provider-unknown and report it.
+#   - In delegated mode, require `PROVIDER == BOUND_PROVIDER` immediately after detection,
+#     before scout, worktree creation, payload access, or any remote write. A mismatch persists
+#     BLOCK with code `review-provider-mismatch` and stops without a question. Never learn or
+#     replace the durable provider from current remote configuration.
+if [ "$DELEGATED" = true ] && [ "$PROVIDER" != "$BOUND_PROVIDER" ]; then
+  # Persist BLOCK(review-provider-mismatch) with a stable generation-specific event id.
+  exit 1
+fi
 
 # 4. PR/MR metadata via the driver (normalized {id,url,state,title,body,base,head,author,labels}).
 #    gh/glab read the repo from CWD, so run it from $REPO.
@@ -105,20 +170,57 @@ WORKTREE="$WORKDIR/wt"
 # 6. Fetch the PR/MR head into a local ref using the driver's forge-specific refspec;
 #    capture the head SHA (GitHub reviews API + the worktree checkout both need it).
 REF="$(bash "$VCS" --fetch-pr-ref --provider "$PROVIDER" <n>)"   # github: pull/<n>/head · gitlab: merge-requests/<n>/head
-git -C "$REPO" fetch origin "$REF:pr-<n>-review"
-SHA=$(git -C "$REPO" rev-parse pr-<n>-review)
+LOCAL_REVIEW_REF="refs/heads/pr-<n>-review"
+if git -C "$REPO" worktree list --porcelain | grep -Fqx "branch $LOCAL_REVIEW_REF"; then
+  echo "local review ref is checked out in another worktree; refusing to move it" >&2
+  exit 1
+fi
+# The default cleanup keeps this ref, so a later force-push/rebase can make the
+# next fetch non-fast-forward. The explicit + refreshes only this guarded review ref.
+git -C "$REPO" fetch origin "+$REF:$LOCAL_REVIEW_REF"
+SHA=$(git -C "$REPO" rev-parse "$LOCAL_REVIEW_REF")
+if [ "$DELEGATED" = true ]; then
+  [ "$SHA" = "$BOUND_HEAD" ] || {
+    echo "delegated review head moved after scout" >&2
+    exit 1
+  }
+else
+  BOUND_HEAD="$SHA"
+fi
 
 # 7. Worktree at the fetched SHA, DETACHED — MAIN CHECKOUT IS NOT TOUCHED, and a
 #    detached checkout never collides on the branch ref when the skill re-runs.
 git -C "$REPO" worktree add --force --detach "$WORKTREE" "$SHA"
 
 # 8. Persist env for downstream phases (inside the per-run dir)
-printf 'REPO=%s\nWORKDIR=%s\nWORKTREE=%s\nSHA=%s\nPROVIDER=%s\nREPOID=%s\n' "$REPO" "$WORKDIR" "$WORKTREE" "$SHA" "$PROVIDER" "$REPOID" > "$WORKDIR/.env"
+printf 'REPO=%s\nWORKDIR=%s\nWORKTREE=%s\nSHA=%s\nBOUND_HEAD=%s\nBOUND_PROVIDER=%s\nPROVIDER=%s\nREPOID=%s\n' "$REPO" "$WORKDIR" "$WORKTREE" "$SHA" "$BOUND_HEAD" "$BOUND_PROVIDER" "$PROVIDER" "$REPOID" > "$WORKDIR/.env"
 
-# 9. Tell the user where everything lives — the mktemp name is random by design
+# 9. Before spawning any delegated reviewer, load an existing immutable payload snapshot.
+#    rc=1 means this operation has no snapshot yet. Every other non-zero result is an unsafe
+#    identity/payload conflict: persist BLOCK with code review-payload-unsafe and stop.
+REUSE_DURABLE_PAYLOAD=false
+REVIEW_PAYLOAD=""
+if [ "$DELEGATED" = true ]; then
+  # shellcheck source=hooks/lib/zensu-autopilot-state.sh
+  source "$STATE_LIB"
+  if REVIEW_PAYLOAD="$(autopilot_read_team_review_payload \
+      "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$BOUND_PROVIDER" "$REPO")"; then
+    REUSE_DURABLE_PAYLOAD=true
+  else
+    SNAPSHOT_RC=$?
+    if [ "$SNAPSHOT_RC" -ne 1 ]; then
+      # Persist BLOCK(review-payload-unsafe) with a stable generation-specific event id,
+      # report the failure, and stop without asking.
+      exit "$SNAPSHOT_RC"
+    fi
+    REVIEW_PAYLOAD=""
+  fi
+fi
+
+# 10. Tell the user where everything lives — the mktemp name is random by design
 echo "Review workspace (artifacts + worktree): $WORKDIR"
 
-# 10. Diff-stats + file list from the worktree (forge-agnostic git — this, not the forge
+# 11. Diff-stats + file list from the worktree (forge-agnostic git — this, not the forge
 #     API, is the authoritative source for the files/changeTypes that drive persona casting;
 #     <base> is the scout metadata's `base`).
 git -C "$WORKTREE" diff origin/<base>...HEAD --stat | tail -10
@@ -131,7 +233,7 @@ For PRs > 50 files: launch 1-2 `Explore` subagents in parallel for deep diff ins
 
 **A.2 Persona-Cast:**
 
-Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`). Always present the cast to the user before spawning:
+Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`). In standalone mode, present the cast to the user before spawning; in delegated mode, log the same cast as a progress update and continue without a question:
 
 ```
 Cast for PR #<n> (<X> files, <Y>+/<Z>-):
@@ -147,9 +249,13 @@ Cast for PR #<n> (<X> files, <Y>+/<Z>-):
   tests-qa        — Test files present (97 @Test)
 ```
 
-Ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list; the always-on holistic core (`coverage-audit`, `bug-hunter`, `maintainability`, `adversarial`) stays in regardless (re-add any the user's custom list omits — for a docs-only PR only `coverage-audit` applies). If `--roles=` arg was provided → still append the holistic core if the user left it out.
+Standalone only: ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list; the always-on holistic core (`coverage-audit`, `bug-hunter`, `maintainability`, `adversarial`) stays in regardless (re-add any the user's custom list omits — for a docs-only PR only `coverage-audit` applies). If `--roles=` arg was provided → still append the holistic core if the user left it out. Delegated mode never calls `AskUserQuestion` here.
 
 ### Phase B — Team Setup + Reviewer Spawn
+
+When `REUSE_DURABLE_PAYLOAD=true`, skip Phases B, C, and the synthesis portion of Phase D.
+The prior process may have crashed after the forge accepted the remote write; the retry must not re-synthesize or overwrite the operation-bound payload. Continue only with the fresh
+OPEN/head guard and Phase D reconcile call using the returned `REVIEW_PAYLOAD` path.
 
 ```
 TeamCreate team_name="pr<n>-review" description="<short>"
@@ -190,9 +296,10 @@ Background reviewers send idle notifications when done. Do not poll. When all id
 
 Lead-driven consolidation, not a DM roundtrip. See `rules/workflow.md` § Debate Strategy.
 
-### Phase D — Synthesis + GitHub Publish
+### Phase D — Synthesis + Forge Publish
 
-Write `$WORKDIR/_synthesis.json` as the review payload (consumed by the driver's `--post-review` — one identical shape for both forges):
+Unless `REUSE_DURABLE_PAYLOAD=true`, write `$WORKDIR/_synthesis.json` as the review payload
+(consumed by the driver's `--post-review` — one identical shape for both forges):
 
 ```json
 {
@@ -266,7 +373,24 @@ Inline findings: max `--max-inline` (default 25), sorted by path then line, P1 f
 
 Validate every inline anchor before it enters `comments[]`, per `rules/github-publish.md` § Pre-Publish Anchor Validation (`hooks/lib/valid-diff-lines.js`: `valid` keeps the anchor, `remap` moves it with a body note, `none` folds the finding into the overall body). Only validated anchors go into the payload the driver's `--post-review` publishes; on GitLab the driver additionally folds any line-less finding into a positionless thread (`rules/gitlab-publish.md`).
 
-Before posting, show the user the body preview + inline count.
+After a newly synthesized payload is complete, bind it durably before the first `--reconcile-review` call. The store is create-once: an identical retry returns the existing
+private snapshot, while different bytes, a stale operation/head, corruption, a symlink, or
+a hardlink fail closed and must persist `BLOCK(review-payload-unsafe)`. Never reconcile from
+the temporary synthesis path in delegated mode.
+
+```bash
+REVIEW_PAYLOAD="$WORKDIR/_synthesis.json"
+if [ "$DELEGATED" = true ] && [ "$REUSE_DURABLE_PAYLOAD" != true ]; then
+  REVIEW_PAYLOAD="$(autopilot_store_team_review_payload \
+    "$RUN_ID" "$OPERATION_KEY" "$BOUND_HEAD" "$REVIEW_PAYLOAD" "$BOUND_PROVIDER" "$REPO")" || {
+      # Persist BLOCK(review-payload-unsafe), report it, and stop without asking.
+      exit 1
+    }
+fi
+```
+
+In standalone mode, show the user the body preview + inline count before posting. In
+delegated mode, record the count as a progress update and continue without a preview gate.
 
 Submit through the VCS driver — GitHub posts one atomic review; GitLab degrades to a summary
 note + N inline discussions (`rules/gitlab-publish.md`), each marker-tagged so a re-run after
@@ -278,11 +402,48 @@ a partial failure skips already-posted threads, the verdict carried in the summa
 # instance) from that repo's remote — the same reason the A.1 scout is wrapped in
 # (cd "$REPO" && ...). GitLab inline positions need the MR diff refs; GitHub ignores them.
 DR=""
-[ "$PROVIDER" = gitlab ] && DR="$(cd "$REPO" && bash "$VCS" --diff-refs --provider "$PROVIDER" --repo-id "$REPOID" <n>)"
+[ "$PROVIDER" = gitlab ] && [ "$DELEGATED" != true ] && DR="$(cd "$REPO" && bash "$VCS" --diff-refs --provider "$PROVIDER" --repo-id "$REPOID" <n>)"
 
-URL="$(cd "$REPO" && bash "$VCS" --post-review --provider "$PROVIDER" --repo-id "$REPOID" \
-  ${DR:+--diff-refs-json "$DR"} <n> "$WORKDIR/_synthesis.json")"
+if [ "$DELEGATED" = true ]; then
+  # Re-scout first and require OPEN + exact $BOUND_HEAD. The delegated path must never substitute the freshly fetched SHA for the capability-bound head when reconciling.
+  REVIEW_RESULT="$(cd "$REPO" && bash "$VCS" --reconcile-review --provider "$PROVIDER" --repo-id "$REPOID" \
+    --expected-head "$BOUND_HEAD" ${DR:+--diff-refs-json "$DR"} \
+    <n> "$REVIEW_PAYLOAD" "$OPERATION_KEY")"
+else
+  URL="$(cd "$REPO" && bash "$VCS" --post-review --provider "$PROVIDER" --repo-id "$REPOID" \
+    ${DR:+--diff-refs-json "$DR"} <n> "$WORKDIR/_synthesis.json")"
+fi
 ```
+
+For a delegated GitLab call, omit `--diff-refs-json`: the reconcile driver performs a
+bounded readiness loop because a newly opened MR can temporarily return empty `diff_refs`.
+Every attempt rechecks `OPEN` plus the immutable bound head; no review part is written until
+complete lowercase base/start/head refs are available. Exhaustion blocks the run cleanly.
+
+The delegated result must be one JSON object with exactly
+`{status,marker,headSha,partCount,postedCount,url,provider}`. Require `provider == PROVIDER`
+(`github` or `gitlab`) and accept only status
+`present|posted|reconciled`; require `headSha == BOUND_HEAD`, `partCount >= 1`, and
+`0 <= postedCount <= partCount`. `present` requires `postedCount == 0`; `posted` requires `postedCount == partCount`; and `reconciled` requires `0 < postedCount < partCount`.
+GitHub requires `partCount == 1` and rejects `reconciled`. GitLab requires `partCount == 1 + comments.length`, using the exact `REVIEW_PAYLOAD` comments array (the
+durable snapshot in delegated mode).
+Validate the marker as
+`<!-- zensu-review:v1:<sha256(operationKey)>:<64-hex-payload-digest>:<headSha>:<N>:part=1/<N> -->`,
+where both head values equal the durable bound head and both `N` values equal
+`partCount`. Reject missing/extra fields, malformed markers, conflicting identities,
+impossible counts, a mismatched provider, or an empty `url`. Return this exact object to Autopilot; it is the only
+receipt allowed to drive `TEAM_REVIEW_PUBLISHED`.
+
+A non-zero reconcile call, malformed output, or rejected receipt blocks the delegated run.
+Do not invoke `--post-review`, a direct forge POST, or a per-comment fallback. A retry first
+loads the existing durable snapshot, skips reviewer/debate/synthesis work, and repeats the
+complete reconcile operation with the same operation key, bound head, and byte-identical
+payload after another fresh OPEN/head guard.
+
+The durable Autopilot owner serializes this operation: never start two reconcile calls for
+the same operation concurrently. The marker protocol guarantees sequential crash/retry
+reconciliation; it does not claim distributed exactly-once behavior for independent
+simultaneous writers that bypass the owner contract.
 
 - **GitHub** — `URL` is the review `html_url` from the POST response; return it to the user.
   Verify with `gh api repos/<owner>/<repo>/pulls/<n>/reviews/<id>/comments | jq length`
@@ -302,11 +463,12 @@ git -C "$REPO" worktree remove --force "$WORKTREE"
 
 Keep `$WORKDIR/` (JSON artifacts) as a debug record — do not delete.
 
-Ask the user whether to drop the local PR ref:
+In standalone mode, ask the user whether to drop the local PR ref:
 
 > Worktree removed. Delete local `pr-<n>-review` ref as well? [y/N]
 
 Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" branch -D pr-<n>-review`.
+Delegated mode keeps the ref without asking.
 
 ## Reference Files
 
@@ -325,8 +487,8 @@ Default: keep the ref (user can re-inspect or re-run). If `y`: `git -C "$REPO" b
 - Reviewers write to `$WORKDIR/<role>.json` (absolute path, outside the worktree). Lead reads + consolidates.
 - Submit ONE review with bundled inline comments — never N single-comment reviews. This is the GitHub atomic path; on GitLab the driver posts a summary note + one discussion per inline finding (GitLab has no atomic review object — spec §7), which is the intended degrade, not N ad-hoc reviews.
 - Default verdict `COMMENT`. Only escalate to `REQUEST_CHANGES`/`APPROVE` if user explicitly asked via `--verdict=`.
-- Idempotent: re-running on the same PR posts an additional review (no overwrite). Each run gets a fresh `mktemp -d` workspace + detached worktree, so a re-run never collides with a prior run's worktree or the branch ref.
-- If the detected forge's CLI auth is not ready (`bash "$VCS" --detect` reports `cliReady=false`) or the user lacks the write scope → stop and ask the user to fix auth first (`gh auth login` / `glab auth login`) before doing the review work. Do NOT fall back to the other forge.
+- Standalone re-runs post an additional review (no overwrite). Delegated Autopilot retries use the durable `--reconcile-review` operation and never intentionally duplicate a review. Each run gets a fresh `mktemp -d` workspace + detached worktree, while the operation/head-bound payload snapshot remains project-local and is reused across those workspaces.
+- In standalone mode only, if the detected forge's CLI auth is not ready (`bash "$VCS" --detect` reports `cliReady=false`) or the user lacks the write scope, stop and ask the user to fix auth first (`gh auth login` / `glab auth login`). In delegated mode persist `BLOCK` with code `review-auth-unavailable`, report it, and stop without asking. Do NOT fall back to the other forge.
 
 ## Next step
 

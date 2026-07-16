@@ -22,7 +22,11 @@ esac
 
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 emit_context() {
-  ZENSU_LOG_HELPER_Q="$LOG_HELPER_Q" node -e '
+  local msys_env_exclusions="ZENSU_LOG_HELPER_Q"
+  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
+    msys_env_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_env_exclusions}"
+  fi
+  MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" ZENSU_LOG_HELPER_Q="$LOG_HELPER_Q" node -e '
     let s = "";
     process.stdin.on("data", c => s += c);
     process.stdin.on("end", () => {

@@ -34,12 +34,22 @@ run_post() {
       CLAUDE_PLUGIN_DATA_OVERRIDE="$rounds_dir" bash "$POST" 2>/dev/null
 }
 
+make_directory_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"junction":"dir");
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
+
 # Default project/.zensu is an untrusted path component, not a trusted anchor.
 P1="$ROOT/project-symlink"; V1="$ROOT/victim-symlink"
 mkdir -p "$P1" "$V1/state"
 printf 'sentinel\n' > "$V1/state/rounds-linkproof.json"
-ln -s "$V1" "$P1/.zensu"
-if ! CLAUDE_PROJECT_DIR="$P1" TDD_STATE_DIR= CLAUDE_PLUGIN_DATA_OVERRIDE= \
+if make_directory_symlink "$V1" "$P1/.zensu" \
+  && ! CLAUDE_PROJECT_DIR="$P1" TDD_STATE_DIR= CLAUDE_PLUGIN_DATA_OVERRIDE= \
     bash "$LOG" --tdd-begin --session linkproof >/dev/null 2>&1 \
   && [ "$(cat "$V1/state/rounds-linkproof.json")" = sentinel ] \
   && [ ! -e "$V1/state/tdd-phase-linkproof.json" ]; then
@@ -51,8 +61,8 @@ fi
 # A deeper explicit path through an intermediate symlink is rejected too.
 P2="$ROOT/project-explicit"; V2="$ROOT/victim-explicit"
 mkdir -p "$P2" "$V2/real-subdir/state"
-ln -s "$V2" "$P2/link"
-if ! run_begin "$P2" "$P2/link/real-subdir/state" "$P2/link/real-subdir/state" deep-link \
+if make_directory_symlink "$V2" "$P2/link" \
+  && ! run_begin "$P2" "$P2/link/real-subdir/state" "$P2/link/real-subdir/state" deep-link \
   && [ ! -e "$V2/real-subdir/state/tdd-phase-deep-link.json" ]; then
   check "P2 deep intermediate symlink is checked below the trusted root" PASS
 else

@@ -34,20 +34,22 @@ field_ok() {
     catch (_) { process.exit(1); }
   ' 2>/dev/null
 }
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 run_max_hook() {
-  local project="$1" session="$2" cfg="$3" state ticket payload
+  local project="$1" session="$2" cfg="$3" state ticket payload context
   state="$TDD_STATE_DIR/tdd-phase-${session}.json"
   FILE="$state" node -e '
     const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"));
     j.reviewRound=1; fs.writeFileSync(process.env.FILE,JSON.stringify(j,null,2));
   '
   ticket="$(CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" bash "$LOG" --review-ticket --session "$session")" || return 1
-  payload="$(SID="$session" TICKET="$ticket" node -e '
+  context="$(tdd_autopilot_context "$state" "$session")" || return 1
+  payload="$(SID="$session" TICKET="$ticket" CONTEXT="$context" node -e '
+    const c=JSON.parse(process.env.CONTEXT);
     process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_input:{
       subagent_type:"zensu:code-reviewer",
-      prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
+      prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=${c.runId} attempt=${c.attempt} chain=${c.chainId}\nAUTOPILOT-STAGE: ${c.returnStage}\nfixture`
     }}));
   ')"
   printf '%s' "$payload" | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" bash "$POST" >/dev/null

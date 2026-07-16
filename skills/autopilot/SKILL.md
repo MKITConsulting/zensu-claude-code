@@ -161,6 +161,64 @@ publication for this PR generation; it is not rewritten to pretend that it revie
 fix commits. The state library rejects unknown events, extra payload keys, stale heads/chains,
 conflicting event ids, and incomplete delivery evidence.
 
+### Delegated review and finding-fix envelopes
+
+Do not delegate either PR skill from conversational context alone. Immediately before each
+delegation, read fresh state with `bash "$LOG" --autopilot-status` and render the envelope
+from the current durable `tdd.attempt` and `tdd.chainId`, the current outer stage, and the
+current durable PR number, URL, and head SHA. The active run must still be owned by this
+task/session; any absent, terminal, corrupt, mismatched, or incomplete value blocks the
+delegation.
+
+The team-review operation key is deterministic:
+`team-review:v1:<sha256(canonical({headSha,runId}))>`. Canonical JSON sorts object keys,
+contains no insignificant whitespace, preserves the exact run id, and lowercases the
+lowercase 7-64 character hexadecimal PR head before hashing. The operation key is deterministic for one run and its
+original review head; never include a timestamp, retry counter, random value, PR title, or
+review payload. Generate it through the state library's canonical helper, never by an
+ad-hoc shell hash:
+
+```bash
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+REVIEW_OPERATION_KEY="$(autopilot_team_review_operation_key "$RUN_ID" "$PR_HEAD_SHA")" \
+  || { echo "cannot bind team-review operation" >&2; exit 1; }
+```
+
+Persist `TEAM_REVIEW_REQUESTED` with that key and the already detected VCS `provider`
+(`github` or `gitlab`) before invoking the skill, then pass the same exact operation key in this four-line envelope:
+
+```text
+/zensu:pr-team-review <pr-url>
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+AUTOPILOT-REVIEW-OP: key=<operationKey> head=<headSha>
+```
+
+For this call `<outer-stage>` is exactly `TEAM_REVIEW`. After the skill returns a validated
+structured reconciliation receipt, persist `TEAM_REVIEW_PUBLISHED` with the same exact
+operation key, receipt marker, bound head, and receipt `provider`; it must equal the provider
+already bound by `TEAM_REVIEW_REQUESTED`.
+The durable transition re-attests the receipt's canonical payload digest and provider-aware
+expected part count against the immutable stored payload while holding the Autopilot lock,
+then records that digest, part count, and provider as review evidence. Never infer or omit
+the provider; copy it from the structured reconciliation receipt.
+
+The rendered stage line is `AUTOPILOT-STAGE: TEAM_REVIEW`.
+
+Fix-findings receives exactly the first three lines and never receives `AUTOPILOT-REVIEW-OP`:
+
+```text
+/zensu:pr-fix-findings <pr-url>
+ZENSU-DELEGATED-CALLER: autopilot
+AUTOPILOT-BINDING: run=<runId> attempt=<attempt> chain=<chainId>
+AUTOPILOT-STAGE: <outer-stage>
+```
+
+For that call `<outer-stage>` is exactly `FIX_FINDINGS`. These are capability envelopes,
+not suggestions: never add, duplicate, reorder, or partially forward their lines.
+The rendered stage line is `AUTOPILOT-STAGE: FIX_FINDINGS`.
+
 ## Workflow
 
 Three phases. Track each as a task with `TaskCreate`/`TaskUpdate` so the user has a live
@@ -291,13 +349,17 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    conversation memory, so a compaction or session restart between chains cannot
    under-report. Render `none` when the union is empty; update the line whenever step 5/6
    pushes.
-4. **Team review — ONCE** — persist `TEAM_REVIEW_REQUESTED`, reconcile that operation, then
-   run `/zensu:pr-team-review` on the PR and persist `TEAM_REVIEW_PUBLISHED`. This is the single deep
+4. **Team review — ONCE** — derive the deterministic key and exact four-line envelope above,
+   persist `TEAM_REVIEW_REQUESTED`, then run `/zensu:pr-team-review` on the PR. Its delegated
+   path reconciles the write-ahead operation remotely and returns the structured receipt;
+   persist `TEAM_REVIEW_PUBLISHED` only after that receipt validates. This is the single deep
    multi-persona pass. It runs **exactly once** and does **not** re-run in the loop.
-5. **Fix the findings** — run `/zensu:pr-fix-findings` and loop it until every review
-   thread from step 4 is resolved. Re-run the step-2 gates, then push so the PR reflects
-   the fixes. Persist `FIX_REQUIRED` before each bound TDD fix return and
-   `FINDINGS_CLEARED` only after authoritative unresolved-thread count is zero.
+5. **Fix the findings** — invoke `/zensu:pr-fix-findings` with the exact three-line envelope
+   above. Its delegated path fetches the complete thread set, performs one aggregate bound
+   TDD fix run serially in this task, re-runs the gates, pushes with current-PR guards,
+   advances the durable PR head, and resolves the addressed threads. Repeat only while its
+   authoritative paginated re-fetch still reports unresolved threads. Persist
+   `FINDINGS_CLEARED` only after that count is zero.
 6. **Validate ↔ fix LOOP** — only now exercise the running feature:
    a. Run the resolved validation **driver** (see `rules/drivers.md`), authenticating via
       the credential-blind login script if one is configured (see `rules/auth.md`). Assert

@@ -12,6 +12,15 @@ check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else ech
 [ -f "$LIB" ] && bash -n "$LIB" 2>/dev/null && check "P2 state library exists and parses" PASS || { check "P2 state library exists and parses" FAIL; exit 1; }
 source "$LIB"
 
+review_marker() {
+  local operation_key="$1" head_sha="$2" payload_digest="$3"
+  OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" PAYLOAD_DIGEST="$payload_digest" node -e '
+    const crypto=require("crypto");
+    const op=crypto.createHash("sha256").update(process.env.OPERATION_KEY).digest("hex");
+    process.stdout.write(`<!-- zensu-review:v1:${op}:${process.env.PAYLOAD_DIGEST}:${process.env.HEAD_SHA.toLowerCase()}:1:part=1/1 -->`);
+  '
+}
+
 TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
 trap 'rm -rf "$TMP"' EXIT
 PROJECT="$TMP/project"; mkdir -p "$PROJECT"
@@ -26,7 +35,7 @@ payload() {
 invoke() {
   printf '%s' "$1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" ZENSU_CONFIG="${3:-$CFG_OFF}" bash "$HOOK" 2>/dev/null
 }
-digest() { shasum -a 256 "$1" | awk '{print $1}'; }
+digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 RUN_FILE="$(autopilot_run_file "$RUN" "$PROJECT")"
 
 OUT="$(invoke "$(payload "$PLAN" "$SID")" "$PROJECT")"
@@ -34,7 +43,7 @@ if printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);proce
   check "P3 approved Autopilot plan delegates directly without a routine question" PASS
 else check "P3 approved Autopilot plan delegates directly without a routine question" FAIL; fi
 
-EXPECTED_SHA="$(printf '%s' "$PLAN" | shasum -a 256 | awk '{print $1}')"
+EXPECTED_SHA="$(printf '%s' "$PLAN" | node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));')"
 if RUN_FILE="$RUN_FILE" SHA="$EXPECTED_SHA" node -e 'const j=require(process.env.RUN_FILE);process.exit(j.stage==="AWAIT_TDD"&&j.nextActionCode==="START_TDD"&&j.approvedPlanSha256===process.env.SHA?0:1)'; then
   check "P4 approval persists the exact plan digest and AWAIT_TDD stage" PASS
 else check "P4 approval persists the exact plan digest and AWAIT_TDD stage" FAIL; fi
@@ -148,8 +157,17 @@ done_plan_event done-gates GATES_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-converge CONVERGENCE_PASSED '{}'
 done_plan_event done-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:done-plan"}'
 done_plan_event done-pr-open PR_OPENED "{\"operationKey\":\"pr:done-plan\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$DONE_HEAD\"}}"
-done_plan_event done-review-request TEAM_REVIEW_REQUESTED '{"operationKey":"review:done-plan"}'
-done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"review:done-plan\",\"marker\":\"zensu-autopilot-review:done-plan\",\"headSha\":\"$DONE_HEAD\"}"
+DONE_REVIEW_KEY="$(autopilot_team_review_operation_key "$DONE_RUN" "$DONE_HEAD")"
+done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"provider\":\"github\"}"
+DONE_REVIEW_PAYLOAD="$TMP/done-review-payload.json"
+printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Done fixture review\",\"commit_id\":\"$DONE_HEAD\",\"comments\":[]}" > "$DONE_REVIEW_PAYLOAD"
+DONE_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload "$DONE_RUN" "$DONE_REVIEW_KEY" \
+  "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null || true)"
+[ -n "$DONE_REVIEW_SNAPSHOT" ] || DONE_READY=false
+DONE_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
+  "$DONE_REVIEW_SNAPSHOT" "$DONE_HEAD" true canonical 2>/dev/null || true)"
+DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD" "$DONE_REVIEW_DIGEST")"
+done_plan_event done-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"marker\":\"$DONE_REVIEW_MARKER\",\"headSha\":\"$DONE_HEAD\",\"provider\":\"github\"}"
 done_plan_event done-findings FINDINGS_CLEARED "{\"headSha\":\"$DONE_HEAD\",\"unresolvedCount\":0}"
 done_plan_event done-validation VALIDATION_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-delivery DELIVERY_COMPLETE "{\"headSha\":\"$DONE_HEAD\"}"
@@ -163,8 +181,6 @@ if [ "$DONE_READY" = true ] && printf '%s' "$DONE_ON" | grep -qF 'AskUserQuestio
 else check "P11 DONE pointer does not own or mutate later plans" FAIL; fi
 
 NO_NODE_BIN="$TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
-ln -s "$(command -v cat)" "$NO_NODE_BIN/cat"
-ln -s "$(command -v grep)" "$NO_NODE_BIN/grep"
 invoke_without_node() {
   printf '%s' "$1" | PATH="$NO_NODE_BIN" ZENSU_FORCE_MAIN='' \
     CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" /bin/bash "$HOOK" 2>/dev/null
@@ -204,6 +220,13 @@ if grep -qF 'PAYLOAD="$INPUT"' "$HOOK" || grep -qF 'zensu_hook_agent_id "$INPUT"
   check "P14 plan hook copies the full payload into a process environment or argv" FAIL
 else
   check "P14 plan hook streams JSON payloads over stdin" PASS
+fi
+
+if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$HOOK" \
+  && grep -qF 'LOG_HELPER_Q' "$HOOK"; then
+  check "P15 MSYS preserves the already shell-quoted log-helper token" PASS
+else
+  check "P15 MSYS preserves the already shell-quoted log-helper token" FAIL
 fi
 
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]
