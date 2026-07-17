@@ -25,6 +25,7 @@ const EXTERNAL_LOCK_POLL_MS = 50;
 const EXTERNAL_LOCK_DEFAULT_ATTEMPTS = 200;
 const LOCK_TOKEN_RE = /^[a-f0-9]{48}$/;
 const LOCK_IDENTITY_RE = /^[a-z0-9._:-]{1,160}$/;
+const TRANSIENT_LOCK_SNAPSHOT_ERROR_RE = /^session-control-v1: (?:file identity changed while opening|file (?:path )?changed while reading|missing file): /;
 const DARWIN_PROCESS_START_RE = /^(Sun|Mon|Tue|Wed|Thu|Fri|Sat) (Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) ([1-9]|[12][0-9]|3[01]) ([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9] [0-9]{4}$/;
 const WORKFLOW_RESERVED_FIELDS = new Set([
   'schema',
@@ -534,7 +535,7 @@ function lockOwner(file) {
       snapshot = readRegularFileSnapshot(file, 4096, true, true);
       break;
     } catch (error) {
-      if (!/file (?:path )?changed while reading|missing file/i.test(error.message)) throw error;
+      if (!TRANSIENT_LOCK_SNAPSHOT_ERROR_RE.test(error.message)) throw error;
       try {
         fs.lstatSync(file);
       } catch (statError) {

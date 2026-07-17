@@ -590,6 +590,91 @@ test('recovers valid dead lock and recovery generations immediately', () => {
   assert.equal(fs.existsSync(path.join(locks, `.${key}.recovery`)), false);
 });
 
+test('retries a lock generation whose identity changes between lstat and open', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-open-race-'));
+  const lockFile = path.join(fs.realpathSync.native(root), '.open-race.lock');
+  // Prime the process-start cache under the real platform before simulating
+  // Windows so this test cannot alter later PID-reuse checks in this process.
+  core.withFileLock(root, 'platform-cache-prime', () => {});
+  fs.writeFileSync(lockFile, JSON.stringify({
+    pid: 2147483647,
+    token: 'e'.repeat(48),
+    created_at: CREATED_AT,
+  }), { mode: 0o600 });
+
+  const originalOpen = fs.openSync;
+  const originalFstat = fs.fstatSync;
+  const platformDescriptor = Object.getOwnPropertyDescriptor(process, 'platform');
+  let raceDescriptor = null;
+  let injected = false;
+  fs.openSync = function patchedOpen(file, flags, ...rest) {
+    const descriptor = originalOpen.call(fs, file, flags, ...rest);
+    if (!injected && path.resolve(String(file)) === path.resolve(lockFile)) {
+      raceDescriptor = descriptor;
+    }
+    return descriptor;
+  };
+  fs.fstatSync = function patchedFstat(descriptor, ...rest) {
+    const stat = originalFstat.call(fs, descriptor, ...rest);
+    if (descriptor !== raceDescriptor || injected) return stat;
+    injected = true;
+    return new Proxy(stat, {
+      get(target, property) {
+        if (property === 'ino') return target.ino === 0 ? 1 : target.ino + 1;
+        if (property === 'birthtimeMs') return target.birthtimeMs + 1;
+        const value = Reflect.get(target, property, target);
+        return typeof value === 'function' ? value.bind(target) : value;
+      },
+    });
+  };
+
+  try {
+    // Force the same lstat/open identity bracket used by Node on Windows even
+    // when this deterministic regression test runs on a POSIX developer host.
+    Object.defineProperty(process, 'platform', { ...platformDescriptor, value: 'win32' });
+    assert.equal(core.withFileLock(root, 'open-race', () => 'recovered'), 'recovered');
+    assert.equal(injected, true);
+    assert.equal(fs.existsSync(lockFile), false);
+  } finally {
+    Object.defineProperty(process, 'platform', platformDescriptor);
+    fs.openSync = originalOpen;
+    fs.fstatSync = originalFstat;
+  }
+});
+
+test('does not classify unrelated errors whose paths mention a transient phrase', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lock-error-path-'));
+  const lockFile = path.join(fs.realpathSync.native(root), '.error-path.lock');
+  fs.writeFileSync(lockFile, JSON.stringify({
+    pid: 2147483647,
+    token: 'f'.repeat(48),
+    created_at: CREATED_AT,
+  }), { mode: 0o600 });
+
+  const originalOpen = fs.openSync;
+  const unrelatedError = new Error(`EACCES: permission denied, open '${path.join(root, 'missing file')}'`);
+  unrelatedError.code = 'EACCES';
+  let matchingOpenCalls = 0;
+  fs.openSync = function patchedOpen(file, flags, ...rest) {
+    if (path.resolve(String(file)) === path.resolve(lockFile)) {
+      matchingOpenCalls += 1;
+      if (matchingOpenCalls === 1) throw unrelatedError;
+      throw new Error('unrelated lock snapshot error was retried');
+    }
+    return originalOpen.call(fs, file, flags, ...rest);
+  };
+
+  try {
+    assert.throws(
+      () => core.withFileLock(root, 'error-path', () => {}),
+      (error) => error === unrelatedError,
+    );
+    assert.equal(matchingOpenCalls, 1);
+  } finally {
+    fs.openSync = originalOpen;
+  }
+});
+
 test('never reclaims an old lock whose owner process is still alive', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-live-lock-'));
   const lockFile = path.join(root, '.liveowner.lock');
