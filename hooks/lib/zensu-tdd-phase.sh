@@ -116,14 +116,21 @@ tdd_state_file() {
 }
 
 _tdd_bound_project_root() {
-  local state_file="${1:-}" session_id="${2:-}" expected project_root
+  local state_file="${1:-}" session_id="${2:-}" expected project_root native_project_root
   [ -n "$state_file" ] && [ -n "$session_id" ] || return 1
   expected="$(tdd_state_file "$session_id")" || return 1
   [ "$state_file" = "$expected" ] || return 1
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   project_root="$(zensu_resolve_project_dir)" || return 1
   [ "$expected" = "$project_root/.zensu/state/tdd-phase-$(zensu_resolve_session_id "$session_id").json" ] || return 1
-  printf '%s\n' "$project_root"
+  # Every caller passes this value to native Node as PROJECT_ROOT. The
+  # immutable binding is already host-native and was identity-checked by
+  # zensu_resolve_project_dir above. Returning the shell rendering here would
+  # rely on heuristic MSYS conversion, which is not a stable transport for
+  # shell-special paths.
+  native_project_root="${ZENSU_PROJECT_ROOT:-}"
+  [ -n "$native_project_root" ] || return 1
+  printf '%s\n' "$native_project_root"
 }
 
 # Validate every path component below a trusted project/temp anchor without
