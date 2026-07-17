@@ -640,7 +640,7 @@ if chown 1 "$FOREIGN_PARENT" 2>/dev/null; then
   else
     check "foreign non-root sticky writable ancestor uses the stable denial" FAIL
   fi
-elif rg -q 'stat\.uid === 0 \|\| stat\.uid === currentUid' \
+elif grep -qF 'stat.uid === 0 || stat.uid === currentUid' \
     "$PLUGIN/hooks/lib/review-evidence-lease-v1.js"; then
   check "foreign sticky-owner guard is structurally verified when chown is unavailable" PASS
 else
@@ -666,7 +666,7 @@ if chown 1 "$FOREIGN_READONLY_PARENT" 2>/dev/null; then
   else
     check "foreign-owned non-writable workspace ancestor uses the stable denial" FAIL
   fi
-elif rg -q '!leaf && currentUid !== null && stat\.uid !== 0 && stat\.uid !== currentUid' \
+elif grep -qF '!leaf && currentUid !== null && stat.uid !== 0 && stat.uid !== currentUid' \
     "$PLUGIN/hooks/lib/review-evidence-lease-v1.js"; then
   check "foreign non-writable ancestor guard is structurally verified when chown is unavailable" PASS
 else
@@ -685,7 +685,7 @@ if helper "$DATA" "$SESSION" create --kind plan-review \
 elif grep -qF 'owned by the current user with mode 0700' "$TMP/system-workspace.err" \
     || { grep -qF 'must not overlap plugin runtime or private plugin data' \
            "$TMP/system-workspace.err" \
-         && rg -q 'stat\.uid !== process\.getuid\(\)' \
+         && grep -qF 'stat.uid !== process.getuid()' \
            "$PLUGIN/hooks/lib/review-evidence-lease-v1.js"; }; then
   check "shared system temp root cannot be used as the private workspace leaf" PASS
 else
