@@ -1100,14 +1100,20 @@ function releaseExternalProcessLockByToken(options) {
   }
   const acquired = lockOwner(binding.lockFile);
   const digest = externalProcessReleaseTokenDigest(token);
-  if (
-    !acquired
-    || !acquired.owner
-    || acquired.owner.kind !== 'external-process-lock'
-    || typeof acquired.owner.release_token_digest !== 'string'
-    || !constantTimeTextEqual(acquired.owner.release_token_digest, digest)
-  ) {
-    fail('external process lock ownership does not match release token');
+  if (!acquired) {
+    fail('external process lock is missing at capability release');
+  }
+  if (!acquired.owner) {
+    fail('external process lock owner is unreadable at capability release');
+  }
+  if (acquired.owner.kind !== 'external-process-lock') {
+    fail('external process lock kind changed before capability release');
+  }
+  if (typeof acquired.owner.release_token_digest !== 'string') {
+    fail('external process lock has no capability digest');
+  }
+  if (!constantTimeTextEqual(acquired.owner.release_token_digest, digest)) {
+    fail(`external process lock release token digest mismatch (${acquired.owner.release_token_digest} != ${digest})`);
   }
   releaseOwnedLock(
     binding.directory,
