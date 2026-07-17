@@ -246,7 +246,10 @@ if [ "$DONE_READY" = true ] && printf '%s' "$DONE_ON" | grep -qF 'AskUserQuestio
   check "P11 DONE pointer falls through without mutating terminal history" PASS
 else check "P11 DONE pointer does not own or mutate later plans" FAIL; fi
 
-NO_NODE_BIN="$TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
+# PATH is a POSIX colon-separated list under Bash, including Git Bash. Keep
+# the one-shot shim in the shell path namespace: a native `D:/...` component
+# would be split at the drive colon before command lookup ever reaches it.
+NO_NODE_BIN="$RAW_TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
 ZENSU_TEST_REAL_NODE="$(command -v node)"
 export ZENSU_TEST_REAL_NODE
 NO_NODE_PATH="$NO_NODE_BIN"
@@ -279,6 +282,14 @@ invoke_with_disappearing_node() {
   arm_one_shot_node
   invoke_without_node "$@"
 }
+
+arm_one_shot_node
+ONE_SHOT_NODE="$(PATH="$NO_NODE_PATH" /bin/bash -c 'command -v node' 2>/dev/null || true)"
+if [ "$ONE_SHOT_NODE" = "$NO_NODE_BIN/node" ]; then
+  check "P11b one-shot Node shim is addressable through the POSIX PATH" PASS
+else
+  check "P11b one-shot Node shim path survives host-path normalization" FAIL
+fi
 
 MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"; mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib" "$MISSING_STATE_PLUGIN/.claude-plugin"
 MISSING_STATE_PLUGIN="$(cd "$MISSING_STATE_PLUGIN" && pwd -P)"
