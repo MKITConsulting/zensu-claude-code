@@ -11,15 +11,18 @@ zensu_hook_principal() {
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
   principal_lib="$lib_dir/claude-principal-v1.js"
   [ -f "$principal_lib" ] && [ ! -L "$principal_lib" ] || return 1
-  printf '%s' "$payload" | PRINCIPAL_LIB="$principal_lib" EXPECTED_EVENT="$expected_event" node -e '
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" | EXPECTED_EVENT="$expected_event" node -e '
     try {
       const payload=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
       if(!payload||typeof payload!=="object"||Array.isArray(payload))process.exit(2);
       if(payload.hook_event_name!==process.env.EXPECTED_EVENT)process.exit(2);
-      const principals=require(process.env.PRINCIPAL_LIB);
+      const principals=require("./claude-principal-v1.js");
       process.stdout.write(principals.classifyPreToolPayload(payload));
     } catch (_) { process.exit(2); }
-  ' 2>/dev/null
+    ' 2>/dev/null
+  )
 }
 
 zensu_hook_is_main_principal() {

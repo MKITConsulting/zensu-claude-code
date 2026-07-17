@@ -9,6 +9,7 @@ POST_REVIEW="$ROOT/hooks/post-review-tdd-delegate.sh"
 STOP_ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
 PRE_EDIT="$ROOT/hooks/pre-edit-tdd-reminder.sh"
 BANNER="$ROOT/hooks/session-start-banner.sh"
+AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
 PR_SKILL="$ROOT/skills/pr-team-review/SKILL.md"
 PASS=0
@@ -272,6 +273,24 @@ if ! grep -qF 'process.argv[1]' "$POST_REVIEW" \
   check "free-form hook messages bypass MSYS argv and environment path conversion" PASS
 else
   check "free-form hook messages bypass MSYS argv and environment path conversion" FAIL
+fi
+
+if (
+  export MSYS2_ENV_CONV_EXCL=EXISTING_SELECTOR
+  EXPECTED_PRINCIPAL_CWD="$(cd -P -- "$(dirname "$AGENT_CONTEXT")" && pwd -P)"
+  node() {
+    [ -z "${PRINCIPAL_LIB:-}" ] || return 9
+    [ "${MSYS2_ENV_CONV_EXCL:-}" = EXISTING_SELECTOR ] || return 9
+    [ "$(pwd -P)" = "$EXPECTED_PRINCIPAL_CWD" ] || return 9
+    command node "$@"
+  }
+  # shellcheck disable=SC1090
+  source "$AGENT_CONTEXT"
+  [ "$(zensu_hook_principal '{"hook_event_name":"SessionStart"}' SessionStart)" = main-v1 ]
+); then
+  check "principal classifier resolves from native process cwd without path transport" PASS
+else
+  check "principal classifier resolves from native process cwd without path transport" FAIL
 fi
 
 printf '%s\n' '----' "test-msys-runtime-boundaries: $PASS PASS / $FAIL FAIL"

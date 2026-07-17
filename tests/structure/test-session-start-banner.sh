@@ -171,7 +171,7 @@ cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SPECIAL_ROOT/hooks/lib/claud
 cp "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" "$SPECIAL_ROOT/hooks/lib/zensu-agent-context.sh"
 printf '%s\n' '#!/bin/bash' \
   '[ -d "${CLAUDE_PLUGIN_DATA:-}" ] || exit 7' \
-  'printf "%s" "$CLAUDE_PLUGIN_DATA" > PRIMER_EXECUTED' > "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
+  ': > "$CLAUDE_PLUGIN_DATA/PRIMER_EXECUTED"' > "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 chmod +x "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 printf '%s\n' '{"hooks":{"tddImplementation":true}}' > "$SPECIAL_BASE/strict.json"
 SPECIAL_PLUGIN_DATA="$SPECIAL_BASE/"'plugin data $(touch PRIMER_DATA_PWNED) `touch PRIMER_DATA_TICKED`;touch PRIMER_DATA_SEMI; apostrophe'"'"'value'
@@ -210,8 +210,7 @@ SPECIAL_COMMAND_RC=$?
 )
 SPECIAL_EXEC_RC=$?
 SPECIAL_MARKER_OK=false
-if [ -f "$SPECIAL_BASE/run/PRIMER_EXECUTED" ] \
-  && [ "$(cat "$SPECIAL_BASE/run/PRIMER_EXECUTED")" = "$SPECIAL_PLUGIN_DATA" ]; then
+if [ -f "$SPECIAL_PLUGIN_DATA/PRIMER_EXECUTED" ]; then
   SPECIAL_MARKER_OK=true
 fi
 if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_COMMAND_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
