@@ -462,57 +462,150 @@ else
 fi
 
 # Exercise the complete SessionStart -> persisted host-native path -> Bash
-# helper -> TDD mutation route with a project name that requires careful shell
-# handling. On Git Bash, the persisted value and the helper result deliberately
-# use different (Windows and MSYS) path namespaces.
+# helper -> TDD lifecycle route with both plugin and project names that require
+# careful shell handling. On Git Bash, the persisted values and the helper
+# results deliberately use different (Windows and MSYS) path namespaces. The
+# lifecycle intentionally covers Core-backed mutations, direct JSON CAS,
+# lock-keeper paths, validated reads, and the pending-review marker.
+SHELL_PLUGIN="$TMP/plugin root (mixed) apostrophe'value"
 SHELL_PROJECT="$TMP/project root (mixed) apostrophe'value"
+SHELL_PLUGIN_DATA="$TMP/shell-plugin-data"
 SHELL_ENV="$TMP/shell-project-session-env"
+SHELL_FOREIGN_PROJECT="$TMP/foreign project (mixed) apostrophe'value"
 SHELL_SID='claude/shell project path'
 SHELL_KEY="$(node "$CORE" session-key "$SHELL_SID")"
-mkdir -p "$SHELL_PROJECT"
+mkdir -p "$SHELL_PLUGIN" "$SHELL_PROJECT" "$SHELL_PLUGIN_DATA" "$SHELL_FOREIGN_PROJECT"
+cp -R "$ROOT/.claude-plugin" "$ROOT/.mcp.json" "$ROOT/hooks" "$ROOT/agents" \
+  "$ROOT/skills" "$ROOT/scripts" "$ROOT/mcp-runtime" "$SHELL_PLUGIN/"
+SHELL_COPY_RC=$?
 : > "$SHELL_ENV"
 payload SessionStart "$SHELL_SID" "$SHELL_PROJECT" \
-  | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$SHELL_ENV" \
-    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK" \
+  | CLAUDE_PLUGIN_ROOT="$SHELL_PLUGIN" CLAUDE_PLUGIN_DATA="$SHELL_PLUGIN_DATA" CLAUDE_ENV_FILE="$SHELL_ENV" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+      bash "$SHELL_PLUGIN/hooks/session-start-session-control.sh" \
     >"$TMP/shell-project-start.out" 2>"$TMP/shell-project-start.err"
 SHELL_START_RC=$?
-SHELL_RESOLVED="$(CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SHELL_SID" SESSION="$SESSION" bash -c '
-  source "$SESSION"
+payload SessionStart "$SHELL_SID" "$SHELL_PROJECT" \
+  | CLAUDE_PLUGIN_ROOT="$SHELL_PLUGIN" CLAUDE_PLUGIN_DATA="$SHELL_PLUGIN_DATA" \
+    CLAUDE_PROJECT_DIR="$SHELL_PROJECT" \
+    bash "$SHELL_PLUGIN/hooks/session-start-autopilot-resume.sh" \
+    >"$TMP/shell-project-resume.out" 2>"$TMP/shell-project-resume.err"
+SHELL_RESUME_RC=$?
+SHELL_LIFECYCLE="$(CLAUDE_PLUGIN_ROOT="$SHELL_PLUGIN" CLAUDE_PLUGIN_DATA="$SHELL_PLUGIN_DATA" \
+  CLAUDE_CODE_SESSION_ID="$SHELL_SID" EXPECTED_PROJECT="$SHELL_PROJECT" bash -c '
+  set -eu
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+  hook_payload="$(SESSION_VALUE="$CLAUDE_CODE_SESSION_ID" PROJECT_VALUE="$EXPECTED_PROJECT" node -e '\''
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PreToolUse", session_id: process.env.SESSION_VALUE,
+      cwd: process.env.PROJECT_VALUE, tool_name: "Read", tool_input: {file_path: "README.md"}
+    }));
+  '\'')"
+  zensu_bind_hook_session "$hook_payload"
+  [ -n "$ZENSU_SESSION_KEY" ]
   zensu_bind_model_session
-  zensu_resolve_project_dir
-' 2>/dev/null)"
-SHELL_RESOLVE_RC=$?
-CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SHELL_SID" ROOT="$ROOT" bash -c '
-  CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/lib/zensu-log.sh" \
-    --phase RED_WRITE --step shell-project-path
-' >"$TMP/shell-project-log.out" 2>"$TMP/shell-project-log.err"
-SHELL_LOG_RC=$?
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+
+  sid="$ZENSU_SESSION_KEY"
+  resolved="$(zensu_resolve_project_dir)"
+  expected="$(cd -P -- "$EXPECTED_PROJECT" && pwd -P)"
+  [ "$resolved" = "$expected" ]
+  state="$(tdd_state_file "$sid")"
+
+  tdd_begin_session "$sid" true false false "" msys-special-run 1 GATES msys-special-chain
+  [ "$(tdd_state_status "$state")" = valid ]
+  [ "$(tdd_session_active "$state")" = true ]
+  tdd_write_phase "$sid" MSYS-P1 RED_WRITE shell-special-path
+  [ "$(tdd_phase "$state")" = RED_WRITE ]
+
+  tdd_mark_impl_complete_bound "$sid" msys-special-run 1 msys-special-chain
+  [ "$(tdd_impl_complete "$state")" = true ]
+  ticket="$(tdd_issue_review_ticket "$sid")"
+  round="$(tdd_consume_review_ticket "$sid" "$ticket")"
+  [ "$round" = 1 ]
+  [ "$(tdd_get_counter "$state" reviewRound)" = 1 ]
+  [ "$(tdd_claimed_review_ticket "$state")" = "$ticket" ]
+
+  # This is the direct JSON generation-CAS path; it seals outcome and chain
+  # completion together beneath the same project-state lock.
+  tdd_finish_autopilot_chain "$sid" msys-special-run 1 msys-special-chain pass "$ticket"
+  [ "$(tdd_chain_done "$state")" = true ]
+  snapshot="$(tdd_chain_snapshot "$state" "$sid")"
+  SNAPSHOT="$snapshot" node -e '\''
+    const value = JSON.parse(process.env.SNAPSHOT);
+    process.exit(value.active === true && value.implComplete === true
+      && value.chainDone === true && value.autopilot
+      && value.autopilot.runId === "msys-special-run"
+      && value.autopilot.attempt === 1
+      && value.autopilot.chainId === "msys-special-chain"
+      && value.autopilot.outcome === "pass" ? 0 : 1);
+  '\''
+
+  tdd_write_pending_review "src/a.ts,src/b.ts" "shell-special pending marker"
+  pending="$(zensu_pending_review_file)"
+  [ -f "$pending" ]
+  [ "$(tdd_pending_review_stale 24)" = false ]
+  tdd_clear_pending_review
+  [ ! -e "$pending" ]
+  printf "ok:%s\\n" "$round"
+' 2>"$TMP/shell-project-lifecycle.err")"
+SHELL_LIFECYCLE_RC=$?
 SHELL_STATE="$SHELL_PROJECT/.zensu/state/tdd-phase-$SHELL_KEY.json"
-SHELL_EXPECTED="$(canonical_shell_path "$SHELL_PROJECT")"
-SHELL_EXPECTED_RC=$?
-SHELL_REVISION=missing
-SHELL_REVISION_RC=1
-if [ -f "$SHELL_STATE" ]; then
-  SHELL_REVISION="$(node -e 'process.stdout.write(String(require(process.argv[1]).revision))' "$SHELL_STATE" 2>/dev/null)"
-  SHELL_REVISION_RC=$?
-fi
-if [ "$SHELL_START_RC" -eq 0 ] && [ "$SHELL_RESOLVE_RC" -eq 0 ] \
-  && [ "$SHELL_LOG_RC" -eq 0 ] && [ "$SHELL_EXPECTED_RC" -eq 0 ] \
-  && [ "$SHELL_RESOLVED" = "$SHELL_EXPECTED" ] \
-  && [ -f "$SHELL_STATE" ] \
-  && [ "$SHELL_REVISION_RC" -eq 0 ] && [ "$SHELL_REVISION" = 2 ]; then
-  check "SessionStart native path survives shell-special project TDD mutation" PASS
+if [ "$SHELL_COPY_RC" -eq 0 ] && [ "$SHELL_START_RC" -eq 0 ] && [ "$SHELL_RESUME_RC" -eq 0 ] \
+  && [ "$SHELL_LIFECYCLE_RC" -eq 0 ] && [ "$SHELL_LIFECYCLE" = ok:1 ] \
+  && [ -f "$SHELL_STATE" ]; then
+  check "Windows/MSYS shell-special plugin and project survive full TDD state lifecycle" PASS
 else
-  printf '    diagnostic start=%s resolve=%s log=%s expected=%s revision_rc=%s revision=%s resolved=%q expected_path=%q state=%q\n' \
-    "$SHELL_START_RC" "$SHELL_RESOLVE_RC" "$SHELL_LOG_RC" "$SHELL_EXPECTED_RC" \
-    "$SHELL_REVISION_RC" "$SHELL_REVISION" "$SHELL_RESOLVED" "$SHELL_EXPECTED" "$SHELL_STATE" >&2
+  printf '    diagnostic copy=%s start=%s resume=%s lifecycle=%s output=%q plugin=%q project=%q state=%q\n' \
+    "$SHELL_COPY_RC" "$SHELL_START_RC" "$SHELL_RESUME_RC" "$SHELL_LIFECYCLE_RC" "$SHELL_LIFECYCLE" \
+    "$SHELL_PLUGIN" "$SHELL_PROJECT" "$SHELL_STATE" >&2
   if [ -s "$TMP/shell-project-start.err" ]; then
     sed 's/^/    SessionStart stderr: /' "$TMP/shell-project-start.err" >&2
   fi
-  if [ -s "$TMP/shell-project-log.err" ]; then
-    sed 's/^/    zensu-log stderr: /' "$TMP/shell-project-log.err" >&2
+  if [ -s "$TMP/shell-project-lifecycle.err" ]; then
+    sed 's/^/    TDD lifecycle stderr: /' "$TMP/shell-project-lifecycle.err" >&2
   fi
-  check "SessionStart native path survives shell-special project TDD mutation" FAIL
+  if [ -s "$TMP/shell-project-resume.err" ]; then
+    sed 's/^/    Autopilot resume stderr: /' "$TMP/shell-project-resume.err" >&2
+  fi
+  check "Windows/MSYS shell-special plugin and project survive full TDD state lifecycle" FAIL
+fi
+
+# The shell-to-native mapper is itself a trust boundary, not merely a path
+# formatter. Exercise foreign roots, lexical traversal, and each incomplete
+# immutable-binding shape directly under the same special-path session.
+SHELL_NATIVE_GUARDS="$(CLAUDE_PLUGIN_ROOT="$SHELL_PLUGIN" CLAUDE_PLUGIN_DATA="$SHELL_PLUGIN_DATA" \
+  CLAUDE_CODE_SESSION_ID="$SHELL_SID" EXPECTED_PROJECT="$SHELL_PROJECT" \
+  FOREIGN_PROJECT="$SHELL_FOREIGN_PROJECT" bash -c '
+  set -eu
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+  zensu_bind_model_session
+  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
+  shell_root="$(zensu_resolve_project_dir)"
+  state="$(tdd_state_file "$ZENSU_SESSION_KEY")"
+  if _tdd_native_project_path "$FOREIGN_PROJECT" >/dev/null 2>&1; then exit 31; fi
+  if _tdd_native_project_path "$shell_root/../$(basename "$FOREIGN_PROJECT")" >/dev/null 2>&1; then exit 32; fi
+  saved_root="$ZENSU_PROJECT_ROOT"
+  saved_key="$ZENSU_SESSION_KEY"
+  saved_context="$ZENSU_SESSION_CONTEXT"
+  unset ZENSU_PROJECT_ROOT
+  if _tdd_native_project_path "$state" >/dev/null 2>&1; then exit 33; fi
+  ZENSU_PROJECT_ROOT="$saved_root"; export ZENSU_PROJECT_ROOT
+  unset ZENSU_SESSION_KEY
+  if _tdd_native_project_path "$state" >/dev/null 2>&1; then exit 34; fi
+  ZENSU_SESSION_KEY="$saved_key"; export ZENSU_SESSION_KEY
+  unset ZENSU_SESSION_CONTEXT
+  if _tdd_native_project_path "$state" >/dev/null 2>&1; then exit 35; fi
+  ZENSU_SESSION_CONTEXT="$saved_context"; export ZENSU_SESSION_CONTEXT
+  [ -n "$(_tdd_native_project_path "$state")" ]
+  printf native-guards-ok
+' 2>"$TMP/shell-native-guards.err")"
+SHELL_NATIVE_GUARDS_RC=$?
+if [ "$SHELL_NATIVE_GUARDS_RC" -eq 0 ] && [ "$SHELL_NATIVE_GUARDS" = native-guards-ok ]; then
+  check "TDD native project mapper rejects foreign, traversal, and partial bindings" PASS
+else
+  sed 's/^/    native mapper stderr: /' "$TMP/shell-native-guards.err" >&2
+  check "TDD native project mapper rejects foreign, traversal, and partial bindings" FAIL
 fi
 
 if CLAUDE_SESSION_ID='transcript-shaped' ZENSU_TRANSCRIPT_PATH="$TMP/fake.jsonl" ZENSU_SESSION_KEY='' bash -c "source '$SESSION'; zensu_bind_model_session" >"$TMP/missing.out" 2>/dev/null; then

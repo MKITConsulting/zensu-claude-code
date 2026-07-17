@@ -144,7 +144,8 @@ TDD_STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 # claim transaction.
 _tdd_state_storage_safe "$TDD_STATE_FILE" || exit 0
 _tdd_path_safe "$TDD_STATE_FILE" regular "$(dirname "$TDD_STATE_FILE")" || exit 0
-PREFLIGHT_CONTEXT="$(STATE_FILE="$TDD_STATE_FILE" SID="$SESSION_ID" node -e '
+NATIVE_TDD_STATE_FILE="$(_tdd_native_project_path "$TDD_STATE_FILE")" || exit 0
+PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node -e '
   try {
     const fs=require("fs"),s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8"));
     const keys=["autopilotRunId","autopilotAttempt","autopilotReturnStage","chainId","chainOutcome"];

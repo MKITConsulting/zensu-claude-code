@@ -98,13 +98,29 @@ case "$SOURCE" in
     # Equal-match SessionStart hooks run concurrently. Prefer a valid existing
     # record on retries; while the first record is not yet present, use Claude's
     # stable project variable. The mutable payload cwd is never authoritative.
-    BINDER="${CLAUDE_PLUGIN_ROOT}/hooks/lib/claude-hook-session-v1.js"
-    PROJECT_ROOT="$(printf '%s' "$INPUT" | BINDER="$BINDER" node -e '
+    NATIVE_PLUGIN_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PLUGIN_ROOT")" \
+      || exit 0
+    NATIVE_PLUGIN_DATA="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" \
+      || exit 0
+    NATIVE_PROJECT_ROOT=""
+    if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+      NATIVE_PROJECT_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PROJECT_DIR")" \
+        || exit 0
+    fi
+    PROJECT_ROOT="$(
+      cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+      printf '%s' "$INPUT" \
+        | CLAUDE_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" \
+          CLAUDE_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
+          CLAUDE_PROJECT_DIR="$NATIVE_PROJECT_ROOT" \
+          node -e '
       const fs = require("node:fs");
-      const binder = require(process.env.BINDER);
+      const binder = require("./claude-hook-session-v1.js");
       const payload = JSON.parse(fs.readFileSync(0, "utf8"));
       process.stdout.write(binder.resolveFreshHookProject(payload));
-    ' 2>/dev/null)" || exit 0
+      ' 2>/dev/null
+    )" || exit 0
+    unset NATIVE_PLUGIN_ROOT NATIVE_PLUGIN_DATA NATIVE_PROJECT_ROOT
     ;;
 esac
 [ -n "$PROJECT_ROOT" ] || exit 0

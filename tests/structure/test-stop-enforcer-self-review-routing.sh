@@ -45,7 +45,9 @@ start_session() {
   export CLAUDE_PROJECT_DIR="$project"
   export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data/$label"
   # shellcheck disable=SC1091
-  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session" "$plugin_root"
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session" "$plugin_root" \
+    || exit 1
+  [ -n "${ZENSU_SESSION_KEY:-}" ] && [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 1
   STARTED_SESSION_KEY="$ZENSU_SESSION_KEY"
   STARTED_PROJECT_ROOT="$ZENSU_PROJECT_ROOT"
 }

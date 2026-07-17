@@ -81,7 +81,9 @@ playwright_mcp_declared() {
   [ -f "$mcp_file" ] && [ -f "$plugin_file" ] && [ -f "$package_file" ] \
     && [ -f "$lock_file" ] && [ -x "$launcher" ] && [ -f "$proxy" ] \
     && command -v node >/dev/null 2>&1 || return 1
-  node -e '
+  (
+    cd -P -- "$probe_root" || return 1
+    node -e '
     const fs = require("fs");
     const mcp = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
     const plugin = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
@@ -105,7 +107,9 @@ playwright_mcp_declared() {
         !args.includes("--isolated") || args.includes("--caps=storage") ||
         JSON.stringify(proxy.ALLOWED_TOOLS) !== JSON.stringify(expectedTools) ||
         plugin.mcpServers !== "./.mcp.json") process.exit(1);
-  ' "$mcp_file" "$plugin_file" "$package_file" "$lock_file" "$proxy" >/dev/null 2>&1
+  ' ./.mcp.json ./.claude-plugin/plugin.json ./mcp-runtime/package.json \
+    ./mcp-runtime/package-lock.json ./scripts/playwright-mcp-proxy.js >/dev/null 2>&1
+  )
 }
 
 if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
@@ -131,6 +135,6 @@ if ! command -v node >/dev/null 2>&1; then
   exit 0
 fi
 
-node "$DIR/zensu-doctor-report.js" 2>/dev/null || \
+(cd -P -- "$DIR" && node ./zensu-doctor-report.js) 2>/dev/null || \
   printf '  %s  zensu-doctor: renderer could not run\n' '⚠️'
 exit 0

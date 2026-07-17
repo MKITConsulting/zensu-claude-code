@@ -76,6 +76,34 @@ rm "$MISSING"
 
 activate_session "$SID"
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
+
+# The path classifier is the trust boundary that separates production files
+# from the state/.zensu exemptions. Failures there must not collapse to the
+# implicit `other` class: prove this selectively by replacing only the Node
+# invocation that receives the classifier's FP+SD environment, while every
+# other hook-side Node invocation still delegates to the real runtime.
+bash "$LOG" --phase RED_WRITE --step classifier-canary --session "$SID" >/dev/null 2>&1
+CLASSIFIER_SHIM_DIR="$WORK/classifier-node-shim"
+mkdir -p "$CLASSIFIER_SHIM_DIR"
+REAL_NODE_BIN="$(command -v node)"
+cat > "$CLASSIFIER_SHIM_DIR/node" <<'SHIM'
+#!/bin/bash
+if [ "${FP+x}" = "x" ] && [ "${SD+x}" = "x" ]; then
+  exit 73
+fi
+exec "$REAL_NODE_BIN" "$@"
+SHIM
+chmod +x "$CLASSIFIER_SHIM_DIR/node"
+CLASSIFIER_FAILURE_OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Edit","session_id":"'"$SID"'","tool_input":{"file_path":"src/app.js"}}' | \
+  PATH="$CLASSIFIER_SHIM_DIR:$PATH" REAL_NODE_BIN="$REAL_NODE_BIN" bash "$GATE" 2>/dev/null)"
+if [ "$(gate_decision "$SID")" = "allow" ] \
+  && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q '"permissionDecision":"deny"' \
+  && printf '%s' "$CLASSIFIER_FAILURE_OUT" | grep -q 'existing session-state file is invalid or unreadable'; then
+  check "path-classifier execution failure blocks an otherwise allowed edit" PASS
+else
+  check "path-classifier execution failure blocks an otherwise allowed edit" FAIL
+fi
+
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null 2>&1
 bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
 STATE_FILE="$(tdd_state_file "$SID")"

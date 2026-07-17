@@ -67,9 +67,14 @@ emit_deny() {
 
 # Session Control export rebinding is a trust-boundary violation, not a
 # configurable source-write convention. Check it before config/escape hatches.
-CONTROL_REASON="$(MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
-  BSWG_MODE=control PAYLOAD="$INPUT" \
-  node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+if ! CONTROL_REASON="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
+    BSWG_MODE=control PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+)"; then
+  emit_deny "Zensu could not validate protected Session Control bindings; retry in a fresh session."
+  exit 0
+fi
 if [ -n "$CONTROL_REASON" ]; then
   emit_deny "$CONTROL_REASON"
   exit 0
@@ -99,8 +104,11 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-REASON="$(BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
-  node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+REASON="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
+    node ./bash-source-write-parse.js 2>/dev/null
+)"
 case "$REASON" in
   __bypass__*)
     for gate in $(printf '%s\n' "$REASON" | awk -F'\t' '$1=="__bypass__"{print $2}'); do

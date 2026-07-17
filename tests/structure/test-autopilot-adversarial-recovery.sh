@@ -176,6 +176,20 @@ seed_exhausted_review() {
 
 check "X1 durable state libraries exist" PASS
 
+if grep -qF "path_indexes=(0 1 2 3 6)" "$STATE_LIB" \
+  && grep -qF "MSYS2_ARG_CONV_EXCL='*' node -" "$STATE_LIB" \
+  && grep -qF '_tdd_native_project_path "$input"' "$STATE_LIB" \
+  && grep -qF '_autopilot_native_project_root "$input"' "$STATE_LIB" \
+  && grep -qF 'root="$(cd -P -- "$input" 2>/dev/null && pwd -P)"' "$STATE_LIB" \
+  && grep -qF '_autopilot_msys_env_exclusions' "$STATE_LIB" \
+  && ! grep -qF 'PAYLOAD_FILE="$payload_file"' "$STATE_LIB" \
+  && ! grep -qF 'TARGET_FILE="$target" node -e' "$STATE_LIB" \
+  && ! grep -qF 'STATE_FILE="$state_file" SID=' "$STATE_LIB"; then
+  check "X1a native Node filesystem boundaries are explicit and mode-complete" PASS
+else
+  check "X1a native Node filesystem boundaries are explicit and mode-complete" FAIL
+fi
+
 # A bound Inner generation is proof that an outer run exists. Removing only
 # the project-local active pointer must never turn that proof into "no run",
 # including after the Inner terminus was durably committed first.
@@ -649,8 +663,9 @@ P16="$ROOT/nonretry-inner-failure"
 S16=adversarial_nonretry_inner
 mkdir -p "$P16/.zensu/state"
 prepare_session "$P16" "$S16" S16 || exit 1
+P16_CANON="$(_autopilot_project_root "$P16")" || exit 1
 tdd_adopt_pending_review() { return 1; }
-if _autopilot_adopt_pending_review_critical "$P16" "$S16" true 0 "$$" >/dev/null 2>&1; then
+if _autopilot_adopt_pending_review_critical "$P16_CANON" "$S16" true 0 "$$" >/dev/null 2>&1; then
   INNER_RC16=0
 else
   INNER_RC16=$?
@@ -670,6 +685,96 @@ if [ "$INNER_RC16" -eq 7 ] && [ "$PUBLIC_RC16" -eq 1 ] \
   check "X16 permanent Inner adoption failure preserves public rc=1 without transaction retries" PASS
 else
   check "X16 Inner failure mapping (inner=$INNER_RC16 public=$PUBLIC_RC16 calls=$ADOPT_CALLS16)" FAIL
+fi
+# X16 intentionally replaces the public lock wrapper to count retries. Restore
+# the production implementation before the native-path integration fixture.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
+# Git Bash skips or misapplies its heuristic path conversion for some quoted
+# values (notably apostrophes). Exercise every Autopilot worker path schema plus
+# direct payload and Inner-state Node boundaries under one immutable binding.
+P17="$ROOT/native path O'Brien project"
+SOURCE_DIR17="$ROOT/external review O'Brien source"
+FOREIGN17="$ROOT/foreign project O'Brien"
+R17=adversarial_native_path_run
+RAW17=adversarial_native_path_session
+C17=adversarial-native-path-chain
+HEAD17=1717171717171717171717171717171717171717
+PLAN17=1717171717171717171717171717171717171717171717171717171717171717
+mkdir -p "$P17" "$SOURCE_DIR17" "$FOREIGN17"
+prepare_session "$P17" "$RAW17" S17 || exit 1
+SOURCE17="$SOURCE_DIR17/review payload with spaces.json"
+printf '%s\n' \
+  "{\"comments\":[],\"body\":\"special-path review\",\"event\":\"COMMENT\",\"commit_id\":\"$HEAD17\"}" \
+  > "$SOURCE17"
+NATIVE17_OK=true
+SHELL_ROOT17="$(zensu_resolve_project_dir)" || NATIVE17_OK=false
+NATIVE_DESC17="${ZENSU_PROJECT_ROOT%/}/.zensu/state"
+FOREIGN_NATIVE17="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$FOREIGN17")" \
+  || NATIVE17_OK=false
+[ "$(_autopilot_native_project_path "$NATIVE_DESC17" 2>/dev/null)" = "$NATIVE_DESC17" ] \
+  || NATIVE17_OK=false
+if _autopilot_native_project_path "$FOREIGN_NATIVE17" >/dev/null 2>&1; then
+  NATIVE17_OK=false
+fi
+if _autopilot_native_project_path \
+    "$SHELL_ROOT17/../$(basename "$FOREIGN17")/.zensu/state" >/dev/null 2>&1; then
+  NATIVE17_OK=false
+fi
+if autopilot_begin_run adversarial_foreign_path_run "$S17" "$FOREIGN17" \
+    >/dev/null 2>&1 || [ -e "$FOREIGN17/.zensu" ]; then
+  NATIVE17_OK=false
+fi
+autopilot_begin_run "$R17" "$S17" "$P17" >/dev/null || NATIVE17_OK=false
+[ "$(autopilot_increment_stop_budget "$R17" PLANNING "$P17" "$S17" 2>/dev/null)" = 1 ] \
+  || NATIVE17_OK=false
+printf '%s' "$(autopilot_increment_stop_budget_capped \
+  "$R17" PLANNING "$P17" "$S17" 5 SPECIAL_PATH_CAP 2>/dev/null)" \
+  | grep -qF '"count":2,"blocked":false' || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-plan PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$PLAN17\"}" "$P17" "$S17" >/dev/null \
+  || NATIVE17_OK=false
+begin_bound "$P17" "$R17" "$S17" 1 "$C17" || NATIVE17_OK=false
+# Exact replay enters the direct Inner STATE_FILE verifier.
+begin_bound "$P17" "$R17" "$S17" 1 "$C17" || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-tdd-done TDD_CHAIN_DONE \
+  "{\"attempt\":1,\"chainId\":\"$C17\",\"sessionId\":\"$S17\",\"outcome\":\"pass\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-gates GATES_PASSED \
+  "{\"headSha\":\"$HEAD17\"}" "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-converge CONVERGENCE_PASSED '{}' \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+PR_KEY17="pr:$R17"
+autopilot_apply_event "$R17" native-path-pr-request PR_OPEN_REQUESTED \
+  "{\"operationKey\":\"$PR_KEY17\"}" "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-pr-open PR_OPENED \
+  "{\"operationKey\":\"$PR_KEY17\",\"pr\":{\"number\":17,\"url\":\"https://github.com/acme/repo/pull/17\",\"headSha\":\"$HEAD17\"}}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+REVIEW_KEY17="$(autopilot_team_review_operation_key "$R17" "$HEAD17")" \
+  || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-review-request TEAM_REVIEW_REQUESTED \
+  "{\"operationKey\":\"$REVIEW_KEY17\",\"provider\":\"github\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+SNAPSHOT17="$(autopilot_store_team_review_payload "$R17" "$REVIEW_KEY17" "$HEAD17" \
+  "$SOURCE17" github "$P17" 2>/dev/null)" || NATIVE17_OK=false
+DIGEST17="$(_autopilot_team_review_payload_inspect \
+  "$SNAPSHOT17" "$HEAD17" true canonical 2>/dev/null)" || NATIVE17_OK=false
+OP_DIGEST17="$(printf '%s' "$REVIEW_KEY17" \
+  | node -e 'const c=require("crypto"),f=require("fs");process.stdout.write(c.createHash("sha256").update(f.readFileSync(0)).digest("hex"));')"
+MARKER17="<!-- zensu-review:v1:${OP_DIGEST17}:${DIGEST17}:${HEAD17}:1:part=1/1 -->"
+autopilot_apply_event "$R17" native-path-review-published TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY17\",\"marker\":\"$MARKER17\",\"headSha\":\"$HEAD17\",\"provider\":\"github\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+FINAL17="$ROOT/native-path-final.json"
+autopilot_read_run "$R17" "$P17" > "$FINAL17" 2>/dev/null || NATIVE17_OK=false
+if [ "$NATIVE17_OK" = true ] \
+  && [ -n "$SNAPSHOT17" ] && cmp -s "$SOURCE17" "$SNAPSHOT17" \
+  && field_ok "$FINAL17" 'value.stage === "FIX_FINDINGS" && value.evidence.review.provider === "github"' \
+  && [ -f "$(tdd_state_file "$S17")" ]; then
+  check "X17 immutable native paths survive spaces and apostrophes across the full worker flow" PASS
+else
+  check "X17 native special-path flow remains coherent (ready=$NATIVE17_OK snapshot=${SNAPSHOT17:-missing})" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-adversarial-recovery: $PASS PASS / $FAIL FAIL"

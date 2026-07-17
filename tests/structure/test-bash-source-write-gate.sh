@@ -230,6 +230,27 @@ run "W78 printf -v host session-id rebind" "printf -v CLAUDE_CODE_SESSION_ID oth
 run "W79 host session-id rebind ignores bashWriteGate:false" \
   "CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
 
+# The mandatory control parser is a trust boundary. A selective runtime failure
+# must deny before config and escape hatches instead of falling through.
+REAL_NODE="$(command -v node)"
+CONTROL_FAIL_BIN="$WORKROOT/control-fail-bin"
+mkdir -p "$CONTROL_FAIL_BIN"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'if [ "${BSWG_MODE:-}" = "control" ]; then exit 23; fi' \
+  'exec "${ZENSU_TEST_REAL_NODE:?}" "$@"' \
+  > "$CONTROL_FAIL_BIN/node"
+chmod +x "$CONTROL_FAIL_BIN/node"
+OUT_CONTROL_FAIL="$(payload 'git status' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+  PATH="$CONTROL_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$REAL_NODE" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
+  ZENSU_CONFIG="$CFG_OFF" ZENSU_BASH_WRITE_GATE=off \
+  bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT_CONTROL_FAIL" = "DENY" ] \
+  && check "W80 control-parser runtime failure denies before config and escapes" PASS \
+  || check "W80 control-parser runtime failure (got '$OUT_CONTROL_FAIL')" FAIL
+
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
             ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"

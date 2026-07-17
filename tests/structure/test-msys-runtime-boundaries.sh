@@ -10,6 +10,9 @@ STOP_ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
 PRE_EDIT="$ROOT/hooks/pre-edit-tdd-reminder.sh"
 BANNER="$ROOT/hooks/session-start-banner.sh"
 AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
+SESSION_BINDING="$ROOT/hooks/lib/zensu-session.sh"
+AUTOPILOT_RESUME="$ROOT/hooks/session-start-autopilot-resume.sh"
+CONFIG_LIB="$ROOT/hooks/lib/zensu-config.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
 PR_SKILL="$ROOT/skills/pr-team-review/SKILL.md"
 PASS=0
@@ -292,6 +295,70 @@ if (
 else
   check "principal classifier resolves from native process cwd without path transport" FAIL
 fi
+
+if [ "$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")" -eq 2 ] \
+    && ! grep -qF 'node "$binder"' "$SESSION_BINDING" \
+    && [ "$(grep -cF 'node ./session-control-core-v1.js session-key' "$SESSION_BINDING")" -eq 2 ] \
+    && grep -qF 'require("./session-control-core-v1.js")' "$SESSION_BINDING" \
+    && ! grep -qF 'CLAUDE_PLUGIN_ROOT="$ZENSU_CLAUDE_PLUGIN_ROOT"' "$SESSION_BINDING" \
+    && grep -qF '_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_ROOT")"' "$PHASE" \
+    && grep -qF '_ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \
+    && ! grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:-${CLAUDE_PLUGIN_ROOT}}' "$PHASE" \
+    && ! grep -qF 'CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \
+    && grep -qF '_tdd_native_project_path()' "$PHASE" \
+    && grep -qF 'native_state_file="$(_tdd_native_project_path "$state_file")"' "$PHASE" \
+    && grep -qF 'require("./claude-hook-session-v1.js")' "$AUTOPILOT_RESUME" \
+    && ! grep -qF 'require(process.env.BINDER)' "$AUTOPILOT_RESUME"; then
+  check "session helpers keep Bash paths separate from authenticated native Node paths" PASS
+else
+  check "session helpers keep Bash paths separate from authenticated native Node paths" FAIL
+fi
+
+if (
+  export CLAUDE_PLUGIN_ROOT="$ROOT"
+  export ZENSU_CLAUDE_PLUGIN_ROOT="$WRONG_ROOT"
+  # shellcheck disable=SC1090
+  source "$PHASE"
+  expected_native="$(bash "$HOST_PATH" "$ROOT")" || exit 1
+  [ "$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" = "$expected_native" ] || exit 1
+  [ "$_ZENSU_TDD_CONTROL_CORE" = "$expected_native/hooks/lib/session-control-core-v1.js" ] || exit 1
+); then
+  check "TDD native code-load authority ignores an ambient ZENSU plugin root" PASS
+else
+  check "TDD native code-load authority ignores an ambient ZENSU plugin root" FAIL
+fi
+
+CONFIG_FIXTURE="$(mktemp -d -t "zensu config apostrophe'XXXXXX")"
+mkdir -p "$CONFIG_FIXTURE/home/.zensu" "$CONFIG_FIXTURE/project/.zensu"
+printf '%s\n' '{"hooks":{"combinedSummary":false},"globalOnly":true}' \
+  > "$CONFIG_FIXTURE/home/.zensu/config.json"
+printf '%s\n' '{"hooks":{"combinedSummary":true},"projectOnly":true}' \
+  > "$CONFIG_FIXTURE/project/.zensu/config.json"
+printf '%s\n' '{"overrideOnly":true}' > "$CONFIG_FIXTURE/override config.json"
+if (
+  export HOME="$CONFIG_FIXTURE/home"
+  export CLAUDE_PROJECT_DIR="$CONFIG_FIXTURE/project"
+  unset ZENSU_CONFIG
+  # shellcheck disable=SC1090
+  source "$CONFIG_LIB"
+  merged="$(_zensu_config_json)" || exit 1
+  MERGED="$merged" node -e '
+    const value = JSON.parse(process.env.MERGED);
+    process.exit(value.globalOnly === true && value.projectOnly === true
+      && value.hooks?.combinedSummary === true ? 0 : 1);
+  ' || exit 1
+  export ZENSU_CONFIG="$CONFIG_FIXTURE/override config.json"
+  overridden="$(_zensu_config_json)" || exit 1
+  OVERRIDDEN="$overridden" node -e '
+    const value = JSON.parse(process.env.OVERRIDDEN);
+    process.exit(value.overrideOnly === true && Object.keys(value).length === 1 ? 0 : 1);
+  '
+); then
+  check "config global, project, and override paths survive shell-special MSYS transport" PASS
+else
+  check "config global, project, and override paths survive shell-special MSYS transport" FAIL
+fi
+rm -rf -- "$CONFIG_FIXTURE"
 
 printf '%s\n' '----' "test-msys-runtime-boundaries: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

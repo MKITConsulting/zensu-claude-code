@@ -310,6 +310,31 @@ FAIL_CLOSED_STDERR="$(cat "$TMP/fail-closed.stderr")"
 WRONG_ROOT="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-root decision)"
 [ "$WRONG_ROOT" = deny ] && check "PreToolUse plugin-root mismatch denies before capability evaluation" PASS || check "PreToolUse plugin-root mismatch denies before capability evaluation" FAIL
 
+# Root mismatches are rejected before policy evaluation, but the hook must
+# still consume a payload larger than the pipe buffer. Otherwise an upstream
+# producer can receive EPIPE while Claude is handling the blocking exit.
+DRAIN_STATUS_FILE="$TMP/drain-pipe-status"
+DRAIN_PRODUCER_ERR="$TMP/drain-producer.stderr"
+DRAIN_HOOK_ERR="$TMP/drain-hook.stderr"
+(
+  set +e
+  set -o pipefail
+  node -e 'process.stdout.write("x".repeat(2 * 1024 * 1024))' 2>"$DRAIN_PRODUCER_ERR" \
+    | CLAUDE_PLUGIN_ROOT="$OTHER" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+        bash "$GATE" >/dev/null 2>"$DRAIN_HOOK_ERR"
+  statuses=("${PIPESTATUS[@]}")
+  printf '%s %s\n' "${statuses[0]:-missing}" "${statuses[1]:-missing}" >"$DRAIN_STATUS_FILE"
+)
+read -r DRAIN_PRODUCER_STATUS DRAIN_HOOK_STATUS <"$DRAIN_STATUS_FILE"
+DRAIN_HOOK_MESSAGE="$(cat "$DRAIN_HOOK_ERR")"
+if [ "$DRAIN_PRODUCER_STATUS" = 0 ] && [ "$DRAIN_HOOK_STATUS" = 2 ] \
+  && [ ! -s "$DRAIN_PRODUCER_ERR" ] \
+  && [ "$DRAIN_HOOK_MESSAGE" = 'zensu: reviewer capability gate unavailable' ]; then
+  check "plugin-root mismatch drains a large payload without producer EPIPE" PASS
+else
+  check "plugin-root mismatch drains payload (producer=$DRAIN_PRODUCER_STATUS hook=$DRAIN_HOOK_STATUS)" FAIL
+fi
+
 WRONG_DATA="$(payload arbitrary-custom Read '{"file_path":"x"}' | GATE_TEST_MODE=wrong-data decision)"
 [ "$WRONG_DATA" = deny ] && check "unbound host plugin-data denies before capability evaluation" PASS || check "unbound host plugin-data denies before capability evaluation" FAIL
 

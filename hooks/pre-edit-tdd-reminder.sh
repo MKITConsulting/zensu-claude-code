@@ -112,11 +112,19 @@ if [ "$ACTIVE_STATE" != "true" ]; then
   exit 0
 fi
 
-# Path classification on the NORMALIZED form (dot-segments, duplicate slashes,
-# case folding and traversal collapse
-# to the same class) so the state deny below cannot be evaded by an alternate
-# spelling that the broader .zensu/ exemption would then allow.
-PATH_CLASS="$(FP="$FILE_PATH" SD="$(dirname "$STATE_FILE")" node -e '
+# Path classification on an explicitly native absolute spelling. Native Node
+# must never receive an MSYS project path through its quote-sensitive implicit
+# conversion. Relative Edit/Write paths are anchored to the immutable bound
+# project before conversion, so dot-segments, duplicate slashes, case folding,
+# and traversal aliases collapse to the same class.
+PROJECT_ROOT_SHELL="$(zensu_resolve_project_dir)" || deny_invalid_state
+case "$FILE_PATH" in
+  /*|[A-Za-z]:[\\/]*|\\\\*) FILE_PATH_SHELL="$FILE_PATH" ;;
+  *) FILE_PATH_SHELL="$PROJECT_ROOT_SHELL/$FILE_PATH" ;;
+esac
+NATIVE_FILE_PATH="$(_tdd_native_path "$FILE_PATH_SHELL")" || deny_invalid_state
+NATIVE_STATE_DIR="$(_tdd_native_project_path "$(dirname "$STATE_FILE")")" || deny_invalid_state
+if ! PATH_CLASS="$(FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e '
   const path = require("path");
   const fs = require("fs");
   const lownorm = p => path.posix.normalize(String(p).replace(/\\/g, "/")).toLowerCase();
@@ -125,14 +133,18 @@ PATH_CLASS="$(FP="$FILE_PATH" SD="$(dirname "$STATE_FILE")" node -e '
     try { return fs.realpathSync(p); }
     catch (_) { return path.join(realdir(path.dirname(p)), path.basename(p)); }
   };
-  const fpRaw = process.env.FP || "";
-  const f = lownorm(fpRaw);
-  const fAbs = lownorm(realfile(path.resolve(fpRaw)));
+  const fAbs = lownorm(realfile(path.resolve(process.env.FP || "")));
   const sAbs = lownorm(realdir(path.resolve(process.env.SD || ""))) + "/";
-  if (f.indexOf("/.zensu/state/") >= 0 || f.indexOf(".zensu/state/") === 0 || fAbs.indexOf(sAbs) === 0) { console.log("state"); }
-  else if (f.indexOf("/.zensu/") >= 0 || f.indexOf(".zensu/") === 0) { console.log("zensu"); }
+  if (fAbs.indexOf(sAbs) === 0) { console.log("state"); }
+  else if (fAbs.indexOf("/.zensu/") >= 0 || fAbs.endsWith("/.zensu")) { console.log("zensu"); }
   else { console.log("other"); }
-' 2>/dev/null)"
+' 2>/dev/null)"; then
+  deny_invalid_state
+fi
+case "$PATH_CLASS" in
+  state|zensu|other) ;;
+  *) deny_invalid_state ;;
+esac
 
 # Session-state hardening: while a session is active, Edit/Write on the
 # session-state files is denied in BOTH modes — flipping `vanilla`/`active`

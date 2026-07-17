@@ -1,5 +1,26 @@
 #!/bin/bash
 
+# Native Windows Node cannot reliably consume MSYS path spellings through the
+# runtime's quote-sensitive automatic environment conversion (notably when a
+# directory contains an apostrophe). Convert only path-valued Node inputs at
+# the boundary, while callers retain their original Bash paths for cleanup and
+# forge-CLI arguments.
+_zensu_vcs_native_node_path() {
+  local input="${1:-}" native
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  case "$input" in *$'\r'*|*$'\n'*) return 1 ;; esac
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|mingw*|MSYS*|CYGWIN*|MINGW*)
+      command -v cygpath >/dev/null 2>&1 || return 1
+      native="$(cygpath -am "$input" 2>/dev/null)" || return 1
+      case "$native" in ""|*$'\r'*|*$'\n'*) return 1 ;; esac
+      case "$native" in [A-Za-z]:/*|//?*/*) ;; *) return 1 ;; esac
+      printf '%s\n' "$native"
+      ;;
+    *) printf '%s\n' "$input" ;;
+  esac
+}
+
 _zensu_vcs_remote_url() {
   if [ -n "${ZENSU_VCS_REMOTE:-}" ]; then
     printf '%s' "$ZENSU_VCS_REMOTE"
@@ -734,7 +755,10 @@ _zensu_vcs_snapshot_review_payload() {
   local source_file="${1:-}" snapshot_file="${2:-}"
   command -v node >/dev/null 2>&1 || return 1
   [ -n "$source_file" ] && [ -n "$snapshot_file" ] || return 1
-  SOURCE_FILE="$source_file" SNAPSHOT_FILE="$snapshot_file" node -e '
+  local native_source_file native_snapshot_file
+  native_source_file="$(_zensu_vcs_native_node_path "$source_file")" || return 1
+  native_snapshot_file="$(_zensu_vcs_native_node_path "$snapshot_file")" || return 1
+  SOURCE_FILE="$native_source_file" SNAPSHOT_FILE="$native_snapshot_file" node -e '
     const fs=require("fs"),crypto=require("crypto"),max=8*1024*1024;
     const source=process.env.SOURCE_FILE,snapshot=process.env.SNAPSHOT_FILE;
     const privateMode=stat=>process.platform==="win32"||(stat.mode&0o777)===0o600;
@@ -773,7 +797,9 @@ _zensu_vcs_review_payload_meta() {
   [ -n "$operation_key" ] || return 1
   [ -z "$expected_raw_digest" ] || { [ "${#expected_raw_digest}" -eq 64 ] \
     && case "$expected_raw_digest" in *[!0-9a-f]*) false ;; *) true ;; esac; } || return 1
-  PROVIDER="$provider" PAYLOAD="$payload" HEAD_SHA="$head" OPERATION_KEY="$operation_key" \
+  local native_payload
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+  PROVIDER="$provider" PAYLOAD="$native_payload" HEAD_SHA="$head" OPERATION_KEY="$operation_key" \
     EXPECTED_RAW_DIGEST="$expected_raw_digest" node -e '
     var fs=require("fs"),crypto=require("crypto"),fd;
     function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
@@ -850,8 +876,12 @@ _zensu_vcs_review_inventory() {
   command -v node >/dev/null 2>&1 || return 1
   case "$provider" in github|gitlab) ;; *) return 1 ;; esac
   [ -z "$expected_manifest" ] || [ -f "$expected_manifest" ] || return 1
+  local native_expected_manifest=""
+  if [ -n "$expected_manifest" ]; then
+    native_expected_manifest="$(_zensu_vcs_native_node_path "$expected_manifest")" || return 1
+  fi
   PROVIDER="$provider" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" HEAD_SHA="$head" PART_COUNT="$part_count" \
-    EXPECTED_MANIFEST="$expected_manifest" PUBLISHER_ID="$publisher_id" \
+    EXPECTED_MANIFEST="$native_expected_manifest" PUBLISHER_ID="$publisher_id" \
     EXPECTED_MANIFEST_DIGEST="$expected_manifest_digest" node -e '
     var s="";process.stdin.on("data",function(c){s+=c;});process.stdin.on("end",function(){
       function fail(){process.exit(1);}
@@ -1136,8 +1166,13 @@ _zensu_vcs_review_gitlab_diff_plan() {
   if [ -n "$target" ]; then
     [ -n "$expected_payload_digest" ] && [ -n "$expected_payload_raw_digest" ] || return 1
   fi
-  PAYLOAD="$payload" DIFFREFS="$diffrefs" HEAD_SHA="$head" EXPECTED_PAYLOAD_DIGEST="$expected_payload_digest" \
-    EXPECTED_PAYLOAD_RAW_DIGEST="$expected_payload_raw_digest" PLAN_TARGET="$target" node -e '
+  local native_payload native_target=""
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+  if [ -n "$target" ]; then
+    native_target="$(_zensu_vcs_native_node_path "$target")" || return 1
+  fi
+  PAYLOAD="$native_payload" DIFFREFS="$diffrefs" HEAD_SHA="$head" EXPECTED_PAYLOAD_DIGEST="$expected_payload_digest" \
+    EXPECTED_PAYLOAD_RAW_DIGEST="$expected_payload_raw_digest" PLAN_TARGET="$native_target" node -e '
     var fs=require("fs"),crypto=require("crypto"),raw="",fd;
     process.stdin.on("data",function(c){raw+=c;});process.stdin.on("end",function(){
       function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
@@ -1261,8 +1296,14 @@ _zensu_vcs_review_gitlab_manifest() {
   if [ -n "$target" ]; then
     [ -n "$plan_digest" ] && [ -n "$payload_raw_digest" ] || return 1
   fi
-  PAYLOAD="$payload" PLAN="$plan" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" \
-    HEAD_SHA="$head" PART_COUNT="$part_count" MANIFEST_TARGET="$target" PLAN_DIGEST="$plan_digest" \
+  local native_payload native_plan native_target=""
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+  native_plan="$(_zensu_vcs_native_node_path "$plan")" || return 1
+  if [ -n "$target" ]; then
+    native_target="$(_zensu_vcs_native_node_path "$target")" || return 1
+  fi
+  PAYLOAD="$native_payload" PLAN="$native_plan" OP_DIGEST="$op_digest" PAYLOAD_DIGEST="$payload_digest" \
+    HEAD_SHA="$head" PART_COUNT="$part_count" MANIFEST_TARGET="$native_target" PLAN_DIGEST="$plan_digest" \
     PAYLOAD_RAW_DIGEST="$payload_raw_digest" node -e '
     var fs=require("fs"),crypto=require("crypto"),p,pl,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
     function privateMode(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;}
@@ -1364,7 +1405,9 @@ _zensu_vcs_review_gitlab_publisher_id() {
 _zensu_vcs_review_gitlab_call() {
   local repoid="${1:-}" id="${2:-}" manifest="${3:-}" manifest_digest="${4:-}" part="${5:-}"
   [ -f "$manifest" ] || return 1
-  MANIFEST="$manifest" MANIFEST_DIGEST="$manifest_digest" PART="$part" REPO_ID="$repoid" REVIEW_ID="$id" node -e '
+  local native_manifest
+  native_manifest="$(_zensu_vcs_native_node_path "$manifest")" || return 1
+  MANIFEST="$native_manifest" MANIFEST_DIGEST="$manifest_digest" PART="$part" REPO_ID="$repoid" REVIEW_ID="$id" node -e '
     var fs=require("fs"),crypto=require("crypto"),manifest,fd;function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
     function privateMode(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;}
     try{
@@ -1532,10 +1575,11 @@ _zensu_vcs_reconcile_review() (
       local existing_url; existing_url="$(printf '%s' "$inventory" | _zensu_vcs_json_field url)"; [ -z "$existing_url" ] || url="$existing_url"
     fi
   elif [ "$present" = "[]" ] && [ "$provider" = "github" ]; then
-    local rendered_review post_response post_url
+    local rendered_review post_response post_url native_payload
     before="$(_zensu_vcs_review_snapshot "$provider" "$repoid" "$id")" || return 1
     _zensu_vcs_review_assert_head "$before" "$head" || return 1
-    rendered_review="$(PAYLOAD="$payload" MARKER="$marker" HEAD_SHA="$head" \
+    native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
+    rendered_review="$(PAYLOAD="$native_payload" MARKER="$marker" HEAD_SHA="$head" \
       EXPECTED_RAW_DIGEST="$payload_snapshot_digest" node -e '
         var fs=require("fs"),crypto=require("crypto"),fd,j;
         function fail(){if(fd!==undefined){try{fs.closeSync(fd);}catch(_){}}process.exit(1);}
@@ -1644,6 +1688,8 @@ _zensu_vcs_post_review_gitlab() {
       diffrefs="$(printf '%s' "$diff_response" | _zensu_vcs_normalize_diff_refs gitlab)" || return 1
     fi
   fi
+  local native_payload
+  native_payload="$(_zensu_vcs_native_node_path "$payload")" || return 1
   local ZPLAN='
     var fs=require("fs"),crypto=require("crypto");
     var mode=process.env.ZENSU_PL_MODE||"count";
@@ -1688,11 +1734,11 @@ _zensu_vcs_post_review_gitlab() {
     process.stdout.write(toks.join(NUL)+NUL);
   '
   local n
-  n="$(ZENSU_PL_MODE=count ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
+  n="$(ZENSU_PL_MODE=count ZENSU_PL_PAYLOAD="$native_payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
   _zensu_vcs_is_num "$n" || return 1
   if ! _zensu_vcs_dry; then
     local needpos
-    needpos="$(ZENSU_PL_MODE=needpos ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
+    needpos="$(ZENSU_PL_MODE=needpos ZENSU_PL_PAYLOAD="$native_payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)"
     if [ "$needpos" = "1" ]; then
       local drb drh
       drb="$(printf '%s' "$diffrefs" | _zensu_vcs_json_field base_sha)"
@@ -1710,7 +1756,7 @@ _zensu_vcs_post_review_gitlab() {
   local i=0
   while [ "$i" -lt "$n" ]; do
     local all=() t
-    while IFS= read -r -d '' t; do all[${#all[@]}]="$t"; done < <(ZENSU_PL_MODE=emit ZENSU_PL_IDX="$i" ZENSU_PL_PAYLOAD="$payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)
+    while IFS= read -r -d '' t; do all[${#all[@]}]="$t"; done < <(ZENSU_PL_MODE=emit ZENSU_PL_IDX="$i" ZENSU_PL_PAYLOAD="$native_payload" ZENSU_PL_DIFFREFS="$diffrefs" ZENSU_PL_IID="$id" ZENSU_PL_REPO="$repoid" node -e "$ZPLAN" 2>/dev/null)
     [ "${#all[@]}" -ge 6 ] || return 1
     local mkr="${all[0]}"
     local argv=("${all[@]:1}")
@@ -1772,7 +1818,7 @@ _zensu_vcs_open_pr() {
   printf '%s' "$out" | _zensu_vcs_extract_url
 }
 
-export -f _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
+export -f _zensu_vcs_native_node_path _zensu_vcs_remote_url _zensu_vcs_split_url _zensu_vcs_classify_host _zensu_vcs_probeable_host _zensu_vcs_probe _zensu_vcs_marker _zensu_vcs_api_base _zensu_vcs_repo_id _zensu_vcs_cli_for _zensu_vcs_auth_state _zensu_vcs_detect _zensu_vcs_is_num _zensu_vcs_is_id _zensu_vcs_is_gh_repoid _zensu_vcs_is_gl_repoid _zensu_vcs_map_state _zensu_vcs_normalize_pr _zensu_vcs_normalize_threads _zensu_vcs_dry _zensu_vcs_pr_state _zensu_vcs_locate_pr _zensu_vcs_fetch_threads _zensu_vcs_resolve_thread _zensu_vcs_json_field _zensu_vcs_json_http_url_field _zensu_vcs_normalize_scout _zensu_vcs_normalize_diff_refs _zensu_vcs_scout_pr _zensu_vcs_fetch_pr_ref _zensu_vcs_diff_refs _zensu_vcs_snapshot_review_payload _zensu_vcs_review_payload_meta _zensu_vcs_review_marker _zensu_vcs_review_inventory _zensu_vcs_review_snapshot _zensu_vcs_review_fetch_inventory _zensu_vcs_review_assert_head _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call _zensu_vcs_review_result _zensu_vcs_reconcile_review _zensu_vcs_post_review _zensu_vcs_post_review_gitlab _zensu_vcs_extract_url _zensu_vcs_open_pr 2>/dev/null || true
 
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
   case "${1:-}" in

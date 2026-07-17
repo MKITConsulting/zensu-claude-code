@@ -68,7 +68,10 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-VERDICT="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/secret-scan-decide.js")"
+VERDICT="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  printf '%s' "$INPUT" | node ./secret-scan-decide.js
+)"
 NODE_RC=$?
 if [ "$NODE_RC" -ne 0 ]; then
   echo "zensu secret-scan: scanner error (rc=$NODE_RC), failing open" >&2

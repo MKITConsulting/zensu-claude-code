@@ -747,6 +747,7 @@ elif grep -qF 'review workspace root must not overlap plugin runtime or private 
     "$TMP/plugin-workspace.err"; then
   check "workspace below pluginRoot is rejected" PASS
 else
+  sed 's/^/    plugin workspace stderr: /' "$TMP/plugin-workspace.err" >&2
   check "workspace below pluginRoot is rejected with the expected boundary" FAIL
 fi
 

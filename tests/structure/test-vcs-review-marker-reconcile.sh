@@ -47,6 +47,23 @@ printf '%s' '{bad json' > "$WORK/bad.json"
 
 source "$LIB" >/dev/null 2>&1
 
+SPECIAL_ROOT="$WORK/review path's boundary"
+mkdir -p "$SPECIAL_ROOT"
+SPECIAL_PAYLOAD="$SPECIAL_ROOT/review payload's copy.json"
+cp "$WORK/a.json" "$SPECIAL_PAYLOAD"
+EXPECTED_NATIVE="$SPECIAL_PAYLOAD"
+case "${OSTYPE:-}" in
+  msys*|cygwin*|mingw*|MSYS*|CYGWIN*|MINGW*) EXPECTED_NATIVE="$(cygpath -am "$SPECIAL_PAYLOAD")" ;;
+esac
+eq "M0 review path converter is explicit and POSIX-stable" \
+  "$(_zensu_vcs_native_node_path "$SPECIAL_PAYLOAD")" "$EXPECTED_NATIVE"
+if _zensu_vcs_native_node_path "$WORK/bad
+path" >/dev/null 2>&1; then
+  check "M0a review path converter rejects line-delimited ambiguity" FAIL
+else
+  check "M0a review path converter rejects line-delimited ambiguity" PASS
+fi
+
 # Canonical payload hashing is independent of JSON key order and whitespace.
 MA="$(_zensu_vcs_review_payload_meta github "$WORK/a.json" abcdef0 'team-review:v1:run-7')"
 MB="$(_zensu_vcs_review_payload_meta github "$WORK/b.json" ABCDEF0 'team-review:v1:run-7')"
@@ -239,7 +256,7 @@ else
 fi
 rm -f "$PINNED_PAYLOAD" "$PINNED_PLAN" "$PINNED_MANIFEST"
 
-if bash -c 'for f in _zensu_vcs_reconcile_review _zensu_vcs_snapshot_review_payload _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call; do type "$f" >/dev/null 2>&1 || exit 1; done'; then
+if bash -c 'for f in _zensu_vcs_native_node_path _zensu_vcs_reconcile_review _zensu_vcs_snapshot_review_payload _zensu_vcs_review_present_parts _zensu_vcs_review_full_parts _zensu_vcs_review_has_part _zensu_vcs_review_validate_diffrefs _zensu_vcs_review_gitlab_diff_plan _zensu_vcs_review_gitlab_manifest _zensu_vcs_review_gitlab_publisher_id _zensu_vcs_review_gitlab_call; do type "$f" >/dev/null 2>&1 || exit 1; done'; then
   check "M20 exported reconcile function retains every transitive helper" PASS
 else
   check "M20 exported reconcile function retains every transitive helper" FAIL
@@ -410,13 +427,14 @@ chmod +x "$WORK/bin/gh"
 
 run_gh() {
   local payload="${1:-$WORK/a.json}"
-  mkdir -p "$WORK/state/tmp"
+  local run_tmpdir="${RUN_TMPDIR:-$WORK/state/tmp}"
+  mkdir -p "$run_tmpdir"
   FAKE_DIR="$WORK/state" FAKE_MUTATE_PAYLOAD="${FAKE_MUTATE_PAYLOAD:-0}" \
     FAKE_MUTATE_PRIVATE_PAYLOAD="${FAKE_MUTATE_PRIVATE_PAYLOAD:-0}" \
     ORIGINAL_PAYLOAD="${ORIGINAL_PAYLOAD:-$payload}" \
     FAKE_COMPOSITE_STATE="${FAKE_COMPOSITE_STATE:-0}" \
     FAKE_DRIFT_DURING_INVENTORY="${FAKE_DRIFT_DURING_INVENTORY:-0}" \
-    FAKE_DRIFT_AFTER_POST="${FAKE_DRIFT_AFTER_POST:-0}" TMPDIR="$WORK/state/tmp" PATH="$WORK/bin:$PATH" \
+    FAKE_DRIFT_AFTER_POST="${FAKE_DRIFT_AFTER_POST:-0}" TMPDIR="$run_tmpdir" PATH="$WORK/bin:$PATH" \
     bash "$LIB" --reconcile-review --provider github --repo-id acme/widget \
       --expected-head abcdef0 --operation-key 'team-review:v1:run-7' 42 "$payload" 2>/dev/null
 }
@@ -474,6 +492,15 @@ case "$(tail -n 1 "$WORK/state/calls")" in
   'api repos/acme/widget/pulls/42') check "G18 final OPEN/head snapshot is the last remote observation" PASS ;;
   *) check "G18 final OPEN/head snapshot is the last remote observation" FAIL ;;
 esac
+
+rm -f "$WORK/state/body" "$WORK/state/calls" "$WORK/state/post.json"
+SPECIAL_GH_RESULT="$(RUN_TMPDIR="$SPECIAL_ROOT/github temp's boundary" run_gh "$SPECIAL_PAYLOAD")"
+if [ "$(printf '%s' "$SPECIAL_GH_RESULT" | jfield status)" = posted ] \
+  && grep -qF 'Stable body' "$WORK/state/body"; then
+  check "G19 native Node handles payload, snapshot, and temp paths with spaces/apostrophes" PASS
+else
+  check "G19 native Node handles payload, snapshot, and temp paths with spaces/apostrophes" FAIL
+fi
 
 # GitLab uses one summary note plus one discussion per inline finding. A partial
 # exact set is completed, while duplicate/conflicting/malformed marker sets stop.
@@ -637,12 +664,13 @@ FAKE
 chmod +x "$WORK/bin/glab"
 run_gl() {
   local payload="${1:-$WORK/a.json}" operation_key="${2:-team-review:v1:run-7}"
-  mkdir -p "$WORK/glstate/tmp"
+  local run_tmpdir="${RUN_TMPDIR:-$WORK/glstate/tmp}"
+  mkdir -p "$run_tmpdir"
   FAKE_DIR="$WORK/glstate" FAKE_DUPLICATE="${FAKE_DUPLICATE:-0}" FAKE_MALFORMED="${FAKE_MALFORMED:-0}" \
     FAKE_DIFFS_MALFORMED="${FAKE_DIFFS_MALFORMED:-0}" FAKE_DIFFS_TRUNCATED="${FAKE_DIFFS_TRUNCATED:-0}" \
     FAKE_CONTEXT_DIFF="${FAKE_CONTEXT_DIFF:-0}" FAKE_AUTHOR_ID="${FAKE_AUTHOR_ID:-701}" \
     FAKE_MUTATE_MANIFEST="${FAKE_MUTATE_MANIFEST:-0}" \
-    FAKE_MUTATE_MANIFEST_BEFORE_POST="${FAKE_MUTATE_MANIFEST_BEFORE_POST:-0}" TMPDIR="$WORK/glstate/tmp" \
+    FAKE_MUTATE_MANIFEST_BEFORE_POST="${FAKE_MUTATE_MANIFEST_BEFORE_POST:-0}" TMPDIR="$run_tmpdir" \
     PATH="$WORK/bin:$PATH" bash "$LIB" --reconcile-review --provider gitlab --repo-id grp%2Fproj \
       --expected-head abcdef0 --operation-key "$operation_key" \
       --diff-refs-json '{"base_sha":"ba5e000","start_sha":"57a2700","head_sha":"abcdef0"}' 7 "$payload" 2>/dev/null
@@ -773,14 +801,24 @@ eq "L14e context anchor carries its new-side line" \
   "$(gl_record_field "$WORK/glstate/part2" position.new_line)" "11"
 
 rm -rf "$WORK/glstate"; mkdir -p "$WORK/glstate"
+SPECIAL_GL_RESULT="$(RUN_TMPDIR="$SPECIAL_ROOT/gitlab temp's boundary" \
+  run_gl "$SPECIAL_PAYLOAD" 'team-review:v1:special-paths')"
+if [ "$(printf '%s' "$SPECIAL_GL_RESULT" | jfield status)" = posted ] \
+  && [ "$(grep -c -- '--method POST' "$WORK/glstate/calls" || true)" = 3 ]; then
+  check "L14f native Node handles GitLab plan and manifest paths with spaces/apostrophes" PASS
+else
+  check "L14f native Node handles GitLab plan and manifest paths with spaces/apostrophes" FAIL
+fi
+
+rm -rf "$WORK/glstate"; mkdir -p "$WORK/glstate"
 LR_SUMMARY="$(FAKE_DIR="$WORK/glstate" PATH="$WORK/bin:$PATH" bash "$LIB" --reconcile-review \
   --provider gitlab --repo-id grp%2Fproj --expected-head abcdef0 --operation-key 'team-review:v1:summary' \
   --diff-refs-json '{"head_sha":"abcdef0"}' 7 "$WORK/summary.json" 2>/dev/null)"
-eq "L14f summary-only reconcile needs no positional diff refs" "$(printf '%s' "$LR_SUMMARY" | jfield status)" "posted"
+eq "L14g summary-only reconcile needs no positional diff refs" "$(printf '%s' "$LR_SUMMARY" | jfield status)" "posted"
 if grep -qF '/diffs' "$WORK/glstate/calls"; then
-  check "L14g summary-only reconcile avoids an unnecessary diff read" FAIL
+  check "L14h summary-only reconcile avoids an unnecessary diff read" FAIL
 else
-  check "L14g summary-only reconcile avoids an unnecessary diff read" PASS
+  check "L14h summary-only reconcile avoids an unnecessary diff read" PASS
 fi
 
 rm -rf "$WORK/glstate"; mkdir -p "$WORK/glstate"

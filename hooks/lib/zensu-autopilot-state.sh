@@ -10,6 +10,101 @@ set -u
 # shellcheck disable=SC1091
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
+# Render filesystem operands for native Node explicitly. When Session Control
+# has already established an immutable project binding, project descendants
+# are translated by preserving their suffix beneath that exact shell/native
+# root pair. Pre-session public helpers retain their historical behavior, but
+# still use cygpath explicitly instead of MSYS' quote-sensitive heuristics.
+_autopilot_native_path() {
+  local input="${1:-}" shell_root
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  case "$input" in
+    "$shell_root"|"$shell_root"/*) _tdd_native_project_path "$input" ;;
+    *) _tdd_native_path "$input" ;;
+  esac
+}
+
+# Project authority is stricter than generic file transport. Once a session is
+# bound, an explicit project root (and every derived state operand) must be the
+# bound root or one of its descendants; it may never fall back to a different
+# path merely because cygpath can render it for native Node.
+_autopilot_native_project_path() {
+  local input="${1:-}" shell_root native_root suffix
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # Reject traversal before selecting a namespace. The suffix mapper is
+  # intentionally lexical so it can handle not-yet-created state files; dot
+  # segments must therefore never reach either its shell or native branch.
+  case "/$input/" in */../*|*/./*) return 1 ;; esac
+  # Validate the private record before accepting either namespace. Public
+  # helpers normally pass the shell spelling returned by pwd -P; accepting the
+  # exact native spelling as well keeps internal callers namespace-stable.
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  native_root="${ZENSU_PROJECT_ROOT%/}"
+  case "$input" in
+    "$shell_root"|"$shell_root"/*) _tdd_native_project_path "$input" ;;
+    "$native_root") printf '%s\n' "$native_root" ;;
+    "$native_root"/*)
+      suffix="${input#"$native_root"/}"
+      [ -n "$suffix" ] || return 1
+      case "$suffix" in *\\*|*$'\r'*|*$'\n'*) return 1 ;; esac
+      printf '%s/%s\n' "$native_root" "$suffix"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+_autopilot_native_project_root() {
+  local input="${1:-}" shell_input shell_root
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  shell_input="$(cd -P -- "$input" 2>/dev/null && pwd -P)" || return 1
+  [ "$shell_input" = "$shell_root" ] || return 1
+  _tdd_native_project_path "$shell_root"
+}
+
+_autopilot_msys_env_exclusions() {
+  local additions="${1:-}" existing="${MSYS2_ENV_CONV_EXCL:-}"
+  [ "$#" -eq 1 ] && [ -n "$additions" ] || return 1
+  printf '%s%s%s\n' "$existing" "${existing:+;}" "$additions"
+}
+
 _autopilot_shell_path() {
   local value="${1:-}"
   [ "$#" -eq 1 ] && [ -n "$value" ] || return 2
@@ -23,8 +118,10 @@ _autopilot_shell_path() {
 }
 
 _autopilot_project_root() {
-  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root
-  ROOT_INPUT="$input" node -e '
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root native_input env_exclusions
+  native_input="$(_autopilot_native_project_root "$input")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions ROOT_INPUT)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" ROOT_INPUT="$native_input" node -e '
     const fs = require("fs");
     const path = require("path");
     const logicalRoot = path.resolve(process.env.ROOT_INPUT || ".");
@@ -127,10 +224,27 @@ _autopilot_locked_dispatch() {
 # All schema and transition decisions live in one worker so every caller uses
 # the same closed vocabulary and canonical payload digest.
 _autopilot_node() {
-  # Keep Bash-facing roots in the Git-Bash namespace, but let MSYS translate
-  # the worker arguments for native Node. Durable projectRoot identity and all
-  # filesystem operands then share Node's canonical Windows namespace.
-  node - "$@" <<'NODE'
+  # Every worker mode has a closed positional schema. Convert every filesystem
+  # operand before native Node starts, then disable MSYS argv rewriting so
+  # spaces, apostrophes, and path-list punctuation cannot influence transport.
+  local mode="${1:-}" native index
+  shift || return 3
+  local args=("$@") path_indexes=()
+  case "$mode" in
+    read-active) path_indexes=(0 1 2) ;;
+    read-run) path_indexes=(0 2) ;;
+    begin) path_indexes=(0 1 2 3 6) ;;
+    apply) path_indexes=(0 1 2 7) ;;
+    team-review-receipt-meta) path_indexes=(0) ;;
+    increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
+    *) return 3 ;;
+  esac
+  for index in "${path_indexes[@]}"; do
+    [ "$index" -lt "${#args[@]}" ] || return 3
+    native="$(_autopilot_native_project_path "${args[$index]}")" || return 2
+    args[$index]="$native"
+  done
+  MSYS2_ARG_CONV_EXCL='*' node - "$mode" "${args[@]}" <<'NODE'
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -1290,10 +1404,13 @@ _autopilot_team_review_payload_identity_critical() {
 # closes the leaf-swap window and rejects hard-linked files.
 _autopilot_team_review_payload_inspect() {
   local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}" digest_mode="${4:-raw}" provider="${5:-}"
+  local native_payload_file env_exclusions
   [ "$#" -ge 3 ] && [ "$#" -le 5 ] || return 3
   case "$private" in true|false) ;; *) return 3 ;; esac
   case "$digest_mode" in raw|canonical) [ -z "$provider" ] || return 3 ;; receipt) case "$provider" in github|gitlab) ;; *) return 3 ;; esac ;; *) return 3 ;; esac
-  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
+  native_payload_file="$(_autopilot_native_path "$payload_file")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions PAYLOAD_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" PAYLOAD_FILE="$native_payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
     PROVIDER="$provider" node -e '
     const fs = require("fs");
     const crypto = require("crypto");
@@ -1391,9 +1508,11 @@ _autopilot_team_review_payload_inspect() {
 # sibling pointing at the same private inode. Anything ambiguous stays
 # fail-closed and untouched.
 _autopilot_recover_team_review_payload_alias() {
-  local target="${1:-}"
+  local target="${1:-}" native_target env_exclusions
   [ "$#" -eq 1 ] && [ -n "$target" ] || return 3
-  TARGET_FILE="$target" node -e '
+  native_target="$(_autopilot_native_project_path "$target")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions TARGET_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" TARGET_FILE="$native_target" node -e '
     const fs = require("fs");
     const path = require("path");
     const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
@@ -1517,6 +1636,7 @@ autopilot_read_team_review_payload() {
 _autopilot_store_team_review_payload_critical() {
   local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5" provider="$6"
   local state_dir="$root/.zensu/state" target tmp rc source_digest target_digest
+  local native_source_file native_target native_tmp env_exclusions
   _autopilot_team_review_payload_identity_critical \
     "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
   target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
@@ -1541,7 +1661,16 @@ _autopilot_store_team_review_payload_critical() {
   tmp="$(mktemp "${target}.tmp.XXXXXXXX" 2>/dev/null)" || return 5
   CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$tmp" regular "$target" regular-or-absent \
     || { rm -f "$tmp"; return 2; }
-  SOURCE_FILE="$source_file" TARGET_FILE="$target" TEMP_FILE="$tmp" \
+  native_source_file="$(_autopilot_native_path "$source_file")" \
+    || { rm -f "$tmp"; return 2; }
+  native_target="$(_autopilot_native_project_path "$target")" \
+    || { rm -f "$tmp"; return 2; }
+  native_tmp="$(_autopilot_native_project_path "$tmp")" \
+    || { rm -f "$tmp"; return 2; }
+  env_exclusions="$(_autopilot_msys_env_exclusions 'SOURCE_FILE;TARGET_FILE;TEMP_FILE')" \
+    || { rm -f "$tmp"; return 2; }
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" \
+    SOURCE_FILE="$native_source_file" TARGET_FILE="$native_target" TEMP_FILE="$native_tmp" \
     EXPECTED_DIGEST="$source_digest" \
     node -e '
       const fs = require("fs");
@@ -1619,13 +1748,15 @@ _autopilot_store_team_review_payload_critical() {
 
 autopilot_store_team_review_payload() {
   local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" \
-    provider="${5:-}" root
+    provider="${5:-}" root native_source_file env_exclusions
   [ "$#" -eq 6 ] && _autopilot_identifier_ok "$run_id" || return 3
   case "$provider" in github|gitlab) ;; *) return 3 ;; esac
   root="$(_autopilot_project_root "${6:-}")" || return 2
   _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
     >/dev/null || return 3
-  SOURCE_FILE="$source_file" node -e '
+  native_source_file="$(_autopilot_native_path "$source_file")" || return 3
+  env_exclusions="$(_autopilot_msys_env_exclusions SOURCE_FILE)" || return 3
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" SOURCE_FILE="$native_source_file" node -e '
     const path = require("path");
     const source = process.env.SOURCE_FILE;
     const resolved = path.resolve(source || "");
@@ -1943,13 +2074,16 @@ _autopilot_increment_inner_budget_critical() {
   local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
   local return_stage="$6" cap="$7" block_code="$8" state_file="$9"
   local _budget_file="${10}" result_file="${11}"
-  local count blocked=false
+  local count blocked=false native_state_file env_exclusions
   _tdd_increment_stop_budget_critical "$state_file" "$session_id" "" \
     "$result_file" "$run_id" "$attempt" "$chain_id" "$return_stage" || return $?
   count="$(cat "$result_file" 2>/dev/null)" || return 1
   case "$count" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$count" -gt "$cap" ]; then
-    STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    native_state_file="$(_autopilot_native_project_path "$state_file")" || return 2
+    env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" || return 2
+    MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_state_file" \
+      SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
       CHAIN_ID="$chain_id" COUNT="$count" node -e '
         try {
           const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
@@ -2029,8 +2163,11 @@ autopilot_increment_inner_stop_budget_capped() {
 
 _autopilot_verify_inner_binding_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
-  local return_stage="$5" chain_id="$6"
-  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+  local return_stage="$5" chain_id="$6" native_state_file env_exclusions
+  native_state_file="$(_autopilot_native_project_path "$state_file")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_state_file" \
+    SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
       const fs=require("fs");
       let s;
@@ -2066,6 +2203,7 @@ _autopilot_begin_tdd_critical() {
   local root="$1" run_id="$2" event_id="$3" session_id="$4" vanilla="$5"
   local attempt="$6" return_stage="$7" chain_id="$8"
   local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  local native_run_tmp env_exclusions
   run_file="$state_dir/autopilot-run-${run_id}.json"
   active_file="$state_dir/autopilot-active.json"
   run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
@@ -2084,7 +2222,12 @@ _autopilot_begin_tdd_critical() {
     rm -f "$run_tmp"
     return "$rc"
   fi
-  if ! STATE_FILE="$run_tmp" RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
+  native_run_tmp="$(_autopilot_native_project_path "$run_tmp")" \
+    || { rm -f "$run_tmp"; return 2; }
+  env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" \
+    || { rm -f "$run_tmp"; return 2; }
+  if ! MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_run_tmp" \
+      RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
       RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
         try {
           const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));

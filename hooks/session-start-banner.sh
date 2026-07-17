@@ -37,7 +37,10 @@ esac
 
 VERSION="?"
 if command -v node >/dev/null 2>&1; then
-  V="$(node -e 'try{const p=require(process.argv[1]);process.stdout.write(p.version||"?")}catch(_){process.stdout.write("?")}' "${CLAUDE_PLUGIN_ROOT}/.claude-plugin/plugin.json" 2>/dev/null)"
+  V="$(
+    cd -P -- "$CLAUDE_PLUGIN_ROOT" || exit 1
+    node -e 'try{const p=require("./.claude-plugin/plugin.json");process.stdout.write(p.version||"?")}catch(_){process.stdout.write("?")}' 2>/dev/null
+  )"
   [ -n "$V" ] && VERSION="$V"
 fi
 

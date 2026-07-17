@@ -16,6 +16,17 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
+# Keep CLAUDE_PLUGIN_ROOT in the executing shell's namespace for Bash path
+# operations and rendered commands. Native Node code-load authority is derived
+# only from this canonically verified executing root, never from ambient
+# ZENSU_* bindings. Data paths are translated explicitly at each Node boundary.
+_ZENSU_TDD_HOST_PATH="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh"
+_ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_ROOT")" \
+  || { return 2 2>/dev/null || exit 2; }
+_ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
+[ -f "$_ZENSU_TDD_CONTROL_CORE" ] && [ ! -L "$_ZENSU_TDD_CONTROL_CORE" ] \
+  || { return 2 2>/dev/null || exit 2; }
+
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
 _tdd_winpid_from_ps() {
@@ -53,6 +64,25 @@ _tdd_is_msys_runtime() {
     msys*|cygwin*|mingw*|MSYS*|CYGWIN*|MINGW*) return 0 ;;
     *) return 1 ;;
   esac
+}
+
+# Convert one arbitrary path spelling for native Node without relying on
+# MSYS' quote-sensitive argv/environment heuristics. The existing safety and
+# immutable-binding checks remain authoritative; this function only transports
+# their already-selected path into the native host namespace.
+_tdd_native_path() {
+  local input="${1:-}" native
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  case "$input" in *$'\r'*|*$'\n'*) return 1 ;; esac
+  if _tdd_is_msys_runtime; then
+    command -v cygpath >/dev/null 2>&1 || return 1
+    native="$(cygpath -am "$input" 2>/dev/null)" || return 1
+    case "$native" in ""|*$'\r'*|*$'\n'*) return 1 ;; esac
+    case "$native" in [A-Za-z]:/*|//?*/*) ;; *) return 1 ;; esac
+    printf '%s\n' "$native"
+  else
+    printf '%s\n' "$input"
+  fi
 }
 
 _tdd_native_process_pid() {
@@ -133,6 +163,33 @@ _tdd_bound_project_root() {
   printf '%s\n' "$native_project_root"
 }
 
+# Translate an already-selected project descendant by preserving its exact
+# suffix beneath the immutable shell/native root pair. This is stronger than
+# asking MSYS (or a mutable mount table) to reinterpret the full path.
+_tdd_native_project_path() {
+  local shell_path="${1:-}" shell_root native_root suffix
+  [ "$#" -eq 1 ] && [ -n "$shell_path" ] || return 1
+  case "$shell_path" in *$'\r'*|*$'\n'*) return 1 ;; esac
+  # The suffix mapper is lexical so it can render not-yet-created state files.
+  # Dot segments would therefore survive the mapping and could escape the
+  # immutable native root; reject them before the namespace boundary.
+  case "/$shell_path/" in */../*|*/./*) return 1 ;; esac
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  native_root="${ZENSU_PROJECT_ROOT:-}"
+  [ -n "$native_root" ] || return 1
+  if [ "$shell_path" = "$shell_root" ]; then
+    printf '%s\n' "$native_root"
+    return 0
+  fi
+  case "$shell_path" in
+    "$shell_root"/*) suffix="${shell_path#"$shell_root"}" ;;
+    *) return 1 ;;
+  esac
+  [ -n "$suffix" ] || return 1
+  printf '%s%s\n' "${native_root%/}" "$suffix"
+}
+
 # Validate every path component below a trusted project/temp anchor without
 # following symlinks. The leaf contract is explicit so directories, FIFOs,
 # devices, sockets, and hard-linked files cannot masquerade as JSON state.
@@ -144,7 +201,8 @@ _tdd_bound_project_root() {
 # nearest existing, non-symlink ancestor becomes the entry point.
 _tdd_paths_safe() {
   [ "$#" -gt 0 ] && [ $(( $# % 2 )) -eq 0 ] || return 1
-  local path_args=("$@") index=0 target mode
+  local path_args=("$@") native_path_args=() index=0 target native_target mode
+  local native_project_root="" native_temp_root="" native_home_root=""
   while [ "$index" -lt "${#path_args[@]}" ]; do
     target="${path_args[$index]}"
     mode="${path_args[$((index + 1))]}"
@@ -159,9 +217,18 @@ _tdd_paths_safe() {
         ;;
       *) return 1 ;;
     esac
+    native_target="$(_tdd_native_path "$target")" || return 1
+    native_path_args+=("$native_target" "$mode")
     index=$((index + 2))
   done
-  PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}" TEMP_ROOT="${TMPDIR:-/tmp}" HOME_ROOT="${HOME:-}" node -e '
+  if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+    native_project_root="$(_tdd_native_path "$CLAUDE_PROJECT_DIR")" || return 1
+  fi
+  native_temp_root="$(_tdd_native_path "${TMPDIR:-/tmp}")" || return 1
+  if [ -n "${HOME:-}" ]; then
+    native_home_root="$(_tdd_native_path "$HOME")" || return 1
+  fi
+  PROJECT_ROOT="$native_project_root" TEMP_ROOT="$native_temp_root" HOME_ROOT="$native_home_root" node -e '
       const fs = require("fs");
       const path = require("path");
       const within = (base, candidate) => {
@@ -224,7 +291,7 @@ _tdd_paths_safe() {
         }
         if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
       }
-    ' "${path_args[@]}" >/dev/null 2>&1
+    ' "${native_path_args[@]}" >/dev/null 2>&1
 }
 
 _tdd_path_safe() {
@@ -255,11 +322,11 @@ _tdd_prepare_directory() {
 # directory. rename(2) has the replacement semantics state writes require and
 # rejects a directory leaf. Revalidate the leaf immediately before rename.
 _tdd_atomic_replace_regular() {
-  local source_file="${1:-}" target_file="${2:-}"
+  local source_file="${1:-}" target_file="${2:-}" native_source_file native_target_file
   _tdd_paths_safe "$source_file" regular "$target_file" regular-or-absent || return 1
   case "$(basename "$target_file")" in
     tdd-phase-scv1_*.json)
-      local session_key project_root expected_file
+      local session_key project_root native_project_root expected_file
       session_key="$(basename "$target_file")"
       session_key="${session_key#tdd-phase-}"
       session_key="${session_key%.json}"
@@ -268,8 +335,10 @@ _tdd_atomic_replace_regular() {
       project_root="$(zensu_resolve_project_dir)" || return 1
       expected_file="${project_root}/.zensu/state/tdd-phase-${session_key}.json"
       [ "$target_file" = "$expected_file" ] || return 1
-      CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-        PROJECT_ROOT="$project_root" SID="$session_key" SOURCE_FILE="$source_file" \
+      native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+      native_source_file="$(_tdd_native_project_path "$source_file")" || return 1
+      CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
+        PROJECT_ROOT="$native_project_root" SID="$session_key" SOURCE_FILE="$native_source_file" \
         node -e '
           const fs = require("node:fs");
           const core = require(process.env.CONTROL_CORE);
@@ -295,7 +364,9 @@ _tdd_atomic_replace_regular() {
       return $?
       ;;
   esac
-  SOURCE_FILE="$source_file" TARGET_FILE="$target_file" node -e '
+  native_source_file="$(_tdd_native_path "$source_file")" || return 1
+  native_target_file="$(_tdd_native_path "$target_file")" || return 1
+  SOURCE_FILE="$native_source_file" TARGET_FILE="$native_target_file" node -e '
     const fs = require("fs");
     const source = process.env.SOURCE_FILE;
     const target = process.env.TARGET_FILE;
@@ -378,7 +449,7 @@ _tdd_write_phase_critical() {
   local reason="$5"
   local ts="$6"
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" STEP="$step_id" PHASE="$phase" REASON="$reason" TS="$ts" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" STEP="$step_id" PHASE="$phase" REASON="$reason" TS="$ts" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       core.mutateWorkflowState({
@@ -458,14 +529,17 @@ _tdd_locked_run() {
   # churn without a filesystem control channel. Bash 3.2 keeps the portable
   # capability fallback below; on POSIX its direct-child parent is stable.
   if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
-    local core_path lock_directory coproc_name keeper_read_fd keeper_write_fd
+    local core_path lock_directory native_lock_directory native_state_file
+    local coproc_name keeper_read_fd keeper_write_fd
     local keeper_pid keeper_status release_status callback_rc keeper_rc
-    core_path="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
+    core_path="$_ZENSU_TDD_CONTROL_CORE"
     lock_directory="$(dirname "$state_file")"
+    native_lock_directory="$(_tdd_native_path "$lock_directory")" || return 1
+    native_state_file="$(_tdd_native_path "$state_file")" || return 1
     _ZENSU_TDD_COPROC_SEQ=$(( ${_ZENSU_TDD_COPROC_SEQ:-0} + 1 ))
     coproc_name="ZENSU_TDD_LOCK_${_ZENSU_TDD_COPROC_SEQ}"
 
-    if ! eval "coproc $coproc_name { _tdd_core_lock_keeper \"\$core_path\" \"\$lock_directory\" \"\$state_file\"; }"; then
+    if ! eval "coproc $coproc_name { _tdd_core_lock_keeper \"\$core_path\" \"\$native_lock_directory\" \"\$native_state_file\"; }"; then
       echo "[zensu-tdd-phase] lock keeper launch failed for $state_file" >&2
       return 1
     fi
@@ -513,7 +587,8 @@ _tdd_locked_run() {
     return "$callback_rc"
   fi
 
-  local lock_directory token_file token acquire_rc release_rc
+  local lock_directory token_file native_lock_directory native_state_file native_token_file
+  local token acquire_rc release_rc
   lock_directory="$(dirname "$state_file")"
   token_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-token.XXXXXX" 2>/dev/null)" || {
     echo "[zensu-tdd-phase] lock token allocation failed for $state_file" >&2
@@ -524,6 +599,18 @@ _tdd_locked_run() {
     return 1
   }
   _tdd_path_safe "$token_file" regular || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+  native_lock_directory="$(_tdd_native_path "$lock_directory")" || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+  native_state_file="$(_tdd_native_path "$state_file")" || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+  native_token_file="$(_tdd_native_path "$token_file")" || {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
   }
@@ -594,8 +681,8 @@ _tdd_locked_run() {
         }
         process.exit(3);
       }
-    ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-      "$lock_directory" "$state_file" "$token_file" >/dev/null; then
+    ' -- "$_ZENSU_TDD_CONTROL_CORE" \
+      "$native_lock_directory" "$native_state_file" "$native_token_file" >/dev/null; then
     acquire_rc=0
   else
     acquire_rc=$?
@@ -616,8 +703,8 @@ _tdd_locked_run() {
             resourcePath,
             token: process.env.LOCK_TOKEN,
           });
-        ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-          "$lock_directory" "$state_file" >/dev/null 2>&1 || true
+        ' -- "$_ZENSU_TDD_CONTROL_CORE" \
+          "$native_lock_directory" "$native_state_file" >/dev/null 2>&1 || true
     fi
     echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
     return 1
@@ -643,8 +730,8 @@ _tdd_locked_run() {
         process.stderr.write(`[zensu-tdd-phase] lock release detail: ${detail}\n`);
         process.exit(3);
       }
-    ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-      "$lock_directory" "$state_file" >/dev/null; then
+    ' -- "$_ZENSU_TDD_CONTROL_CORE" \
+      "$native_lock_directory" "$native_state_file" >/dev/null; then
     release_rc=0
   else
     release_rc=$?
@@ -692,7 +779,7 @@ _tdd_write_flag_critical() {
   local key="$3"
   local val="$4"
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" VAL="$val" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" VAL="$val" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const value = process.env.VAL === "true";
@@ -728,7 +815,7 @@ _tdd_increment_counter_critical() {
   local state_file="$1"
   local session_id="$2"
   local key="$3"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" KEY="$key" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const names = { reviewRound: "review_progress", stopBlockCount: "stop_guard" };
@@ -772,7 +859,7 @@ tdd_reset_review_budget() {
   state_file="$(tdd_state_file "$session_id")" || return 1
   [ -f "$state_file" ] && [ ! -L "$state_file" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" EXPECTED_REVISION="$expected_revision" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" EXPECTED_REVISION="$expected_revision" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const state = core.resetReviewBudget({
@@ -805,7 +892,7 @@ tdd_set_flag() {
 _tdd_write_clear_critical() {
   local state_file="$1"
   local session_id="$2"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
     const core = require(process.env.CONTROL_CORE);
     core.mutateWorkflowState({
       projectRoot: process.env.PROJECT_ROOT,
@@ -843,7 +930,7 @@ tdd_clear_session() {
 
 _tdd_clear_standalone_session_critical() {
   local state_file="$1" session_id="$2" expected_revision="${3:-}"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" \
     EXPECTED_REVISION="$expected_revision" node -e '
     const core=require(process.env.CONTROL_CORE);
@@ -880,7 +967,7 @@ tdd_clear_standalone_session() {
 _tdd_clear_autopilot_session_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
   local expected_revision="${6:-}"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" \
     RUN_ID="$run_id" ATTEMPT="$attempt" CHAIN_ID="$chain_id" \
     EXPECTED_REVISION="$expected_revision" node -e '
@@ -918,7 +1005,7 @@ tdd_clear_autopilot_session() {
 _tdd_write_chain_reset_critical() {
   local state_file="$1"
   local session_id="$2"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
     const core = require(process.env.CONTROL_CORE);
     core.mutateWorkflowState({
       projectRoot: process.env.PROJECT_ROOT,
@@ -959,7 +1046,7 @@ _tdd_begin_session_critical() {
   local require_deferred_eligible="$5" deferred_claim="$6"
   local autopilot_run_id="${7:-}" autopilot_attempt="${8:-}"
   local autopilot_return_stage="${9:-}" chain_id="${10:-}"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
     SID="$session_id" VANILLA="$vanilla" \
       IMPL_COMPLETE="$impl_complete" REQUIRE_DEFERRED_ELIGIBLE="$require_deferred_eligible" \
@@ -1064,7 +1151,7 @@ tdd_autopilot_context() {
   local expected_session="${2:-}"
   [ -n "$state_file" ] || return 1
   [ -n "$expected_session" ] || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$expected_session")" \
     EXPECTED_SESSION="$expected_session" node -e '
     try {
@@ -1109,7 +1196,7 @@ tdd_chain_snapshot() {
   local state_file="${1:-}" expected_session="${2:-}"
   [ -n "$state_file" ] && [ -n "$expected_session" ] || return 2
   [ -e "$state_file" ] || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$expected_session")" \
     EXPECTED_SESSION="$expected_session" node -e '
     try {
@@ -1153,7 +1240,7 @@ tdd_chain_snapshot() {
 # retry or recovery transition reused the same session file.
 _tdd_mark_impl_complete_bound_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4" chain_id="$5"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" \
     SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     CHAIN_ID="$chain_id" node -e '
@@ -1192,7 +1279,7 @@ tdd_mark_impl_complete_bound() {
 # therefore linkage absence is proven again while holding the Inner mutex.
 _tdd_mark_impl_complete_standalone_critical() {
   local state_file="$1" session_id="$2"
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
     const core=require(process.env.CONTROL_CORE);
     const s=core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID});
@@ -1246,8 +1333,11 @@ _tdd_autopilot_attempt_shape_ok() {
 _tdd_set_chain_outcome_critical() {
   local state_file="$1" session_id="$2" outcome="$3" run_id="$4"
   local attempt="$5" chain_id="$6" ticket="$7" binding_supplied="$8" tmp node_rc
+  local native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  STATE_FILE="$state_file" SID="$session_id" OUTCOME="$outcome" RUN_ID="$run_id" \
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  STATE_FILE="$native_state_file" SID="$session_id" OUTCOME="$outcome" RUN_ID="$run_id" \
     ATTEMPT="$attempt" CHAIN_ID="$chain_id" TICKET="$ticket" \
     BINDING_SUPPLIED="$binding_supplied" node -e '
       const fs = require("fs");
@@ -1291,7 +1381,7 @@ _tdd_set_chain_outcome_critical() {
       if (s.chainOutcome !== "" || s.chainDone !== false) process.exit(3);
       s.chainOutcome = process.env.OUTCOME;
       fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-    ' "$tmp" 2>/dev/null
+    ' "$native_tmp" 2>/dev/null
   node_rc=$?
   if [ "$node_rc" -eq 10 ]; then
     rm -f "$tmp" 2>/dev/null
@@ -1332,8 +1422,11 @@ tdd_set_chain_outcome() {
 _tdd_finish_autopilot_chain_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
   local chain_id="$5" outcome="$6" ticket="$7" tmp node_rc
+  local native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  STATE_FILE="$native_state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     CHAIN_ID="$chain_id" OUTCOME="$outcome" TICKET="$ticket" node -e '
       const fs = require("fs");
       let s;
@@ -1379,7 +1472,7 @@ _tdd_finish_autopilot_chain_critical() {
       s.chainOutcome = process.env.OUTCOME;
       s.chainDone = true;
       fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-    ' "$tmp" 2>/dev/null
+    ' "$native_tmp" 2>/dev/null
   node_rc=$?
   if [ "$node_rc" -eq 10 ]; then
     rm -f "$tmp" 2>/dev/null
@@ -1423,10 +1516,12 @@ _tdd_review_ticket_shape_ok() {
 }
 
 _tdd_issue_review_ticket_critical() {
-  local state_file="$1" session_id="$2" ticket="$3" tmp
+  local state_file="$1" session_id="$2" ticket="$3" tmp native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
-  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1468,7 +1563,7 @@ _tdd_issue_review_ticket_critical() {
     // crash-retry receipt must not survive into another exhausted budget.
     delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  ' "$tmp" 2>/dev/null; then
+  ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
@@ -1501,15 +1596,27 @@ tdd_issue_review_ticket() {
 
 _tdd_consume_review_ticket_critical() {
   local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}"
-  local state_dir state_tmp next_file
+  local state_dir state_tmp next_file native_state_file native_state_tmp native_next_file
   state_dir="$(dirname "$state_file")"
   state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
   next_file="$(mktemp "${state_file}.next.XXXXXX" 2>/dev/null)" || {
     rm -f "$state_tmp" 2>/dev/null
     return 1
   }
+  native_state_file="$(_tdd_native_project_path "$state_file")" || {
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  }
+  native_state_tmp="$(_tdd_native_project_path "$state_tmp")" || {
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  }
+  native_next_file="$(_tdd_native_project_path "$next_file")" || {
+    rm -f "$state_tmp" "$next_file" 2>/dev/null
+    return 1
+  }
 
-  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1567,7 +1674,7 @@ _tdd_consume_review_ticket_critical() {
     s.reviewRound = next;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], JSON.stringify({next, autopilot}));
-  ' "$state_tmp" "$next_file" 2>/dev/null; then
+  ' "$native_state_tmp" "$native_next_file" 2>/dev/null; then
     rm -f "$state_tmp" "$next_file" 2>/dev/null
     return 1
   fi
@@ -1621,8 +1728,11 @@ tdd_consume_review_ticket() {
 _tdd_mark_autopilot_max_round_handoff_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
   local return_stage="$5" chain_id="$6" ticket="$7" tmp node_rc
+  local native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  STATE_FILE="$native_state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" TICKET="$ticket" node -e '
       const fs = require("fs");
       let s;
@@ -1661,7 +1771,7 @@ _tdd_mark_autopilot_max_round_handoff_critical() {
       s.chainOutcome = "max-rounds";
       s.codeReviewDone = true;
       fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-    ' "$tmp" 2>/dev/null
+    ' "$native_tmp" 2>/dev/null
   node_rc=$?
   if [ "$node_rc" -eq 10 ]; then
     rm -f "$tmp" 2>/dev/null
@@ -1694,9 +1804,12 @@ tdd_mark_autopilot_max_round_handoff() {
 
 _tdd_mark_review_converged_critical() {
   local state_file="$1" session_id="$2" ticket="$3" key="$4" tmp
+  local native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
-  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" KEY="$key" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" KEY="$key" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1723,7 +1836,7 @@ _tdd_mark_review_converged_critical() {
     if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
     s[key] = true;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  ' "$tmp" 2>/dev/null; then
+  ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
@@ -1750,9 +1863,11 @@ tdd_mark_review_converged() {
 }
 
 _tdd_mark_unclaimed_review_critical() {
-  local state_file="$1" session_id="$2" key="$3" tmp
+  local state_file="$1" session_id="$2" key="$3" tmp native_state_file native_tmp
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  if ! STATE_FILE="$state_file" SID="$session_id" KEY="$key" node -e '
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  if ! STATE_FILE="$native_state_file" SID="$session_id" KEY="$key" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1774,7 +1889,7 @@ _tdd_mark_unclaimed_review_critical() {
     if (key === "selfReviewFixed" && (s.codeReviewDone !== true || s.selfReviewFixed !== false)) process.exit(3);
     s[key] = true;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  ' "$tmp" 2>/dev/null; then
+  ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
@@ -1798,8 +1913,12 @@ tdd_mark_unclaimed_review() {
 
 _tdd_ensure_self_review_ticket_critical() {
   local state_file="$1" session_id="$2" candidate="$3" result_file="$4" tmp
+  local native_state_file native_tmp native_result_file
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  if ! STATE_FILE="$state_file" SID="$session_id" CANDIDATE="$candidate" node -e '
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  native_result_file="$(_tdd_native_project_path "$result_file")" || { rm -f "$tmp"; return 1; }
+  if ! STATE_FILE="$native_state_file" SID="$session_id" CANDIDATE="$candidate" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1825,7 +1944,7 @@ _tdd_ensure_self_review_ticket_critical() {
     }
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], ticket);
-  ' "$tmp" "$result_file" 2>/dev/null; then
+  ' "$native_tmp" "$native_result_file" 2>/dev/null; then
     rm -f "$tmp" "$result_file" 2>/dev/null
     return 1
   fi
@@ -1856,11 +1975,14 @@ _tdd_increment_stop_budget_critical() {
   local state_file="$1" session_id="$2" _budget_file="${3:-}" result_file="$4"
   local expected_run="${5:-}" expected_attempt="${6:-}" expected_chain="${7:-}"
   local expected_return_stage="${8:-}"
-  local state_dir state_tmp
+  local state_dir state_tmp native_state_file native_state_tmp native_result_file
   state_dir="$(dirname "$state_file")"
   _tdd_state_storage_safe "$state_file" || return 1
   state_tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  if ! STATE_FILE="$state_file" SID="$session_id" \
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$state_tmp"; return 1; }
+  native_state_tmp="$(_tdd_native_project_path "$state_tmp")" || { rm -f "$state_tmp"; return 1; }
+  native_result_file="$(_tdd_native_project_path "$result_file")" || { rm -f "$state_tmp"; return 1; }
+  if ! STATE_FILE="$native_state_file" SID="$session_id" \
       EXPECTED_RUN="$expected_run" EXPECTED_ATTEMPT="$expected_attempt" \
       EXPECTED_CHAIN="$expected_chain" EXPECTED_RETURN_STAGE="$expected_return_stage" node -e '
     const fs = require("fs");
@@ -1893,7 +2015,7 @@ _tdd_increment_stop_budget_critical() {
     s.stopBlockCount = next;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
     fs.writeFileSync(process.argv[2], String(next));
-  ' "$state_tmp" "$result_file" 2>/dev/null; then
+  ' "$native_state_tmp" "$native_result_file" 2>/dev/null; then
     rm -f "$state_tmp" "$result_file" 2>/dev/null
     return 1
   fi
@@ -1922,11 +2044,13 @@ tdd_increment_stop_budget() {
 
 _tdd_rearm_review_critical() {
   local state_file="$1" session_id="$2" ticket="$3" _counter_file="${4:-}" _stopblocks_file="${5:-}"
-  local state_dir tmp
+  local state_dir tmp native_state_file native_tmp
   state_dir="$(dirname "$state_file")"
   _tdd_state_storage_safe "$state_file" || return 1
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
-  if ! STATE_FILE="$state_file" SID="$session_id" TICKET="$ticket" node -e '
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
@@ -1955,7 +2079,7 @@ _tdd_rearm_review_critical() {
     delete s.chainOutcome;
     delete s.reviewRearm;
     fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-  ' "$tmp" 2>/dev/null; then
+  ' "$native_tmp" 2>/dev/null; then
     rm -f "$tmp" 2>/dev/null
     return 1
   fi
@@ -1985,12 +2109,14 @@ tdd_rearm_review() {
 _tdd_rearm_autopilot_review_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
   local chain_id="$5" ticket="$6" retire="$7" _counter_file="${8:-}"
-  local _stopblocks_file="${9:-}" state_dir tmp node_rc
+  local _stopblocks_file="${9:-}" state_dir tmp node_rc native_state_file native_tmp
   state_dir="$(dirname "$state_file")"
   _tdd_state_storage_safe "$state_file" || return 1
   tmp="$(mktemp "${state_file}.XXXXXX" 2>/dev/null)" || return 1
+  native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
+  native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
-  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+  STATE_FILE="$native_state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     CHAIN_ID="$chain_id" TICKET="$ticket" RETIRE="$retire" node -e '
       const fs = require("fs");
       const crypto = require("crypto");
@@ -2091,7 +2217,7 @@ _tdd_rearm_autopilot_review_critical() {
       s.chainOutcome = "";
       s.reviewRearm = requested;
       fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
-    ' "$tmp" 2>/dev/null
+    ' "$native_tmp" 2>/dev/null
   node_rc=$?
 
   if [ "$node_rc" -eq 10 ]; then
@@ -2134,7 +2260,7 @@ _tdd_write_workflow_begin_critical() {
   local session_id="$2"
   local tools="$3"
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" TOOLS="$tools" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" TOOLS="$tools" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       core.mutateWorkflowState({
@@ -2169,7 +2295,7 @@ _tdd_read_validated_state() {
   local state_file="${1:-}"
   local mode="${2:-status}"
   local arg="${3:-}"
-  local base key expected project_root
+  local base key expected project_root native_project_root native_state_file
   if [ -z "$state_file" ]; then
     echo "missing"; return 0
   fi
@@ -2186,8 +2312,12 @@ _tdd_read_validated_state() {
   [ "$state_file" = "$expected" ] || { echo "invalid"; return 0; }
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   project_root="$(zensu_resolve_project_dir)" || { echo "invalid"; return 0; }
+  native_project_root="$(_tdd_native_project_path "$project_root")" \
+    || { echo "invalid"; return 0; }
+  native_state_file="$(_tdd_native_project_path "$state_file")" \
+    || { echo "invalid"; return 0; }
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$project_root" STATE_FILE="$state_file" READ_MODE="$mode" READ_ARG="$arg" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$native_project_root" STATE_FILE="$native_state_file" READ_MODE="$mode" READ_ARG="$arg" \
     node -e '
       const fs = require("node:fs");
       const path = require("node:path");
@@ -2288,9 +2418,10 @@ tdd_get_counter() {
 }
 
 tdd_claimed_review_ticket() {
-  local state_file="${1:-}"
+  local state_file="${1:-}" native_state_file
   [ -n "$state_file" ] && _tdd_path_safe "$state_file" regular "$(dirname "$state_file")" \
     || return 1
+  native_state_file="$(_tdd_native_project_path "$state_file")" || return 1
   node -e '
     try {
       const s = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -2302,7 +2433,7 @@ tdd_claimed_review_ticket() {
       if (!valid) process.exit(3);
       process.stdout.write(ticket);
     } catch (_) { process.exit(3); }
-  ' "$state_file" 2>/dev/null
+  ' "$native_state_file" 2>/dev/null
 }
 
 zensu_workflow_allows() {
@@ -2390,7 +2521,7 @@ _tdd_write_bypass_critical() {
   local session_id="$2"
   local gate="$3"
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" GATE="$gate" ALLOWLIST="$ZENSU_BYPASS_GATE_ALLOWLIST" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" GATE="$gate" ALLOWLIST="$ZENSU_BYPASS_GATE_ALLOWLIST" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const allow = String(process.env.ALLOWLIST || "").split(" ").filter(Boolean);
@@ -2484,7 +2615,7 @@ _tdd_write_bypass_clear_critical() {
   local state_file="$1"
   local session_id="$2"
   [ -f "$state_file" ] || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" node -e '
     const core = require(process.env.CONTROL_CORE);
     core.mutateWorkflowState({
       projectRoot: process.env.PROJECT_ROOT,
@@ -2518,8 +2649,10 @@ _tdd_write_pending_review_critical() {
   local files="$2"
   local summary="$3"
   local ts="$4"
+  local native_pf
+  native_pf="$(_tdd_native_project_path "$pf")" || return 1
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" PENDING_FILE="$pf" FILES="$files" SUMMARY="$summary" TS="$ts" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PENDING_FILE="$native_pf" FILES="$files" SUMMARY="$summary" TS="$ts" \
     node -e '
       const core = require(process.env.CONTROL_CORE);
       const files = (process.env.FILES || "").split(",").map(s => s.trim()).filter(Boolean);
@@ -2572,10 +2705,11 @@ _tdd_clear_pending_review_critical() {
 }
 
 _tdd_pending_file_stale() {
-  local file="${1:-}" ttl_hours="${2:-}"
+  local file="${1:-}" ttl_hours="${2:-}" native_file
   case "$ttl_hours" in ''|*[!0-9]*) return 1 ;; esac
   [ "$ttl_hours" -gt 0 ] || return 1
   [ -f "$file" ] && [ ! -L "$file" ] || return 1
+  native_file="$(_tdd_native_project_path "$file")" || return 1
   TTL="$ttl_hours" node -e '
     try {
       const fs = require("fs");
@@ -2585,12 +2719,13 @@ _tdd_pending_file_stale() {
       const ttl = Number.parseInt(process.env.TTL, 10) * 3600 * 1000;
       process.exit(Number.isFinite(t) && Date.now() - t >= ttl ? 0 : 1);
     } catch (_) { process.exit(1); }
-  ' "$file" >/dev/null 2>&1
+  ' "$native_file" >/dev/null 2>&1
 }
 
 _tdd_read_pending_claim_metadata() {
-  local claim_file="${1:-}"
+  local claim_file="${1:-}" native_claim_file
   [ -f "$claim_file" ] && [ ! -L "$claim_file" ] || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
   node -e '
     try {
       const j = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
@@ -2606,16 +2741,19 @@ _tdd_read_pending_claim_metadata() {
       const emitted = j.handoffEmitted === true;
       process.stdout.write(`${id}\t${owner}\t${ownerPid}\t${emitted}`);
     } catch (_) { process.exit(3); }
-  ' "$claim_file" 2>/dev/null
+  ' "$native_claim_file" 2>/dev/null
 }
 
 _tdd_assign_pending_claim_metadata() {
   local claim_file="$1" owner_session="$2" owner_pid="$3" claim_stale="${4:-false}" project_root
+  local native_project_root native_claim_file
   project_root="$(zensu_resolve_project_dir)" || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$owner_session" \
-    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
-    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
     OWNER_PID="$owner_pid" CLAIM_STALE="$claim_stale" LOG_STYLE="$(_zensu_log_style)" \
     node -e '
       try {
@@ -2639,11 +2777,14 @@ _tdd_assign_pending_claim_metadata() {
 _tdd_reconcile_seeded_pending_claim() {
   local owner_session="$1" current_session="$2" claim_id="$3" claim_file="$4"
   local _owner_pid="$5" _handoff_emitted="$6" claim_stale="$7" project_root
+  local native_project_root native_claim_file
   project_root="$(zensu_resolve_project_dir)" || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$current_session" \
-    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
-    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
     CLAIM_ID="$claim_id" OWNER_SESSION="$owner_session" CLAIM_STALE="$claim_stale" \
     node -e '
       try {
@@ -2826,12 +2967,14 @@ tdd_adopt_pending_review() {
 }
 
 _tdd_finalize_pending_review_transfer() {
-  local claim_file="$1" current_session="$2" project_root
+  local claim_file="$1" current_session="$2" project_root native_project_root native_claim_file
   project_root="$(zensu_resolve_project_dir)" || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$current_session" \
-    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
-    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
     node -e '
       try {
         const core = require(process.env.CONTROL_CORE);
@@ -2849,15 +2992,18 @@ _tdd_finalize_pending_review_transfer() {
 
 _tdd_mark_pending_review_handoff_critical() {
   local _pf="$1" claim_file="$2" session_id="$3" owner_pid="$4" project_root
+  local native_project_root native_claim_file
   project_root="$(zensu_resolve_project_dir)" || return 1
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
   # The pending-review lock held by the caller is the outer lock. Core then
   # acquires the claim lock followed by the one canonical target-state lock,
   # atomically validating the generation, finalizing any durable receipt, and
   # renewing the handoff lease. A normal TDD generation returns a no-op here.
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$session_id" \
-    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
-    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
     OWNER_PID="$owner_pid" LOG_STYLE="$(_zensu_log_style)" node -e '
       try {
         const core = require(process.env.CONTROL_CORE);
@@ -2892,11 +3038,14 @@ tdd_mark_pending_review_handoff() {
 
 _tdd_cancel_pending_review_claim_core() {
   local claim_file="$1" session_id="$2" requested_mode="$3" reset_binding_json="$4" project_root
+  local native_project_root native_claim_file
   project_root="$(zensu_resolve_project_dir)" || return 1
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$session_id" \
-    PROJECT_ROOT="$project_root" PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" \
-    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$claim_file" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
     REQUESTED_MODE="$requested_mode" RESET_BINDING_JSON="$reset_binding_json" node -e '
       try {
         const fs = require("node:fs");
@@ -3149,11 +3298,12 @@ tdd_pending_review_stale() {
   local ttl_hours="${1:-}"
   case "$ttl_hours" in ''|*[!0-9]*) echo "false"; return 0 ;; esac
   [ "$ttl_hours" -le 0 ] && { echo "false"; return 0; }
-  local pf
+  local pf native_pf
   pf="$(zensu_pending_review_file)"
   [ -f "$pf" ] || { echo "false"; return 0; }
   [ -L "$pf" ] && { echo "false"; return 0; }
   command -v node >/dev/null 2>&1 || { echo "false"; return 0; }
+  native_pf="$(_tdd_native_project_path "$pf")" || { echo "false"; return 0; }
   local verdict
   verdict=$(TTL="$ttl_hours" node -e '
     try {
@@ -3168,7 +3318,7 @@ tdd_pending_review_stale() {
       const ttlMs = parseInt(process.env.TTL, 10) * 3600 * 1000;
       console.log((Date.now() - t) >= ttlMs ? "true" : "false");
     } catch (_) { console.log("false"); }
-  ' "$pf" 2>/dev/null)
+  ' "$native_pf" 2>/dev/null)
   [ "$verdict" = "true" ] && echo "true" || echo "false"
 }
 
@@ -3192,8 +3342,12 @@ tdd_seed_deferred_review() {
 case "${OSTYPE:-}" in
   msys*|cygwin*|mingw*|win32*) ;;
   *)
+    # Export the two values only after they were derived from, and
+    # identity-checked against, the executing library above. Exported helpers
+    # must never fall back to an inherited ZENSU_* module path.
+    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac
