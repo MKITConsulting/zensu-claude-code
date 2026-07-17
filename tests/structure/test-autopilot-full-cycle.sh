@@ -276,6 +276,7 @@ Exercise the complete durable lifecycle.
 <!-- zensu-autopilot:${RUN} -->"
 PLAN_INPUT="$(PLAN="$PLAN" SESSION="$SESSION" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name:"PostToolUse",
     session_id:process.env.SESSION,
     tool_name:"ExitPlanMode",
     tool_input:{plan:process.env.PLAN}

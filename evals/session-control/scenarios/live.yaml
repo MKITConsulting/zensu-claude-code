@@ -18,7 +18,7 @@
     expected_exit_code: 0
     expected_hook: HostStream:AgentSpawn:zensu:review-aspect
     expect_no_changes: true
-- description: "L03 bare PLM subagent inherits neutral context and cannot execute shell"
+- description: "L03 plugin-scoped PLM subagent inherits neutral context with read-only tools"
   vars:
     scenario_id: live-neutral-subagent
     expected_valid: true
@@ -26,5 +26,35 @@
     expected_workflow_state: live_verified
     expected_revision: 2
     expected_exit_code: 0
-    expected_hook: HostStream:NeutralCapability:zensu-plm:host-profile-v1:shell-denied
+    expected_hook: HostStream:NeutralContext:zensu:zensu-plm:host-profile-v1:read-only
+    expect_no_changes: true
+- description: "L04 generic review worker reads an external marker while every command tool remains denied"
+  vars:
+    scenario_id: live-generic-review-worker
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: HostStream:HostProfile:general-purpose:external-read-command-denied
+    expect_no_changes: true
+- description: "L05 dedicated plan-review worker consumes only its private read lease, receives structured denials, and returns one validated JSON result"
+  vars:
+    scenario_id: live-dedicated-evidence-worker
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: HostStream:EvidenceWorker:plan-review:leased-read-search-denials-valid-json
+    expect_no_changes: true
+- description: "L06 a complete multiworker plan-review run binds, confines, validates, and collects every worker without cross-result drift"
+  vars:
+    scenario_id: live-dedicated-evidence-multiworker
+    expected_valid: true
+    expected_host: claude
+    expected_workflow_state: live_verified
+    expected_revision: 2
+    expected_exit_code: 0
+    expected_hook: HostStream:EvidenceWorker:plan-review:multiworker-flow-complete
     expect_no_changes: true

@@ -33,7 +33,7 @@ export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PROJECT_DIR="$PROJECT"
 export ZENSU_CONFIG="$ROOT/no-config.json"
 unset CLAUDE_PLUGIN_DATA ZENSU_PROJECT_ROOT ZENSU_SESSION_CONTEXT ZENSU_SESSION_KEY \
-  ZENSU_TEST_ENV_FILE ZENSU_TEST_PLUGIN_DATA 2>/dev/null || true
+  ZENSU_TEST_PLUGIN_DATA 2>/dev/null || true
 
 # shellcheck disable=SC1090
 source "$PHASE"
@@ -44,7 +44,6 @@ STARTED_SESSION_KEY=""
 start_session() {
   local raw_session="$1" label="${2:-$1}"
   export ZENSU_TEST_PLUGIN_DATA="$ROOT/plugin-data-$label"
-  export ZENSU_TEST_ENV_FILE="$ROOT/session-$label.env"
   # shellcheck disable=SC1090
   source "$BASELINE" "$raw_session"
   STARTED_SESSION_KEY="$ZENSU_SESSION_KEY"
@@ -63,14 +62,40 @@ review_prompt() {
 }
 
 run_hook() {
-  local sid="$1" subtype="$2" prompt="$3"
-  SID="$sid" SUBTYPE="$subtype" PROMPT="$prompt" node -e '
+  local sid="$1" subtype="$2" prompt="$3" payload_sid="$1"
+  # Stateful helper calls may use the canonical key after model binding, but
+  # Claude hook payloads always carry the raw host session id.
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" SUBTYPE="$subtype" PROMPT="$prompt" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
       tool_name: "Agent",
       tool_input: {subagent_type: process.env.SUBTYPE, prompt: process.env.PROMPT},
       session_id: process.env.SID
     }));
   ' | bash "$HOOK" 2>/dev/null
+}
+
+run_hook_as() {
+  local sid="$1" subtype="$2" prompt="$3" principal_kind="$4" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" SUBTYPE="$subtype" PROMPT="$prompt" PRINCIPAL_KIND="$principal_kind" node -e '
+    const p={
+      hook_event_name:"PostToolUse",
+      tool_name:"Agent",
+      tool_input:{subagent_type:process.env.SUBTYPE,prompt:process.env.PROMPT},
+      session_id:process.env.SID,
+    };
+    if(process.env.PRINCIPAL_KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.PRINCIPAL_KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.PRINCIPAL_KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.PRINCIPAL_KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ' | ZENSU_FORCE_MAIN=1 bash "$HOOK" 2>/dev/null
 }
 
 state() {
@@ -382,6 +407,28 @@ AFTER="$(digest "$S12_STATE")"
 [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
   && check "S12 state owned by another canonical session is a byte-stable no-op" PASS \
   || check "S12 state owned by another canonical session is a byte-stable no-op" FAIL
+
+# Explicit or partial hook principals must never borrow the main thread's
+# consume-mode reviewer authority, even when ambient force-main is set.
+start_session principal-guard
+S12B="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S12B"
+log --tdd-complete --session "$S12B"
+PRINCIPAL_TICKET="$(issue_ticket "$S12B")"
+PRINCIPAL_PROMPT="$(review_prompt "$PRINCIPAL_TICKET")"
+S12B_STATE="$(state "$S12B")"
+BEFORE="$(digest "$S12B_STATE")"
+PRINCIPAL_OUTPUT=""
+for PRINCIPAL_KIND in reviewer plm neutral partial; do
+  PRINCIPAL_OUTPUT="${PRINCIPAL_OUTPUT}$(run_hook_as "$S12B" zensu:code-reviewer "$PRINCIPAL_PROMPT" "$PRINCIPAL_KIND")"
+done
+AFTER="$(digest "$S12B_STATE")"
+if [ -z "$PRINCIPAL_OUTPUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S12B")" = false ] && [ "$(review_round "$S12B")" = 0 ]; then
+  check "S12b reviewer/PLM/neutral/partial principals cannot consume a ticket or emit helper text" PASS
+else
+  check "S12b non-main principals are a byte-stable post-review no-op" FAIL
+fi
 
 # Parallel duplicate deliveries race on one atomic ticket claim; exactly one wins.
 start_session concurrent

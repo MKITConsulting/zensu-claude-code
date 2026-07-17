@@ -81,6 +81,11 @@ const wrapperEvidence = [
   'WrapperSnapshot:ProjectState:attestation-only',
   'WrapperControlEvidence:sealed',
 ];
+const dedicatedWrapperEvidence = wrapperEvidence.map((entry) => (
+  entry === 'WrapperSnapshot:PluginData:context-only'
+    ? 'WrapperSnapshot:PluginData:context-and-closed-evidence-lease'
+    : entry
+));
 
 function registerContention(session) {
   const file = path.join(root, 'evals', 'session-control', 'lib', 'concurrency-control.js');
@@ -134,12 +139,83 @@ try {
       workflow_state: 'live_verified',
       hook_sequence: [
         ...wrapperEvidence,
-        'HostStream:AgentSpawn:zensu-plm',
-        'HostStream:NeutralCapability:zensu-plm:host-profile-v1:shell-denied',
+        'HostStream:AgentSpawn:zensu:zensu-plm',
+        'HostStream:NeutralContext:zensu:zensu-plm:host-profile-v1:read-only',
       ],
     }, { scenario_id: 'live-neutral-subagent' }),
+    result({
+      ...base,
+      session_id_hash: hash('live-generic-review-worker'),
+      workflow_state: 'live_verified',
+      hook_sequence: [
+        ...wrapperEvidence,
+        'HostStream:AgentSpawn:general-purpose',
+        'HostStream:HostProfile:general-purpose:external-read-command-denied',
+      ],
+    }, { scenario_id: 'live-generic-review-worker' }),
+    result({
+      ...base,
+      session_id_hash: hash('live-dedicated-evidence-worker'),
+      workflow_state: 'live_verified',
+      hook_sequence: [
+        ...dedicatedWrapperEvidence,
+        'HostStream:AgentSpawn:zensu:plan-review-worker',
+        'HostStream:EvidenceWorker:plan-review:leased-read-search-denials-valid-json',
+      ],
+    }, { scenario_id: 'live-dedicated-evidence-worker' }),
+    result({
+      ...base,
+      session_id_hash: hash('live-dedicated-evidence-multiworker'),
+      workflow_state: 'live_verified',
+      hook_sequence: [
+        ...dedicatedWrapperEvidence,
+        'HostStream:EvidenceWorker:plan-review:multiworker-flow-complete',
+      ],
+    }, { scenario_id: 'live-dedicated-evidence-multiworker' }),
   ];
   verify('live', live);
+
+  for (const [rowIndex, marker] of [
+    [1, 'HostStream:AgentSpawn:zensu:review-aspect'],
+    [1, 'HostStream:ReviewerContext:reviewer-readonly-v1'],
+    [2, 'HostStream:AgentSpawn:zensu:zensu-plm'],
+    [2, 'HostStream:NeutralContext:zensu:zensu-plm:host-profile-v1:read-only'],
+    [3, 'HostStream:AgentSpawn:general-purpose'],
+    [3, 'HostStream:HostProfile:general-purpose:external-read-command-denied'],
+    [4, 'HostStream:AgentSpawn:zensu:plan-review-worker'],
+    [4, 'HostStream:EvidenceWorker:plan-review:leased-read-search-denials-valid-json'],
+    [5, 'HostStream:EvidenceWorker:plan-review:multiworker-flow-complete'],
+  ]) {
+    const duplicatedMarker = live.map((row) => JSON.parse(JSON.stringify(row)));
+    const attestation = strictParse(duplicatedMarker[rowIndex].response.output);
+    attestation.hook_sequence.push(marker);
+    duplicatedMarker[rowIndex].response.output = controlLine(attestation);
+    verify('live', duplicatedMarker, 1);
+  }
+
+  const dedicatedContextOnly = live.map((row) => JSON.parse(JSON.stringify(row)));
+  const dedicatedContextOnlyAttestation = strictParse(dedicatedContextOnly[4].response.output);
+  dedicatedContextOnlyAttestation.hook_sequence = dedicatedContextOnlyAttestation.hook_sequence.map((entry) => (
+    entry === 'WrapperSnapshot:PluginData:context-and-closed-evidence-lease'
+      ? 'WrapperSnapshot:PluginData:context-only' : entry
+  ));
+  dedicatedContextOnly[4].response.output = controlLine(dedicatedContextOnlyAttestation);
+  verify('live', dedicatedContextOnly, 1);
+
+  const dedicatedAmbiguousPluginData = live.map((row) => JSON.parse(JSON.stringify(row)));
+  const dedicatedAmbiguousAttestation = strictParse(dedicatedAmbiguousPluginData[4].response.output);
+  dedicatedAmbiguousAttestation.hook_sequence.push('WrapperSnapshot:PluginData:context-only');
+  dedicatedAmbiguousPluginData[4].response.output = controlLine(dedicatedAmbiguousAttestation);
+  verify('live', dedicatedAmbiguousPluginData, 1);
+
+  const ordinaryLeaseMarker = live.map((row) => JSON.parse(JSON.stringify(row)));
+  const ordinaryLeaseAttestation = strictParse(ordinaryLeaseMarker[0].response.output);
+  ordinaryLeaseAttestation.hook_sequence = ordinaryLeaseAttestation.hook_sequence.map((entry) => (
+    entry === 'WrapperSnapshot:PluginData:context-only'
+      ? 'WrapperSnapshot:PluginData:context-and-closed-evidence-lease' : entry
+  ));
+  ordinaryLeaseMarker[0].response.output = controlLine(ordinaryLeaseAttestation);
+  verify('live', ordinaryLeaseMarker, 1);
 
   const duplicateLiveId = live.map((row) => JSON.parse(JSON.stringify(row)));
   duplicateLiveId[2].vars.scenario_id = 'live-main-fresh';

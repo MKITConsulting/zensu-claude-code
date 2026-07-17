@@ -92,11 +92,12 @@ fi
 # P3 — resolution contract in consumers
 if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/tdd-plan.md' "$TDD_MD" \
   && grep -qF 'when that file exists, else the plugin default' "$TDD_MD" \
-  && grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/templates/tdd-plan.md' "$TDD_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$TDD_MD"; then
-  check "P3a tdd Phase 2 resolves override then the session-bound plugin default" PASS
+  && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/tdd-plan.md' "$TDD_MD" \
+  && grep -qF '`${CLAUDE_PLUGIN_ROOT}` is the active plugin installation supplied to this skill component' "$TDD_MD" \
+  && ! grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT' "$TDD_MD"; then
+  check "P3a tdd Phase 2 resolves override then the natively rendered plugin default" PASS
 else
-  check "P3a tdd Phase 2 resolves override then the session-bound plugin default" FAIL
+  check "P3a tdd Phase 2 resolves override then the natively rendered plugin default" FAIL
 fi
 if grep -qiE 'replaces the default wholesale' "$TDD_MD" && grep -qF 'MUST keep the mandatory sections' "$TDD_MD"; then
   check "P3b tdd documents the wholesale-replace + mandatory contract" PASS

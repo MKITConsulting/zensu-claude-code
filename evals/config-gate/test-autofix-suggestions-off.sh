@@ -41,7 +41,7 @@ source "$BASELINE" sess-off-001
 bash "$LOG" --tdd-begin --session sess-off-001 >/dev/null
 bash "$LOG" --tdd-complete --session sess-off-001 >/dev/null
 TICKET_FLAG_ABSENT="$(bash "$LOG" --review-ticket --session sess-off-001)"
-STDIN_FLAG_ABSENT="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_ABSENT}\\nfixture\"},\"session_id\":\"sess-off-001\"}"
+STDIN_FLAG_ABSENT="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_ABSENT}\\nfixture\"},\"session_id\":\"sess-off-001\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_ABSENT" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in
@@ -73,7 +73,7 @@ source "$BASELINE" sess-off-002
 bash "$LOG" --tdd-begin --session sess-off-002 >/dev/null
 bash "$LOG" --tdd-complete --session sess-off-002 >/dev/null
 TICKET_FLAG_FALSE="$(bash "$LOG" --review-ticket --session sess-off-002)"
-STDIN_FLAG_FALSE="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_FALSE}\\nfixture\"},\"session_id\":\"sess-off-002\"}"
+STDIN_FLAG_FALSE="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_FLAG_FALSE}\\nfixture\"},\"session_id\":\"sess-off-002\"}"
 OUT="$(printf '%s' "$STDIN_FLAG_FALSE" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

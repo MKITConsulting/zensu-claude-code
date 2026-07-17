@@ -39,6 +39,12 @@ command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat 2>/dev/null || true)"
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$INPUT"; then
+  zensu_emit_hook_session_deny
+  exit 0
+fi
+
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the escape checks so all Bash gates share the order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"

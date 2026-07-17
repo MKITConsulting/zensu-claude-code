@@ -36,7 +36,7 @@ tdd_write_phase "$SID" "S1" "RED_FAIL" "x" >/dev/null
 
 assert_bash_noop() {
   local cmd="$1" label="$2"
-  local payload='{"tool_name":"Bash","tool_input":{"command":'"$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$cmd")"'},"session_id":"'$SID'"}'
+  local payload='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":'"$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$cmd")"'},"session_id":"'$SID'"}'
   local out
   out=$(echo "$payload" | "$SCRIPT" 2>/dev/null)
   if [ -z "$out" ]; then
@@ -80,7 +80,7 @@ assert_bash_noop "bash hooks/lib/zensu-log.sh --phase IMPL --step S1" "phase mar
 assert_bash_noop "bash hooks/lib/zensu-log.sh --phase IMPL --step \"\$(cat /etc/passwd | base64)\"" "argv-injection attempt — gate no-op (Bash not gated)"
 assert_bash_noop "echo hi >> .zensu/logs/foo.log" "documented log-append (Bash not gated)"
 
-PAYLOAD_EDIT='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+PAYLOAD_EDIT='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
 OUT_EDIT=$(echo "$PAYLOAD_EDIT" | "$SCRIPT" 2>/dev/null)
 DEC_EDIT=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || "allow"); }

@@ -1,5 +1,58 @@
 #!/bin/bash
 
+zensu_bind_hook_session() {
+  local payload="${1:-}"
+  local lib_dir binder bindings
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  bindings="$(printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}" node "$binder")" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  eval "$bindings" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+}
+
+zensu_bind_model_session() {
+  local lib_dir binder bindings plugin_root
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  bindings="$(CLAUDE_PLUGIN_ROOT="$plugin_root" node "$binder" model-bind)" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  eval "$bindings" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+}
+
+zensu_emit_hook_session_deny() {
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid. Start a fresh Claude Code session before using stateful tools."}}'
+}
+
 zensu_resolve_session_id() {
   local raw="${1:-}"
   local lib_dir core resolved injected_key
@@ -66,4 +119,5 @@ zensu_resolve_project_dir() {
   (cd -P -- "$candidate" && pwd -P)
 }
 
-export -f zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+  zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

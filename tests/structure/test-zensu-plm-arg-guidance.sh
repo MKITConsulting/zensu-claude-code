@@ -16,6 +16,13 @@ if [ ! -f "$AGENT" ]; then
   exit 1
 fi
 
+FRONTMATTER="$(awk 'NR == 1 && $0 == "---" { active = 1; next } active && $0 == "---" { exit } active { print }' "$AGENT")"
+if [ "$(printf '%s\n' "$FRONTMATTER" | grep -cxF 'tools: Read, Grep, Glob')" -eq 1 ]; then
+  check "C0 read-only role exposes exactly Read, Grep, and Glob" PASS
+else
+  check "C0 read-only role exposes exactly Read, Grep, and Glob" FAIL
+fi
+
 CP_LINE="$(grep -F 'products create` — Create a new product' "$AGENT" 2>/dev/null)"
 if printf '%s' "$CP_LINE" | grep -qF -- '--slug' && printf '%s' "$CP_LINE" | grep -qF -- '--name'; then
   check "C1 create_product entry names required --name + --slug flags" PASS

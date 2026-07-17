@@ -35,7 +35,7 @@ SID="s-redfail-1"
 source "$BASELINE" "$SID"
 tdd_write_phase "$SID" "S1" "RED_FAIL" "assertion mismatch" >/dev/null
 
-PAYLOAD_TEST='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'$SID'"}'
+PAYLOAD_TEST='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'$SID'"}'
 OUT_TEST=$(echo "$PAYLOAD_TEST" | "$SCRIPT" 2>/dev/null)
 if [ -z "$OUT_TEST" ]; then
   check "RED_FAIL + test file: allowed (empty stdout)" PASS
@@ -43,7 +43,7 @@ else
   check "RED_FAIL + test file: allowed (got: $OUT_TEST)" FAIL
 fi
 
-PAYLOAD_PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+PAYLOAD_PROD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
 OUT_PROD=$(echo "$PAYLOAD_PROD" | "$SCRIPT" 2>/dev/null)
 DECISION=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }
@@ -64,7 +64,7 @@ case "$REASON" in
   *)          check "deny reason mentions RED_FAIL phase (got: $REASON)" FAIL ;;
 esac
 
-PAYLOAD_TESTDIR='{"tool_name":"Edit","tool_input":{"file_path":"src/__tests__/Foo.tsx"},"session_id":"'$SID'"}'
+PAYLOAD_TESTDIR='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/__tests__/Foo.tsx"},"session_id":"'$SID'"}'
 OUT_TD=$(echo "$PAYLOAD_TESTDIR" | "$SCRIPT" 2>/dev/null)
 if [ -z "$OUT_TD" ]; then
   check "RED_FAIL + __tests__ dir file: allowed" PASS

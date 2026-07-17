@@ -47,7 +47,12 @@ else
 fi
 
 payload() {
-  node -e 'process.stdout.write(JSON.stringify({prompt:process.argv[1]}))' "$1"
+  node -e '
+    const payload={hook_event_name:"UserPromptSubmit",prompt:process.argv[1]};
+    if(process.argv[2])payload.agent_type=process.argv[2];
+    if(process.argv[3])payload.agent_id=process.argv[3];
+    process.stdout.write(JSON.stringify(payload));
+  ' "$1" "${2:-}" "${3:-}"
 }
 
 classify() {
@@ -90,7 +95,7 @@ OUT8="$(payload "bootstrap a new product roadmap in zensu" | env CLAUDE_PLUGIN_R
 rm -rf "$P8"
 
 P9="$(mktemp -d -t introuter-XXXXXX)"
-OUT9="$(printf '%s' '{"session_id":"s9"}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+OUT9="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s9"}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
 RC9=$?
 if [ "$RC9" = "0" ] && [ -z "$OUT9" ]; then
   check "C9 missing prompt field -> exit 0, silent (fail-open)" PASS
@@ -169,6 +174,29 @@ else
   check "C16 pilot carve-out in directive (fired=$fired16)" FAIL
 fi
 rm -rf "$P16"
+
+P17="$(mktemp -d -t introuter-XXXXXX)"
+OUT17=''
+for agent_type in general-purpose zensu:review-aspect zensu:zensu-plm; do
+  OUT17="${OUT17}$(payload 'bootstrap a new Zensu product' "$agent_type" agent-17 \
+    | ZENSU_FORCE_MAIN=1 env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P17" \
+      ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+done
+if [ -z "$OUT17" ]; then
+  check "C17 explicit agent principals stay silent despite ZENSU_FORCE_MAIN" PASS
+else
+  check "C17 explicit agent principals stay silent despite ZENSU_FORCE_MAIN" FAIL
+fi
+rm -rf "$P17"
+
+P18="$(mktemp -d -t introuter-XXXXXX)"
+OUT18="$(printf '%s' '{"prompt":"bootstrap a new Zensu product"}' \
+  | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P18" ZENSU_CONFIG="$NO_CONFIG" \
+    bash "$HOOK" 2>/dev/null)"
+[ -z "$OUT18" ] \
+  && check "C18 missing hook event cannot receive main-thread routing" PASS \
+  || check "C18 missing hook event cannot receive main-thread routing" FAIL
+rm -rf "$P18"
 
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"

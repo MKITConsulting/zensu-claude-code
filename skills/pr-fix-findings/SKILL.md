@@ -62,11 +62,10 @@ attempt, and valid durable run/chain identifiers. A partial, duplicate, malforme
 mutation. A non-contiguous or extended envelope fails the same way. Never reinterpret it as a standalone request, and never accept or synthesize an
 `AUTOPILOT-REVIEW-OP` line for this skill.
 
-Resolve `LOG="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh"`, source the sibling
-`zensu-session.sh`, and set
-`CURRENT_SESSION="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"`.
-The resolver must preserve the immutable Session Control binding. Read fresh
-state with `bash "$LOG" --autopilot-status`. Fail closed unless `ownerSessionId` equals `CURRENT_SESSION`;
+Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"` and set
+`CURRENT_SESSION="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --session-key)"`.
+The helper must validate the immutable private Session Control binding. Read fresh
+state with `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status`. Fail closed unless `ownerSessionId` equals `CURRENT_SESSION`;
 `tdd.sessionId` equals that same current session; `runId`, `tdd.attempt`, and `tdd.chainId`
 equal the binding; `stage` equals both the
 envelope and `FIX_FINDINGS`; and `evidence.pr.number`, `evidence.pr.url`, and
@@ -115,7 +114,7 @@ All other safety and reporting rules still apply.
 ## Procedure
 
 0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
-   `ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"` — if this is empty or
+   `ROOT="${CLAUDE_PLUGIN_ROOT}"` — if this is empty or
    `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with a FATAL message and
    start a fresh Claude Code session. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`,
    require `[ -f "$VCS" ]`, run `bash "$VCS" --detect`, and

@@ -13,10 +13,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Control v1. Fresh sessions bind the exact executed plugin, project, source
   revision, runtime digest, and domain-separated session hash under
   `CLAUDE_PLUGIN_DATA`; SubagentStart reuses the immutable parent context.
+- **model helper binding**: Use Claude's native `${CLAUDE_PLUGIN_ROOT}` and
+  `${CLAUDE_PLUGIN_DATA}` substitution in top-level Skill/Agent content, then
+  validate the host-exposed `CLAUDE_CODE_SESSION_ID` against the private record
+  inside each stateful helper process. SessionStart no longer reads or writes
+  `CLAUDE_ENV_FILE`, and plugin-private selectors are never exported to the
+  shared main/subagent Bash environment. Supporting files loaded through
+  `Read` receive a concrete root from their parent Skill because native
+  substitution is not recursively applied to loaded Markdown.
 - **reviewers**: Enforce `reviewer-readonly-v1` from the trusted hook
   `agent_type`. Reviewer agents cannot write, mutate workflow state, run free
   shell or control commands, spawn nested agents, or impersonate the main
   thread.
+- **plan and PR review workers**: Replace broad review children and agent-team
+  coordination with exact `zensu:plan-review-worker` and
+  `zensu:pr-review-worker` identities. The main thread registers one private,
+  immutable exact-file/safe-subtree lease, workers use only
+  `Read`/`Grep`/`Glob`, and `SubagentStop` captures one raw JSON object whose
+  `kind`, role, schema, size, and host worker id are validated before the main
+  thread materializes it. Leased paths are canonicalized and revalidated on
+  every call so symlink or TOCTOU replacement fails closed; the lease closes on
+  success and failure. PR leases additionally bind an unquoted name-status
+  manifest so ambiguous escaped paths and findings outside the changed-path set
+  fail closed. Large PRs receive role/area evidence shards rather than a
+  mandatory monolithic full diff. Standalone PR publication now requires an
+  explicit approval after the final preview, while delegated publication stays
+  unattended.
+- **neutral command boundary**: Deny every shell/command tool for
+  `host-profile-v1` children. A command-text denylist cannot confine arbitrary
+  code because environment enumeration, expansion, aliases, and interpreters
+  can reconstruct protected selectors and paths after `PreToolUse`; neutral
+  children retain only their host-granted non-command tools.
+- **protected traversal boundary**: Treat `Grep`/`Glob` roots bidirectionally.
+  A direct protected path, an ancestor that could recursively expose protected
+  descendants, an omitted path whose effective `cwd` is such an ancestor, and
+  escaping path filters all deny for reviewer, PLM, and neutral principals;
+  content regexes and concrete safe source/docs/test subtrees remain available.
 - **evals**: Add pinned Promptfoo contract, live, concurrency, and adversarial
   validation with wrapper-owned control attestations. Nightly/release now use
   Claude Code 2.1.211 to install `zensu@zensu` into an isolated user cache,
@@ -48,6 +80,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **hook context**: Rebind every non-SessionStart hook from the trusted
+  `session_id` and private `CLAUDE_PLUGIN_DATA` record, independently of model
+  Bash state. The all-tool capability gate now fails closed with Claude's
+  blocking exit code when its runtime cannot execute.
+- **session continuation**: Require explicit SessionStart lifecycle sources.
+  `resume`/`compact` now reuse an existing immutable project record after
+  `CwdChanged` and cannot recreate a deleted record; `startup`/`clear` cannot
+  reuse one session id across projects. Autopilot recovery also resolves
+  continuation state exclusively from that record, never from mutable payload
+  `cwd`, and remains silent when the binding cannot be authenticated.
+- **subagents**: Recognize plugin-scoped reviewer and PLM identities, keep the
+  PLM and exact reviewers on the `Read`/`Grep`/`Glob` profile, preserve
+  non-command host-granted tools and external detached-worktree `cwd` changes
+  for ordinary neutral children, and deny all command-execution aliases. Neutral
+  children can no longer borrow an active main-thread window for mutating Zensu
+  operations or modify the installed plugin/private plugin-data roots through
+  file tools, symlink aliases, case aliases, or multiply linked files.
+- **top-level agents**: Classify Claude's documented `SessionStart.agent_type`
+  for `claude --agent` with the same fail-closed rules as PreToolUse. Exact
+  reviewers remain read-only, PLM/unknown/partial identities remain neutral,
+  and only a payload with neither agent field receives `main-v1`.
+- **eval evidence**: Make Promptfoo child proofs causal and exclusive. L03/L04
+  now reject extra root spawns, result-before-use, batched calls, duplicate ids,
+  dirty Git status, and duplicate attestation markers; the offline wrapper
+  derives marker paths and Bash principals from the actual hook context. C39
+  executes all command-tool aliases plus environment-enumeration, obfuscation,
+  selector, and native helper/binder denial paths;
+  C40 executes the skill-rendered per-call binding, proves ambient private
+  selectors are ignored, rejects foreign raw ids and discoverable derived
+  record keys as host session ids, and pins `CLAUDE_ENV_FILE` byte identity.
 - **isolation**: Stop reading or rewriting the legacy shared plugin-root
   locator, which could be clobbered by another host, plugin version, or
   worktree while a session was still active.

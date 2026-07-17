@@ -79,6 +79,13 @@ const missingSpawn = { ...adversarial, hook_sequence: ['HostStream:Attack:write:
 const missingSpawnVerdict = assertion(controlLine(missingSpawn), { vars: adversarialVars });
 assert.equal(missingSpawnVerdict.pass, false, 'attack evidence without the structured Claude reviewer spawn must be rejected');
 
+const duplicateExpectedHook = strictParse(happy.output);
+duplicateExpectedHook.hook_sequence = ['Contract:ExactMarker', 'Contract:ExactMarker'];
+const duplicateExpectedHookVerdict = assertion(controlLine(duplicateExpectedHook), {
+  vars: { expected_valid: true, expected_host: 'claude', expected_hook: 'Contract:ExactMarker' },
+});
+assert.equal(duplicateExpectedHookVerdict.pass, false, 'expected_hook must occur exactly once');
+
 const catalogue = fs.readFileSync(path.join(root, 'evals', 'session-control', 'scenarios', 'catalog.yaml'), 'utf8');
 assert.ok((catalogue.match(/^- description:/gm) || []).length >= 20);
 process.stdout.write('attestation.test.js: PASS\n');

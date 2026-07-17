@@ -134,12 +134,19 @@ stateDiagram-v2
 Phase transitions are recorded by invoking the log helper:
 
 ```bash
-bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "..."]
+CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" \
+  bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
+  --phase {PHASE} --step {step_id} [--reason "..."]
 ```
 
-Expand the session-specific export in every independently executed shell
-command. The export is bound by `SessionStart`; shared home-directory pointers,
-cached shell variables, and hook-subprocess-only variables are not recovery paths.
+The top-level `/zensu:tdd` Skill receives Claude's native plugin root/data
+substitution and replaces both angle-bracket values before the command runs.
+This supporting document is loaded through `Read`, so it deliberately does not
+assume a second native-substitution pass. Each stateful invocation passes only
+the concrete plugin-data directory to the helper process. The helper reads the
+host-exposed `CLAUDE_CODE_SESSION_ID`, validates it against the private immutable
+record, and derives its internal selectors in that process only. Do not source
+the internal binder, cache its selectors, or use a shared home-directory pointer.
 
 The phase helper mutates workflow state through the Session Control v1 CAS API;
 narrative log lines are appended separately by the skill. Its token- and inode-bound lock generations
@@ -182,19 +189,23 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 
 ---
 
-## 6. Environment Variables
+## 6. Host Environment and Native Placeholders
 
 | Variable | Where set | Effect |
 |----------|-----------|--------|
 | `CLAUDE_AGENT_TYPE` | Legacy environment hint. | Never trusted for Session Control or reviewer authorization. Those decisions use the top-level host hook payload. |
+| `CLAUDE_PLUGIN_ROOT` | Claude native substitution in top-level Skill/Agent content; hook environment. | Supplies the exact installed helper path. The helper independently verifies that path against its own executable. |
+| `CLAUDE_PLUGIN_DATA` | Claude native substitution in top-level Skill/Agent content; hook environment. | Passed to each stateful helper invocation and validated as the private record store. It is not exported by SessionStart. |
+| `CLAUDE_CODE_SESSION_ID` | Claude Bash/hook environment. | Host session id used to locate the private record. It is not secret and grants no authority without all record checks. |
+| `CLAUDE_ENV_FILE` | Claude shell environment propagation mechanism. | Deliberately ignored: SessionStart neither reads nor writes it, and no plugin-private selector is exported through it. |
 | `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the phase-gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
 | `ZENSU_CHAIN` | User sets in shell | Set to `off` to disable the `Stop`-hook review-chain backstop ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) so the main agent may end its turn without completing the review chain. |
 | `ZENSU_HOOK_LOG` | Eval wrapper sets per isolated test dir | Opt-in mirror of denial reasons. Hook writes 4 lines (`TDD-Phase-Gate`, `Current phase:`, `Expected:`, `permissionDecision=deny`) on denial. Empty file in production. |
-| `CLAUDE_PROJECT_DIR` | Claude-code harness | Root for relative state paths. |
+| `CLAUDE_PROJECT_DIR` | Claude host environment/native substitution. | Stable input for fresh registration. Each stateful helper resolves and uses the immutable record's project root even after `CwdChanged`. |
 
 Session Control stores its baseline and all TDD workflow transitions only in
-the immutable session project's `${CLAUDE_PROJECT_DIR}/.zensu/state`. There is
-no caller-controlled state-directory override.
+the immutable record-bound project's `.zensu/state`. There is no
+caller-controlled state-directory override.
 
 ---
 
@@ -211,7 +222,7 @@ flowchart LR
     end
     subgraph Runtime_State[Phase 4: Runtime State]
       State[.zensu/state/<br/>tdd-phase-scv1_hash.json<br/>FSM + reviewRound + stopBlockCount]
-      Context[$CLAUDE_PLUGIN_DATA/session-control/v1/<br/>records/scv1_hash.json]
+      Context[&lt;plugin-data&gt;/session-control/v1/<br/>records/scv1_hash.json]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -233,31 +244,96 @@ immutable session record lives separately under
 `CLAUDE_PLUGIN_DATA/session-control/v1/records/`. State filenames use the
 domain-separated `scv1_…` key, contain the matching session hash, and increment
 a monotonic revision on every atomic mutation. The raw host session id is not
-stored. The review-loop budget (`reviewRound`) and Stop anti-deadlock budget
+persisted, but Claude exposes it as `CLAUDE_CODE_SESSION_ID` in Bash and hook
+subprocesses; it is not a secret or capability on its own. The review-loop
+budget (`reviewRound`) and Stop anti-deadlock budget
 (`stopBlockCount`) are validated bounded integers in this same CAS document. They
 have no independently writable `rounds-*.json` or `*.stopblocks` sidecars.
 
 `SessionStart` is the only context writer. It binds the canonical project and
 executed plugin roots, plugin-data directory, plugin version, source revision,
-and a digest over all runtime-relevant files. Only the top-level interactive
-thread receives `main-v1`. `SubagentStart` reads that same parent record and
-injects `reviewer-readonly-v1` for the three exact bare built-in reviewer names,
-and neutral `host-profile-v1` for every other child, including `zensu-plm`.
-Claude Code cannot
-block a child from SubagentStart, so the first all-tool `PreToolUse` hook
-revalidates session id, plugin root, plugin data, project, record path, and live
-runtime digest before every tool call. Missing identity/context, any mismatch,
-runtime drift, or an attempted context rebind is denied there. Legacy transcript,
-PPID, newest-file, and fallback-id discovery is deliberately ignored; concurrent
-fresh sessions therefore remain isolated even inside the same worktree.
+and a digest over all runtime-relevant files. A fresh `startup`/`clear` may
+create the record; an existing fresh event must still name the bound project.
+`resume`/`compact` require the existing record and preserve its exact project
+and workflow-state bytes even when `CwdChanged` reports a descendant or an
+external detached worktree. Missing or unknown lifecycle sources fail closed.
+Only a host payload with neither `agent_id` nor `agent_type` receives `main-v1`.
+Claude also reports `agent_type` on `SessionStart` for top-level `claude --agent`
+sessions; those events use the same exact reviewer/neutral classifier as
+PreToolUse and can never inherit main authority. Claude reports plugin-shipped
+agents to hooks through their scoped `agent_type`. `SubagentStart` reads that same parent record and
+injects `reviewer-readonly-v1` for the five exact reviewer identities
+`zensu:code-reviewer`, `zensu:review-aspect`, and
+`zensu:review-judge`, plus the dedicated `zensu:plan-review-worker` and
+`zensu:pr-review-worker`. Every other child receives neutral `host-profile-v1`,
+including the plugin-scoped PLM identity `zensu:zensu-plm`; that exact PLM
+identity is nevertheless subject to the strict read-only capability profile
+described below. Claude Code cannot block a child from `SubagentStart`, so the
+first all-tool `PreToolUse` hook revalidates session id, plugin root, plugin
+data, project, record path, and live runtime digest before every tool call. The
+session id plus its private
+plugin-data record bind the session; the record's `project_root` remains the
+immutable anchor for workflow state. By contrast, the host-reported payload
+`cwd` is canonical location metadata, not a session authenticator. It may point
+inside the original project or at an external detached review worktree after a
+`CwdChanged` event, and relative tool paths resolve against that canonical
+current directory without rebinding `project_root`. Missing identity/context,
+any record mismatch, runtime drift, or an attempted control-context rebind is
+denied there. Legacy transcript, PPID, newest-file, and fallback-id discovery is
+deliberately ignored; concurrent fresh sessions therefore remain isolated even
+inside the same worktree.
 
-Built-in reviewers expose only the host's `Read`, `Grep`, and `Glob` tools. The
-PreToolUse gate repeats that exact allowlist after context revalidation: no shell,
-Git, control, MCP, or nested-agent exception exists. Neutral agents retain their
-ordinary host profile but cannot operate on Session Control/workflow-root state,
-perform Zensu mutations, spawn a main-capable agent, or claim `main-v1`.
-Mutation workflows therefore stay in the interactive main thread and are
-entered through the matching skill.
+The read-only Autopilot SessionStart sibling follows the same location split.
+For `resume`/`compact` it resolves the immutable private record before examining
+project state and stays silent when that record is unavailable. Because equal
+SessionStart matchers run concurrently, `startup`/`clear` prefer an already
+valid record and otherwise use Claude's stable `CLAUDE_PROJECT_DIR`; mutable
+payload `cwd` is never an Autopilot-state selector.
+
+The plugin-scoped reviewers and `zensu:zensu-plm` expose only the host's `Read`,
+`Grep`, and `Glob` tools. The `PreToolUse` gate repeats that exact allowlist after
+context revalidation: no shell, Git, control, MCP, or other tool outside that
+trio is available to those identities. Other `host-profile-v1` children retain
+ordinary non-command tools granted by their agent frontmatter and the Claude
+host, including file, Agent/Task, coordination, and report-writing operations
+where the host provides them. They cannot invoke `Bash`, `shell`, `exec`,
+`exec_command`, `terminal`, or `command`: arbitrary command execution cannot be
+confined by scanning its source text for protected tokens. The plugin gate adds
+no separate Agent/Task or nesting policy; Claude's host and agent definition
+decide those capabilities, and Claude currently prevents a subagent from
+spawning another subagent.
+
+The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
+the interactive main thread creates one private lease generation containing
+exact evidence files, exact candidates, and narrow safe subtrees; the lease id
+and plugin-data path never enter the worker prompt. Creation canonicalizes path
+chains, rejects symlink aliases and unsafe roots, and snapshots identity/content
+metadata. Every leased `Read`/`Grep`/`Glob` call revalidates that snapshot, so a
+replacement, symlink swap, or other TOCTOU drift fails closed. The workers have
+no file mutation, task, messaging, nested-agent, Skill, MCP, Web, or command
+capability. They return one raw JSON final message with exact `kind` and `role`;
+`SubagentStop` captures it privately, and collection binds the host worker id,
+kind, role, size, and schema before the main thread may materialize it. The lease
+closes after collection and on every failure path. Repository instructions,
+diffs, source text, overlays, and refinement context remain untrusted data and
+cannot alter this contract.
+
+For every reviewer, PLM, and neutral principal, `Grep`/`Glob` must name a
+concrete safe source/docs/test subtree. A protected root, an ancestor that could
+recursively expose protected descendants, or an omitted path whose effective
+`cwd` is such an ancestor is denied. Grep content regexes may still mention
+terms such as `session-control` or `main-v1`; only traversal roots and path
+filters carry this restriction.
+
+For a neutral child, the gate derives the principal only from the trusted hook
+payload. It denies command execution independently of command text, blocks
+actual canonical access to protected Session Control and workflow-root paths,
+blocks every file mutation below the installed-plugin/private plugin-data roots
+(including symlink, case, and hard-link aliases), and blocks mutating Zensu
+operations. It does not mistake ordinary report text that mentions those terms
+for a control attempt, and tool-input prose cannot claim `main-v1`. Mutating
+Zensu workflows therefore remain in the interactive main thread and are entered
+through the matching skill.
 
 This enforcement boundary is intentionally narrower than an OS sandbox. It
 protects Claude host-tool/subagent workflow decisions and serializes
@@ -265,6 +341,8 @@ project-local CAS mutations, but it cannot make project-local files a
 cryptographic authority against user-authorized build/test programs, external
 processes, or a same-UID process racing after a path check. Untrusted repository
 code requires an OS sandbox/container, separate identity, and restricted mounts.
+Likewise, a third-party MCP tool that exposes arbitrary local execution is
+outside this host-tool boundary and must not be granted to an untrusted agent.
 
 ---
 
@@ -339,7 +417,7 @@ Every `/zensu:tdd` run uses four channels:
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" timestamp "$SESSION_EPOCH")" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
+printf '%s%s\n' "$(CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" timestamp "$SESSION_EPOCH")" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
 ```
 
 The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
@@ -347,7 +425,9 @@ The helper resolves the user's configured `logging.timestampStyle` (`wall`, `rel
 Workflow-state phase transitions are atomic:
 
 ```bash
-bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "{reason}"]
+CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" \
+  bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
+  --phase {PHASE} --step {step_id} [--reason "{reason}"]
 ```
 
 This command updates only the state document through one Session Control v1 CAS

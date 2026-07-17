@@ -29,6 +29,10 @@ through `--plugin-dir`.
    The real `SessionStart` must create the immutable record and bind its
    `plugin_root` to the installed cache. `source_revision` is content-addressed
    and must equal `runtime_digest`; Git SHA remains separate wrapper evidence.
+   SessionStart must not read or write `CLAUDE_ENV_FILE`. Stateful model calls
+   receive Claude's native installed-root/plugin-data substitutions and bind the
+   host-exposed `CLAUDE_CODE_SESSION_ID` to that private record inside the helper
+   process; the session value alone is never accepted as a capability.
 8. The wrapper re-hashes source, installed runtime, stream, configuration, and
    state before emitting exactly one canonical control attestation. The receipt
    records the clean source SHA, source/cache roots, and both runtime digests.
@@ -37,12 +41,82 @@ through `--plugin-dir`.
 
 ## Behavioral proof
 
-- The live suite runs a fresh main session, a real `zensu:review-aspect`, and a
-  normal `zensu:zensu-plm` subagent. The normal child attempts a structured Bash
-  probe and must receive the exact neutral `host-profile-v1` denial; it never
-  receives `main-v1` or Session Control access. The reviewer derives a marker only from injected
-  reviewer context and proves it with a structured `Read`, without reading the
-  Session Control record.
+- The four live scenarios run a fresh main session, a real plugin-scoped
+  `zensu:review-aspect`, a plugin-scoped `zensu:zensu-plm`, and a
+  `general-purpose` child. The reviewer derives its marker only from injected
+  `reviewer-readonly-v1` context and proves it with one structured `Read`,
+  without reading the Session Control record.
+- Offline and installed-plugin contract scenarios also exercise the dedicated
+  `zensu:plan-review-worker` and `zensu:pr-review-worker` identities. Each has
+  only `Read`, `Grep`, and `Glob`; attempts to use file mutation, task,
+  messaging, nested-agent, Skill, MCP, Web, or command tools must receive the
+  structured capability denial. No fallback child identity is accepted.
+- Plan/PR review scenarios create a private exact-file/safe-subtree lease,
+  bind each spawn's host worker id to one exact role, and collect one raw final
+  JSON object with `kind` exactly `plan-review` or `pr-review`. Collection
+  rejects wrong worker ids, roles, kinds, extra prose/fences/keys, malformed or
+  oversized JSON, duplicate role claims, non-identical re-submissions, and
+  output that was not captured through `SubagentStop` (an identical repeated
+  hook delivery is idempotent). PR leases also bind the exact `core.quotePath=false`
+  name-status manifest; quoted or backslash-escaped paths fail closed, and every
+  inline finding must name a changed path from that manifest. Only the main
+  thread materializes accepted results, and close revokes the generation on
+  both success and failure.
+- Lease adversarial cases cover broad/ancestor roots, symlink aliases, path
+  replacement, and TOCTOU drift between create and use. Creation snapshots the
+  canonical identity and content metadata of exact files and roots; every
+  leased `Read`/`Grep`/`Glob` call must revalidate that snapshot and fail closed
+  after drift. Reviewed repository instructions, diffs, overlays, source text,
+  and refinement context are treated as untrusted data and cannot widen the
+  capability or output contract.
+- L03 proves the PLM's neutral-context handoff: `zensu:zensu-plm` derives the
+  project root, runtime digest, and `host-profile-v1` principal only from its
+  actual injected context, then performs exactly one causal use-then-result
+  successful `Read` of the
+  wrapper-owned neutral marker. Its agent definition and the capability gate
+  both restrict it to `Read`, `Grep`, and `Glob`; it receives neither `main-v1`
+  nor Session Control selectors.
+- Every other neutral `host-profile-v1` child is denied all shell/command tool
+  aliases before command contents are considered. This is a capability rule,
+  not a token denylist: `env`, expansion, obfuscated protected paths/helpers,
+  and nested interpreters cannot regain command execution. Non-command host
+  tools remain available subject to the child definition and the remaining
+  protected-path and mutating-Zensu checks.
+- Reviewer, PLM, and neutral `Grep`/`Glob` calls must name a concrete safe
+  subtree. The gate denies both protected roots and ancestors that could
+  recursively expose them, uses canonical `cwd` when a traversal path is
+  omitted, and rejects escaping path filters while leaving Grep content regexes
+  unrestricted.
+- Neutral file mutations deny the complete canonical installed-plugin and
+  private plugin-data trees. Existing path segments are canonicalized for
+  case-insensitive filesystems; symlink and dangling-symlink aliases resolve to
+  the protected target; existing multiply linked mutation targets fail closed.
+  Ordinary project files and external review reports with one link remain
+  available.
+- L04 proves that the neutral profile is not a blanket tool denial. A
+  `general-purpose` `host-profile-v1` child derives its runtime digest and
+  principal only from injected context, performs exactly one successful `Read`
+  of a wrapper-owned marker in an external detached review worktree, and then
+  makes exactly one `Bash {command:"env"}` probe. The real capability gate must
+  return its exact structured command-denial reason. Extra calls, seeded
+  context, wrong marker/principal/command, reordered results, a failed Read, or
+  a successful command all fail evidence validation. Agent/Task availability
+  remains governed by the child's frontmatter and Claude host permissions; the
+  plugin gate adds no separate nesting restriction.
+- The all-tool `PreToolUse` boundary treats canonical `cwd` as trusted host
+  location metadata, not as a session authenticator, and resolves relative tool
+  paths against the current directory even after `CwdChanged`. Session identity
+  remains bound by the session id plus its private plugin-data record, while the
+  record's immutable `project_root` remains the workflow-state anchor.
+- Fresh `startup`/`clear` events create a record only for their stable project;
+  cross-project reuse is rejected. `resume`/`compact` require that record and
+  preserve both its project anchor and baseline CAS bytes after `CwdChanged`.
+  The Autopilot recovery sibling likewise reads continuation state only from the
+  record-bound project and stays silent when the binding is missing.
+- `SessionStart` payloads carrying Claude's documented `agent_type` for
+  `claude --agent` use the same fail-closed principal classifier as PreToolUse:
+  exact reviewers remain read-only and every other explicit identity stays
+  neutral. Only a payload with neither agent field receives `main-v1`.
 - The concurrency suite starts 12 independent wrapper processes. A dynamic
   barrier forms three generations of exactly four distinct live participants;
   each generation releases only after all four are ready. Duplicate identities,

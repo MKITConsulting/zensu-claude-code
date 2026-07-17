@@ -35,35 +35,29 @@ for BASELINE_SID in missing-state "$SID"; do
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
 done
 export STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
-SESSION_RECORDS="$(dirname "$ZENSU_SESSION_CONTEXT")"
 
 # shellcheck disable=SC1090
 source "$PHASE_LIB"
 
 session_key() { node "$CORE" session-key "$1"; }
 activate_session() {
-  local key
-  key="$(session_key "$1")" || return 1
-  export ZENSU_SESSION_KEY="$key"
-  export ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json"
-  [ -f "$ZENSU_SESSION_CONTEXT" ]
+  export CLAUDE_CODE_SESSION_ID="$1"
+  # shellcheck disable=SC1090
+  source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
+  zensu_bind_model_session
 }
 
 gate_decision() {
-  local sid="$1" key context out
-  key="$(session_key "$sid")"
-  context="$SESSION_RECORDS/$key.json"
-  out="$(printf '%s' '{"tool_name":"Edit","session_id":"'"$sid"'","tool_input":{"file_path":"src/app.js"}}' | \
-    ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" bash "$GATE" 2>/dev/null)"
+  local sid="$1" out
+  out="$(printf '%s' '{"hook_event_name":"PreToolUse","tool_name":"Edit","session_id":"'"$sid"'","tool_input":{"file_path":"src/app.js"}}' | \
+    bash "$GATE" 2>/dev/null)"
   case "$out" in *'"permissionDecision":"deny"'*) echo deny ;; *) echo allow ;; esac
 }
 
 stop_decision() {
-  local sid="$1" key context out
-  key="$(session_key "$sid")"
-  context="$SESSION_RECORDS/$key.json"
-  out="$(printf '{"session_id":"%s"}' "$sid" | \
-    ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" bash "$STOP" 2>/dev/null)"
+  local sid="$1" out
+  out="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | \
+    bash "$STOP" 2>/dev/null)"
   case "$out" in *'"decision":"block"'*) echo block ;; *) echo allow ;; esac
 }
 

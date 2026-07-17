@@ -45,6 +45,7 @@ review_payload() {
     const sessionId = process.argv[1];
     const ticket = process.argv[2];
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
       tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",

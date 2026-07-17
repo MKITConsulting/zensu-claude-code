@@ -72,12 +72,12 @@ or `--chain-done`. Capture `RUN_ID`, `ATTEMPT`, `CHAIN_ID`, and `RETURN_STAGE`
 only from the accepted envelope, never from conversation memory.
 
 Before reading or changing files, set
-`ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"`,
+`ROOT="${CLAUDE_PLUGIN_ROOT}"`,
 require the session helper to be a regular file, source
 `$ROOT/hooks/lib/zensu-session.sh`, and resolve the current session with
-`SESSION_ID="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"`.
-That resolver must preserve the immutable Session Control key. Then run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --autopilot-status`, and
+`SESSION_ID="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$ROOT/hooks/lib/zensu-log.sh" --session-key)"`.
+That helper must validate the immutable private Session Control record. Then run
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --autopilot-status`, and
 cross-check the durable result. It must name the captured `runId`, have
 `ownerSessionId` equal to the resolved session, be the current nonterminal
 `stage=TDD_RUNNING` run, and match `tdd.sessionId`, `tdd.attempt`,
@@ -104,11 +104,11 @@ catch anything you missed.
 
 If there are NO changes this session, close only the verified generation. For a
 standalone handoff run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`.
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`.
 For an Autopilot-bound handoff run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>" --outcome no-changes`.
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>" --outcome no-changes`.
 State "No changes — self-review skipped" only after the command succeeds, then
-stop. Every command expands the session-bound `ZENSU_CLAUDE_PLUGIN_ROOT`
+stop. Every command uses Claude's natively rendered `CLAUDE_PLUGIN_ROOT`
 directly inside a quoted shell parameter; never paste its value into shell source.
 
 ## Phase 2: Analyze
@@ -147,10 +147,10 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   EXACTLY ONE fix round, in this main thread, under the still-active PreToolUse
   phase-gate. For each must-fix: RED test, then IMPL, then GREEN (re-enter the
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
-  `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
   Then set the latch with
-  `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
+  `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
   bound handoff, the same captured official envelope exactly once:
@@ -162,7 +162,7 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   - re-invoke the whole `/zensu:tdd` skill (its Phase 6 tail would re-spawn the reviewer).
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
-  1. Standalone handoffs keep the unqualified terminus: run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus. If it fails, stop as stale and do not render a successful final report.
+  1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus. If it fails, stop as stale and do not render a successful final report.
   2. Render the final report (below), then stop.
 
 ### Final report
@@ -199,7 +199,7 @@ changed (if any), and any advisory findings buffered (not fixed). State whether 
 What is left: any deferred suggestions or max-rounds findings requiring manual fix,
 plus the next step. If nothing is open, say so in one line. Close the section with
 the bypass-ledger audit line: run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
 `Gates bypassed during this session: <output>` (the verb echoes `none` when the
 ledger is empty).
 

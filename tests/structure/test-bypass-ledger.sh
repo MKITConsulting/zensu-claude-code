@@ -195,8 +195,10 @@ if [ -n "$SBOX" ]; then
   export CLAUDE_PROJECT_DIR="$SBOX"
   export ZENSU_TEST_PLUGIN_DATA="$SBOX/plugin-data"
   start_session() {
+    local raw_session="$1" project="${2:-$SBOX}"
+    export CLAUDE_PROJECT_DIR="$project"
     # shellcheck disable=SC1091
-    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$1"
+    source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session"
   }
   run_log() {
     STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config.json" \
@@ -219,6 +221,7 @@ if [ -n "$SBOX" ]; then
     ticket="$(run_log --review-ticket --session "$sid" 2>/dev/null)" || return 1
     SID_VALUE="$sid" TICKET="$ticket" node -e '
       process.stdout.write(JSON.stringify({
+        hook_event_name: "PostToolUse",
         session_id: process.env.SID_VALUE,
         tool_name: "Agent",
         tool_input: {
@@ -281,7 +284,7 @@ if [ -n "$SBOX" ]; then
 
   start_session hx
   run_log --tdd-begin --session hx >/dev/null 2>&1
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Edit","tool_input":{"file_path":"src/x.js"}}' | run_hook_env ZENSU_TDD_GATE pre-edit-tdd-reminder.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Edit","tool_input":{"file_path":"src/x.js"}}' | run_hook_env ZENSU_TDD_GATE pre-edit-tdd-reminder.sh)"
   L1="$(run_log --bypass-list --session hx 2>/dev/null)"
   if [ "$L1" = "ZENSU_TDD_GATE" ]; then
     check "P5d env escape records through the real tdd gate" PASS
@@ -293,7 +296,7 @@ if [ -n "$SBOX" ]; then
     *)          check "P5e bypassed tdd gate still allows" PASS ;;
   esac
 
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf x >> src/y.js"}}' | run_hook pre-bash-source-write-gate.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf x >> src/y.js"}}' | run_hook pre-bash-source-write-gate.sh)"
   L2="$(run_log --bypass-list --session hx 2>/dev/null)"
   if [ "$L2" = "ZENSU_TDD_GATE, ZENSU_BASH_WRITE_GATE" ]; then
     check "P5f inline prefix records through the source-write gate (exact)" PASS
@@ -305,7 +308,7 @@ if [ -n "$SBOX" ]; then
     *)          check "P5g inline-bypassed write still allows" PASS ;;
   esac
 
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=\"off\" printf x >> src/q.js"}}' | run_hook pre-bash-source-write-gate.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_BASH_WRITE_GATE=\"off\" printf x >> src/q.js"}}' | run_hook pre-bash-source-write-gate.sh)"
   L3="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$OUT" in *'"deny"'*) QUOTED_ALLOWED=no ;; *) QUOTED_ALLOWED=yes ;; esac
   if [ "$QUOTED_ALLOWED" = "yes" ] && [ "$L3" = "ZENSU_TDD_GATE, ZENSU_BASH_WRITE_GATE" ]; then
@@ -314,14 +317,14 @@ if [ -n "$SBOX" ]; then
     check "P5h QUOTED inline prefix is honored AND recorded (got: $L3, allowed: $QUOTED_ALLOWED)" FAIL
   fi
 
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"PostToolUse","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PostToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
   L4="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$L4" in
     *ZENSU_TEST_WITNESS*) check "P5i witness env escape records (armed session)" PASS ;;
     *)                    check "P5i witness env escape records (got: $L4)" FAIL ;;
   esac
 
-  OUT="$(printf '%s' '{"session_id":"hx"}' | run_hook_env ZENSU_CHAIN stop-chain-enforcer.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"Stop","session_id":"hx"}' | run_hook_env ZENSU_CHAIN stop-chain-enforcer.sh)"
   L5="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$L5" in
     *ZENSU_CHAIN*) check "P5j enforcer env escape records (armed session)" PASS ;;
@@ -332,14 +335,14 @@ if [ -n "$SBOX" ]; then
     *)           check "P5k bypassed enforcer still allows the stop" PASS ;;
   esac
 
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Bash","tool_input":{"command":"zensu products create --name X"}}' | run_hook_env ZENSU_MCP_GATE pre-bash-zensu-gate.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"zensu products create --name X"}}' | run_hook_env ZENSU_MCP_GATE pre-bash-zensu-gate.sh)"
   L6="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$L6" in
     *ZENSU_MCP_GATE*) check "P5l zensu-gate env escape records (invocation present)" PASS ;;
     *)                check "P5l zensu-gate env escape records (got: $L6)" FAIL ;;
   esac
 
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_MCP_GATE=off zensu products create --name X && zensu products list"}}' | run_hook pre-bash-zensu-gate.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Bash","tool_input":{"command":"ZENSU_MCP_GATE=off zensu products create --name X && zensu products list"}}' | run_hook pre-bash-zensu-gate.sh)"
   case "$OUT" in
     *'"deny"'*) check "P5m mixed command: read segment still allowed" FAIL ;;
     *)          check "P5m mixed command: read segment still allowed" PASS ;;
@@ -352,7 +355,7 @@ if [ -n "$SBOX" ]; then
 
   start_session zdx
   run_log --tdd-begin --session zdx >/dev/null 2>&1
-  OUT="$(printf '%s' '{"session_id":"zdx","tool_name":"Bash","tool_input":{"command":"ZENSU_MCP_GATE=off zensu features create A; zensu products create B"}}' | run_hook pre-bash-zensu-gate.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"zdx","tool_name":"Bash","tool_input":{"command":"ZENSU_MCP_GATE=off zensu features create A; zensu products create B"}}' | run_hook pre-bash-zensu-gate.sh)"
   L7b="$(run_log --bypass-list --session zdx 2>/dev/null)"
   case "$OUT" in
     *'"deny"'*)
@@ -366,7 +369,7 @@ if [ -n "$SBOX" ]; then
   esac
 
   start_session hx
-  OUT="$(printf '%s' '{"session_id":"hx","tool_name":"Write","tool_input":{"file_path":"src/app.js","content":"const x = 1;"}}' | run_hook_env ZENSU_SECRET_SCAN pre-write-secret-scan.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"hx","tool_name":"Write","tool_input":{"file_path":"src/app.js","content":"const x = 1;"}}' | run_hook_env ZENSU_SECRET_SCAN pre-write-secret-scan.sh)"
   L8="$(run_log --bypass-list --session hx 2>/dev/null)"
   case "$L8" in
     *ZENSU_SECRET_SCAN*) check "P5o secret-scan env escape records" PASS ;;
@@ -380,7 +383,7 @@ if [ -n "$SBOX" ]; then
 
   start_session hh
   run_log --tdd-begin --session hh >/dev/null 2>&1
-  PAYLOAD_HD='{"session_id":"hh","tool_name":"Bash","tool_input":{"command":"cat > note.md <<'\''EOF'\''\nfor one-offs use ZENSU_SECRET_SCAN=off inline\nEOF"}}'
+  PAYLOAD_HD='{"hook_event_name":"PreToolUse","session_id":"hh","tool_name":"Bash","tool_input":{"command":"cat > note.md <<'\''EOF'\''\nfor one-offs use ZENSU_SECRET_SCAN=off inline\nEOF"}}'
   if printf '%s' "$PAYLOAD_HD" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{JSON.parse(s);})' 2>/dev/null; then
     check "P5q0 heredoc payload is valid JSON (non-vacuous)" PASS
   else
@@ -393,7 +396,7 @@ if [ -n "$SBOX" ]; then
   else
     check "P5q heredoc body mentioning the escape does NOT record (got: $L9)" FAIL
   fi
-  PAYLOAD_MENTION='{"session_id":"hh","tool_name":"Bash","tool_input":{"command":"git commit -m \"docs: use ZENSU_SECRET_SCAN=off inline\""}}'
+  PAYLOAD_MENTION='{"hook_event_name":"PreToolUse","session_id":"hh","tool_name":"Bash","tool_input":{"command":"git commit -m \"docs: use ZENSU_SECRET_SCAN=off inline\""}}'
   OUT="$(printf '%s' "$PAYLOAD_MENTION" | run_hook pre-write-secret-scan.sh)"
   L9b="$(run_log --bypass-list --session hh 2>/dev/null)"
   if [ "$L9b" = "none" ]; then
@@ -403,7 +406,7 @@ if [ -n "$SBOX" ]; then
   fi
 
   start_session coldfx
-  OUT="$(printf '%s' '{"session_id":"coldfx","tool_name":"Edit","tool_input":{"file_path":"src/x.js"}}' | run_hook_env ZENSU_TDD_GATE pre-edit-tdd-reminder.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PreToolUse","session_id":"coldfx","tool_name":"Edit","tool_input":{"file_path":"src/x.js"}}' | run_hook_env ZENSU_TDD_GATE pre-edit-tdd-reminder.sh)"
   L10="$(run_log --bypass-list --session coldfx 2>/dev/null)"
   if [ "$L10" = "none" ]; then
     check "P5r inactive session records nothing (tdd gate)" PASS
@@ -411,7 +414,7 @@ if [ -n "$SBOX" ]; then
     check "P5r inactive session records nothing (got: $L10)" FAIL
   fi
   start_session coldw
-  OUT="$(printf '%s' '{"session_id":"coldw","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
+  OUT="$(printf '%s' '{"hook_event_name":"PostToolUse","session_id":"coldw","tool_name":"Bash","tool_input":{"command":"ls"},"tool_response":{"stdout":"x"}}' | run_hook_env ZENSU_TEST_WITNESS post-bash-witness.sh)"
   L11="$(run_log --bypass-list --session coldw 2>/dev/null)"
   if [ "$L11" = "none" ]; then
     check "P5s inactive session records nothing (witness)" PASS
@@ -489,9 +492,9 @@ if [ -n "$SBOX" ]; then
   git -C "$DWSBOX" config commit.gpgsign false
   printf 'x\n' > "$DWSBOX/src/t.js"
   git -C "$DWSBOX" add -A 2>/dev/null && git -C "$DWSBOX" commit -qm base 2>/dev/null
-  start_session dwx
+  start_session dwx "$DWSBOX"
   run_log --tdd-begin --session dwx >/dev/null 2>&1
-  DW_PAYLOAD="$(printf '{"session_id":"dwx","tool_name":"Bash","cwd":%s,"tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf a >> ok.js; printf b >> src/t.js"}}' "$(printf '%s' "$DWSBOX" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(s)))')")"
+  DW_PAYLOAD="$(printf '{"hook_event_name":"PreToolUse","session_id":"dwx","tool_name":"Bash","cwd":%s,"tool_input":{"command":"ZENSU_BASH_WRITE_GATE=off printf a >> ok.js; printf b >> src/t.js"}}' "$(printf '%s' "$DWSBOX" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>process.stdout.write(JSON.stringify(s)))')")"
   OUT="$(printf '%s' "$DW_PAYLOAD" | STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$DWSBOX" ZENSU_CONFIG="$SBOX/config.json" ZENSU_BSWGATE_TEMP_DIRS=/nonexistent-temp-root ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh" 2>/dev/null)"
   L14="$(run_log --bypass-list --session dwx 2>/dev/null)"
   case "$OUT" in

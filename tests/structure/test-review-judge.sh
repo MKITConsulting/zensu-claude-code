@@ -137,10 +137,13 @@ else
 fi
 
 # P5 — README + workflow doc
-if grep -qxF '### Agents (4)' "$README" && grep -qF '| **review-judge** |' "$README"; then
-  check "P5a README agents table is (4) with the judge row" PASS
+if grep -qxF '### Agents (6)' "$README" \
+   && grep -qF '| **review-judge** |' "$README" \
+   && grep -qF '| **plan-review-worker** |' "$README" \
+   && grep -qF '| **pr-review-worker** |' "$README"; then
+  check "P5a README agents table is (6) with judge and dedicated review workers" PASS
 else
-  check "P5a README agents table is (4) with the judge row" FAIL
+  check "P5a README agents table is (6) with judge and dedicated review workers" FAIL
 fi
 if grep -qF '| `reviewJudge` |' "$README"; then
   check "P5b README config table carries the reviewJudge row" PASS

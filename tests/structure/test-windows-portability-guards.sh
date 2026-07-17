@@ -11,7 +11,7 @@ WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
-ADAPTER="$ROOT/hooks/lib/claude-session-control-v1.js"
+BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -50,7 +50,8 @@ else
 fi
 
 if grep -qF 'dangling symlink leaf' "$REVIEWER" \
-  && grep -qF 'neutral apply_patch Move to outside project is denied' "$REVIEWER" \
+  && grep -qF 'neutral apply_patch Move to external host path is allowed' "$REVIEWER" \
+  && grep -qF 'neutral apply_patch Move to workflow state is denied' "$REVIEWER" \
   && grep -qF 'workflow-state symlink rejection skipped only on Windows' "$CORRUPTION" \
   && grep -qF 'SKIP POSIX 0700 assertion on Windows' "$MARKETPLACE"; then
   check "security cases remain present behind only their narrow portability guards" PASS
@@ -142,9 +143,9 @@ else
 fi
 
 if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$CORE" \
-  && grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$ADAPTER" \
   && grep -qF 'pathBefore && !sameFileIdentity(pathBefore, before)' "$CORE" \
-  && grep -qF '!sameFileIdentity(pathBefore, opened)' "$ADAPTER"; then
+  && grep -qF "const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });" "$BINDER" \
+  && grep -qF 'recordStat.isSymbolicLink() || !recordStat.isFile() || recordStat.nlink !== 1' "$BINDER"; then
   check "Session Control brackets Windows opens with path and descriptor identity" PASS
 else
   check "Session Control brackets Windows opens with path and descriptor identity" FAIL

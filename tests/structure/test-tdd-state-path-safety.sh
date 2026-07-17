@@ -28,7 +28,6 @@ start_session() {
   mkdir -p "$project"
   export CLAUDE_PROJECT_DIR="$project"
   export ZENSU_TEST_PLUGIN_DATA="$project/.session-control-test/plugin-data"
-  export ZENSU_TEST_ENV_FILE="$project/.session-control-test/${raw_sid}.env"
   # shellcheck disable=SC1090
   source "$BASELINE" "$raw_sid" || return 1
   CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT"; export CLAUDE_PROJECT_DIR
@@ -42,9 +41,14 @@ run_begin() {
 }
 
 run_post() {
-  local sid="$1" ticket="$2"
-  SID="$sid" TICKET="$ticket" node -e '
-    process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_input:{
+  local sid="$1" ticket="$2" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      session_id:process.env.SID,tool_input:{
       subagent_type:"zensu:code-reviewer",
       prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
     }}));

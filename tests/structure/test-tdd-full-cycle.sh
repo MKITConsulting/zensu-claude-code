@@ -40,8 +40,14 @@ PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
 SID_RAW="full-cycle"
 # shellcheck disable=SC1091
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID_RAW"
-PROJ="$ZENSU_PROJECT_ROOT"; export CLAUDE_PROJECT_DIR="$PROJ"
-SID="$ZENSU_SESSION_KEY"
+PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
+SID_KEY="$ZENSU_SESSION_KEY"
+# Production model commands receive only Claude's native component data and raw
+# host session id. Keep the helper-private selectors out of this parent shell so
+# every zensu-log invocation below has to bind its own process from the record.
+unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+  ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+export CLAUDE_PLUGIN_DATA="$PLUGIN_DATA"
 STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
 export ZENSU_CONFIG="$STATE_DIR/strict-config.json"   # tddImplementation:true (strict gate) + all other defaults (selfReview on)
 printf '%s' '{"hooks":{"tddImplementation":true}}' > "$ZENSU_CONFIG"
@@ -49,11 +55,19 @@ unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN 2>/dev/nul
 cleanup() { rm -rf "$PROJ"; }
 trap cleanup EXIT
 
-SID_KEY="$SID"
 SF="$STATE_DIR/tdd-phase-${SID_KEY}.json"
 
-PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID"'"}'
-TEST='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'"$SID"'"}'
+PROD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID_RAW"'"}'
+TEST='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'"$SID_RAW"'"}'
+
+LOG_HELPER_Q="$(printf '%q' "$LOG")"
+PLUGIN_DATA_Q="$(printf '%q' "$PLUGIN_DATA")"
+EXPECTED_LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+
+model_log() {
+  CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SID_RAW" \
+    bash "$LOG" "$@"
+}
 
 gate() {  # echoes allow|deny for a payload
   printf '%s' "$1" | bash "$GATE" 2>/dev/null | node -e '
@@ -62,24 +76,25 @@ gate() {  # echoes allow|deny for a payload
       try{const j=JSON.parse(s);console.log(j.hookSpecificOutput&&j.hookSpecificOutput.permissionDecision==="deny"?"deny":"allow")}
       catch(_){console.log("allow")}});'
 }
-stop_dec() { printf '%s' '{"session_id":"'"$SID"'"}' | bash "$STOP" 2>/dev/null | node -e '
+stop_dec() { printf '%s' '{"hook_event_name":"Stop","session_id":"'"$SID_RAW"'"}' | bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
-stop_reason() { printf '%s' '{"session_id":"'"$SID"'"}' | bash "$STOP" 2>/dev/null | node -e '
+stop_reason() { printf '%s' '{"hook_event_name":"Stop","session_id":"'"$SID_RAW"'"}' | bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).reason||"")}catch(_){console.log("")}});'; }
-phase_step() { bash "$LOG" --phase "$1" --step "$2" --session "$SID" >/dev/null 2>&1; }
+phase_step() { model_log --phase "$1" --step "$2" >/dev/null 2>&1; }
 
 echo "== Phase 0: plan approval -> begin =="
 [ "$(gate "$PROD")" = "allow" ] && check "0a pre-begin: gate is a pass-through (no chain-state)" PASS || check "0a pre-begin pass-through" FAIL
 grep -qF "skill='zensu:tdd'" "$PLANHOOK" && check "0b plan-approved hook routes to /zensu:tdd skill" PASS || check "0b plan-approved wiring" FAIL
-bash "$LOG" --tdd-begin --session "$SID" >/dev/null
+model_log --tdd-begin >/dev/null
 [ "$(gate "$PROD")" = "deny" ] && check "0c after --tdd-begin: active + UNINITIALIZED -> prod deny" PASS || check "0c begin activates gate" FAIL
 GATE_DIRECTIVE="$(printf '%s' "$PROD" | bash "$GATE" 2>/dev/null)"
-printf '%s' "$GATE_DIRECTIVE" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session' \
-  && check "0d pre-edit deny output positively pins the fail-closed helper guard" PASS \
-  || check "0d pre-edit deny output lacks the fail-closed helper guard" FAIL
+printf '%s' "$GATE_DIRECTIVE" | grep -qF "$EXPECTED_LOG_COMMAND" \
+  && ! printf '%s' "$GATE_DIRECTIVE" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' \
+  && check "0d pre-edit deny output pins the native per-call helper binding" PASS \
+  || check "0d pre-edit deny output lacks the native per-call helper binding" FAIL
 
 echo "== Step S1: RED -> GREEN =="
 phase_step RED_WRITE S1
@@ -113,7 +128,7 @@ phase_step REFACTOR S2
 [ "$(gate "$TEST")" = "allow" ] && check "R2 REFACTOR: test edit allow" PASS || check "R2 REFACTOR test allow" FAIL
 
 echo "== Witness mid-cycle (active session) =="
-echo '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS" >/dev/null 2>&1
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID_RAW"'"}' | bash "$WITNESS" >/dev/null 2>&1
 WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
 W1_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
 { [ -f "$WLOG" ] && printf '%s' "$W1_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W1_LINE" | grep -qF 'tail="ok"'; } \
@@ -121,7 +136,7 @@ W1_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
 
 # W1b: production-shaped tool_response (NO exit_code, as the real Claude Code Bash payload) ->
 # exit=? but tail= still captured from real stdout. The reality the exit_code mocks can't show.
-echo '{"tool_input":{"command":"node --test"},"tool_response":{"stdout":"pass 1","stderr":"","interrupted":false,"isImage":false},"session_id":"'"$SID"'"}' | bash "$WITNESS" >/dev/null 2>&1
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"node --test"},"tool_response":{"stdout":"pass 1","stderr":"","interrupted":false,"isImage":false},"session_id":"'"$SID_RAW"'"}' | bash "$WITNESS" >/dev/null 2>&1
 W1B_LINE="$(grep -F 'cmd="node --test"' "$WLOG" 2>/dev/null | head -n1)"
 { printf '%s' "$W1B_LINE" | grep -qF 'exit=?' && printf '%s' "$W1B_LINE" | grep -qF 'tail="' && printf '%s' "$W1B_LINE" | grep -qF 'pass 1'; } \
   && check "W1b production payload (no exit_code) -> exit=? + tail= captured" PASS || check "W1b reality-shape tail got='${W1B_LINE}'" FAIL
@@ -129,20 +144,22 @@ W1B_LINE="$(grep -F 'cmd="node --test"' "$WLOG" 2>/dev/null | head -n1)"
 echo "== Terminus: implComplete -> review -> self-review -> done =="
 # Mid-TDD (not yet complete): Stop must allow.
 [ "$(stop_dec)" = "allow" ] && check "T0 mid-cycle (!implComplete): Stop allows" PASS || check "T0 mid-cycle allow" FAIL
-bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+model_log --tdd-complete >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T1 implComplete + !codeReviewDone: Stop BLOCKS" PASS || check "T1 terminus block" FAIL
 case "$(stop_reason)" in *"zensu:code-reviewer"*) check "T2 block reason forces zensu:code-reviewer" PASS ;; *) check "T2 reason code-reviewer" FAIL ;; esac
 REVIEW_STOP_REASON="$(stop_reason)"
-if printf '%s' "$REVIEW_STOP_REASON" | grep -qF "$LOG" \
-  && ! printf '%s' "$REVIEW_STOP_REASON" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
-  check "T2b reviewer Stop directive embeds the concrete session plugin root" PASS
+if printf '%s' "$REVIEW_STOP_REASON" | grep -qF "$EXPECTED_LOG_COMMAND" \
+  && ! printf '%s' "$REVIEW_STOP_REASON" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT'; then
+  check "T2b reviewer Stop directive embeds the native per-call helper binding" PASS
 else
-  check "T2b reviewer Stop directive lacks the concrete helper path" FAIL
+  check "T2b reviewer Stop directive lacks the native per-call helper binding" FAIL
 fi
 # code-reviewer Agent completes -> post-review routes in-thread + counts a round
-REVIEW_TICKET="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
-CTX="$(SID_VALUE="$SID" TICKET="$REVIEW_TICKET" node -e '
+REVIEW_TICKET="$(model_log --review-ticket 2>/dev/null)"
+CTX="$(SID_VALUE="$SID_RAW" TICKET="$REVIEW_TICKET" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
     tool_input: {
       subagent_type: "zensu:code-reviewer",
       prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
@@ -151,13 +168,13 @@ CTX="$(SID_VALUE="$SID" TICKET="$REVIEW_TICKET" node -e '
   }));
 ' | bash "$POSTREV" 2>/dev/null | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}})')"
 echo "$CTX" | grep -q "/zensu:tdd" && check "T3 post-review routes fixes in-thread (/zensu:tdd)" PASS || check "T3 in-thread routing" FAIL
-if printf '%s' "$CTX" | grep -qF "$LOG" \
-  && ! printf '%s' "$CTX" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
-  check "T3b post-review output embeds the concrete session plugin root" PASS
+if printf '%s' "$CTX" | grep -qF "$EXPECTED_LOG_COMMAND" \
+  && ! printf '%s' "$CTX" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT'; then
+  check "T3b post-review output embeds the native per-call helper binding" PASS
 else
-  check "T3b post-review output lacks the concrete helper path" FAIL
+  check "T3b post-review output lacks the native per-call helper binding" FAIL
 fi
-RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$SID" node -e '
+RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$SID_RAW" node -e '
   try {
     const core=require(process.env.CONTROL_CORE);
     console.log(core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SID}).reviewRound);
@@ -165,20 +182,18 @@ RCOUNT="$(CONTROL_CORE="$SESSION_CORE" PROJECT_ROOT="$CLAUDE_PROJECT_DIR" SID="$
 ')"
 [ "$RCOUNT" = "1" ] && check "T4 integrated reviewRound increments (1)" PASS || check "T4 reviewRound=1 (got $RCOUNT)" FAIL
 # reviewer PASS -> code-review chain converges
-bash "$LOG" --code-review-done --claimed-review-ticket "$REVIEW_TICKET" \
-  --session "$SID" >/dev/null
+model_log --code-review-done --claimed-review-ticket "$REVIEW_TICKET" >/dev/null
 [ "$(stop_dec)" = "block" ] && check "T5 codeReviewDone + !chainDone: Stop still BLOCKS" PASS || check "T5 pre-self-review block" FAIL
 case "$(stop_reason)" in *"zensu:self-review"*) check "T6 block reason now forces skill='zensu:self-review'" PASS ;; *) check "T6 reason self-review" FAIL ;; esac
 SELF_REVIEW_STOP_REASON="$(stop_reason)"
-if printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF "$LOG" \
-  && ! printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF '${CLAUDE_PLUGIN_ROOT}'; then
-  check "T6b self-review Stop directive embeds the concrete session plugin root" PASS
+if printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF "$EXPECTED_LOG_COMMAND" \
+  && ! printf '%s' "$SELF_REVIEW_STOP_REASON" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT'; then
+  check "T6b self-review Stop directive embeds the native per-call helper binding" PASS
 else
-  check "T6b self-review Stop directive lacks the concrete helper path" FAIL
+  check "T6b self-review Stop directive lacks the native per-call helper binding" FAIL
 fi
 # self-review owns the terminus
-bash "$LOG" --chain-done --claimed-review-ticket "$REVIEW_TICKET" \
-  --session "$SID" >/dev/null
+model_log --chain-done --claimed-review-ticket "$REVIEW_TICKET" >/dev/null
 [ "$(stop_dec)" = "allow" ] && check "T7 chainDone: Stop ALLOWS (cycle complete)" PASS || check "T7 terminus allow" FAIL
 
 echo "----"

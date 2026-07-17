@@ -42,19 +42,21 @@ for section in \
     || check "R3 section present: $section" FAIL
 done
 
-if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"' "$SKILL_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$SKILL_MD" \
+if grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG"' "$SKILL_MD" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
   && ! grep -qF '.zensu/plugin-root' "$SKILL_MD"; then
-  check "R4 helper resolution uses only the fail-closed session export" PASS
+  check "R4 helper resolution uses native root/data binding without legacy exports" PASS
 else
-  check "R4 helper resolution uses only the fail-closed session export" FAIL
+  check "R4 helper resolution uses native root/data binding without legacy exports" FAIL
 fi
 
-if grep -qF 'SESSION_ID="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"' "$SKILL_MD" \
-  && grep -qF 'REVIEW_TICKET="$(bash "$LOG" --current-review-ticket)"' "$SKILL_MD"; then
-  check "R5 Phase 1 binds the current Session Control principal and consumed ticket" PASS
+if grep -qF 'SESSION_ID="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --session-key)"' "$SKILL_MD" \
+  && grep -qF 'REVIEW_TICKET="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --current-review-ticket)"' "$SKILL_MD" \
+  && grep -qF 'Do not source `zensu-session.sh` or invoke its binder directly.' "$SKILL_MD"; then
+  check "R5 Phase 1 binds session and ticket inside each stateful helper process" PASS
 else
-  check "R5 Phase 1 binds the current Session Control principal and consumed ticket" FAIL
+  check "R5 Phase 1 binds session and ticket inside each stateful helper process" FAIL
 fi
 
 if grep -qF -- '--review-rearm --session "$SESSION_ID"' "$SKILL_MD" \

@@ -37,7 +37,7 @@ tdd_write_phase "$SID_A" "S3" "RED_WRITE" ""                  >/dev/null
 tdd_write_phase "$SID_A" "S3" "RED_FAIL"  "assertion mismatch" >/dev/null
 tdd_write_phase "$SID_A" "S3" "IMPL"      ""                  >/dev/null
 
-PAYLOAD_A='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_A'"}'
+PAYLOAD_A='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_A'"}'
 OUT_A=$(echo "$PAYLOAD_A" | "$SCRIPT" 2>/dev/null)
 if [ -z "$OUT_A" ]; then
   check "IMPL after RED_FAIL for current step: allowed on production file" PASS
@@ -54,7 +54,7 @@ tdd_write_phase "$SID_B" "S3" "IMPL"      ""                  >/dev/null
 tdd_write_phase "$SID_B" "S3" "GREEN_PASS" ""                 >/dev/null
 tdd_write_phase "$SID_B" "S4" "IMPL"      ""                  >/dev/null
 
-PAYLOAD_B='{"tool_name":"Edit","tool_input":{"file_path":"src/bar.ts"},"session_id":"'$SID_B'"}'
+PAYLOAD_B='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/bar.ts"},"session_id":"'$SID_B'"}'
 OUT_B=$(echo "$PAYLOAD_B" | "$SCRIPT" 2>/dev/null)
 DECISION_B=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }
@@ -72,7 +72,7 @@ source "$BASELINE" "$SID_C"
 tdd_write_phase "$SID_C" "S3" "RED_WRITE" "" >/dev/null
 tdd_write_phase "$SID_C" "S3" "IMPL"      "" >/dev/null
 
-PAYLOAD_C='{"tool_name":"Edit","tool_input":{"file_path":"src/baz.ts"},"session_id":"'$SID_C'"}'
+PAYLOAD_C='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/baz.ts"},"session_id":"'$SID_C'"}'
 OUT_C=$(echo "$PAYLOAD_C" | "$SCRIPT" 2>/dev/null)
 DECISION_C=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }

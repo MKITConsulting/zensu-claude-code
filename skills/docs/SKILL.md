@@ -122,12 +122,12 @@ in `docs/documentation-guide.md`.
 ## Workflow
 
 **Workflow gate (first + last action).** As the VERY FIRST action, run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs"`.
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "link_docs"`.
 This marks the Zensu product workflow active so the CLI write-gate
 (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link docs` command
 as workflow-driven rather than freelance and does not block it. As the VERY LAST action (after the final phase,
 or on early exit), run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --workflow-end`.
+`CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`.
 
 The single Zensu **mutation** (`zensu link docs`) runs in
 **this main thread** under that marker. The Phase 3 authoring fan-out uses

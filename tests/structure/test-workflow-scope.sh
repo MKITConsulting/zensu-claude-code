@@ -3,6 +3,7 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 SESSION_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
+BASELINE="${CLAUDE_PLUGIN_ROOT}/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -15,17 +16,14 @@ SD="$(mktemp -d -t wfscope-XXXXXX)"
 SID_DIRECT="scope-direct"
 PROJECT="$SD/project"
 PLUGIN_DATA="$SD/plugin-data"
-ENV_FILE="$SD/session.env"
 mkdir -p "$PROJECT" "$PLUGIN_DATA"
-: >"$ENV_FILE"
-PAYLOAD="$(SID="$SID_DIRECT" PROJECT="$PROJECT" node -e '
-  process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",session_id:process.env.SID,cwd:process.env.PROJECT}));
-')"
-printf '%s' "$PAYLOAD" | CLAUDE_PLUGIN_ROOT="$CLAUDE_PLUGIN_ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
-  CLAUDE_ENV_FILE="$ENV_FILE" bash "$CLAUDE_PLUGIN_ROOT/hooks/session-start-session-control.sh" >/dev/null
-# shellcheck disable=SC1090
-source "$ENV_FILE"
 export CLAUDE_PLUGIN_ROOT
+export CLAUDE_PROJECT_DIR="$PROJECT"
+export ZENSU_TEST_PLUGIN_DATA="$PLUGIN_DATA"
+# Exercise the same fresh SessionStart plus per-Bash native binding as real
+# model-side workflow commands. No session selectors come from CLAUDE_ENV_FILE.
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_DIRECT" || exit 1
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 tdd_workflow_begin "$SID_DIRECT" "link_test,create_revision"
 SF="$(tdd_state_file "$SID_DIRECT")"

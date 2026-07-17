@@ -33,7 +33,7 @@ exception is removal of an expired `pending-review.json` you explicitly confirm.
   or invokes `/zensu:doctor`.
 - A hook or gate is not firing and you need to see whether it is wired,
   configured, or authenticated.
-- After onboarding a new machine or switching worktrees (`ZENSU_PROJECT_ROOT`
+- After onboarding a new machine or switching worktrees (native project-root
   surprises, invalid CAS workflow state).
 - Before a release, to confirm `plugin.json` and `marketplace.json` versions agree.
 
@@ -54,7 +54,7 @@ files. A configured MCP row remains a warning until the loaded MCP tools are con
 
 ## Phase 1: Run the diagnostics
 
-Use the validated, session-bound `ZENSU_CLAUDE_PLUGIN_ROOT` export directly.
+Use Claude's natively rendered `${CLAUDE_PLUGIN_ROOT}` directly.
 Before invoking the helper, inspect the tools
 already available in this Claude Code session — do not call the browser. Runtime readiness
 requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
@@ -71,7 +71,7 @@ Never paste the root value into shell source.
 
 ```bash
 READY=0
-ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"
+ROOT="${CLAUDE_PLUGIN_ROOT}"
 case "$ROOT" in /*) ;; *) ROOT="" ;; esac
 if [ -z "$ROOT" ] || [ -L "$ROOT" ] || [ ! -d "$ROOT" ] \
   || [ -L "$ROOT/hooks/lib/zensu-doctor.sh" ] || [ ! -f "$ROOT/hooks/lib/zensu-doctor.sh" ]; then
@@ -80,9 +80,9 @@ if [ -z "$ROOT" ] || [ -L "$ROOT" ] || [ ! -d "$ROOT" ] \
     '  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' \
     '' 'Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.'
 elif [ "$READY" = 1 ]; then
-  ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
+  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
 else
-  bash "$ROOT/hooks/lib/zensu-doctor.sh"
+  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"
 fi
 ```
 
@@ -128,7 +128,8 @@ Only when the **Session state** block explicitly reports
 `pending-review.json ... expired`, you MAY offer to remove that one exact file:
 
 1. Derive the current worktree's exact state directory without scanning:
-   `${ZENSU_PROJECT_ROOT:-${CLAUDE_PROJECT_DIR:?project root unavailable}}/.zensu/state`.
+   `${CLAUDE_PROJECT_DIR}/.zensu/state`; Claude concretizes the native project
+   placeholder when this skill is loaded.
    Reject a missing directory or any symlink.
 2. Set `PENDING="$STATE_DIR/pending-review.json"`. Require a regular,
    non-symlink file. Show this exact path; do not list the directory.

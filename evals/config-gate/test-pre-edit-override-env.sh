@@ -27,7 +27,7 @@ source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 source "$BASELINE" s-override-1
 tdd_set_flag "s-override-1" active true >/dev/null 2>&1
 
-PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-override-1"}'
+PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-override-1"}'
 
 unset ZENSU_TDD_GATE
 OUT_BASELINE=$(echo "$PAYLOAD" | "$SCRIPT" 2>/dev/null)

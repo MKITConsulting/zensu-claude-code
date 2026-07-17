@@ -71,7 +71,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
-| Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `ZENSU_CLAUDE_PLUGIN_ROOT`, `ZENSU_SESSION_KEY`, `ZENSU_SESSION_CONTEXT`, `ZENSU_RUNTIME_DIGEST`, `ZENSU_PROJECT_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
+| Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `README.md` § Claude Environment and Native Placeholders |
 | TDD FSM details, phase transitions, gate logic, four-channel logging | `docs/tdd-manager-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
 | Hook scripts (what each does, when it fires) | `README.md` § Hooks table + `hooks/<script>.sh` source |

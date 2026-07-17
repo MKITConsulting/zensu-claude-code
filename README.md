@@ -182,23 +182,40 @@ other's session state.
 
 Both are handled by Session Control v1:
 
-- **Spawned agents never block on `Stop`.** The enforcer reads the hook-input `agent_id`
-  (present only inside a spawned subagent) and no-ops for Task/Agent reviewers **and**
-  Workflow workers. Only the genuine interactive thread enforces. `ZENSU_FORCE_MAIN=1`
-  may re-enable the Stop backstop for debugging, but it cannot bypass the reviewer
-  capability boundary.
+- **Spawned agents never block on `Stop`.** The enforcer classifies the trusted
+  hook payload and no-ops for Task/Agent reviewers **and** Workflow workers.
+  Only a genuine `Stop` event with neither `agent_id` nor `agent_type` may enforce;
+  no environment override can promote a child into the interactive main principal.
 - **One immutable parent context.** `SessionStart` binds the exact plugin installation,
   project, version, content-addressed source revision (equal to the runtime digest), and runtime digest to a domain-separated session
   hash under `CLAUDE_PLUGIN_DATA/session-control/v1`. `SubagentStart` reads that
   parent record to inject context, but Claude Code does not support blocking a child
   from this event. The first all-tool `PreToolUse` hook therefore revalidates the
-  inherited session id, plugin root, plugin-data directory, project root, context
-  path, and current runtime digest before every tool call and denies missing or
-  contradictory context. The three exact built-in reviewer names receive
-  `reviewer-readonly-v1`; `zensu-plm` and every other unknown or custom
-  subagent receive neutral `host-profile-v1`. Only the top-level interactive
-  thread receives `main-v1`; there is no transcript scan,
-  PPID key, newest-file selection, or fallback identity.
+  host-provided session id, executing plugin root, plugin-data directory, private
+  record, and current runtime digest before every tool call and denies missing or
+  contradictory context. Hook subprocesses derive this binding directly from the
+  standard host fields. `SessionStart` never reads or writes `CLAUDE_ENV_FILE`,
+  and no plugin-private selector is exported into the shared model/subagent shell
+  environment. The record's `project_root` remains the immutable
+  workflow-state anchor, while the canonical host-reported `cwd` may move to an
+  external detached worktree after `CwdChanged` and is used only to resolve
+  relative tool paths. Fresh `startup`/`clear` events may create that binding;
+  `resume`/`compact` require the existing record and reuse its original project
+  even when the current directory changed. A missing lifecycle source, a
+  continuation without its record, or a fresh cross-project reuse of the same
+  session id fails closed instead of creating a replacement anchor. The five
+  exact plugin-scoped reviewer identities receive
+  `reviewer-readonly-v1`; the plugin-scoped `zensu:zensu-plm` and every other
+  unknown or custom agent receive neutral `host-profile-v1`. This also applies
+  when Claude reports `agent_type` directly on `SessionStart` for a top-level
+  `claude --agent` session; only a host payload with neither agent field is the
+  interactive `main-v1` principal. The PLM and
+  reviewers are nevertheless restricted to `Read`/`Grep`/`Glob`; ordinary
+  host-profile children keep non-command tools granted by Claude and their
+  agent definitions, but every shell/command tool is denied because command
+  text cannot be safely confined by token inspection. Only the top-level
+  interactive thread receives `main-v1`; there
+  is no transcript scan, PPID key, newest-file selection, or fallback identity.
 
 **Security boundary.** Session Control protects host-tool and subagent workflow
 decisions against cross-session confusion, protected-path access, and concurrent
@@ -209,7 +226,16 @@ project-local state is therefore not a cryptographic authority against
 user-authorized build/test commands, external processes, or other same-UID
 processes that can mutate the worktree between check and use. Run untrusted
 project code inside an OS sandbox/container with a separate UID and restricted
-mounts; do not treat `host-profile-v1` as a host sandbox.
+mounts; do not treat `host-profile-v1` as a host sandbox. Normal report prose
+cannot impersonate a principal: identity comes only from trusted hook payload
+fields. For neutral children the gate blocks every command tool, actual
+protected paths, protected traversal roots, and mutating Zensu operations while
+preserving non-command review tools. `Grep`/`Glob` must target a concrete safe
+subtree; omitted paths and project/plugin/plugin-data ancestors are denied.
+Neutral file mutations also deny the complete installed-plugin and private
+plugin-data trees, including symlink, case-variant, and hard-link aliases.
+Third-party MCP tools that themselves expose arbitrary local execution are
+outside this host-tool boundary; do not grant them to untrusted agents.
 
 > Naming note: this is unrelated to the MCP-gate `--workflow-begin` / `workflowActive`
 > markers above — those scope per-skill MCP mutation tools, not Claude Code Workflows.
@@ -237,7 +263,8 @@ const aspects = await parallel(ASPECTS.map(a => () =>
 let merged = /* dedupe + sort the five findings lists in-script */
 const judge = await agent(`Judge pass. Files changed: [${changed}]\n${merged}`, { agentType: 'zensu:review-judge' })
 merged = /* apply JUDGE-* deltas; Panel-FP: verdicts stay visible and mark the referenced finding [Panel-FP-neutralized — do not fix] */
-const reviewTicket = /* stdout from: bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket */
+const reviewTicket = /* stdout from the top-level Skill command template:
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --review-ticket */
 await agent(`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${reviewTicket}\n${merged}`, { agentType: 'zensu:code-reviewer' })
 ```
 
@@ -309,27 +336,51 @@ To point the CLI at a self-hosted Zensu backend, see [Self-hosting](#self-hostin
 
 The plugin drives Zensu through the typed `zensu` CLI — install it with `curl -fsSL https://zensu.dev/install.sh | sh` and authenticate with `zensu auth login`. It provides commands for feature CRUD, security analysis, tier management, user journeys, product bootstrap, ghost scans, pulse sessions, and more (`zensu --help`). The hosted MCP server (`mcp.zensu.dev`) still exists for the Zensu web app's own AI assistant, but is no longer wired into this plugin.
 
-### Agents (4)
+### Agents (6)
 
 | Agent | Role | How It Works |
 |-------|------|--------------|
-| **zensu-plm** | Read-only planning analyst | Explains and decomposes Zensu lifecycle work. It remains a neutral subagent; the matching skill performs mutations in the interactive main thread. |
+| **zensu-plm** | Read-only planning analyst | Explains and decomposes Zensu lifecycle work. It receives neutral context but exposes only `Read`, `Grep`, and `Glob`; the matching skill performs mutations in the interactive main thread. |
 | **code-reviewer** | Quality Review | Consolidates the review. Standalone: walks 5 specialist perspectives (conventions, bugs, architecture, tests, security) in a single READ-ONLY agent. In the `/zensu:tdd` chain: runs in **fan-out consume mode**, emitting the report the main thread merged from five parallel `review-aspect` agents (no re-read, no build/test). |
 | **review-aspect** | Single-Perspective Review | READ-ONLY reviewer scoped to ONE perspective. The `/zensu:tdd` chain spawns five in a single parallel batch (one per perspective), then merges their findings in the main thread. Runs zero build/test commands — the suite already ran in the Phase 6 audit. |
 | **review-judge** | Independent Second Pass | READ-ONLY judge spawned AFTER the five-aspect merge (gated by `hooks.reviewJudge`, default on). Re-reads the changed files fresh and covers the panel's structural blind spots: cross-cutting integration, requirement drift against the plan's stable AC-###/FR-### IDs, missed edge cases, and panel quality — a false-positive panel finding gets a `Panel-FP:` meta-verdict that the main thread neutralizes before fix routing. Emits `JUDGE-*` deltas; never repeats panel findings, never runs build/test. |
+| **plan-review-worker** | Confined plan validator | Dedicated `/zensu:plan-review` worker with only `Read`, `Grep`, and `Glob`. It reads a private, immutable evidence lease and returns one raw `kind:"plan-review"` JSON object as its final message; only the main thread validates and materializes that result. |
+| **pr-review-worker** | Confined PR persona | Dedicated `/zensu:pr-team-review` worker with only `Read`, `Grep`, and `Glob`. It reviews a leased role/area evidence shard and returns one raw `kind:"pr-review"` JSON object; it cannot write files, mutate tasks, message agents, spawn agents, run commands, or publish. |
 
 The built-in reviewer boundary uses each agent's exact
 `tools: Read, Grep, Glob` allowlist. There is no shell or Git exception and no
 control/agent tool. The first all-tool `PreToolUse` hook is the fail-closed
 enforcement point: it revalidates the immutable Session Control context on every
-tool call, recognizes Claude Code's bare `code-reviewer`, `review-aspect`, and
-`review-judge` identities, then repeats the exact three-tool reviewer allowlist.
+tool call, recognizes Claude Code's plugin-scoped `zensu:code-reviewer`,
+`zensu:review-aspect`, `zensu:review-judge`, `zensu:plan-review-worker`, and
+`zensu:pr-review-worker` identities (plus exact bare
+`--agents` fixtures), then repeats the exact three-tool reviewer allowlist. The
+plugin-scoped `zensu:zensu-plm` receives the same strict allowlist. Every other
+neutral `host-profile-v1` child may retain ordinary non-command host tools, but
+cannot invoke `Bash`, `shell`, `exec`, `exec_command`, `terminal`, or `command`.
+
+The two review-worker identities add a private evidence lease on top of that
+three-tool profile. The interactive main thread creates one immutable generation
+containing exact files and narrow search roots, records each host worker id, and
+never exposes the lease id or plugin-data path to the worker. Each tool call
+revalidates canonical paths, symlink/path identity, and the creation snapshot so
+TOCTOU replacement fails closed. PR leases also bind the exact
+`core.quotePath=false` name-status manifest; ambiguous quoted/backslash paths and
+findings outside that changed-path set fail closed. `SubagentStop` captures the
+worker's one raw JSON result; collection requires the exact worker id, result
+kind, and role.
+Only then may the main thread write a debug JSON file, and it closes the lease on
+success and failure. Repository instructions, diffs, source text, overlays, and
+refinement context remain untrusted data and cannot widen this contract.
 
 > **Implementation is no longer delegated to an agent.** Since 0.4.0 `/zensu:tdd` runs in the **main thread** — vanilla by default, with strict RED→GREEN available when configured — because the old `tdd-manager` subagent lost too much implementation context. Since 0.6.0 the review chain fans out to five parallel `review-aspect` subagents, optionally runs `review-judge`, and consolidates through one consume-mode `code-reviewer`, while preserving the round counter, auto-fix loop, and self-review terminus.
 
 #### Custom review personas (repo-local)
 
 Projects extend the review panel without forking the plugin: drop agent definitions at `.claude/agents/zensu-review-*.md` (standard agent frontmatter + body prompt; Claude Code registers them at session start — a file added mid-session is not yet spawnable and gets logged as `PERSONA SKIPPED — <name> (not registered)`). The frontmatter `name:` must equal the filename stem and match `zensu-review-[A-Za-z0-9_-]+` — anything else is skipped as malformed. An optional `activation:` field holds comma-separated glob patterns (items may be quoted) matched against the changed-file paths — `**` crosses directory separators on segment boundaries (`"**/domain/**"` matches `src/domain/x.ts` but not `src/subdomain/x.ts`), `*`/`?` stay within one segment, and a pattern without `/` also matches the basename. Project-agnostic examples: `"**/domain/**"` (DDD rules), `"**/*.tf"` (infrastructure), `"**/*.component.ts"` (frontend components). A persona with no `activation:` field always joins; one whose globs match nothing is skipped AND named in the run log (`PERSONA SKIPPED — <name> (no activation match)`) — never silently omitted; malformed files (bad frontmatter, name/stem mismatch, symlinks) are skipped with a log line and never abort the chain. Extra personas are capped at five per run — glob-matched personas take slots before always-join ones (relevance wins), each group lexicographic; overflow is logged as dropped. **Output contract:** a persona reports exactly like a built-in aspect — `## Aspect: <persona-name>` header with `- [SEVERITY] file:line — finding` bullets — except every finding is prefixed with the persona's uppercased `<NAME>-<n>` ID for provenance. **Trust boundary:** a persona file is a repo-controlled prompt at the same trust level as any `.claude/agents` definition or a checked-in `CLAUDE.md` — the read-only/no-build contract is carried by the spawn prompt and the persona's own `tools:` frontmatter, not by promotion to the built-in reviewer principal. Custom personas stay neutral `host-profile-v1`: the all-tool gate prevents Session Control/workflow-root access and `main-v1` impersonation, but their ordinary host tools remain governed by their own frontmatter. Audit `zensu-review-*.md` files in third-party repos before running `/zensu:tdd`. Matching is decided deterministically by `hooks/lib/persona-activation.js` (changed files on stdin, personas dir as argv; verdict lines `spawn`/`skip`/`drop`).
+
+Here, “ordinary host tools” means non-command tools only: neutral personas are
+denied every shell/command alias regardless of their frontmatter.
 
 #### Skill overlays (additive-only)
 
@@ -342,7 +393,7 @@ Three skills carry an overlay anchor (`<!-- zensu:overlay <name> -->`): `tdd`, `
 
 #### Templates (repo-overridable)
 
-Three artifact skeletons ship as plugin defaults under `templates/` and resolve with the repo winning: a consumer uses `.zensu/templates/<name>.md` at the git toplevel of the working checkout (`git rev-parse --show-toplevel` — worktree-aware, same anchor as persona discovery) when it exists, else `${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/templates/<name>.md`. An override REPLACES the default wholesale — it MUST keep the mandatory sections, because the Phase 5/6 audits and `/zensu:converge` anchor on them (a structure test can only pin the plugin defaults, so for overrides this is a documented contract):
+Three artifact skeletons ship as plugin defaults under `templates/` and resolve with the repo winning: a consumer uses `.zensu/templates/<name>.md` at the git toplevel of the working checkout (`git rev-parse --show-toplevel` — worktree-aware, same anchor as persona discovery) when it exists, else `<absolute-plugin-root>/templates/<name>.md`. The top-level Skill obtains that concrete root from Claude's native `${CLAUDE_PLUGIN_ROOT}` substitution; a supporting file loaded with `Read` must receive the already-resolved value from its parent instead of expecting another substitution pass. An override REPLACES the default wholesale — it MUST keep the mandatory sections, because the Phase 5/6 audits and `/zensu:converge` anchor on them (a structure test can only pin the plugin defaults, so for overrides this is a documented contract):
 
 | Template | Consumer | Mandatory sections |
 |----------|----------|--------------------|
@@ -354,7 +405,7 @@ Three artifact skeletons ship as plugin defaults under `templates/` and resolve 
 
 Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:
 
-- **Phase declaration.** Before any edit, the main agent declares the current TDD phase via `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. `ZENSU_CLAUDE_PLUGIN_ROOT` is bound to the exact plugin installation at SessionStart. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
+- **Phase declaration.** Before any edit, the main agent declares the current TDD phase through the top-level Skill command template `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>`. Claude renders both native plugin placeholders in top-level Skill/Agent content. The helper then uses the host-exposed `CLAUDE_CODE_SESSION_ID` only inside that Bash process to validate the exact immutable record and derive its internal selectors; it never trusts an ambient plugin-private selector. Valid phases: `RED_WRITE`, `RED_RUN`, `RED_FAIL`, `IMPL`, `GREEN_RUN`, `GREEN_PASS`, `REFACTOR`.
 - **Gate enforcement.** The PreToolUse hook (`pre-edit-tdd-reminder.sh`) blocks edits whose declared phase violates FSM transitions. In particular, `IMPL` requires a prior `RED_FAIL` marker for the **same step** — there is no path to production code without a failing test on record.
 - **State.** Phase markers persist at `.zensu/state/tdd-phase-<scv1-session-key>.json`. Every atomic mutation increments the record revision, and each step's history remains auditable from the file.
 - **Activation.** Phase 0 of the skill calls `zensu-log.sh --tdd-begin`, which sets a per-session chain-state `active` flag. Given a valid SessionStart baseline, the TDD gate (and Bash witness) enforce **only** while that flag is set; a valid inactive baseline passes through. A missing, malformed, or unreadable mandatory baseline is an integrity failure and fails closed in Session Control plus the edit/Stop guards. (Pre-0.4.0 this keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`.) Bypass via `ZENSU_TDD_GATE=off` for legitimate non-TDD edits explicitly authorized by the user. The strict gate described above is **opt-in**: `hooks.tddImplementation` defaults to `false`, so out of the box the workflow runs in **vanilla mode** — the gate passes through and the RED→GREEN ceremony is dropped while the evidence audits and review chain stay enforced. Set `hooks.tddImplementation:true` to enforce the strict RED→GREEN gate (see the Hook Opt-Out table).
@@ -396,8 +447,8 @@ Anti-hallucination rules: every finding requires file:line reference, confidence
 | `/zensu:wargame` | Wargame a hard mission before a cheaper executor runs it — an executable-blind battle plan (every move + expected observation, likely failure + counter-move, forks, abort conditions, verification runs, red-team pass, graded against an 8-point standard). Also handles `/goal` property-proof contracts; code/feature missions reuse the Zensu review chain to converge. |
 | `/zensu:autopilot` | Take a feature from a plain-language idea to a ready, validated GitHub PR — one interactive planning gate, then an autonomous build via vanilla `/zensu:tdd`, gates, converge report, PR, one `/zensu:pr-team-review` pass, `/zensu:pr-fix-findings`, and a validate↔fix loop driven by a pluggable, credential-blind driver. Stops at a ready PR; never merges or deploys. |
 | `/zensu:pr-fix-findings` | Fix every unresolved review comment on a GitHub PR end-to-end: locate the PR, pull unresolved threads, triage, implement each fix through vanilla `/zensu:tdd`, push, and resolve the threads. Built to run standalone or repeatedly until no unresolved threads remain. |
-| `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored multi-agent reviewer team via `TeamCreate` (default 6, from a 12-persona pool), runs them in parallel as read-only validators, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Reviews the plan only — writes no code, triggers no TDD. |
-| `/zensu:pr-team-review` | Multi-agent review of an **existing GitHub PR**: scouts the PR, auto-casts a tailored reviewer team from a 25-persona pool (always-on holistic core: coverage, correctness, maintainability, anti-groupthink), **always runs an explicit test-coverage evaluation that flags uncovered files and paths** (mandatory `### Test Coverage` section; `--coverage-gate` to block on uncovered production files, `--run-coverage` to run the real tool), fetches the PR into an isolated git worktree (main checkout untouched), spawns the reviewers in parallel, runs a debate (with an anti-groupthink challenge round) + synthesis pass, then publishes one consolidated GitHub review (inline comments + overall body) via `gh api` — every inline anchor is pre-validated against the PR diff (`hooks/lib/valid-diff-lines.js`) with nearest-line remap so no finding is lost to a 422. Complements `/zensu:plan-review` (which validates a plan before code exists). |
+| `/zensu:plan-review` | Revalidate an implementation/design plan **before** coding: dynamically casts a tailored parallel batch (default 6, from a 12-persona pool) of dedicated `zensu:plan-review-worker` validators behind one private evidence lease, then consolidates one report with a GO / GO-WITH-CHANGES / REVISE / NO-GO verdict plus concrete plan amendments. Workers return raw JSON through their final messages; only the main thread materializes accepted results. Reviews the plan only — writes no code, triggers no TDD. |
+| `/zensu:pr-team-review` | Multi-agent review of an **existing GitHub PR**: scouts the PR, auto-casts dedicated `zensu:pr-review-worker` personas from a 25-persona pool (always-on holistic core: coverage, correctness, maintainability, anti-groupthink), **always runs an explicit test-coverage evaluation that flags uncovered files and paths** (mandatory `### Test Coverage` section; `--coverage-gate` to block on uncovered production files, `--run-coverage` to run the real tool), fetches the PR into an isolated git worktree (main checkout untouched), and leases exact evidence to parallel read-only workers. Large PRs use role/area evidence shards instead of a monolithic full-diff requirement. The main thread validates and materializes raw JSON results, runs the anti-groupthink synthesis, then shows the final preview. Standalone publication waits for explicit approval after that preview; delegated runs continue unattended through reconciliation and publish. Every inline anchor is pre-validated against the PR diff (`hooks/lib/valid-diff-lines.js`) with nearest-line remap so no finding is lost to a 422. Complements `/zensu:plan-review` (which validates a plan before code exists). |
 | `/zensu:security-review` | Comprehensive security review: classification, analysis, STRIDE threat model, review completion |
 | `/zensu:ghost-scan` | Scan a repository with a multi-perspective agent fan-out to discover undocumented features, user journeys, and docs, and import them |
 | `/zensu:pulse` | Developer journal — track coding sessions with privacy-first activity logging |
@@ -422,16 +473,16 @@ A read-only health check for the install, for when something is not firing and y
 
 The helper never writes and always exits `0` — a red ❌ is a finding in the report, not a failed command. The skill may remove only an expired, non-symlink `pending-review.json` after explicit confirmation; it never deletes CAS workflow documents. Use `/zensu:setup` to edit config and `/zensu:reset-review-limit` for a transactional review-budget reset.
 
-### Hooks (17)
+### Hooks (19)
 
 | Hook Script | Event | Config Flag | Description |
 |-------------|-------|-------------|-------------|
-| `session-start-session-control.sh` | SessionStart + SubagentStart | — | SessionStart creates the immutable Session Control v1 record and exports its exact root, hashed key, record path, project root, and runtime digest via `CLAUDE_ENV_FILE`; the top-level interactive thread receives `main-v1`. SubagentStart reads the parent record and injects `reviewer-readonly-v1` for the three exact built-in reviewers or neutral `host-profile-v1` for every other child, including `zensu-plm`. Because Claude Code cannot block on SubagentStart, this hook's child-side failure is diagnostic; the first PreToolUse gate performs the mandatory fail-closed revalidation. |
-| `pre-reviewer-capability-gate.sh` | PreToolUse `*` | — | First enforcement hook for every tool. Revalidates session id, installed plugin root, plugin-data store, project, record path, and live runtime digest against the immutable wrapper-exported context; any missing or mismatched field denies before capability evaluation. Exact bare built-in reviewers may invoke only `Read`/`Grep`/`Glob`; only the top-level interactive thread receives `main-v1`. All other subagents, including `zensu-plm`, remain `host-profile-v1` and cannot access Session Control/workflow-root state or impersonate main. |
+| `session-start-session-control.sh` | SessionStart + SubagentStart | — | SessionStart creates the immutable Session Control v1 record and emits the principal-specific context; it neither reads nor writes `CLAUDE_ENV_FILE` and exports no plugin-private selectors to model or subagent shells. A payload with neither `agent_id` nor `agent_type` receives interactive `main-v1`; `claude --agent` SessionStart payloads use the same exact reviewer/neutral classifier as later tool hooks. SubagentStart reads the parent record and injects `reviewer-readonly-v1` for the five exact plugin-scoped reviewers (`code-reviewer`, `review-aspect`, `review-judge`, `plan-review-worker`, `pr-review-worker`) or neutral `host-profile-v1` for every other child, including `zensu:zensu-plm`. Because Claude Code cannot block on SubagentStart, this hook's child-side failure is diagnostic; the first PreToolUse gate performs the mandatory fail-closed revalidation. Stateful model commands receive Claude's native plugin root/data values at the call site and validate the host-exposed session id against this record inside the helper process only. |
+| `pre-reviewer-capability-gate.sh` | PreToolUse `*` | — | First enforcement hook for every tool. Derives and revalidates session id, installed plugin root, plugin-data store, private record, workflow-state anchor, current canonical `cwd`, and live runtime digest directly from standard hook metadata; it never assumes SessionStart shell exports reach hook processes. Missing or mismatched bindings return a structured `permissionDecision: deny`; launcher/runtime failures are normalized to Claude's blocking exit code 2 with a sanitized diagnostic. The five exact plugin-scoped reviewers and `zensu:zensu-plm` may invoke only `Read`/`Grep`/`Glob`; plan/PR workers are further limited to their private exact-file/safe-subtree lease and all leased paths are revalidated against their creation snapshot on every call. Only the top-level interactive thread receives `main-v1`. Other `host-profile-v1` children retain ordinary non-command host tools, while all shell/command aliases, direct or ancestor traversal into Session Control/workflow-root state, mutations below the installed-plugin/private plugin-data roots, and mutating Zensu operations are blocked. `Grep`/`Glob` require a concrete safe subtree rather than an omitted path or a project/plugin/plugin-data ancestor. |
 | `session-start-pulse.sh` | SessionStart | `pulseSession` | Emits HEAD/branch banner and prepares pulse session context at startup |
 | `session-start-banner.sh` | SessionStart | `sessionBanner` | User-facing "Zensu PLM vX active" banner + usage hints (Plan mode → ask whether to run `/zensu:tdd`, gate-enforced edits when you do, skills list). Plain stdout, shown to the user. Fires only on fresh starts (`source=startup`/`clear`), silent on `resume`/`compact`. Skipped when `sessionBanner:false`. |
 | `session-start-primer.sh` | SessionStart | `sessionBanner` | Model-facing orientation: injects a short `additionalContext` primer so the agent proactively uses Plan mode and asks before running `/zensu:tdd`. Same fresh-start filter + `sessionBanner` gate as the banner. |
-| `session-start-autopilot-resume.sh` | SessionStart | — | Read-only durable Autopilot recovery context. On `startup`, `resume`, `compact`, and `clear`, a matching top-level owner session receives the exact validated run stage and closed next-action code from project-local state. Absent state stays silent; corrupt or foreign-owner state is reported without reflecting untrusted bytes or mutating progress. |
+| `session-start-autopilot-resume.sh` | SessionStart | — | Read-only durable Autopilot recovery context. On `resume`/`compact`, it requires the private session record and reads only its immutable project; a `CwdChanged` location can never select Autopilot state. On concurrent fresh `startup`/`clear`, it prefers an already-valid record and otherwise uses Claude's stable `CLAUDE_PROJECT_DIR`, never payload `cwd`. A matching top-level owner receives the exact validated run stage and closed next-action code. Missing bindings/absent state stay silent; corrupt or foreign-owner state is reported without reflecting untrusted bytes or mutating progress. |
 | `pre-edit-tdd-reminder.sh` | PreToolUse Edit/Write/MultiEdit | `ZENSU_TDD_GATE` (env) | TDD Phase Gate. Enforces RED→IMPL→GREEN FSM via `.zensu/state/tdd-phase-<sid>.json`. Active only while the session's chain-state `active` flag is set (by `zensu-log.sh --tdd-begin`); pre-0.4.0 it keyed on `CLAUDE_AGENT_TYPE=zensu:tdd-manager`. Bypass with `ZENSU_TDD_GATE=off`. Bash file mutations are intentionally **not** gated — they remain the responsibility of the `/zensu:tdd` prompt discipline + PostToolUse code-reviewer chain. |
 | `pre-bash-zensu-gate.sh` | PreToolUse `Bash` | `mcpGate` (+ `ZENSU_MCP_GATE` env) | Zensu CLI write-gate. Parses `zensu <noun> <verb>` from the Bash command, resolves each via `hooks/lib/zensu-cli-map.sh`, and classifies via `hooks/lib/zensu-mcp-tools.sh`: read/telemetry commands (`zensu_is_read_tool`) pass ungated; every state-mutating command is **default-denied** unless it is declared in an active main-thread skill workflow window (opened by `zensu-log.sh --workflow-begin --tools "…"`, e.g. inside `/zensu:implement` or `/zensu:bootstrap`) or a bypass is set (`ZENSU_MCP_GATE=off` env **or inline prefix** / `mcpGate:false` config). A `zensu-plm` child is neutral and receives no mutation exemption. Reads, `--help`/`-h`, and writes whose target backend (`--api-url` flag / `ZENSU_API_URL` env) is **localhost** are never gated — the gate is scoped to writing the real tracked product, not a throwaway dev/test DB. A deny returns `permissionDecision:deny` with remediation pointing at the matching main-thread skill. A convention-nudge, not a hard boundary (once the CLI's token is on disk an agent can `curl` the API directly): forces mutations through the workflow conventions (dedup, user journeys, baseline revisions, security classification, release-readiness gates) instead of raw CLI calls. |
 | `pre-bash-source-write-gate.sh` | PreToolUse `Bash` | `bashWriteGate` (+ `ZENSU_BASH_WRITE_GATE` env) | Source-write integrity gate. Inspects raw Bash writes (`>`/`>>`, `tee`, `sed -i`, `dd of=`, `cat > f <<EOF`) and **denies** a write to a source-extension file when either (A) it overwrites an **existing git-tracked** file inside the project, or (B) the resolved path **escapes the session root** (`CLAUDE_PROJECT_DIR`, else the command's cwd) into a sibling or main checkout — relative targets resolved against a cwd that tracks `cd`, so (B) catches `cd ../main && printf … >> src/x.rs` even for a new file. Never gated: new files inside the project, gitignored/untracked files, non-source extensions, and temp roots (`$TMPDIR`/`/tmp`/`/private/tmp`/`/var/folders`, overridable via `ZENSU_BSWGATE_TEMP_DIRS`); `mv`/`cp` are out of scope. Bypass a one-off with an inline `ZENSU_BASH_WRITE_GATE=off` (or `ZENSU_MCP_GATE=off`) prefix; disable with `bashWriteGate:false`. A convention-nudge that closes the Bash-write blind spot of `pre-edit-tdd-reminder.sh`, not a hard boundary. |
@@ -502,7 +553,7 @@ When the `zensu` CLI is installed and authenticated, additional capabilities act
 
 ### Hook Opt-Out
 
-Zensu ships seventeen automatic hooks that fire across the development lifecycle (full enumeration in the [Hooks (17)](#hooks-17) table above). The configurable subset is listed below; `pre-edit-tdd-reminder.sh` has no on/off flag of its own — it is bypassed per call via the `ZENSU_TDD_GATE` env var and passes through for whole sessions frozen into vanilla mode by `tddImplementation` (see that row below). Any flagged hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
+Zensu ships nineteen automatic hooks that fire across the development lifecycle (full enumeration in the [Hooks (19)](#hooks-19) table above). The configurable subset is listed below; `pre-edit-tdd-reminder.sh` has no on/off flag of its own — it is bypassed per call via the `ZENSU_TDD_GATE` env var and passes through for whole sessions frozen into vanilla mode by `tddImplementation` (see that row below). Any flagged hook can be disabled via `~/.zensu/config.json` without forking, editing, or uninstalling the plugin.
 
 **Visible opt-outs (bypass ledger).** Env-var escapes stay free — no gate ever blocks on them — but they are no longer silent: while a TDD session is active (chain-state `active`), each gate records the escape it was bypassed through (`ZENSU_TDD_GATE`, `ZENSU_BASH_WRITE_GATE`, `ZENSU_MCP_GATE`, `ZENSU_SECRET_SCAN`, `ZENSU_CHAIN`, `ZENSU_TEST_WITNESS` — env or inline prefix) into the per-session state file, deduplicated per gate name and carrying gate names only (never command payloads or values; entries are validated against the closed six-gate allowlist at write and read, pre-existing junk sanitized and bounded by the closed allowlist + per-name dedup). One recording semantic for every site: the escape is recorded when it short-circuits the gate's **decision point** — the witness records once per session on the first command it would otherwise have witnessed; the zensu CLI gate records when a `zensu` invocation is actually present; `ZENSU_MCP_GATE` is also honored (and therefore also recorded) by the Bash source-write gate at its own any-Bash-command decision point, so it can appear in sessions that never ran the zensu CLI; the secret-scan gate's inline escape records only on write-channel commands while its exported env escape records on the first scanned payload of any kind; inline prefixes are reported by the command parsers themselves (quoted spellings and mixed commands included; heredoc bodies, argument mentions, and channel-less commands excluded), and a command that ends up DENIED never mints a ledger entry from the denying gate — deny wins over markers WITHIN each gate (sibling hooks on the same tool call decide independently, so a gate that individually allowed may still have recorded its own escape even when another gate denied the call; over-reporting, never under-reporting). A config-disabled gate (`hooks.<flag>:false`) has no decision point — deliberate standing configuration is not ledgered. The chain-end summary surfaces the list as `Gates bypassed during this session: …` (`/zensu:autopilot` prints the build-level union into the PR body as `Gates bypassed during build: …`), sourced via `zensu-log.sh --bypass-list` (`none` when clean; `--bypass-note <gate>` is the write verb, itself scoped to active sessions). The ledger resets at every `--tdd-begin` (which echoes any non-empty outgoing ledger as `previous-run bypasses (cleared now): …` so multi-run unions have a durable trace) and `--tdd-reset`; recording is fail-open — a ledger failure never breaks the gate.
 
@@ -603,7 +654,7 @@ Example (relative timestamps):
 
 Invalid values, missing keys, malformed JSON, or a missing `node` binary all fall back to `wall`.
 
-### Environment Variables
+### Claude Environment and Native Placeholders
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -613,14 +664,13 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the exact Session Control key's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log`. |
 | `ZENSU_CHAIN` | — | Set to `off` to disable only the inner TDD review-chain backstop. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell; it does not release an active outer Autopilot run. |
 | `ZENSU_AUTOPILOT` | — | Set to `off` to stop an active durable Autopilot run through an audited `BLOCKED` transition. Equivalent to `hooks.autopilotEnforcer:false`; it never records `DONE`, merge, release, or deployment success. |
-| `ZENSU_FORCE_MAIN` | — | Debug-only Stop-hook override. It cannot change the trusted host `agent_type` or bypass `reviewer-readonly-v1`. |
 | `CLAUDE_AGENT_TYPE` | — | Legacy introspection variable only. Security decisions use the trusted top-level `agent_type` from each hook payload, never this environment variable. |
-| `CLAUDE_PLUGIN_ROOT` | — | Set by Claude Code for each plugin hook subprocess. Every hook self-resolves from it because matching SessionStart hooks run concurrently. No user setup required. |
-| `ZENSU_CLAUDE_PLUGIN_ROOT` | — | Exact executed plugin root exported by `session-start-session-control.sh` through `CLAUDE_ENV_FILE` and bound to the immutable session record. Missing/invalid values fail closed; no shared home-directory pointer is consulted. |
-| `ZENSU_SESSION_KEY` | — | Domain-separated `scv1_…` session key exported by Session Control v1. The raw host session id is never persisted. |
-| `ZENSU_SESSION_CONTEXT` | — | Absolute path to the immutable Session Control v1 record under `CLAUDE_PLUGIN_DATA`. |
-| `ZENSU_RUNTIME_DIGEST` | — | SHA-256 digest covering the manifest plus every runtime hook, library, agent, and skill file bound at SessionStart. |
-| `ZENSU_PROJECT_ROOT` | — | Canonical project/worktree root bound at SessionStart and reused by all state helpers. |
+| `CLAUDE_PLUGIN_ROOT` | — | Claude-native plugin placeholder in top-level Skill/Agent content and plugin-root environment value in hook subprocesses. Stateful Skill commands use the rendered absolute value; every hook also verifies the executing plugin root. No user setup required. |
+| `CLAUDE_PLUGIN_DATA` | — | Claude-native plugin data placeholder in top-level Skill/Agent content and plugin-data environment value in hook subprocesses. Stateful Skill commands pass the rendered value only to that helper invocation; Session Control validates its private record below this directory. |
+| `CLAUDE_CODE_SESSION_ID` | — | Host-provided environment value in Bash and hook subprocesses. It matches the hook payload session id but is **not a secret or capability**; stateful helpers accept it only after the private plugin-data record, executing root, runtime digest, and project binding all validate. |
+| `CLAUDE_SESSION_ID` | — | Claude-native session placeholder available in top-level Skill content. Zensu does not copy it into a public selector; the state helper binds from `CLAUDE_CODE_SESSION_ID` and the private record at each call. |
+| `CLAUDE_PROJECT_DIR` | — | Stable project directory supplied by Claude. Fresh SessionStart registration uses it where required; the immutable record remains the workflow-state anchor after `CwdChanged`. |
+| `CLAUDE_ENV_FILE` | — | Claude's general shell-environment propagation file. Zensu Session Control deliberately never reads or writes it, so plugin-private authority cannot leak into main or subagent Bash environments. |
 
 ## Data & Privacy
 
@@ -676,10 +726,10 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Backend unreachable / `zensu` command errors | Verify network connectivity to `https://api.zensu.dev` (or your self-hosted `ZENSU_API_URL` — see [Self-hosting](#self-hosting)), and that `zensu auth status` shows a logged-in session |
 | Invalid API key | Verify `ZENSU_API_KEY` format (`zsk_...`) and re-run `zensu auth login` — see [API Key (CI/CD)](#api-key-cicd) |
 | Hook errors on Windows | Use WSL or Git Bash (see [Platform Support](#platform-support)) |
-| Planning agent cannot mutate Zensu state | Expected: every child, including `zensu-plm`, is neutral `host-profile-v1`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
+| Planning agent cannot mutate Zensu state | Expected: `zensu:zensu-plm` receives neutral `host-profile-v1` context but its agent definition and enforcement gate expose only `Read`/`Grep`/`Glob`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
 | OAuth login not opening | Check your default browser settings |
-| TDD phase gate blocking a legitimate edit | Set `ZENSU_TDD_GATE=off` for that edit only, or declare the correct phase via `bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>` first |
-| `ZENSU_CLAUDE_PLUGIN_ROOT` missing in an agent Bash command | Confirm Claude Code `2.1.211`, run `echo "${ZENSU_CLAUDE_PLUGIN_ROOT:-unset}"`, and restart every still-running Claude Code session once so SessionStart can bind the installed root. The retired `~/.zensu/plugin-root` locator is never consulted and may be deleted. |
+| TDD phase gate blocking a legitimate edit | Set `ZENSU_TDD_GATE=off` for that edit only, or let the top-level `/zensu:tdd` Skill declare the correct phase via `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>` first |
+| Stateful helper reports that its rendered Session Control binding is unavailable | Confirm Claude Code `2.1.211` or newer and restart every still-running Claude Code session once so top-level Skill content is rendered with the installed plugin root/data and SessionStart can create the matching private record. Do not source an internal binder or search for another plugin root. The retired `~/.zensu/plugin-root` locator is never consulted and may be deleted. |
 
 ## Contributing
 

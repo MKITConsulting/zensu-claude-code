@@ -343,8 +343,10 @@ if grep -qF '@latest' "$MCP_JSON"; then
 else
   check "P6b MCP runtime never floats on @latest" PASS
 fi
-if grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" install-browser' "$SKILL_MD" \
+if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser' "$SKILL_MD" \
+  && grep -qF 'natively rendered `${CLAUDE_PLUGIN_ROOT}` path' "$SKILL_MD" \
   && grep -qF '`browser_install` is not a tool in the pinned' "$SKILL_MD" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
   && grep -qF 'run_sanitized_child "$BIN" install-browser' "$MCP_LAUNCHER"; then
   check "P6f missing browser recovery uses the pinned launcher install-browser command" PASS
 else
@@ -634,16 +636,19 @@ if grep -rqiE "$GERMAN_RE" "$SKILL_DIR"; then
 else
   check "P8b tracked skill content is English-only" PASS
 fi
-if grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy' "$SKILL_MD" \
-  && grep -qF '${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
-  && grep -qF 'bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy' "$ZENSU_MD" \
+if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy' "$SKILL_MD" \
+  && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
+  && grep -qF 'supporting files loaded through `Read` do not receive' "$SKILL_MD" \
+  && grep -qF '<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh' "$ZENSU_MD" \
+  && grep -qF 'bash "<absolute-plugin-root>/scripts/playwright-mcp.sh" --check-policy' "$ZENSU_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_MD" \
   && ! grep -qF '{ACTIVE_PLUGIN_ROOT}' "$ZENSU_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$SKILL_MD" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$ZENSU_MD" \
   && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$ZENSU_MD"; then
-  check "P8c skill and adapter use the fail-closed session-bound plugin root" PASS
+  check "P8c skill uses native root rendering and concretizes adapter placeholders" PASS
 else
-  check "P8c skill and adapter use the fail-closed session-bound plugin root" FAIL
+  check "P8c skill uses native root rendering and concretizes adapter placeholders" FAIL
 fi
 
 echo "----"

@@ -50,6 +50,8 @@ run_hook() {
   local session="$1" ticket="$2"
   SID="$session" TICKET="$ticket" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       session_id: process.env.SID,
       tool_input: {
         subagent_type: "zensu:code-reviewer",
@@ -130,7 +132,7 @@ for KEY in autopilotRunId autopilotAttempt autopilotReturnStage chainId chainOut
   '
   STATE_DIGEST="$(digest "$SF")"
   STATE_INODE="$(inode "$SF")"
-  OUT="$(run_hook "$SID" "$TICKET")"
+  OUT="$(run_hook "$SID_RAW" "$TICKET")"
   [ -z "$OUT" ] || PARTIAL_OK=false
   [ "$(digest "$SF")" = "$STATE_DIGEST" ] || PARTIAL_OK=false
   [ "$(inode "$SF")" = "$STATE_INODE" ] || PARTIAL_OK=false

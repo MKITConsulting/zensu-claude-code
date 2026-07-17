@@ -9,12 +9,18 @@ CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
-# State verbs consume only the immutable Session Control v1 exports. Missing
-# session or project context is a hard failure; transcript and PPID discovery
-# are intentionally absent from the fresh-session contract.
+# State verbs bind from the skill-rendered plugin-data path and Claude's host
+# session id inside this helper process only. SessionStart deliberately exports
+# no Zensu selectors because CLAUDE_ENV_FILE reaches subsequent subagent Bash
+# calls too. Missing context is a hard failure; transcript and PPID discovery
+# remain absent.
 case "${1:-}" in
   --*)
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if ! zensu_bind_model_session; then
+      echo "zensu-log.sh: rendered Session Control binding unavailable" >&2
+      exit 2
+    fi
     if ! _zensu_pd="$(zensu_resolve_project_dir)" || [ -z "$_zensu_pd" ]; then
       echo "zensu-log.sh: Session Control project context unavailable" >&2
       exit 2
@@ -25,6 +31,14 @@ case "${1:-}" in
 esac
 
 case "${1:-}" in
+  --session-key)
+    session_val="$(zensu_resolve_session_id)" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
+    printf '%s\n' "$session_val"
+    exit 0
+    ;;
   --phase)
     phase_val=""
     step_val=""

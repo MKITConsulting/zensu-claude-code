@@ -14,29 +14,6 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT
 INPUT=""
 IFS= read -r -d '' INPUT || true
 
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
-ACTIVE_POINTER_HINT="${PROJECT_ROOT:+$PROJECT_ROOT/.zensu/state/autopilot-active.json}"
-AUTOPILOT_STATE_HINT=false
-if [ -n "$ACTIVE_POINTER_HINT" ] && { [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; }; then
-  AUTOPILOT_STATE_HINT=true
-fi
-if [ -n "$PROJECT_ROOT" ]; then
-  for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
-    if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
-      AUTOPILOT_STATE_HINT=true
-      break
-    fi
-  done
-fi
-unset _zensu_autopilot_hint
-
-shell_spawned_agent() {
-  [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
-  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
-}
-
 emit_autopilot_runtime_blocked() {
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PostToolUse","additionalContext":"ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=RUNTIME_UNAVAILABLE. A project-local durable Autopilot state artifact exists, but the state runtime is unavailable. Do not implement, start unbound TDD, replace the run, or infer approval; repair the plugin runtime first."}}'
 }
@@ -54,16 +31,34 @@ read_field() {
   ' 2>/dev/null
 }
 
+# Only the trusted top-level PostToolUse principal may own the durable planning
+# gate. Keep this no-op before session binding and runtime checks.
 AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-if [ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ]; then
-  # shellcheck disable=SC1090
-  source "$AGENT_CONTEXT_LIB"
-  if [ "$(zensu_is_spawned_agent "$(read_field agent_id)" "$(read_field agent_type)")" = "true" ]; then
-    exit 0
-  fi
-elif shell_spawned_agent; then
+[ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ] || exit 0
+# shellcheck disable=SC1090
+source "$AGENT_CONTEXT_LIB"
+zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$INPUT"; then
+  emit_autopilot_runtime_blocked
   exit 0
 fi
+PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
+ACTIVE_POINTER_HINT="${PROJECT_ROOT:+$PROJECT_ROOT/.zensu/state/autopilot-active.json}"
+AUTOPILOT_STATE_HINT=false
+if [ -n "$ACTIVE_POINTER_HINT" ] && { [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; }; then
+  AUTOPILOT_STATE_HINT=true
+fi
+if [ -n "$PROJECT_ROOT" ]; then
+  for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
+    if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
+      AUTOPILOT_STATE_HINT=true
+      break
+    fi
+  done
+fi
+unset _zensu_autopilot_hint
 
 if [ "$NODE_AVAILABLE" != "true" ]; then
   [ "$AUTOPILOT_STATE_HINT" = true ] && emit_autopilot_runtime_blocked
@@ -88,7 +83,7 @@ emit_autopilot_context() {
     const log=process.env.LOG_HELPER_Q;
     const attempt=process.env.ATTEMPT;
     const returnStage=process.env.RETURN_STAGE;
-    const msg = `ZENSU_AUTOPILOT PLAN_APPROVED runId=${run}. This is the one approved planning gate for the durable run. Do not ask another TDD/workflow question. Continue autonomously in this top-level session. Your VERY NEXT workflow action is the Skill tool with skill=\u0027zensu:tdd\u0027, passing the approved plan as the feature specification and the delegated context AUTOPILOT-RUN: ${run}. Before implementation, that delegated skill must create one safe chain id and run exactly: bash ${log} --tdd-begin --session ${sid} --autopilot-run ${run} --autopilot-attempt ${attempt} --autopilot-return-stage ${returnStage} --chain-id <chain-id>. Do not run a standalone unbound TDD generation, do not ask the user, and do not skip the review/self-review chain.`;
+    const msg = `ZENSU_AUTOPILOT PLAN_APPROVED runId=${run}. This is the one approved planning gate for the durable run. Do not ask another TDD/workflow question. Continue autonomously in this top-level session. Your VERY NEXT workflow action is the Skill tool with skill=\u0027zensu:tdd\u0027, passing the approved plan as the feature specification and the delegated context AUTOPILOT-RUN: ${run}. Before implementation, that delegated skill must create one safe chain id and run exactly: ${log} --tdd-begin --session ${sid} --autopilot-run ${run} --autopilot-attempt ${attempt} --autopilot-return-stage ${returnStage} --chain-id <chain-id>. Do not run a standalone unbound TDD generation, do not ask the user, and do not skip the review/self-review chain.`;
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
   '
 }
@@ -199,7 +194,9 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       exit 0
     fi
     LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
-    emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_HELPER_Q" \
+    PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
+    LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+    emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_COMMAND" \
       "$ACTIVE_ATTEMPT" "$ACTIVE_RETURN_STAGE"
     exit 0
         ;;

@@ -30,12 +30,13 @@ trap cleanup EXIT
 source "$PHASE_LIB"
 
 start_session() {
-  local raw_session="$1" project="${2:-$PROJ}" label="${3:-$1}"
+  local raw_session="$1" project="${2:-$PROJ}" label="${3:-$1}" plugin_root="${4:-$PLUGIN_DIR}"
   project="$(cd "$project" && pwd -P)"
   export CLAUDE_PROJECT_DIR="$project"
+  export CLAUDE_PLUGIN_ROOT="$plugin_root"
   export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data/$label"
   # shellcheck disable=SC1091
-  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session"
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session" "$plugin_root"
   STARTED_SESSION_KEY="$ZENSU_SESSION_KEY"
   STARTED_PROJECT_ROOT="$ZENSU_PROJECT_ROOT"
 }
@@ -47,11 +48,13 @@ flag() {
   node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$PROJ/.zensu/state/tdd-phase-${session_key}.json" "$key"
 }
 postrev() {
-  local sid="$1" cfg="${2:-}"
+  local sid="$1" cfg="${2:-}" raw_sid="${CLAUDE_CODE_SESSION_ID:-}"
   local ticket payload
   ticket="$(bash "$LOG" --review-ticket --session "$sid" 2>/dev/null)" || return 1
-  payload="$(SID="$sid" TICKET="$ticket" node -e '
+  payload="$(SID="$raw_sid" TICKET="$ticket" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",
         prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
@@ -67,9 +70,12 @@ postrev() {
 }
 postrev_with_ticket() {
   local sid="$1" ticket="$2" envelope="${3:-}" project="${4:-$CLAUDE_PROJECT_DIR}" payload
-  payload="$(SID="$sid" TICKET="$ticket" ENVELOPE="$envelope" node -e '
+  local raw_sid="${CLAUDE_CODE_SESSION_ID:-}"
+  payload="$(SID="$raw_sid" TICKET="$ticket" ENVELOPE="$envelope" node -e '
     const suffix = process.env.ENVELOPE ? `\n${process.env.ENVELOPE}` : "";
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",
         prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}${suffix}\nfixture`
@@ -113,19 +119,27 @@ fi
 # token even when the active plugin root contains shell metacharacters.
 SPECIAL_BASE="$(mktemp -d -t zensu-postreview-root-XXXXXX)"
 SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch POSTREV_PWNED) `touch POSTREV_TICKED`;touch POSTREV_SEMI; apostrophe'"'"'value quote"back\slash'
-mkdir -p "$SPECIAL_ROOT/hooks" "$SPECIAL_BASE/run"
+mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
 SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
-cp -R "$PLUGIN_DIR/hooks/lib" "$SPECIAL_ROOT/hooks/lib"
-cp "$POSTREV" "$SPECIAL_ROOT/hooks/post-review-tdd-delegate.sh"
+for runtime_dir in hooks agents skills docs templates scripts mcp-runtime; do
+  cp -R "$PLUGIN_DIR/$runtime_dir" "$SPECIAL_ROOT/$runtime_dir"
+done
+mkdir -p "$SPECIAL_ROOT/.claude-plugin"
+cp "$PLUGIN_DIR/.claude-plugin/plugin.json" "$SPECIAL_ROOT/.claude-plugin/plugin.json"
+cp "$PLUGIN_DIR/.mcp.json" "$SPECIAL_ROOT/.mcp.json"
 SPECIAL_LOG="$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 SPECIAL_SID_RAW="postrev-special-root"
-start_session "$SPECIAL_SID_RAW" "$SPECIAL_BASE/run" special-root
+SPECIAL_LABEL='special data $(touch POSTREV_DATA_PWNED) `touch POSTREV_DATA_TICKED`;touch POSTREV_DATA_SEMI'
+start_session "$SPECIAL_SID_RAW" "$SPECIAL_BASE/run" "$SPECIAL_LABEL" "$SPECIAL_ROOT"
 SPECIAL_SID="$STARTED_SESSION_KEY"
+SPECIAL_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
 CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-begin --session "$SPECIAL_SID" >/dev/null
 CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-complete --session "$SPECIAL_SID" >/dev/null
 SPECIAL_TICKET="$(CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --review-ticket --session "$SPECIAL_SID" 2>/dev/null)"
-SPECIAL_PAYLOAD="$(SID="$SPECIAL_SID" TICKET="$SPECIAL_TICKET" node -e '
+SPECIAL_PAYLOAD="$(SID="$SPECIAL_SID_RAW" TICKET="$SPECIAL_TICKET" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
     session_id: process.env.SID,
     tool_input: {
       subagent_type: "zensu:code-reviewer",
@@ -136,6 +150,8 @@ SPECIAL_PAYLOAD="$(SID="$SPECIAL_SID" TICKET="$SPECIAL_TICKET" node -e '
 SPECIAL_OUT="$(printf '%s' "$SPECIAL_PAYLOAD" | CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" \
   bash "$SPECIAL_ROOT/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
 EXPECTED_Q="$(printf '%q' "$SPECIAL_LOG")"
+EXPECTED_DATA_Q="$(printf '%q' "$SPECIAL_PLUGIN_DATA")"
+EXPECTED_PREFIX="CLAUDE_PLUGIN_DATA=$EXPECTED_DATA_Q bash $EXPECTED_Q"
 SPECIAL_CTX="$(printf '%s' "$SPECIAL_OUT" | node -e '
   let s=""; process.stdin.on("data", c => s += c);
   process.stdin.on("end", () => {
@@ -148,27 +164,38 @@ SPECIAL_CTX="$(printf '%s' "$SPECIAL_OUT" | node -e '
   });
 ' 2>/dev/null)"
 SPECIAL_PARSE_RC=$?
+SPECIAL_EXPECTED_COMMAND="$EXPECTED_PREFIX --review-ticket"
+SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_CTX" | EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
+  const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
+  const at=body.indexOf(expected);if(at<0)process.exit(1);
+  process.stdout.write(body.slice(at,at+expected.length));
+' 2>/dev/null)"
+SPECIAL_COMMAND_RC=$?
 (
   cd "$SPECIAL_BASE/run" || exit 1
-  CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" eval "bash $EXPECTED_Q --review-ticket --session $SPECIAL_SID" >/dev/null 2>&1
+  unset CLAUDE_PLUGIN_DATA
+  eval "$SPECIAL_EMITTED_COMMAND" >/dev/null 2>&1
 )
 SPECIAL_EXEC_RC=$?
-if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
-  && printf '%s' "$SPECIAL_CTX" | grep -qF "bash $EXPECTED_Q --code-review-done" \
-  && printf '%s' "$SPECIAL_CTX" | grep -qF "bash $EXPECTED_Q --review-ticket" \
+if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_COMMAND_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
+  && printf '%s' "$SPECIAL_CTX" | grep -qF "$EXPECTED_PREFIX --code-review-done" \
+  && printf '%s' "$SPECIAL_CTX" | grep -qF "$EXPECTED_PREFIX --review-ticket" \
   && ! printf '%s' "$SPECIAL_CTX" | grep -qF '${CLAUDE_PLUGIN_ROOT}' \
   && [ ! -e "$SPECIAL_BASE/run/POSTREV_PWNED" ] \
   && [ ! -e "$SPECIAL_BASE/run/POSTREV_TICKED" ] \
-  && [ ! -e "$SPECIAL_BASE/run/POSTREV_SEMI" ]; then
-  check "P4b special-character root stays valid JSON and inert in review commands" PASS
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_SEMI" ] \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_DATA_PWNED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_DATA_TICKED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/POSTREV_DATA_SEMI" ]; then
+  check "P4b exact emitted review command executes with inert quoted root and plugin data" PASS
 else
-  check "P4b special-character root stays valid JSON and inert in review commands" FAIL
+  check "P4b exact emitted review command executes with inert quoted root and plugin data" FAIL
 fi
 if grep -qE 'LOG_HELPER_Q=.*printf.*%q.*CLAUDE_PLUGIN_ROOT.*zensu-log\.sh' "$POSTREV" \
-  && grep -qF 'bash ${LOG_HELPER_Q}' "$POSTREV"; then
-  check "P4c generated review commands serialize the active root through printf %q" PASS
+  && grep -qF 'LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"' "$POSTREV"; then
+  check "P4c generated review commands quote plugin data and active root" PASS
 else
-  check "P4c generated review commands serialize the active root through printf %q" FAIL
+  check "P4c generated review commands quote plugin data and active root" FAIL
 fi
 rm -rf "$SPECIAL_BASE"
 

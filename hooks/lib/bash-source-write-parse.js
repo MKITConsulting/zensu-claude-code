@@ -111,6 +111,7 @@ function detectChannels(cmd) {
 
 const CONTROL_BINDINGS = new Set([
   "CLAUDE_ENV_FILE",
+  "CLAUDE_CODE_SESSION_ID",
   "ZENSU_CLAUDE_PLUGIN_ROOT",
   "ZENSU_SESSION_KEY",
   "ZENSU_SESSION_CONTEXT",
@@ -173,11 +174,10 @@ function commandRefersToControlPath(cmd, envFile) {
   return false;
 }
 
-// Session Control exports are immutable host attestations. A Bash tool call
-// must not rebind them or append a replacement block to CLAUDE_ENV_FILE. This
-// check is deliberately independent of the source-write config and escape
-// hatches: those are convenience controls, while these values are the trust
-// anchor used by every later capability/state decision.
+// Claude's host session selector and Zensu's helper-private bindings must not
+// be rebound by a model-issued Bash call. Likewise, model commands may not
+// write CLAUDE_ENV_FILE and poison later Bash environments. This check is
+// deliberately independent of the source-write config and escape hatches.
 function detectControlMutation(cmd) {
   if (!cmd) return "";
   const envFile = process.env.CLAUDE_ENV_FILE || "";
@@ -187,7 +187,7 @@ function detectControlMutation(cmd) {
   const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
     || commandRefersToControlPath(cmd, envFile);
   if (refersToEnvFile && detectChannels(cmd)) {
-    return "Blocked a Bash write to CLAUDE_ENV_FILE. Session Control exports are immutable for the lifetime of the session; start a fresh Claude Code session instead of rebinding them.";
+    return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
   }
 
   for (const event of lex(stripHeredocs(cmd))) {
@@ -197,14 +197,14 @@ function detectControlMutation(cmd) {
     let i = 0;
     while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
       const name = bindingFromAssignment(toks[i]);
-      if (name) return "Blocked a Bash rebind of immutable Session Control export " + name + ". Start a fresh Claude Code session instead.";
+      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
       i++;
     }
     while (i < toks.length && WRAP.has(unquote(toks[i]).split("/").pop())) {
       i++;
       while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
         const name = bindingFromAssignment(toks[i]);
-        if (name) return "Blocked a Bash rebind of immutable Session Control export " + name + ". Start a fresh Claude Code session instead.";
+        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
         i++;
       }
     }
@@ -214,22 +214,22 @@ function detectControlMutation(cmd) {
     if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
       for (const arg of args) {
         const name = bindingFromAssignment(arg);
-        if (name) return "Blocked a Bash rebind of immutable Session Control export " + name + ". Start a fresh Claude Code session instead.";
+        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
       }
     }
     if (cmd0 === "unset") {
       const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked removal of immutable Session Control export " + name + ". Start a fresh Claude Code session instead.";
+      if (name) return "Blocked removal of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
     }
     if (cmd0 === "printf") {
       const vi = args.indexOf("-v");
       if (vi !== -1 && CONTROL_BINDINGS.has(args[vi + 1])) {
-        return "Blocked a Bash rebind of immutable Session Control export " + args[vi + 1] + ". Start a fresh Claude Code session instead.";
+        return "Blocked a Bash rebind of protected Session Control input " + args[vi + 1] + ". Start a fresh Claude Code session instead.";
       }
     }
     if (cmd0 === "read") {
       const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
-      if (name) return "Blocked a Bash rebind of immutable Session Control export " + name + ". Start a fresh Claude Code session instead.";
+      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
     }
   }
   return "";

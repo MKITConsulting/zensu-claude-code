@@ -36,12 +36,12 @@ bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 # reviewRound in the Session Control workflow document is authoritative.
 for _round in 1 2; do
   PRIME_TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
-  PRIME_STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${PRIME_TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
+  PRIME_STDIN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${PRIME_TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
   printf '%s' "$PRIME_STDIN" | "$SCRIPT" >/dev/null 2>/dev/null
 done
 
 TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
-STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
+STDIN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"${SID}\"}"
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in *"Auto-fix convergence: max 2 rounds reached"*) check "stdout contains convergence message" PASS ;; *) check "stdout contains convergence message" FAIL ;; esac

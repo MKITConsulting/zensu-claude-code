@@ -39,7 +39,7 @@ export CLAUDE_PROJECT_DIR="$WPROJ"
 source "$BASELINE" "$SID"
 env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
   bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
-PAY=$(printf '{"tool_input":{"command":"go test ./..."},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID")
+PAY=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"go test ./..."},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID")
 echo "$PAY" | env CLAUDE_PROJECT_DIR="$WPROJ" ZENSU_CONFIG="$CFG_NONE" \
   bash "$WITNESS_HOOK" >/dev/null 2>&1
 WLINE="$(head -n1 "$WPROJ/.zensu/logs/witness-$(session_key "$SID").log" 2>/dev/null)"
@@ -62,7 +62,7 @@ export CLAUDE_PROJECT_DIR="$WPROJ2"
 source "$BASELINE" "$SID2"
 env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
   bash "$LOG" --tdd-begin --session "$SID2" >/dev/null 2>&1
-PAY2=$(printf '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID2")
+PAY2=$(printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"%s"}' "$SID2")
 echo "$PAY2" | env CLAUDE_PROJECT_DIR="$WPROJ2" ZENSU_CONFIG="$CFG_WALL" \
   bash "$WITNESS_HOOK" >/dev/null 2>&1
 WLINE2="$(head -n1 "$WPROJ2/.zensu/logs/witness-$(session_key "$SID2").log" 2>/dev/null)"
@@ -127,7 +127,7 @@ env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_
   bash "$LOG" --tdd-complete --session "$SIDR" >/dev/null 2>&1
 TICKETR="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
   bash "$LOG" --review-ticket --session "$SIDR")"
-STDINR="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR}\\nfixture\"},\"session_id\":\"${SIDR}\"}"
+STDINR="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR}\\nfixture\"},\"session_id\":\"${SIDR}\"}"
 printf '%s' "$STDINR" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE/project" ZENSU_CONFIG="$CFG_NONE" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_N=$(CORE="$SESSION_CORE" PROJECT_ROOT="$RSTATE/project" SID="$SIDR" node -e '
@@ -157,7 +157,7 @@ env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU
   bash "$LOG" --tdd-complete --session "$SIDR2" >/dev/null 2>&1
 TICKETR2="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
   bash "$LOG" --review-ticket --session "$SIDR2")"
-STDINR2="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR2}\\nfixture\"},\"session_id\":\"${SIDR2}\"}"
+STDINR2="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKETR2}\\nfixture\"},\"session_id\":\"${SIDR2}\"}"
 printf '%s' "$STDINR2" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$RSTATE2/project" ZENSU_CONFIG="$CFG_WALL" \
   bash "$ROUNDS_HOOK" >/dev/null 2>&1
 R_W=$(CORE="$SESSION_CORE" PROJECT_ROOT="$RSTATE2/project" SID="$SIDR2" node -e '

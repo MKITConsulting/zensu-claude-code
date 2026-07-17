@@ -121,7 +121,7 @@ confirmed.
 Before any browser call, require the plugin's version-1 navigation broker declared by
 `validate.navigationBroker` and configured in Claude's parent environment as
 `ZENSU_VERIFY_NAVIGATION_POLICY_V1`. Run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
+`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" --check-policy <local|remote> "<validated-origin>" "<exact-page-route>" declared-safe`
 as a standalone preflight for every route. The parent JSON must bind each exact page route to
 its validated origin with the `declared-safe` mode described in the config contract. Contract
 v1 intentionally supports no redaction-driver mode: protected or sensitive coverage that is
@@ -178,6 +178,10 @@ This common `$RUN_DIR` must exist before runtime or authentication preparation.
 ### Local mode
 
 Local means the application process actually uses files from the current worktree.
+Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
+`rules/zensu-monorepo.md` says `<absolute-plugin-root>`, replace it with this
+concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
+Claude's native placeholder substitution.
 
 1. Inspect the explicit `--config` path or `.zensu/autopilot.yaml` as a **candidate**, using
    `../autopilot/rules/config.md`. An autopilot recipe is not automatically safe for live
@@ -332,9 +336,9 @@ direct `mcp__playwright__<operation>` name or Claude's plugin namespace
 `mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
 that the plugin MCP server was not loaded and ask the user to restart Claude Code after
 checking the plugin installation. If the browser binary is missing, require the validated
-session-bound `ZENSU_CLAUDE_PLUGIN_ROOT` export, obtain explicit approval for the networked
+natively rendered `${CLAUDE_PLUGIN_ROOT}` path, obtain explicit approval for the networked
 browser installation, then run
-`bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" install-browser` and ask the user to
+`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser` and ask the user to
 restart Claude Code so the MCP server reloads. `browser_install` is not a tool in the pinned
 runtime. Do not silently replace the browser driver with ad-hoc `curl` checks; that cannot
 prove the UI.

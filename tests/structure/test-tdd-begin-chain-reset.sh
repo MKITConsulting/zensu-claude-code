@@ -52,7 +52,7 @@ SID_KEY="$SID"
 log() { bash "$LOG" "$@" >/dev/null 2>>"$LOG_STDERR"; }
 
 stop_dec() {
-  printf '%s' '{"session_id":"'"$SID"'"}' | bash "$STOP" 2>/dev/null | node -e '
+  printf '%s' '{"hook_event_name":"Stop","session_id":"'"$SID_RAW"'"}' | bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'
@@ -81,8 +81,10 @@ D1="$(stop_dec)"
 # Route the matching Agent completion through the production PostToolUse hook;
 # this is the official transition that consumes the one-shot ticket and records
 # reviewRound=1 before any ticket-bound terminal flag may be written.
-SID_VALUE="$SID" TICKET="$TICKET1" node -e '
+SID_VALUE="$SID_RAW" TICKET="$TICKET1" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
     session_id: process.env.SID_VALUE,
     tool_input: {
       subagent_type: "zensu:code-reviewer",

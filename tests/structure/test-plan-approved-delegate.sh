@@ -41,11 +41,15 @@ export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
 mkdir -p "$CLAUDE_PROJECT_DIR"
 # Exercise the hook with the same sealed context a real SessionStart supplies.
 # shellcheck disable=SC1090
-source "$BASELINE" "plan-approved-session"
+SESSION_ID="plan-approved-session"
+source "$BASELINE" "$SESSION_ID"
 # Force defaults (autoTdd enabled) by pointing config resolution at a missing file.
 export ZENSU_CONFIG="$TMP_DIR/no-such-config.json"
 
-OUT="$(printf '%s' '{"tool_name":"ExitPlanMode","tool_input":{"plan":"add a function"}}' | bash "$HOOK" 2>/dev/null)"
+OUT="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode", tool_input: {plan: "add a function"}
+}))' | bash "$HOOK" 2>/dev/null)"
 
 # D2 valid additionalContext JSON for PostToolUse
 if printf '%s' "$OUT" | node -e '
@@ -102,7 +106,10 @@ fi
 # D7 hooks.autoTdd=false -> silent (hook can be disabled)
 CFG_OFF="$TMP_DIR/autotdd-off.json"
 printf '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
-OUT_OFF="$(printf '%s' '{"tool_name":"ExitPlanMode"}' | ZENSU_CONFIG="$CFG_OFF" bash "$HOOK" 2>/dev/null)"
+OUT_OFF="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode"
+}))' | ZENSU_CONFIG="$CFG_OFF" bash "$HOOK" 2>/dev/null)"
 rm -f "$CFG_OFF"
 if [ -z "$OUT_OFF" ]; then
   check "D7 hooks.autoTdd=false -> silent (no output)" PASS

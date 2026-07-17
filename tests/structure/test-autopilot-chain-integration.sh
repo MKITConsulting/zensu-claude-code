@@ -100,8 +100,8 @@ field_ok "$RF2" 'j.stage==="BLOCKED"&&j.blocked.code==="TDD_MAX_ROUNDS"' \
   && check "C4 max-rounds outcome blocks the outer run instead of advancing" PASS \
   || check "C4 max-rounds outcome blocks the outer run instead of advancing" FAIL
 
-P3="$TMP/crash"; mkdir -p "$P3"; R3=chain_run_crash; S3=chain_session_crash; C3=chain-crash-001
-prepare_session "$P3" "$S3" S3 || exit 1
+P3="$TMP/crash"; mkdir -p "$P3"; R3=chain_run_crash; S3_RAW=chain_session_crash; S3="$S3_RAW"; C3=chain-crash-001
+prepare_session "$P3" "$S3_RAW" S3 || exit 1
 approve "$P3" "$R3" "$S3" || exit 1
 CLAUDE_PROJECT_DIR="$P3" bash "$LOG" --tdd-begin --session "$S3" --autopilot-run "$R3" --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id "$C3" >/dev/null
 CLAUDE_PROJECT_DIR="$P3" bash "$LOG" --tdd-complete --session "$S3" \
@@ -110,7 +110,8 @@ CLAUDE_PROJECT_DIR="$P3" bash "$LOG" --tdd-complete --session "$S3" \
 CLAUDE_PROJECT_DIR="$P3" bash -c 'source "$1"; tdd_finish_autopilot_chain "$2" "$3" 1 "$4" pass' \
   _ "$PHASE" "$S3" "$R3" "$C3"
 RF3="$(autopilot_run_file "$R3" "$P3")"
-OUT3="$(printf '{\"session_id\":\"%s\"}' "$S3" | CLAUDE_PROJECT_DIR="$P3" bash "$STOP" 2>/dev/null)"
+OUT3="$(printf '{\"hook_event_name\":\"Stop\",\"session_id\":\"%s\"}' "$S3_RAW" \
+  | CLAUDE_PROJECT_DIR="$P3" CLAUDE_CODE_SESSION_ID="$S3_RAW" bash "$STOP" 2>/dev/null)"
 if printf '%s' "$OUT3" | grep -q '"decision":"block"' && field_ok "$RF3" 'j.stage==="GATES"'; then
   check "C5 Stop heals inner-done/outer-running crash window then still blocks" PASS
 else check "C5 Stop heals the two-file crash window" FAIL; fi

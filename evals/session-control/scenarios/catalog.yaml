@@ -62,13 +62,73 @@
   vars: { scenario_id: no-attestation, expected_valid: false }
 - description: "C32 reordered canonical fields are rejected"
   vars: { scenario_id: reordered-fields, expected_valid: false }
-- description: "C33 real bare reviewer agent types receive reviewer-readonly-v1"
-  vars: { scenario_id: bare-reviewer-types, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C33 plugin-scoped reviewers and exact bare fixtures receive reviewer-readonly-v1"
+  vars: { scenario_id: bare-reviewer-types, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:SessionStartAgent:Reviewers:reviewer-readonly-v1' }
 - description: "C34 unknown custom agents receive neutral host-profile-v1"
-  vars: { scenario_id: unknown-neutral-profile, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
-- description: "C35 missing inherited SubagentStart context is denied at PreToolUse"
+  vars: { scenario_id: unknown-neutral-profile, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:SessionStartAgent:Unknown:host-profile-v1' }
+- description: "C35 missing private parent record is denied at PreToolUse"
   vars: { scenario_id: pretool-missing-context-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
-- description: "C36 tampered inherited SubagentStart context is denied at PreToolUse"
+- description: "C36 tampered private parent record is denied at PreToolUse"
   vars: { scenario_id: pretool-tampered-context-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
 - description: "C37 deleted project CAS state after activation is denied at PreToolUse"
   vars: { scenario_id: pretool-deleted-cas-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0 }
+- description: "C38 PLM stays neutral and read-only in frontmatter plus PreToolUse"
+  vars: { scenario_id: plm-readonly-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:ZensuPlm:SessionStart:host-profile-v1:ReadOnly:WriteDenied' }
+- description: "C39 generic review workers keep non-command host tools while every command capability is denied"
+  vars: { scenario_id: generic-review-worker-boundary, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:GeneralPurpose:host-profile-v1:OrdinaryNonCommandToolsAllowed:AllCommandToolsDenied' }
+- description: "C40 native skill helper binds per call, ignores ambient selectors, rejects foreign and derived session ids, and leaves CLAUDE_ENV_FILE untouched"
+  vars: { scenario_id: native-helper-binding, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:NativeSkillBinding:PerCall:EnvFileUntouched:AmbientSelectorsIgnored:ForeignAndDerivedSessionDenied' }
+- description: "C41 dedicated evidence-worker definitions expose only leased Read, Grep, and Glob and receive their exact principals"
+  vars: { scenario_id: evidence-worker-principal-frontmatter, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:DefinitionsAndPrincipals:Exact' }
+- description: "C42 an active lease authorizes an exact immutable file Read"
+  vars: { scenario_id: evidence-worker-exact-read, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExactReadAllowed' }
+- description: "C43 an active lease authorizes Grep only at an exact safe subtree"
+  vars: { scenario_id: evidence-worker-exact-grep, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExactGrepAllowed' }
+- description: "C44 an active lease authorizes Glob only at an exact safe subtree"
+  vars: { scenario_id: evidence-worker-exact-glob, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExactGlobAllowed' }
+- description: "C45 dedicated workers deny every non-read tool family including command, mutation, orchestration, web, skill, and MCP"
+  vars: { scenario_id: evidence-worker-all-tool-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:CapabilityMatrix:AllNonReadToolsDenied' }
+- description: "C46 a lease denies Read of an existing but nonlisted file inside an allowed subtree"
+  vars: { scenario_id: evidence-worker-nonlisted-read-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:NonlistedReadDenied' }
+- description: "C47 a lease denies Read and search outside every listed evidence root"
+  vars: { scenario_id: evidence-worker-external-path-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:ExternalDenied' }
+- description: "C48 repository roots and their ancestors are never valid Grep or Glob roots"
+  vars: { scenario_id: evidence-worker-root-ancestor-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:RootAndAncestorDenied' }
+- description: "C49 Grep and Glob with omitted paths fail closed instead of inheriting cwd"
+  vars: { scenario_id: evidence-worker-omitted-path-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:OmittedDenied' }
+- description: "C50 traversal and escaping glob patterns cannot leave an exact safe subtree"
+  vars: { scenario_id: evidence-worker-traversal-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Path:TraversalDenied' }
+- description: "C51 tampering with the private lease record invalidates every worker capability"
+  vars: { scenario_id: evidence-worker-lease-tamper-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:TamperDenied' }
+- description: "C52 exact-file hash drift and safe-root content or stat drift invalidate a lease"
+  vars: { scenario_id: evidence-worker-hash-drift-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:HashAndFinalizeSnapshotDriftDenied' }
+- description: "C53 an expired evidence lease cannot authorize later worker calls"
+  vars: { scenario_id: evidence-worker-expiry-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:ExpiredDenied' }
+- description: "C54 a closed evidence lease cannot be replayed by its former worker"
+  vars: { scenario_id: evidence-worker-revoke-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Lease:RevokedDenied' }
+- description: "C55 a foreign host session cannot bind, use, collect, or close another session lease"
+  vars: { scenario_id: evidence-worker-session-binding-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Binding:ForeignSessionDenied' }
+- description: "C56 plan and PR evidence leases cannot be consumed by the opposite dedicated worker type"
+  vars: { scenario_id: evidence-worker-type-binding-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Binding:LeaseTypeDenied' }
+- description: "C57 worker ids are bound once and max-workers cannot be exceeded or replayed"
+  vars: { scenario_id: evidence-worker-agent-binding-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Binding:AgentAndCapacityDenied' }
+- description: "C58 symlink aliases plus sensitive and special filesystem entries are rejected"
+  vars: { scenario_id: evidence-worker-symlink-alias-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Alias:SymlinkDeniedOrPlatformSkipped' }
+- description: "C59 hardlink aliases cannot replace a leased exact file"
+  vars: { scenario_id: evidence-worker-hardlink-alias-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Alias:HardlinkDeniedOrPlatformSkipped' }
+- description: "C60 case aliases cannot bypass canonical leased path identity"
+  vars: { scenario_id: evidence-worker-case-alias-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Alias:CaseDeniedOrPlatformSkipped' }
+- description: "C61 prompt-injected tool requests remain data and every requested capability is denied"
+  vars: { scenario_id: evidence-worker-prompt-injection-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:PromptInjection:ToolAttemptsDenied' }
+- description: "C62 one lease safely binds multiple parallel workers without cross-worker result confusion"
+  vars: { scenario_id: evidence-worker-parallel-binding, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Concurrency:ParallelBindingsIsolated' }
+- description: "C63 independent review runs cannot consume each other's leases, workers, or results"
+  vars: { scenario_id: evidence-worker-cross-run-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:Concurrency:CrossRunDenied' }
+- description: "C64 valid raw plan- and PR-review JSON messages are captured once and collected canonically after closure"
+  vars: { scenario_id: evidence-worker-stop-positive-collect, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:SubagentStop:ValidFinalizedCollected' }
+- description: "C65 malformed, fenced, prefixed, suffixed, and oversized final messages fail SubagentStop validation"
+  vars: { scenario_id: evidence-worker-stop-json-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:SubagentStop:InvalidJsonDenied' }
+- description: "C66 schema, PR path, changed-production coverage-set, and collect-role mismatches fail closed"
+  vars: { scenario_id: evidence-worker-stop-schema-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:SubagentStop:SchemaAndRoleDenied' }
+- description: "C67 failed, missing, duplicate, or replayed SubagentStop output cannot be collected"
+  vars: { scenario_id: evidence-worker-stop-output-deny, expected_valid: true, expected_host: claude, expected_revision: 2, expected_exit_code: 0, expected_hook: 'Contract:EvidenceWorker:SubagentStop:OutputFailuresDenied' }

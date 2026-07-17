@@ -71,18 +71,18 @@ start_session "$SID"
 
 # Fresh marker -> adopt -> block + cleared (sanity, matches deferred fallback)
 bash "$LOG" --pending-review --files "x.ts" --summary "fresh" >/dev/null 2>&1
-OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
 { [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] && [ ! -f "$MARKER" ]; } \
   && check "I1 fresh marker -> adopt -> block + marker cleared" PASS \
   || check "I1 fresh adopt (dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
 bash "$LOG" --chain-done --session "$SID" >/dev/null 2>&1
-printf '{"session_id":"%s"}' "$SID" | bash "$STOP" >/dev/null 2>&1
+printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID" | bash "$STOP" >/dev/null 2>&1
 
 # Stale marker -> NOT adopted -> allow (clean exit 0) + cleared
 SID2="ttl-stale"
 start_session "$SID2"
 printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER"
-OUT="$(printf '{"session_id":"%s"}' "$SID2" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID2" | bash "$STOP" 2>/dev/null)"; RC=$?
 { [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ ! -f "$MARKER" ]; } \
   && check "I2 stale marker -> NOT adopted (allow, clean exit) + marker cleared" PASS \
   || check "I2 stale not adopted (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL
@@ -93,12 +93,12 @@ start_session "$SID3"
 CFG_OFF="$STATE_DIR/ttl-off.json"
 printf '%s\n' '{"hooks":{"pendingReviewTtlHours":0}}' > "$CFG_OFF"
 printf '%s\n' '{"files":["x.ts"],"summary":"old","ts":"'"$OLD_TS"'"}' > "$MARKER"
-OUT="$(printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"; RC=$?
 [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
   && check "I3 ttl=0 disables guard -> stale marker still adopts (block)" PASS \
   || check "I3 ttl=0 still adopts (dec=$(printf '%s' "$OUT" | decision))" FAIL
 bash "$LOG" --chain-done --session "$SID3" >/dev/null 2>&1
-printf '{"session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" >/dev/null 2>&1
+printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID3" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" >/dev/null 2>&1
 
 # no-ts marker (as timestampStyle:"none" writes) with an OLD file mtime -> NOT
 # adopted, so an abandoned marker from a crashed run cannot hijack a later
@@ -107,7 +107,7 @@ SID4="ttl-nots-old"
 start_session "$SID4"
 printf '%s\n' '{"files":["x.ts"],"summary":"nots-old"}' > "$MARKER"
 touch -t 202001010000 "$MARKER" 2>/dev/null
-OUT="$(printf '{"session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"; RC=$?
 { [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ] && [ ! -f "$MARKER" ]; } \
   && check "I4 no-ts + old mtime -> NOT adopted (allow, clean exit) + marker cleared" PASS \
   || check "I4 no-ts old-mtime not adopted (rc=$RC dec=$(printf '%s' "$OUT" | decision) marker_exists=$([ -f "$MARKER" ] && echo y || echo n))" FAIL

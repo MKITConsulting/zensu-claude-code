@@ -47,7 +47,19 @@ else
 fi
 
 payload() {
-  node -e 'process.stdout.write(JSON.stringify({prompt:process.argv[1],session_id:process.argv[2]||"t"}))' "$1" "$2"
+  local prompt="$1" session_id="${2:-t}" project="${3:-${CLAUDE_PROJECT_DIR:-}}"
+  local plugin_data="$project/plugin-data"
+  mkdir -p "$project" "$plugin_data"
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name:"SessionStart", source:"startup",
+    session_id:process.argv[1], cwd:process.argv[2]
+  }))' "$session_id" "$project" \
+    | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$plugin_data" \
+      env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+      bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null || return 1
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name:"UserPromptSubmit", prompt:process.argv[1], session_id:process.argv[2]
+  }))' "$prompt" "$session_id"
 }
 
 # Reduce the hook output to FIRED (TDD directive present) / EMPTY (silent) /
@@ -72,13 +84,13 @@ fired() {
 # C6 — a non-planning code prompt (the intent-router stays SILENT on this one)
 # must FIRE here: every-turn, no keyword filter.
 P6="$(mktemp -d -t tddrem-XXXXXX)"
-OUT6="$(payload "fix the auth token expiry bug" "s6" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P6" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+OUT6="$(payload "fix the auth token expiry bug" "s6" "$P6" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P6/plugin-data" CLAUDE_PROJECT_DIR="$P6" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
 [ "$OUT6" = "FIRED" ] && check "C6 non-planning code prompt fires the TDD directive" PASS || check "C6 non-planning fires (got '$OUT6')" FAIL
 rm -rf "$P6"
 
 # C7 — a German prompt fires IDENTICALLY (proves language-independence: no regex).
 P7="$(mktemp -d -t tddrem-XXXXXX)"
-OUT7="$(payload "behebe den Login-Fehler im Auth-Service" "s7" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P7" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
+OUT7="$(payload "behebe den Login-Fehler im Auth-Service" "s7" "$P7" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P7/plugin-data" CLAUDE_PROJECT_DIR="$P7" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | fired)"
 [ "$OUT7" = "FIRED" ] && check "C7 German prompt fires identically (language-independent, no regex)" PASS || check "C7 German fires (got '$OUT7')" FAIL
 rm -rf "$P7"
 
@@ -96,7 +108,7 @@ rm -rf "$P8"
 # C9 — hooks.tddReminder:false -> silent (opt-out honored).
 P9="$(mktemp -d -t tddrem-XXXXXX)"
 CFG9="$P9/config.json"; printf '%s' '{"hooks":{"tddReminder":false}}' > "$CFG9"
-OUT9="$(payload "implement a debounce helper" "s9" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$CFG9" bash "$HOOK" 2>/dev/null | fired)"
+OUT9="$(payload "implement a debounce helper" "s9" "$P9" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P9/plugin-data" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$CFG9" bash "$HOOK" 2>/dev/null | fired)"
 [ "$OUT9" = "EMPTY" ] && check "C9 hooks.tddReminder:false -> silent (opt-out honored)" PASS || check "C9 disabled silent (got '$OUT9')" FAIL
 rm -rf "$P9"
 
@@ -108,7 +120,7 @@ OUT10="$(
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" s10
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --tdd-begin --session s10 >/dev/null 2>&1
-  payload "add validation to the parser" "s10" | bash "$HOOK" 2>/dev/null | fired
+  payload "add validation to the parser" "s10" "$P10" | bash "$HOOK" 2>/dev/null | fired
 )"
 [ "$OUT10" = "EMPTY" ] && check "C10 active TDD session -> silent" PASS || check "C10 active-session silence (got '$OUT10')" FAIL
 rm -rf "$P10"
@@ -125,7 +137,7 @@ fi
 
 # C12 — the directive front-loads ask-first, the fast-paths, and the dismiss clauses.
 P12="$(mktemp -d -t tddrem-XXXXXX)"
-AC12="$(payload "build a rate limiter" "s12" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P12" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+AC12="$(payload "build a rate limiter" "s12" "$P12" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$P12/plugin-data" CLAUDE_PROJECT_DIR="$P12" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
 if [ -n "$AC12" ] \
    && printf '%s' "$AC12" | grep -qi 'AskUserQuestion' \
    && printf '%s' "$AC12" | grep -qi 'use tdd' \
@@ -139,6 +151,32 @@ else
   check "C12 directive content (fired=$fired12)" FAIL
 fi
 rm -rf "$P12"
+
+# Explicit and partial subagent metadata must be a total no-op before the
+# reminder can expose main-thread steering. Ambient force-main cannot override
+# the trusted payload classifier.
+P13="$(mktemp -d -t tddrem-XXXXXX)"
+BASE13="$(payload "implement a privileged helper" "s13" "$P13")"
+OUT13=""
+for KIND13 in reviewer plm neutral partial; do
+  PAYLOAD13="$(BASE="$BASE13" KIND="$KIND13" node -e '
+    const p=JSON.parse(process.env.BASE);
+    if(process.env.KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ')"
+  OUT13="${OUT13}$(printf '%s' "$PAYLOAD13" | ZENSU_FORCE_MAIN=1 CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PLUGIN_DATA="$P13/plugin-data" CLAUDE_PROJECT_DIR="$P13" ZENSU_CONFIG="$NO_CONFIG" \
+    bash "$HOOK" 2>/dev/null)"
+done
+if [ -z "$OUT13" ]; then
+  check "C13 reviewer/PLM/neutral/partial principals receive no TDD reminder" PASS
+else
+  check "C13 non-main principals receive no TDD reminder" FAIL
+fi
+rm -rf "$P13"
 
 echo "----"
 echo "test-tdd-reminder-hook: $PASS PASS / $FAIL FAIL"

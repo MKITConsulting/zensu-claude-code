@@ -19,20 +19,17 @@ trap 'rm -rf "$WORK"' EXIT
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 export CLAUDE_PROJECT_DIR="$WORK/project"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
+export ZENSU_TEST_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
 export STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
 export ZENSU_CONFIG="$WORK/config.json"
-ENV_FILE="$WORK/session.env"
 mkdir -p "$CLAUDE_PROJECT_DIR" "$CLAUDE_PLUGIN_DATA"
-: >"$ENV_FILE"
 printf '%s\n' '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
 
 SID="reset-transaction-revision"
-PAYLOAD="$(SID="$SID" PROJECT="$CLAUDE_PROJECT_DIR" node -e '
-  process.stdout.write(JSON.stringify({hook_event_name:"SessionStart",session_id:process.env.SID,cwd:process.env.PROJECT}));
-')"
-printf '%s' "$PAYLOAD" | CLAUDE_ENV_FILE="$ENV_FILE" bash "$ROOT/hooks/session-start-session-control.sh" >/dev/null
+# Exercise the same fresh SessionStart + per-Bash native binder used by the
+# Session Control harness. No CLAUDE_ENV_FILE selectors are available anymore.
 # shellcheck disable=SC1090
-source "$ENV_FILE"
+source "$ROOT/tests/session-control/initialize-baseline.sh" "$SID" "$ROOT"
 # shellcheck disable=SC1090
 source "$ROOT/hooks/lib/zensu-tdd-phase.sh"
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
@@ -90,7 +87,8 @@ BYTES_AFTER_STALE="$(file_digest "$STATE_FILE")"
 TICKET="$(tdd_issue_review_ticket "$SID")"
 STDIN="$(SID="$SID" TICKET="$TICKET" node -e '
   process.stdout.write(JSON.stringify({
-    tool_name: "Task",
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
     tool_input: {
       subagent_type: "zensu:code-reviewer",
       prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`,

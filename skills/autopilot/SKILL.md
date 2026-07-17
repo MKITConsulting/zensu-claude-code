@@ -68,7 +68,7 @@ Every git-host call — opening the PR/MR and the pre-push state guard — goes 
 so the forge (GitHub or GitLab) is detected once and each op degrades correctly.
 
 ```bash
-ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
+ROOT="${CLAUDE_PLUGIN_ROOT}"
 [ -n "$ROOT" ] && [ -f "$ROOT/hooks/lib/zensu-vcs.sh" ] || {
   echo "FATAL: active plugin root is unavailable — start a fresh Claude Code session" >&2
   exit 1
@@ -95,7 +95,7 @@ Before presenting the Phase-0 plan, generate one token-safe run id (`run_<random
 persist it from the worktree root:
 
 ```bash
-bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
 ```
 
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
@@ -115,9 +115,9 @@ that exact stage. Never start an unbound TDD generation during an active run.
 Every other transition goes through the closed API (stable event ids; exact JSON payload):
 
 ```bash
-bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
   --event-id <stable-id> --payload '<exact-json>'
-bash "$LOG" --autopilot-status
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 
 The closed stage sequence is `PLANNING → AWAIT_TDD ↔ TDD_RUNNING → GATES → CONVERGE →
@@ -137,7 +137,7 @@ A successful TDD return to `FIX_FINDINGS`, `VALIDATE`, or `COVER` arms a mandato
 handoff. Re-run the gates, push the fix, read the resulting PR head, then apply exactly:
 
 ```bash
-bash "$LOG" --autopilot-event --run "$RUN_ID" --event PR_HEAD_UPDATED \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event PR_HEAD_UPDATED \
   --event-id "head:<previous-sha>:<new-sha>" \
   --payload '{"previousHeadSha":"<previous-sha>","headSha":"<new-sha>","gatesPassed":true,"pushCompleted":true}'
 ```
@@ -165,7 +165,7 @@ conflicting event ids, and incomplete delivery evidence.
 ### Delegated review and finding-fix envelopes
 
 Do not delegate either PR skill from conversational context alone. Immediately before each
-delegation, read fresh state with `bash "$LOG" --autopilot-status` and render the envelope
+delegation, read fresh state with `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status` and render the envelope
 from the current durable `tdd.attempt` and `tdd.chainId`, the current outer stage, and the
 current durable PR number, URL, and head SHA. The active run must still be owned by this
 task/session; any absent, terminal, corrupt, mismatched, or incomplete value blocks the
@@ -342,7 +342,7 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
    step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
-   each fix loop), run `bash "$LOG" --bypass-list`
+   each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
    and union the non-`none` entries —
    each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`

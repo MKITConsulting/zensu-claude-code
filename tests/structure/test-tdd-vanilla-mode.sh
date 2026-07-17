@@ -41,7 +41,8 @@ STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
 for BASELINE_SID in \
   vanilla-lib vanilla-lib-reset vanilla-lib-array vanilla-lib-array-wf vanilla-lib-wf \
   vanilla-begin-default vanilla-begin-strict vanilla-begin-vanilla vanilla-fail \
-  vanilla-strtrue vanilla-rebegin vanilla-malformed vanilla-conv; do
+  vanilla-strtrue vanilla-rebegin vanilla-malformed vanilla-conv vanilla-plan \
+  vanilla-ask-v vanilla-ask-s vanilla-ask-d; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
 done
@@ -59,13 +60,11 @@ session_key() { node "$SESSION_CORE" session-key "$1"; }
 # The SessionStart hook exports the canonical realpath. Keep that exact spelling:
 # on macOS, mktemp may expose /var while realpath resolves it to /private/var,
 # and Session Control deliberately rejects a non-canonical context filename.
-SESSION_RECORDS="$(dirname "$ZENSU_SESSION_CONTEXT")"
 activate_session() {
-  local key
-  key="$(session_key "$1")" || return 1
-  export ZENSU_SESSION_KEY="$key"
-  export ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json"
-  [ -f "$ZENSU_SESSION_CONTEXT" ]
+  export CLAUDE_CODE_SESSION_ID="$1"
+  # shellcheck disable=SC1090
+  source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
+  zensu_bind_model_session
 }
 payload_session() {
   node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
@@ -74,44 +73,31 @@ payload_session() {
   })'
 }
 
-prod_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"%s"}' "$1"; }
-test_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"%s"}' "$1"; }
+prod_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"%s"}' "$1"; }
+test_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"%s"}' "$1"; }
 
 gate() {  # echoes allow|deny for a payload; $2 = optional ZENSU_CONFIG override
-  local sid key context
+  local sid
   sid="$(printf '%s' "$1" | payload_session)"
-  key="$(session_key "$sid")"
-  context="$SESSION_RECORDS/$key.json"
-  printf '%s' "$1" | ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" \
-    ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$GATE" 2>/dev/null | node -e '
+  printf '%s' "$1" | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$GATE" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{const j=JSON.parse(s);console.log(j.hookSpecificOutput&&j.hookSpecificOutput.permissionDecision==="deny"?"deny":"allow")}
       catch(_){console.log("allow")}});'
 }
-stop_dec() { local key; key="$(session_key "$1")"; printf '%s' '{"session_id":"'"$1"'"}' | \
-  ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json" \
+stop_dec() { printf '%s' '{"hook_event_name":"Stop","session_id":"'"$1"'"}' | \
   ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}
       try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
-stop_reason() { local key; key="$(session_key "$1")"; printf '%s' '{"session_id":"'"$1"'"}' | \
-  ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$key.json" \
+stop_reason() { printf '%s' '{"hook_event_name":"Stop","session_id":"'"$1"'"}' | \
   ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$STOP" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).reason||"")}catch(_){console.log("")}});'; }
 hook_ctx() {  # stdin payload, $1 hook script, $2 optional ZENSU_CONFIG override -> echoes additionalContext
-  local payload sid key context
+  local payload
   payload="$(cat)"
-  sid="$(printf '%s' "$payload" | payload_session)"
-  key="${ZENSU_SESSION_KEY:-}"
-  context="${ZENSU_SESSION_CONTEXT:-}"
-  if [ -n "$sid" ]; then
-    key="$(session_key "$sid")"
-    context="$SESSION_RECORDS/$key.json"
-  fi
-  printf '%s' "$payload" | ZENSU_SESSION_KEY="$key" ZENSU_SESSION_CONTEXT="$context" \
-    ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$1" 2>/dev/null | node -e '
+  printf '%s' "$payload" | ZENSU_CONFIG="${2:-$ZENSU_CONFIG}" bash "$1" 2>/dev/null | node -e '
     let s="";process.stdin.on("data",c=>s+=c);
     process.stdin.on("end",()=>{try{console.log(JSON.parse(s).hookSpecificOutput.additionalContext||"")}catch(_){console.log("")}});'
 }
@@ -120,6 +106,8 @@ postreview_ctx() { # $1 session, $2 optional live config; every delivery gets a 
   ticket="$(bash "$LOG" --review-ticket --session "$sid" 2>/dev/null)" || return 1
   SID_VALUE="$sid" TICKET="$ticket" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",
         prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
@@ -276,8 +264,8 @@ bash "$LOG" --phase GREEN_PASS --step SX --session "$SID_B" >/dev/null 2>&1
   && check "E2 config flip to vanilla mid-session: strict gate still denies (frozen)" PASS || check "E2 freeze strict->vanilla" FAIL
 
 echo "== Gate: session-state files are write-protected =="
-state_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":".zensu/state/tdd-phase-evil.json"},"session_id":"%s"}' "$1"; }
-plans_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":".zensu/plans/notes.md"},"session_id":"%s"}' "$1"; }
+state_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":".zensu/state/tdd-phase-evil.json"},"session_id":"%s"}' "$1"; }
+plans_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":".zensu/plans/notes.md"},"session_id":"%s"}' "$1"; }
 [ "$(gate "$(state_payload "$SID_A")")" = "deny" ] \
   && check "SP1 strict session: Edit on .zensu/state/ denied (no self-un-gating)" PASS || check "SP1 state-path deny strict" FAIL
 [ "$(gate "$(state_payload "$SID_B")")" = "deny" ] \
@@ -286,7 +274,7 @@ plans_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":".zensu/
   && check "SP3 vanilla session: .zensu/plans/ exemption preserved" PASS || check "SP3 plans exemption" FAIL
 [ "$(gate "$(plans_payload "$SID_A")")" = "allow" ] \
   && check "SP3b strict session: .zensu/plans/ exemption reached past the state deny" PASS || check "SP3b strict plans exemption" FAIL
-evil_path_payload() { printf '{"tool_name":"Edit","tool_input":{"file_path":"%s"},"session_id":"%s"}' "$1" "$2"; }
+evil_path_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"%s"},"session_id":"%s"}' "$1" "$2"; }
 [ "$(gate "$(evil_path_payload ".zensu/./state/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
   && check "SP4 dot-segment spelling .zensu/./state/ still denied" PASS || check "SP4 dot-segment deny" FAIL
 [ "$(gate "$(evil_path_payload ".zensu//state/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
@@ -311,7 +299,7 @@ fi
 
 echo "== Witness: records in vanilla session (live vanilla config) =="
 activate_session "$SID_B"
-echo '{"tool_input":{"command":"npm test"},"tool_response":{"stdout":"ok"},"session_id":"'"$SID_B"'"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$WITNESS" >/dev/null 2>&1
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"stdout":"ok"},"session_id":"'"$SID_B"'"}' | ZENSU_CONFIG="$CFG_VANILLA" bash "$WITNESS" >/dev/null 2>&1
 WLOG="$PROJ/.zensu/logs/witness-$(session_key "$SID_B").log"
 W_LINE="$(grep -F 'cmd="npm test"' "$WLOG" 2>/dev/null | head -n1)"
 { [ -f "$WLOG" ] && printf '%s' "$W_LINE" | grep -qF 'cmd="npm test"' && printf '%s' "$W_LINE" | grep -qF 'tail="ok"'; } \
@@ -342,7 +330,8 @@ bash "$LOG" --chain-done --claimed-review-ticket "$VANILLA_REVIEW_TICKET" \
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "allow" ] && check "D5 chainDone in vanilla: Stop ALLOWS" PASS || check "D5 vanilla terminus allow" FAIL
 
 echo "== Ask-hooks: mode-aware directives =="
-PA_V="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
+SID_PLAN="vanilla-plan"
+PA_V="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode","session_id":"'"$SID_PLAN"'"}' | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
 { printf '%s' "$PA_V" | grep -q "vanilla" \
   && printf '%s' "$PA_V" | grep -qF "skill='zensu:tdd'" \
   && printf '%s' "$PA_V" | grep -q "AskUserQuestion" \
@@ -350,13 +339,13 @@ PA_V="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_VANILLA")"
   && ! printf '%s' "$PA_V" | grep -qF "strict TDD flow"; } \
   && check "F1 plan-approval (vanilla cfg): vanilla wording + skill route + ask + docs fast-path, no strict text" PASS \
   || check "F1 plan-approval vanilla directive" FAIL
-PA_S="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_STRICT")"
+PA_S="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode","session_id":"'"$SID_PLAN"'"}' | hook_ctx "$PLANHOOK" "$CFG_STRICT")"
 printf '%s' "$PA_S" | grep -qF "strict TDD flow" \
   && check "F2 plan-approval (tddImplementation:true): strict directive" PASS || check "F2 plan-approval strict directive" FAIL
-PA_D="$(printf '%s' '{}' | hook_ctx "$PLANHOOK" "$CFG_DEFAULT")"
+PA_D="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"ExitPlanMode","session_id":"'"$SID_PLAN"'"}' | hook_ctx "$PLANHOOK" "$CFG_DEFAULT")"
 { printf '%s' "$PA_D" | grep -q "vanilla" && ! printf '%s' "$PA_D" | grep -qF "strict TDD flow"; } \
   && check "F2b plan-approval (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F2b plan-approval default vanilla" FAIL
-RM_V="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-v"}' | hook_ctx "$REMINDER" "$CFG_VANILLA")"
+RM_V="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"implement a debounce helper","session_id":"vanilla-ask-v"}' | hook_ctx "$REMINDER" "$CFG_VANILLA")"
 { printf '%s' "$RM_V" | grep -q "vanilla" \
   && printf '%s' "$RM_V" | grep -qF "skill='zensu:tdd'" \
   && printf '%s' "$RM_V" | grep -q "AskUserQuestion" \
@@ -364,10 +353,10 @@ RM_V="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanil
   && ! printf '%s' "$RM_V" | grep -qF "strict TDD flow"; } \
   && check "F3 reminder (vanilla cfg): vanilla wording + skill route + ask + not-a-code-change fast-path, no strict text" PASS \
   || check "F3 reminder vanilla directive" FAIL
-RM_S="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-s"}' | hook_ctx "$REMINDER" "$CFG_STRICT")"
+RM_S="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"implement a debounce helper","session_id":"vanilla-ask-s"}' | hook_ctx "$REMINDER" "$CFG_STRICT")"
 printf '%s' "$RM_S" | grep -qF "strict TDD flow" \
   && check "F4 reminder (tddImplementation:true): strict directive" PASS || check "F4 reminder strict directive" FAIL
-RM_D="$(printf '%s' '{"prompt":"implement a debounce helper","session_id":"vanilla-ask-d"}' | hook_ctx "$REMINDER" "$CFG_DEFAULT")"
+RM_D="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","prompt":"implement a debounce helper","session_id":"vanilla-ask-d"}' | hook_ctx "$REMINDER" "$CFG_DEFAULT")"
 { printf '%s' "$RM_D" | grep -q "vanilla" && ! printf '%s' "$RM_D" | grep -qF "strict TDD flow"; } \
   && check "F4b reminder (default cfg): vanilla directive — default flipped to vanilla" PASS || check "F4b reminder default vanilla" FAIL
 
@@ -451,14 +440,14 @@ printf '%s' "$BN_S" | grep -qF "strict RED→GREEN TDD" \
 BN_D="$(printf '%s' '{"source":"startup"}' | ZENSU_CONFIG="$CFG_DEFAULT" bash "$BANNER" 2>/dev/null)"
 { printf '%s' "$BN_D" | grep -q "vanilla" && ! printf '%s' "$BN_D" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR2b banner (default cfg): vanilla wording — default flipped to vanilla" PASS || check "BNR2b banner default vanilla" FAIL
-PRM_V="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
+PRM_V="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_VANILLA")"
 { printf '%s' "$PRM_V" | grep -q "vanilla" && printf '%s' "$PRM_V" | grep -qF "/zensu:tdd" \
   && ! printf '%s' "$PRM_V" | grep -qF "strict RED→GREEN TDD"; } \
   && check "BNR3 primer (vanilla cfg): vanilla orientation, /zensu:tdd route kept" PASS || check "BNR3 primer vanilla wording" FAIL
-PRM_S="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_STRICT")"
+PRM_S="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_STRICT")"
 printf '%s' "$PRM_S" | grep -qF "strict RED→GREEN TDD" \
   && check "BNR4 primer (tddImplementation:true): strict orientation" PASS || check "BNR4 primer strict wording" FAIL
-PRM_D="$(printf '%s' '{"source":"startup"}' | hook_ctx "$PRIMER" "$CFG_DEFAULT")"
+PRM_D="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | hook_ctx "$PRIMER" "$CFG_DEFAULT")"
 EXPECTED_PRIMER_HELPER="$(printf '%q' "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
 if printf '%s' "$PRM_V" | grep -qF "$EXPECTED_PRIMER_HELPER" \
   && printf '%s' "$PRM_S" | grep -qF "$EXPECTED_PRIMER_HELPER"; then

@@ -43,17 +43,20 @@ activate_session() {
   project="$(cd "$project" && pwd -P)" || return 1
   key="$(node "$SESSION_CORE" session-key "$supplied")" || return 1
   context="$ZENSU_TEST_PLUGIN_DATA/session-control/v1/records/$key.json"
-  if [ ! -f "$context" ]; then
+  if [ "${ZENSU_PROJECT_ROOT:-}" = "$project" ] \
+      && [ "${ZENSU_SESSION_KEY:-}" = "$key" ] \
+      && [ "${ZENSU_SESSION_CONTEXT:-}" = "$context" ] \
+      && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
+      && [ "$(node "$SESSION_CORE" session-key "$CLAUDE_CODE_SESSION_ID" 2>/dev/null)" = "$key" ]; then
     export CLAUDE_PROJECT_DIR="$project"
-    # shellcheck disable=SC1090
-    source "$SESSION_INIT" "$supplied" || return 1
-  else
-    export CLAUDE_PROJECT_DIR="$project"
-    export ZENSU_PROJECT_ROOT="$project"
-    export ZENSU_SESSION_KEY="$key"
-    export ZENSU_SESSION_CONTEXT="$context"
-    export CLAUDE_PLUGIN_DATA="$ZENSU_TEST_PLUGIN_DATA"
+    return 0
   fi
+  # A derived key cannot recreate the raw host identity. New bindings must be
+  # initialized from the same raw session id Claude places in hook payloads.
+  case "$supplied" in scv1_*) return 1 ;; esac
+  export CLAUDE_PROJECT_DIR="$project"
+  # shellcheck disable=SC1090
+  source "$SESSION_INIT" "$supplied" || return 1
   [ "$ZENSU_SESSION_KEY" = "$key" ] && [ "$ZENSU_SESSION_CONTEXT" = "$context" ]
 }
 
@@ -77,7 +80,7 @@ decision() {
 invoke_stop() {
   local project="$1" session_id="$2"
   activate_session "$project" "$session_id" || return 1
-  printf '{"session_id":"%s"}' "$session_id" \
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$CLAUDE_CODE_SESSION_ID" \
     | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$ROOT/missing-config.json" \
       bash "$STOP" 2>/dev/null
 }
@@ -99,6 +102,27 @@ pair_ok() {
 
 digest() {
   node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
+}
+
+copy_runtime() {
+  local destination="$1" runtime_entry
+  mkdir -p "$destination"
+  destination="$(cd "$destination" && pwd -P)" || return 1
+  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+    cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
+  done
+  mkdir -p "$destination/mcp-runtime"
+  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
+    "$destination/mcp-runtime/" || return 1
+}
+
+bind_runtime_session() {
+  local plugin_root="$1" project="$2" raw_session="$3" label="$4"
+  local ZENSU_TEST_PLUGIN_DATA="$ROOT/$label-plugin-data"
+  export ZENSU_TEST_PLUGIN_DATA
+  export CLAUDE_PROJECT_DIR="$project"
+  # shellcheck disable=SC1090
+  source "$SESSION_INIT" "$raw_session" "$plugin_root"
 }
 
 IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
@@ -204,6 +228,7 @@ fi
 # intentionally have no outer pointer and therefore exercise standalone TDD.
 P4="$ROOT/standalone-runtime"
 S4=adversarial_standalone_runtime
+S4_RAW="$S4"
 mkdir -p "$P4"
 prepare_session "$P4" "$S4" S4 || exit 1
 CLAUDE_PROJECT_DIR="$P4" bash "$LOG" --tdd-begin --session "$S4" >/dev/null \
@@ -215,24 +240,21 @@ for utility in cat dirname grep; do
   utility_path="$(command -v "$utility")"
   [ -n "$utility_path" ] && ln -s "$utility_path" "$NO_NODE_PATH/$utility"
 done
-OUT4="$(printf '{"session_id":"%s"}' "$S4" \
+OUT4="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$S4_RAW" \
   | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$NO_NODE_PATH" \
     /bin/bash "$STOP" 2>/dev/null)"
-if [ "$(printf '%s' "$OUT4" | decision)" = block ] \
-  && printf '%s' "$OUT4" | grep -qF 'project-local inner state exists'; then
-  check "X4 missing Node blocks an active standalone Inner chain" PASS
+if [ -z "$OUT4" ]; then
+  check "X4 missing Node stays silent before unauthenticated principal/state inspection" PASS
 else
-  check "X4 missing Node cannot release standalone Inner work" FAIL
+  check "X4 missing Node must not guess a main-thread Stop decision" FAIL
 fi
 
 MISSING_PHASE_ROOT="$ROOT/missing-phase-root"
-mkdir -p "$MISSING_PHASE_ROOT/hooks/lib"
+copy_runtime "$MISSING_PHASE_ROOT"
 MISSING_PHASE_ROOT="$(cd "$MISSING_PHASE_ROOT" && pwd -P)"
-ln -s "$STOP" "$MISSING_PHASE_ROOT/hooks/stop-chain-enforcer.sh"
-for library in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-autopilot-state.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$library" "$MISSING_PHASE_ROOT/hooks/lib/$library"
-done
-OUT5="$(printf '{"session_id":"%s"}' "$S4" \
+rm -f "$MISSING_PHASE_ROOT/hooks/lib/zensu-tdd-phase.sh"
+bind_runtime_session "$MISSING_PHASE_ROOT" "$P4" "$S4_RAW" missing-phase
+OUT5="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$S4_RAW" \
   | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$MISSING_PHASE_ROOT" \
     bash "$MISSING_PHASE_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT5" | decision)" = block ] \

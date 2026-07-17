@@ -46,7 +46,7 @@ bash "$LOG" --tdd-complete --session "$SID_R" >/dev/null 2>&1
 TICKET_R="$(bash "$LOG" --review-ticket --session "$SID_R")"
 tamper "$STATE_R" reviewRound '"2"'
 cp "$STATE_R" "$TMP_DIR/review-state-before.json"
-PAYLOAD_R="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_R}\\nfixture\"},\"session_id\":\"${SID_R}\"}"
+PAYLOAD_R="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET_R}\\nfixture\"},\"session_id\":\"${SID_R}\"}"
 printf '%s' "$PAYLOAD_R" | "$POST_REVIEW" >"$TMP_DIR/review.out" 2>"$TMP_DIR/review.err"
 POST_REVIEW_RC=$?
 if [ "$POST_REVIEW_RC" -eq 0 ] && [ ! -s "$TMP_DIR/review.out" ]; then

@@ -914,11 +914,14 @@ test('renders an explicit reviewer read-only contract', () => {
 
 test('renders a neutral host profile without main or reviewer authority', () => {
   const f = fixture();
-  const rendered = core.renderHostContext(register(f));
+  const context = register(f);
+  const rendered = core.renderHostContext(context);
   assert.match(rendered, /^\[zensu-host-context\]/);
   assert.match(rendered, /principal=host-profile-v1/);
   assert.doesNotMatch(rendered, /principal=main-v1/);
   assert.doesNotMatch(rendered, /principal=reviewer-readonly-v1/);
+  assert.doesNotMatch(rendered, /(?:plugin_root|plugin_data|session_id|session_id_hash|ZENSU_|CLAUDE_PLUGIN_DATA)=/);
+  assert.ok(!rendered.includes(context.plugin_root));
 });
 
 test('increments workflow revision atomically on every mutation', () => {

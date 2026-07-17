@@ -49,7 +49,7 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK" && grep -qF 'zensu-cli-map.sh' "$HOOK" \
 payload() {
   CMD="$1" AT="${2:-}" SID="${3:-gate-test}" node -e '
     const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.env.CMD},session_id:process.env.SID,cwd:"/tmp"};
-    if(process.env.AT) o.agent_type=process.env.AT;
+    if(process.env.AT) { o.agent_id="gate-subagent-1"; o.agent_type=process.env.AT; }
     process.stdout.write(JSON.stringify(o));
   '
 }
@@ -100,6 +100,8 @@ run "B25 compound: read && mutation"        "zensu features get f1 && zensu secu
 source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 tdd_workflow_begin gate-test "set_security_classification" "$(( $(date +%s) + 3600 ))" 2>/dev/null
 run "B8 mutation + workflowActive (in set)" "zensu security classify f1"                                '' ALLOW
+run "B8a arbitrary subagent cannot borrow the active main workflow window" "zensu security classify f1" general-purpose DENY
+run "B8b arbitrary subagent keeps Zensu CLI reads" "zensu features get f1" general-purpose ALLOW
 run "B27b out-of-scope mutation -> DENY"    "zensu link test f1 --test-type unit --file a.go"            '' DENY
 tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
@@ -137,6 +139,8 @@ fi
 # B22 Session Control authorization is single-session. An ambient legacy
 # CLAUDE_SESSION_ID must never donate another session's workflow grant to the
 # current hook payload; the exact current payload session remains authorized.
+# A missing payload session is denied: hook subprocesses do not inherit the
+# SessionStart export block, so ambient ZENSU_SESSION_KEY is never authority.
 source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" skill-sess
 tdd_workflow_begin skill-sess "set_security_classification" "$(( $(date +%s) + 3600 ))" 2>/dev/null
 OUT="$(payload 'zensu security classify f1' '' other-sess | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_SESSION_ID="skill-sess" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
@@ -146,7 +150,7 @@ OUT="$(payload 'zensu security classify f1' '' skill-sess | env CLAUDE_PLUGIN_RO
 SKILL_SESSION_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key skill-sess)"
 PAYLOAD_NO_SESSION="$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"zensu security classify f1"},cwd:"/tmp"}))')"
 OUT="$(printf '%s' "$PAYLOAD_NO_SESSION" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_SESSION_ID="foreign-ambient" ZENSU_SESSION_KEY="$SKILL_SESSION_KEY" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT" = "ALLOW" ] && check "B22c omitted payload session uses exact exported Session Control key -> ALLOW" PASS || check "B22c exported-current authorization (got '$OUT')" FAIL
+[ "$OUT" = "DENY" ] && check "B22c omitted payload session cannot use ambient exported key -> DENY" PASS || check "B22c missing-payload authorization (got '$OUT')" FAIL
 
 # B23 representative mutations across nouns -> DENY (freelance)
 M_FAIL=0

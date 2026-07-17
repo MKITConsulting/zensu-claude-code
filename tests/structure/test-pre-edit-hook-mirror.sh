@@ -54,7 +54,7 @@ else
   check "C1b guarded zensu-log command deduplicated (definitions=$LOG_COMMAND_DEFINITION_COUNT uses=$LOG_COMMAND_USE_COUNT)" FAIL
 fi
 
-PAYLOAD_DENY='{"tool_name":"Edit","tool_input":{"file_path":"/tmp/x.ts"},"session_id":"hookmirror-test"}'
+PAYLOAD_DENY='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"/tmp/x.ts"},"session_id":"hookmirror-test"}'
 
 C2_STATE_DIR="$(mktemp -d -t hookmirror-c2-XXXX)"
 C2_LOG="$C2_STATE_DIR/should-not-exist.log"
@@ -157,7 +157,7 @@ C8_STATE_DIR="$(mktemp -d -t hookmirror-c8-XXXX)"
 C8_LOG="$(mktemp -t hookmirror-c8-log-XXXX)"
 : > "$C8_LOG"
 seed_active "$C8_STATE_DIR" "hookmirror-test"
-PAYLOAD_ZENSU='{"tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_tdd-x.md"},"session_id":"hookmirror-test"}'
+PAYLOAD_ZENSU='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/plans/2026-01-01_tdd-x.md"},"session_id":"hookmirror-test"}'
 OUT_C8=$(printf '%s' "$PAYLOAD_ZENSU" | \
   STATE_DIR="$C8_STATE_DIR" ZENSU_HOOK_LOG="$C8_LOG" bash "$HOOK" 2>&1)
 RC_C8=$?
@@ -173,7 +173,7 @@ C9_STATE_DIR="$(mktemp -d -t hookmirror-c9-XXXX)"
 C9_LOG="$(mktemp -t hookmirror-c9-log-XXXX)"
 : > "$C9_LOG"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
-PAYLOAD_TRAVERSAL='{"tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
+PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
 OUT_C9=$(printf '%s' "$PAYLOAD_TRAVERSAL" | \
   STATE_DIR="$C9_STATE_DIR" ZENSU_HOOK_LOG="$C9_LOG" bash "$HOOK" 2>&1)
 RC_C9=$?
@@ -184,6 +184,61 @@ else
   check "C9 .zensu/../ traversal denied (rc=$RC_C9, content=${C9_CONTENT:0:120}, out=${OUT_C9:0:120})" FAIL
 fi
 rm -rf "$C9_STATE_DIR" "$C9_LOG"
+
+# Main-thread edit authority comes only from the trusted payload principal.
+# Neither ZENSU_FORCE_MAIN nor a partial agent identity may reach the bypass
+# ledger, denial renderer, or its concrete helper command.
+C10_STATE_DIR="$(mktemp -d -t hookmirror-c10-XXXX)"
+seed_active "$C10_STATE_DIR" "hookmirror-principal"
+C10_STATE_FILE="$(tdd_state_file "$ZENSU_SESSION_KEY")"
+C10_BEFORE="$(node -e 'const fs=require("fs"),c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$C10_STATE_FILE")"
+C10_OK=true
+for C10_KIND in reviewer plm neutral partial; do
+  C10_PAYLOAD="$(BASE="$PAYLOAD_DENY" KIND="$C10_KIND" node -e '
+    const p=JSON.parse(process.env.BASE); p.session_id="hookmirror-principal";
+    if(process.env.KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ')"
+  C10_OUT="$(printf '%s' "$C10_PAYLOAD" | ZENSU_FORCE_MAIN=1 ZENSU_TDD_GATE=off \
+    STATE_DIR="$C10_STATE_DIR" bash "$HOOK" 2>&1)"
+  [ -z "$C10_OUT" ] || C10_OK=false
+done
+C10_AFTER="$(node -e 'const fs=require("fs"),c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$C10_STATE_FILE")"
+if [ "$C10_OK" = true ] && [ "$C10_AFTER" = "$C10_BEFORE" ]; then
+  check "C10 reviewer/PLM/neutral/partial principals are silent and byte-stable despite ZENSU_FORCE_MAIN" PASS
+else
+  check "C10 non-main principals are silent and byte-stable" FAIL
+fi
+rm -rf "$C10_STATE_DIR"
+
+# Execute the command prefix copied verbatim from the denial text. This proves
+# the model-facing command supplies the per-call plugin-data binding rather
+# than depending on inherited ZENSU_* selectors.
+C11_STATE_DIR="$(mktemp -d -t hookmirror-c11-XXXX)"
+seed_active "$C11_STATE_DIR" "hookmirror-command"
+C11_PAYLOAD="$(BASE="$PAYLOAD_DENY" node -e 'const p=JSON.parse(process.env.BASE);p.session_id="hookmirror-command";process.stdout.write(JSON.stringify(p))')"
+C11_OUT="$(printf '%s' "$C11_PAYLOAD" | STATE_DIR="$C11_STATE_DIR" bash "$HOOK" 2>/dev/null)"
+C11_HELPER_Q="$(printf '%q' "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
+C11_DATA_Q="$(printf '%q' "$CLAUDE_PLUGIN_DATA")"
+C11_PREFIX="CLAUDE_PLUGIN_DATA=$C11_DATA_Q bash $C11_HELPER_Q"
+C11_EMITTED_PREFIX="$(printf '%s' "$C11_OUT" | EXPECTED="$C11_PREFIX" node -e '
+  const body=require("fs").readFileSync(0,"utf8"), expected=process.env.EXPECTED;
+  const at=body.indexOf(expected); if(at<0)process.exit(1);
+  process.stdout.write(body.slice(at,at+expected.length));
+' 2>/dev/null)"
+C11_EXTRACT_RC=$?
+eval "$C11_EMITTED_PREFIX --phase RED_WRITE --step emitted-command" >/dev/null 2>&1
+C11_EXEC_RC=$?
+C11_PHASE="$(tdd_phase "$(tdd_state_file "$ZENSU_SESSION_KEY")")"
+if [ "$C11_EXTRACT_RC" = 0 ] && [ "$C11_EXEC_RC" = 0 ] && [ "$C11_PHASE" = RED_WRITE ]; then
+  check "C11 command prefix extracted from denial executes with native per-call binding" PASS
+else
+  check "C11 emitted command prefix executes (extract=$C11_EXTRACT_RC exec=$C11_EXEC_RC phase=$C11_PHASE)" FAIL
+fi
+rm -rf "$C11_STATE_DIR"
 
 echo "----"
 echo "test-pre-edit-hook-mirror: $PASS PASS / $FAIL FAIL"

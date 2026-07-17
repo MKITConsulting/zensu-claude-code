@@ -163,12 +163,15 @@ else
   check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
 fi
 
-# Round 15 — Native plugin root resolution to eliminate cross-session races
+# Round 15 — Native component root/data binding to eliminate cross-session races
 
-if grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$AGENT" && ! grep -qF '{PLUGIN_ROOT}' "$AGENT" && ! grep -qF '.zensu/plugin-root' "$AGENT"; then
-  check "R15-P1 Phase 0 uses only the session-bound export, never raw placeholders or the legacy pointer" PASS
+if grep -qF '${CLAUDE_PLUGIN_ROOT}' "$AGENT" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"' "$AGENT" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$AGENT" \
+  && ! grep -qF '.zensu/plugin-root' "$AGENT"; then
+  check "R15-P1 Phase 0 uses native root/data placeholders without legacy exports or pointer" PASS
 else
-  check "R15-P1 Phase 0 still uses a raw placeholder or legacy pointer" FAIL
+  check "R15-P1 Phase 0 native root/data binding drifted or legacy authority returned" FAIL
 fi
 
 if grep -qF 'FATAL: active plugin root unavailable — start a fresh Claude Code session' "$AGENT"; then
@@ -190,25 +193,27 @@ else
   check "R15-P4 zero unquoted native-root helper calls remain in agent" PASS
 fi
 
-SAFE_HELPER_COUNT=$(grep -cF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh' "$AGENT")
+SAFE_HELPER_COUNT=$(grep -cF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"' "$AGENT")
 if [ "$SAFE_HELPER_COUNT" -ge 10 ]; then
-  check "R15-P5 at least 10 direct session-export helper invocations present (got $SAFE_HELPER_COUNT)" PASS
+  check "R15-P5 at least 10 native per-call helper bindings present (got $SAFE_HELPER_COUNT)" PASS
 else
-  check "R15-P5 expected >=10 direct session-export helper invocations; got $SAFE_HELPER_COUNT" FAIL
+  check "R15-P5 expected >=10 native per-call helper bindings; got $SAFE_HELPER_COUNT" FAIL
 fi
 
-# Fix-round 2: Phase 0 validates the session-scoped root rather than discovering one
+# Fix-round 2: Phase 0 validates the native component root rather than discovering one
 
-if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"' "$AGENT"; then
-  check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" PASS
+if grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$AGENT" \
+  && grep -qF 'require `[ -f "$ROOT/hooks/lib/zensu-log.sh" ]`' "$AGENT" \
+  && grep -qF 'pass the natively rendered `CLAUDE_PLUGIN_DATA` on every stateful helper invocation' "$AGENT"; then
+  check "F1.a Phase 0 validates native CLAUDE_PLUGIN_ROOT and requires per-call plugin data" PASS
 else
-  check "F1.a Phase 0 Step 1 explicitly validates ZENSU_CLAUDE_PLUGIN_ROOT via Bash" FAIL
+  check "F1.a Phase 0 native root/data validation contract" FAIL
 fi
 
-if grep -qF 'Never discover or persist a replacement root yourself' "$AGENT"; then
-  check "F1.b Phase 0 forbids root discovery and persistence fallbacks" PASS
+if grep -qF 'Never source the internal Session Control binder, discover or persist a replacement root, or cache plugin-private selectors yourself.' "$AGENT"; then
+  check "F1.b Phase 0 forbids binder use, root discovery, persistence, and selector caching" PASS
 else
-  check "F1.b Phase 0 forbids root discovery and persistence fallbacks" FAIL
+  check "F1.b Phase 0 forbids binder use, root discovery, persistence, and selector caching" FAIL
 fi
 
 if grep -qF 'require `[ -f "$ROOT/hooks/lib/zensu-log.sh" ]`' "$AGENT" \

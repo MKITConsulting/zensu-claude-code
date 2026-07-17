@@ -5,6 +5,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 VCS_LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -977,8 +978,18 @@ FILE="$SEMANTIC_FILE" PLAN_SHA="$PLAN_SHA" node -e '
 '
 autopilot_read_run "$SEMANTIC_RUN" "$SEMANTIC_PROJECT" >/dev/null 2>&1
 SEMANTIC_READ_RC=$?
-CLAUDE_PROJECT_DIR="$SEMANTIC_PROJECT" CLAUDE_SESSION_ID="$SEMANTIC_OWNER" \
+# Prove that the public command reaches the semantic validator through a real
+# native model binding. A binder failure has a distinct synthetic status, so an
+# exit 2 below can only be the intentionally corrupt event history.
+(
+  export CLAUDE_PROJECT_DIR="$SEMANTIC_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/semantic-plugin-data"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$SEMANTIC_OWNER" || exit 90
+  MODEL_KEY="$(bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --session-key 2>/dev/null)" || exit 91
+  [ "$MODEL_KEY" = "$ZENSU_SESSION_KEY" ] || exit 92
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >/dev/null 2>&1
+)
 SEMANTIC_STATUS_RC=$?
 if [ "$SEMANTIC_READ_RC" -eq 2 ] && [ "$SEMANTIC_STATUS_RC" -eq 2 ]; then
   check "S3b impossible event-history jumps fail closed on read and status" PASS

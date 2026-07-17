@@ -421,6 +421,7 @@ function buildContext(options) {
     principal_profiles: {
       main: 'main-v1',
       reviewer: 'reviewer-readonly-v1',
+      evidence_worker: 'evidence-worker-v1',
       host: 'host-profile-v1',
     },
   };
@@ -444,6 +445,7 @@ function validateContext(context, expectedHost) {
     !context.principal_profiles
     || context.principal_profiles.main !== 'main-v1'
     || context.principal_profiles.reviewer !== 'reviewer-readonly-v1'
+    || context.principal_profiles.evidence_worker !== 'evidence-worker-v1'
     || context.principal_profiles.host !== 'host-profile-v1'
   ) {
     fail('context principal profiles are invalid');
@@ -1212,6 +1214,22 @@ function renderReviewerContext(contextInput) {
     `runtime_digest=${context.runtime_digest}`,
     'principal=reviewer-readonly-v1.',
     'The reviewer must not write, spawn, mutate workflow state, invoke mutating control or MCP tools, or impersonate main.',
+    'Grep and Glob must name a concrete safe source/docs/test subtree; an omitted path or project/plugin/plugin-data ancestor is denied because it could traverse protected state.',
+  ].join(' ');
+}
+
+function renderEvidenceWorkerContext(contextInput) {
+  const context = validateContext(contextInput);
+  return [
+    '[zensu-evidence-worker-context]',
+    `schema_version=${context.schema_version}`,
+    `host=${context.host}`,
+    `project_root=${JSON.stringify(context.project_root)}`,
+    `runtime_digest=${context.runtime_digest}`,
+    'principal=evidence-worker-v1.',
+    'Only Read, Grep, and Glob are available and every call is confined by a private, agent-bound evidence lease.',
+    'No lease id, plugin-data path, raw session id, private selector, command, mutation, messaging, task, nested-agent, Skill, MCP, Web, or memory capability is available.',
+    'Return exactly one raw schema-valid JSON result for the assigned kind and role.',
   ].join(' ');
 }
 
@@ -1224,8 +1242,9 @@ function renderHostContext(contextInput) {
     `project_root=${JSON.stringify(context.project_root)}`,
     `runtime_digest=${context.runtime_digest}`,
     'principal=host-profile-v1.',
-    'No session selector or installed plugin path is disclosed to this neutral principal.',
-    'This neutral agent must not use shell/control tools, access Session Control or workflow-root state, spawn another agent, or claim main-v1.',
+    'Non-command tools remain governed by this agent definition and Claude Code host permissions; every command-execution tool is denied by the Zensu capability gate.',
+    'Grep and Glob must name a concrete safe subtree; an omitted path or project/plugin/plugin-data ancestor is denied because it could traverse protected state.',
+    'Session selectors are not authority: this neutral agent must not access Session Control or workflow-root state, claim main-v1, or mutate Zensu workflow state.',
   ].join(' ');
 }
 
@@ -3252,6 +3271,7 @@ module.exports = {
   readContext,
   renderMainContext,
   renderReviewerContext,
+  renderEvidenceWorkerContext,
   renderHostContext,
   stampWorkflowState,
   initializeWorkflowState,

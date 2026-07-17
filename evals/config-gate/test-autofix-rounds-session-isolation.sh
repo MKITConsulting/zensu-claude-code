@@ -25,24 +25,39 @@ printf '%s\n' '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG
 payload() {
   local sid="$1" ticket
   ticket="$(bash "$LOG" --review-ticket --session "$sid")" || return 1
-  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid"
+  printf '{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid"
 }
+
+bind_model_session() {
+  export CLAUDE_CODE_SESSION_ID="$1"
+  export CLAUDE_PLUGIN_DATA="$2"
+  # shellcheck disable=SC1090
+  source "$PLUGIN_DIR/hooks/lib/zensu-session.sh"
+  zensu_bind_model_session
+}
+
 # shellcheck disable=SC1090
 source "$BASELINE" sess-A
-SESSION_RECORDS="$(dirname "$ZENSU_SESSION_CONTEXT")"
+SESSION_A_ID="$CLAUDE_CODE_SESSION_ID"
+SESSION_A_DATA="$CLAUDE_PLUGIN_DATA"
 bash "$LOG" --tdd-begin --session sess-A >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session sess-A >/dev/null 2>&1
 payload sess-A | "$SCRIPT" >/dev/null 2>&1
 
 # shellcheck disable=SC1090
 source "$BASELINE" sess-B
+SESSION_B_ID="$CLAUDE_CODE_SESSION_ID"
+SESSION_B_DATA="$CLAUDE_PLUGIN_DATA"
 bash "$LOG" --tdd-begin --session sess-B >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session sess-B >/dev/null 2>&1
 payload sess-B | "$SCRIPT" >/dev/null 2>&1
 
-export ZENSU_SESSION_KEY="$(node "$CORE" session-key sess-A)"
-export ZENSU_SESSION_CONTEXT="$SESSION_RECORDS/$ZENSU_SESSION_KEY.json"
+bind_model_session "$SESSION_A_ID" "$SESSION_A_DATA"
 payload sess-A | "$SCRIPT" >/dev/null 2>&1
+
+# Leave the test shell on a real host binding as well; do not rely on ambient
+# ZENSU_* selectors, which production helpers intentionally ignore.
+bind_model_session "$SESSION_B_ID" "$SESSION_B_DATA"
 
 KEY_A="$(node "$CORE" session-key sess-A)"
 KEY_B="$(node "$CORE" session-key sess-B)"

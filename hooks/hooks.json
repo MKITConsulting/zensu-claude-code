@@ -6,7 +6,8 @@
         "hooks": [
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-reviewer-capability-gate.sh\"",
+            "timeout": 60
           }
         ]
       },
@@ -111,6 +112,22 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-session-control.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/review-evidence-subagent-start.sh\"",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/review-evidence-subagent-stop.sh\"",
+            "timeout": 60
           }
         ]
       }

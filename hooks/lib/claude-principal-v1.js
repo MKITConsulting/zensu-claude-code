@@ -3,13 +3,26 @@
 const PRINCIPALS = Object.freeze({
   MAIN: 'main-v1',
   REVIEWER: 'reviewer-readonly-v1',
+  EVIDENCE_WORKER: 'evidence-worker-v1',
   HOST: 'host-profile-v1',
 });
 
-// Claude Code's SubagentStart and PreToolUse payloads report plugin agents by
-// their bare frontmatter `name`. Keep this allowlist exact: aliases, paths,
-// namespace-looking strings, and repository-defined custom agents are neutral.
-const REVIEWER_TYPES = new Set(['code-reviewer', 'review-aspect', 'review-judge']);
+// Claude Code reports plugin-shipped agents with the plugin-scoped identifier.
+// Bare names remain exact read-only identities for the --agents evaluation
+// fixtures and same-named project agents; neither form grants main authority.
+const REVIEWER_TYPES = new Set([
+  'zensu:code-reviewer',
+  'zensu:review-aspect',
+  'zensu:review-judge',
+  'code-reviewer',
+  'review-aspect',
+  'review-judge',
+]);
+const PLM_TYPES = new Set(['zensu:zensu-plm', 'zensu-plm']);
+const EVIDENCE_WORKER_TYPES = new Set([
+  'zensu:plan-review-worker',
+  'zensu:pr-review-worker',
+]);
 
 function boundedIdentity(value) {
   return typeof value === 'string'
@@ -19,12 +32,14 @@ function boundedIdentity(value) {
 }
 
 function classifySubagent(agentType, agentId) {
-  // Claude's documented security-relevant discriminator is the bare
-  // `agent_type`; `agent_id` is useful correlation metadata but is not
-  // guaranteed on every hook payload. Never let a missing correlation id turn
-  // an exact read-only reviewer into the broader neutral capability profile.
+  // Claude's documented security-relevant discriminator is `agent_type`;
+  // plugin-shipped agents use scoped identifiers while explicit --agents test
+  // fixtures may use the exact bare names above. `agent_id` is correlation
+  // metadata and is not guaranteed on every hook payload. Never let a missing
+  // correlation id broaden an exact read-only identity.
   if (!boundedIdentity(agentType)) return PRINCIPALS.HOST;
   if (agentId !== undefined && !boundedIdentity(agentId)) return PRINCIPALS.HOST;
+  if (EVIDENCE_WORKER_TYPES.has(agentType)) return PRINCIPALS.EVIDENCE_WORKER;
   if (REVIEWER_TYPES.has(agentType)) return PRINCIPALS.REVIEWER;
   return PRINCIPALS.HOST;
 }
@@ -41,6 +56,8 @@ function classifyPreToolPayload(payload) {
 
 module.exports = {
   PRINCIPALS,
+  EVIDENCE_WORKER_TYPES,
+  PLM_TYPES,
   REVIEWER_TYPES,
   classifySubagent,
   classifyPreToolPayload,

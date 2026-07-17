@@ -8,12 +8,23 @@ if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECU
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT
-LOG_COMMAND='bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/zensu-log.sh"'
 
 PAYLOAD="$(cat)"
 
-if ! command -v node >/dev/null 2>&1; then
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
+zensu_hook_is_main_principal "$PAYLOAD" PreToolUse || exit 0
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$PAYLOAD"; then
+  zensu_emit_hook_session_deny
   exit 0
+fi
+
+LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
+LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+
+if ! command -v node >/dev/null 2>&1; then
+  exit 2
 fi
 
 parse_field() {
@@ -36,7 +47,6 @@ case "$TOOL_NAME" in
 esac
 
 SESSION_ID="$(parse_field session_id)"
-source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 FILE_PATH="$(parse_field tool_input.file_path)"
 

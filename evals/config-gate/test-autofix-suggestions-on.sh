@@ -35,7 +35,7 @@ source "$BASELINE" sess-on-001
 bash "$LOG" --tdd-begin --session sess-on-001 >/dev/null
 bash "$LOG" --tdd-complete --session sess-on-001 >/dev/null
 TICKET="$(bash "$LOG" --review-ticket --session sess-on-001)"
-STDIN="{\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"sess-on-001\"}"
+STDIN="{\"hook_event_name\":\"PostToolUse\",\"tool_name\":\"Agent\",\"tool_input\":{\"subagent_type\":\"zensu:code-reviewer\",\"prompt\":\"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: ${TICKET}\\nfixture\"},\"session_id\":\"sess-on-001\"}"
 OUT="$(printf '%s' "$STDIN" | "$SCRIPT" 2>/dev/null)"
 
 case "$OUT" in

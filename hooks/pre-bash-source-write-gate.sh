@@ -66,6 +66,12 @@ fi
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled bashWriteGate || exit 0
 
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$INPUT"; then
+  zensu_emit_hook_session_deny
+  exit 0
+fi
+
 # Bypass ledger: escapes stay free, but while a TDD session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). Inline
 # escapes are reported by the parser itself (__bypass__ markers) — the ONE
@@ -79,7 +85,8 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-REASON="$(BSWG_MODE= PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+REASON="$(BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
+  node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
 case "$REASON" in
   __bypass__*)
     for gate in $(printf '%s\n' "$REASON" | awk -F'\t' '$1=="__bypass__"{print $2}'); do

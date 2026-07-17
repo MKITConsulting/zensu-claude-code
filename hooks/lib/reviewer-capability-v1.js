@@ -5,37 +5,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
 const principals = require('./claude-principal-v1.js');
+const hookSession = require('./claude-hook-session-v1.js');
+const evidenceLeases = require('./review-evidence-lease-v1.js');
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const REVIEWER_READ_TOOLS = new Set(['Read', 'Grep', 'Glob']);
-const SHELL_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
-const SPAWN_OR_CONTROL_TOOLS = new Set([
-  'Agent',
-  'Task',
-  'spawn_agent',
-  'followup_task',
-  'send_message',
-  'Skill',
-  'update_goal',
-  'update_plan',
+const COMMAND_TOOLS = new Set(['Bash', 'shell', 'exec', 'exec_command', 'terminal', 'command']);
+const MUTATING_FILE_TOOLS = new Set([
+  'Write',
+  'Edit',
+  'MultiEdit',
+  'NotebookEdit',
+  'apply_patch',
 ]);
-const HOST_SAFE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit', 'apply_patch']);
-const HASH_RE = /^sha256:[a-f0-9]{64}$/;
-const CONTROL_TOKENS = [
-  'ZENSU_CLAUDE_PLUGIN_ROOT',
-  'ZENSU_SESSION_KEY',
-  'ZENSU_SESSION_CONTEXT',
-  'ZENSU_RUNTIME_DIGEST',
-  'ZENSU_PROJECT_ROOT',
-  'CLAUDE_PLUGIN_DATA',
-  'main-v1',
-  'session-control',
-  'session_control',
-  'zensu-log.sh',
-  'tdd-phase-',
-  'workflow-state',
-  'render-main',
-];
+const ZENSU_MCP_READ_RE = /^(?:list_|get_|search_|suggest_|view_|validate_|analyze_journey_health$|ghost_get_candidates$|pulse_(?:start_session|end_session|session_summary)$)/;
 
 function deny(reason) {
   process.stdout.write(`${JSON.stringify({
@@ -56,7 +39,7 @@ function parsePayload() {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
     throw new Error('trusted hook payload must be an object');
   }
-  if (payload.hook_event_name && payload.hook_event_name !== 'PreToolUse') {
+  if (payload.hook_event_name !== 'PreToolUse') {
     throw new Error('unexpected hook event');
   }
   if (typeof payload.tool_name !== 'string' || payload.tool_name.trim() === '') {
@@ -92,14 +75,6 @@ function parsePayload() {
   return payload;
 }
 
-function environmentText(name) {
-  const value = process.env[name];
-  if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) {
-    throw new Error(`${name} is missing or unsafe`);
-  }
-  return value;
-}
-
 function canonicalDirectory(value, label, rejectAlias = false) {
   if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) {
     throw new Error(`${label} is missing or unsafe`);
@@ -121,27 +96,6 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   const stat = fs.lstatSync(canonical);
   if (stat.isSymbolicLink() || !stat.isDirectory()) throw new Error(`${label} must be a real directory`);
   return canonical;
-}
-
-function contextFile(value, expected) {
-  if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) {
-    throw new Error('ZENSU_SESSION_CONTEXT is missing or unsafe');
-  }
-  const requested = path.resolve(value);
-  if (requested !== expected) throw new Error('session context path does not match session_id and plugin data');
-  let stat;
-  try {
-    stat = fs.lstatSync(requested);
-  } catch {
-    throw new Error('session context record is missing');
-  }
-  if (stat.isSymbolicLink() || !stat.isFile() || stat.size > MAX_PAYLOAD_BYTES) {
-    throw new Error('session context record is unsafe');
-  }
-  if (fs.realpathSync.native(requested) !== requested) {
-    throw new Error('session context record is not canonical');
-  }
-  return requested;
 }
 
 function revalidateWorkflowState(options) {
@@ -188,48 +142,17 @@ function revalidateWorkflowState(options) {
 }
 
 function revalidateSessionContext(payload) {
-  const executedPluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
-  const hostPluginRoot = canonicalDirectory(environmentText('CLAUDE_PLUGIN_ROOT'), 'CLAUDE_PLUGIN_ROOT');
-  const exportedPluginRoot = canonicalDirectory(
-    environmentText('ZENSU_CLAUDE_PLUGIN_ROOT'),
-    'ZENSU_CLAUDE_PLUGIN_ROOT',
-  );
-  if (hostPluginRoot !== executedPluginRoot || exportedPluginRoot !== executedPluginRoot) {
-    throw new Error('plugin root does not match the executing installed plugin');
-  }
-
-  const pluginData = canonicalDirectory(environmentText('CLAUDE_PLUGIN_DATA'), 'CLAUDE_PLUGIN_DATA', true);
-  const projectRoot = canonicalDirectory(environmentText('ZENSU_PROJECT_ROOT'), 'ZENSU_PROJECT_ROOT');
-  const payloadProject = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
-  if (payloadProject !== projectRoot) throw new Error('tool project does not match the immutable session context');
-
-  const sessionKey = core.sessionKey(payload.session_id);
-  if (environmentText('ZENSU_SESSION_KEY') !== sessionKey) {
-    throw new Error('session key does not match the PreToolUse session_id');
-  }
-  const recordsDir = path.join(pluginData, 'session-control', 'v1', 'records');
-  const expectedContext = path.join(recordsDir, `${sessionKey}.json`);
-  contextFile(environmentText('ZENSU_SESSION_CONTEXT'), expectedContext);
-
-  const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });
-  if (context.plugin_root !== executedPluginRoot) throw new Error('context plugin root mismatch');
-  if (context.plugin_data !== pluginData) throw new Error('context plugin data mismatch');
-  if (context.project_root !== projectRoot) throw new Error('context project mismatch');
-  const exportedDigest = environmentText('ZENSU_RUNTIME_DIGEST');
-  if (!HASH_RE.test(exportedDigest) || exportedDigest !== context.runtime_digest) {
-    throw new Error('exported runtime digest does not match the immutable context');
-  }
+  const binding = hookSession.resolveHookSession(payload);
+  const projectRoot = canonicalDirectory(binding.projectRoot, 'context project root');
+  const toolCwd = canonicalDirectory(payload.cwd, 'PreToolUse cwd');
   revalidateWorkflowState({
-    recordsDir,
     sessionId: payload.session_id,
     projectRoot,
   });
   return {
-    context,
-    pluginRoot: executedPluginRoot,
-    pluginData,
+    ...binding,
     projectRoot,
-    contextFile: expectedContext,
+    toolCwd,
   };
 }
 
@@ -251,6 +174,17 @@ function inputStrings(input) {
 function isInside(base, candidate) {
   const relative = path.relative(base, candidate);
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
+}
+
+function isMultiplyLinkedFile(candidate) {
+  let stat;
+  try {
+    stat = fs.lstatSync(candidate);
+  } catch (error) {
+    if (error.code === 'ENOENT') return false;
+    throw error;
+  }
+  return stat.isFile() && stat.nlink > 1;
 }
 
 function canonicalCandidate(projectRoot, value) {
@@ -283,7 +217,11 @@ function canonicalCandidate(projectRoot, value) {
     if (pending.length > 0 && !info.isDirectory()) {
       throw new Error('tool path traverses a non-directory component');
     }
-    current = candidate;
+    // Preserve the filesystem's canonical spelling for every existing path
+    // segment. On case-insensitive macOS/Windows filesystems, lstat accepts a
+    // case-variant alias while path.relative remains string/case based; keeping
+    // the requested spelling here would let that alias evade root comparisons.
+    current = fs.realpathSync.native(candidate);
   }
   return path.resolve(current);
 }
@@ -314,16 +252,64 @@ function pathInputs(input) {
   return values;
 }
 
+function traversalAccessViolation(payload, trusted, protectedRoots, candidates) {
+  if (!['Grep', 'Glob'].includes(payload.tool_name)) return null;
+
+  // Traversal tools can expose descendants while naming only an ancestor as
+  // their input. Direct-target checks are therefore insufficient: a Grep at
+  // the project root reaches .zensu, and a Glob at a plugin-data ancestor
+  // reveals private records. When the host-default path is omitted, cwd is
+  // the effective traversal root and must pass the same bidirectional check.
+  const traversalRoots = candidates.length > 0 ? candidates : [trusted.toolCwd];
+  if (traversalRoots.some((candidate) => candidate && protectedRoots.some((root) => (
+    isInside(root, candidate) || isInside(candidate, root)
+  )))) {
+    return 'traversal root may reach protected Session Control or workflow state';
+  }
+
+  // Grep.pattern is a content regex and may legitimately mention protected
+  // terminology. Only its path filters are traversal patterns. Glob.pattern
+  // is itself a path pattern and must be checked alongside its aliases.
+  const fields = payload.tool_name === 'Grep'
+    ? ['glob', 'include', 'exclude']
+    : ['pattern', 'glob', 'include', 'exclude'];
+  for (const field of fields) {
+    const raw = payload.tool_input[field];
+    const patterns = Array.isArray(raw) ? raw : [raw];
+    for (const pattern of patterns) {
+      if (typeof pattern !== 'string') continue;
+      const normalized = pattern.replaceAll('\\', '/');
+      if (
+        path.isAbsolute(pattern)
+        || /(?:^|\/)\.\.(?:\/|$)/.test(normalized)
+        || /(?:^|\/)\.zensu(?:\/|$)/.test(normalized)
+      ) {
+        return `${payload.tool_name} pattern may escape into protected state`;
+      }
+    }
+  }
+  return null;
+}
+
 function protectedAccessViolation(payload, trusted) {
   const directPaths = pathInputs(payload.tool_input);
-  const candidates = directPaths.map((value) => canonicalCandidate(trusted.projectRoot, value));
+  const candidates = directPaths.map((value) => canonicalCandidate(trusted.toolCwd, value));
   const protectedRoots = [
     trusted.contextFile,
     path.join(trusted.pluginData, 'session-control'),
+    path.join(trusted.pluginData, 'review-evidence'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-hook-session-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'reviewer-capability-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'review-evidence-lease-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'review-evidence-hook-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-review-evidence.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'review-evidence-subagent-start.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'review-evidence-subagent-stop.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-session.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'session-start-session-control.sh'),
   ].map((value) => path.resolve(value));
 
@@ -335,69 +321,99 @@ function protectedAccessViolation(payload, trusted) {
     return 'the requested path is protected Session Control or workflow state';
   }
 
-  if (['Grep', 'Glob'].includes(payload.tool_name)) {
-    if (candidates.length === 0) {
-      return `${payload.tool_name} requires an explicit search root outside protected state`;
-    }
-    if (candidates.some((candidate) => protectedRoots.some((root) => isInside(candidate, root)))) {
-      return `${payload.tool_name} search root contains protected Session Control or workflow state`;
-    }
-    const patternFields = ['pattern', 'glob', 'exclude', 'include'];
-    for (const field of patternFields) {
-      const value = payload.tool_input[field];
-      const values = Array.isArray(value) ? value : [value];
-      for (const pattern of values) {
-        if (typeof pattern !== 'string') continue;
-        const normalized = pattern.replaceAll('\\', '/');
-        if (
-          path.isAbsolute(pattern)
-          || /(?:^|\/)\.\.(?:\/|$)/.test(normalized)
-          || /(?:^|\/)\.zensu(?:\/|$)/.test(normalized)
-          || normalized.includes('session-control')
-        ) {
-          return `${payload.tool_name} pattern may reach protected state`;
-        }
-      }
-    }
-  }
+  const traversalViolation = traversalAccessViolation(
+    payload, trusted, protectedRoots, candidates,
+  );
+  if (traversalViolation) return traversalViolation;
   return null;
 }
 
 function neutralViolation(payload, trusted) {
-  if (SHELL_TOOLS.has(payload.tool_name)) {
-    return 'host-profile-v1 cannot invoke shell or command-execution tools';
-  }
-  if (SPAWN_OR_CONTROL_TOOLS.has(payload.tool_name) || payload.tool_name.startsWith('mcp__')) {
-    return 'host-profile-v1 cannot invoke agent, workflow-control, Skill, or MCP tools';
-  }
-  if (!HOST_SAFE_TOOLS.has(payload.tool_name)) {
-    return `host-profile-v1 cannot invoke unapproved tool ${payload.tool_name}`;
+  // A shell is an arbitrary-code capability. Inspecting its source text for
+  // protected words cannot establish confinement: environment enumeration,
+  // variables, substitutions, aliases, or an interpreter can reconstruct any
+  // selector/path after PreToolUse. Neutral children therefore receive no
+  // command-execution tool at all. Main remains unchanged, while exact
+  // reviewer/PLM identities are already restricted to Read/Grep/Glob above.
+  if (COMMAND_TOOLS.has(payload.tool_name)) {
+    return 'host-profile-v1 cannot invoke command-execution tools';
   }
 
-  const protectedPaths = [
+  const zensuMcpTool = /^mcp__.*zensu/i.test(payload.tool_name)
+    ? payload.tool_name.split('__').at(-1)
+    : null;
+  if (zensuMcpTool && !ZENSU_MCP_READ_RE.test(zensuMcpTool)) {
+    return 'host-profile-v1 cannot invoke mutating Zensu MCP tools';
+  }
+
+  const protectedRoots = [
     trusted.contextFile,
     path.join(trusted.pluginData, 'session-control'),
+    path.join(trusted.pluginData, 'review-evidence'),
     path.join(trusted.projectRoot, '.zensu'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'session-control-core-v1.js'),
     path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-session-control-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'claude-hook-session-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'reviewer-capability-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'review-evidence-lease-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'review-evidence-hook-v1.js'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-review-evidence.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'review-evidence-subagent-start.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'review-evidence-subagent-stop.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-session.sh'),
     path.join(trusted.pluginRoot, 'hooks', 'session-start-session-control.sh'),
-  ].map((value) => value.replaceAll('\\', '/'));
-  const strings = [payload.tool_name, ...inputStrings(payload.tool_input)];
-  for (const original of strings) {
-    const value = original.replaceAll('\\', '/');
-    if (CONTROL_TOKENS.some((token) => value.includes(token))) {
-      return 'host-profile-v1 cannot access Session Control, workflow-root state, or main-v1 identity';
-    }
-    if (/(?:^|\/)\.zensu(?:\/|$)/.test(value)) {
-      return 'host-profile-v1 cannot access the workflow root';
-    }
-    if (protectedPaths.some((protectedPath) => value.includes(protectedPath))) {
-      return 'host-profile-v1 cannot access a protected Session Control path';
-    }
+    path.join(trusted.pluginRoot, 'hooks', 'pre-reviewer-capability-gate.sh'),
+    path.join(trusted.pluginRoot, 'hooks', 'lib', 'zensu-log.sh'),
+  ].map((value) => path.resolve(value));
+  const candidates = pathInputs(payload.tool_input)
+    .map((value) => canonicalCandidate(trusted.toolCwd, value));
+
+  // Neutral children may write project files and external review reports, but
+  // the installed plugin and its private data store are authorities for future
+  // capability decisions. Protect both canonical trees from every standard
+  // file-mutation tool. canonicalCandidate resolves existing and dangling
+  // symlink aliases before this comparison, so a project-local alias cannot be
+  // used to persist modified runtime bytes or a forged next-session record.
+  const immutableRuntimeRoots = [trusted.pluginRoot, trusted.pluginData]
+    .map((value) => path.resolve(value));
+  if (
+    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    && candidates.some((candidate) => candidate
+      && immutableRuntimeRoots.some((root) => isInside(root, candidate)))
+  ) {
+    return 'host-profile-v1 cannot mutate the installed plugin runtime or private plugin data';
   }
-  const pathViolation = protectedAccessViolation(payload, trusted);
-  if (pathViolation) return pathViolation;
+
+  // realpath cannot distinguish hard links. A project-local hard link can
+  // therefore name the same inode as a plugin-runtime file without living
+  // below pluginRoot. Standard mutation tools must fail closed for every
+  // existing multiply-linked file; ordinary nlink=1 project/report files and
+  // new files keep their normal host semantics.
+  if (
+    MUTATING_FILE_TOOLS.has(payload.tool_name)
+    && candidates.some((candidate) => candidate && isMultiplyLinkedFile(candidate))
+  ) {
+    return 'host-profile-v1 cannot mutate multiply linked files';
+  }
+
+  if (candidates.some((candidate) => candidate
+      && protectedRoots.some((root) => isInside(root, candidate)))) {
+    return 'host-profile-v1 cannot access a protected Session Control path';
+  }
+
+  const traversalViolation = traversalAccessViolation(
+    payload, trusted, protectedRoots, candidates,
+  );
+  if (traversalViolation) return `host-profile-v1 ${traversalViolation}`;
   return null;
+}
+
+function readOnlyViolation(payload, trusted, profile) {
+  if (!REVIEWER_READ_TOOLS.has(payload.tool_name)) {
+    return `${profile} cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed`;
+  }
+  const violation = protectedAccessViolation(payload, trusted);
+  return violation ? `${profile} ${violation}` : null;
 }
 
 function main() {
@@ -422,18 +438,34 @@ function main() {
 
   const principal = principals.classifyPreToolPayload(payload);
   if (principal === principals.PRINCIPALS.MAIN) return;
-  if (principal === principals.PRINCIPALS.REVIEWER) {
-    if (REVIEWER_READ_TOOLS.has(payload.tool_name)) {
-      try {
-        const violation = protectedAccessViolation(payload, trusted);
-        if (violation) deny(`reviewer-readonly-v1 ${violation}`);
-        else return;
-      } catch (error) {
-        deny(`reviewer-readonly-v1 path validation failed: ${error.message}`);
+  if (principal === principals.PRINCIPALS.EVIDENCE_WORKER) {
+    try {
+      const violation = evidenceLeases.toolViolation(payload, trusted);
+      if (violation) {
+        deny(violation.startsWith('evidence-worker-v1')
+          ? violation : `evidence-worker-v1 ${violation}`);
       }
-      return;
+    } catch (error) {
+      deny(`evidence-worker-v1 validation failed: ${error.message}`);
     }
-    deny(`reviewer-readonly-v1 cannot invoke ${payload.tool_name}; only Read, Grep, and Glob are allowed`);
+    return;
+  }
+  if (principal === principals.PRINCIPALS.REVIEWER) {
+    try {
+      const violation = readOnlyViolation(payload, trusted, 'reviewer-readonly-v1');
+      if (violation) deny(violation);
+    } catch (error) {
+      deny(`reviewer-readonly-v1 path validation failed: ${error.message}`);
+    }
+    return;
+  }
+  if (principals.PLM_TYPES.has(payload.agent_type)) {
+    try {
+      const violation = readOnlyViolation(payload, trusted, 'zensu-plm-readonly-v1');
+      if (violation) deny(violation);
+    } catch (error) {
+      deny(`zensu-plm-readonly-v1 path validation failed: ${error.message}`);
+    }
     return;
   }
   try {

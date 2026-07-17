@@ -29,7 +29,7 @@ run_review() {
   bash "$LOG" --tdd-begin --session "$sid" >/dev/null 2>&1 || return 1
   bash "$LOG" --tdd-complete --session "$sid" >/dev/null 2>&1 || return 1
   ticket="$(bash "$LOG" --review-ticket --session "$sid")" || return 1
-  printf '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid" \
+  printf '{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\\nREVIEW-TICKET: %s\\nfixture"},"session_id":"%s"}' "$ticket" "$sid" \
     | "$POST_REVIEW" >/dev/null 2>&1
 }
 

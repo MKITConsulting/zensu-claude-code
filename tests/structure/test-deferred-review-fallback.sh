@@ -38,7 +38,7 @@ SID="deferred-main"
 SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
 start_session "$SID"
 
-OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
 if [ "$RC" -eq 0 ] && [ "$(printf '%s' "$OUT" | decision)" = "allow" ]; then
   check "D0 no marker + not active -> allow stop (clean exit 0, not a crash)" PASS
 else
@@ -50,7 +50,7 @@ bash "$LOG" --pending-review --files "src/x.ts,src/y.ts" --summary "workflow cha
   && check "D1 --pending-review writes project marker" PASS \
   || check "D1 marker written" FAIL
 
-OUT="$(printf '{"session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID" | bash "$STOP" 2>/dev/null)"; RC=$?
 DEC="$(printf '%s' "$OUT" | decision)"
 if [ "$RC" -eq 0 ] && [ "$DEC" = "block" ] && printf '%s' "$OUT" | grep -q "zensu:code-reviewer"; then
   check "D2 marker present + not active -> adopt -> block with reviewer directive" PASS
@@ -84,7 +84,7 @@ SYM_FILE="$PROJ/.zensu/state/tdd-phase-$(node "$SESSION_CORE" session-key "$SID_
 SYM_BEFORE="$(cksum < "$SYM_FILE")"
 ln -s /etc/hosts "$MARKER" 2>/dev/null || true
 if [ -L "$MARKER" ]; then
-  OUT="$(printf '{"session_id":"%s"}' "$SID_SYM" | bash "$STOP" 2>/dev/null)"; RC=$?
+  OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID_SYM" | bash "$STOP" 2>/dev/null)"; RC=$?
   if [ "$RC" -eq 0 ] \
     && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \
     && [ -L "$MARKER" ] \
@@ -104,7 +104,7 @@ start_session "$SID_CO"
 bash "$LOG" --tdd-begin --session "$SID_CO" >/dev/null 2>&1
 bash "$LOG" --tdd-complete --session "$SID_CO" >/dev/null 2>&1
 bash "$LOG" --pending-review --files "co.ts" >/dev/null 2>&1
-OUT="$(printf '{"session_id":"%s"}' "$SID_CO" | bash "$STOP" 2>/dev/null)"; RC=$?
+OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID_CO" | bash "$STOP" 2>/dev/null)"; RC=$?
 DEC="$(printf '%s' "$OUT" | decision)"
 MARK_OK="no"; { [ -f "$MARKER" ] && [ ! -L "$MARKER" ]; } && MARK_OK="yes"
 if [ "$RC" -eq 0 ] && [ "$DEC" = "block" ] && [ "$MARK_OK" = "yes" ] && printf '%s' "$OUT" | grep -q "zensu:code-reviewer"; then
@@ -125,7 +125,7 @@ if touch "$PROJ/.zensu/state/.wprobe" 2>/dev/null; then
   chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
   echo "  SKIP  D8 seed-failure — state dir still writable (cannot force failure on this platform)"
 else
-  OUT="$(printf '{"session_id":"%s"}' "$SID_FAIL" | bash "$STOP" 2>/dev/null)"; RC=$?
+  OUT="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID_FAIL" | bash "$STOP" 2>/dev/null)"; RC=$?
   chmod 755 "$PROJ/.zensu/state" 2>/dev/null || true
   if [ "$RC" -eq 0 ] \
     && [ "$(printf '%s' "$OUT" | decision)" = "block" ] \

@@ -36,6 +36,7 @@ bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
 SID_VALUE="$SID" TICKET_VALUE="$TICKET" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
     tool_name: "Agent",
     tool_input: {
       subagent_type: "zensu:code-reviewer",

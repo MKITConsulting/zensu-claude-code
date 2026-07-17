@@ -9,25 +9,27 @@ fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
 unset _ZENSU_EXECUTED_PLUGIN_ROOT
 
+INPUT="$(cat 2>/dev/null || true)"
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
+zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
+source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
+zensu_bind_hook_session "$INPUT" || exit 0
+
 # Bypass ledger: the escape stays free, but while a TDD session is active the
 # opt-out is recorded to chain state (fail-open, gate name only; per-gate dedup
 # makes this once per session). The project-bound state pre-filter keeps the off-path
 # free of node spawns when no session was ever armed.
 if [ "${ZENSU_TEST_WITNESS:-}" = "off" ]; then
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
   _project_root="$(zensu_resolve_project_dir)" || exit 0
   _state_dir="$_project_root/.zensu/state"
   ls "$_state_dir"/tdd-phase-*.json >/dev/null 2>&1 || exit 0
   command -v node >/dev/null 2>&1 || exit 0
-  INPUT="$(cat 2>/dev/null || true)"
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
   tdd_record_bypass_payload "$INPUT" ZENSU_TEST_WITNESS 2>/dev/null || true
   exit 0
 fi
 
 if ! command -v node >/dev/null 2>&1; then exit 0; fi
-
-INPUT="$(cat)"
 
 TMP_FIELDS="$(mktemp 2>/dev/null)" || exit 0
 printf '%s' "$INPUT" | node -e '
@@ -49,7 +51,6 @@ printf '%s' "$INPUT" | node -e '
 
 { read -r CMD_JSON; read -r EXIT_CODE; read -r TAIL_JSON; read -r INTERRUPTED; read -r SESSION; } < "$TMP_FIELDS"
 rm -f "$TMP_FIELDS"
-source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 SANITIZED_SESSION="$(zensu_resolve_session_id "$SESSION")" || exit 0
 
 # Activation: record witness lines only while a main-thread TDD session is active
@@ -60,7 +61,7 @@ if [ "$(tdd_session_active "$(tdd_state_file "$SANITIZED_SESSION")")" != "true" 
   exit 0
 fi
 
-PROJECT_DIR="${CLAUDE_PROJECT_DIR:-.}"
+PROJECT_DIR="$(zensu_resolve_project_dir)" || exit 0
 WITNESS_DIR="$PROJECT_DIR/.zensu/logs"
 WITNESS_LOG="$WITNESS_DIR/witness-${SANITIZED_SESSION}.log"
 mkdir -p "$WITNESS_DIR" 2>/dev/null || exit 0

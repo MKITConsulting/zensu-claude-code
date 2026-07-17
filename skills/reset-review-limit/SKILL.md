@@ -76,13 +76,17 @@ Resolve the current session and read its consumed generation ticket through the
 official helpers. Do not inspect state files yourself:
 
 ```sh
-ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}"
+ROOT="${CLAUDE_PLUGIN_ROOT}"
 LOG="$ROOT/hooks/lib/zensu-log.sh"
-[ -f "$ROOT/hooks/lib/zensu-session.sh" ] && [ -f "$LOG" ] || exit 1
-source "$ROOT/hooks/lib/zensu-session.sh"
-SESSION_ID="$(zensu_resolve_session_id "${ZENSU_SESSION_KEY:?FATAL: Session Control key unavailable}")"
-REVIEW_TICKET="$(bash "$LOG" --current-review-ticket)"
+[ -f "$LOG" ] || exit 1
+SESSION_ID="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --session-key)"
+REVIEW_TICKET="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --current-review-ticket)"
 ```
+
+Do not source `zensu-session.sh` or invoke its binder directly. Each stateful
+`zensu-log.sh` process binds the natively rendered plugin data and Claude's
+host-exposed session id to the private immutable record before it reads or
+mutates workflow state.
 
 If this command fails or prints an empty value, stop. The current session has no
 ticket-bound exhausted generation to reset. Never fall back to searching for a
@@ -91,7 +95,7 @@ different session.
 Then read the official durable status once:
 
 ```sh
-AUTOPILOT_STATUS="$(bash "$LOG" --autopilot-status 2>/dev/null)"
+AUTOPILOT_STATUS="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status 2>/dev/null)"
 AUTOPILOT_STATUS_RC=$?
 ```
 
@@ -121,7 +125,7 @@ a historical `DONE`/`CANCELLED` pointer, run exactly one generation-bound
 transition:
 
 ```sh
-bash "$LOG" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" \
   --review-rearm --session "$SESSION_ID" \
   --claimed-review-ticket "$REVIEW_TICKET"
 ```
@@ -145,7 +149,7 @@ For the exact current-session binding, call the central helper once with every
 binding dimension and the consumed ticket:
 
 ```sh
-bash "$LOG" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" \
   --review-rearm --session "$SESSION_ID" --autopilot-run "$RUN_ID" \
   --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" \
   --claimed-review-ticket "$REVIEW_TICKET"
@@ -172,7 +176,7 @@ without reinterpretation.
 For a standalone or same-chain durable rearm, run the getter once more:
 
 ```sh
-if bash "$LOG" --current-review-ticket >/dev/null 2>&1; then
+if CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --current-review-ticket >/dev/null 2>&1; then
   echo "FATAL: consumed review ticket is still active" >&2
   exit 1
 fi

@@ -79,7 +79,10 @@ module.exports = (output, context = {}) => {
   if (exitCode !== undefined && attestation.exit_code !== Number(exitCode)) checks.push('exit code mismatch');
 
   const hook = expected(vars, 'expected_hook');
-  if (hook && !attestation.hook_sequence.includes(hook)) checks.push(`missing hook evidence ${hook}`);
+  if (hook) {
+    const matches = attestation.hook_sequence.filter((entry) => entry === hook);
+    if (matches.length !== 1) checks.push(`expected exactly one hook evidence ${hook}, found ${matches.length}`);
+  }
 
   const capabilities = expected(vars, 'expected_reviewer_capabilities');
   if (capabilities && attestation.reviewer_capabilities !== capabilities) {

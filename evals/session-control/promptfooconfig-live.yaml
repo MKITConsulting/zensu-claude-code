@@ -1,4 +1,4 @@
-description: "Claude Code Session Control v1 live fresh-session suite"
+description: "Claude Code Session Control v1 live fresh-session and dedicated evidence-worker suite"
 
 providers:
   - id: 'exec: ../../scripts/session-control-claude-wrapper.sh'

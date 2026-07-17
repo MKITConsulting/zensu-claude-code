@@ -59,7 +59,7 @@ make_payload() {
   stdout_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$stdout")"
   session_json="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$session_id")"
   if [ "$exit_code" = "null" ]; then exit_json="null"; else exit_json="$exit_code"; fi
-  printf '{"tool_input":{"command":%s},"tool_response":{"exit_code":%s,"stdout":%s,"interrupted":%s},"session_id":%s}' \
+  printf '{"hook_event_name":"PostToolUse","tool_input":{"command":%s},"tool_response":{"exit_code":%s,"stdout":%s,"interrupted":%s},"session_id":%s}' \
     "$cmd_json" "$exit_json" "$stdout_json" "$interrupted" "$session_json"
 }
 
@@ -166,7 +166,7 @@ rm -rf "$PROJECT_TMP_H7"
 PROJECT_TMP_H8="$(mktemp -d -t "witness-proj-XXXXXX")"
 SESSION_H8="sess-h8-$$"
 activate "$PROJECT_TMP_H8" "$SESSION_H8"
-NO_RESPONSE_PAYLOAD=$(printf '{"tool_input":{"command":"echo hi"},"session_id":"%s"}' "$SESSION_H8")
+NO_RESPONSE_PAYLOAD=$(printf '{"hook_event_name":"PostToolUse","tool_input":{"command":"echo hi"},"session_id":"%s"}' "$SESSION_H8")
 echo "$NO_RESPONSE_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H8" STATE_DIR="$PROJECT_TMP_H8/.zensu/state" bash "$HOOK" >/dev/null 2>&1
 RC_H8=$?
 WITNESS_H8="$(witness_file "$PROJECT_TMP_H8" "$SESSION_H8")"
@@ -238,7 +238,7 @@ activate "$PROJECT_TMP_H12" "$SESSION_H12"
 # Production-shaped Bash tool_response: stdout/stderr/interrupted/isImage, NO exit_code key
 # (mirrors the real Claude Code payload, where exit_code is never present -> exit=?). Built
 # with node so the JSON is guaranteed valid and omits exit_code exactly as production does.
-H12_PAYLOAD=$(node -e 'process.stdout.write(JSON.stringify({tool_input:{command:"node --test"},tool_response:{stdout:"tests 1\npass 1\nfail 0",stderr:"",interrupted:false,isImage:false},session_id:process.argv[1]}))' "$SESSION_H12")
+H12_PAYLOAD=$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",tool_input:{command:"node --test"},tool_response:{stdout:"tests 1\npass 1\nfail 0",stderr:"",interrupted:false,isImage:false},session_id:process.argv[1]}))' "$SESSION_H12")
 printf '%s\n' "$H12_PAYLOAD" | env CLAUDE_PROJECT_DIR="$PROJECT_TMP_H12" STATE_DIR="$PROJECT_TMP_H12/.zensu/state" bash "$HOOK" >/dev/null 2>&1
 WITNESS_H12="$(witness_file "$PROJECT_TMP_H12" "$SESSION_H12")"
 H12_LINE="$(head -n1 "$WITNESS_H12" 2>/dev/null)"
@@ -357,6 +357,34 @@ else
   check "P12-H15 tail round-trip (expected='$QUOTE_STDOUT' got='$EXTRACTED_TAIL')" FAIL
 fi
 rm -rf "$PROJECT_TMP_H15"
+
+PROJECT_TMP_H16="$(mktemp -d -t "witness-proj-XXXXXX")"
+SESSION_H16="sess-h16-$$"
+activate "$PROJECT_TMP_H16" "$SESSION_H16"
+STATE_H16="$PROJECT_TMP_H16/.zensu/state/tdd-phase-$(session_key "$SESSION_H16").json"
+H16_BEFORE="$(node -e 'const fs=require("fs"),c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$STATE_H16")"
+BASE_H16="$(make_payload "principal-cmd" 0 "should-not-log" "$SESSION_H16")"
+H16_OUTPUT=""
+for H16_KIND in reviewer plm neutral partial; do
+  P_H16="$(BASE="$BASE_H16" KIND="$H16_KIND" node -e '
+    const p=JSON.parse(process.env.BASE);
+    if(process.env.KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ')"
+  H16_OUTPUT="${H16_OUTPUT}$(printf '%s' "$P_H16" | ZENSU_FORCE_MAIN=1 ZENSU_TEST_WITNESS=off \
+    CLAUDE_PROJECT_DIR="$PROJECT_TMP_H16" STATE_DIR="$PROJECT_TMP_H16/.zensu/state" bash "$HOOK" 2>/dev/null)"
+done
+H16_AFTER="$(node -e 'const fs=require("fs"),c=require("crypto");process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"))' "$STATE_H16")"
+if [ -z "$H16_OUTPUT" ] && [ "$H16_AFTER" = "$H16_BEFORE" ] \
+  && [ ! -f "$(witness_file "$PROJECT_TMP_H16" "$SESSION_H16")" ]; then
+  check "P12-H16 reviewer/PLM/neutral/partial principals cannot write witness or bypass state" PASS
+else
+  check "P12-H16 non-main principals are a byte-stable witness no-op" FAIL
+fi
+rm -rf "$PROJECT_TMP_H16"
 
 echo "----"
 echo "test-post-bash-witness: $PASS PASS / $FAIL FAIL"

@@ -44,14 +44,18 @@ field_ok() {
 digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 run_max_hook() {
-  local project="$1" session="$2" cfg="$3" state ticket payload context
+  local project="$1" session="$2" raw_session="$3" cfg="$4" state ticket payload context
   state="$(tdd_state_file "$session")" || return 1
   tdd_increment_counter "$session" reviewRound >/dev/null || return 1
   ticket="$(CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" bash "$LOG" --review-ticket --session "$session")" || return 1
   context="$(tdd_autopilot_context "$state" "$session")" || return 1
-  payload="$(SID="$session" TICKET="$ticket" CONTEXT="$context" node -e '
+  payload="$(SID="$raw_session" TICKET="$ticket" CONTEXT="$context" node -e '
     const c=JSON.parse(process.env.CONTEXT);
-    process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_input:{
+    process.stdout.write(JSON.stringify({
+      hook_event_name:"PostToolUse",
+      tool_name:"Agent",
+      session_id:process.env.SID,
+      tool_input:{
       subagent_type:"zensu:code-reviewer",
       prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=${c.runId} attempt=${c.attempt} chain=${c.chainId}\nAUTOPILOT-STAGE: ${c.returnStage}\nfixture`
     }}));
@@ -70,13 +74,13 @@ CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$LOG" --tdd-begin --sessio
 CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$LOG" --tdd-complete --session "$S1" \
   --autopilot-run "$R1" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C1" >/dev/null
-run_max_hook "$P1" "$S1" "$CFG_ON"
+run_max_hook "$P1" "$S1" "$S1_RAW" "$CFG_ON"
 TF1="$(tdd_state_file "$S1")"; RF1="$(autopilot_run_file "$R1" "$P1")"
 if field_ok "$TF1" 'j.chainOutcome==="max-rounds"&&j.codeReviewDone===true&&j.chainDone===false' \
   && field_ok "$RF1" 'j.stage==="TDD_RUNNING"'; then
   check "M1 self-review handoff persists bound max-rounds without closing early" PASS
 else check "M1 self-review handoff persists bound max-rounds without closing early" FAIL; fi
-OUT1_STOP="$(printf '%s' "{\"session_id\":\"$S1\"}" \
+OUT1_STOP="$(printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"$S1_RAW\"}" \
   | CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$STOP" 2>/dev/null)"
 if printf '%s' "$OUT1_STOP" | grep -qF "skill='zensu:self-review'" \
   && ! printf '%s' "$OUT1_STOP" | grep -qF 'nextActionCode=AWAIT_TDD_CHAIN' \
@@ -101,7 +105,7 @@ else check "M1a max-round handoff exact retry contract" FAIL; fi
 # still live and Stop must resume self-review rather than falling back to the
 # Outer AWAIT_TDD_CHAIN action.
 if tdd_mark_review_converged "$S1" "$T1" selfReviewFixed; then
-  OUT1_FIXED_STOP="$(printf '%s' "{\"session_id\":\"$S1\"}" \
+  OUT1_FIXED_STOP="$(printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"$S1_RAW\"}" \
     | CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$STOP" 2>/dev/null)"
 else
   OUT1_FIXED_STOP=""
@@ -133,7 +137,7 @@ CLAUDE_PROJECT_DIR="$P2" ZENSU_CONFIG="$CFG_OFF" bash "$LOG" --tdd-begin --sessi
 CLAUDE_PROJECT_DIR="$P2" ZENSU_CONFIG="$CFG_OFF" bash "$LOG" --tdd-complete --session "$S2" \
   --autopilot-run "$R2" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C2" >/dev/null
-run_max_hook "$P2" "$S2" "$CFG_OFF"
+run_max_hook "$P2" "$S2" "$S2_RAW" "$CFG_OFF"
 TF2="$(tdd_state_file "$S2")"; RF2="$(autopilot_run_file "$R2" "$P2")"
 if field_ok "$TF2" 'j.chainOutcome==="max-rounds"&&j.chainDone===true' \
   && field_ok "$RF2" 'j.stage==="BLOCKED"&&j.blocked.code==="TDD_MAX_ROUNDS"'; then

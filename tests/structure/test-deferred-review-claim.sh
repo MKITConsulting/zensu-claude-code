@@ -30,18 +30,15 @@ setup_case() {
   CASE_STATE="$CASE_PROJECT/.zensu/state"
   CASE_CONFIG="$CASE_ROOT/config.json"
   CASE_PLUGIN_DATA="$CASE_ROOT/plugin-data"
-  CASE_ENV_DIR="$CASE_ROOT/session-env"
-  mkdir -p "$CASE_PROJECT" "$CASE_PLUGIN_DATA" "$CASE_ENV_DIR"
+  mkdir -p "$CASE_PROJECT" "$CASE_PLUGIN_DATA"
   [ -n "$config_json" ] || config_json='{}'
   printf '%s\n' "$config_json" > "$CASE_CONFIG"
   activate_session "case-control-$1"
 }
 activate_session() {
-  local sid="$1" key
-  key="$(node "$CORE" session-key "$sid")" || return 1
+  local sid="$1"
   export CLAUDE_PROJECT_DIR="$CASE_PROJECT"
   export ZENSU_TEST_PLUGIN_DATA="$CASE_PLUGIN_DATA"
-  export ZENSU_TEST_ENV_FILE="$CASE_ENV_DIR/${key}.env"
   # shellcheck disable=SC1090
   source "$BASELINE" "$sid"
 }
@@ -253,7 +250,7 @@ canonical_session() {
 stop() (
   local sid="$1"
   activate_session "$sid" || exit 1
-  printf '{"session_id":"%s"}' "$sid" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     ZENSU_CONFIG="$CASE_CONFIG" \
     bash "$STOP" 2>/dev/null
 )

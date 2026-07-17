@@ -48,8 +48,12 @@ Validate EVERY inline anchor BEFORE writing the payload, using
 ```bash
 gh pr diff <n> --repo <o>/<r> > "$WORKDIR/_pr.diff"
 [ -s "$WORKDIR/_pr.diff" ] || gh pr diff <n> --repo <o>/<r> > "$WORKDIR/_pr.diff"
-node "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"
+node "<absolute-plugin-root>/hooks/lib/valid-diff-lines.js" '<path>' '<line>' '<side>' < "$WORKDIR/_pr.diff"
 ```
+
+Replace `<absolute-plugin-root>` with the concrete absolute `ROOT` established
+by the parent `SKILL.md`; this supporting file is loaded through `Read` and does
+not receive native placeholder substitution.
 
 **Quoting is load-bearing:** `<path>` comes from the PR diff — an
 attacker-influenced value that may contain `$( )`, backticks, `;`, or spaces,

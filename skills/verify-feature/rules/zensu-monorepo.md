@@ -8,7 +8,8 @@ Use this adapter only when the current repository contains all four markers:
 - `frontend/pnpm-lock.yaml`
 
 The adapter is the checked-in lifecycle controller at
-`${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/skills/verify-feature/scripts/zensu-monorepo-runtime.sh`. Do not copy its
+`<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh`. The parent skill
+must replace `<absolute-plugin-root>` with its already concretized native plugin root. Do not copy its
 commands into separate Bash calls. The controller is the ownership boundary: it retains
 generated secrets internally, persists only the exact container, ports, origin, and run ID,
 and tears down only resources whose private lease can be revalidated. Backend and frontend run
@@ -28,7 +29,7 @@ physical worktree at `$GIT_ROOT/.zensu/verify-feature-runs/<random>`.
 Set these non-secret shell variables for the current report only:
 
 ```bash
-ZENSU_RUNTIME_CONTROLLER="${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
+ZENSU_RUNTIME_CONTROLLER="<absolute-plugin-root>/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 ZENSU_VERIFY_RUN_DIR="$RUN_DIR"
 ZENSU_VERIFY_WORKTREE="$GIT_ROOT"
 ```
@@ -48,7 +49,7 @@ resource, then require the already-running plugin MCP broker to accept it:
 
 ```bash
 APP_ORIGIN="$(bash "$ZENSU_RUNTIME_CONTROLLER" planned-origin "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE")"
-bash "${ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL: plugin root unavailable; start a fresh Claude Code session}/scripts/playwright-mcp.sh" --check-policy local "$APP_ORIGIN" "/" declared-safe
+bash "<absolute-plugin-root>/scripts/playwright-mcp.sh" --check-policy local "$APP_ORIGIN" "/" declared-safe
 bash "$ZENSU_RUNTIME_CONTROLLER" up "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 bash "$ZENSU_RUNTIME_CONTROLLER" ready "$ZENSU_VERIFY_RUN_DIR" "$ZENSU_VERIFY_WORKTREE"
 ```

@@ -85,6 +85,8 @@ postrev_ctx() {
   ticket="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)" || return 1
   SID_VALUE="$SID" TICKET="$ticket" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",
         prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
@@ -98,8 +100,8 @@ postrev_ctx() {
 }
 
 echo "== 1. Gate activation via chain-state (no CLAUDE_AGENT_TYPE) =="
-P_PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID"'"}'
-P_TEST='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'"$SID"'"}'
+P_PROD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'"$SID"'"}'
+P_TEST='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.test.ts"},"session_id":"'"$SID"'"}'
 
 [ "$(gate_decision "$P_PROD")" = "allow" ] && check "1a no chain-state -> pass-through (not gated)" PASS || check "1a no chain-state -> pass-through" FAIL
 
@@ -117,18 +119,18 @@ bash "$LOG" --phase IMPL --step S1 --session "$SID" >/dev/null
 [ "$(gate_decision "$P_PROD")" = "allow" ] && check "1e IMPL (after RED_FAIL for step) + prod edit -> allow" PASS || check "1e IMPL prod -> allow" FAIL
 
 echo "== 2. Witness activation via chain-state =="
-echo '{"tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS"
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"npm test"},"tool_response":{"exit_code":0,"stdout":"ok"},"session_id":"'"$SID"'"}' | bash "$WITNESS"
 WLOG="$PROJ/.zensu/logs/witness-${SID_KEY}.log"
 { [ -f "$WLOG" ] && grep -qF 'cmd="npm test"' "$WLOG"; } && check "2a active session records witness line" PASS || check "2a active witness line" FAIL
 
 SID_INACTIVE="smoke-inactive"
 start_session "$SID_INACTIVE"
-echo '{"tool_input":{"command":"echo hi"},"tool_response":{"exit_code":0,"stdout":"hi"},"session_id":"'"$SID_INACTIVE"'"}' | bash "$WITNESS"
+echo '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":"echo hi"},"tool_response":{"exit_code":0,"stdout":"hi"},"session_id":"'"$SID_INACTIVE"'"}' | bash "$WITNESS"
 [ ! -f "$PROJ/.zensu/logs/witness-$(session_key "$SID_INACTIVE").log" ] && check "2b inactive session writes NO witness" PASS || check "2b inactive witness skipped" FAIL
 
 echo "== 3. Stop-hook block/allow matrix =="
 SID_S="smoke-stop"; export SF_BACKUP="$SF"; start_session "$SID_S"; SF="$(tdd_state_file "$SID_S")"
-P_STOP='{"session_id":"'"$SID_S"'"}'
+P_STOP='{"hook_event_name":"Stop","session_id":"'"$SID_S"'"}'
 [ "$(stop_decision "$P_STOP")" = "allow" ] && check "3a no chain-state -> allow stop" PASS || check "3a no chain-state allow" FAIL
 bash "$LOG" --tdd-begin --session "$SID_S" >/dev/null
 [ "$(stop_decision "$P_STOP")" = "allow" ] && check "3b active + !implComplete -> allow stop (mid-TDD)" PASS || check "3b mid-TDD allow" FAIL
@@ -146,6 +148,8 @@ postrev_ctx() {
   ticket="$(bash "$LOG" --review-ticket --session "$SID_R" 2>/dev/null)" || return 1
   SID_VALUE="$SID_R" TICKET="$ticket" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
       tool_input: {
         subagent_type: "zensu:code-reviewer",
         prompt: `PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`

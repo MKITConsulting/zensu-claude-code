@@ -53,10 +53,11 @@ if grep -qE '^name: doctor$' "$SKILL_MD"; then
 else
   check "P2c skill frontmatter name is doctor" FAIL
 fi
-if grep -qF 'ROOT="${ZENSU_CLAUDE_PLUGIN_ROOT:-}"' "$SKILL_MD" \
+if grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
   && grep -qF 'bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
   && grep -qF 'Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' "$SKILL_MD" \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT:?FATAL:' "$SKILL_MD"; then
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD"; then
   check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" PASS
 else
   check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" FAIL
@@ -102,9 +103,14 @@ fi
 REAL_MANIFEST="$(ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" ZENSU_CONFIG="$PLUGIN_DIR/.no-such-doctor-config" CLAUDE_PROJECT_DIR="$PLUGIN_DIR/.no-such-doctor-project" \
   node "$REPORT" 2>/dev/null)"
+EXPECTED_HOOKS=0
+for hook_script in "$PLUGIN_DIR"/hooks/*.sh; do
+  [ -f "$hook_script" ] || continue
+  EXPECTED_HOOKS=$((EXPECTED_HOOKS + 1))
+done
 case "$REAL_MANIFEST" in
-  *'hooks wiring: all 17 hooks referenced in hooks.json exist on disk'*) check "P2o real hook manifest pins exactly 17 wired scripts" PASS ;;
-  *) check "P2o real hook manifest count is not exactly 17" FAIL ;;
+  *"hooks wiring: all $EXPECTED_HOOKS hooks referenced in hooks.json exist on disk"*) check "P2o real hook manifest covers all $EXPECTED_HOOKS hook scripts" PASS ;;
+  *) check "P2o real hook manifest count does not match $EXPECTED_HOOKS hook scripts on disk" FAIL ;;
 esac
 if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
   && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then

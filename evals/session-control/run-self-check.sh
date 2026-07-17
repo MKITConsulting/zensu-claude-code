@@ -21,9 +21,9 @@ for file in "$EVAL_DIR"/promptfooconfig-{contract,live,concurrency,adversarial}.
     "$PROMPTFOO" validate config --config "$file" >/dev/null
 done
 
-test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/catalog.yaml")" -ge 20
+test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/catalog.yaml")" -eq 67
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/adversarial.yaml")" -eq 6
-test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/live.yaml")" -eq 3
+test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/live.yaml")" -eq 6
 grep -q 'maxConcurrency: 4' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 3' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 5' "$EVAL_DIR/promptfooconfig-adversarial.yaml"

@@ -35,7 +35,7 @@ SID_GP="s-greenpass-1"
 source "$BASELINE" "$SID_GP"
 tdd_write_phase "$SID_GP" "S1" "GREEN_PASS" "" >/dev/null
 
-PAYLOAD_GP_PROD='{"tool_name":"Edit","tool_input":{"file_path":"src/strings.ts"},"session_id":"'$SID_GP'"}'
+PAYLOAD_GP_PROD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/strings.ts"},"session_id":"'$SID_GP'"}'
 OUT_GP_PROD=$(echo "$PAYLOAD_GP_PROD" | "$SCRIPT" 2>/dev/null)
 DEC_GP_PROD=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }
@@ -47,7 +47,7 @@ else
   check "GREEN_PASS + production file (src/strings.ts): DENIED (got: '$DEC_GP_PROD')" FAIL
 fi
 
-PAYLOAD_GP_TEST='{"tool_name":"Edit","tool_input":{"file_path":"src/strings.test.ts"},"session_id":"'$SID_GP'"}'
+PAYLOAD_GP_TEST='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/strings.test.ts"},"session_id":"'$SID_GP'"}'
 OUT_GP_TEST=$(echo "$PAYLOAD_GP_TEST" | "$SCRIPT" 2>/dev/null)
 if [ -z "$OUT_GP_TEST" ]; then
   check "GREEN_PASS + test file (src/strings.test.ts): allowed (counter-case to deny rule)" PASS
@@ -55,7 +55,7 @@ else
   check "GREEN_PASS + test file (src/strings.test.ts): allowed (got: $OUT_GP_TEST)" FAIL
 fi
 
-PAYLOAD_GP_GO='{"tool_name":"Edit","tool_input":{"file_path":"src/utils/refactor.go"},"session_id":"'$SID_GP'"}'
+PAYLOAD_GP_GO='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/utils/refactor.go"},"session_id":"'$SID_GP'"}'
 OUT_GP_GO=$(echo "$PAYLOAD_GP_GO" | "$SCRIPT" 2>/dev/null)
 DEC_GP_GO=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }
@@ -71,7 +71,7 @@ SID_RUN="s-redrun-1"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID_RUN"
 tdd_write_phase "$SID_RUN" "S1" "RED_RUN" "" >/dev/null
-PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_RUN'"}'
+PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_RUN'"}'
 OUT_RUN=$(echo "$PAYLOAD" | "$SCRIPT" 2>/dev/null)
 DECISION_RUN=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }
@@ -87,7 +87,7 @@ SID_GR="s-greenrun-1"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID_GR"
 tdd_write_phase "$SID_GR" "S1" "GREEN_RUN" "" >/dev/null
-PAYLOAD2='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_GR'"}'
+PAYLOAD2='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID_GR'"}'
 OUT_GR=$(echo "$PAYLOAD2" | "$SCRIPT" 2>/dev/null)
 DECISION_GR=$(node -e '
   try { const j = JSON.parse(process.argv[1]); console.log(j.hookSpecificOutput?.permissionDecision || ""); }

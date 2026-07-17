@@ -3,6 +3,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
+LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -19,48 +21,75 @@ fi
 check "hook script exists and is executable" PASS
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-STATE_DIR="$(mktemp -d)"
-export STATE_DIR
-cleanup() { rm -rf "$STATE_DIR"; }
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+export STATE_DIR="$WORK_DIR/retired-state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
-unset CLAUDE_AGENT_TYPE
 unset ZENSU_TDD_GATE
 
-PAYLOAD_REVIEWER='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-iso-1"}'
-OUT_REV=$(echo "$PAYLOAD_REVIEWER" | CLAUDE_AGENT_TYPE="zensu:code-reviewer" "$SCRIPT" 2>/dev/null)
+SID="s-iso-active"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID"
+# shellcheck disable=SC1090
+source "$LIB"
+tdd_set_flag "$SID" active true >/dev/null 2>&1
+
+# Spawned-agent identity is carried only by Claude's trusted top-level payload
+# fields. The active main-thread state makes these checks meaningful: if either
+# identity were accidentally promoted to main, the production edit would deny.
+PAYLOAD_REVIEWER='{"hook_event_name":"PreToolUse","agent_type":"zensu:code-reviewer","agent_id":"agent-reviewer-1","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+OUT_REV=$(echo "$PAYLOAD_REVIEWER" | "$SCRIPT" 2>/dev/null)
 EXIT_REV=$?
 if [ -z "$OUT_REV" ] && [ "$EXIT_REV" = "0" ]; then
-  check "non-tdd-manager subagent (code-reviewer via env): empty stdout + exit 0" PASS
+  check "active session + spawned code-reviewer identity: isolated with empty stdout + exit 0" PASS
 else
-  check "non-tdd-manager subagent (code-reviewer via env): empty stdout + exit 0 (got: '$OUT_REV' exit=$EXIT_REV)" FAIL
+  check "active session + spawned code-reviewer identity: isolated (got: '$OUT_REV' exit=$EXIT_REV)" FAIL
 fi
 
-PAYLOAD_PLM='{"tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-iso-2"}'
-OUT_PLM=$(echo "$PAYLOAD_PLM" | CLAUDE_AGENT_TYPE="zensu:zensu-plm" "$SCRIPT" 2>/dev/null)
+PAYLOAD_PLM='{"hook_event_name":"PreToolUse","agent_type":"zensu:zensu-plm","agent_id":"agent-plm-1","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+OUT_PLM=$(echo "$PAYLOAD_PLM" | "$SCRIPT" 2>/dev/null)
 EXIT_PLM=$?
 if [ -z "$OUT_PLM" ] && [ "$EXIT_PLM" = "0" ]; then
-  check "non-tdd-manager subagent (zensu-plm via env): empty stdout + exit 0" PASS
+  check "active session + spawned zensu-plm identity: isolated with empty stdout + exit 0" PASS
 else
-  check "non-tdd-manager subagent (zensu-plm via env): empty stdout + exit 0 (got: '$OUT_PLM' exit=$EXIT_PLM)" FAIL
+  check "active session + spawned zensu-plm identity: isolated (got: '$OUT_PLM' exit=$EXIT_PLM)" FAIL
 fi
 
-PAYLOAD_BASH='{"tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"s-iso-3"}'
-OUT_BASH=$(echo "$PAYLOAD_BASH" | CLAUDE_AGENT_TYPE="zensu:tdd-manager" "$SCRIPT" 2>/dev/null)
+# Counter-proof: the exact same active session without spawned-agent metadata
+# reaches the TDD phase gate and is denied in UNINITIALIZED.
+PAYLOAD_MAIN='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+OUT_MAIN=$(echo "$PAYLOAD_MAIN" | "$SCRIPT" 2>/dev/null)
+DECISION_MAIN=$(node -e '
+  try { const j=JSON.parse(process.argv[1]); process.stdout.write(j.hookSpecificOutput?.permissionDecision || ""); }
+  catch (_) { process.stdout.write(""); }
+' "$OUT_MAIN" 2>/dev/null)
+if [ "$DECISION_MAIN" = "deny" ]; then
+  check "active session + main principal counter-proof: production Edit is denied" PASS
+else
+  check "active session + main principal counter-proof: expected deny (got: '$OUT_MAIN')" FAIL
+fi
+
+# Tool filtering is independent of principal isolation: authenticated main
+# payloads for non-edit tools remain silent even while the session is active.
+PAYLOAD_BASH='{"hook_event_name":"PreToolUse","tool_name":"Bash","tool_input":{"command":"ls"},"session_id":"'$SID'"}'
+OUT_BASH=$(echo "$PAYLOAD_BASH" | "$SCRIPT" 2>/dev/null)
 EXIT_BASH=$?
 if [ -z "$OUT_BASH" ] && [ "$EXIT_BASH" = "0" ]; then
-  check "Bash + benign read-only command (ls): empty stdout + exit 0" PASS
+  check "active main session + Bash tool filter: empty stdout + exit 0" PASS
 else
-  check "Bash + benign read-only command (ls): empty stdout + exit 0 (got: '$OUT_BASH' exit=$EXIT_BASH)" FAIL
+  check "active main session + Bash tool filter: expected empty stdout (got: '$OUT_BASH' exit=$EXIT_BASH)" FAIL
 fi
 
-PAYLOAD_READ='{"tool_name":"Read","tool_input":{"file_path":"src/foo.ts"},"session_id":"s-iso-4"}'
-OUT_READ=$(echo "$PAYLOAD_READ" | CLAUDE_AGENT_TYPE="zensu:tdd-manager" "$SCRIPT" 2>/dev/null)
+PAYLOAD_READ='{"hook_event_name":"PreToolUse","tool_name":"Read","tool_input":{"file_path":"src/foo.ts"},"session_id":"'$SID'"}'
+OUT_READ=$(echo "$PAYLOAD_READ" | "$SCRIPT" 2>/dev/null)
 EXIT_READ=$?
 if [ -z "$OUT_READ" ] && [ "$EXIT_READ" = "0" ]; then
-  check "non-Edit tool (Read): empty stdout + exit 0" PASS
+  check "active main session + Read tool filter: empty stdout + exit 0" PASS
 else
-  check "non-Edit tool (Read): empty stdout + exit 0 (got: '$OUT_READ' exit=$EXIT_READ)" FAIL
+  check "active main session + Read tool filter: expected empty stdout (got: '$OUT_READ' exit=$EXIT_READ)" FAIL
 fi
 
 echo "----"

@@ -21,7 +21,7 @@ bash "$LOG" --tdd-begin --session "$SID" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 REVIEW_TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
 
-PAYLOAD='{"tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: '"$REVIEW_TICKET"'\nfixture"},"session_id":"'"$SID"'"}'
+PAYLOAD='{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: '"$REVIEW_TICKET"'\nfixture"},"session_id":"'"$SID"'"}'
 OUT="$(printf '%s' "$PAYLOAD" | bash "$HOOK" 2>/dev/null)"
 printf '%s' "$OUT" | grep -qF '"additionalContext"' \
   && check "code-reviewer completion emits additionalContext" PASS \
@@ -40,7 +40,7 @@ printf '%s' "$OUT" | grep -qF "bash ${LOG_Q} --review-ticket" \
   && check "directive pins the executing plugin's review-ticket helper" PASS \
   || check "directive does not pin the executing plugin's review-ticket helper" FAIL
 
-OTHER="$(printf '%s' '{"tool_name":"Agent","tool_input":{"subagent_type":"zensu-plm"},"session_id":"'"$SID"'"}' | bash "$HOOK" 2>/dev/null)"
+OTHER="$(printf '%s' '{"hook_event_name":"PostToolUse","tool_name":"Agent","tool_input":{"subagent_type":"zensu-plm"},"session_id":"'"$SID"'"}' | bash "$HOOK" 2>/dev/null)"
 [ -z "$OTHER" ] && check "neutral non-reviewer child is isolated" PASS \
   || check "neutral non-reviewer child is isolated" FAIL
 

@@ -216,10 +216,25 @@ TMPD="$(mktemp -d)"
 trap 'rm -rf "$TMPD"' EXIT
 printf '{"hooks":{}}' > "$TMPD/config-on.json"
 printf '{"hooks":{"secretScan":false}}' > "$TMPD/config-off.json"
+export CLAUDE_PROJECT_DIR="$TMPD"
+export ZENSU_TEST_PLUGIN_DATA="$TMPD/plugin-data"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" secret-scan-test
 
 run_hook() {
   local payload="$1"; shift
-  printf '%s' "$payload" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" ${1+"$@"} bash "$HOOK" 2>/dev/null
+  if [[ "$payload" = \{* ]]; then
+    payload="$(printf '%s' "$payload" | node -e '
+      let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{
+        const j=JSON.parse(s);j.hook_event_name="PreToolUse";j.session_id="secret-scan-test";j.cwd=process.argv[1];
+        process.stdout.write(JSON.stringify(j));
+      });
+    ' "$TMPD")"
+  fi
+  printf '%s' "$payload" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+    -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= \
+    STATE_DIR="$TMPD/state" CLAUDE_PROJECT_DIR="$TMPD" ${1+"$@"} bash "$HOOK" 2>/dev/null
 }
 
 DENY='permissionDecision":"deny'
@@ -266,7 +281,7 @@ OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","c
 [ -z "$OUT" ] && check "F5 ZENSU_SECRET_SCAN=off env -> allow" PASS || check "F5 ZENSU_SECRET_SCAN=off env -> allow" FAIL
 
 OUT="$(run_hook 'this is not json')"
-[ -z "$OUT" ] && check "F6 broken payload -> fail-open allow" PASS || check "F6 broken payload -> fail-open allow" FAIL
+if is_deny "$OUT"; then check "F6 broken payload cannot bind a hook session -> deny" PASS; else check "F6 broken payload binding deny" FAIL; fi
 
 OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"cat > creds.env <<EOF\nghp_''123456789012345678901234567890123456\nEOF"}}')"
 case "$OUT" in *"$DENY"*github-token*) check "F7 Bash heredoc with GitHub token -> deny (rule named)" PASS;; *) check "F7 Bash heredoc with GitHub token -> deny (rule named)" FAIL;; esac
@@ -286,7 +301,7 @@ case "$OUT" in *"$DENY"*slack-token*) check "F9 MultiEdit with Slack token -> de
 OUT="$(run_hook '{"tool_name":"NotebookEdit","tool_input":{"notebook_path":"/x/nb/analysis.ipynb","new_source":"key = \"sk_''live_abcdef1234567890XY\""}}')"
 case "$OUT" in *"$DENY"*stripe-live-key*) check "F10 NotebookEdit with Stripe key -> deny (rule named)" PASS;; *) check "F10 NotebookEdit with Stripe key -> deny (rule named)" FAIL;; esac
 
-OUT="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-off.json" ZENSU_SECRET_SCAN= BSWG_MODE= bash "$HOOK" 2>/dev/null)"
+OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' ZENSU_CONFIG="$TMPD/config-off.json")"
 [ -z "$OUT" ] && check "F11 hooks.secretScan:false -> allow" PASS || check "F11 hooks.secretScan:false -> allow" FAIL
 
 OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/readme.md","content":"plain documentation text, nothing secret"}}')"
@@ -298,7 +313,7 @@ cat > "$TMPD/shim/node" <<'SHIM'
 for a in "$@"; do
   case "$a" in *secret-scan-decide.js*) exit 1;; esac
 done
-exec /usr/bin/env -i PATH=/usr/bin:/bin:/usr/local/bin node "$@" 2>/dev/null || exec node "$@"
+exec "$REAL_NODE_BIN" "$@"
 SHIM
 chmod +x "$TMPD/shim/node" 2>/dev/null
 REAL_NODE_DIR="$(dirname "$(command -v node)")"
@@ -308,7 +323,8 @@ REAL_NODE_DIR="$(dirname "$(command -v node)")"
 printf '#!/bin/bash\necho SHIMOK\n' > "$TMPD/shim/_probe"
 chmod +x "$TMPD/shim/_probe" 2>/dev/null
 if [ "$(PATH="$TMPD/shim:/usr/bin:/bin" _probe 2>/dev/null)" = "SHIMOK" ]; then
-  OUT="$(printf '%s' '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$TMPD/config-on.json" ZENSU_SECRET_SCAN= BSWG_MODE= PATH="$TMPD/shim:$REAL_NODE_DIR:/usr/bin:/bin" bash "$HOOK" 2>/dev/null)"
+  OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' \
+    REAL_NODE_BIN="$REAL_NODE_DIR/node" PATH="$TMPD/shim:$REAL_NODE_DIR:/usr/bin:/bin")"
   [ -z "$OUT" ] && check "F13 scanner crash (node shim rc=1) -> fail-open allow" PASS || check "F13 scanner crash (node shim rc=1) -> fail-open allow" FAIL
 else
   check "F13 scanner crash -> fail-open allow (skipped: FS ignores exec bit)" PASS

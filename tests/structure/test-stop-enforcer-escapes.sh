@@ -46,7 +46,7 @@ arm() {
 # --- T0 control: armed session blocks by default ---
 SID0="esc-control"
 arm "$SID0"
-OUT0="$(printf '{"session_id":"%s"}' "$SID0" | bash "$STOP" 2>/dev/null)"
+OUT0="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID0" | bash "$STOP" 2>/dev/null)"
 [ "$(printf '%s' "$OUT0" | decision)" = "block" ] \
   && check "T0 armed session blocks by default (control)" PASS \
   || check "T0 control block (out=$OUT0)" FAIL
@@ -54,7 +54,7 @@ OUT0="$(printf '{"session_id":"%s"}' "$SID0" | bash "$STOP" 2>/dev/null)"
 # --- E1 ZENSU_CHAIN=off -> allow stop ---
 SID1="esc-chain-off"
 arm "$SID1"
-OUT1="$(printf '{"session_id":"%s"}' "$SID1" | ZENSU_CHAIN=off bash "$STOP" 2>/dev/null)"
+OUT1="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID1" | ZENSU_CHAIN=off bash "$STOP" 2>/dev/null)"
 if [ -z "$OUT1" ] || [ "$(printf '%s' "$OUT1" | decision)" = "allow" ]; then
   check "E1 ZENSU_CHAIN=off -> allow stop (env escape)" PASS
 else
@@ -66,7 +66,7 @@ SID2="esc-cfg-off"
 arm "$SID2"
 CFG_OFF="$STATE_DIR/enforcer-off.json"
 printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
-OUT2="$(printf '{"session_id":"%s"}' "$SID2" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"
+OUT2="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID2" | ZENSU_CONFIG="$CFG_OFF" bash "$STOP" 2>/dev/null)"
 if [ -z "$OUT2" ] || [ "$(printf '%s' "$OUT2" | decision)" = "allow" ]; then
   check "E2 hooks.chainEnforcer=false -> allow stop (config escape)" PASS
 else
@@ -82,7 +82,7 @@ for _ in 1 2 3 4 5 6 7 8; do
   tdd_increment_counter "$SID3" stopBlockCount >/dev/null
 done
 ERR3="$STATE_DIR/e3.err"
-OUT3="$(printf '{"session_id":"%s"}' "$SID3" | bash "$STOP" 2>"$ERR3")"
+OUT3="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID3" | bash "$STOP" 2>"$ERR3")"
 DEC3="$(printf '%s' "$OUT3" | decision)"
 if [ "$DEC3" = "allow" ] && grep -qi "did not converge" "$ERR3"; then
   check "E3 blocks>CAP -> allow + stderr warning (anti-deadlock release)" PASS
@@ -96,7 +96,7 @@ arm "$SID4"
 for _ in 1 2; do
   tdd_increment_counter "$SID4" stopBlockCount >/dev/null
 done
-OUT4="$(printf '{"session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"
+OUT4="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SID4" | bash "$STOP" 2>/dev/null)"
 [ "$(printf '%s' "$OUT4" | decision)" = "block" ] \
   && check "E4 blocks<=CAP still block (budget not exhausted)" PASS \
   || check "E4 within-budget block (out=$OUT4)" FAIL
