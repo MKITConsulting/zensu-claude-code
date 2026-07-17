@@ -230,7 +230,10 @@ if (
   export CLAUDE_PLUGIN_ROOT="$ROOT"
   # shellcheck disable=SC1090
   source "$PHASE"
-  native_pid="$(_tdd_native_process_pid "${BASHPID:-$$}")" || exit 1
+  # Capture the long-lived parent before command substitution creates a
+  # short-lived Git-Bash process with its own BASHPID.
+  shell_pid="${BASHPID:-$$}"
+  native_pid="$(_tdd_native_process_pid "$shell_pid")" || exit 1
   node -e 'process.kill(Number(process.argv[1]), 0)' "$native_pid"
 ); then
   check "deferred review PID maps to a process visible to native Node" PASS
