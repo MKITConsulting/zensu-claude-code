@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -d "$ROOT/plugins/zensu" ]; then PLUGIN="$ROOT/plugins/zensu"; else PLUGIN="$ROOT"; fi
 GATE="$PLUGIN/hooks/pre-reviewer-capability-gate.sh"
 POLICY="$PLUGIN/hooks/lib/reviewer-capability-v1.js"
+HOST_PATH="$PLUGIN/hooks/lib/zensu-host-path.sh"
 PASS=0
 FAIL=0
 check() {
@@ -12,7 +13,7 @@ check() {
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
 
-for artifact in "$GATE" "$POLICY"; do
+for artifact in "$GATE" "$POLICY" "$HOST_PATH"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$PLUGIN/}" PASS || check "artifact exists: ${artifact#$PLUGIN/}" FAIL
 done
 if [ "$FAIL" -ne 0 ]; then
@@ -20,8 +21,14 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d "${TMPDIR:-/tmp}/reviewer-capability-XXXXXX")"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || {
+  rm -rf -- "$RAW_TMP"
+  printf '%s\n' 'reviewer capability fixture could not render its native host path' >&2
+  exit 1
+}
+trap 'rm -rf "$RAW_TMP"' EXIT
 PLUGIN_DATA="$TMP/plugin-data"
 MISSING_DATA="$TMP/missing-plugin-data"
 TAMPERED_DATA="$TMP/tampered-plugin-data"
@@ -190,7 +197,7 @@ else
   check "case-variant plugin-root alias is exercised only on a case-insensitive filesystem" PASS
 fi
 assert_case "neutral agent cannot invoke Bash even for git status" deny arbitrary-custom Bash '{"command":"git status --short"}'
-assert_case "neutral agent cannot invoke Bash in an external review worktree" deny arbitrary-custom Bash '{"command":"git -C /tmp/review-worktree diff --stat"}'
+assert_case "neutral agent cannot invoke Bash in an external review worktree" deny arbitrary-custom Bash "{\"command\":\"git -C $OTHER diff --stat\"}"
 assert_case "neutral agent cannot enumerate the inherited shell environment" deny arbitrary-custom Bash '{"command":"env"}'
 assert_case "neutral agent cannot obfuscate a workflow-root path" deny arbitrary-custom Bash '{"command":"d=.zen; ls \"$d\"su/state"}'
 assert_case "neutral agent cannot obfuscate a helper name" deny arbitrary-custom Bash '{"command":"n=zensu-log; printf %s \"$n.sh\""}'
@@ -200,8 +207,8 @@ assert_case "neutral agent cannot invoke exec tool aliases" deny arbitrary-custo
 assert_case "neutral agent cannot invoke exec_command tool aliases" deny arbitrary-custom exec_command '{"cmd":"pwd"}'
 assert_case "neutral agent cannot invoke terminal tool aliases" deny arbitrary-custom terminal '{"script":"pwd"}'
 assert_case "neutral agent cannot invoke command tool aliases" deny arbitrary-custom command '{"command":"pwd"}'
-assert_case "neutral agent keeps external report writes" allow arbitrary-custom Write '{"file_path":"/tmp/zensu-review/report.md"}'
-assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write '{"file_path":"/tmp/zensu-review/report.md","content":"session-control main-v1 ZENSU_SESSION_KEY"}'
+assert_case "neutral agent keeps external report writes" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\"}"
+assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\",\"content\":\"session-control main-v1 ZENSU_SESSION_KEY\"}"
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
 assert_case "neutral agent keeps unrelated MCP tools" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
 assert_case "neutral agent keeps read-only Zensu MCP tools" allow arbitrary-custom mcp__zensu__get_feature '{"feature_id":"F-1"}'
@@ -232,7 +239,7 @@ assert_case "neutral Glob cannot escape a safe subtree through its pattern" deny
 PAYLOAD_CWD="$OTHER" assert_case "neutral Grep may use an omitted path in an external safe cwd" allow arbitrary-custom Grep '{"pattern":"main-v1"}'
 PAYLOAD_CWD="$OTHER" assert_case "neutral Glob may use an omitted path in an external safe cwd" allow arbitrary-custom Glob '{"pattern":"**/*"}'
 assert_case "reviewer cannot read outside the immutable project" deny code-reviewer Read '{"file_path":"/etc/passwd"}'
-assert_case "neutral agent may read an external host-governed path" allow arbitrary-custom Read '{"file_path":"/etc/passwd"}'
+assert_case "neutral agent may read an external host-governed path" allow arbitrary-custom Read "{\"file_path\":\"$OTHER/existing-report.md\"}"
 PAYLOAD_CWD="$PROJECT/src/nested" assert_case "descendant cwd remains bound to the immutable project" allow arbitrary-custom Read '{"file_path":"../../README.md"}'
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)

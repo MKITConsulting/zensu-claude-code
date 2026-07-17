@@ -91,7 +91,14 @@ fi
 # A root with shell syntax in its filename must survive JSON serialization and
 # be emitted as one runnable, inert shell token in the stop reason.
 SPECIAL_BASE="$(mktemp -d -t zensu-stop-root-XXXXXX)"
-SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value quote"back\slash'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value [windows]'
+    ;;
+  *)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value quote"back\slash'
+    ;;
+esac
 mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
 SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
 for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
@@ -130,7 +137,9 @@ SPECIAL_BOUND_TICKET="$(CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" CLAUDE_PLUGIN_ROOT
   --current-review-ticket --session "$SPECIAL_SID" 2>/dev/null)"
 SPECIAL_TICKET_Q="$(printf '%q' "$SPECIAL_BOUND_TICKET")"
 SPECIAL_EXPECTED_COMMAND="$EXPECTED_PREFIX --chain-done --claimed-review-ticket $SPECIAL_TICKET_Q"
-SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_REASON" | EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
+SPECIAL_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || SPECIAL_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${SPECIAL_MSYS_EXCL}"
+SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_REASON" | MSYS2_ENV_CONV_EXCL="$SPECIAL_MSYS_EXCL" EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
   const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
   const at=body.indexOf(expected);if(at<0)process.exit(1);
   process.stdout.write(body.slice(at,at+expected.length));

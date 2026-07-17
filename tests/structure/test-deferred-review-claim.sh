@@ -314,6 +314,12 @@ activate_session "$PID_SID"
 ) & PID_WORKER=$!
 wait_for_file "$CASE_ROOT/handoff-ready"
 TOP_OWNER_PID="$(cat "$CASE_ROOT/top.pid" 2>/dev/null)"
+EXPECTED_OWNER_PID="$(
+  export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+  # shellcheck disable=SC1090
+  source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+  _tdd_native_process_pid "$TOP_OWNER_PID"
+)"
 PID_META="$(CLAIM_FILE="$CASE_STATE/pending-review.json.claim" node -e '
   const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));
   process.stdout.write(`${j.ownerPid}\t${j.handoffEmitted}`);
@@ -322,10 +328,10 @@ PID_ALIVE=false
 kill -0 "$TOP_OWNER_PID" 2>/dev/null && PID_ALIVE=true
 : > "$CASE_ROOT/release-owner"
 wait "$PID_WORKER"
-if [ "$PID_META" = "$TOP_OWNER_PID"$'\ttrue' ] && [ "$PID_ALIVE" = true ]; then
+if [ "$PID_META" = "$EXPECTED_OWNER_PID"$'\ttrue' ] && [ "$PID_ALIVE" = true ]; then
   check "P1 deferred owner PID remains live through durable handoff" PASS
 else
-  check "P1 deferred owner PID remains live through durable handoff (top=$TOP_OWNER_PID meta=$PID_META alive=$PID_ALIVE)" FAIL
+  check "P1 deferred owner PID remains live through durable handoff (shell=$TOP_OWNER_PID native=$EXPECTED_OWNER_PID meta=$PID_META alive=$PID_ALIVE)" FAIL
 fi
 
 # Reset remains an idempotent no-op when neither a state nor a claim artifact

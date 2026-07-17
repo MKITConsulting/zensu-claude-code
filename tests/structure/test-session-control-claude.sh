@@ -6,6 +6,7 @@ HOOK="$ROOT/hooks/session-start-session-control.sh"
 ADAPTER="$ROOT/hooks/lib/claude-session-control-v1.js"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 SESSION="$ROOT/hooks/lib/zensu-session.sh"
+HOST_PATH="$ROOT/hooks/lib/zensu-host-path.sh"
 README="$ROOT/README.md"
 CHANGELOG="$ROOT/CHANGELOG.md"
 PASS=0
@@ -15,7 +16,7 @@ check() {
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
 
-for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION"; do
+for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION" "$HOST_PATH"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$ROOT/}" PASS || check "artifact exists: ${artifact#$ROOT/}" FAIL
 done
 
@@ -50,8 +51,10 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 
-TMP="$(mktemp -d)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d "${TMPDIR:-/tmp}/claude-session-control-XXXXXX")"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || exit 1
+trap 'rm -rf "$RAW_TMP"' EXIT
 PLUGIN_DATA="$TMP/plugin-data"
 PLUGIN_DATA_B="$TMP/plugin-data-b"
 PLUGIN_COPY="$TMP/plugin-copy"
@@ -82,14 +85,18 @@ RECORD_A="$CONTROL/records/$KEY_A.json"
 RECORD_B="$CONTROL/records/$KEY_B.json"
 
 payload() {
-  node -e 'process.stdout.write(JSON.stringify({
+  local msys_env_exclusions="PAYLOAD_SESSION_ID"
+  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
+    msys_env_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_env_exclusions}"
+  fi
+  MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" PAYLOAD_SESSION_ID="$2" node -e 'process.stdout.write(JSON.stringify({
     hook_event_name: process.argv[1],
-    session_id: process.argv[2],
-    cwd: process.argv[3],
-    agent_id: process.argv[4] || undefined,
-    agent_type: process.argv[5] || undefined,
-    source: process.argv[6] || (process.argv[1] === "SessionStart" ? "startup" : undefined)
-  }))' "$@"
+    session_id: process.env.PAYLOAD_SESSION_ID,
+    cwd: process.argv[2],
+    agent_id: process.argv[3] || undefined,
+    agent_type: process.argv[4] || undefined,
+    source: process.argv[5] || (process.argv[1] === "SessionStart" ? "startup" : undefined)
+  }))' "$1" "$3" "${4:-}" "${5:-}" "${6:-}"
 }
 
 canonical_node_path() {

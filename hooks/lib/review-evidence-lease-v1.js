@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const hookSession = require('./claude-hook-session-v1.js');
+const hostPaths = require('./claude-path-v1.js');
 
 const SCHEMA = 'zensu.review-evidence-lease';
 const SCHEMA_VERSION = 1;
@@ -103,8 +104,9 @@ function sameIdentity(left, right) {
 
 function canonicalExisting(input, label, expected) {
   requireSafeText(input, label);
-  if (!path.isAbsolute(input)) fail(`${label} must be an absolute path`);
-  const requested = path.resolve(input);
+  const normalizedInput = hostPaths.normalizeHostPathInput(input, label);
+  if (!path.isAbsolute(normalizedInput)) fail(`${label} must be an absolute path`);
+  const requested = path.resolve(normalizedInput);
   let supplied;
   let canonical;
   try {
@@ -1029,12 +1031,21 @@ function manifestPaths(file, label) {
     fail(`${label} is not valid UTF-8`);
   }
   if (/\r(?!\n)/.test(text)) fail(`${label} contains unsupported carriage returns`);
-  const values = text.replaceAll('\r\n', '\n').split('\n').filter((line) => line !== '');
-  if (values.length > MAX_EVIDENCE_FILES) fail(`${label} contains too many paths`);
-  for (const value of values) {
-    if (value.trim() !== value || !path.isAbsolute(value) || UNSAFE_PATH_TEXT_RE.test(value)) {
+  const rawValues = text.replaceAll('\r\n', '\n').split('\n').filter((line) => line !== '');
+  if (rawValues.length > MAX_EVIDENCE_FILES) fail(`${label} contains too many paths`);
+  const values = [];
+  for (const value of rawValues) {
+    if (value.trim() !== value || UNSAFE_PATH_TEXT_RE.test(value)) {
       fail(`${label} contains a non-canonical path line`);
     }
+    let normalizedValue;
+    try {
+      normalizedValue = hostPaths.normalizeHostPathInput(value, `${label} path`);
+    } catch {
+      fail(`${label} contains a non-canonical path line`);
+    }
+    if (!path.isAbsolute(normalizedValue)) fail(`${label} contains a non-canonical path line`);
+    values.push(normalizedValue);
   }
   return { snapshot, values };
 }
@@ -1597,7 +1608,9 @@ function revalidateSafeRoot(entry) {
 
 function canonicalToolPath(input, cwd, label, expected) {
   requireSafeText(input, label);
-  const requested = path.isAbsolute(input) ? path.resolve(input) : path.resolve(cwd, input);
+  const normalizedInput = hostPaths.normalizeHostPathInput(input, label);
+  const requested = path.isAbsolute(normalizedInput)
+    ? path.resolve(normalizedInput) : path.resolve(cwd, normalizedInput);
   return canonicalExisting(requested, label, expected).canonical;
 }
 

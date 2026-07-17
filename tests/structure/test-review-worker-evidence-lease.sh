@@ -4,6 +4,7 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 if [ -d "$ROOT/plugins/zensu" ]; then PLUGIN="$ROOT/plugins/zensu"; else PLUGIN="$ROOT"; fi
 HELPER="$PLUGIN/hooks/lib/zensu-review-evidence.sh"
+HOST_PATH="$PLUGIN/hooks/lib/zensu-host-path.sh"
 START="$PLUGIN/hooks/review-evidence-subagent-start.sh"
 STOP="$PLUGIN/hooks/review-evidence-subagent-stop.sh"
 GATE="$PLUGIN/hooks/pre-reviewer-capability-gate.sh"
@@ -15,7 +16,7 @@ check() {
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
 
-for artifact in "$HELPER" "$START" "$STOP" "$GATE" \
+for artifact in "$HELPER" "$HOST_PATH" "$START" "$STOP" "$GATE" \
   "$PLUGIN/hooks/lib/review-evidence-lease-v1.js" \
   "$PLUGIN/hooks/lib/review-evidence-hook-v1.js" \
   "$PLUGIN/agents/plan-review-worker.md" "$PLUGIN/agents/pr-review-worker.md"; do
@@ -56,18 +57,31 @@ if [ "$FAIL" -ne 0 ]; then
   exit 1
 fi
 
-TMP="$(mktemp -d)"
-TMP="$(cd -P -- "$TMP" && pwd -P)"
+RAW_TMP="$(mktemp -d "${TMPDIR:-/tmp}/evidence-lease-XXXXXX")"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || {
+  rm -rf -- "$RAW_TMP"
+  printf '%s\n' 'evidence lease fixture could not render its native host path' >&2
+  exit 1
+}
 PLUGIN_SCOPE_WORKSPACE=''
 SYSTEM_FILES=''
 SYSTEM_ROOTS=''
-trap 'rm -rf "$TMP"; [ -z "$PLUGIN_SCOPE_WORKSPACE" ] || rm -rf "$PLUGIN_SCOPE_WORKSPACE"; [ -z "$SYSTEM_FILES" ] || rm -f "$SYSTEM_FILES"; [ -z "$SYSTEM_ROOTS" ] || rm -f "$SYSTEM_ROOTS"' EXIT
-PROJECT="$TMP/project"
+trap 'rm -rf "$RAW_TMP"; [ -z "$PLUGIN_SCOPE_WORKSPACE" ] || rm -rf "$PLUGIN_SCOPE_WORKSPACE"; [ -z "$SYSTEM_FILES" ] || rm -f "$SYSTEM_FILES"; [ -z "$SYSTEM_ROOTS" ] || rm -f "$SYSTEM_ROOTS"' EXIT
+RAW_PROJECT="$RAW_TMP/project"
 WORKSPACE="$TMP/review-workspace"
 DATA="$TMP/plugin-data"
 SESSION='evidence-lease-session'
-mkdir -p "$PROJECT/src/nested" "$WORKSPACE" "$DATA"
+mkdir -p "$RAW_PROJECT/src/nested" "$WORKSPACE" "$DATA"
+PROJECT="$(bash "$HOST_PATH" "$RAW_PROJECT")" || exit 1
 chmod 700 "$WORKSPACE"
+if [ -d "$TMP" ] && [ -d "$PROJECT" ] \
+    && node -e 'const fs=require("node:fs");fs.realpathSync.native(process.argv[1]);fs.realpathSync.native(process.argv[2])' \
+      "$TMP" "$PROJECT"; then
+  check "mktemp workspace and shell-spelled source project convert before native Session Control/lease reads" PASS
+else
+  check "mktemp workspace and shell-spelled source project convert before native Session Control/lease reads" FAIL
+fi
 printf '%s\n' '# project' > "$PROJECT/README.md"
 printf '%s\n' 'const value = 1;' > "$PROJECT/src/app.js"
 printf '%s\n' 'evidence packet' > "$WORKSPACE/EVIDENCE.md"
@@ -722,7 +736,7 @@ fi
 mkdir -p "$PLUGIN/tests/results"
 PLUGIN_SCOPE_WORKSPACE="$(mktemp -d "$PLUGIN/tests/results/evidence-scope.XXXXXX")"
 PLUGIN_SCOPE_WORKSPACE="$(cd -P -- "$PLUGIN_SCOPE_WORKSPACE" && pwd -P)"
-printf '%s\n' '/etc/passwd' > "$PLUGIN_SCOPE_WORKSPACE/FILES.txt"
+printf '%s\n' "$PROJECT/README.md" > "$PLUGIN_SCOPE_WORKSPACE/FILES.txt"
 : > "$PLUGIN_SCOPE_WORKSPACE/ROOTS.txt"
 if helper "$DATA" "$SESSION" create --kind plan-review \
     --files-manifest "$PLUGIN_SCOPE_WORKSPACE/FILES.txt" \

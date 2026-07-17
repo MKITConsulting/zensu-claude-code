@@ -59,9 +59,10 @@ export CLAUDE_PROJECT_DIR="$PROJECT"
 export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data"
 # shellcheck disable=SC1091
 source "$ROOT/tests/session-control/initialize-baseline.sh" "$RAW"
-# SessionStart canonicalizes the project path (notably /var -> /private/var on
-# macOS); all exact path assertions must use that authority.
-PROJECT="$ZENSU_PROJECT_ROOT"
+# SessionStart records the host-native canonical path. Shell helpers deliberately
+# render that same authority in the executing shell namespace (for example
+# C:\\repo -> /c/repo on Git Bash), so exact shell assertions use pwd -P.
+PROJECT="$(cd -P -- "$ZENSU_PROJECT_ROOT" && pwd -P)"
 
 STATE_PATH="$(CLAUDE_PROJECT_DIR="$PROJECT" bash -c "source '$SESSION'; source '$PHASE'; tdd_state_file '$RAW'")"
 EXPECTED_STATE="$PROJECT/.zensu/state/tdd-phase-$EXPECTED.json"

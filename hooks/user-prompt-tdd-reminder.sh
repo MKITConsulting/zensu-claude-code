@@ -19,12 +19,18 @@
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 INPUT="$(cat)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0

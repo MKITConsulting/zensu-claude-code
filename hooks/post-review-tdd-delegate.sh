@@ -16,12 +16,18 @@
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 INPUT="$(cat)"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
@@ -321,14 +327,19 @@ else
   TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
 fi
 
+emit_post_context() {
+  node -e '
+    const msg = require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({hookSpecificOutput:{
+      hookEventName:"PostToolUse", additionalContext:msg
+    }}));
+  '
+  echo
+}
+
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
-  node -e '
-    process.stdout.write(JSON.stringify({hookSpecificOutput:{
-      hookEventName:"PostToolUse", additionalContext:process.argv[1]
-    }}));
-  ' "${DISABLED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}"
-  echo
+  printf '%s' "${DISABLED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -359,16 +370,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     fi
     CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
   fi
-  node -e '
-    const msg = process.argv[1];
-    process.stdout.write(JSON.stringify({
-      hookSpecificOutput: {
-        hookEventName: "PostToolUse",
-        additionalContext: msg
-      }
-    }));
-  ' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}"
-  echo
+  printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -382,13 +384,4 @@ EXPANDED_MSG="${MSG//\$\{NEXT\}/$NEXT}"
 EXPANDED_MSG="${EXPANDED_MSG//\$\{MAX_ROUNDS\}/$MAX_ROUNDS}"
 EXPANDED_MSG="${EXPANDED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}"
 
-node -e '
-  const msg = process.argv[1];
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PostToolUse",
-      additionalContext: msg
-    }
-  }));
-' "$EXPANDED_MSG"
-echo
+printf '%s' "$EXPANDED_MSG" | emit_post_context

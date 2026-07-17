@@ -6,10 +6,13 @@
 _ZENSU_TEST_SOURCE_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" || return 1
 _ZENSU_TEST_ROOT="${2:-$_ZENSU_TEST_SOURCE_ROOT}"
 _ZENSU_TEST_ROOT="$(cd "$_ZENSU_TEST_ROOT" && pwd -P)" || return 1
-_ZENSU_TEST_PROJECT="${CLAUDE_PROJECT_DIR:?test baseline requires CLAUDE_PROJECT_DIR}"
+_ZENSU_TEST_HOST_PATH="$_ZENSU_TEST_SOURCE_ROOT/hooks/lib/zensu-host-path.sh"
+_ZENSU_TEST_RAW_PROJECT="${CLAUDE_PROJECT_DIR:?test baseline requires CLAUDE_PROJECT_DIR}"
 _ZENSU_TEST_SESSION="${1:?usage: source initialize-baseline.sh SESSION_ID [PLUGIN_ROOT]}"
-_ZENSU_TEST_DATA="${ZENSU_TEST_PLUGIN_DATA:-$_ZENSU_TEST_PROJECT/.session-control-test/plugin-data}"
-mkdir -p "$_ZENSU_TEST_DATA" || return 1
+_ZENSU_TEST_RAW_DATA="${ZENSU_TEST_PLUGIN_DATA:-$_ZENSU_TEST_RAW_PROJECT/.session-control-test/plugin-data}"
+mkdir -p "$_ZENSU_TEST_RAW_DATA" || return 1
+_ZENSU_TEST_PROJECT="$(bash "$_ZENSU_TEST_HOST_PATH" "$_ZENSU_TEST_RAW_PROJECT")" || return 1
+_ZENSU_TEST_DATA="$(bash "$_ZENSU_TEST_HOST_PATH" "$_ZENSU_TEST_RAW_DATA")" || return 1
 
 _ZENSU_TEST_PAYLOAD="$(node -e 'process.stdout.write(JSON.stringify({
   hook_event_name:"SessionStart", source:"startup", session_id:process.argv[1], cwd:process.argv[2]
@@ -24,5 +27,6 @@ export CLAUDE_CODE_SESSION_ID="$_ZENSU_TEST_SESSION"
 # shellcheck disable=SC1090
 . "$_ZENSU_TEST_ROOT/hooks/lib/zensu-session.sh" || return 1
 zensu_bind_model_session || return 1
-unset _ZENSU_TEST_SOURCE_ROOT _ZENSU_TEST_ROOT _ZENSU_TEST_PROJECT _ZENSU_TEST_SESSION _ZENSU_TEST_DATA \
-  _ZENSU_TEST_PAYLOAD
+unset _ZENSU_TEST_SOURCE_ROOT _ZENSU_TEST_ROOT _ZENSU_TEST_HOST_PATH \
+  _ZENSU_TEST_RAW_PROJECT _ZENSU_TEST_PROJECT _ZENSU_TEST_SESSION \
+  _ZENSU_TEST_RAW_DATA _ZENSU_TEST_DATA _ZENSU_TEST_PAYLOAD

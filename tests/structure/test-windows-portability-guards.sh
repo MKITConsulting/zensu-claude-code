@@ -59,10 +59,18 @@ else
   check "security cases remain present behind only their narrow portability guards" FAIL
 fi
 
-if grep -qF 'name: Windows Core lease canary' "$WORKFLOW" \
-  && grep -A2 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF "runner.os == 'Windows'" \
-  && grep -A5 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'test-tdd-no-flock-external-lease.sh' \
-  && grep -A5 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'tests/session-control/run.sh'; then
+WINDOWS_CANARY_BLOCK="$(awk '
+  /^      - name: Windows Core lease canary$/ { capture=1 }
+  capture && seen && /^      - / { exit }
+  capture { print; seen=1 }
+' "$WORKFLOW")"
+if printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF "runner.os == 'Windows'" \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-msys-runtime-boundaries.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-deferred-review-claim.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-id-v1.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-start-banner.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-tdd-no-flock-external-lease.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'tests/session-control/run.sh'; then
   check "Windows CI fails fast on the cross-process Core lease" PASS
 else
   check "Windows CI fails fast on the cross-process Core lease" FAIL

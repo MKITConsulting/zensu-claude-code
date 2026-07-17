@@ -2,12 +2,18 @@
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 PAYLOAD="$(cat)"
 
@@ -22,6 +28,11 @@ fi
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
+_ZENSU_MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
+  *';PAYLOAD_LOG_COMMAND;'*) ;;
+  *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}PAYLOAD_LOG_COMMAND" ;;
+esac
 
 if ! command -v node >/dev/null 2>&1; then
   exit 2
@@ -129,7 +140,7 @@ PATH_CLASS="$(FP="$FILE_PATH" SD="$(dirname "$STATE_FILE")" node -e '
 # zensu-log.sh via the Bash tool, which this hook never sees. Checked BEFORE
 # the vanilla bypass and the .zensu/ exemption on purpose.
 if [ "$PATH_CLASS" = "state" ]; then
-  PAYLOAD_LOG_COMMAND="$LOG_COMMAND" node -e '
+  MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" PAYLOAD_LOG_COMMAND="$LOG_COMMAND" node -e '
     const logCommand = process.env.PAYLOAD_LOG_COMMAND;
     process.stdout.write(JSON.stringify({
       hookSpecificOutput: {
@@ -188,7 +199,7 @@ if decide_allow; then
   exit 0
 fi
 
-PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$FILE_PATH" PAYLOAD_TOOL="$TOOL_NAME" PAYLOAD_LOG_COMMAND="$LOG_COMMAND" node -e '
+MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" PAYLOAD_PHASE="$PHASE" PAYLOAD_STEP="$STEP" PAYLOAD_FILE="$FILE_PATH" PAYLOAD_TOOL="$TOOL_NAME" PAYLOAD_LOG_COMMAND="$LOG_COMMAND" node -e '
   const phase = process.env.PAYLOAD_PHASE || "UNINITIALIZED";
   const step  = process.env.PAYLOAD_STEP || "(none)";
   const file  = process.env.PAYLOAD_FILE || "(unknown)";

@@ -155,7 +155,14 @@ fi
 # runnable shell token. Spaces, command substitutions, backticks, semicolons,
 # quotes, and backslashes must stay data rather than becoming shell syntax.
 SPECIAL_BASE="$(mktemp -d -t zensu-primer-root-XXXXXX)"
-SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch PRIMER_PWNED) `touch PRIMER_TICKED`;touch PRIMER_SEMI; apostrophe'"'"'value quote"back\slash'$'\nnewline'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch PRIMER_PWNED) `touch PRIMER_TICKED`;touch PRIMER_SEMI; apostrophe'"'"'value [windows]'
+    ;;
+  *)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch PRIMER_PWNED) `touch PRIMER_TICKED`;touch PRIMER_SEMI; apostrophe'"'"'value quote"back\slash'$'\nnewline'
+    ;;
+esac
 mkdir -p "$SPECIAL_ROOT/hooks/lib" "$SPECIAL_BASE/run"
 SPECIAL_CANONICAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
 cp "$PRIMER" "$SPECIAL_ROOT/hooks/session-start-primer.sh"
@@ -187,7 +194,9 @@ SPECIAL_CTX="$(printf '%s' "$PRIMER_SPECIAL" | node -e '
   });
 ' 2>/dev/null)"
 SPECIAL_PARSE_RC=$?
-SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_CTX" | EXPECTED="$EXPECTED_COMMAND" node -e '
+SPECIAL_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || SPECIAL_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${SPECIAL_MSYS_EXCL}"
+SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_CTX" | MSYS2_ENV_CONV_EXCL="$SPECIAL_MSYS_EXCL" EXPECTED="$EXPECTED_COMMAND" node -e '
   const body=require("fs").readFileSync(0,"utf8"), expected=process.env.EXPECTED;
   const at=body.indexOf(expected);
   if(at<0)process.exit(1);

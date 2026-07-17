@@ -224,7 +224,9 @@ C11_OUT="$(printf '%s' "$C11_PAYLOAD" | STATE_DIR="$C11_STATE_DIR" bash "$HOOK" 
 C11_HELPER_Q="$(printf '%q' "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
 C11_DATA_Q="$(printf '%q' "$CLAUDE_PLUGIN_DATA")"
 C11_PREFIX="CLAUDE_PLUGIN_DATA=$C11_DATA_Q bash $C11_HELPER_Q"
-C11_EMITTED_PREFIX="$(printf '%s' "$C11_OUT" | EXPECTED="$C11_PREFIX" node -e '
+C11_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || C11_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${C11_MSYS_EXCL}"
+C11_EMITTED_PREFIX="$(printf '%s' "$C11_OUT" | MSYS2_ENV_CONV_EXCL="$C11_MSYS_EXCL" EXPECTED="$C11_PREFIX" node -e '
   const body=require("fs").readFileSync(0,"utf8"), expected=process.env.EXPECTED;
   const at=body.indexOf(expected); if(at<0)process.exit(1);
   process.stdout.write(body.slice(at,at+expected.length));

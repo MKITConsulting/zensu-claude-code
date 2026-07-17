@@ -6,6 +6,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 
@@ -22,8 +23,10 @@ review_marker() {
   '
 }
 
-TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || exit 1
+trap 'rm -rf "$RAW_TMP"' EXIT
 PROJECT="$TMP/project"; mkdir -p "$PROJECT"
 provision_session() {
   local project="$1" raw_session="$2" label="$3"
@@ -79,7 +82,9 @@ PLAN_CONTEXT="$(printf '%s' "$OUT" | node -e '
 PLAN_HELPER_Q="$(printf '%q' "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
 PLAN_DATA_Q="$(printf '%q' "$MAIN_DATA")"
 PLAN_EXPECTED_COMMAND="CLAUDE_PLUGIN_DATA=$PLAN_DATA_Q bash $PLAN_HELPER_Q --tdd-begin --session $SID --autopilot-run $RUN --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id <chain-id>"
-PLAN_EMITTED_COMMAND="$(printf '%s' "$PLAN_CONTEXT" | EXPECTED="$PLAN_EXPECTED_COMMAND" node -e '
+PLAN_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${PLAN_MSYS_EXCL}"
+PLAN_EMITTED_COMMAND="$(printf '%s' "$PLAN_CONTEXT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" EXPECTED="$PLAN_EXPECTED_COMMAND" node -e '
   const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
   const at=body.indexOf(expected);if(at<0)process.exit(1);
   process.stdout.write(body.slice(at,at+expected.length));
@@ -284,6 +289,7 @@ cp "$PLUGIN_DIR/hooks/session-start-session-control.sh" "$MISSING_STATE_PLUGIN/h
 cp "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
   "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" \
   "$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" \
   "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" \
   "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" \
   "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" \

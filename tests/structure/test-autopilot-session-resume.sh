@@ -3,6 +3,7 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 HOOK="$PLUGIN_DIR/hooks/session-start-autopilot-resume.sh"
 SESSION_CONTROL_HOOK="$PLUGIN_DIR/hooks/session-start-session-control.sh"
 STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
@@ -46,8 +47,10 @@ else
   exit 1
 fi
 
-TMP="$(mktemp -d -t zensu-autopilot-resume-XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d -t zensu-autopilot-resume-XXXXXX)"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || exit 1
+trap 'rm -rf "$RAW_TMP"' EXIT
 PROJECT="$TMP/project"
 EMPTY_PROJECT="$TMP/empty-project"
 OTHER_CWD="$TMP/other-cwd"
@@ -486,7 +489,7 @@ MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"
 mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib"
 MISSING_STATE_PLUGIN="$(cd "$MISSING_STATE_PLUGIN" && pwd -P)"
 cp "$HOOK" "$MISSING_STATE_PLUGIN/hooks/session-start-autopilot-resume.sh"
-for runtime_file in zensu-agent-context.sh zensu-session.sh claude-principal-v1.js claude-hook-session-v1.js session-control-core-v1.js; do
+for runtime_file in zensu-agent-context.sh zensu-session.sh claude-principal-v1.js claude-path-v1.js claude-hook-session-v1.js session-control-core-v1.js; do
   cp "$PLUGIN_DIR/hooks/lib/$runtime_file" "$MISSING_STATE_PLUGIN/hooks/lib/$runtime_file"
 done
 MISSING_STATE_DATA="$TMP/missing-state-data"

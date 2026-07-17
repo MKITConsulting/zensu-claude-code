@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
+const hostPaths = require('./claude-path-v1.js');
 const principals = require('./claude-principal-v1.js');
 const hookSession = require('./claude-hook-session-v1.js');
 const evidenceLeases = require('./review-evidence-lease-v1.js');
@@ -79,7 +80,7 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) {
     throw new Error(`${label} is missing or unsafe`);
   }
-  const requested = path.resolve(value);
+  const requested = path.resolve(hostPaths.normalizeHostPathInput(value, label));
   let supplied;
   try {
     supplied = fs.lstatSync(requested);
@@ -189,7 +190,8 @@ function isMultiplyLinkedFile(candidate) {
 
 function canonicalCandidate(projectRoot, value) {
   if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) return null;
-  const requested = path.resolve(projectRoot, value);
+  const normalizedValue = hostPaths.normalizeHostPathInput(value, 'tool path');
+  const requested = path.resolve(projectRoot, normalizedValue);
   let current = path.parse(requested).root;
   let pending = path.relative(current, requested).split(path.sep).filter(Boolean);
   let symlinkBudget = 40;

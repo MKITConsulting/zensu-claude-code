@@ -4,6 +4,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
+const hostPaths = require('./claude-path-v1.js');
 const principals = require('./claude-principal-v1.js');
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
@@ -48,10 +49,11 @@ function readPayload() {
 
 function canonicalDirectory(value, label, rejectAlias = false) {
   if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) fail(`${label} is unsafe`);
+  const normalizedValue = hostPaths.normalizeHostPathInput(value, label);
   if (rejectAlias) {
     let supplied;
     try {
-      supplied = fs.lstatSync(path.resolve(value));
+      supplied = fs.lstatSync(path.resolve(normalizedValue));
     } catch {
       fail(`${label} does not exist`);
     }
@@ -59,7 +61,7 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   }
   let canonical;
   try {
-    canonical = fs.realpathSync.native(value);
+    canonical = fs.realpathSync.native(normalizedValue);
   } catch {
     fail(`${label} does not exist`);
   }

@@ -10,6 +10,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const core = require('./session-control-core-v1.js');
+const hostPaths = require('./claude-path-v1.js');
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
 const ALLOWED_EVENTS = new Set([
@@ -28,7 +29,7 @@ function canonicalDirectory(value, label, rejectAlias = false) {
   if (typeof value !== 'string' || value.trim() === '' || /[\0\r\n]/.test(value)) {
     fail(`${label} is unavailable or unsafe`);
   }
-  const requested = path.resolve(value);
+  const requested = path.resolve(hostPaths.normalizeHostPathInput(value, label));
   let supplied;
   let canonical;
   try {

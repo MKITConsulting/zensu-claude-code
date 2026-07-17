@@ -150,6 +150,24 @@ else
   check "P9 SKILL.md materializes the working dir with mktemp -d (no predictable /tmp path)" FAIL
 fi
 
+HOST_PATH_HELPER="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
+P9_MKTEMP_LINE="$(grep -nF 'RAW_DIR=$(mktemp -d' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P9_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_DIR"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P9_REPO_LINE="$(grep -nF 'RAW_REPO=$(pwd -P)' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P9_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P9_MANIFEST_LINE="$(grep -nF "printf 'DIR=%s" "$SKILL_MD" | head -1 | cut -d: -f1)"
+if [ -x "$HOST_PATH_HELPER" ] \
+   && [ -n "$P9_MKTEMP_LINE" ] && [ -n "$P9_HOST_LINE" ] && [ -n "$P9_MANIFEST_LINE" ] \
+   && [ "$P9_MKTEMP_LINE" -lt "$P9_HOST_LINE" ] && [ "$P9_HOST_LINE" -lt "$P9_MANIFEST_LINE" ] \
+   && [ -n "$P9_REPO_LINE" ] && [ -n "$P9_REPO_HOST_LINE" ] \
+   && [ "$P9_REPO_LINE" -lt "$P9_REPO_HOST_LINE" ] && [ "$P9_REPO_HOST_LINE" -lt "$P9_MANIFEST_LINE" ] \
+   && grep -qF 'never put a Git-Bash-only `/tmp/...` path into those artifacts' "$SKILL_MD" \
+   && grep -qF 'must be constructed from the native-host `REPO` spelling above' "$SKILL_MD"; then
+  check "P9b SKILL.md renders the workspace for the native host before any evidence path is emitted" PASS
+else
+  check "P9b SKILL.md renders the workspace for the native host before any evidence path is emitted" FAIL
+fi
+
 # P10 — dedicated plan-review workers consume a private evidence lease and return
 # one raw JSON final message. Only the main thread may materialize accepted results.
 INJECTION_BLOCK="$(awk '

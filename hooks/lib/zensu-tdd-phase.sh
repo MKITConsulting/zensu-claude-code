@@ -3,14 +3,82 @@ set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd -P)" \
   || { return 2 2>/dev/null || exit 2; }
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  return 2 2>/dev/null || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    return 2 2>/dev/null || exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    return 2 2>/dev/null || exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+
+_tdd_winpid_from_ps() {
+  local shell_pid="${1:-}"
+  [ "$#" -eq 1 ] || return 1
+  case "$shell_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$shell_pid" -gt 0 ] 2>/dev/null || return 1
+
+  awk -v target="$shell_pid" '
+    NR == 1 {
+      header_has_status = ($1 == "S" || $1 == "STAT" || $1 == "STATUS") ? 1 : 0
+      for (i = 1; i <= NF; i += 1) {
+        if ($i == "PID" && !pid_column) pid_column = i
+        if ($i == "WINPID") winpid_column = i
+      }
+      next
+    }
+    pid_column && winpid_column {
+      data_has_status = ($1 ~ /^[SIO]$/) ? 1 : 0
+      offset = data_has_status - header_has_status
+      pid_value = $(pid_column + offset)
+      winpid_value = $(winpid_column + offset)
+      if (pid_value == target && winpid_value ~ /^[1-9][0-9]*$/) {
+        print winpid_value
+        found = 1
+        exit
+      }
+    }
+    END { if (!found) exit 1 }
+  '
+}
+
+_tdd_is_msys_runtime() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|mingw*|MSYS*|CYGWIN*|MINGW*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+_tdd_native_process_pid() {
+  local shell_pid="${1:-}" native_pid ps_output
+  [ "$#" -eq 1 ] || return 1
+  case "$shell_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$shell_pid" -gt 0 ] 2>/dev/null || return 1
+
+  if _tdd_is_msys_runtime; then
+    command -v ps >/dev/null 2>&1 || return 1
+    command -v awk >/dev/null 2>&1 || return 1
+    # Capture the producer status before parsing. Without this separation a
+    # failing ps could emit one plausible row and have its non-zero status
+    # hidden by the successful final stage of a pipeline.
+    ps_output="$(ps -p "$shell_pid" -l 2>/dev/null)" || return 1
+    native_pid="$(printf '%s\n' "$ps_output" \
+      | _tdd_winpid_from_ps "$shell_pid")" || return 1
+    native_pid="${native_pid//[[:space:]]/}"
+  else
+    native_pid="$shell_pid"
+  fi
+
+  case "$native_pid" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$native_pid" -gt 0 ] 2>/dev/null || return 1
+  printf '%s\n' "$native_pid"
+}
 
 _tdd_context_binding() {
   local session_id="${1:-}" key record records
@@ -2739,8 +2807,7 @@ tdd_adopt_pending_review() {
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   case "$vanilla" in true|false) ;; *) return 1 ;; esac
   case "$ttl_hours" in ''|*[!0-9]*) ttl_hours=0 ;; esac
-  case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$owner_pid" -gt 0 ] || return 1
+  owner_pid="$(_tdd_native_process_pid "$owner_pid")" || return 1
   pf="$(zensu_pending_review_file)"
   dir="$(dirname "$pf")"
   claim_file="${pf}.claim"
@@ -2805,8 +2872,7 @@ tdd_mark_pending_review_handoff() {
   local supplied_session="${1:-}" owner_pid="${2:-$$}" session_id pf dir claim_file
   [ "$#" -ge 1 ] && [ "$#" -le 2 ] || return 1
   [ -n "$supplied_session" ] || return 1
-  case "$owner_pid" in ''|*[!0-9]*) return 1 ;; esac
-  [ "$owner_pid" -gt 0 ] || return 1
+  owner_pid="$(_tdd_native_process_pid "$owner_pid")" || return 1
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
   pf="$(zensu_pending_review_file)"
@@ -3120,7 +3186,7 @@ case "${OSTYPE:-}" in
   msys*|cygwin*|mingw*|win32*) ;;
   *)
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

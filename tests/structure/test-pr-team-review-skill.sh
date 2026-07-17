@@ -205,6 +205,25 @@ else
   check "P11d retained review refs refresh safely after force-pushes" FAIL
 fi
 
+HOST_PATH_HELPER="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
+P11_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_GIT_LINE="$(grep -nF 'git -C "$REPO" rev-parse --is-inside-work-tree' "$SKILL_MD" | head -1 | cut -d: -f1)"
+if [ -x "$HOST_PATH_HELPER" ] \
+   && [ -n "$P11_MKTEMP_LINE" ] && [ -n "$P11_HOST_LINE" ] && [ -n "$P11_WORKTREE_LINE" ] \
+   && [ "$P11_MKTEMP_LINE" -lt "$P11_HOST_LINE" ] && [ "$P11_HOST_LINE" -lt "$P11_WORKTREE_LINE" ] \
+   && [ -n "$P11_REPO_LINE" ] && [ -n "$P11_REPO_HOST_LINE" ] && [ -n "$P11_GIT_LINE" ] \
+   && [ "$P11_REPO_LINE" -lt "$P11_REPO_HOST_LINE" ] && [ "$P11_REPO_HOST_LINE" -lt "$P11_GIT_LINE" ] \
+   && grep -qF 'never put a Git-Bash-only `/tmp/...` path into those artifacts' "$SKILL_MD" \
+   && grep -qF 'must be constructed from the native-host `WORKTREE`' "$SKILL_MD"; then
+  check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" PASS
+else
+  check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" FAIL
+fi
+
 # P12 — always-on test-coverage evaluation. The skill MUST guarantee a coverage
 # assessment on every run: an always-cast `coverage-audit` persona + a mandatory
 # `### Test Coverage` synthesis section that inventories uncovered files/paths.

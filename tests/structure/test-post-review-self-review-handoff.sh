@@ -118,7 +118,14 @@ fi
 # The model-facing command must remain valid JSON and a single inert shell
 # token even when the active plugin root contains shell metacharacters.
 SPECIAL_BASE="$(mktemp -d -t zensu-postreview-root-XXXXXX)"
-SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch POSTREV_PWNED) `touch POSTREV_TICKED`;touch POSTREV_SEMI; apostrophe'"'"'value quote"back\slash'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch POSTREV_PWNED) `touch POSTREV_TICKED`;touch POSTREV_SEMI; apostrophe'"'"'value [windows]'
+    ;;
+  *)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch POSTREV_PWNED) `touch POSTREV_TICKED`;touch POSTREV_SEMI; apostrophe'"'"'value quote"back\slash'
+    ;;
+esac
 mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
 SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
 for runtime_dir in hooks agents skills docs templates scripts mcp-runtime; do
@@ -165,7 +172,9 @@ SPECIAL_CTX="$(printf '%s' "$SPECIAL_OUT" | node -e '
 ' 2>/dev/null)"
 SPECIAL_PARSE_RC=$?
 SPECIAL_EXPECTED_COMMAND="$EXPECTED_PREFIX --review-ticket"
-SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_CTX" | EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
+SPECIAL_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || SPECIAL_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${SPECIAL_MSYS_EXCL}"
+SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_CTX" | MSYS2_ENV_CONV_EXCL="$SPECIAL_MSYS_EXCL" EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
   const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
   const at=body.indexOf(expected);if(at<0)process.exit(1);
   process.stdout.write(body.slice(at,at+expected.length));

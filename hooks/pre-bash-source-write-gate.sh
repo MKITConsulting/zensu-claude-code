@@ -27,14 +27,26 @@
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
+
+_ZENSU_MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
+  *';CLAUDE_ENV_FILE;'*) ;;
+  *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}CLAUDE_ENV_FILE" ;;
+esac
 
 # Drain stdin before any early exit so an upstream writer never sees a broken
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
@@ -55,7 +67,9 @@ emit_deny() {
 
 # Session Control export rebinding is a trust-boundary violation, not a
 # configurable source-write convention. Check it before config/escape hatches.
-CONTROL_REASON="$(BSWG_MODE=control PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+CONTROL_REASON="$(MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
+  BSWG_MODE=control PAYLOAD="$INPUT" \
+  node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
 if [ -n "$CONTROL_REASON" ]; then
   emit_deny "$CONTROL_REASON"
   exit 0

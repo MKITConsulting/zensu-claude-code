@@ -8,12 +8,18 @@ case "$DEFERRED_OWNER_PID" in ''|*[!0-9]*) exit 2 ;; esac
 [ "$DEFERRED_OWNER_PID" -gt 0 ] || exit 2
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
-if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] && [ "$CLAUDE_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
-  echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
-  exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
 fi
 CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
-unset _ZENSU_EXECUTED_PLUGIN_ROOT
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 INPUT=""
 IFS= read -r -d '' INPUT || true
 
@@ -164,7 +170,10 @@ if [ -r "$AUTOPILOT_STATE_LIB" ]; then
 fi
 
 emit_block() {
-  node -e 'process.stdout.write(JSON.stringify({decision:"block",reason:process.argv[1]}))' "$1"
+  printf '%s' "$1" | node -e '
+    const reason = require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({decision:"block",reason}));
+  '
   echo
 }
 
