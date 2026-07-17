@@ -86,6 +86,18 @@ function runNode(source, args = []) {
   });
 }
 
+function assertKilled(child, label) {
+  const details = `${label}, code=${child.code}, signal=${child.signal}, stderr=${child.stderr}`;
+  const reportedSignal = child.signal === 'SIGKILL';
+  // The Windows runner reports this emulated forced termination through the
+  // exit code rather than ChildProcess.signalCode.
+  const windowsForcedExit = WINDOWS
+    && child.signal === null
+    && Number.isInteger(child.code)
+    && child.code !== 0;
+  assert.ok(reportedSignal || windowsForcedExit, details);
+}
+
 function deferredFixture(options = {}) {
   const f = fixture('claude');
   if (options.legacyHostSegment === true) {
@@ -271,7 +283,7 @@ async function killDeferredCancellationAt(f, options, killpoint) {
     };
     core.cancelDeferredReviewClaim(options);
   `, [JSON.stringify(options), killpoint, stateFile, f.claimFile]);
-  assert.equal(child.signal, 'SIGKILL', `expected ${killpoint} killpoint, stderr=${child.stderr}`);
+  assertKilled(child, `expected ${killpoint} killpoint`);
 }
 
 function rewriteJson(file, mutation) {
@@ -3009,14 +3021,22 @@ test('claim replacement during inspection is detected without overwriting the wi
   let claimDescriptor = null;
   let raced = false;
   fs.openSync = function patchedOpen(file, flags, ...rest) {
+    const isClaim = path.resolve(String(file)) === path.resolve(target)
+      && typeof flags === 'number';
+    if (WINDOWS && isClaim && !raced) {
+      // Windows does not permit rename-over-open. Race the bracketed
+      // lstat/open sequence instead, which exercises the same identity guard.
+      raced = true;
+      core.atomicWriteJson(f.claimFile, replacement);
+    }
     const descriptor = originalOpen.call(fs, file, flags, ...rest);
-    if (path.resolve(String(file)) === path.resolve(target) && typeof flags === 'number') {
+    if (!WINDOWS && isClaim) {
       claimDescriptor = descriptor;
     }
     return descriptor;
   };
   fs.readSync = function patchedRead(descriptor, ...args) {
-    if (descriptor === claimDescriptor && !raced) {
+    if (!WINDOWS && descriptor === claimDescriptor && !raced) {
       raced = true;
       core.atomicWriteJson(f.claimFile, replacement);
     }
@@ -3025,7 +3045,7 @@ test('claim replacement during inspection is detected without overwriting the wi
   try {
     assert.throws(
       () => core.inspectDeferredReviewOwner(inspectDeferredOptions(f)),
-      /file path changed while reading|file changed while reading/i,
+      /file identity changed while opening|file path changed while reading|file changed while reading/i,
     );
     assert.equal(raced, true);
     assert.deepEqual(JSON.parse(fs.readFileSync(f.claimFile, 'utf8')), replacement);
@@ -3142,7 +3162,7 @@ test('recovers a crash after terminal done-state CAS before exact claim removal'
     };
     core.clearTerminalDeferredReviewClaim(options);
   `, [JSON.stringify(options), stateFile]);
-  assert.equal(child.signal, 'SIGKILL');
+  assertKilled(child, 'expected terminal done-state CAS killpoint');
   assert.equal(fs.existsSync(f.claimFile), true);
   const inspected = core.inspectDeferredReviewOwner(options);
   assert.equal(inspected.status, 'cancelled');
