@@ -45,7 +45,8 @@ if grep -qF 'if (process.platform !== "win32") {' "$LIB" \
 else
   check "S2c directory fsync remains POSIX-only" FAIL
 fi
-if grep -qF 'tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));' "$LIB" \
+if grep -qF 'const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$LIB" \
+  && grep -qF 'tempFd = fs.openSync(temp, fs.constants.O_WRONLY | noFollow);' "$LIB" \
   && grep -qF 'fs.ftruncateSync(tempFd, 0);' "$LIB"; then
   check "S2d payload temp identity is verified before truncation" PASS
 else

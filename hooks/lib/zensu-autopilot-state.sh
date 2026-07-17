@@ -1297,6 +1297,8 @@ _autopilot_team_review_payload_inspect() {
     PROVIDER="$provider" node -e '
     const fs = require("fs");
     const crypto = require("crypto");
+    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
     const max = 8 * 1024 * 1024;
     const file = process.env.PAYLOAD_FILE;
     const head = String(process.env.HEAD_SHA || "").toLowerCase();
@@ -1354,7 +1356,7 @@ _autopilot_team_review_payload_inspect() {
       if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
           || before.size < 1 || before.size > max
           || (requirePrivate && !privateMode(before))) fail(2);
-      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
       const opened = fs.fstatSync(fd);
       if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
           || opened.ino !== before.ino || opened.size !== before.size
@@ -1394,6 +1396,8 @@ _autopilot_recover_team_review_payload_alias() {
   TARGET_FILE="$target" node -e '
     const fs = require("fs");
     const path = require("path");
+    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
     const target = process.env.TARGET_FILE;
     const directory = path.dirname(target);
     const basename = path.basename(target);
@@ -1437,8 +1441,8 @@ _autopilot_recover_team_review_payload_alias() {
       const tempBefore = fs.lstatSync(temp);
       if (!privateRegular(tempBefore) || tempBefore.nlink !== 2
           || tempBefore.dev !== targetBefore.dev || tempBefore.ino !== targetBefore.ino) fail(2);
-      targetFd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      targetFd = fs.openSync(target, fs.constants.O_RDONLY | noFollow);
+      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | noFollow);
       const targetOpen = fs.fstatSync(targetFd);
       const tempOpen = fs.fstatSync(tempFd);
       if (!privateRegular(targetOpen) || !privateRegular(tempOpen)
@@ -1542,6 +1546,8 @@ _autopilot_store_team_review_payload_critical() {
     node -e '
       const fs = require("fs");
       const crypto = require("crypto");
+      const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+        ? fs.constants.O_NOFOLLOW : 0;
       const source = process.env.SOURCE_FILE;
       const target = process.env.TARGET_FILE;
       const temp = process.env.TEMP_FILE;
@@ -1550,7 +1556,7 @@ _autopilot_store_team_review_payload_critical() {
       try {
         const sourceBefore = fs.lstatSync(source);
         if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) process.exit(2);
-        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | noFollow);
         const sourceOpen = fs.fstatSync(sourceFd);
         if (!sourceOpen.isFile() || sourceOpen.nlink !== 1 || sourceOpen.dev !== sourceBefore.dev
             || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) process.exit(2);
@@ -1563,7 +1569,7 @@ _autopilot_store_team_review_payload_critical() {
 
         const tempBefore = fs.lstatSync(temp);
         if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) process.exit(2);
-        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
+        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | noFollow);
         const tempOpen = fs.fstatSync(tempFd);
         if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
             || tempOpen.ino !== tempBefore.ino) process.exit(2);

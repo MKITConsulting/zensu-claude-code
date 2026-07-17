@@ -43,8 +43,11 @@ unset CLAUDE_PLUGIN_ROOT 2>/dev/null || true
 source "$PHASE"
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
-if printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'acquireExternalProcessLock' \
-  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'releaseExternalProcessLock' \
+LOCK_KEEPER_BODY="$(sed -n '/^_tdd_core_lock_keeper() {$/,/^}$/p' "$PHASE")"
+if printf '%s\n' "$LOCK_KEEPER_BODY" | grep -Fq 'ownerPid: process.pid' \
+  && printf '%s\n' "$LOCK_KEEPER_BODY" | grep -Fq 'acquireExternalProcessLock' \
+  && printf '%s\n' "$LOCK_KEEPER_BODY" | grep -Fq 'releaseExternalProcessLock' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'coproc $coproc_name' \
   && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'command -v flock' \
   && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'flock -x' \
   && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -Fq 'TDD_DISABLE_FLOCK' \

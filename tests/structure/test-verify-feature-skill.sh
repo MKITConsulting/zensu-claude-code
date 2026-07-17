@@ -389,6 +389,10 @@ ISO_TEST_READY="$ISO_TEST_DIR/a-ready"
 ISO_TEST_RELEASE="$ISO_TEST_DIR/a-release"
 ISO_TEST_SIGNAL_READY="$ISO_TEST_DIR/signal-ready"
 ISO_TEST_SIGNAL_SEEN="$ISO_TEST_DIR/signal-seen"
+ISO_TEST_WINDOWS=false
+case "$(uname -s 2>/dev/null || true)" in
+  MINGW*|MSYS*|CYGWIN*) ISO_TEST_WINDOWS=true ;;
+esac
 mkdir -p "$ISO_TEST_RUNTIME" "$ISO_TEST_SCRIPTS" "$ISO_TEST_BIN"
 cp "$MCP_LAUNCHER" "$ISO_TEST_LAUNCHER"
 chmod +x "$ISO_TEST_LAUNCHER"
@@ -433,7 +437,7 @@ if (command === 'signal') {
     fs.writeFileSync(args[4], 'seen\n');
     process.exit(143);
   });
-  fs.writeFileSync(args[3], 'ready\n');
+  fs.writeFileSync(args[3], `${process.pid}\n`);
   setInterval(() => {}, 50);
 } else {
   process.exit(0);
@@ -536,14 +540,43 @@ ISO_TEST_SIGNAL_PID=$!
 ISO_TEST_WAIT=0
 while [ ! -f "$ISO_TEST_SIGNAL_READY" ] && [ "$ISO_TEST_WAIT" -lt 250 ]; do sleep 0.02; ISO_TEST_WAIT=$((ISO_TEST_WAIT+1)); done
 ISO_TEST_SIGNAL_PREFIX="$(tail -n 1 "$ISO_TEST_CALLS")"
+ISO_TEST_SIGNAL_CHILD_PID=""
+if [ -f "$ISO_TEST_SIGNAL_READY" ]; then
+  ISO_TEST_SIGNAL_CHILD_PID="$(tr -d '\r\n' <"$ISO_TEST_SIGNAL_READY")"
+fi
 kill -TERM "$ISO_TEST_SIGNAL_PID" 2>/dev/null || true
 wait "$ISO_TEST_SIGNAL_PID" 2>/dev/null; ISO_TEST_SIGNAL_RC=$?
+ISO_TEST_SIGNAL_CHILD_GONE=false
+case "$ISO_TEST_SIGNAL_CHILD_PID" in
+  ''|*[!0-9]*) ;;
+  *)
+    if node -e '
+      const pid = Number(process.argv[1]);
+      try {
+        process.kill(pid, 0);
+        process.exit(1);
+      } catch (error) {
+        if (error && error.code === "ESRCH") process.exit(0);
+        throw error;
+      }
+    ' "$ISO_TEST_SIGNAL_CHILD_PID"; then
+      ISO_TEST_SIGNAL_CHILD_GONE=true
+    fi
+    ;;
+esac
+ISO_TEST_SIGNAL_OBSERVED=false
+if [ -e "$ISO_TEST_SIGNAL_SEEN" ] || [ "$ISO_TEST_WINDOWS" = "true" ]; then
+  # Node documents SIGTERM as an unconditional termination on Windows; its
+  # JavaScript SIGTERM listener is therefore not a portable observation point.
+  ISO_TEST_SIGNAL_OBSERVED=true
+fi
 if [ "$ISO_TEST_SIGNAL_RC" != "0" ] \
-  && [ -e "$ISO_TEST_SIGNAL_SEEN" ] \
+  && [ "$ISO_TEST_SIGNAL_CHILD_GONE" = "true" ] \
+  && [ "$ISO_TEST_SIGNAL_OBSERVED" = "true" ] \
   && [ ! -e "$ISO_TEST_SIGNAL_PREFIX" ]; then
-  check "P6j TERM is forwarded to the runtime child and its generation is cleaned" PASS
+  check "P6j TERM stops the runtime child, is observed where supported, and cleans its generation" PASS
 else
-  check "P6j TERM is forwarded to the runtime child and its generation is cleaned" FAIL
+  check "P6j TERM stops the runtime child, is observed where supported, and cleans its generation" FAIL
 fi
 rm -rf "$ISO_TEST_DIR"
 if jq -e '.skills | index("./skills/verify-feature")' "$PLUGIN_JSON" >/dev/null 2>&1 \

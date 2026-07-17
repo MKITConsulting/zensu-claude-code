@@ -315,9 +315,45 @@ if [ -L "$ZENSU_HOOK_LOG" ] || { [ -e "$ZENSU_HOOK_LOG" ] && [ ! -f "$ZENSU_HOOK
 fi
 if ! node -e '
   const fs = require("node:fs");
-  const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC | fs.constants.O_NOFOLLOW;
-  const fd = fs.openSync(process.argv[1], flags, 0o600);
-  fs.closeSync(fd);
+  const file = process.argv[1];
+  const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
+  const sameIdentity = (left, right) => left.ino !== 0 || right.ino !== 0
+    ? left.dev === right.dev && left.ino === right.ino
+    : left.birthtimeMs === right.birthtimeMs && left.mode === right.mode;
+  let before = null;
+  let fd;
+  try {
+    try {
+      before = fs.lstatSync(file);
+      if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) process.exit(3);
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    const flags = before
+      ? fs.constants.O_WRONLY | noFollow
+      : fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow;
+    fd = fs.openSync(file, flags, 0o600);
+    const opened = fs.fstatSync(fd);
+    const pathAfterOpen = fs.lstatSync(file);
+    if (!opened.isFile() || opened.nlink !== 1 || pathAfterOpen.isSymbolicLink()
+        || !pathAfterOpen.isFile() || pathAfterOpen.nlink !== 1
+        || (before && !sameIdentity(before, opened))
+        || !sameIdentity(opened, pathAfterOpen)) process.exit(3);
+    fs.ftruncateSync(fd, 0);
+    fs.fchmodSync(fd, 0o600);
+    fs.fsyncSync(fd);
+    const finalDescriptor = fs.fstatSync(fd);
+    const finalPath = fs.lstatSync(file);
+    if (finalDescriptor.nlink !== 1 || finalPath.isSymbolicLink()
+        || !finalPath.isFile() || finalPath.nlink !== 1
+        || !sameIdentity(opened, finalDescriptor)
+        || !sameIdentity(finalDescriptor, finalPath)) process.exit(3);
+    fs.closeSync(fd);
+    fd = undefined;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 ' "$ZENSU_HOOK_LOG" 2>/dev/null; then
   echo "claude-promptfoo-wrapper: cannot create hook log without following symlinks" >&2
   exit 2

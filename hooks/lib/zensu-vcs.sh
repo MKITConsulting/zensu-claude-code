@@ -742,14 +742,14 @@ _zensu_vcs_snapshot_review_payload() {
     try{
       before=fs.lstatSync(source);
       if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size>max)process.exit(1);
-      sourceFd=fs.openSync(source,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+      sourceFd=fs.openSync(source,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));
       opened=fs.fstatSync(sourceFd);
       if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size>max)process.exit(1);
       data=fs.readFileSync(sourceFd);after=fs.fstatSync(sourceFd);fs.closeSync(sourceFd);sourceFd=undefined;
       if(data.length>max||after.size!==opened.size||after.mtimeMs!==opened.mtimeMs||after.ctimeMs!==opened.ctimeMs)process.exit(1);
       target=fs.lstatSync(snapshot);
       if(!target.isFile()||target.isSymbolicLink()||target.nlink!==1)process.exit(1);
-      targetFd=fs.openSync(snapshot,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));
+      targetFd=fs.openSync(snapshot,fs.constants.O_WRONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));
       targetOpened=fs.fstatSync(targetFd);
       if(!targetOpened.isFile()||targetOpened.nlink!==1||targetOpened.dev!==target.dev||targetOpened.ino!==target.ino)process.exit(1);
       fs.ftruncateSync(targetFd,0);fs.fchmodSync(targetFd,0o600);fs.writeFileSync(targetFd,data);fs.fsyncSync(targetFd);
@@ -790,7 +790,7 @@ _zensu_vcs_review_payload_meta() {
       try{
         before=fs.lstatSync(path);
         if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
-        fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+        fd=fs.openSync(path,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));opened=fs.fstatSync(fd);
         if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
         data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
         if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
@@ -881,7 +881,7 @@ _zensu_vcs_review_inventory() {
           var fs=require("fs"),crypto=require("crypto"),before=fs.lstatSync(manifestPath);
           if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
               ||!privateMode(before)||before.size<1||before.size>16*1024*1024)fail();
-          fd=fs.openSync(manifestPath,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+          fd=fs.openSync(manifestPath,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));
           var opened=fs.fstatSync(fd);
           if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
               ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
@@ -1152,7 +1152,7 @@ _zensu_vcs_review_gitlab_diff_plan() {
         var before,opened,after,final,data;
         try{
           before=fs.lstatSync(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
-          fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+          fd=fs.openSync(path,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));opened=fs.fstatSync(fd);
           if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
           data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
           if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
@@ -1242,7 +1242,7 @@ _zensu_vcs_review_gitlab_diff_plan() {
       var privateMode=function(stat){return process.platform==="win32"||(stat.mode&0o777)===0o600;};
       try{
         var before=fs.lstatSync(target);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||!privateMode(before))fail();
-        fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));var opened=fs.fstatSync(fd);
+        fd=fs.openSync(target,fs.constants.O_WRONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));var opened=fs.fstatSync(fd);
         if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)||opened.dev!==before.dev||opened.ino!==before.ino)fail();
         fs.ftruncateSync(fd,0);fs.writeFileSync(fd,body);fs.fsyncSync(fd);var after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;
         var final=fs.lstatSync(target);if(after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
@@ -1277,7 +1277,7 @@ _zensu_vcs_review_gitlab_manifest() {
       var before,opened,after,final,data;
       try{
         before=fs.lstatSync(path);if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>max)fail();
-        fd=fs.openSync(path,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));opened=fs.fstatSync(fd);
+        fd=fs.openSync(path,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));opened=fs.fstatSync(fd);
         if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
         data=fs.readFileSync(fd);after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;final=fs.lstatSync(path);
         if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1
@@ -1335,7 +1335,7 @@ _zensu_vcs_review_gitlab_manifest() {
     try{
       var before=fs.lstatSync(target);
       if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||!privateMode(before))fail();
-      fd=fs.openSync(target,fs.constants.O_WRONLY|(fs.constants.O_NOFOLLOW||0));
+      fd=fs.openSync(target,fs.constants.O_WRONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));
       var opened=fs.fstatSync(fd);
       if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
           ||opened.dev!==before.dev||opened.ino!==before.ino)fail();
@@ -1372,7 +1372,7 @@ _zensu_vcs_review_gitlab_call() {
       var before=fs.lstatSync(process.env.MANIFEST);
       if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1
           ||!privateMode(before)||before.size<1||before.size>16*1024*1024)fail();
-      fd=fs.openSync(process.env.MANIFEST,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));
+      fd=fs.openSync(process.env.MANIFEST,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));
       var opened=fs.fstatSync(fd);
       if(!opened.isFile()||opened.nlink!==1||!privateMode(opened)
           ||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
@@ -1542,7 +1542,7 @@ _zensu_vcs_reconcile_review() (
         try{
           var before=fs.lstatSync(process.env.PAYLOAD);
           if(!before.isFile()||before.isSymbolicLink()||before.nlink!==1||before.size<1||before.size>8*1024*1024)fail();
-          fd=fs.openSync(process.env.PAYLOAD,fs.constants.O_RDONLY|(fs.constants.O_NOFOLLOW||0));var opened=fs.fstatSync(fd);
+          fd=fs.openSync(process.env.PAYLOAD,fs.constants.O_RDONLY|(process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0));var opened=fs.fstatSync(fd);
           if(!opened.isFile()||opened.nlink!==1||opened.dev!==before.dev||opened.ino!==before.ino||opened.size!==before.size)fail();
           var data=fs.readFileSync(fd),after=fs.fstatSync(fd);fs.closeSync(fd);fd=undefined;var final=fs.lstatSync(process.env.PAYLOAD);
           if(data.length!==opened.size||after.dev!==opened.dev||after.ino!==opened.ino||after.nlink!==1

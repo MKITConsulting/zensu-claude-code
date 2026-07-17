@@ -325,6 +325,49 @@ _tdd_write_phase_critical() {
     ' 2>/dev/null
 }
 
+_tdd_core_lock_keeper() {
+  node -e '
+    const fs = require("node:fs");
+    const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
+    let core = null;
+    let lease = null;
+    try {
+      core = require(corePath);
+      lease = core.acquireExternalProcessLock({
+        lockDirectory,
+        resourcePath,
+        ownerPid: process.pid,
+      });
+      fs.writeSync(1, "READY\n");
+      const command = fs.readFileSync(0, "utf8");
+      if (command !== "RELEASE\n") throw new Error("lock keeper release protocol failed");
+      core.releaseExternalProcessLock({
+        lockDirectory,
+        resourcePath,
+        ownerPid: process.pid,
+        token: lease.token,
+      });
+      lease = null;
+      fs.writeSync(1, "RELEASED\n");
+    } catch (error) {
+      const detail = String(error && error.message ? error.message : "unknown lock keeper error")
+        .replace(/[\r\n]+/g, " ").slice(0, 512);
+      if (lease && core) {
+        try {
+          core.releaseExternalProcessLock({
+            lockDirectory,
+            resourcePath,
+            ownerPid: process.pid,
+            token: lease.token,
+          });
+        } catch (_) { /* the caller fails closed below */ }
+      }
+      try { fs.writeSync(1, `ERROR ${detail}\n`); } catch (_) { /* parent exited */ }
+      process.exit(3);
+    }
+  ' -- "$1" "$2" "$3"
+}
+
 _tdd_locked_run() {
   local state_file="$1"
   shift
@@ -333,6 +376,67 @@ _tdd_locked_run() {
   # PATH or environment would split mutual exclusion for the same resource.
   # Recheck storage after acquisition so a path swap cannot reach the mutation.
   _tdd_state_storage_safe "$state_file" || return 1
+
+  # Bash 4+ gives us anonymous bidirectional coprocess pipes. Keep one Node
+  # process alive for the entire critical section so its PID is both the lease
+  # owner and the release authority. This avoids Git Bash native parent-wrapper
+  # churn without a filesystem control channel. Bash 3.2 keeps the portable
+  # capability fallback below; on POSIX its direct-child parent is stable.
+  if [ "${BASH_VERSINFO[0]:-0}" -ge 4 ]; then
+    local core_path lock_directory coproc_name keeper_read_fd keeper_write_fd
+    local keeper_pid keeper_status release_status callback_rc keeper_rc
+    core_path="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
+    lock_directory="$(dirname "$state_file")"
+    _ZENSU_TDD_COPROC_SEQ=$(( ${_ZENSU_TDD_COPROC_SEQ:-0} + 1 ))
+    coproc_name="ZENSU_TDD_LOCK_${_ZENSU_TDD_COPROC_SEQ}"
+
+    if ! eval "coproc $coproc_name { _tdd_core_lock_keeper \"\$core_path\" \"\$lock_directory\" \"\$state_file\"; }"; then
+      echo "[zensu-tdd-phase] lock keeper launch failed for $state_file" >&2
+      return 1
+    fi
+    eval "keeper_read_fd=\${${coproc_name}[0]}"
+    eval "keeper_write_fd=\${${coproc_name}[1]}"
+    eval "keeper_pid=\${${coproc_name}_PID}"
+    case "$keeper_read_fd:$keeper_write_fd:$keeper_pid" in
+      *[!0-9:]*|::*|:*:|:*::* )
+        echo "[zensu-tdd-phase] lock keeper descriptors are invalid for $state_file" >&2
+        return 1
+        ;;
+    esac
+
+    keeper_status=""
+    IFS= read -r keeper_status <&"$keeper_read_fd" || true
+    if [ "$keeper_status" != "READY" ]; then
+      eval "exec ${keeper_write_fd}>&-" 2>/dev/null || true
+      eval "exec ${keeper_read_fd}<&-" 2>/dev/null || true
+      if wait "$keeper_pid" 2>/dev/null; then keeper_rc=0; else keeper_rc=$?; fi
+      eval "unset $coproc_name ${coproc_name}_PID" 2>/dev/null || true
+      [ -z "$keeper_status" ] || echo "[zensu-tdd-phase] lock detail: ${keeper_status#ERROR }" >&2
+      echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
+      return 1
+    fi
+
+    if _tdd_state_storage_safe "$state_file" && "$@"; then
+      callback_rc=0
+    else
+      callback_rc=$?
+    fi
+    if ! printf 'RELEASE\n' >&"$keeper_write_fd"; then
+      callback_rc=1
+    fi
+    eval "exec ${keeper_write_fd}>&-" 2>/dev/null || true
+    release_status=""
+    IFS= read -r release_status <&"$keeper_read_fd" || true
+    eval "exec ${keeper_read_fd}<&-" 2>/dev/null || true
+    if wait "$keeper_pid" 2>/dev/null; then keeper_rc=0; else keeper_rc=$?; fi
+    eval "unset $coproc_name ${coproc_name}_PID" 2>/dev/null || true
+    if [ "$keeper_rc" -ne 0 ] || [ "$release_status" != "RELEASED" ]; then
+      [ -z "$release_status" ] || echo "[zensu-tdd-phase] lock release detail: ${release_status#ERROR }" >&2
+      echo "[zensu-tdd-phase] lock release failed for $state_file" >&2
+      return 1
+    fi
+    return "$callback_rc"
+  fi
 
   local lock_directory token_file token acquire_rc release_rc
   lock_directory="$(dirname "$state_file")"
@@ -3015,6 +3119,7 @@ tdd_seed_deferred_review() {
 case "${OSTYPE:-}" in
   msys*|cygwin*|mingw*|win32*) ;;
   *)
+    export -f _tdd_core_lock_keeper 2>/dev/null || true
     export -f _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;

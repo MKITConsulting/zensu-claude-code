@@ -123,7 +123,7 @@ if [ "${1:-}" = "--check-policy" ]; then
 fi
 
 materialize_runtime() {
-  local temp_base generation_real bin_target npm_status
+  local temp_base generation_real npm_status
   temp_base="${TMPDIR:-/tmp}"
   RUNTIME_GENERATION="$(mktemp -d "$temp_base/zensu-playwright-mcp.XXXXXX")"
   generation_real="$(cd "$RUNTIME_GENERATION" && pwd -P)"
@@ -153,14 +153,24 @@ materialize_runtime() {
     echo "zensu Playwright MCP: npm ci did not materialize the pinned executable" >&2
     exit 2
   fi
-  bin_target="$(node -e 'const fs=require("node:fs"); process.stdout.write(fs.realpathSync(process.argv[1]))' "$BIN")"
-  case "$bin_target" in
-    "$RUNTIME_GENERATION/node_modules"/*) ;;
-    *)
-      echo "zensu Playwright MCP: pinned executable escapes its isolated runtime" >&2
-      exit 2
-      ;;
-  esac
+  # Keep both sides of the containment check inside Node. On Windows, Node's
+  # realpath is a native drive-letter path while Git Bash variables use MSYS
+  # paths; comparing those representations in the shell rejects valid bins.
+  if ! node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const root = fs.realpathSync(process.argv[1]);
+    const target = fs.realpathSync(process.argv[2]);
+    const relative = path.relative(root, target);
+    const contained = relative !== ""
+      && relative !== ".."
+      && !relative.startsWith(`..${path.sep}`)
+      && !path.isAbsolute(relative);
+    process.exit(contained ? 0 : 1);
+  ' "$RUNTIME_GENERATION/node_modules" "$BIN"; then
+    echo "zensu Playwright MCP: pinned executable escapes its isolated runtime" >&2
+    exit 2
+  fi
 }
 
 materialize_runtime

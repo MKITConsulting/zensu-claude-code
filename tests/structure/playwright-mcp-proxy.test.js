@@ -14,6 +14,10 @@ const posixLauncher = process.platform === 'win32'
   ? { skip: 'the live launcher requires macOS, Linux, or WSL' }
   : {};
 
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
+
 const {
   ALLOWED_TOOLS,
   JsonLineTransport,
@@ -428,6 +432,18 @@ cat >"$prefix/node_modules/.bin/playwright-mcp" <<'MCP_STUB'
 printf "trusted:%s\\n" "$1"
 MCP_STUB
 chmod +x "$prefix/node_modules/.bin/playwright-mcp"
+`, { mode: 0o755 });
+  // Reproduce the old cross-runtime representation bug even on POSIX: the
+  // former launcher printed Node's realpath and compared it with a shell path.
+  // A Windows-shaped result made that valid contained executable look external.
+  fs.writeFileSync(path.join(tools, 'node'), `#!/bin/sh
+case "\${2:-}" in
+  *process.stdout.write*)
+    printf '%s' 'C:\\synthetic\\node_modules\\.bin\\playwright-mcp'
+    exit 0
+    ;;
+esac
+exec ${shellQuote(process.execPath)} "$@"
 `, { mode: 0o755 });
   try {
     const launcher = path.join(fixtureScripts, 'playwright-mcp.sh');

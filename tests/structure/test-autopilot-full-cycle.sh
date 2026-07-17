@@ -128,7 +128,8 @@ if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
         function atomicWrite(path,value){
           const tmp=path+".tmp-"+process.pid;let fd;
           try{
-            fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+            const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+            fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
             fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
             fs.renameSync(tmp,path);
           }catch(_){if(fd!==undefined){try{fs.closeSync(fd);}catch(__){}}try{fs.unlinkSync(tmp);}catch(__){}fail();}
@@ -214,7 +215,8 @@ if [ "${1:-}" = api ] && [ "${2:-}" = -X ] && [ "${3:-}" = POST ]; then
       });
       const tmp=process.env.REVIEW_FILE+".tmp-"+process.pid;let fd;
       try{
-        fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+        const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+        fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
         fs.writeFileSync(fd,JSON.stringify(payload));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
         if(fs.existsSync(process.env.REVIEW_FILE))fail();
         fs.renameSync(tmp,process.env.REVIEW_FILE);
@@ -244,7 +246,8 @@ if [ "${1:-}" = api ]; then
         const value={threadId,replyTo,rootComment:root,body:process.env.REPLY_BODY};
         const tmp=process.env.REPLY_FILE+".tmp-"+process.pid;let fd;
         try{
-          fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+          const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+          fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
           fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
           fs.renameSync(tmp,process.env.REPLY_FILE);
         }catch(_){if(fd!==undefined){try{fs.closeSync(fd);}catch(__){}}try{fs.unlinkSync(tmp);}catch(__){}fail();}

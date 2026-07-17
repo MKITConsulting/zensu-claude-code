@@ -12,6 +12,12 @@ PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 ADAPTER="$ROOT/hooks/lib/claude-session-control-v1.js"
+AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
+VCS="$ROOT/hooks/lib/zensu-vcs.sh"
+RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
+AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
+ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
+PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -62,6 +68,17 @@ else
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
+LOCK_KEEPER_BODY="$(sed -n '/^_tdd_core_lock_keeper() {$/,/^}$/p' "$PHASE")"
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'coproc $coproc_name' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'BASH_VERSINFO[0]' \
+  && printf '%s\n' "$LOCK_KEEPER_BODY" | grep -qF 'ownerPid: process.pid' \
+  && printf '%s\n' "$LOCK_KEEPER_BODY" | grep -qF 'fs.readFileSync(0, "utf8")' \
+  && printf '%s\n' "$LOCK_KEEPER_BODY" | grep -qF 'command !== "RELEASE\n"'; then
+  check "Bash 4+ holds each Core lease in one live keeper process" PASS
+else
+  check "Bash 4+ holds each Core lease in one live keeper process" FAIL
+fi
+
 if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'process.argv.slice(1)' \
   && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -Eq 'process\.env\.(CONTROL_CORE|LOCK_DIRECTORY|RESOURCE_PATH|TOKEN_FILE)' \
   && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'token: process.env.LOCK_TOKEN' \
@@ -131,6 +148,62 @@ if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOF
   check "Session Control brackets Windows opens with path and descriptor identity" PASS
 else
   check "Session Control brackets Windows opens with path and descriptor identity" FAIL
+fi
+
+if [ "$(grep -cF 'const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$AUTOPILOT_STATE")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(temp, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(source, fs.constants.O_RDONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(temp, fs.constants.O_WRONLY | noFollow)' "$AUTOPILOT_STATE")" -eq 1 ] \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$AUTOPILOT_STATE"; then
+  check "Autopilot secure opens omit unsupported O_NOFOLLOW on Windows" PASS
+else
+  check "Autopilot secure opens omit unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
+  && ! grep -qF 'O_RDONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \
+  && ! grep -qF 'O_WRONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \
+  && grep -qF 'opened.dev!==before.dev||opened.ino!==before.ino' "$VCS" \
+  && grep -qF 'targetOpened.dev!==target.dev||targetOpened.ino!==target.ino' "$VCS"; then
+  check "VCS secure opens keep identity brackets with a Windows-safe flag" PASS
+else
+  check "VCS secure opens keep identity brackets with a Windows-safe flag" FAIL
+fi
+
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$RESET_SNAPSHOT" \
+  && grep -qF 'opened.dev !== before.dev' "$RESET_SNAPSHOT" \
+  && grep -qF 'final.dev !== opened.dev' "$RESET_SNAPSHOT" \
+  && grep -qF "throw new Error('file changed while reading')" "$RESET_SNAPSHOT"; then
+  check "reset eval snapshots use a Windows-safe identity-bracketed read" PASS
+else
+  check "reset eval snapshots use a Windows-safe identity-bracketed read" FAIL
+fi
+
+if [ "$(grep -cF 'const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;' "$AUTOPILOT_FULL")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.constants.O_EXCL|noFollow' "$AUTOPILOT_FULL")" -eq 3 ] \
+  && ! grep -qF 'fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0)' "$AUTOPILOT_FULL"; then
+  check "Autopilot full-cycle fixtures omit unsupported O_NOFOLLOW on Windows" PASS
+else
+  check "Autopilot full-cycle fixtures omit unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$ENRICHMENT" \
+  && grep -qF 'info.dev === opened.dev && info.ino === opened.ino' "$ENRICHMENT" \
+  && ! grep -qF 'fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW' "$ENRICHMENT"; then
+  check "Claude enrichment reads use a Windows-safe identity bracket" PASS
+else
+  check "Claude enrichment reads use a Windows-safe identity bracket" FAIL
+fi
+
+if grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$PROMPTFOO_WRAPPER" \
+  && grep -qF 'fs.constants.O_CREAT | fs.constants.O_EXCL | noFollow' "$PROMPTFOO_WRAPPER" \
+  && grep -qF 'fs.ftruncateSync(fd, 0);' "$PROMPTFOO_WRAPPER" \
+  && ! grep -qF 'fs.constants.O_TRUNC' "$PROMPTFOO_WRAPPER"; then
+  check "Promptfoo hook log proves identity before truncating on Windows" PASS
+else
+  check "Promptfoo hook log proves identity before truncating on Windows" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

@@ -21,14 +21,26 @@ function safeRead(file) {
   if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1 || before.size > MAX_BYTES) {
     throw new Error('unsafe regular file');
   }
-  const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
   const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
   try {
     const opened = fs.fstatSync(descriptor);
-    if (!opened.isFile() || opened.nlink !== 1 || opened.size !== before.size) {
+    if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
+      || opened.ino !== before.ino || opened.size !== before.size) {
       throw new Error('file identity changed');
     }
-    return fs.readFileSync(descriptor);
+    const bytes = fs.readFileSync(descriptor);
+    const after = fs.fstatSync(descriptor);
+    const final = fs.lstatSync(file);
+    if (bytes.length !== opened.size || after.dev !== opened.dev || after.ino !== opened.ino
+      || after.nlink !== 1 || after.size !== opened.size || after.mtimeMs !== opened.mtimeMs
+      || after.ctimeMs !== opened.ctimeMs || !final.isFile() || final.isSymbolicLink()
+      || final.nlink !== 1 || final.dev !== opened.dev || final.ino !== opened.ino
+      || final.size !== opened.size) {
+      throw new Error('file changed while reading');
+    }
+    return bytes;
   } finally {
     fs.closeSync(descriptor);
   }
