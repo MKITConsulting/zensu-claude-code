@@ -199,6 +199,37 @@ if [ "$(printf '%s' "$OUT8D" | decision)" = block ] && printf '%s' "$OUT8D" | gr
   check "S8d nonterminal run without a pointer blocks Stop" PASS
 else check "S8d orphan nonterminal run cannot look absent" FAIL; fi
 
+# Model the exact adoption race: the initial locked read reports absent, the
+# adoption lease stays contended, and its descriptor-backed fallback proves a
+# nonterminal run is active. That proof must block this Stop directly; a second
+# contended read must never turn the active generation back into "absent".
+P6G="$TMP/adoption-active-contention"; start "$P6G" stop_run_contention stop_session_contention
+RF6G="$(autopilot_run_file stop_run_contention "$P6G")"
+BEFORE8G="$(digest "$RF6G")"
+CONTENTION_PLUGIN="$TMP/adoption-contention-plugin"; copy_runtime "$CONTENTION_PLUGIN"
+CONTENTION_PLUGIN="$(cd "$CONTENTION_PLUGIN" && pwd -P)"
+CONTENTION_STATE_LIB="$CONTENTION_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
+printf '%s\n' \
+  'source "$REAL_AUTOPILOT_STATE_LIB"' \
+  'autopilot_read_active() { printf '\''read\n'\'' >> "$ZENSU_CONTENTION_READ_MARKER"; return 1; }' \
+  '_autopilot_locked_run() { printf '\''lock\n'\'' >> "$ZENSU_CONTENTION_LOCK_MARKER"; return 1; }' \
+  > "$CONTENTION_STATE_LIB"
+bind_runtime_session "$CONTENTION_PLUGIN" "$P6G" stop_session_contention adoption-contention
+OUT8G="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_contention"}' \
+  | CLAUDE_PROJECT_DIR="$P6G" CLAUDE_PLUGIN_ROOT="$CONTENTION_PLUGIN" \
+    REAL_AUTOPILOT_STATE_LIB="$LIB" \
+    ZENSU_CONTENTION_READ_MARKER="$TMP/adoption-contention-read" \
+    ZENSU_CONTENTION_LOCK_MARKER="$TMP/adoption-contention-lock" \
+    bash "$CONTENTION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+AFTER8G="$(digest "$RF6G")"
+if [ "$(printf '%s' "$OUT8G" | decision)" = block ] \
+  && printf '%s' "$OUT8G" | grep -qF 'became active while deferred review adoption was waiting for the Outer lock' \
+  && [ -s "$TMP/adoption-contention-read" ] \
+  && [ -s "$TMP/adoption-contention-lock" ] \
+  && [ "$BEFORE8G" = "$AFTER8G" ]; then
+  check "S8g active Outer proof cannot degrade to absent after adoption contention" PASS
+else check "S8g adoption contention must fail closed on the proven active Outer" FAIL; fi
+
 P6E="$TMP/hidden-orphan"; start "$P6E" stop_run_old_terminal stop_session_old_terminal
 autopilot_apply_event stop_run_old_terminal cancel-old-terminal CANCEL '{}' "$P6E" >/dev/null
 OLD_POINTER8E="$TMP/old-terminal-pointer.json"

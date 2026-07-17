@@ -459,13 +459,11 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
     case "$ADOPT_RC" in
       6) ;; # no pending marker/claim; this is a normal no-work result
       4)
-        # A durable run won the race after the initial read. Route from its
-        # fresh authoritative state; the pending marker remains untouched.
-        outer_reload
-        if [ "$OUTER_STATUS" -eq 0 ]; then outer_finish
-        elif [ "$OUTER_STATUS" -ne 1 ]; then
-          emit_block "Zensu Autopilot Stop denied: durable state changed while deferred review adoption was waiting for the Outer lock."
-        fi
+        # The locked read or its descriptor-backed contention fallback proved
+        # that a durable run became active after the initial absent snapshot.
+        # Do not take a second contended read here: its legacy rc=1 conflates
+        # lock timeout with absence and could erase that stronger proof.
+        emit_block "Zensu Autopilot Stop denied: a durable run became active while deferred review adoption was waiting for the Outer lock. Retry Stop so the current durable state can be routed safely."
         exit 0
         ;;
       *)
