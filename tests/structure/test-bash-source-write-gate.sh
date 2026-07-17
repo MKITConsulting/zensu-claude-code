@@ -74,11 +74,11 @@ classify() {
     });
   '
 }
-# run <label> <cmd> <expected> [cwd] [cfg]
+# run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
-  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}"
+  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}" env_file="${6:-$PROJ/.claude-env}"
   local out
-  out="$(payload "$cmd" "$cwd" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
+  out="$(payload "$cmd" "$cwd" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$env_file" \
         ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
@@ -199,9 +199,23 @@ run "W64 exported Session Control rebind" "export ZENSU_SESSION_CONTEXT=/tmp/oth
 run "W65 unset Session Control export" "unset ZENSU_SESSION_KEY" DENY
 run "W66 printf -v Session Control rebind" "printf -v ZENSU_RUNTIME_DIGEST bad" DENY
 run "W67 append through CLAUDE_ENV_FILE variable" 'printf '\''export ZENSU_PROJECT_ROOT=/tmp/other\n'\'' >> "$CLAUDE_ENV_FILE"' DENY
-run "W68 append through exact CLAUDE_ENV_FILE path" "printf x >> $PROJ/.claude-env" DENY
+run "W68 native CLAUDE_ENV_FILE vs Git-Bash command path" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
 run "W69 control rebind ignores bashWriteGate:false" "ZENSU_CLAUDE_PLUGIN_ROOT=/tmp/other env" DENY "$PROJ" "$CFG_OFF"
 run "W70 control rebind ignores inline escape" "ZENSU_BASH_WRITE_GATE=off ZENSU_PROJECT_ROOT=/tmp/other env" DENY
+run "W71 protected path prefix is not an exact CLAUDE_ENV_FILE match" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env.backup" ALLOW "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
+run "W72 symbolic CLAUDE_ENV_FILE reference is independent of native path parsing" \
+  'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
+run "W73 POSIX CLAUDE_ENV_FILE comparison remains case-sensitive and exact" \
+  "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  '/Users/Runner/Session/.claude-env'
+run "W74 POSIX CLAUDE_ENV_FILE does not fold case" \
+  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_DEF" \
+  '/Users/Runner/Session/.claude-env'
 
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \

@@ -56,8 +56,14 @@ zensu_resolve_project_dir() {
     const requested = path.resolve(process.env.PROJECT_CANDIDATE);
     const canonical = fs.realpathSync.native(requested);
     if (requested !== canonical || context.project_root !== canonical) process.exit(1);
-    process.stdout.write(canonical);
-  ' 2>/dev/null
+  ' 2>/dev/null || return 1
+
+  # Session Control records the host-native canonical path. On Git Bash that
+  # is a Windows path (for example C:\\work\\repo), while subsequent shell
+  # helpers need the MSYS spelling (/c/work/repo) for path concatenation and
+  # Bash builtins. Validate the immutable native value above, then render the
+  # same directory in the executing shell's canonical namespace.
+  (cd -P -- "$candidate" && pwd -P)
 }
 
 export -f zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

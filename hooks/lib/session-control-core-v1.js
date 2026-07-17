@@ -560,6 +560,13 @@ function lockOwner(file) {
     || owner.pid <= 0
     || typeof owner.token !== 'string'
     || !LOCK_TOKEN_RE.test(owner.token)
+    || (
+      owner.release_token_digest !== undefined
+      && (
+        typeof owner.release_token_digest !== 'string'
+        || !HASH_RE.test(owner.release_token_digest)
+      )
+    )
     || !Number.isFinite(Date.parse(owner.created_at || ''))
     || (
       owner.process_start_identity !== undefined
@@ -653,12 +660,16 @@ function createOwnedArtifact(
   const ownerIdentity = ownerOverride
     ? ownerOverride.processStartIdentity
     : currentProcessStartIdentity();
+  const releaseTokenDigest = ownerOverride ? (ownerOverride.releaseTokenDigest ?? null) : null;
   if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) fail('lock owner pid is invalid');
   if (
     ownerIdentity !== null
     && (typeof ownerIdentity !== 'string' || !LOCK_IDENTITY_RE.test(ownerIdentity))
   ) {
     fail('lock owner process identity is invalid');
+  }
+  if (releaseTokenDigest !== null && !HASH_RE.test(releaseTokenDigest)) {
+    fail('lock release capability digest is invalid');
   }
   const owner = {
     pid: ownerPid,
@@ -667,6 +678,7 @@ function createOwnedArtifact(
     created_at: nowIso(),
     process_start_identity: ownerIdentity,
   };
+  if (releaseTokenDigest !== null) owner.release_token_digest = releaseTokenDigest;
   if (tokenSink !== null && typeof tokenSink !== 'function') {
     fail('lock token sink must be a function');
   }
@@ -888,6 +900,25 @@ function externalProcessLockAttemptLimit(value) {
   return value;
 }
 
+function externalProcessReleaseTokenDigest(token) {
+  if (typeof token !== 'string' || !LOCK_TOKEN_RE.test(token)) {
+    fail('external process lock token is invalid');
+  }
+  return `sha256:${crypto.createHash('sha256')
+    .update(EXTERNAL_PROCESS_LOCK_DOMAIN)
+    .update('release-capability\0', 'utf8')
+    .update(token, 'utf8')
+    .digest('hex')}`;
+}
+
+function constantTimeTextEqual(left, right) {
+  if (typeof left !== 'string' || typeof right !== 'string') return false;
+  const leftBuffer = Buffer.from(left, 'utf8');
+  const rightBuffer = Buffer.from(right, 'utf8');
+  return leftBuffer.length === rightBuffer.length
+    && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
 function requireExternalProcessOwnerAuthority(ownerPid) {
   if (!Number.isSafeInteger(ownerPid) || ownerPid <= 0) {
     fail('external process lock owner pid is invalid');
@@ -932,6 +963,7 @@ function acquireExternalProcessLock(options) {
     fail('external process lock token sink must be a function');
   }
   let ownerProcessStartIdentity = null;
+  let releaseToken = null;
   let owner = null;
   let acquired = null;
 
@@ -960,9 +992,11 @@ function acquireExternalProcessLock(options) {
     }
     if (!owner) {
       ownerProcessStartIdentity = processStartIdentity(ownerPid);
+      releaseToken = crypto.randomBytes(24).toString('hex');
       owner = {
         pid: ownerPid,
         processStartIdentity: ownerProcessStartIdentity,
+        releaseTokenDigest: externalProcessReleaseTokenDigest(releaseToken),
       };
     }
     acquired = createOwnedArtifact(
@@ -970,7 +1004,7 @@ function acquireExternalProcessLock(options) {
       'external-process-lock',
       owner,
       binding.directoryStat,
-      tokenSink,
+      tokenSink ? () => tokenSink(releaseToken) : null,
     );
     if (acquired) {
       if (!fs.existsSync(binding.recoveryFile)) break;
@@ -1001,7 +1035,7 @@ function acquireExternalProcessLock(options) {
   }
 
   return {
-    token: acquired.owner.token,
+    token: releaseToken,
     lockFile: binding.lockFile,
     ownerPid,
     processStartIdentity: ownerProcessStartIdentity,
@@ -1018,12 +1052,18 @@ function releaseExternalProcessLock(options) {
   }
 
   const acquired = lockOwner(binding.lockFile);
+  const tokenMatches = acquired && acquired.owner && acquired.owner.release_token_digest
+    ? constantTimeTextEqual(
+      acquired.owner.release_token_digest,
+      externalProcessReleaseTokenDigest(token),
+    )
+    : Boolean(acquired && acquired.owner && acquired.owner.token === token);
   if (
     !acquired
     || !acquired.owner
     || acquired.owner.kind !== 'external-process-lock'
     || acquired.owner.pid !== ownerPid
-    || acquired.owner.token !== token
+    || !tokenMatches
   ) {
     fail('external process lock ownership does not match release token');
   }
@@ -1037,6 +1077,38 @@ function releaseExternalProcessLock(options) {
     }
   }
 
+  releaseOwnedLock(
+    binding.directory,
+    binding.key,
+    binding.lockFile,
+    acquired,
+    binding.directoryStat,
+  );
+  return true;
+}
+
+// Git Bash may interpose a different native parent process for each Node
+// invocation even while the same Bash critical section remains alive. The
+// release capability is therefore stable across invocations. Only its digest
+// is stored in the lock artifact, so read access to that artifact does not grant
+// release authority. Descriptor-backed identity checks still protect removal.
+function releaseExternalProcessLockByToken(options) {
+  const binding = externalProcessLockBinding(options);
+  const token = options.token;
+  if (typeof token !== 'string' || !LOCK_TOKEN_RE.test(token)) {
+    fail('external process lock token is invalid');
+  }
+  const acquired = lockOwner(binding.lockFile);
+  const digest = externalProcessReleaseTokenDigest(token);
+  if (
+    !acquired
+    || !acquired.owner
+    || acquired.owner.kind !== 'external-process-lock'
+    || typeof acquired.owner.release_token_digest !== 'string'
+    || !constantTimeTextEqual(acquired.owner.release_token_digest, digest)
+  ) {
+    fail('external process lock ownership does not match release token');
+  }
   releaseOwnedLock(
     binding.directory,
     binding.key,
@@ -3195,6 +3267,7 @@ module.exports = {
   externalProcessLockPath,
   acquireExternalProcessLock,
   releaseExternalProcessLock,
+  releaseExternalProcessLockByToken,
   withFileLock,
   atomicWriteJson,
   atomicCreateJson,

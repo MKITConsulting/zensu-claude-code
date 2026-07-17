@@ -71,6 +71,15 @@ else
   check "Core lease paths use argv while its token stays off the command line" FAIL
 fi
 
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF '[[ "$token" =~ ^[a-f0-9]{48}$ ]]' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'rm -f -- "$token_file"' \
+  && grep -qF 'release_token_digest' "$CORE" \
+  && grep -qF 'crypto.timingSafeEqual' "$CORE"; then
+  check "Release capability is validated, hashed at rest, and its handoff is removed early" PASS
+else
+  check "Release capability is validated, hashed at rest, and its handoff is removed early" FAIL
+fi
+
 if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
   && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'sameIdentity(before, opened)' \
   && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'opened.nlink !== 1' \
@@ -79,6 +88,24 @@ if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'process.platform !== "win32" && 
   check "Windows token open proves identity before truncate without unsupported O_NOFOLLOW" PASS
 else
   check "Windows token open proves identity before truncate without unsupported O_NOFOLLOW" FAIL
+fi
+
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF '[zensu-tdd-phase] lock detail:' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF '[zensu-tdd-phase] lock release detail:' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF '.slice(0, 512)' \
+  && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'zensu-tdd-lock-error' \
+  && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'lock_error="$(node'; then
+  check "Lease diagnostics use bounded stderr without a pathname or subshell" PASS
+else
+  check "Lease diagnostics use bounded stderr without a pathname or subshell" FAIL
+fi
+
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'releaseExternalProcessLockByToken' \
+  && grep -qF 'function releaseExternalProcessLockByToken(options)' "$CORE" \
+  && grep -qF 'releaseExternalProcessLockByToken,' "$CORE"; then
+  check "Cross-process lease release uses the token capability" PASS
+else
+  check "Cross-process lease release uses the token capability" FAIL
 fi
 
 if ! grep -Fq "require('\$ROOT/" "$ROOT/evals/session-control/run-self-check.sh" \

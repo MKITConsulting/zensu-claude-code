@@ -123,6 +123,56 @@ function bindingFromAssignment(raw) {
   return m && CONTROL_BINDINGS.has(m[1]) ? m[1] : "";
 }
 
+// Git Bash and native Windows processes can spell the same absolute path in
+// different namespaces. In particular, the Bash command in the hook payload
+// keeps `/d/work/file`, while MSYS converts an exported CLAUDE_ENV_FILE to
+// `D:\\work\\file` before launching native Node. Normalize both spellings to a
+// drive-qualified, slash-separated comparison namespace. This is deliberately
+// lexical: the SessionStart exporter has already canonicalized and validated
+// CLAUDE_ENV_FILE, and the mutation gate must not follow an attacker-controlled
+// command path through the filesystem merely to compare its spelling.
+function controlPathNamespace(value) {
+  if (typeof value !== "string" || !value || /[\u0000-\u001f]/.test(value)) return "";
+  let normalized = value.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\/\/\?\/([A-Za-z]:\/)/, "$1");
+  normalized = normalized.replace(/^\/([A-Za-z])(?=\/)/, "$1:");
+  if (!/^[A-Za-z]:\//.test(normalized)) return normalized;
+  const drive = normalized.slice(0, 2).toLowerCase();
+  const tail = path.posix.normalize("/" + normalized.slice(3));
+  return (drive + tail).toLowerCase();
+}
+
+function commandRefersToControlPath(cmd, envFile) {
+  const target = controlPathNamespace(envFile);
+  if (!target) return false;
+  const windowsDriveTarget = /^[a-z]:\//.test(target);
+
+  // Normalize drive-root spellings wherever a shell token may begin. Keeping
+  // token boundaries in the comparison prevents `.claude-env.backup` from
+  // being mistaken for the protected file while still covering glued redirects
+  // such as `>>/d/work/.claude-env` and quoted paths containing spaces.
+  let normalizedCommand = cmd
+    .replace(/\\/g, "/")
+    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:");
+  // Drive-letter paths are case-insensitive; POSIX paths are not. Lowercase
+  // only for the Windows namespace so the existing Unix exact-path behavior
+  // remains case-sensitive.
+  if (windowsDriveTarget) normalizedCommand = normalizedCommand.toLowerCase();
+  let offset = 0;
+  while (offset <= normalizedCommand.length - target.length) {
+    const index = normalizedCommand.indexOf(target, offset);
+    if (index === -1) return false;
+    const before = index === 0 ? "" : normalizedCommand[index - 1];
+    const afterIndex = index + target.length;
+    const after = afterIndex === normalizedCommand.length ? "" : normalizedCommand[afterIndex];
+    const startsAtBoundary = !before || /[\s"'`=<>|&;(]/.test(before);
+    const endsAtBoundary = !after || /[\s"'`<>|&;)]/.test(after);
+    if (startsAtBoundary && endsAtBoundary) return true;
+    offset = index + 1;
+  }
+  return false;
+}
+
 // Session Control exports are immutable host attestations. A Bash tool call
 // must not rebind them or append a replacement block to CLAUDE_ENV_FILE. This
 // check is deliberately independent of the source-write config and escape
@@ -131,8 +181,11 @@ function bindingFromAssignment(raw) {
 function detectControlMutation(cmd) {
   if (!cmd) return "";
   const envFile = process.env.CLAUDE_ENV_FILE || "";
+  // Keep the symbolic reference check independent from path normalization: a
+  // command that writes through $CLAUDE_ENV_FILE must stay denied even if the
+  // ambient value is missing, native Windows, or otherwise uncomparable.
   const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
-    || (envFile && cmd.indexOf(envFile) !== -1);
+    || commandRefersToControlPath(cmd, envFile);
   if (refersToEnvFile && detectChannels(cmd)) {
     return "Blocked a Bash write to CLAUDE_ENV_FILE. Session Control exports are immutable for the lifetime of the session; start a fresh Claude Code session instead of rebinding them.";
   }

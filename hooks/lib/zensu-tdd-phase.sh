@@ -334,7 +334,7 @@ _tdd_locked_run() {
   # Recheck storage after acquisition so a path swap cannot reach the mutation.
   _tdd_state_storage_safe "$state_file" || return 1
 
-  local lock_directory token_file error_file token acquire_rc release_rc
+  local lock_directory token_file token acquire_rc release_rc
   lock_directory="$(dirname "$state_file")"
   token_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-token.XXXXXX" 2>/dev/null)" || {
     echo "[zensu-tdd-phase] lock token allocation failed for $state_file" >&2
@@ -348,24 +348,10 @@ _tdd_locked_run() {
     rm -f -- "$token_file" 2>/dev/null || true
     return 1
   }
-  error_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-error.XXXXXX" 2>/dev/null)" || {
-    rm -f -- "$token_file" 2>/dev/null || true
-    echo "[zensu-tdd-phase] lock diagnostic allocation failed for $state_file" >&2
-    return 1
-  }
-  chmod 600 "$error_file" 2>/dev/null || {
-    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
-    return 1
-  }
-  _tdd_path_safe "$error_file" regular || {
-    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
-    return 1
-  }
-
-  node -e '
+  if node -e '
       const fs = require("node:fs");
       const [corePath, lockDirectory, resourcePath, tokenFile] = process.argv.slice(1);
-      const core = require(corePath);
+      let core = null;
       const sameIdentity = (left, right) => {
         if (left.ino !== 0 && right.ino !== 0) return left.dev === right.dev && left.ino === right.ino;
         return left.birthtimeMs === right.birthtimeMs && left.mode === right.mode;
@@ -379,6 +365,7 @@ _tdd_locked_run() {
       let descriptor;
       let lease = null;
       try {
+        core = require(corePath);
         const before = fs.lstatSync(tokenFile);
         if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) throw new Error("unsafe token file");
         descriptor = fs.openSync(
@@ -413,14 +400,15 @@ _tdd_locked_run() {
       } catch (error) {
         const detail = String(error && error.message ? error.message : "unknown acquisition error")
           .replace(/[\r\n]+/g, " ").slice(0, 512);
-        process.stderr.write(`${detail}\n`);
-        if (descriptor !== undefined) fs.closeSync(descriptor);
-        if (lease) {
+        process.stderr.write(`[zensu-tdd-phase] lock detail: ${detail}\n`);
+        if (descriptor !== undefined) {
+          try { fs.closeSync(descriptor); } catch (_) { /* fail closed below */ }
+        }
+        if (lease && core) {
           try {
-            core.releaseExternalProcessLock({
+            core.releaseExternalProcessLockByToken({
               lockDirectory,
               resourcePath,
-              ownerPid: process.ppid,
               token: lease.token,
             });
           } catch (_) { /* fail closed below */ }
@@ -428,57 +416,60 @@ _tdd_locked_run() {
         process.exit(3);
       }
     ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-      "$lock_directory" "$state_file" "$token_file" >/dev/null 2>"$error_file"
-  acquire_rc=$?
+      "$lock_directory" "$state_file" "$token_file" >/dev/null; then
+    acquire_rc=0
+  else
+    acquire_rc=$?
+  fi
   if _tdd_path_safe "$token_file" regular; then
     token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
   else
     token=""
   fi
-  if [ "$acquire_rc" -ne 0 ] || [ -z "$token" ]; then
-    if [ -n "$token" ]; then
+  rm -f -- "$token_file" 2>/dev/null || true
+  if [ "$acquire_rc" -ne 0 ] || ! [[ "$token" =~ ^[a-f0-9]{48}$ ]]; then
+    if [[ "$token" =~ ^[a-f0-9]{48}$ ]]; then
       LOCK_TOKEN="$token" node -e '
           const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
           const core = require(corePath);
-          core.releaseExternalProcessLock({
+          core.releaseExternalProcessLockByToken({
             lockDirectory,
             resourcePath,
-            ownerPid: process.ppid,
             token: process.env.LOCK_TOKEN,
           });
         ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
           "$lock_directory" "$state_file" >/dev/null 2>&1 || true
     fi
-    if _tdd_path_safe "$error_file" regular; then
-      local lock_error
-      lock_error="$(head -n 1 "$error_file" 2>/dev/null)"
-      [ -z "$lock_error" ] || echo "[zensu-tdd-phase] lock detail: $lock_error" >&2
-    fi
-    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
     echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
     return 1
   fi
-  rm -f -- "$error_file" 2>/dev/null || true
-
   if _tdd_state_storage_safe "$state_file"; then
     "$@"
   else
     false
   fi
   local rc=$?
-  LOCK_TOKEN="$token" node -e '
+  if LOCK_TOKEN="$token" node -e '
       const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
-      const core = require(corePath);
-      core.releaseExternalProcessLock({
-        lockDirectory,
-        resourcePath,
-        ownerPid: process.ppid,
-        token: process.env.LOCK_TOKEN,
-      });
+      try {
+        const core = require(corePath);
+        core.releaseExternalProcessLockByToken({
+          lockDirectory,
+          resourcePath,
+          token: process.env.LOCK_TOKEN,
+        });
+      } catch (error) {
+        const detail = String(error && error.message ? error.message : "unknown release error")
+          .replace(/[\r\n]+/g, " ").slice(0, 512);
+        process.stderr.write(`[zensu-tdd-phase] lock release detail: ${detail}\n`);
+        process.exit(3);
+      }
     ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-      "$lock_directory" "$state_file" >/dev/null 2>&1
-  release_rc=$?
-  rm -f -- "$token_file" "$error_file" 2>/dev/null || true
+      "$lock_directory" "$state_file" >/dev/null; then
+    release_rc=0
+  else
+    release_rc=$?
+  fi
   if [ "$release_rc" -ne 0 ]; then
     echo "[zensu-tdd-phase] lock release failed for $state_file" >&2
     return 1

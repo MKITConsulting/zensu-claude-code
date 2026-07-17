@@ -86,6 +86,10 @@ canonical_node_path() {
   node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.argv[1]))' -- "$1"
 }
 
+canonical_shell_path() {
+  (cd -P -- "$1" && pwd -P)
+}
+
 run_hook() {
   CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$ENV_FILE" \
     env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK"
@@ -302,10 +306,12 @@ fi
 
 HELPER_KEY="$(bash -c "source '$ENV_FILE'; source '$SESSION'; zensu_resolve_session_id ''" 2>/dev/null)"
 HELPER_PROJECT="$(bash -c "source '$ENV_FILE'; source '$SESSION'; zensu_resolve_project_dir" 2>/dev/null)"
-if [ "$HELPER_KEY" = "$KEY_A" ] && [ "$HELPER_PROJECT" = "$(canonical_node_path "$PROJECT_A")" ]; then
-  check "model-side helpers consume only the exported session contract" PASS
+if [ "$HELPER_KEY" = "$KEY_A" ] \
+  && [ "$HELPER_PROJECT" = "$(canonical_shell_path "$PROJECT_A")" ] \
+  && [ -d "$HELPER_PROJECT" ]; then
+  check "model-side helpers consume the exported contract in the shell path namespace" PASS
 else
-  check "model-side helpers consume only the exported session contract" FAIL
+  check "model-side helpers consume the exported contract in the shell path namespace" FAIL
 fi
 
 if ZENSU_PROJECT_ROOT="$PROJECT_B" ZENSU_SESSION_KEY="$KEY_A" ZENSU_SESSION_CONTEXT="$RECORD_A" \
@@ -341,6 +347,39 @@ if [ -f "$STATE_A" ] && [ "$(node -e 'process.stdout.write(String(require(proces
   check "model-side zensu-log uses the exported key and exact project state" PASS
 else
   check "model-side zensu-log uses the exported key and exact project state" FAIL
+fi
+
+# Exercise the complete SessionStart -> persisted host-native path -> Bash
+# helper -> TDD mutation route with a project name that requires careful shell
+# handling. On Git Bash, the persisted value and the helper result deliberately
+# use different (Windows and MSYS) path namespaces.
+SHELL_PROJECT="$TMP/project root (mixed) apostrophe'value"
+SHELL_ENV="$TMP/shell-project-session-env"
+SHELL_SID='claude/shell project path'
+SHELL_KEY="$(node "$CORE" session-key "$SHELL_SID")"
+mkdir -p "$SHELL_PROJECT"
+: > "$SHELL_ENV"
+payload SessionStart "$SHELL_SID" "$SHELL_PROJECT" \
+  | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$SHELL_ENV" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK" \
+    >"$TMP/shell-project-start.out" 2>"$TMP/shell-project-start.err"
+SHELL_RESOLVED="$(ENV_FILE="$SHELL_ENV" SESSION="$SESSION" bash -c '
+  source "$ENV_FILE"
+  source "$SESSION"
+  zensu_resolve_project_dir
+' 2>/dev/null)"
+ENV_FILE="$SHELL_ENV" ROOT="$ROOT" bash -c '
+  source "$ENV_FILE"
+  CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/lib/zensu-log.sh" \
+    --phase RED_WRITE --step shell-project-path
+' >/dev/null
+SHELL_STATE="$SHELL_PROJECT/.zensu/state/tdd-phase-$SHELL_KEY.json"
+if [ "$SHELL_RESOLVED" = "$(canonical_shell_path "$SHELL_PROJECT")" ] \
+  && [ -f "$SHELL_STATE" ] \
+  && [ "$(node -e 'process.stdout.write(String(require(process.argv[1]).revision))' "$SHELL_STATE")" = 2 ]; then
+  check "SessionStart native path survives shell-special project TDD mutation" PASS
+else
+  check "SessionStart native path survives shell-special project TDD mutation" FAIL
 fi
 
 if CLAUDE_SESSION_ID='transcript-shaped' ZENSU_TRANSCRIPT_PATH="$TMP/fake.jsonl" ZENSU_SESSION_KEY='' bash -c "source '$SESSION'; zensu_resolve_session_id ''" >"$TMP/missing.out" 2>/dev/null; then

@@ -96,7 +96,7 @@ else
   check "P9 provider owns sidecar fixtures and verifies byte-identical isolation" FAIL
 fi
 
-if rg -n 'rm -f .*rounds-|Removed:.*rounds-|counter file\(s\) deleted|No round counter files' \
+if grep -En 'rm -f .*rounds-|Removed:.*rounds-|counter file\(s\) deleted|No round counter files' \
   "$HAPPY" "$INVALID" "$SIDECAR" "$README" "$FIXTURE" >/dev/null; then
   check "P10 suite has no retired sidecar-search/deletion contract" FAIL
 else

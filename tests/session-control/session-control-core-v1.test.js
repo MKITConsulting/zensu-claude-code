@@ -3644,6 +3644,56 @@ test('external process lease release rejects an unrelated live owner PID', () =>
   }
 });
 
+test('external process lease token capability releases across a different process', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-token-release-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  const artifact = JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8'));
+  assert.match(artifact.release_token_digest, /^sha256:[a-f0-9]{64}$/);
+  assert.notEqual(artifact.token, acquired.token);
+  assert.equal(fs.readFileSync(acquired.lockFile, 'utf8').includes(acquired.token), false);
+  const source = String.raw`
+    const core = require(process.env.SESSION_CONTROL_CORE);
+    core.releaseExternalProcessLockByToken({
+      lockDirectory: process.argv[1],
+      resourcePath: process.argv[2],
+      token: process.argv[3],
+    });
+  `;
+  const released = await runNode(source, [root, resourcePath, acquired.token]);
+  assert.equal(released.code, 0, released.stderr);
+  assert.equal(fs.existsSync(acquired.lockFile), false);
+});
+
+test('external process lease artifact identity is not a release capability', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-artifact-token-'));
+  const resourcePath = path.join(root, 'state.json');
+  fs.writeFileSync(resourcePath, '{}\n', { mode: 0o600 });
+  const acquired = core.acquireExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+  });
+  const artifact = JSON.parse(fs.readFileSync(acquired.lockFile, 'utf8'));
+  assert.throws(() => core.releaseExternalProcessLockByToken({
+    lockDirectory: root,
+    resourcePath,
+    token: artifact.token,
+  }), /token|ownership/i);
+  assert.equal(fs.existsSync(acquired.lockFile), true);
+  core.releaseExternalProcessLock({
+    lockDirectory: root,
+    resourcePath,
+    ownerPid: process.pid,
+    token: acquired.token,
+  });
+});
+
 test('external process lease binds an absent resource through its canonical parent', () => {
   const outer = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-external-absent-'));
   const root = path.join(outer, 'state');
@@ -3770,6 +3820,12 @@ test('external process lease rejects a wrong release token without changing the 
     resourcePath,
     ownerPid: process.pid,
     token: 'f'.repeat(48),
+  }), /token|ownership/i);
+  assert.deepEqual(fs.readFileSync(acquired.lockFile), before);
+  assert.throws(() => core.releaseExternalProcessLockByToken({
+    lockDirectory: root,
+    resourcePath,
+    token: 'e'.repeat(48),
   }), /token|ownership/i);
   assert.deepEqual(fs.readFileSync(acquired.lockFile), before);
   core.releaseExternalProcessLock({
