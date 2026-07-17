@@ -30,11 +30,11 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           bash tests/structure/test-msys-runtime-boundaries.sh
+          bash tests/structure/test-session-control-claude.sh
+          bash tests/structure/test-session-start-banner.sh
+          bash tests/structure/test-session-id-v1.sh
           bash tests/structure/test-deferred-review-claim.sh
           bash tests/structure/test-deferred-review-fallback.sh
-          bash tests/structure/test-session-id-v1.sh
-          bash tests/structure/test-session-start-banner.sh
-          bash tests/structure/test-session-control-claude.sh
           bash tests/structure/test-review-worker-evidence-lease.sh
           bash tests/structure/test-reviewer-capability-gate.sh
           bash tests/structure/test-autopilot-plan-delegate.sh

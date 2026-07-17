@@ -475,21 +475,43 @@ payload SessionStart "$SHELL_SID" "$SHELL_PROJECT" \
   | CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$SHELL_ENV" \
     env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK" \
     >"$TMP/shell-project-start.out" 2>"$TMP/shell-project-start.err"
+SHELL_START_RC=$?
 SHELL_RESOLVED="$(CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SHELL_SID" SESSION="$SESSION" bash -c '
   source "$SESSION"
   zensu_bind_model_session
   zensu_resolve_project_dir
 ' 2>/dev/null)"
+SHELL_RESOLVE_RC=$?
 CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_CODE_SESSION_ID="$SHELL_SID" ROOT="$ROOT" bash -c '
   CLAUDE_PLUGIN_ROOT="$ROOT" bash "$ROOT/hooks/lib/zensu-log.sh" \
     --phase RED_WRITE --step shell-project-path
-' >/dev/null
+' >"$TMP/shell-project-log.out" 2>"$TMP/shell-project-log.err"
+SHELL_LOG_RC=$?
 SHELL_STATE="$SHELL_PROJECT/.zensu/state/tdd-phase-$SHELL_KEY.json"
-if [ "$SHELL_RESOLVED" = "$(canonical_shell_path "$SHELL_PROJECT")" ] \
+SHELL_EXPECTED="$(canonical_shell_path "$SHELL_PROJECT")"
+SHELL_EXPECTED_RC=$?
+SHELL_REVISION=missing
+SHELL_REVISION_RC=1
+if [ -f "$SHELL_STATE" ]; then
+  SHELL_REVISION="$(node -e 'process.stdout.write(String(require(process.argv[1]).revision))' "$SHELL_STATE" 2>/dev/null)"
+  SHELL_REVISION_RC=$?
+fi
+if [ "$SHELL_START_RC" -eq 0 ] && [ "$SHELL_RESOLVE_RC" -eq 0 ] \
+  && [ "$SHELL_LOG_RC" -eq 0 ] && [ "$SHELL_EXPECTED_RC" -eq 0 ] \
+  && [ "$SHELL_RESOLVED" = "$SHELL_EXPECTED" ] \
   && [ -f "$SHELL_STATE" ] \
-  && [ "$(node -e 'process.stdout.write(String(require(process.argv[1]).revision))' "$SHELL_STATE")" = 2 ]; then
+  && [ "$SHELL_REVISION_RC" -eq 0 ] && [ "$SHELL_REVISION" = 2 ]; then
   check "SessionStart native path survives shell-special project TDD mutation" PASS
 else
+  printf '    diagnostic start=%s resolve=%s log=%s expected=%s revision_rc=%s revision=%s resolved=%q expected_path=%q state=%q\n' \
+    "$SHELL_START_RC" "$SHELL_RESOLVE_RC" "$SHELL_LOG_RC" "$SHELL_EXPECTED_RC" \
+    "$SHELL_REVISION_RC" "$SHELL_REVISION" "$SHELL_RESOLVED" "$SHELL_EXPECTED" "$SHELL_STATE" >&2
+  if [ -s "$TMP/shell-project-start.err" ]; then
+    sed 's/^/    SessionStart stderr: /' "$TMP/shell-project-start.err" >&2
+  fi
+  if [ -s "$TMP/shell-project-log.err" ]; then
+    sed 's/^/    zensu-log stderr: /' "$TMP/shell-project-log.err" >&2
+  fi
   check "SessionStart native path survives shell-special project TDD mutation" FAIL
 fi
 
