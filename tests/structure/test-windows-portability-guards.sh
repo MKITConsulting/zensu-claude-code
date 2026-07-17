@@ -7,6 +7,7 @@ REVIEWER="$ROOT/tests/structure/test-reviewer-capability-gate.sh"
 CORRUPTION="$ROOT/tests/structure/test-tdd-state-corruption-fail-closed.sh"
 MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
+WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -45,6 +46,14 @@ if grep -qF 'dangling symlink leaf' "$REVIEWER" \
   check "security cases remain present behind only their narrow portability guards" PASS
 else
   check "security cases remain present behind only their narrow portability guards" FAIL
+fi
+
+if grep -qF 'name: Windows Core lease canary' "$WORKFLOW" \
+  && grep -A2 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF "runner.os == 'Windows'" \
+  && grep -A3 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'test-tdd-no-flock-external-lease.sh'; then
+  check "Windows CI fails fast on the cross-process Core lease" PASS
+else
+  check "Windows CI fails fast on the cross-process Core lease" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

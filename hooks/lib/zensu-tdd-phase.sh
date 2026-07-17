@@ -334,7 +334,7 @@ _tdd_locked_run() {
   # Recheck storage after acquisition so a path swap cannot reach the mutation.
   _tdd_state_storage_safe "$state_file" || return 1
 
-  local lock_directory token_file token acquire_rc release_rc
+  local lock_directory token_file error_file token acquire_rc release_rc
   lock_directory="$(dirname "$state_file")"
   token_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-token.XXXXXX" 2>/dev/null)" || {
     echo "[zensu-tdd-phase] lock token allocation failed for $state_file" >&2
@@ -346,6 +346,19 @@ _tdd_locked_run() {
   }
   _tdd_path_safe "$token_file" regular || {
     rm -f -- "$token_file" 2>/dev/null || true
+    return 1
+  }
+  error_file="$(mktemp "${TMPDIR:-/tmp}/zensu-tdd-lock-error.XXXXXX" 2>/dev/null)" || {
+    rm -f -- "$token_file" 2>/dev/null || true
+    echo "[zensu-tdd-phase] lock diagnostic allocation failed for $state_file" >&2
+    return 1
+  }
+  chmod 600 "$error_file" 2>/dev/null || {
+    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
+    return 1
+  }
+  _tdd_path_safe "$error_file" regular || {
+    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
     return 1
   }
 
@@ -391,7 +404,10 @@ _tdd_locked_run() {
         ) throw new Error("token file changed after publication");
         fs.closeSync(descriptor);
         descriptor = undefined;
-      } catch (_) {
+      } catch (error) {
+        const detail = String(error && error.message ? error.message : "unknown acquisition error")
+          .replace(/[\r\n]+/g, " ").slice(0, 512);
+        process.stderr.write(`${detail}\n`);
         if (descriptor !== undefined) fs.closeSync(descriptor);
         if (lease) {
           try {
@@ -405,7 +421,7 @@ _tdd_locked_run() {
         }
         process.exit(3);
       }
-    ' >/dev/null 2>&1
+    ' >/dev/null 2>"$error_file"
   acquire_rc=$?
   if _tdd_path_safe "$token_file" regular; then
     token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
@@ -426,10 +442,16 @@ _tdd_locked_run() {
           });
         ' >/dev/null 2>&1 || true
     fi
-    rm -f -- "$token_file" 2>/dev/null || true
+    if _tdd_path_safe "$error_file" regular; then
+      local lock_error
+      lock_error="$(head -n 1 "$error_file" 2>/dev/null)"
+      [ -z "$lock_error" ] || echo "[zensu-tdd-phase] lock detail: $lock_error" >&2
+    fi
+    rm -f -- "$token_file" "$error_file" 2>/dev/null || true
     echo "[zensu-tdd-phase] lock acquisition failed for $state_file" >&2
     return 1
   fi
+  rm -f -- "$error_file" 2>/dev/null || true
 
   if _tdd_state_storage_safe "$state_file"; then
     "$@"
@@ -449,7 +471,7 @@ _tdd_locked_run() {
       });
     ' >/dev/null 2>&1
   release_rc=$?
-  rm -f -- "$token_file" 2>/dev/null || true
+  rm -f -- "$token_file" "$error_file" 2>/dev/null || true
   if [ "$release_rc" -ne 0 ]; then
     echo "[zensu-tdd-phase] lock release failed for $state_file" >&2
     return 1
