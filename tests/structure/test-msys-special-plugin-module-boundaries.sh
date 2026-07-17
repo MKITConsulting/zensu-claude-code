@@ -283,9 +283,13 @@ BASH_PAYLOAD="$(SESSION_VALUE="$SESSION" PROJECT_VALUE="$NATIVE_PROJECT" node -e
     tool_input: { command: "printf changed > src/app.js" },
   }));
 ')"
+# This canary validates module loading and tracked-source classification, not the
+# configurable temp carveout. Disable that carveout so mktemp under /tmp on Linux
+# behaves identically to macOS runners whose mktemp root is /var/folders.
 BASH_OUT="$(printf '%s' "$BASH_PAYLOAD" \
   | CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
+    ZENSU_BSWGATE_TEMP_DIRS= \
     bash "$PLUGIN/hooks/pre-bash-source-write-gate.sh" 2>"$RAW_TMP/bash-parser.err")"
 BASH_RC=$?
 if [ "$BASH_RC" -eq 0 ] \

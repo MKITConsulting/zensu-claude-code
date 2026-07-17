@@ -691,6 +691,206 @@ fi
 # shellcheck disable=SC1090
 source "$STATE_LIB" || exit 1
 
+# Outer-lock contention must not turn a safely foreign-owned deferred review
+# into repeated fail-closed Stop prompts. After a fresh absent-Outer read, the
+# public composite may prove the foreign claim read-only and return no-work.
+P16B="$ROOT/owned-claim-contention"
+O16B=adversarial_contention_owner
+S16B=adversarial_contention_contender
+mkdir -p "$P16B"
+prepare_session "$P16B" "$O16B" O16B || exit 1
+CLAUDE_PROJECT_DIR="$P16B" TDD_STATE_DIR="$P16B/.zensu/state" \
+  tdd_write_pending_review owned.ts "owned contention fixture" >/dev/null || exit 1
+tdd_adopt_pending_review "$O16B" true 0 "${BASHPID:-$$}" >/dev/null || exit 1
+tdd_mark_pending_review_handoff "$O16B" "${BASHPID:-$$}" >/dev/null || exit 1
+OWNER_STATE16B="$(tdd_state_file "$O16B")"
+CLAIM16B="$P16B/.zensu/state/pending-review.json.claim"
+BEFORE_OWNER16B="$(digest "$OWNER_STATE16B")"
+BEFORE_CLAIM16B="$(digest "$CLAIM16B")"
+prepare_session "$P16B" "$S16B" S16B || exit 1
+CONTENDER_STATE16B="$(tdd_state_file "$S16B")"
+BEFORE_CONTENDER16B="$(digest "$CONTENDER_STATE16B")"
+LOCK_ATTEMPTS16B=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B=$((LOCK_ATTEMPTS16B + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B=0
+else
+  RC16B=$?
+fi
+if [ "$RC16B" -eq 6 ] && [ "$LOCK_ATTEMPTS16B" -eq 1 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b foreign-owned claim releases Outer-lock contention as byte-stable no-work" PASS
+else
+  check "X16b owned contention fallback (rc=$RC16B attempts=$LOCK_ATTEMPTS16B)" FAIL
+fi
+
+# rc=1 can also mean unsafe Outer storage rather than ordinary lease
+# contention. A valid foreign claim must never mask that evidence as no-work.
+mkdir "$P16B/.zensu/state/autopilot" || exit 1
+LOCK_ATTEMPTS16B_UNSAFE=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_UNSAFE=$((LOCK_ATTEMPTS16B_UNSAFE + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_UNSAFE=0
+else
+  RC16B_UNSAFE=$?
+fi
+rmdir "$P16B/.zensu/state/autopilot" || exit 1
+if [ "$RC16B_UNSAFE" -eq 2 ] && [ "$LOCK_ATTEMPTS16B_UNSAFE" -eq 1 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b2 unsafe Outer storage cannot masquerade as owned-claim no-work" PASS
+else
+  check "X16b2 unsafe contention evidence (rc=$RC16B_UNSAFE attempts=$LOCK_ATTEMPTS16B_UNSAFE)" FAIL
+fi
+
+# read-active is intentionally unlocked in the fallback. During begin it may
+# see the run before the active pointer and return rc=2 even though storage is
+# safe; that observation is inconclusive and must go back through all bounded
+# serialized retries rather than becoming an immediate corruption decision.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+prepare_session "$P16B" adversarial_contention_contender S16B || exit 1
+LOCK_ATTEMPTS16B_TRANSIENT_FIRST=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_TRANSIENT_FIRST=$((LOCK_ATTEMPTS16B_TRANSIENT_FIRST + 1))
+  return 1
+}
+_autopilot_node() { return 2; }
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_TRANSIENT_FIRST=0
+else
+  RC16B_TRANSIENT_FIRST=$?
+fi
+if [ "$RC16B_TRANSIENT_FIRST" -eq 1 ] \
+    && [ "$LOCK_ATTEMPTS16B_TRANSIENT_FIRST" -eq 5 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b3 transient first Outer read returns to bounded serialized retry" PASS
+else
+  check "X16b3 first-read transient routing (rc=$RC16B_TRANSIENT_FIRST attempts=$LOCK_ATTEMPTS16B_TRANSIENT_FIRST)" FAIL
+fi
+
+# The second read is the linearization fence and can hit the same transient.
+# It likewise cannot authorize no-work or emit an immediate corruption result.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+prepare_session "$P16B" adversarial_contention_contender S16B || exit 1
+LOCK_ATTEMPTS16B_TRANSIENT_FENCE=0
+READ_MARKER16B_TRANSIENT="$P16B/first-transient-fence-read"
+rm -f "$READ_MARKER16B_TRANSIENT"
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_TRANSIENT_FENCE=$((LOCK_ATTEMPTS16B_TRANSIENT_FENCE + 1))
+  return 1
+}
+_autopilot_node() {
+  if [ ! -e "$READ_MARKER16B_TRANSIENT" ]; then
+    : > "$READ_MARKER16B_TRANSIENT"
+    return 1
+  fi
+  return 2
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_TRANSIENT_FENCE=0
+else
+  RC16B_TRANSIENT_FENCE=$?
+fi
+if [ "$RC16B_TRANSIENT_FENCE" -eq 1 ] \
+    && [ "$LOCK_ATTEMPTS16B_TRANSIENT_FENCE" -eq 5 ] \
+    && [ -e "$READ_MARKER16B_TRANSIENT" ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b4 transient final Outer fence returns to bounded serialized retry" PASS
+else
+  check "X16b4 final-fence transient routing (rc=$RC16B_TRANSIENT_FENCE attempts=$LOCK_ATTEMPTS16B_TRANSIENT_FENCE marker=$([ -e "$READ_MARKER16B_TRANSIENT" ] && echo yes || echo no))" FAIL
+fi
+
+# A current nonterminal Outer generation remains authoritative even when a
+# foreign deferred claim is present: the same contention fallback must route
+# back to the Outer state instead of using the no-work proof.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+P16C="$ROOT/active-outer-contention"
+R16C=adversarial_active_outer_contention_run
+O16C=adversarial_active_outer_contention_owner
+S16C=adversarial_active_outer_contention_contender
+mkdir -p "$P16C"
+prepare_session "$P16C" "$O16C" O16C || exit 1
+CLAUDE_PROJECT_DIR="$P16C" TDD_STATE_DIR="$P16C/.zensu/state" \
+  tdd_write_pending_review outer-owned.ts "active outer contention fixture" >/dev/null || exit 1
+tdd_adopt_pending_review "$O16C" true 0 "${BASHPID:-$$}" >/dev/null || exit 1
+tdd_mark_pending_review_handoff "$O16C" "${BASHPID:-$$}" >/dev/null || exit 1
+autopilot_begin_run "$R16C" "$O16C" "$P16C" >/dev/null || exit 1
+CLAIM16C="$P16C/.zensu/state/pending-review.json.claim"
+RUN16C="$(autopilot_run_file "$R16C" "$P16C")"
+BEFORE_CLAIM16C="$(digest "$CLAIM16C")"
+BEFORE_RUN16C="$(digest "$RUN16C")"
+prepare_session "$P16C" "$S16C" S16C || exit 1
+LOCK_ATTEMPTS16C=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16C=$((LOCK_ATTEMPTS16C + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16C" "$S16C" true 0 >/dev/null 2>&1; then
+  RC16C=0
+else
+  RC16C=$?
+fi
+if [ "$RC16C" -eq 4 ] && [ "$LOCK_ATTEMPTS16C" -eq 1 ] \
+    && [ "$(digest "$CLAIM16C")" = "$BEFORE_CLAIM16C" ] \
+    && [ "$(digest "$RUN16C")" = "$BEFORE_RUN16C" ]; then
+  check "X16c active Outer remains authoritative during owned-claim contention" PASS
+else
+  check "X16c active Outer contention routing (rc=$RC16C attempts=$LOCK_ATTEMPTS16C)" FAIL
+fi
+# Restore the production lock wrapper before the remaining integration cases.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
+# The final unlocked Outer read is the contention proof's linearization fence.
+# Force the first read to report absence, keep the foreign claim valid, then let
+# the real second read reveal the already-active run; routing must still be rc=4.
+eval "$(declare -f _autopilot_node | sed '1s/_autopilot_node/_adversarial_original_node_16d/')"
+LOCK_ATTEMPTS16D=0
+READ_MARKER16D="$P16C/first-contention-read"
+rm -f "$READ_MARKER16D"
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16D=$((LOCK_ATTEMPTS16D + 1))
+  return 1
+}
+_autopilot_node() {
+  if [ "${1:-}" = read-active ] && [ ! -e "$READ_MARKER16D" ]; then
+    : > "$READ_MARKER16D"
+    return 1
+  fi
+  _adversarial_original_node_16d "$@"
+}
+if autopilot_adopt_pending_review "$P16C" "$S16C" true 0 >/dev/null 2>&1; then
+  RC16D=0
+else
+  RC16D=$?
+fi
+if [ "$RC16D" -eq 4 ] && [ "$LOCK_ATTEMPTS16D" -eq 1 ] \
+    && [ -e "$READ_MARKER16D" ] \
+    && [ "$(digest "$CLAIM16C")" = "$BEFORE_CLAIM16C" ] \
+    && [ "$(digest "$RUN16C")" = "$BEFORE_RUN16C" ]; then
+  check "X16d second Outer read fences the owned-claim contention proof" PASS
+else
+  check "X16d contention TOCTOU fence (rc=$RC16D attempts=$LOCK_ATTEMPTS16D marker=$([ -e "$READ_MARKER16D" ] && echo yes || echo no))" FAIL
+fi
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
 # Git Bash skips or misapplies its heuristic path conversion for some quoted
 # values (notably apostrophes). Exercise every Autopilot worker path schema plus
 # direct payload and Inner-state Node boundaries under one immutable binding.

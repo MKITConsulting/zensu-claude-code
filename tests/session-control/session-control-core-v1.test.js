@@ -2144,6 +2144,110 @@ test('handoff claims stay owned until both the process is dead and the claim is 
   assert.equal(stale.ownerRevision, owner.revision);
 });
 
+test('read-only foreign deferred ownership accepts only a live owner or fresh handoff', () => {
+  const ownedOptions = (fixtureValue, overrides = {}) => {
+    const options = inspectDeferredOptions(fixtureValue);
+    delete options.claimStale;
+    return { ...options, ttlHours: 6, ...overrides };
+  };
+  const live = deferredFixture({ ownerSession: 'read-only-live-owner' });
+  seedDeferredOwner(live);
+  writeDeferredClaim(live);
+  const liveStateFile = path.join(
+    live.stateDirectory,
+    `tdd-phase-${live.ownerSessionId}.json`,
+  );
+  const liveClaimBefore = fs.readFileSync(live.claimFile);
+  const liveStateBefore = fs.readFileSync(liveStateFile);
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(live)),
+    true,
+  );
+  assert.deepEqual(fs.readFileSync(live.claimFile), liveClaimBefore);
+  assert.deepEqual(fs.readFileSync(liveStateFile), liveStateBefore);
+
+  const assignmentWindow = deferredFixture({ ownerSession: 'read-only-assignment-window' });
+  writeDeferredClaim(assignmentWindow);
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(assignmentWindow)),
+    true,
+  );
+
+  const freshHandoff = deferredFixture({ ownerSession: 'read-only-fresh-handoff' });
+  seedDeferredOwner(freshHandoff);
+  writeDeferredClaim(freshHandoff, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+  });
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(freshHandoff)),
+    true,
+  );
+
+  const staleHandoff = deferredFixture({ ownerSession: 'read-only-stale-handoff' });
+  seedDeferredOwner(staleHandoff);
+  writeDeferredClaim(staleHandoff, {
+    ownerPid: 2147483647,
+    handoffEmitted: true,
+    ts: '2000-01-01T00:00:00Z',
+  });
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(staleHandoff)),
+    false,
+  );
+
+  const deadUnacknowledged = deferredFixture({ ownerSession: 'read-only-dead-unacknowledged' });
+  seedDeferredOwner(deadUnacknowledged);
+  writeDeferredClaim(deadUnacknowledged, { ownerPid: 2147483647 });
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(deadUnacknowledged)),
+    false,
+  );
+
+  const current = deferredFixture({ ownerSession: 'read-only-current-owner' });
+  seedDeferredOwner(current);
+  writeDeferredClaim(current);
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(current, {
+      currentContextFile: current.ownerContextFile,
+      currentSessionId: current.ownerSessionId,
+    })),
+    false,
+  );
+
+  const done = deferredFixture({ ownerSession: 'read-only-done-owner' });
+  seedDeferredOwner(done, { chainDone: true });
+  writeDeferredClaim(done, { handoffEmitted: true });
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(done)),
+    false,
+  );
+
+  const transferring = deferredFixture({ ownerSession: 'read-only-transfer-owner' });
+  const transferState = seedDeferredOwner(transferring);
+  writeDeferredClaim(transferring, {
+    transfer: preparedTransfer(transferring, transferState.revision),
+  });
+  const transferClaimBefore = fs.readFileSync(transferring.claimFile);
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(transferring)),
+    false,
+  );
+  assert.deepEqual(fs.readFileSync(transferring.claimFile), transferClaimBefore);
+
+  const cancelling = deferredFixture({ ownerSession: 'read-only-cancellation-owner' });
+  const cancellationState = seedDeferredOwner(cancelling);
+  writeDeferredClaim(cancelling, {
+    cancellation: preparedCancellation(cancelling, cancellationState.revision),
+  });
+  const cancellationClaimBefore = fs.readFileSync(cancelling.claimFile);
+  assert.equal(
+    core.deferredReviewOwnedByOther(ownedOptions(cancelling)),
+    false,
+  );
+  assert.deepEqual(fs.readFileSync(cancelling.claimFile), cancellationClaimBefore);
+});
+
 test('process start identity prevents a live PID reuse from retaining a deferred claim', (t) => {
   const actualIdentity = currentProcessStartIdentity();
   if (!actualIdentity) {

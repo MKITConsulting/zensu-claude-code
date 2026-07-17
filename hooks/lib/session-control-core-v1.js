@@ -1747,6 +1747,22 @@ function readWorkflowState(options) {
   return validateWorkflowState(readJson(file), options.sessionId);
 }
 
+function readWorkflowStateSnapshot(projectRoot, sessionId) {
+  const file = workflowStateFile(projectRoot, sessionId);
+  const snapshot = readRegularFileSnapshot(file);
+  let value;
+  try {
+    value = JSON.parse(snapshot.data.toString('utf8'));
+  } catch {
+    fail(`invalid JSON: ${file}`);
+  }
+  return {
+    file,
+    snapshot,
+    state: validateWorkflowState(value, sessionId),
+  };
+}
+
 function canonicalControlSessionKey(input, label) {
   const value = requireText(input, label);
   const key = sessionKey(value);
@@ -2064,6 +2080,86 @@ function deferredReviewStateIsRetired(state, transfer) {
   return state.revision === transfer.fromOwnerRevision + 1
     && state.last_event === 'deferred-review-transfer'
     && deferredReviewStateIsIdle(state);
+}
+
+function deferredReviewClaimIsStale(claimSnapshot, ttlHours) {
+  if (!Number.isSafeInteger(ttlHours) || ttlHours < 0 || ttlHours > 8760) {
+    fail('deferred-review ownership ttl is invalid');
+  }
+  if (ttlHours === 0) return false;
+  const claimTimestamp = typeof claimSnapshot.claim.ts === 'string'
+    ? Date.parse(claimSnapshot.claim.ts)
+    : Number.NaN;
+  const timestamp = Number.isFinite(claimTimestamp)
+    ? claimTimestamp
+    : claimSnapshot.snapshot.stat.mtimeMs;
+  return Number.isFinite(timestamp)
+    && Date.now() - timestamp >= ttlHours * 60 * 60 * 1000;
+}
+
+// A contending Stop hook needs a cheap, mutation-free proof that another
+// session already owns the deferred review. Keep this separate from
+// inspectDeferredReviewOwner(): that recovery API may advance transfer or
+// cancellation receipts. Two descriptor-backed snapshots on each artifact
+// provide one stable overlap without joining the contended Outer lock or
+// introducing a second lock queue.
+function deferredReviewOwnedByOther(options) {
+  const binding = currentClaudeSessionContext(options);
+  const ttlHours = options.ttlHours;
+  if (!Number.isSafeInteger(ttlHours) || ttlHours < 0 || ttlHours > 8760) {
+    fail('deferred-review ownership ttl is invalid');
+  }
+
+  const firstClaim = readDeferredReviewClaimSnapshot(options, binding.projectRoot);
+  const claim = firstClaim.claim;
+  if (
+    claim.ownerSessionId === binding.currentSessionId
+    || claim.transfer !== undefined
+    || claim.cancellation !== undefined
+  ) {
+    return false;
+  }
+
+  const contexts = relatedClaudeSessionContexts(options, claim.ownerSessionId);
+  const firstState = readWorkflowStateSnapshot(
+    contexts.projectRoot,
+    contexts.ownerSessionId,
+  );
+  const secondClaim = readDeferredReviewClaimSnapshot(options, binding.projectRoot);
+  const secondState = readWorkflowStateSnapshot(
+    contexts.projectRoot,
+    contexts.ownerSessionId,
+  );
+  if (
+    !sameRegularSnapshot(firstClaim.snapshot, secondClaim.snapshot)
+    || !sameRegularSnapshot(firstState.snapshot, secondState.snapshot)
+  ) {
+    return false;
+  }
+
+  const stableClaim = secondClaim.claim;
+  const state = secondState.state;
+  if (
+    stableClaim.ownerSessionId !== contexts.ownerSessionId
+    || stableClaim.transfer !== undefined
+    || stableClaim.cancellation !== undefined
+  ) {
+    return false;
+  }
+
+  const ownerAlive = deferredOwnerProcessIsAlive(stableClaim);
+  if (state.deferredReviewClaim !== stableClaim.claimId) {
+    return stableClaim.handoffEmitted === false
+      && deferredReviewStateCanSeed(state)
+      && ownerAlive;
+  }
+  if (state.chainDone === true || state.active !== true || state.implComplete !== true) {
+    return false;
+  }
+  return ownerAlive || (
+    stableClaim.handoffEmitted === true
+    && !deferredReviewClaimIsStale(secondClaim, ttlHours)
+  );
 }
 
 function cancelStalePreparedDeferredReviewTransfer(options, claim, inspectedState) {
@@ -3281,6 +3377,7 @@ module.exports = {
   resetReviewBudget,
   readWorkflowState,
   inspectDeferredReviewOwner,
+  deferredReviewOwnedByOther,
   prepareDeferredReviewTransfer,
   retireDeferredReviewOwner,
   markDeferredReviewOwnerRetired,

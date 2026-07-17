@@ -474,6 +474,8 @@ DECISIONS="$(OUT_DIR="$CASE_ROOT" node -e '
   let block = 0;
   let allow = 0;
   let invalid = 0;
+  let actionable = 0;
+  let safety = 0;
   for (let index = 1; index <= 20; index += 1) {
     const outputFile = `${process.env.OUT_DIR}/out-${index}`;
     const rcFile = `${process.env.OUT_DIR}/rc-${index}`;
@@ -483,11 +485,15 @@ DECISIONS="$(OUT_DIR="$CASE_ROOT" node -e '
       if (rc !== "0") { invalid += 1; continue; }
       if (!raw) { allow += 1; continue; }
       const value = JSON.parse(raw);
-      if (value && value.decision === "block" && typeof value.reason === "string") block += 1;
+      if (value && value.decision === "block" && typeof value.reason === "string") {
+        block += 1;
+        if (value.reason.startsWith("STOP intercepted by zensu chain-enforcer.")) actionable += 1;
+        else safety += 1;
+      }
       else invalid += 1;
     } catch (_) { invalid += 1; }
   }
-  process.stdout.write(`${block}\t${allow}\t${invalid}`);
+  process.stdout.write(`${block}\t${allow}\t${invalid}\t${actionable}\t${safety}`);
 ')"
 STATE_META="$(STATE_DIR="$CASE_STATE" node -e '
   const fs = require("fs");
@@ -500,16 +506,21 @@ STATE_META="$(STATE_DIR="$CASE_STATE" node -e '
   const exactOwner = active.length === 1
     && active[0].name === ownerFile
     && active[0].value.deferredReviewClaim === claim.claimId;
-  process.stdout.write(`${states.length}\t${active.length}\t${states.length - active.length}\t${exactOwner}`);
+  const exactBudget = active.length === 1 && active[0].value.stopBlockCount === 1;
+  const transfers = states.filter(({ value }) => value.last_event === "deferred-review-transfer").length;
+  process.stdout.write(`${states.length}\t${active.length}\t${states.length - active.length}\t${exactOwner}\t${claim.handoffEmitted === true}\t${exactBudget}\t${transfers}`);
 ')"
-IFS=$'\t' read -r WINNERS ALLOWS INVALID_STOPS <<<"$DECISIONS"
-IFS=$'\t' read -r STATES ACTIVE_STATES INACTIVE_STATES EXACT_OWNER <<<"$STATE_META"
+IFS=$'\t' read -r WINNERS ALLOWS INVALID_STOPS ACTIONABLE_BLOCKS SAFETY_BLOCKS <<<"$DECISIONS"
+IFS=$'\t' read -r STATES ACTIVE_STATES INACTIVE_STATES EXACT_OWNER HANDOFF_EMITTED EXACT_BUDGET TRANSFER_STATES <<<"$STATE_META"
 if [ "$WINNERS" = 1 ] && [ "$ALLOWS" = 19 ] && [ "$INVALID_STOPS" = 0 ] \
+  && [ "$ACTIONABLE_BLOCKS" = 1 ] && [ "$SAFETY_BLOCKS" = 0 ] \
   && [ "$STATES" = 21 ] && [ "$ACTIVE_STATES" = 1 ] \
-  && [ "$INACTIVE_STATES" = 20 ] && [ "$EXACT_OWNER" = true ]; then
+  && [ "$INACTIVE_STATES" = 20 ] && [ "$EXACT_OWNER" = true ] \
+  && [ "$HANDOFF_EMITTED" = true ] && [ "$EXACT_BUDGET" = true ] \
+  && [ "$TRANSFER_STATES" = 0 ]; then
   check "C1 parallel Stops adopt and block exactly once" PASS
 else
-  check "C1 parallel Stops adopt and block exactly once (blocks=$WINNERS allows=$ALLOWS invalid=$INVALID_STOPS states=$STATES active=$ACTIVE_STATES inactive=$INACTIVE_STATES exact_owner=$EXACT_OWNER)" FAIL
+  check "C1 parallel Stops adopt and block exactly once (blocks=$WINNERS actionable=$ACTIONABLE_BLOCKS safety=$SAFETY_BLOCKS allows=$ALLOWS invalid=$INVALID_STOPS states=$STATES active=$ACTIVE_STATES inactive=$INACTIVE_STATES exact_owner=$EXACT_OWNER handoff=$HANDOFF_EMITTED budget=$EXACT_BUDGET transfers=$TRANSFER_STATES)" FAIL
 fi
 
 # Simulate process death after seed but before block output: direct adoption

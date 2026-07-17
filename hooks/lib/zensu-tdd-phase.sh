@@ -2946,6 +2946,47 @@ _tdd_adopt_pending_review_critical() {
   return 1
 }
 
+# Read-only contention probe used only after the durable Outer mutex could not
+# be acquired. Core brackets both the foreign claim and owner state with stable
+# descriptor-backed snapshots; this helper deliberately takes no pending or
+# workflow lock and never repairs/transfers/cancels a claim.
+tdd_pending_review_owned_by_other() {
+  local supplied_session="${1:-}" ttl_hours="${2:-}" session_id pf dir claim_file
+  local project_root native_project_root native_claim_file
+  [ "$#" -eq 2 ] && [ -n "$supplied_session" ] || return 1
+  case "$ttl_hours" in ''|*[!0-9]*) return 1 ;; esac
+  [ "$ttl_hours" -le 8760 ] 2>/dev/null || return 1
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  project_root="$(zensu_resolve_project_dir)" || return 1
+  native_project_root="$(_tdd_native_project_path "$project_root")" || return 1
+  pf="$(zensu_pending_review_file)"
+  dir="$(dirname "$pf")"
+  claim_file="${pf}.claim"
+  _tdd_path_safe "$claim_file" regular-or-absent "$dir" || return 1
+  [ -f "$claim_file" ] && [ ! -L "$claim_file" ] || return 1
+  native_claim_file="$(_tdd_native_project_path "$claim_file")" || return 1
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
+    CURRENT_CONTEXT="${ZENSU_SESSION_CONTEXT:-}" CURRENT_SESSION="$session_id" \
+    PROJECT_ROOT="$native_project_root" PLUGIN_ROOT="$_ZENSU_TDD_NATIVE_PLUGIN_ROOT" \
+    RUNTIME_DIGEST="${ZENSU_RUNTIME_DIGEST:-}" CLAIM_FILE="$native_claim_file" \
+    TTL_HOURS="$ttl_hours" node -e '
+      try {
+        const core = require(process.env.CONTROL_CORE);
+        const owned = core.deferredReviewOwnedByOther({
+          currentContextFile: process.env.CURRENT_CONTEXT,
+          currentSessionId: process.env.CURRENT_SESSION,
+          projectRoot: process.env.PROJECT_ROOT,
+          pluginRoot: process.env.PLUGIN_ROOT,
+          runtimeDigest: process.env.RUNTIME_DIGEST,
+          claimFile: process.env.CLAIM_FILE,
+          ttlHours: Number.parseInt(process.env.TTL_HOURS, 10),
+        });
+        process.exit(owned ? 0 : 1);
+      } catch (_) { process.exit(3); }
+    ' >/dev/null 2>&1
+}
+
 tdd_adopt_pending_review() {
   local supplied_session="${1:-}" session_id vanilla="${2:-false}" ttl_hours="${3:-0}" pf dir claim_file
   local owner_pid="${4:-$$}"
@@ -3347,7 +3388,7 @@ case "${OSTYPE:-}" in
     # must never fall back to an inherited ZENSU_* module path.
     export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

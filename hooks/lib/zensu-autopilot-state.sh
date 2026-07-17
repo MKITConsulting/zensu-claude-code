@@ -1856,9 +1856,63 @@ _autopilot_adopt_pending_review_critical() {
   return "$adopt_rc"
 }
 
+# When the Outer lease is saturated, avoid sending every safely losing Stop a
+# generic storage-error prompt. This is a read-only proof: check Outer, prove a
+# stable foreign plain claim, then check Outer again as the TOCTOU fence. A run
+# published after that final absent/terminal read linearizes after this Stop.
+_autopilot_deferred_contention_result() {
+  local root="$1" session_id="$2" ttl_hours="$3" state read_rc stage
+  _autopilot_storage_safe "$root" "" || return 2
+  if state="$(_autopilot_node read-active \
+      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
+        catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in DONE|CANCELLED) ;; *) return 4 ;; esac
+      ;;
+    1) ;;
+    # This unlocked read may observe begin's durable run before its active
+    # pointer is published. Storage safety was proven above, so this is
+    # inconclusive and must return to the serialized retry path.
+    2) return 8 ;;
+    *) return "$read_rc" ;;
+  esac
+
+  tdd_pending_review_owned_by_other "$session_id" "$ttl_hours" || return 8
+
+  _autopilot_storage_safe "$root" "" || return 2
+  if state="$(_autopilot_node read-active \
+      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
+        catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in DONE|CANCELLED) return 6 ;; *) return 4 ;; esac
+      ;;
+    1) return 6 ;;
+    # The final fence can see the same valid run->pointer publication window.
+    # Without a conclusive absent/terminal/active result, retry under Outer.
+    2) return 8 ;;
+    *) return "$read_rc" ;;
+  esac
+}
+
 autopilot_adopt_pending_review() {
   local root session_id="${2:-}" vanilla="${3:-false}" ttl_hours="${4:-0}"
-  local owner_pid="${5:-$$}" lock_attempt=0 rc
+  local owner_pid="${5:-$$}" lock_attempt=0 rc contention_rc
   [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || return 3
   _autopilot_session_id_ok "$session_id" || return 3
   case "$vanilla" in true|false) ;; *) return 3 ;; esac
@@ -1883,6 +1937,13 @@ autopilot_adopt_pending_review() {
     # but do not retry them as though the Outer project lock were contended.
     [ "$rc" -eq 7 ] && return 1
     [ "$rc" -eq 1 ] || return "$rc"
+    _autopilot_deferred_contention_result "$root" "$session_id" "$ttl_hours"
+    contention_rc=$?
+    case "$contention_rc" in
+      4|6) return "$contention_rc" ;;
+      8) ;;
+      *) return "$contention_rc" ;;
+    esac
     lock_attempt=$((lock_attempt + 1))
   done
   return 1
