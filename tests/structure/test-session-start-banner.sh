@@ -170,8 +170,8 @@ cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$SPECIAL_ROOT/hooks/lib/zensu-config
 cp "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" "$SPECIAL_ROOT/hooks/lib/claude-principal-v1.js"
 cp "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" "$SPECIAL_ROOT/hooks/lib/zensu-agent-context.sh"
 printf '%s\n' '#!/bin/bash' \
-  '[ "${CLAUDE_PLUGIN_DATA:-}" = "${EXPECTED_PLUGIN_DATA:-}" ] || exit 7' \
-  ': > "${EXEC_MARKER:?}"' > "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
+  '[ -d "${CLAUDE_PLUGIN_DATA:-}" ] || exit 7' \
+  'printf "%s" "$CLAUDE_PLUGIN_DATA" > PRIMER_EXECUTED' > "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 chmod +x "$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
 printf '%s\n' '{"hooks":{"tddImplementation":true}}' > "$SPECIAL_BASE/strict.json"
 SPECIAL_PLUGIN_DATA="$SPECIAL_BASE/"'plugin data $(touch PRIMER_DATA_PWNED) `touch PRIMER_DATA_TICKED`;touch PRIMER_DATA_SEMI; apostrophe'"'"'value'
@@ -206,14 +206,18 @@ SPECIAL_COMMAND_RC=$?
 (
   cd "$SPECIAL_BASE/run" || exit 1
   unset CLAUDE_PLUGIN_DATA
-  EXPECTED_PLUGIN_DATA="$SPECIAL_PLUGIN_DATA" EXEC_MARKER="$SPECIAL_BASE/run/PRIMER_EXECUTED" \
-    eval "$SPECIAL_EMITTED_COMMAND" >/dev/null 2>&1
+  eval "$SPECIAL_EMITTED_COMMAND" >/dev/null 2>&1
 )
 SPECIAL_EXEC_RC=$?
+SPECIAL_MARKER_OK=false
+if [ -f "$SPECIAL_BASE/run/PRIMER_EXECUTED" ] \
+  && [ "$(cat "$SPECIAL_BASE/run/PRIMER_EXECUTED")" = "$SPECIAL_PLUGIN_DATA" ]; then
+  SPECIAL_MARKER_OK=true
+fi
 if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_COMMAND_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
   && printf '%s' "$SPECIAL_CTX" | grep -qF "$EXPECTED_COMMAND" \
   && ! printf '%s' "$SPECIAL_CTX" | grep -qF '${CLAUDE_PLUGIN_ROOT}' \
-  && [ -e "$SPECIAL_BASE/run/PRIMER_EXECUTED" ] \
+  && [ "$SPECIAL_MARKER_OK" = true ] \
   && [ ! -e "$SPECIAL_BASE/run/PRIMER_PWNED" ] \
   && [ ! -e "$SPECIAL_BASE/run/PRIMER_TICKED" ] \
   && [ ! -e "$SPECIAL_BASE/run/PRIMER_SEMI" ] \
@@ -222,7 +226,7 @@ if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_COMMAND_RC" = "0" ] && [ "$SPECI
   && [ ! -e "$SPECIAL_BASE/run/PRIMER_DATA_SEMI" ]; then
   check "B15 emitted command executes with inert quoted root and plugin data" PASS
 else
-  check "B15 emitted command executes with inert quoted root and plugin data" FAIL
+  check "B15 emitted command executes with inert quoted root and plugin data (parse=$SPECIAL_PARSE_RC command=$SPECIAL_COMMAND_RC exec=$SPECIAL_EXEC_RC marker=$SPECIAL_MARKER_OK)" FAIL
 fi
 rm -rf "$SPECIAL_BASE"
 rm -rf "$PRIMER_DATA_BASE"
