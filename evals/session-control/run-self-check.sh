@@ -7,8 +7,8 @@ PROMPTFOO="$ROOT/node_modules/.bin/promptfoo"
 STATE="$(mktemp -d -t zensu-session-selfcheck-XXXXXX)"
 trap 'rm -rf "$STATE"' EXIT
 
-test "$(node -p "require('$ROOT/package.json').devDependencies.promptfoo")" = '0.121.18'
-test "$(node -p "require('$ROOT/package-lock.json').packages['node_modules/promptfoo'].version")" = '0.121.18'
+test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.18'
+test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.18'
 test -x "$PROMPTFOO"
 PROMPTFOO_VERSION="$(
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \

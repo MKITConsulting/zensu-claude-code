@@ -8,6 +8,10 @@ CORRUPTION="$ROOT/tests/structure/test-tdd-state-corruption-fail-closed.sh"
 MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
+PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
+SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
+CORE="$ROOT/hooks/lib/session-control-core-v1.js"
+ADAPTER="$ROOT/hooks/lib/claude-session-control-v1.js"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -50,10 +54,56 @@ fi
 
 if grep -qF 'name: Windows Core lease canary' "$WORKFLOW" \
   && grep -A2 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF "runner.os == 'Windows'" \
-  && grep -A3 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'test-tdd-no-flock-external-lease.sh'; then
+  && grep -A5 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'test-tdd-no-flock-external-lease.sh' \
+  && grep -A5 -F 'name: Windows Core lease canary' "$WORKFLOW" | grep -qF 'tests/session-control/run.sh'; then
   check "Windows CI fails fast on the cross-process Core lease" PASS
 else
   check "Windows CI fails fast on the cross-process Core lease" FAIL
+fi
+
+LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'process.argv.slice(1)' \
+  && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -Eq 'process\.env\.(CONTROL_CORE|LOCK_DIRECTORY|RESOURCE_PATH|TOKEN_FILE)' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'token: process.env.LOCK_TOKEN' \
+  && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -q '"\$token" >/dev/null'; then
+  check "Core lease paths use argv while its token stays off the command line" PASS
+else
+  check "Core lease paths use argv while its token stays off the command line" FAIL
+fi
+
+if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'sameIdentity(before, opened)' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'opened.nlink !== 1' \
+  && printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'sameIdentity(afterDescriptor, afterPath)' \
+  && ! printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'fs.constants.O_TRUNC'; then
+  check "Windows token open proves identity before truncate without unsupported O_NOFOLLOW" PASS
+else
+  check "Windows token open proves identity before truncate without unsupported O_NOFOLLOW" FAIL
+fi
+
+if ! grep -Fq "require('\$ROOT/" "$ROOT/evals/session-control/run-self-check.sh" \
+  && ! grep -Fq "require('\$ROOT/" "$ROOT/evals/session-control/run-eval.sh" \
+  && grep -qF 'canonical_node_path' "$SESSION"; then
+  check "Session Control evals and assertions pass filesystem paths through argv" PASS
+else
+  check "Session Control evals and assertions pass filesystem paths through argv" FAIL
+fi
+
+if grep -qF 'cd -P -- "$ROOT"' "$SESSION_HOOK" \
+  && grep -qF 'exec node ./hooks/lib/claude-session-control-v1.js' "$SESSION_HOOK" \
+  && grep -qF 'unset CLAUDE_PLUGIN_ROOT PLUGIN_ROOT ZENSU_PLUGIN_ROOT' "$SESSION_HOOK"; then
+  check "SessionStart launches Node relatively after validating shell-side roots" PASS
+else
+  check "SessionStart launches Node relatively after validating shell-side roots" FAIL
+fi
+
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$CORE" \
+  && grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$ADAPTER" \
+  && grep -qF 'pathBefore && !sameFileIdentity(pathBefore, before)' "$CORE" \
+  && grep -qF '!sameFileIdentity(pathBefore, opened)' "$ADAPTER"; then
+  check "Session Control brackets Windows opens with path and descriptor identity" PASS
+else
+  check "Session Control brackets Windows opens with path and descriptor identity" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

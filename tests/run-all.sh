@@ -62,7 +62,7 @@ run_required_suite() {
 
 log "════════════════════════════════════════════════════════════"
 log "  zensu plugin — run-all  ($TIMESTAMP)  mode=${MODE:-default}"
-log "  plugin v$(node -e 'process.stdout.write(require("'"$ROOT"'/.claude-plugin/plugin.json").version)' 2>/dev/null || echo '?')"
+log "  plugin v$(node -e 'process.stdout.write(require(process.argv[1]).version)' -- "$ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo '?')"
 log "════════════════════════════════════════════════════════════"
 
 # ── Deterministic: structure tests ───────────────────────────────────

@@ -82,6 +82,10 @@ payload() {
   }))' "$@"
 }
 
+canonical_node_path() {
+  node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.argv[1]))' -- "$1"
+}
+
 run_hook() {
   CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_ENV_FILE="$ENV_FILE" \
     env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY bash "$HOOK"
@@ -226,7 +230,10 @@ ENV_KEY="$(printf '%s\n' "$ENV_VALUES" | sed -n '2p')"
 ENV_CONTEXT="$(printf '%s\n' "$ENV_VALUES" | sed -n '3p')"
 ENV_DIGEST="$(printf '%s\n' "$ENV_VALUES" | sed -n '4p')"
 ENV_PROJECT="$(printf '%s\n' "$ENV_VALUES" | sed -n '5p')"
-if [ "$ENV_ROOT" = "$(cd "$ROOT" && pwd -P)" ] && [ "$ENV_KEY" = "$KEY_A" ] && [ "$ENV_CONTEXT" = "$(cd "$CONTROL/records" && pwd -P)/$KEY_A.json" ] && [ "$ENV_PROJECT" = "$(cd "$PROJECT_A" && pwd -P)" ]; then
+if [ "$ENV_ROOT" = "$(canonical_node_path "$ROOT")" ] \
+  && [ "$ENV_KEY" = "$KEY_A" ] \
+  && [ "$ENV_CONTEXT" = "$(canonical_node_path "$RECORD_A")" ] \
+  && [ "$ENV_PROJECT" = "$(canonical_node_path "$PROJECT_A")" ]; then
   check "SessionStart exports exact root, hashed key, immutable context and project" PASS
 else
   check "SessionStart exports exact root, hashed key, immutable context and project" FAIL
@@ -295,7 +302,7 @@ fi
 
 HELPER_KEY="$(bash -c "source '$ENV_FILE'; source '$SESSION'; zensu_resolve_session_id ''" 2>/dev/null)"
 HELPER_PROJECT="$(bash -c "source '$ENV_FILE'; source '$SESSION'; zensu_resolve_project_dir" 2>/dev/null)"
-if [ "$HELPER_KEY" = "$KEY_A" ] && [ "$HELPER_PROJECT" = "$(cd "$PROJECT_A" && pwd -P)" ]; then
+if [ "$HELPER_KEY" = "$KEY_A" ] && [ "$HELPER_PROJECT" = "$(canonical_node_path "$PROJECT_A")" ]; then
   check "model-side helpers consume only the exported session contract" PASS
 else
   check "model-side helpers consume only the exported session contract" FAIL

@@ -28,11 +28,20 @@ jobs:
       - run: npm ci
       - name: Windows Core lease canary
         if: runner.os == 'Windows'
-        run: bash tests/structure/test-tdd-no-flock-external-lease.sh
+        run: |
+          bash tests/structure/test-tdd-no-flock-external-lease.sh
+          bash tests/session-control/run.sh
       - run: bash tests/run-all.sh
       - name: Show suite report on failure
         if: failure()
-        run: cat tests/results/run-all-*.txt
+        run: |
+          shopt -s nullglob
+          reports=(tests/results/run-all-*.txt)
+          if ((${#reports[@]})); then
+            cat "${reports[@]}"
+          else
+            echo 'No full-suite report was produced; inspect the failed preflight step above.'
+          fi
 
   session-control-contract:
     name: Session Control contract (Promptfoo 0.121.18)

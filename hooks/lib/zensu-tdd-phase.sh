@@ -362,30 +362,36 @@ _tdd_locked_run() {
     return 1
   }
 
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-    LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" TOKEN_FILE="$token_file" \
-    node -e '
+  node -e '
       const fs = require("node:fs");
-      const core = require(process.env.CONTROL_CORE);
+      const [corePath, lockDirectory, resourcePath, tokenFile] = process.argv.slice(1);
+      const core = require(corePath);
       const sameIdentity = (left, right) => {
         if (left.ino !== 0 && right.ino !== 0) return left.dev === right.dev && left.ino === right.ino;
         return left.birthtimeMs === right.birthtimeMs && left.mode === right.mode;
       };
-      const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+      // Windows exposes O_NOFOLLOW in some Node builds but rejects it for this
+      // open. The lstat/open/fstat identity bracket is the portable no-follow
+      // equivalent there. Open without O_TRUNC so every mutation remains after
+      // that identity proof; tokenSink performs the truncate only afterwards.
+      const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+        ? fs.constants.O_NOFOLLOW : 0;
       let descriptor;
       let lease = null;
       try {
-        const before = fs.lstatSync(process.env.TOKEN_FILE);
+        const before = fs.lstatSync(tokenFile);
         if (before.isSymbolicLink() || !before.isFile() || before.nlink !== 1) throw new Error("unsafe token file");
         descriptor = fs.openSync(
-          process.env.TOKEN_FILE,
-          fs.constants.O_WRONLY | fs.constants.O_TRUNC | noFollow,
+          tokenFile,
+          fs.constants.O_WRONLY | noFollow,
         );
         const opened = fs.fstatSync(descriptor);
-        if (!sameIdentity(before, opened)) throw new Error("token file changed before open");
+        if (!opened.isFile() || opened.nlink !== 1 || !sameIdentity(before, opened)) {
+          throw new Error("token file changed before open");
+        }
         lease = core.acquireExternalProcessLock({
-          lockDirectory: process.env.LOCK_DIRECTORY,
-          resourcePath: process.env.RESOURCE_PATH,
+          lockDirectory,
+          resourcePath,
           ownerPid: process.ppid,
           tokenSink: (token) => {
             fs.ftruncateSync(descriptor, 0);
@@ -394,7 +400,7 @@ _tdd_locked_run() {
           },
         });
         const afterDescriptor = fs.fstatSync(descriptor);
-        const afterPath = fs.lstatSync(process.env.TOKEN_FILE);
+        const afterPath = fs.lstatSync(tokenFile);
         if (
           afterDescriptor.nlink !== 1
           || afterPath.isSymbolicLink()
@@ -412,8 +418,8 @@ _tdd_locked_run() {
         if (lease) {
           try {
             core.releaseExternalProcessLock({
-              lockDirectory: process.env.LOCK_DIRECTORY,
-              resourcePath: process.env.RESOURCE_PATH,
+              lockDirectory,
+              resourcePath,
               ownerPid: process.ppid,
               token: lease.token,
             });
@@ -421,7 +427,8 @@ _tdd_locked_run() {
         }
         process.exit(3);
       }
-    ' >/dev/null 2>"$error_file"
+    ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+      "$lock_directory" "$state_file" "$token_file" >/dev/null 2>"$error_file"
   acquire_rc=$?
   if _tdd_path_safe "$token_file" regular; then
     token="$(tr -d '[:space:]' < "$token_file" 2>/dev/null)"
@@ -430,17 +437,17 @@ _tdd_locked_run() {
   fi
   if [ "$acquire_rc" -ne 0 ] || [ -z "$token" ]; then
     if [ -n "$token" ]; then
-      CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-        LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" LOCK_TOKEN="$token" \
-        node -e '
-          const core = require(process.env.CONTROL_CORE);
+      LOCK_TOKEN="$token" node -e '
+          const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
+          const core = require(corePath);
           core.releaseExternalProcessLock({
-            lockDirectory: process.env.LOCK_DIRECTORY,
-            resourcePath: process.env.RESOURCE_PATH,
+            lockDirectory,
+            resourcePath,
             ownerPid: process.ppid,
             token: process.env.LOCK_TOKEN,
           });
-        ' >/dev/null 2>&1 || true
+        ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+          "$lock_directory" "$state_file" >/dev/null 2>&1 || true
     fi
     if _tdd_path_safe "$error_file" regular; then
       local lock_error
@@ -459,17 +466,17 @@ _tdd_locked_run() {
     false
   fi
   local rc=$?
-  CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
-    LOCK_DIRECTORY="$lock_directory" RESOURCE_PATH="$state_file" LOCK_TOKEN="$token" \
-    node -e '
-      const core = require(process.env.CONTROL_CORE);
+  LOCK_TOKEN="$token" node -e '
+      const [corePath, lockDirectory, resourcePath] = process.argv.slice(1);
+      const core = require(corePath);
       core.releaseExternalProcessLock({
-        lockDirectory: process.env.LOCK_DIRECTORY,
-        resourcePath: process.env.RESOURCE_PATH,
+        lockDirectory,
+        resourcePath,
         ownerPid: process.ppid,
         token: process.env.LOCK_TOKEN,
       });
-    ' >/dev/null 2>&1
+    ' -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js" \
+      "$lock_directory" "$state_file" >/dev/null 2>&1
   release_rc=$?
   rm -f -- "$token_file" "$error_file" 2>/dev/null || true
   if [ "$release_rc" -ne 0 ]; then

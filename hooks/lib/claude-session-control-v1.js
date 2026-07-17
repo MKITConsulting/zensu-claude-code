@@ -142,7 +142,8 @@ function appendEnvironmentBlock(values) {
   const block = Buffer.from(`${[...invalidation, ...exports].join('\n')}\n`, 'utf8');
   if (pathBefore.size + block.length > MAX_PAYLOAD_BYTES) fail('CLAUDE_ENV_FILE would exceed its size limit');
 
-  const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
   let descriptor;
   try {
     descriptor = fs.openSync(file, fs.constants.O_WRONLY | fs.constants.O_APPEND | noFollow);

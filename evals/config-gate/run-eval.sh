@@ -29,10 +29,12 @@ check() {
 run_test() {
   local script="$1"
   local label="$2"
+  local output
   if [ -x "$script" ]; then
-    if "$script" >/dev/null 2>&1; then
+    if output="$("$script" 2>&1)"; then
       check "$label" PASS
     else
+      printf '%s\n' "$output" | sed 's/^/    /' | tee -a "$REPORT"
       check "$label" FAIL
     fi
   else

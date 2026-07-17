@@ -151,7 +151,8 @@ function readRegularFileSnapshot(
   missingAllowed = false,
   allowMultipleLinks = false,
 ) {
-  const noFollow = Number.isInteger(fs.constants.O_NOFOLLOW) ? fs.constants.O_NOFOLLOW : 0;
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
   let descriptor;
   let pathBefore = null;
   const parent = path.dirname(file);

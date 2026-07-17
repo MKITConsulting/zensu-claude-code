@@ -96,7 +96,7 @@ case "$(uname -s)" in
     [ "$(tdd_get_counter "$STATE_FILE" stopBlockCount)" = 1 ] \
       && check "Stop increments only the integrated stopBlockCount field" PASS \
       || check "Stop increments only the integrated stopBlockCount field" FAIL
-    if rg -qi 'symlink|stopblocks file' "$TMP_DIR/stop.err"; then
+    if grep -Eqi 'symlink|stopblocks file' "$TMP_DIR/stop.err"; then
       check "Stop emits no sidecar-specific warning" FAIL
     else
       check "Stop emits no sidecar-specific warning" PASS
