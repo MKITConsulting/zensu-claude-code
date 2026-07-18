@@ -283,7 +283,9 @@ evil_path_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit"
   && check "SP6 case variant .ZENSU/State/ still denied" PASS || check "SP6 case-variant deny" FAIL
 [ "$(gate "$(evil_path_payload "src/../.zensu/state/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
   && check "SP7 traversal src/../.zensu/state/ still denied" PASS || check "SP7 traversal deny" FAIL
-[ "$(gate "$(evil_path_payload "$STATE_DIR/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
+activate_session "$SID_B"
+BOUND_STATE_DIR="$(dirname "$(tdd_state_file "$SID_B")")"
+[ "$(gate "$(evil_path_payload "$BOUND_STATE_DIR/tdd-phase-evil.json" "$SID_B")")" = "deny" ] \
   && check "SP8 resolved STATE_DIR override location denied too" PASS || check "SP8 state-dir override deny" FAIL
 ln -s "$STATE_DIR" "$PROJ/statelink" 2>/dev/null
 if [ -L "$PROJ/statelink" ]; then

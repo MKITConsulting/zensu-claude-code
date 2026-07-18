@@ -9,6 +9,7 @@ STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 PHASE="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 SESSION_INIT="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 
@@ -20,22 +21,36 @@ mkdir -p "$TMP/session-control/plugin-data"
 ZENSU_TEST_PLUGIN_DATA="$(cd "$TMP/session-control/plugin-data" && pwd -P)"
 export ZENSU_TEST_PLUGIN_DATA
 
+native_directory() {
+  local rendered
+  rendered="$(bash "$HOST_PATH" "$1")" || return 1
+  MSYS2_ARG_CONV_EXCL='*' node -e '
+    const fs = require("fs");
+    process.stdout.write(fs.realpathSync.native(process.argv[1]));
+  ' "$rendered"
+}
+
 activate_session() {
-  local project="$1" supplied="$2" key context
+  local project="$1" supplied="$2" key context native_project native_plugin_data
   mkdir -p "$project" || return 1
   project="$(cd "$project" && pwd -P)" || return 1
+  native_project="$(native_directory "$project")" || return 1
+  native_plugin_data="$(native_directory "$ZENSU_TEST_PLUGIN_DATA")" || return 1
   key="$(node "$SESSION_CORE" session-key "$supplied")" || return 1
-  context="$ZENSU_TEST_PLUGIN_DATA/session-control/v1/records/$key.json"
+  context="$(MSYS2_ARG_CONV_EXCL='*' node -e '
+    const path = require("path");
+    process.stdout.write(path.join(process.argv[1], "session-control", "v1", "records", `${process.argv[2]}.json`));
+  ' "$native_plugin_data" "$key")" || return 1
   if [ ! -f "$context" ]; then
     export CLAUDE_PROJECT_DIR="$project"
     # shellcheck disable=SC1090
     source "$SESSION_INIT" "$supplied" || return 1
   else
     export CLAUDE_PROJECT_DIR="$project"
-    export ZENSU_PROJECT_ROOT="$project"
+    export ZENSU_PROJECT_ROOT="$native_project"
     export ZENSU_SESSION_KEY="$key"
     export ZENSU_SESSION_CONTEXT="$context"
-    export CLAUDE_PLUGIN_DATA="$ZENSU_TEST_PLUGIN_DATA"
+    export CLAUDE_PLUGIN_DATA="$native_plugin_data"
   fi
   [ "$ZENSU_SESSION_KEY" = "$key" ] && [ "$ZENSU_SESSION_CONTEXT" = "$context" ]
 }

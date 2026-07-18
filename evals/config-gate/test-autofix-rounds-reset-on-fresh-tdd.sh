@@ -21,14 +21,13 @@ export STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
 mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 
 SID="sess-reset-001"
-KEY="$(node "$CORE" session-key "$SID")"
-STATE_FILE="$STATE_DIR/tdd-phase-${KEY}.json"
 # shellcheck disable=SC1090
 source "$BASELINE" "$SID"
 STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
-STATE_FILE="$STATE_DIR/tdd-phase-${KEY}.json"
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
 . "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+STATE_FILE="$(tdd_state_file "$SID")" || exit 1
+STATE_DIR="$(dirname "$STATE_FILE")"
 tdd_increment_counter "$SID" reviewRound >/dev/null
 tdd_increment_counter "$SID" reviewRound >/dev/null
 tdd_increment_counter "$SID" stopBlockCount >/dev/null

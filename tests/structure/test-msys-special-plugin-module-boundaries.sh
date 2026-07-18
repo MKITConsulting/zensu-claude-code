@@ -77,11 +77,11 @@ export PATH="$NODE_SHIM_DIR:$PATH"
 
 printf '%s\n' '# boundary fixture' > "$PROJECT/README.md"
 printf '%s\n' 'const original = true;' > "$PROJECT/src/app.js"
-git -C "$PROJECT" init -q \
-  && git -C "$PROJECT" config user.email boundary@example.test \
-  && git -C "$PROJECT" config user.name 'Boundary Test' \
-  && git -C "$PROJECT" add README.md src/app.js \
-  && git -C "$PROJECT" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
+git -C "$NATIVE_PROJECT" init -q \
+  && git -C "$NATIVE_PROJECT" config user.email boundary@example.test \
+  && git -C "$NATIVE_PROJECT" config user.name 'Boundary Test' \
+  && git -C "$NATIVE_PROJECT" add README.md src/app.js \
+  && git -C "$NATIVE_PROJECT" -c commit.gpgsign=false -c core.hooksPath=/dev/null \
     commit -qm fixture \
   || exit 1
 

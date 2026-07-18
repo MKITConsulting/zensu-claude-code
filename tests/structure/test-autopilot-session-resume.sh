@@ -3,7 +3,6 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 HOOK="$PLUGIN_DIR/hooks/session-start-autopilot-resume.sh"
 SESSION_CONTROL_HOOK="$PLUGIN_DIR/hooks/session-start-session-control.sh"
 STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
@@ -49,7 +48,7 @@ fi
 
 RAW_TMP="$(mktemp -d -t zensu-autopilot-resume-XXXXXX)"
 RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
-TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || exit 1
+TMP="$RAW_TMP"
 trap 'rm -rf "$RAW_TMP"' EXIT
 PROJECT="$TMP/project"
 EMPTY_PROJECT="$TMP/empty-project"

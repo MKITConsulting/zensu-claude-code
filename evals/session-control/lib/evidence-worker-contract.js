@@ -583,7 +583,12 @@ async function runScenario(options) {
     const statLease = createLease(options, statItem);
     const statAgent = 'safe-root-stat-drift';
     startWorker(options, statAgent);
-    fs.chmodSync(statItem.nonlistedFile, 0o640);
+    const beforeStatDrift = fs.statSync(statItem.nonlistedFile);
+    fs.utimesSync(
+      statItem.nonlistedFile,
+      beforeStatDrift.atime,
+      new Date(beforeStatDrift.mtimeMs + 60_000),
+    );
     assertDenied(tool(options, statAgent, 'Glob', {
       pattern: '*.txt', path: statItem.safeRoot,
     }), 'safe subtree stat-only drift', 'validation failed');

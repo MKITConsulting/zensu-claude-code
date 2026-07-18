@@ -518,7 +518,9 @@ fi
 # Deployed v1 completed receipts remain readable below, but an in-flight v1
 # request never had a trusted provider. It must fail closed instead of learning
 # the forge from a new publication event.
-LEGACY_REQUEST_PROJECT="$ROOT/legacy-requested-providerless"
+# Keep the directory name short: the private payload temp suffix is long and
+# must retain headroom beneath legacy Windows MAX_PATH on hosted runners.
+LEGACY_REQUEST_PROJECT="$ROOT/p0"
 LEGACY_REQUEST_FILE="$LEGACY_REQUEST_PROJECT/.zensu/state/autopilot-run-${RUN}.json"
 LEGACY_REQUEST_READY=false
 if prepare_provider_project "$LEGACY_REQUEST_PROJECT" github; then
@@ -535,8 +537,9 @@ if prepare_provider_project "$LEGACY_REQUEST_PROJECT" github; then
   ' "$LEGACY_REQUEST_FILE" && LEGACY_REQUEST_READY=true
 fi
 LEGACY_REQUEST_BEFORE="$(file_digest "$LEGACY_REQUEST_FILE" 2>/dev/null || true)"
-if [ "$LEGACY_REQUEST_READY" = true ] \
-  && ! autopilot_apply_event "$RUN" evt_legacy_request_provider_choice TEAM_REVIEW_PUBLISHED \
+if [ "$LEGACY_REQUEST_READY" != true ]; then
+  check "R7ad providerless v1 fixture prepares within Windows path limits" FAIL
+elif ! autopilot_apply_event "$RUN" evt_legacy_request_provider_choice TEAM_REVIEW_PUBLISHED \
     "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" \
     "$LEGACY_REQUEST_PROJECT" >/dev/null 2>&1 \
   && [ "$(file_digest "$LEGACY_REQUEST_FILE")" = "$LEGACY_REQUEST_BEFORE" ]; then

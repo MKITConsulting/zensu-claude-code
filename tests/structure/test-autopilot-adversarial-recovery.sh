@@ -9,6 +9,7 @@ LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 SESSION_INIT="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 
 PASS=0
 FAIL=0
@@ -37,13 +38,27 @@ mkdir -p "$ROOT/session-control/plugin-data"
 ZENSU_TEST_PLUGIN_DATA="$(cd "$ROOT/session-control/plugin-data" && pwd -P)"
 export ZENSU_TEST_PLUGIN_DATA
 
+native_directory() {
+  local rendered
+  rendered="$(bash "$HOST_PATH" "$1")" || return 1
+  MSYS2_ARG_CONV_EXCL='*' node -e '
+    const fs = require("fs");
+    process.stdout.write(fs.realpathSync.native(process.argv[1]));
+  ' "$rendered"
+}
+
 activate_session() {
-  local project="$1" supplied="$2" key context
+  local project="$1" supplied="$2" key context native_project native_plugin_data
   mkdir -p "$project" || return 1
   project="$(cd "$project" && pwd -P)" || return 1
+  native_project="$(native_directory "$project")" || return 1
+  native_plugin_data="$(native_directory "$ZENSU_TEST_PLUGIN_DATA")" || return 1
   key="$(node "$SESSION_CORE" session-key "$supplied")" || return 1
-  context="$ZENSU_TEST_PLUGIN_DATA/session-control/v1/records/$key.json"
-  if [ "${ZENSU_PROJECT_ROOT:-}" = "$project" ] \
+  context="$(MSYS2_ARG_CONV_EXCL='*' node -e '
+    const path = require("path");
+    process.stdout.write(path.join(process.argv[1], "session-control", "v1", "records", `${process.argv[2]}.json`));
+  ' "$native_plugin_data" "$key")" || return 1
+  if [ "${ZENSU_PROJECT_ROOT:-}" = "$native_project" ] \
       && [ "${ZENSU_SESSION_KEY:-}" = "$key" ] \
       && [ "${ZENSU_SESSION_CONTEXT:-}" = "$context" ] \
       && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
