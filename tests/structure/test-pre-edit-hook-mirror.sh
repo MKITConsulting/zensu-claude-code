@@ -171,12 +171,21 @@ rm -rf "$C8_STATE_DIR" "$C8_LOG"
 
 C9_STATE_DIR="$(mktemp -d -t hookmirror-c9-XXXX)"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
+if [ -d "$C9_STATE_DIR/.zensu" ]; then
+  check "C9p seeded project prefix exists before traversal normalization" PASS
+else
+  check "C9p seeded project prefix exists before traversal normalization" FAIL
+fi
 C9_CLASSIFIER_MARKER="$C9_STATE_DIR/classifier-exclusions"
 C9_PRELOAD_SHELL="$PLUGIN_DIR/tests/structure/fixtures/pre-edit-classifier-transport-preload.js"
 C9_NODE_OPTIONS="--require=$C9_PRELOAD_SHELL"
 C9_BASE_EXCLUSIONS='EXISTING_SELECTOR'
-PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
-C9_EXPECTED_REASON='TDD-Phase-Gate: Write on /work/proj/.zensu/../src/main.ts blocked.'
+# Exercise the traversal alias beneath the real seeded project. Its `.zensu`
+# prefix exists, so Git Bash can canonicalize `..` before the native classifier;
+# an unrelated `/work/proj` fixture fails earlier on Windows for the correct
+# ENOENT reason and never tests the intended classifier transport boundary.
+PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":".zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
+C9_EXPECTED_REASON='TDD-Phase-Gate: Write on .zensu/../src/main.ts blocked.'
 C9_BASELINE="$(
   unset FP SD
   printf '%s' "$PAYLOAD_TRAVERSAL" | \

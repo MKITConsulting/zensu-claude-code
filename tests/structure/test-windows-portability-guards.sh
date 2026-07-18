@@ -66,14 +66,18 @@ WINDOWS_CANARY_BLOCK="$(awk '
 ' "$WORKFLOW")"
 if printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF "runner.os == 'Windows'" \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-msys-runtime-boundaries.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | awk '
+    /test-msys-runtime-boundaries\.sh/ { getline; if ($0 ~ /test-pre-edit-hook-mirror\.sh/) found=1 }
+    END { exit(found ? 0 : 1) }
+  ' \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-deferred-review-claim.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-id-v1.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-start-banner.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-tdd-no-flock-external-lease.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'tests/session-control/run.sh'; then
-  check "Windows CI fails fast on the cross-process Core lease" PASS
+  check "Windows CI fails fast on MSYS path transport and the cross-process Core lease" PASS
 else
-  check "Windows CI fails fast on the cross-process Core lease" FAIL
+  check "Windows CI fails fast on MSYS path transport and the cross-process Core lease" FAIL
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
