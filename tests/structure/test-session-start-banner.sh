@@ -22,7 +22,7 @@ check() {
 
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const ss=(h.hooks.SessionStart||[]).flatMap(x=>x.hooks||[]).map(z=>[z.command||"",...(z.args||[])].join(" "));
+  const ss=(h.hooks.SessionStart||[]).flatMap(x=>x.hooks||[]).map(z=>z.command||"");
   const hasB=ss.some(c=>/session-start-banner\.sh/.test(c));
   const hasP=ss.some(c=>/session-start-primer\.sh/.test(c));
   process.exit(hasB && hasP ? 0 : 1);

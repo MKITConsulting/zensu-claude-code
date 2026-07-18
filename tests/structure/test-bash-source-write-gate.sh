@@ -27,7 +27,7 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test([z.command||"",...(z.args||[])].join(" "))));
+  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
   process.exit(ok?0:1);
 ' "$HOOKS_JSON" 2>/dev/null \
   && check "W4 registered as PreToolUse Bash matcher" PASS || check "W4 registered as PreToolUse Bash matcher" FAIL

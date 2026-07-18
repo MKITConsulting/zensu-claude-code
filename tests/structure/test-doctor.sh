@@ -94,10 +94,24 @@ if grep -qF 'Playwright MCP: valid integrity-locked plugin config + npm present'
 else
   check "P2j report distinguishes configured from runtime-ready Playwright MCP" FAIL
 fi
-if ! grep -qF 'Array.isArray(h && h.args)' "$REPORT"; then
-  check "P2n doctor parses only the documented hooks.json command field" PASS
+HOOK_ARGS_READER="$(
+  find "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/evals" "$PLUGIN_DIR/tests" -type f \
+    \( -name '*.sh' -o -name '*.js' -o -name '*.mjs' -o -name '*.cjs' -o -name '*.ts' \) \
+    ! -path '*/node_modules/*' ! -path '*/results/*' -print \
+    | while IFS= read -r reader; do
+        if [ "$reader" != "$PLUGIN_DIR/tests/structure/test-doctor.sh" ] \
+          && grep -qF 'hooks.json' "$reader" \
+          && grep -qE '\.command([^[:alnum:]_]|$)' "$reader" \
+          && grep -qE '\.args([^[:alnum:]_]|$)' "$reader"; then
+          printf '%s\n' "${reader#$PLUGIN_DIR/}"
+          break
+        fi
+      done
+)"
+if [ -z "$HOOK_ARGS_READER" ]; then
+  check "P2n all hook-manifest readers parse only the documented command field" PASS
 else
-  check "P2n doctor retains undocumented hooks.json args tolerance" FAIL
+  check "P2n undocumented hook args tolerance remains in $HOOK_ARGS_READER" FAIL
 fi
 
 REAL_MANIFEST="$(ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \

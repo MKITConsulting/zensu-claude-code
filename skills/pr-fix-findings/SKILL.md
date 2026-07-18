@@ -115,8 +115,9 @@ All other safety and reporting rules still apply.
 
 0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
    `ROOT="${CLAUDE_PLUGIN_ROOT}"` — if this is empty or
-   `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with a FATAL message and
-   start a fresh Claude Code session. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`,
+   `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with the byte-identical
+   `FATAL: active plugin root is unavailable — start a fresh Claude Code session`
+   diagnostic. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`,
    require `[ -f "$VCS" ]`, run `bash "$VCS" --detect`, and
    read `provider` + `cliReady` + `repo` from the `key=value` output.
    - `cliReady=false` → in standalone mode stop and ask the user to install/authenticate

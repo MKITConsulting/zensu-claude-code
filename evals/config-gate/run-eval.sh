@@ -73,7 +73,7 @@ else
   check "hooks/session-start-pulse.sh is executable" FAIL
 fi
 
-SS_CMD=$(node -e "const j=JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8'));console.log((j.hooks.SessionStart[0].hooks||[]).map(h=>[h.command||'',...(h.args||[])].join(' ')).join('\\n'))" 2>/dev/null)
+SS_CMD=$(node -e "const j=JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8'));console.log((j.hooks.SessionStart[0].hooks||[]).map(h=>h.command||'').join('\\n'))" 2>/dev/null)
 case "$SS_CMD" in
   *session-start-pulse.sh*) check "SessionStart hook wired to session-start-pulse.sh" PASS ;;
   *)                         check "SessionStart hook wired to session-start-pulse.sh" FAIL ;;

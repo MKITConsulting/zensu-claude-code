@@ -27,7 +27,7 @@ bash -n "$HOOK" 2>/dev/null && check "B2 bash -n syntax check passes" PASS || ch
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-zensu-gate\.sh/.test([z.command||"",...(z.args||[])].join(" "))));
+  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-zensu-gate\.sh/.test(z.command||"")));
   const noMcp=!pres.some(e=>/mcp__plugin_zensu_zensu/.test(e.matcher||""));
   process.exit(ok && noMcp ? 0 : 1);
 ' "$HOOKS_JSON" 2>/dev/null; then

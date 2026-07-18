@@ -36,7 +36,7 @@ log "Plugin dir: $PLUGIN_DIR"
 registered_check() {
   node -e '
     const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-    const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>[z.command||"",...(z.args||[])].join(" "));
+    const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command||"");
     process.exit(ups.some(c=>/user-prompt-intent-router\.sh/.test(c))?0:1);
   ' "$HOOKS_JSON" 2>/dev/null
 }

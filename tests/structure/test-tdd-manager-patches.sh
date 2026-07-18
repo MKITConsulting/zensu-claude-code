@@ -6,6 +6,9 @@ set -u
 # This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
+AUTOPILOT_SKILL="$PLUGIN_DIR/skills/autopilot/SKILL.md"
+PR_TEAM_REVIEW_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PR_FIX_FINDINGS_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
 TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 
 PASS=0; FAIL=0
@@ -174,10 +177,18 @@ else
   check "R15-P1 Phase 0 native root/data binding drifted or legacy authority returned" FAIL
 fi
 
-if grep -qF 'FATAL: active plugin root unavailable — start a fresh Claude Code session' "$AGENT"; then
-  check "R15-P2 Phase 0 fails closed when the session-bound plugin root is unavailable" PASS
+CANONICAL_ROOT_FAILURE='FATAL: active plugin root is unavailable — start a fresh Claude Code session'
+ROOT_FAILURE_DRIFT=""
+for skill in "$AGENT" "$AUTOPILOT_SKILL" "$PR_TEAM_REVIEW_SKILL" "$PR_FIX_FINDINGS_SKILL"; do
+  if ! grep -qF "$CANONICAL_ROOT_FAILURE" "$skill"; then
+    ROOT_FAILURE_DRIFT="${skill#$PLUGIN_DIR/}"
+    break
+  fi
+done
+if [ -z "$ROOT_FAILURE_DRIFT" ]; then
+  check "R15-P2 native-root workflows share one byte-identical fail-closed diagnostic" PASS
 else
-  check "R15-P2 Phase 0 fails closed when the session-bound plugin root is unavailable" FAIL
+  check "R15-P2 native-root failure diagnostic drifted in $ROOT_FAILURE_DRIFT" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
