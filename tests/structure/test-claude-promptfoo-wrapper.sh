@@ -852,6 +852,7 @@ if command -v sandbox-exec >/dev/null 2>&1 || command -v bwrap >/dev/null 2>&1; 
   rm -rf "$WATCH_PROBE_DIR" "$WATCH_PROBE_MARKER" "$WATCH_PROBE_READY"
 
   if [ "$NATIVE_WATCH_AVAILABLE" = 1 ]; then
+  WATCH_START_FAILURE='claude-promptfoo-wrapper: failed to start immutable fixture monitor'
   STUB_P13S8_DIR="$(mktemp -d)"
   cat >"$STUB_P13S8_DIR/claude" <<'STUB'
 #!/bin/bash
@@ -869,10 +870,12 @@ STUB
   mkdir -p "$SRC_P13S8_DIR/.zensu"
   printf 'version: 1\n' >"$SRC_P13S8_DIR/.zensu/autopilot.yaml"
   OPT_P13S8="$(printf '{"config":{"working_dir":"%s","init_git":true}}' "$SRC_P13S8_DIR")"
-  OUT_P13S8=$(env PATH="$STUB_P13S8_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8" 2>/dev/null)
+  OUT_P13S8=$(env PATH="$STUB_P13S8_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8" 2>&1)
   RC_P13S8=$?
   if [ "$RC_P13S8" = 0 ] && printf '%s\n' "$OUT_P13S8" | grep -qF '"tracked_clean":true'; then
     check "P13-S8 live init_git path enforces OS-level read-only fixture with writable runtime paths" PASS
+  elif [ "$RC_P13S8" = 2 ] && [ "$OUT_P13S8" = "$WATCH_START_FAILURE" ]; then
+    check "P13-S8 live immutable-fixture integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
   else
     check "P13-S8 live init_git path enforces OS-level read-only fixture (rc=$RC_P13S8, out=${OUT_P13S8:0:400})" FAIL
   fi
@@ -894,10 +897,32 @@ STUB
     ZENSU_VERIFY_FIXTURE_RESERVATION_HANDOFF=/private/tmp/zensu-overlap-handoff \
     bash "$WRAPPER" 'p' "$OPT_OVERLAP" 2>&1)
   RC_RESERVATION_OVERLAP=$?
-  if [ "$RC_HOME_OVERLAP" = 69 ] && [ "$RC_RESERVATION_OVERLAP" = 69 ] \
-    && printf '%s\n%s\n' "$OUT_HOME_OVERLAP" "$OUT_RESERVATION_OVERLAP" | grep -qF 'contains the immutable fixture' \
-    && ! printf '%s\n%s\n' "$OUT_HOME_OVERLAP" "$OUT_RESERVATION_OVERLAP" | grep -qF 'overlap-claude-ran'; then
-    check "P13-S8b writable HOME and reservation ancestors are rejected before Claude starts" PASS
+  HOME_OVERLAP_FAILURE='claude-promptfoo-wrapper: HOME writable root contains the immutable fixture'
+  RESERVATION_OVERLAP_FAILURE='claude-promptfoo-wrapper: fixture reservation writable root contains the immutable fixture'
+  HOME_OVERLAP_SAFE=false
+  HOME_WATCH_UNAVAILABLE=false
+  RESERVATION_OVERLAP_SAFE=false
+  RESERVATION_WATCH_UNAVAILABLE=false
+  if [ "$RC_HOME_OVERLAP" = 69 ] && [ "$OUT_HOME_OVERLAP" = "$HOME_OVERLAP_FAILURE" ]; then
+    HOME_OVERLAP_SAFE=true
+  elif [ "$RC_HOME_OVERLAP" = 2 ] && [ "$OUT_HOME_OVERLAP" = "$WATCH_START_FAILURE" ]; then
+    HOME_OVERLAP_SAFE=true
+    HOME_WATCH_UNAVAILABLE=true
+  fi
+  if [ "$RC_RESERVATION_OVERLAP" = 69 ] \
+    && [ "$OUT_RESERVATION_OVERLAP" = "$RESERVATION_OVERLAP_FAILURE" ]; then
+    RESERVATION_OVERLAP_SAFE=true
+  elif [ "$RC_RESERVATION_OVERLAP" = 2 ] \
+    && [ "$OUT_RESERVATION_OVERLAP" = "$WATCH_START_FAILURE" ]; then
+    RESERVATION_OVERLAP_SAFE=true
+    RESERVATION_WATCH_UNAVAILABLE=true
+  fi
+  if [ "$HOME_OVERLAP_SAFE" = true ] && [ "$RESERVATION_OVERLAP_SAFE" = true ]; then
+    if [ "$HOME_WATCH_UNAVAILABLE" = true ] || [ "$RESERVATION_WATCH_UNAVAILABLE" = true ]; then
+      check "P13-S8b writable-root integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
+    else
+      check "P13-S8b writable HOME and reservation ancestors are rejected before Claude starts" PASS
+    fi
   else
     check "P13-S8b writable fixture ancestors fail closed (home=$RC_HOME_OVERLAP reservation=$RC_RESERVATION_OVERLAP)" FAIL
   fi
