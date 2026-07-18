@@ -2295,8 +2295,7 @@ _tdd_read_validated_state() {
   local state_file="${1:-}"
   local mode="${2:-status}"
   local arg="${3:-}"
-  local base key expected project_root native_project_root native_state_file
-  local msys_env_exclusions
+  local base key expected project_root native_project_root native_state_file lib_dir
   if [ -z "$state_file" ]; then
     echo "missing"; return 0
   fi
@@ -2317,12 +2316,19 @@ _tdd_read_validated_state() {
     || { echo "invalid"; return 0; }
   native_state_file="$(_tdd_native_project_path "$state_file")" \
     || { echo "invalid"; return 0; }
-  msys_env_exclusions="$(zensu_msys_env_exclusions CONTROL_CORE PROJECT_ROOT STATE_FILE)" \
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" \
+    || { echo "invalid"; return 0; }
+  [ -f "$lib_dir/session-control-core-v1.js" ] \
+    && [ ! -L "$lib_dir/session-control-core-v1.js" ] \
     || { echo "invalid"; return 0; }
 
-  MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
-    CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$native_project_root" \
-    STATE_FILE="$native_state_file" READ_MODE="$mode" READ_ARG="$arg" \
+  # Native Node receives the already-rendered host paths as an opaque NUL frame
+  # over stdin. MSYS2 never interprets stdin, so an ambient conversion policy
+  # cannot rewrite the project/state identity before validation. The trusted
+  # Core module resolves relative to the canonically verified executing lib.
+  printf '%s\0%s\0%s\0%s\0' \
+    "$native_project_root" "$native_state_file" "$mode" "$arg" | (
+    cd -P -- "$lib_dir" || exit 1
     node -e '
       const fs = require("node:fs");
       const path = require("node:path");
@@ -2330,7 +2336,11 @@ _tdd_read_validated_state() {
         process.stdout.write(status);
         if (status === "valid" && value !== undefined) process.stdout.write("\n" + String(value));
       };
-      const file = process.env.STATE_FILE || "";
+      const fields = fs.readFileSync(0).toString("utf8").split("\0");
+      if (fields.length !== 5 || fields[4] !== "") {
+        emit("invalid"); process.exit(0);
+      }
+      const [projectRoot, file, mode = "status", arg = ""] = fields;
       const match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(path.basename(file));
       if (!match) { emit("invalid"); process.exit(0); }
       let stat;
@@ -2339,12 +2349,10 @@ _tdd_read_validated_state() {
       if (stat.isSymbolicLink() || !stat.isFile()) { emit("invalid"); process.exit(0); }
       let state;
       try {
-        const core = require(process.env.CONTROL_CORE);
-        state = core.readWorkflowState({ projectRoot: process.env.PROJECT_ROOT, sessionId: match[1] });
+        const core = require("./session-control-core-v1.js");
+        state = core.readWorkflowState({ projectRoot, sessionId: match[1] });
       } catch (_) { emit("invalid"); process.exit(0); }
 
-      const mode = process.env.READ_MODE || "status";
-      const arg = process.env.READ_ARG || "";
       if (mode === "status") emit("valid");
       else if (mode === "flag") emit("valid", state[arg] === true ? "true" : "false");
       else if (mode === "phase") emit("valid", state.phase === undefined ? "UNINITIALIZED" : state.phase);
@@ -2370,7 +2378,8 @@ _tdd_read_validated_state() {
           : [];
         emit("valid", values.join(", "));
       } else emit("invalid");
-    ' 2>/dev/null || echo "invalid"
+    '
+  ) 2>/dev/null || echo "invalid"
 }
 
 tdd_state_status() {

@@ -16,6 +16,7 @@ AUTOPILOT_RESUME="$ROOT/hooks/session-start-autopilot-resume.sh"
 CONFIG_LIB="$ROOT/hooks/lib/zensu-config.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
 PR_SKILL="$ROOT/skills/pr-team-review/SKILL.md"
+STATE_READER_BLOCK="$(awk '/^_tdd_read_validated_state\(\)/,/^}/' "$PHASE")"
 PASS=0
 FAIL=0
 
@@ -374,7 +375,13 @@ if [ "$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")" -eq 2 ]
     && grep -qF 'native_state_file="$(_tdd_native_project_path "$state_file")"' "$PHASE" \
     && [ "$(grep -cF 'zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA' "$SESSION_BINDING")" -eq 2 ] \
     && grep -qF 'zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE' "$SESSION_BINDING" \
-    && grep -qF 'zensu_msys_env_exclusions CONTROL_CORE PROJECT_ROOT STATE_FILE' "$PHASE" \
+    && printf '%s' "$STATE_READER_BLOCK" | grep -qF "printf '%s\\0%s\\0%s\\0%s\\0'" \
+    && printf '%s' "$STATE_READER_BLOCK" | grep -qF 'readFileSync(0)' \
+    && printf '%s' "$STATE_READER_BLOCK" | grep -qF 'require("./session-control-core-v1.js")' \
+    && ! printf '%s' "$STATE_READER_BLOCK" | grep -qF 'zensu_msys_env_exclusions' \
+    && ! printf '%s' "$STATE_READER_BLOCK" | grep -qF 'CONTROL_CORE=' \
+    && ! printf '%s' "$STATE_READER_BLOCK" | grep -qF 'PROJECT_ROOT=' \
+    && ! printf '%s' "$STATE_READER_BLOCK" | grep -qF 'STATE_FILE=' \
     && grep -qF 'require("./claude-hook-session-v1.js")' "$AUTOPILOT_RESUME" \
     && ! grep -qF 'require(process.env.BINDER)' "$AUTOPILOT_RESUME"; then
   check "session helpers keep Bash paths separate from authenticated native Node paths" PASS

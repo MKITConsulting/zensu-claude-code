@@ -4,6 +4,9 @@ const fs = require('node:fs');
 
 if (process.env.ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE === '1') {
   const has = (name) => Object.prototype.hasOwnProperty.call(process.env, name);
+  if (['CONTROL_CORE', 'PROJECT_ROOT', 'STATE_FILE'].some(has)) {
+    process.exit(96);
+  }
   const hasFilePath = has('FP');
   const hasStateDir = has('SD');
 
