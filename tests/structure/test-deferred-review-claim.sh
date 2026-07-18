@@ -529,13 +529,79 @@ fi
 setup_case seed_crash
 zlog --pending-review --files crash.ts >/dev/null
 adopt owner-a >/dev/null
+C2_CLAIM="$CASE_STATE/pending-review.json.claim"
+C2_OWNER_A="$(canonical_session owner-a)"
+C2_OWNER_B="$(canonical_session owner-b)"
+C2_DEAD_PID=2147483647
+C2_CRASH_FIXTURE="$(CONTROL_CORE="$CORE" CLAIM_FILE="$C2_CLAIM" \
+  EXPECTED_OWNER="$C2_OWNER_A" DEAD_PID="$C2_DEAD_PID" node -e '
+    const fs = require("node:fs");
+    const core = require(process.env.CONTROL_CORE);
+    const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+    const deadPid = Number.parseInt(process.env.DEAD_PID, 10);
+    if (claim.ownerSessionId !== process.env.EXPECTED_OWNER
+        || claim.handoffEmitted !== false
+        || claim.transfer !== undefined
+        || claim.cancellation !== undefined) {
+      throw new Error("seeded crash fixture has unexpected ownership state");
+    }
+    try {
+      process.kill(deadPid, 0);
+      throw new Error("dead fixture pid is unexpectedly live");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+    claim.ownerPid = deadPid;
+    claim.ownerProcessStartIdentity = null;
+    core.atomicWriteJson(process.env.CLAIM_FILE, claim);
+    const readback = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+    let dead = false;
+    try { process.kill(readback.ownerPid, 0); }
+    catch (error) {
+      if (error.code !== "ESRCH") throw error;
+      dead = true;
+    }
+    process.stdout.write(`${readback.claimId}\t${readback.ownerSessionId}\t${readback.ownerPid}\t${readback.handoffEmitted}\t${dead}`);
+  ' 2>&1)"
+C2_CRASH_FIXTURE_RC=$?
+IFS=$'\t' read -r C2_CLAIM_ID C2_FIXTURE_OWNER C2_FIXTURE_PID \
+  C2_FIXTURE_HANDOFF C2_FIXTURE_DEAD <<<"$C2_CRASH_FIXTURE"
 OUT="$(stop owner-b)"
-if [ "$(printf '%s' "$OUT" | decision)" = block ] \
-  && [ "$(state_flag owner-a active)" = false ] \
-  && [ "$(state_flag owner-b active)" = true ]; then
+C2_DECISION="$(printf '%s' "$OUT" | decision)"
+C2_OWNER_A_ACTIVE="$(state_flag owner-a active)"
+C2_OWNER_B_ACTIVE="$(state_flag owner-b active)"
+C2_FINAL_META="$(CONTROL_CORE="$CORE" CLAIM_FILE="$C2_CLAIM" \
+  PROJECT_ROOT="$CASE_PROJECT" OWNER_B="$C2_OWNER_B" node -e '
+  try {
+    const core = require(process.env.CONTROL_CORE);
+    const claim = JSON.parse(require("node:fs").readFileSync(process.env.CLAIM_FILE, "utf8"));
+    const state = core.readWorkflowState({
+      projectRoot: process.env.PROJECT_ROOT,
+      sessionId: process.env.OWNER_B,
+    });
+    const receipt = claim.transfer === undefined && claim.cancellation === undefined ? "no" : "yes";
+    process.stdout.write(`${claim.claimId}\t${claim.ownerSessionId}\t${claim.handoffEmitted}\t${receipt}\t${state.deferredReviewClaim}\t${state.stopBlockCount}`);
+  } catch (_) { process.stdout.write("missing\tmissing\tmissing\tmissing\tmissing\tmissing"); }
+')"
+IFS=$'\t' read -r C2_FINAL_CLAIM_ID C2_FINAL_OWNER C2_FINAL_HANDOFF \
+  C2_FINAL_RECEIPT C2_FINAL_STATE_CLAIM C2_FINAL_STOP_COUNT <<<"$C2_FINAL_META"
+if [ "$C2_CRASH_FIXTURE_RC" -eq 0 ] \
+  && [ "$C2_CLAIM_ID" = "$C2_FINAL_CLAIM_ID" ] \
+  && [ "$C2_FIXTURE_OWNER" = "$C2_OWNER_A" ] \
+  && [ "$C2_FIXTURE_PID" = "$C2_DEAD_PID" ] \
+  && [ "$C2_FIXTURE_HANDOFF" = false ] \
+  && [ "$C2_FIXTURE_DEAD" = true ] \
+  && [ "$C2_DECISION" = block ] \
+  && [ "$C2_OWNER_A_ACTIVE" = false ] \
+  && [ "$C2_OWNER_B_ACTIVE" = true ] \
+  && [ "$C2_FINAL_OWNER" = "$C2_OWNER_B" ] \
+  && [ "$C2_FINAL_HANDOFF" = true ] \
+  && [ "$C2_FINAL_RECEIPT" = no ] \
+  && [ "$C2_FINAL_STATE_CLAIM" = "$C2_CLAIM_ID" ] \
+  && [ "$C2_FINAL_STOP_COUNT" = 1 ]; then
   check "C2 seed-before-output crash transfers one durable claim" PASS
 else
-  check "C2 seed-before-output crash transfers one durable claim" FAIL
+  check "C2 seed crash transfer (fixture_rc=$C2_CRASH_FIXTURE_RC fixture=$C2_CRASH_FIXTURE decision=$C2_DECISION owner_a=$C2_OWNER_A_ACTIVE owner_b=$C2_OWNER_B_ACTIVE final=$C2_FINAL_META)" FAIL
 fi
 
 # Force the failure after assignment has already published canonical ownership.
