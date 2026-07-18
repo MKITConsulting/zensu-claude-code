@@ -11,6 +11,7 @@ PRE_EDIT="$ROOT/hooks/pre-edit-tdd-reminder.sh"
 BANNER="$ROOT/hooks/session-start-banner.sh"
 AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
 SESSION_BINDING="$ROOT/hooks/lib/zensu-session.sh"
+MSYS_ENV="$ROOT/hooks/lib/zensu-msys-env.sh"
 AUTOPILOT_RESUME="$ROOT/hooks/session-start-autopilot-resume.sh"
 CONFIG_LIB="$ROOT/hooks/lib/zensu-config.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
@@ -29,11 +30,66 @@ check() {
 }
 
 if [ -f "$PATHS" ] && [ ! -L "$PATHS" ] \
-    && [ -f "$HOST_PATH" ] && [ ! -L "$HOST_PATH" ] && [ -x "$HOST_PATH" ]; then
+    && [ -f "$HOST_PATH" ] && [ ! -L "$HOST_PATH" ] && [ -x "$HOST_PATH" ] \
+    && [ -f "$MSYS_ENV" ] && [ ! -L "$MSYS_ENV" ]; then
   check "shared native-host path boundaries exist" PASS
 else
   check "shared native-host path boundaries exist" FAIL
 fi
+
+if (
+  # shellcheck disable=SC1090
+  source "$MSYS_ENV"
+  export MSYS2_ENV_CONV_EXCL='EXISTING_SELECTOR;STATE_FILE='
+  [ "$(zensu_msys_env_exclusions STATE_FILE CONTROL_CORE PROJECT_ROOT)" \
+    = 'EXISTING_SELECTOR;STATE_FILE=;CONTROL_CORE=;PROJECT_ROOT=' ] || exit 1
+  export MSYS2_ENV_CONV_EXCL='*'
+  [ "$(zensu_msys_env_exclusions STATE_FILE CONTROL_CORE)" \
+    = '*' ] || exit 1
+  ! zensu_msys_env_exclusions 'bad-name' >/dev/null 2>&1
+  export MSYS2_ENV_CONV_EXCL='EXISTING_SELECTOR;*;TAIL'
+  [ "$(zensu_msys_env_exclusions STATE_FILE CONTROL_CORE)" \
+    = 'EXISTING_SELECTOR;*;TAIL;STATE_FILE=;CONTROL_CORE=' ] || exit 1
+  export MSYS2_ENV_CONV_EXCL=EXISTING_SELECTOR
+  ! zensu_msys_env_exclusions STATE_FILE 'bad-name' >/dev/null 2>&1
+  export MSYS2_ENV_CONV_EXCL=$'EXISTING_SELECTOR\nBROKEN'
+  ! zensu_msys_env_exclusions STATE_FILE >/dev/null 2>&1
+); then
+  check "MSYS environment exclusions preserve ambient selectors, deduplicate exact names, honor standalone wildcard, and reject malformed input" PASS
+else
+  check "MSYS environment exclusion helper contract" FAIL
+fi
+
+SESSION_HELPER_FIXTURE="$(mktemp -d -t zensu-session-helper-XXXXXX)"
+cp -R "$ROOT/hooks" "$SESSION_HELPER_FIXTURE/hooks"
+mkdir -p "$SESSION_HELPER_FIXTURE/plugin-data"
+rm -f -- "$SESSION_HELPER_FIXTURE/hooks/lib/zensu-msys-env.sh"
+SESSION_HELPER_PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"src/main.ts"},"session_id":"missing-helper-test"}'
+MISSING_HELPER_OUT="$(printf '%s' "$SESSION_HELPER_PAYLOAD" \
+  | CLAUDE_PLUGIN_DATA="$SESSION_HELPER_FIXTURE/plugin-data" \
+    bash "$SESSION_HELPER_FIXTURE/hooks/pre-edit-tdd-reminder.sh" 2>&1)"
+MISSING_HELPER_RC=$?
+SYMLINK_HELPER_OK=true
+if ln -s "$MSYS_ENV" "$SESSION_HELPER_FIXTURE/hooks/lib/zensu-msys-env.sh" 2>/dev/null \
+    && [ -L "$SESSION_HELPER_FIXTURE/hooks/lib/zensu-msys-env.sh" ]; then
+  SYMLINK_HELPER_OUT="$(printf '%s' "$SESSION_HELPER_PAYLOAD" \
+    | CLAUDE_PLUGIN_DATA="$SESSION_HELPER_FIXTURE/plugin-data" \
+      bash "$SESSION_HELPER_FIXTURE/hooks/pre-edit-tdd-reminder.sh" 2>&1)"
+  SYMLINK_HELPER_RC=$?
+  [ "$SYMLINK_HELPER_RC" -eq 0 ] \
+    && printf '%s' "$SYMLINK_HELPER_OUT" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$SYMLINK_HELPER_OUT" | grep -qF 'immutable Zensu session binding is unavailable' \
+    || SYMLINK_HELPER_OK=false
+fi
+if [ "$MISSING_HELPER_RC" -eq 0 ] \
+    && printf '%s' "$MISSING_HELPER_OUT" | grep -qF '"permissionDecision":"deny"' \
+    && printf '%s' "$MISSING_HELPER_OUT" | grep -qF 'immutable Zensu session binding is unavailable' \
+    && [ "$SYMLINK_HELPER_OK" = true ]; then
+  check "missing or symlinked MSYS helper keeps the PreToolUse gate fail-closed" PASS
+else
+  check "missing or symlinked MSYS helper keeps the PreToolUse gate fail-closed" FAIL
+fi
+rm -rf -- "$SESSION_HELPER_FIXTURE"
 
 if [ -f "$PATHS" ] && PATHS="$PATHS" node -e '
   const paths = require(process.env.PATHS);
@@ -279,7 +335,7 @@ else
   check "free-form hook messages bypass MSYS argv and environment path conversion" FAIL
 fi
 
-if grep -qF 'for _ZENSU_NATIVE_ENV_NAME in FP SD; do' "$PRE_EDIT" \
+if grep -qF 'zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD' "$PRE_EDIT" \
     && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ] \
     && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e' "$PRE_EDIT"; then
   check "native pre-edit classifier protects FP and SD from MSYS environment conversion" PASS
@@ -316,6 +372,9 @@ if [ "$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")" -eq 2 ]
     && ! grep -qF 'CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \
     && grep -qF '_tdd_native_project_path()' "$PHASE" \
     && grep -qF 'native_state_file="$(_tdd_native_project_path "$state_file")"' "$PHASE" \
+    && [ "$(grep -cF 'zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA' "$SESSION_BINDING")" -eq 2 ] \
+    && grep -qF 'zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE' "$SESSION_BINDING" \
+    && grep -qF 'zensu_msys_env_exclusions CONTROL_CORE PROJECT_ROOT STATE_FILE' "$PHASE" \
     && grep -qF 'require("./claude-hook-session-v1.js")' "$AUTOPILOT_RESUME" \
     && ! grep -qF 'require(process.env.BINDER)' "$AUTOPILOT_RESUME"; then
   check "session helpers keep Bash paths separate from authenticated native Node paths" PASS

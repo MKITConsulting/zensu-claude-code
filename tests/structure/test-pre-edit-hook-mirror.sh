@@ -173,10 +173,8 @@ C9_STATE_DIR="$(mktemp -d -t hookmirror-c9-XXXX)"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
 C9_CLASSIFIER_MARKER="$C9_STATE_DIR/classifier-exclusions"
 C9_PRELOAD_SHELL="$PLUGIN_DIR/tests/structure/fixtures/pre-edit-classifier-transport-preload.js"
-C9_PRELOAD_NATIVE="$(_tdd_native_path "$C9_PRELOAD_SHELL")"
-C9_MARKER_NATIVE="$(_tdd_native_path "$C9_CLASSIFIER_MARKER")"
-C9_NODE_OPTIONS="--require=$C9_PRELOAD_NATIVE"
-C9_BASE_EXCLUSIONS='EXISTING_SELECTOR;NODE_OPTIONS;ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER'
+C9_NODE_OPTIONS="--require=$C9_PRELOAD_SHELL"
+C9_BASE_EXCLUSIONS='EXISTING_SELECTOR'
 PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
 C9_EXPECTED_REASON='TDD-Phase-Gate: Write on /work/proj/.zensu/../src/main.ts blocked.'
 C9_BASELINE="$(
@@ -194,8 +192,8 @@ else
 fi
 C9_NEGATIVE_RC=0
 NODE_OPTIONS="$C9_NODE_OPTIONS" ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE=1 \
-  ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_MARKER_NATIVE" \
-  MSYS2_ENV_CONV_EXCL="${C9_BASE_EXCLUSIONS};SD" \
+  ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_CLASSIFIER_MARKER" \
+  MSYS2_ENV_CONV_EXCL="${C9_BASE_EXCLUSIONS};SD=" \
   FP=/native/file SD=/native/state node -e 'process.exit(0)' \
   >/dev/null 2>&1 || C9_NEGATIVE_RC=$?
 if [ "$C9_NEGATIVE_RC" = "91" ] && [ ! -e "$C9_CLASSIFIER_MARKER" ]; then
@@ -207,14 +205,14 @@ OUT_C9="$(
   unset FP SD
   printf '%s' "$PAYLOAD_TRAVERSAL" | \
     NODE_OPTIONS="$C9_NODE_OPTIONS" ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE=1 \
-    ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_MARKER_NATIVE" \
+    ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_CLASSIFIER_MARKER" \
     MSYS2_ENV_CONV_EXCL="$C9_BASE_EXCLUSIONS" \
     STATE_DIR="$C9_STATE_DIR" bash "$HOOK" 2>&1
 )"
 RC_C9=$?
 C9_EXCLUSIONS="$(cat "$C9_CLASSIFIER_MARKER" 2>/dev/null)"
 C9_EXCLUSIONS_OK=true
-for C9_NAME in EXISTING_SELECTOR FP SD NODE_OPTIONS ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER; do
+for C9_NAME in EXISTING_SELECTOR FP= SD=; do
   case ";$C9_EXCLUSIONS;" in *";$C9_NAME;"*) ;; *) C9_EXCLUSIONS_OK=false ;; esac
 done
 if [ "$RC_C9" = "0" ] && printf '%s' "$OUT_C9" | grep -qF "$C9_EXPECTED_REASON" \

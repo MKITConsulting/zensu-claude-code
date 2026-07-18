@@ -2296,6 +2296,7 @@ _tdd_read_validated_state() {
   local mode="${2:-status}"
   local arg="${3:-}"
   local base key expected project_root native_project_root native_state_file
+  local msys_env_exclusions
   if [ -z "$state_file" ]; then
     echo "missing"; return 0
   fi
@@ -2316,8 +2317,12 @@ _tdd_read_validated_state() {
     || { echo "invalid"; return 0; }
   native_state_file="$(_tdd_native_project_path "$state_file")" \
     || { echo "invalid"; return 0; }
+  msys_env_exclusions="$(zensu_msys_env_exclusions CONTROL_CORE PROJECT_ROOT STATE_FILE)" \
+    || { echo "invalid"; return 0; }
 
-  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$native_project_root" STATE_FILE="$native_state_file" READ_MODE="$mode" READ_ARG="$arg" \
+  MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+    CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$native_project_root" \
+    STATE_FILE="$native_state_file" READ_MODE="$mode" READ_ARG="$arg" \
     node -e '
       const fs = require("node:fs");
       const path = require("node:path");

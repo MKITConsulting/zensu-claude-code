@@ -28,21 +28,16 @@ fi
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
-_ZENSU_MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
-case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
-  *';PAYLOAD_LOG_COMMAND;'*) ;;
-  *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}PAYLOAD_LOG_COMMAND" ;;
-esac
 # FP and SD cross the classifier boundary only after explicit native-path
 # conversion. Exclude both from Git Bash's heuristic environment conversion so
-# dot segments and drive spellings cannot be reinterpreted a second time.
-for _ZENSU_NATIVE_ENV_NAME in FP SD; do
-  case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
-    *";${_ZENSU_NATIVE_ENV_NAME};"*) ;;
-    *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}${_ZENSU_NATIVE_ENV_NAME}" ;;
-  esac
-done
-unset _ZENSU_NATIVE_ENV_NAME
+# dot segments and drive spellings cannot be reinterpreted a second time. The
+# rendered log command is opaque data at the same native Node boundary.
+_ZENSU_MSYS2_ENV_CONV_EXCL="$(
+  zensu_msys_env_exclusions PAYLOAD_LOG_COMMAND FP SD
+)" || {
+  zensu_emit_hook_session_deny
+  exit 0
+}
 
 if ! command -v node >/dev/null 2>&1; then
   exit 2

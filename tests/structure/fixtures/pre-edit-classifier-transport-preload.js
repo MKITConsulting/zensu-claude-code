@@ -15,10 +15,8 @@ if (process.env.ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE === '1') {
     );
     const required = [
       ['EXISTING_SELECTOR', 90],
-      ['FP', 91],
-      ['SD', 92],
-      ['NODE_OPTIONS', 94],
-      ['ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER', 95],
+      ['FP=', 91],
+      ['SD=', 92],
     ];
     for (const [name, exitCode] of required) {
       if (!exclusions.has(name)) process.exit(exitCode);

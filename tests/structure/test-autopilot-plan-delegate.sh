@@ -298,6 +298,7 @@ printf '%s\n' '{"name":"zensu","version":"test-missing-state"}' \
 cp "$HOOK" "$MISSING_STATE_PLUGIN/hooks/plan-approved-delegate.sh"
 cp "$PLUGIN_DIR/hooks/session-start-session-control.sh" "$MISSING_STATE_PLUGIN/hooks/session-start-session-control.sh"
 cp "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" \
   "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" \
   "$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js" \
   "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" \

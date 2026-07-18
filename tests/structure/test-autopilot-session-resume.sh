@@ -489,7 +489,7 @@ MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"
 mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib"
 MISSING_STATE_PLUGIN="$(cd "$MISSING_STATE_PLUGIN" && pwd -P)"
 cp "$HOOK" "$MISSING_STATE_PLUGIN/hooks/session-start-autopilot-resume.sh"
-for runtime_file in zensu-agent-context.sh zensu-session.sh zensu-host-path.sh claude-principal-v1.js claude-path-v1.js claude-hook-session-v1.js session-control-core-v1.js; do
+for runtime_file in zensu-agent-context.sh zensu-session.sh zensu-msys-env.sh zensu-host-path.sh claude-principal-v1.js claude-path-v1.js claude-hook-session-v1.js session-control-core-v1.js; do
   cp "$PLUGIN_DIR/hooks/lib/$runtime_file" "$MISSING_STATE_PLUGIN/hooks/lib/$runtime_file"
 done
 MISSING_STATE_DATA="$TMP/missing-state-data"

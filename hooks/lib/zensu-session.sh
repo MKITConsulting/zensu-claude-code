@@ -1,8 +1,32 @@
 #!/bin/bash
 
+_ZENSU_SESSION_MSYS_ENV_READY=false
+_ZENSU_SESSION_LIB_DIR=''
+_ZENSU_SESSION_MSYS_ENV=''
+unset -f zensu_msys_env_exclusions 2>/dev/null || true
+if _ZENSU_SESSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"; then
+  _ZENSU_SESSION_MSYS_ENV="$_ZENSU_SESSION_LIB_DIR/zensu-msys-env.sh"
+  if [ -f "$_ZENSU_SESSION_MSYS_ENV" ] && [ ! -L "$_ZENSU_SESSION_MSYS_ENV" ]; then
+    # shellcheck disable=SC1090
+    if source "$_ZENSU_SESSION_MSYS_ENV" \
+        && declare -F zensu_msys_env_exclusions >/dev/null 2>&1; then
+      _ZENSU_SESSION_MSYS_ENV_READY=true
+    fi
+  fi
+fi
+if [ "$_ZENSU_SESSION_MSYS_ENV_READY" != true ]; then
+  # Keep every public session function available to its caller. Stateful hooks
+  # can then render their normal fail-closed deny even when this dependency is
+  # missing, symlinked, or otherwise unsafe to source.
+  zensu_msys_env_exclusions() { return 1; }
+fi
+export -f zensu_msys_env_exclusions 2>/dev/null || true
+unset _ZENSU_SESSION_LIB_DIR _ZENSU_SESSION_MSYS_ENV _ZENSU_SESSION_MSYS_ENV_READY
+
 zensu_bind_hook_session() {
   local payload="${1:-}"
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
     ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
   [ -n "$payload" ] || return 1
@@ -13,6 +37,8 @@ zensu_bind_hook_session() {
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
   native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
   native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
   # Native Windows Node cannot reliably consume an MSYS module path when the
   # plugin root contains shell metacharacters. Resolve the already-validated
   # module from its own directory and let the binder normalize the declared
@@ -20,7 +46,8 @@ zensu_bind_hook_session() {
   bindings="$(
     cd -P -- "$lib_dir" || exit 1
     printf '%s' "$payload" \
-      | CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
         node ./claude-hook-session-v1.js
   )" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
@@ -38,6 +65,7 @@ zensu_bind_hook_session() {
 
 zensu_bind_model_session() {
   local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
   unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
     ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
   [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
@@ -49,9 +77,12 @@ zensu_bind_model_session() {
   [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
   native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
   native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
   bindings="$(
     cd -P -- "$lib_dir" || exit 1
-    CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
       node ./claude-hook-session-v1.js model-bind
   )" || {
     unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
@@ -105,7 +136,7 @@ zensu_resolve_project_dir() {
   local candidate="${ZENSU_PROJECT_ROOT:-}"
   local context_file="${ZENSU_SESSION_CONTEXT:-}"
   local session_key="${ZENSU_SESSION_KEY:-}"
-  local lib_dir core
+  local lib_dir core msys_env_exclusions
   [ -n "$candidate" ] && [ -n "$context_file" ] && [ -n "$session_key" ] || return 1
   [ ! -L "$candidate" ] && [ -d "$candidate" ] || return 1
   [ ! -L "$context_file" ] && [ -f "$context_file" ] || return 1
@@ -113,9 +144,12 @@ zensu_resolve_project_dir() {
   lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
   core="$lib_dir/session-control-core-v1.js"
   [ -f "$core" ] || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE)" \
+    || return 1
   (
     cd -P -- "$lib_dir" || exit 1
-    PROJECT_CANDIDATE="$candidate" CONTEXT_FILE="$context_file" SESSION_KEY="$session_key" node -e '
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      PROJECT_CANDIDATE="$candidate" CONTEXT_FILE="$context_file" SESSION_KEY="$session_key" node -e '
     const fs = require("node:fs");
     const path = require("node:path");
     const core = require("./session-control-core-v1.js");
