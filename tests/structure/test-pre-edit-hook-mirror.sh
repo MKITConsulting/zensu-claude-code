@@ -171,54 +171,50 @@ rm -rf "$C8_STATE_DIR" "$C8_LOG"
 
 C9_STATE_DIR="$(mktemp -d -t hookmirror-c9-XXXX)"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
-C9_REAL_NODE="$(type -P node)"
-C9_BASH_ENV="$C9_STATE_DIR/bash-env"
 C9_CLASSIFIER_MARKER="$C9_STATE_DIR/classifier-exclusions"
-cat > "$C9_BASH_ENV" <<'C9_BASH_ENV'
-node() {
-  if [ "${FP+x}" = x ] || [ "${SD+x}" = x ]; then
-    [ "${FP+x}" = x ] && [ "${SD+x}" = x ] || return 89
-    case ";${MSYS2_ENV_CONV_EXCL:-};" in *';EXISTING_SELECTOR;'*) ;; *) return 90 ;; esac
-    case ";${MSYS2_ENV_CONV_EXCL:-};" in *';FP;'*) ;; *) return 91 ;; esac
-    case ";${MSYS2_ENV_CONV_EXCL:-};" in *';SD;'*) ;; *) return 92 ;; esac
-    printf '%s' "${MSYS2_ENV_CONV_EXCL:-}" > "$ZENSU_CLASSIFIER_EXCLUSION_MARKER"
-  fi
-  "$ZENSU_REAL_NODE" "$@"
-}
-export -f node
-C9_BASH_ENV
-C9_STATE_FILE="$(tdd_state_file "$ZENSU_SESSION_KEY")"
-C9_PREFLIGHT="$(BASH_ENV="$C9_BASH_ENV" ZENSU_REAL_NODE="$C9_REAL_NODE" \
-  C9_STATE_FILE="$C9_STATE_FILE" bash -c '
-    source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-    printf "%s/%s" "$(tdd_state_status "$C9_STATE_FILE")" "$(tdd_session_active "$C9_STATE_FILE")"
-  ' 2>&1)"
-if [ "$C9_PREFLIGHT" = "valid/true" ] && [ ! -e "$C9_CLASSIFIER_MARKER" ]; then
-  check "C9a classifier canary is transparent before FP/SD boundary" PASS
+C9_PRELOAD_SHELL="$PLUGIN_DIR/tests/structure/fixtures/pre-edit-classifier-transport-preload.js"
+C9_PRELOAD_NATIVE="$(_tdd_native_path "$C9_PRELOAD_SHELL")"
+C9_MARKER_NATIVE="$(_tdd_native_path "$C9_CLASSIFIER_MARKER")"
+C9_NODE_OPTIONS="--require=$C9_PRELOAD_NATIVE"
+C9_BASE_EXCLUSIONS='EXISTING_SELECTOR;NODE_OPTIONS;ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER'
+PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
+C9_EXPECTED_REASON='TDD-Phase-Gate: Write on /work/proj/.zensu/../src/main.ts blocked.'
+C9_BASELINE="$(
+  unset FP SD
+  printf '%s' "$PAYLOAD_TRAVERSAL" | \
+    MSYS2_ENV_CONV_EXCL="$C9_BASE_EXCLUSIONS" \
+    STATE_DIR="$C9_STATE_DIR" bash "$HOOK" 2>&1
+)"
+C9_BASELINE_RC=$?
+if [ "$C9_BASELINE_RC" = "0" ] && printf '%s' "$C9_BASELINE" | grep -qF "$C9_EXPECTED_REASON" \
+  && [ ! -e "$C9_CLASSIFIER_MARKER" ]; then
+  check "C9a uninstrumented full hook preserves ambient MSYS exclusions" PASS
 else
-  check "C9a classifier canary preserves active state (status=$C9_PREFLIGHT, marker=$([ -e "$C9_CLASSIFIER_MARKER" ] && echo y || echo n))" FAIL
+  check "C9a uninstrumented full hook reaches traversal deny (rc=$C9_BASELINE_RC, marker=$([ -e "$C9_CLASSIFIER_MARKER" ] && echo y || echo n), out=${C9_BASELINE:0:240})" FAIL
 fi
 C9_NEGATIVE_RC=0
-BASH_ENV="$C9_BASH_ENV" ZENSU_REAL_NODE="$C9_REAL_NODE" \
-  ZENSU_CLASSIFIER_EXCLUSION_MARKER="$C9_CLASSIFIER_MARKER" \
-  MSYS2_ENV_CONV_EXCL=EXISTING_SELECTOR FP=/native/file SD=/native/state \
-  bash -c 'node -e "process.exit(0)"' >/dev/null 2>&1 || C9_NEGATIVE_RC=$?
+NODE_OPTIONS="$C9_NODE_OPTIONS" ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE=1 \
+  ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_MARKER_NATIVE" \
+  MSYS2_ENV_CONV_EXCL="${C9_BASE_EXCLUSIONS};SD" \
+  FP=/native/file SD=/native/state node -e 'process.exit(0)' \
+  >/dev/null 2>&1 || C9_NEGATIVE_RC=$?
 if [ "$C9_NEGATIVE_RC" = "91" ] && [ ! -e "$C9_CLASSIFIER_MARKER" ]; then
   check "C9b classifier canary rejects a missing FP exclusion" PASS
 else
   check "C9b classifier canary detects missing FP exclusion (rc=$C9_NEGATIVE_RC, marker=$([ -e "$C9_CLASSIFIER_MARKER" ] && echo y || echo n))" FAIL
 fi
-PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
-C9_EXPECTED_REASON='TDD-Phase-Gate: Write on /work/proj/.zensu/../src/main.ts blocked.'
-OUT_C9=$(printf '%s' "$PAYLOAD_TRAVERSAL" | \
-  BASH_ENV="$C9_BASH_ENV" ZENSU_REAL_NODE="$C9_REAL_NODE" \
-  ZENSU_CLASSIFIER_EXCLUSION_MARKER="$C9_CLASSIFIER_MARKER" \
-  MSYS2_ENV_CONV_EXCL=EXISTING_SELECTOR \
-  STATE_DIR="$C9_STATE_DIR" bash "$HOOK" 2>&1)
+OUT_C9="$(
+  unset FP SD
+  printf '%s' "$PAYLOAD_TRAVERSAL" | \
+    NODE_OPTIONS="$C9_NODE_OPTIONS" ZENSU_TEST_PRE_EDIT_CLASSIFIER_PROBE=1 \
+    ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER="$C9_MARKER_NATIVE" \
+    MSYS2_ENV_CONV_EXCL="$C9_BASE_EXCLUSIONS" \
+    STATE_DIR="$C9_STATE_DIR" bash "$HOOK" 2>&1
+)"
 RC_C9=$?
 C9_EXCLUSIONS="$(cat "$C9_CLASSIFIER_MARKER" 2>/dev/null)"
 C9_EXCLUSIONS_OK=true
-for C9_NAME in EXISTING_SELECTOR FP SD; do
+for C9_NAME in EXISTING_SELECTOR FP SD NODE_OPTIONS ZENSU_TEST_PRE_EDIT_CLASSIFIER_MARKER; do
   case ";$C9_EXCLUSIONS;" in *";$C9_NAME;"*) ;; *) C9_EXCLUSIONS_OK=false ;; esac
 done
 if [ "$RC_C9" = "0" ] && printf '%s' "$OUT_C9" | grep -qF "$C9_EXPECTED_REASON" \
