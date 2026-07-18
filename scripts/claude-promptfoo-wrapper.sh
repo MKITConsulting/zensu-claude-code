@@ -65,8 +65,7 @@ if ! command -v jq >/dev/null 2>&1; then
 fi
 
 PROMPT="${1:-}"
-OPTIONS_JSON="${2:-}"
-[ -n "$OPTIONS_JSON" ] || OPTIONS_JSON='{}'
+OPTIONS_JSON="${2:-"{}"}"
 
 AGENT="$(echo "$OPTIONS_JSON" | jq -r '.config.agent // ""' 2>/dev/null)"
 WORKDIR="$(echo "$OPTIONS_JSON" | jq -r '.config.working_dir // "."' 2>/dev/null)"
