@@ -2130,6 +2130,20 @@ test('deferred-review inspection distinguishes current, live-owned, and dead-own
 });
 
 test('handoff claims stay owned until both the process is dead and the claim is stale', () => {
+  const live = deferredFixture({ ownerSession: 'live-stale-handoff-owner' });
+  const liveOwner = seedDeferredOwner(live);
+  writeDeferredClaim(live, {
+    ownerPid: process.pid,
+    ownerProcessStartIdentity: currentProcessStartIdentity(),
+    handoffEmitted: true,
+  });
+  const liveAndStale = core.inspectDeferredReviewOwner(inspectDeferredOptions(
+    live,
+    { claimStale: true },
+  ));
+  assert.equal(liveAndStale.status, 'owned');
+  assert.equal(liveAndStale.ownerRevision, liveOwner.revision);
+
   const f = deferredFixture();
   const owner = seedDeferredOwner(f);
   writeDeferredClaim(f, {

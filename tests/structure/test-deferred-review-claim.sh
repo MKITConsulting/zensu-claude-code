@@ -1493,24 +1493,127 @@ CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
   fs.writeFileSync(process.env.CLAIM_FILE, JSON.stringify(j, null, 2));
 '
 LEASE_NONE_B="$(stop lease-none-b)"
-LEASE_NONE_HAS_TS="$(CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
-  const j = JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE, "utf8"));
-  process.stdout.write(Object.prototype.hasOwnProperty.call(j, "ts") ? "yes" : "no");
-')"
+LEASE_NONE_PREPARED="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
+  const fs = require("fs");
+  const core = require(process.env.CONTROL_CORE);
+  const ttlMs = 60 * 60 * 1000;
+  const file = process.env.CLAIM_FILE;
+  const claim = JSON.parse(fs.readFileSync(file, "utf8"));
+  const assignmentMtimeMs = fs.statSync(file).mtimeMs;
+  const assignmentAgeMs = Date.now() - assignmentMtimeMs;
+  const hasTs = Object.prototype.hasOwnProperty.call(claim, "ts");
+  if (hasTs || !Number.isFinite(assignmentMtimeMs)
+      || assignmentAgeMs < -5000 || assignmentAgeMs >= ttlMs) {
+    throw new Error(`assignment did not establish a fresh mtime-only lease: hasTs=${hasTs} mtimeMs=${assignmentMtimeMs} ageMs=${assignmentAgeMs}`);
+  }
+
+  // The contract intentionally requires both a dead owner and an expired
+  // handoff lease. Make owner death deterministic instead of depending on a
+  // short-lived Git Bash PID not being reused before the next assertion.
+  claim.ownerPid = 2147483647;
+  claim.ownerProcessStartIdentity = null;
+  core.atomicWriteJson(file, claim);
+  const restore = new Date(assignmentMtimeMs);
+  const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  let fixtureMtimeMs = Number.NaN;
+  let restoreError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.utimesSync(file, restore, restore);
+      fixtureMtimeMs = fs.statSync(file).mtimeMs;
+      if (Number.isFinite(fixtureMtimeMs)
+          && Math.abs(fixtureMtimeMs - assignmentMtimeMs) <= 2000) break;
+      restoreError = new Error(`restored mtime differs from assignment: ${fixtureMtimeMs}`);
+    } catch (error) {
+      if (!["EPERM", "EACCES"].includes(error.code)) throw error;
+      restoreError = error;
+    }
+    pause(50);
+  }
+  let ownerAlive = false;
+  try { process.kill(claim.ownerPid, 0); ownerAlive = true; }
+  catch (error) { ownerAlive = error.code === "EPERM"; }
+  if (!Number.isFinite(fixtureMtimeMs)
+      || Math.abs(fixtureMtimeMs - assignmentMtimeMs) > 2000) {
+    throw restoreError || new Error(`failed to restore assignment mtime: ${fixtureMtimeMs}`);
+  }
+  if (ownerAlive || Date.now() - fixtureMtimeMs >= ttlMs) {
+    throw new Error(`dead-owner fixture is invalid: alive=${ownerAlive} mtimeMs=${fixtureMtimeMs}`);
+  }
+  process.stdout.write(`no\t${assignmentMtimeMs}\t${fixtureMtimeMs}`);
+')"; LEASE_NONE_PREPARED_RC=$?
+LEASE_NONE_HAS_TS=""
+LEASE_NONE_ASSIGNMENT_MTIME=""
+LEASE_NONE_FIXTURE_MTIME=""
+IFS=$'\t' read -r LEASE_NONE_HAS_TS LEASE_NONE_ASSIGNMENT_MTIME \
+  LEASE_NONE_FIXTURE_MTIME <<<"$LEASE_NONE_PREPARED"
 LEASE_NONE_C_FRESH="$(stop lease-none-c)"; LEASE_NONE_C_FRESH_RC=$?
-touch -t 202001010000 "$LEASE_NONE_CLAIM" 2>/dev/null
-LEASE_NONE_C_EXPIRED="$(stop lease-none-c)"
-if [ "$(printf '%s' "$LEASE_NONE_A" | decision)" = block ] \
-  && [ "$(printf '%s' "$LEASE_NONE_B" | decision)" = block ] \
+# Use the same native Node filesystem boundary as the production mtime reader.
+# The old Git Bash `touch -t` result was unchecked, so a no-op could not be
+# distinguished from a lease bug. Set and verify the stale precondition here.
+LEASE_NONE_STALE_MTIME="$(CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
+  const fs = require("fs");
+  const ttlMs = 60 * 60 * 1000;
+  const stale = new Date(Date.now() - 2 * ttlMs);
+  const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  let mtimeMs = Number.NaN;
+  let lastError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      fs.utimesSync(process.env.CLAIM_FILE, stale, stale);
+      mtimeMs = fs.statSync(process.env.CLAIM_FILE).mtimeMs;
+      if (Number.isFinite(mtimeMs) && Date.now() - mtimeMs >= ttlMs) break;
+      lastError = new Error(`stale mtime read-back remained fresh: ${mtimeMs}`);
+    } catch (error) {
+      if (!["EPERM", "EACCES"].includes(error.code)) throw error;
+      lastError = error;
+    }
+    pause(50);
+  }
+  if (!Number.isFinite(mtimeMs) || Date.now() - mtimeMs < ttlMs) {
+    throw lastError || new Error(`failed to establish stale claim mtime: ${mtimeMs}`);
+  }
+  process.stdout.write(String(mtimeMs));
+')"; LEASE_NONE_STALE_MTIME_RC=$?
+if [ "$LEASE_NONE_STALE_MTIME_RC" -eq 0 ]; then
+  LEASE_NONE_C_EXPIRED="$(stop lease-none-c)"; LEASE_NONE_C_EXPIRED_RC=$?
+else
+  LEASE_NONE_C_EXPIRED=""; LEASE_NONE_C_EXPIRED_RC=2
+fi
+LEASE_NONE_A_DECISION="$(printf '%s' "$LEASE_NONE_A" | decision)"
+LEASE_NONE_B_DECISION="$(printf '%s' "$LEASE_NONE_B" | decision)"
+LEASE_NONE_C_FRESH_DECISION="$(printf '%s' "$LEASE_NONE_C_FRESH" | decision)"
+LEASE_NONE_C_EXPIRED_DECISION="$(printf '%s' "$LEASE_NONE_C_EXPIRED" | decision)"
+LEASE_NONE_B_ACTIVE="$(state_flag lease-none-b active)"
+LEASE_NONE_C_ACTIVE="$(state_flag lease-none-c active)"
+LEASE_NONE_OWNER_DIAG="$(CONTROL_CORE="$CORE" CLAIM_FILE="$LEASE_NONE_CLAIM" node -e '
+  try {
+    const fs = require("fs");
+    const core = require(process.env.CONTROL_CORE);
+    const claim = JSON.parse(fs.readFileSync(process.env.CLAIM_FILE, "utf8"));
+    let alive = false;
+    try { process.kill(claim.ownerPid, 0); alive = true; }
+    catch (error) { alive = error.code === "EPERM"; }
+    const actual = core.processStartIdentityForPid(claim.ownerPid);
+    process.stdout.write(`pid:${claim.ownerPid},stored:${claim.ownerProcessStartIdentity || "null"},actual:${actual || "null"},alive:${alive}`);
+  } catch (error) {
+    process.stdout.write(`diagnostic-error:${error.message}`);
+  }
+')"
+if [ "$LEASE_NONE_A_DECISION" = block ] \
+  && [ "$LEASE_NONE_B_DECISION" = block ] \
+  && [ "$LEASE_NONE_PREPARED_RC" -eq 0 ] \
   && [ "$LEASE_NONE_HAS_TS" = no ] \
   && [ "$LEASE_NONE_C_FRESH_RC" -eq 0 ] \
-  && [ "$(printf '%s' "$LEASE_NONE_C_FRESH" | decision)" = allow ] \
-  && [ "$(printf '%s' "$LEASE_NONE_C_EXPIRED" | decision)" = block ] \
-  && [ "$(state_flag lease-none-b active)" = false ] \
-  && [ "$(state_flag lease-none-c active)" = true ]; then
+  && [ "$LEASE_NONE_C_FRESH_DECISION" = allow ] \
+  && [ "$LEASE_NONE_STALE_MTIME_RC" -eq 0 ] \
+  && [ "$LEASE_NONE_C_EXPIRED_RC" -eq 0 ] \
+  && [ "$LEASE_NONE_C_EXPIRED_DECISION" = block ] \
+  && [ "$LEASE_NONE_B_ACTIVE" = false ] \
+  && [ "$LEASE_NONE_C_ACTIVE" = true ]; then
   check "C8 timestampStyle none renews claim lease through mtime" PASS
 else
-  check "C8 timestampStyle none renews claim lease through mtime" FAIL
+  check "C8 timestampStyle none lease renewal (a=$LEASE_NONE_A_DECISION b=$LEASE_NONE_B_DECISION prepared_rc=$LEASE_NONE_PREPARED_RC has_ts=$LEASE_NONE_HAS_TS assignment_mtime=$LEASE_NONE_ASSIGNMENT_MTIME fixture_mtime=$LEASE_NONE_FIXTURE_MTIME fresh_rc=$LEASE_NONE_C_FRESH_RC fresh=$LEASE_NONE_C_FRESH_DECISION stale_rc=$LEASE_NONE_STALE_MTIME_RC stale_mtime=$LEASE_NONE_STALE_MTIME expired_rc=$LEASE_NONE_C_EXPIRED_RC expired=$LEASE_NONE_C_EXPIRED_DECISION b_active=$LEASE_NONE_B_ACTIVE c_active=$LEASE_NONE_C_ACTIVE owner=$LEASE_NONE_OWNER_DIAG)" FAIL
 fi
 
 echo "----"
