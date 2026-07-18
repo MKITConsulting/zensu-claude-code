@@ -932,6 +932,29 @@ else
 fi
 rm -rf "$WATCH_BOUNDARY_DIR" "$WATCH_BOUNDARY_DIR.marker" "$WATCH_BOUNDARY_DIR.ready"
 
+# ── P14: OPTIONS_JSON default must not corrupt a provided argv[2] ─────────────
+# Regression for `OPTIONS_JSON="${2:-{}}"`: bash closes the ${...} expansion at
+# the FIRST `}`, so the default word is `{` plus a LITERAL trailing `}` — every
+# provided argv[2] gets a stray `}` appended. jq's streaming parser masks it
+# today (it emits the first value, then errors on stdout-suppressed stderr), but
+# OPTIONS_JSON is malformed JSON and breaks under any strict parse / rc check.
+# The default word must be quoted: `${2:-"{}"}`. Assert the exact assignment
+# line round-trips a provided argv[2] byte-identical and still defaults to `{}`.
+OPTIONS_ASSIGN="$(grep -m1 '^OPTIONS_JSON=' "$WRAPPER")"
+P14_JSON='{"config":{"agent":"sentinel","working_dir":"/tmp/x"}}'
+P14_SET="$( set -- dummy "$P14_JSON"; eval "$OPTIONS_ASSIGN"; printf '%s' "$OPTIONS_JSON" )"
+if [ "$P14_SET" = "$P14_JSON" ]; then
+  check "P14-S1 provided argv[2] round-trips through OPTIONS_JSON byte-identical" PASS
+else
+  check "P14-S1 OPTIONS_JSON corrupts provided argv[2] (got '$P14_SET')" FAIL
+fi
+P14_EMPTY="$( set -- dummy ""; eval "$OPTIONS_ASSIGN"; printf '%s' "$OPTIONS_JSON" )"
+if [ "$P14_EMPTY" = '{}' ]; then
+  check "P14-S2 empty argv[2] still defaults to {}" PASS
+else
+  check "P14-S2 empty argv[2] default (got '$P14_EMPTY')" FAIL
+fi
+
 echo "----"
 echo "test-claude-promptfoo-wrapper: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
