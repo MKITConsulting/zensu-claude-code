@@ -306,10 +306,12 @@ Restart the session (`/exit` and reopen) so the new hooks, agents, and skills lo
 
 Session Control is intentionally fresh-session-only. The former
 `~/.zensu/plugin-root` locator is neither read, migrated, nor rewritten during
-install or update; it is inert and may be deleted. Updating installs the new
-plugin copy, and the next fresh session binds that exact installed root in its
-private immutable context. An already-running pre-update session is not
-rebound to the new copy.
+install or update; it is inert to the updated plugin but may contain a stale or
+dangling path. Delete it only once no Claude Code session from an older Zensu
+plugin installation is still running in the same home; the plugin never deletes
+it automatically. Updating installs the new plugin copy, and the next fresh
+session binds that exact installed root in its private immutable context. An
+already-running pre-update session is not rebound to the new copy.
 
 ## Authentication
 
@@ -729,7 +731,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Planning agent cannot mutate Zensu state | Expected: `zensu:zensu-plm` receives neutral `host-profile-v1` context but its agent definition and enforcement gate expose only `Read`/`Grep`/`Glob`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
 | OAuth login not opening | Check your default browser settings |
 | TDD phase gate blocking a legitimate edit | Set `ZENSU_TDD_GATE=off` for that edit only, or let the top-level `/zensu:tdd` Skill declare the correct phase via `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>` first |
-| Stateful helper reports that its rendered Session Control binding is unavailable | Confirm Claude Code `2.1.211` or newer and restart every still-running Claude Code session once so top-level Skill content is rendered with the installed plugin root/data and SessionStart can create the matching private record. Do not source an internal binder or search for another plugin root. The retired `~/.zensu/plugin-root` locator is never consulted and may be deleted. |
+| Stateful helper reports that its rendered Session Control binding is unavailable | Confirm Claude Code `2.1.211` or newer and restart every still-running Claude Code session once so top-level Skill content is rendered with the installed plugin root/data and SessionStart can create the matching private record. Do not source an internal binder or search for another plugin root. The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin. Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home; the plugin never deletes it automatically. |
 
 ## Contributing
 

@@ -39,6 +39,48 @@ do
   fi
 done
 
+README_UPDATING="$(awk '
+  /^## Updating$/ { in_section = 1; next }
+  in_section && /^## / { exit }
+  in_section { print }
+' "$README")"
+README_UPDATING_ONELINE="$(printf '%s\n' "$README_UPDATING" | tr '\n' ' ' | tr -s ' ')"
+for requirement in \
+  '`~/.zensu/plugin-root` locator is neither read, migrated, nor rewritten' \
+  'is inert to the updated plugin' \
+  'Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
+  'the plugin never deletes it automatically'
+do
+  if printf '%s\n' "$README_UPDATING_ONELINE" | grep -qF -- "$requirement"; then
+    check "README upgrade note: $requirement" PASS
+  else
+    check "README upgrade note: $requirement" FAIL
+  fi
+done
+
+README_TROUBLESHOOTING="$(awk '
+  /^## Troubleshooting$/ { in_section = 1; next }
+  in_section && /^## / { exit }
+  in_section { print }
+' "$README")"
+README_TROUBLESHOOTING_ONELINE="$(printf '%s\n' "$README_TROUBLESHOOTING" | tr '\n' ' ' | tr -s ' ')"
+for requirement in \
+  'The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin' \
+  'Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
+  'the plugin never deletes it automatically'
+do
+  if printf '%s\n' "$README_TROUBLESHOOTING_ONELINE" | grep -qF -- "$requirement"; then
+    check "README troubleshooting note: $requirement" PASS
+  else
+    check "README troubleshooting note: $requirement" FAIL
+  fi
+done
+if ! grep -qF 'may be deleted' "$README"; then
+  check "README has no unqualified legacy-locator deletion advice" PASS
+else
+  check "README has no unqualified legacy-locator deletion advice" FAIL
+fi
+
 SAFE_LOG_COMMAND='CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"'
 if [ "$(grep -cF "$SAFE_LOG_COMMAND" "$README" 2>/dev/null || true)" -ge 2 ] \
   && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$README"; then
