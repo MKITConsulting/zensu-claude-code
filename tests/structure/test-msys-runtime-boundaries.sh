@@ -272,10 +272,19 @@ if ! grep -qF 'process.argv[1]' "$POST_REVIEW" \
     && grep -qF 'readFileSync(0, "utf8")' "$POST_REVIEW" \
     && ! grep -qF 'reason:process.argv[1]' "$STOP_ENFORCER" \
     && grep -qF 'readFileSync(0, "utf8")' "$STOP_ENFORCER" \
-    && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 2 ]; then
+    && [ "$(grep -cF 'PAYLOAD_LOG_COMMAND="$LOG_COMMAND" node -e' "$PRE_EDIT")" -eq 2 ] \
+    && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ]; then
   check "free-form hook messages bypass MSYS argv and environment path conversion" PASS
 else
   check "free-form hook messages bypass MSYS argv and environment path conversion" FAIL
+fi
+
+if grep -qF 'for _ZENSU_NATIVE_ENV_NAME in FP SD; do' "$PRE_EDIT" \
+    && [ "$(grep -cF 'MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL"' "$PRE_EDIT")" -eq 3 ] \
+    && grep -qF 'FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e' "$PRE_EDIT"; then
+  check "native pre-edit classifier protects FP and SD from MSYS environment conversion" PASS
+else
+  check "native pre-edit classifier protects FP and SD from MSYS environment conversion" FAIL
 fi
 
 if (

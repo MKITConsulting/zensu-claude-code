@@ -173,15 +173,38 @@ C9_STATE_DIR="$(mktemp -d -t hookmirror-c9-XXXX)"
 C9_LOG="$(mktemp -t hookmirror-c9-log-XXXX)"
 : > "$C9_LOG"
 seed_active "$C9_STATE_DIR" "hookmirror-test"
+C9_REAL_NODE="$(type -P node)"
+C9_NODE_SHIM_DIR="$C9_STATE_DIR/node-shim"
+C9_CLASSIFIER_MARKER="$C9_STATE_DIR/classifier-exclusions"
+mkdir -p "$C9_NODE_SHIM_DIR"
+cat > "$C9_NODE_SHIM_DIR/node" <<'C9_NODE_SHIM'
+#!/bin/bash
+if [ "${1:-}" = "-e" ]; then
+  case "${2:-}" in
+    *'const realfile = p =>'*)
+      case ";${MSYS2_ENV_CONV_EXCL:-};" in *';EXISTING_SELECTOR;'*) ;; *) exit 90 ;; esac
+      case ";${MSYS2_ENV_CONV_EXCL:-};" in *';FP;'*) ;; *) exit 91 ;; esac
+      case ";${MSYS2_ENV_CONV_EXCL:-};" in *';SD;'*) ;; *) exit 92 ;; esac
+      : > "$ZENSU_CLASSIFIER_EXCLUSION_MARKER"
+      ;;
+  esac
+fi
+exec "$ZENSU_REAL_NODE" "$@"
+C9_NODE_SHIM
+chmod +x "$C9_NODE_SHIM_DIR/node"
 PAYLOAD_TRAVERSAL='{"hook_event_name":"PreToolUse","tool_name":"Write","tool_input":{"file_path":"/work/proj/.zensu/../src/main.ts"},"session_id":"hookmirror-test"}'
 OUT_C9=$(printf '%s' "$PAYLOAD_TRAVERSAL" | \
+  PATH="$C9_NODE_SHIM_DIR:$PATH" ZENSU_REAL_NODE="$C9_REAL_NODE" \
+  ZENSU_CLASSIFIER_EXCLUSION_MARKER="$C9_CLASSIFIER_MARKER" \
+  MSYS2_ENV_CONV_EXCL=EXISTING_SELECTOR \
   STATE_DIR="$C9_STATE_DIR" ZENSU_HOOK_LOG="$C9_LOG" bash "$HOOK" 2>&1)
 RC_C9=$?
 C9_CONTENT="$(cat "$C9_LOG" 2>/dev/null)"
-if [ "$RC_C9" = "0" ] && printf '%s' "$OUT_C9" | grep -qF 'permissionDecision' && [ -n "$C9_CONTENT" ]; then
-  check "C9 .zensu/../ traversal path -> still gated (not waved through the .zensu bypass)" PASS
+if [ "$RC_C9" = "0" ] && printf '%s' "$OUT_C9" | grep -qF 'permissionDecision' \
+  && [ -n "$C9_CONTENT" ] && [ -e "$C9_CLASSIFIER_MARKER" ]; then
+  check "C9 .zensu/../ traversal stays gated with explicit native FP/SD transport" PASS
 else
-  check "C9 .zensu/../ traversal denied (rc=$RC_C9, content=${C9_CONTENT:0:120}, out=${OUT_C9:0:120})" FAIL
+  check "C9 traversal native transport (rc=$RC_C9, marker=$([ -e "$C9_CLASSIFIER_MARKER" ] && echo y || echo n), content=${C9_CONTENT:0:120}, out=${OUT_C9:0:120})" FAIL
 fi
 rm -rf "$C9_STATE_DIR" "$C9_LOG"
 

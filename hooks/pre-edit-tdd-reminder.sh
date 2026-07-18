@@ -33,6 +33,16 @@ case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
   *';PAYLOAD_LOG_COMMAND;'*) ;;
   *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}PAYLOAD_LOG_COMMAND" ;;
 esac
+# FP and SD cross the classifier boundary only after explicit native-path
+# conversion. Exclude both from Git Bash's heuristic environment conversion so
+# dot segments and drive spellings cannot be reinterpreted a second time.
+for _ZENSU_NATIVE_ENV_NAME in FP SD; do
+  case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
+    *";${_ZENSU_NATIVE_ENV_NAME};"*) ;;
+    *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}${_ZENSU_NATIVE_ENV_NAME}" ;;
+  esac
+done
+unset _ZENSU_NATIVE_ENV_NAME
 
 if ! command -v node >/dev/null 2>&1; then
   exit 2
@@ -124,7 +134,8 @@ case "$FILE_PATH" in
 esac
 NATIVE_FILE_PATH="$(_tdd_native_path "$FILE_PATH_SHELL")" || deny_invalid_state
 NATIVE_STATE_DIR="$(_tdd_native_project_path "$(dirname "$STATE_FILE")")" || deny_invalid_state
-if ! PATH_CLASS="$(FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e '
+if ! PATH_CLASS="$(MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
+  FP="$NATIVE_FILE_PATH" SD="$NATIVE_STATE_DIR" node -e '
   const path = require("path");
   const fs = require("fs");
   const lownorm = p => path.posix.normalize(String(p).replace(/\\/g, "/")).toLowerCase();
