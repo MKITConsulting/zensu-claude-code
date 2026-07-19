@@ -170,6 +170,7 @@ function readRegularFileSnapshot(
         pathBefore = fs.lstatSync(file);
       } catch (error) {
         if (missingAllowed && error.code === 'ENOENT') return null;
+        if (error.code === 'ENOENT') fail(`missing file: ${file}`);
         throw error;
       }
       if (pathBefore.isSymbolicLink()) fail(`symlink file rejected: ${file}`);

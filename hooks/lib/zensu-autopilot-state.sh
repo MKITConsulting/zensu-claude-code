@@ -258,6 +258,29 @@ const fail = (code, message) => {
   if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);
   process.exit(code);
 };
+const projectRootIndex = Object.freeze({
+  "read-active": 2,
+  "read-run": 2,
+  begin: 6,
+  apply: 7,
+  "increment-budget": 5,
+  "increment-budget-capped": 5,
+})[mode];
+if (projectRootIndex !== undefined) {
+  const requestedProjectRoot = args[projectRootIndex];
+  if (typeof requestedProjectRoot !== "string" || requestedProjectRoot.length === 0
+      || /[\u0000-\u001f]/.test(requestedProjectRoot)) {
+    fail(3, "invalid physical project root");
+  }
+  try {
+    const canonicalProjectRoot = fs.realpathSync.native(path.resolve(requestedProjectRoot));
+    const stat = fs.lstatSync(canonicalProjectRoot);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) fail(2, "unsafe physical project root");
+    args[projectRootIndex] = canonicalProjectRoot;
+  } catch (_) {
+    fail(2, "physical project root is unavailable");
+  }
+}
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const exact = (value, keys) => isObject(value)
   && Object.keys(value).length === keys.length

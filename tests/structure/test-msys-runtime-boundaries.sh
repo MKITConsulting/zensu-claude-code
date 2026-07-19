@@ -13,10 +13,21 @@ AGENT_CONTEXT="$ROOT/hooks/lib/zensu-agent-context.sh"
 SESSION_BINDING="$ROOT/hooks/lib/zensu-session.sh"
 MSYS_ENV="$ROOT/hooks/lib/zensu-msys-env.sh"
 AUTOPILOT_RESUME="$ROOT/hooks/session-start-autopilot-resume.sh"
+AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 CONFIG_LIB="$ROOT/hooks/lib/zensu-config.sh"
 PLAN_SKILL="$ROOT/skills/plan-review/SKILL.md"
 PR_SKILL="$ROOT/skills/pr-team-review/SKILL.md"
 STATE_READER_BLOCK="$(awk '/^_tdd_read_validated_state\(\)/,/^}/' "$PHASE")"
+PATH_SAFETY_BLOCK="$(awk '
+  /^_tdd_paths_safe\(\)/ { capture=1 }
+  /^_tdd_path_safe\(\)/ { capture=0 }
+  capture
+' "$PHASE")"
+AUTOPILOT_NODE_BLOCK="$(awk '
+  /^_autopilot_node\(\)/ { capture=1 }
+  /^_autopilot_begin_critical\(\)/ { capture=0 }
+  capture
+' "$AUTOPILOT_STATE")"
 PASS=0
 FAIL=0
 
@@ -36,6 +47,35 @@ if [ -f "$PATHS" ] && [ ! -L "$PATHS" ] \
   check "shared native-host path boundaries exist" PASS
 else
   check "shared native-host path boundaries exist" FAIL
+fi
+
+if printf '%s\n' "$PATH_SAFETY_BLOCK" | grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF 'const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(1);' \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF '"$native_project_root" "$native_temp_root" "$native_home_root"' \
+    && printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -qF '"${native_path_args[@]}"' \
+    && ! printf '%s\n' "$PATH_SAFETY_BLOCK" \
+      | grep -Eq 'process\.env\.(PROJECT_ROOT|TEMP_ROOT|HOME_ROOT)'; then
+  check "path safety transports every pre-rendered native anchor and operand through rewrite-disabled argv" PASS
+else
+  check "path safety native argv transport contract" FAIL
+fi
+
+if printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \
+      | grep -qF 'const canonicalProjectRoot = fs.realpathSync.native(path.resolve(requestedProjectRoot));' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \
+      | grep -qF 'args[projectRootIndex] = canonicalProjectRoot;' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-active": 2,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-run": 2,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  begin: 6,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  apply: 7,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget": 5,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget-capped": 5,'; then
+  check "Autopilot canonicalizes every mode-specific physical project root before persistence or comparison" PASS
+else
+  check "Autopilot physical project-root canonicalization contract" FAIL
 fi
 
 if (

@@ -18,6 +18,11 @@ RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
 AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
 ENRICHMENT="$ROOT/scripts/claude-enrichment-render.js"
 PROMPTFOO_WRAPPER="$ROOT/scripts/claude-promptfoo-wrapper.sh"
+CORE_SNAPSHOT_BLOCK="$(awk '
+  /^function readRegularFileSnapshot\(/ { capture=1 }
+  /^function readRegularFile\(/ { capture=0 }
+  capture
+' "$CORE")"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -156,6 +161,8 @@ fi
 
 if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$CORE" \
   && grep -qF 'pathBefore && !sameFileIdentity(pathBefore, before)' "$CORE" \
+  && [ "$(printf '%s\n' "$CORE_SNAPSHOT_BLOCK" \
+    | grep -cF 'if (error.code === '\''ENOENT'\'') fail(`missing file: ${file}`);')" -eq 2 ] \
   && grep -qF "const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });" "$BINDER" \
   && grep -qF 'recordStat.isSymbolicLink() || !recordStat.isFile() || recordStat.nlink !== 1' "$BINDER"; then
   check "Session Control brackets Windows opens with path and descriptor identity" PASS

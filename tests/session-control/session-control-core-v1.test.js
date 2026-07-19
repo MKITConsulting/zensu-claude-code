@@ -979,7 +979,15 @@ test('resetReviewBudget rejects invalid state without repair or byte changes', (
 
 test('fails closed for a missing context', () => {
   const f = fixture();
-  assert.throws(() => core.readContext({ recordsDir: f.recordsDir, sessionId: RAW_SESSION }), /missing|not found/i);
+  fs.mkdirSync(f.recordsDir, { recursive: true });
+  const expectedFile = path.join(
+    fs.realpathSync.native(f.recordsDir),
+    `${core.sessionKey(RAW_SESSION)}.json`,
+  );
+  assert.throws(
+    () => core.readContext({ recordsDir: f.recordsDir, sessionId: RAW_SESSION }),
+    (error) => error.message === `session-control-v1: missing file: ${expectedFile}`,
+  );
 });
 
 test('renders main context without the raw session identifier', () => {

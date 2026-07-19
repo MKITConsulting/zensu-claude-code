@@ -225,8 +225,10 @@ else
   check "evidence SubagentStop stores, seals, and closes through the special plugin root" FAIL
 fi
 
-VERSION="$("$REAL_NODE" -e 'process.stdout.write(require(process.argv[1]).version)' \
-  "$PLUGIN/.claude-plugin/plugin.json")"
+VERSION="$(node -e '
+  const manifest = JSON.parse(require("node:fs").readFileSync(0, "utf8"));
+  process.stdout.write(manifest.version);
+' < "$PLUGIN/.claude-plugin/plugin.json")" || exit 1
 BANNER_OUT="$(session_payload \
   | CLAUDE_PLUGIN_ROOT="$PLUGIN" HOME="$HOME_DIR" ZENSU_CONFIG="$CONFIG" \
     bash "$PLUGIN/hooks/session-start-banner.sh" 2>"$RAW_TMP/banner.err")"

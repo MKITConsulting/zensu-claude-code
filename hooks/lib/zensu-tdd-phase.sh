@@ -228,16 +228,16 @@ _tdd_paths_safe() {
   if [ -n "${HOME:-}" ]; then
     native_home_root="$(_tdd_native_path "$HOME")" || return 1
   fi
-  PROJECT_ROOT="$native_project_root" TEMP_ROOT="$native_temp_root" HOME_ROOT="$native_home_root" node -e '
+  MSYS2_ARG_CONV_EXCL='*' node -e '
       const fs = require("fs");
       const path = require("path");
       const within = (base, candidate) => {
         const rel = path.relative(base, candidate);
         return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
       };
-      const trusted = [process.env.PROJECT_ROOT, process.env.TEMP_ROOT, process.env.HOME_ROOT]
+      const [projectRoot, tempRoot, homeRoot, ...args] = process.argv.slice(1);
+      const trusted = [projectRoot, tempRoot, homeRoot]
         .filter(Boolean).map(value => path.resolve(value));
-      const args = process.argv.slice(1);
       const validModes = new Set(["regular", "regular-or-absent", "directory", "directory-or-absent"]);
       for (let pair = 0; pair < args.length; pair += 2) {
         const target = path.resolve(args[pair]);
@@ -291,7 +291,8 @@ _tdd_paths_safe() {
         }
         if (missing && (mode === "regular" || mode === "directory")) process.exit(3);
       }
-    ' "${native_path_args[@]}" >/dev/null 2>&1
+    ' "$native_project_root" "$native_temp_root" "$native_home_root" \
+      "${native_path_args[@]}" >/dev/null 2>&1
 }
 
 _tdd_path_safe() {
