@@ -28,7 +28,10 @@ REVISION="$(git -C "$SOURCE" rev-parse HEAD)"
 
 TARGET="$(cd "$TEMPORARY/targets" && pwd -P)/marketplace"
 RESULT="$(node "$GENERATOR" "$SOURCE" "$TARGET" "$REVISION")"
-[ "$RESULT" = "$TARGET" ]
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) RESULT="$(cygpath -u "$RESULT")" ;;
+esac
+[ "$(cd "$RESULT" && pwd -P)" = "$(cd "$TARGET" && pwd -P)" ]
 [ "$(jq -r '.plugins[0].source' "$TARGET/.claude-plugin/marketplace.json")" = './plugin' ]
 [ "$(jq -r '.plugins[0].source.source' "$TARGET/plugin/.claude-plugin/marketplace.json")" = github ]
 [ "$(jq -r '.plugins[0].source.ref' "$TARGET/plugin/.claude-plugin/marketplace.json")" = v9.8.7 ]

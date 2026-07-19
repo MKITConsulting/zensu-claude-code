@@ -6,6 +6,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 VCS_LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -59,11 +60,21 @@ source "$LIB"
 # shellcheck disable=SC1090
 source "$VCS_LIB"
 
-ROOT="$(mktemp -d -t zensu-autopilot-state-XXXXXX)"
+ROOT="$(mktemp -d -t za-state-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 PROJECT="$ROOT/project"
 mkdir -p "$PROJECT"
-PROJECT_PHYSICAL="$(cd "$PROJECT" && pwd -P)"
+
+native_directory() {
+  local rendered
+  rendered="$(bash "$HOST_PATH" "$1")" || return 1
+  MSYS2_ARG_CONV_EXCL='*' node -e '
+    const fs = require("fs");
+    process.stdout.write(fs.realpathSync.native(process.argv[1]));
+  ' "$rendered"
+}
+
+PROJECT_PHYSICAL="$(native_directory "$PROJECT")"
 export CLAUDE_PROJECT_DIR="$PROJECT"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_CONFIG="$ROOT/no-config.json"
@@ -452,7 +463,7 @@ prepare_provider_project() {
   mkdir -p "$state_dir" || return 1
   cp "$ACTIVE_FILE" "$state_dir/autopilot-active.json" || return 1
   cp "$RUN_FILE" "$run_file" || return 1
-  physical="$(cd "$target" && pwd -P)" || return 1
+  physical="$(native_directory "$target")" || return 1
   PROJECT_PHYSICAL="$physical" REQUEST_PROVIDER="$provider" node -e '
   const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
   const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
@@ -619,7 +630,7 @@ LEGACY_RUN_FILE="$LEGACY_STATE_DIR/autopilot-run-${RUN}.json"
 mkdir -p "$LEGACY_STATE_DIR"
 cp "$ACTIVE_FILE" "$LEGACY_STATE_DIR/autopilot-active.json"
 cp "$RUN_FILE" "$LEGACY_RUN_FILE"
-LEGACY_PROJECT_PHYSICAL="$(cd "$LEGACY_PROJECT" && pwd -P)"
+LEGACY_PROJECT_PHYSICAL="$(native_directory "$LEGACY_PROJECT")"
 LEGACY_PROJECT_PHYSICAL="$LEGACY_PROJECT_PHYSICAL" node -e '
   const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
   const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:

@@ -31,7 +31,7 @@ fi
 # shellcheck disable=SC1090
 source "$STATE_LIB"
 
-ROOT="$(mktemp -d -t zensu-autopilot-adversarial-XXXXXX)"
+ROOT="$(mktemp -d -t za-adv-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 mkdir -p "$ROOT/session-control/plugin-data"
