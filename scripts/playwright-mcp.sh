@@ -79,12 +79,15 @@ run_child() {
 }
 
 run_sanitized_child() {
+  local arg_conv_excl="$1"
+  shift
   local env_args=(
     "PATH=$PATH"
     "HOME=$SANITIZED_HOME"
     "XDG_CONFIG_HOME=$SANITIZED_HOME/.config"
     "XDG_CACHE_HOME=$SANITIZED_HOME/.cache"
     "XDG_DATA_HOME=$SANITIZED_HOME/.local/share"
+    "MSYS2_ENV_CONV_EXCL=ZENSU_VERIFY_NAVIGATION_POLICY_V1="
   )
   local name value
   for name in \
@@ -95,6 +98,7 @@ run_sanitized_child() {
     value="${!name-}"
     [ -z "$value" ] || env_args+=( "$name=$value" )
   done
+  [ -z "$arg_conv_excl" ] || env_args+=( "MSYS2_ARG_CONV_EXCL=$arg_conv_excl" )
   run_child env -i "${env_args[@]}" "$@"
 }
 
@@ -118,7 +122,18 @@ fi
 # Policy validation runs only the checked-in broker and never loads the upstream
 # npm package graph, so it needs no generated runtime.
 if [ "${1:-}" = "--check-policy" ]; then
-  run_sanitized_child node "$PROXY" --runtime-dir "$RUNTIME_DIR" "$@"
+  POLICY_PROXY_HOST="$PROXY"
+  POLICY_RUNTIME_DIR_HOST="$RUNTIME_DIR"
+  if command -v cygpath >/dev/null 2>&1; then
+    POLICY_PROXY_HOST="$(cygpath -am "$PROXY")" \
+      || { echo "zensu Playwright MCP: cannot canonicalize the policy proxy path" >&2; exit 2; }
+    POLICY_RUNTIME_DIR_HOST="$(cygpath -am "$RUNTIME_DIR")" \
+      || { echo "zensu Playwright MCP: cannot canonicalize the policy runtime path" >&2; exit 2; }
+  fi
+  # All paths are native before conversion is disabled. This keeps the policy
+  # route and origin byte-exact across the final MSYS env -> native Node spawn.
+  run_sanitized_child '*' node "$POLICY_PROXY_HOST" \
+    --runtime-dir "$POLICY_RUNTIME_DIR_HOST" "$@"
   exit $?
 fi
 
@@ -141,7 +156,7 @@ materialize_runtime() {
   cp "$LOCK_FILE" "$RUNTIME_GENERATION/package-lock.json"
   echo "zensu Playwright MCP: materializing isolated integrity-locked runtime" >&2
   npm_status=0
-  run_sanitized_child npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund >&2 || npm_status=$?
+  run_sanitized_child '' npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund >&2 || npm_status=$?
   if [ "$npm_status" -ne 0 ]; then
     echo "zensu Playwright MCP: npm ci failed" >&2
     exit "$npm_status"
@@ -181,8 +196,8 @@ fi
 
 child_status=0
 if [ "${1:-}" = "install-browser" ]; then
-  run_sanitized_child "$BIN" install-browser || child_status=$?
+  run_sanitized_child '' "$BIN" install-browser || child_status=$?
 else
-  run_sanitized_child node "$PROXY" --runtime-dir "$RUNTIME_GENERATION" "$@" || child_status=$?
+  run_sanitized_child '' node "$PROXY" --runtime-dir "$RUNTIME_GENERATION" "$@" || child_status=$?
 fi
 exit "$child_status"

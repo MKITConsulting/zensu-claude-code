@@ -325,8 +325,8 @@ if jq -e '.mcpServers.playwright.command == "${CLAUDE_PLUGIN_ROOT}/scripts/playw
   && jq -e '.mcpServers.playwright.args | index("--caps=storage") | not' "$MCP_JSON" >/dev/null 2>&1 \
   && [ "$(jq -r '.dependencies["@playwright/mcp"]' "$MCP_PACKAGE")" = '0.0.75' ] \
   && jq -e '.packages["node_modules/@playwright/mcp"] | .version == "0.0.75" and (.integrity | startswith("sha512-"))' "$MCP_LOCK" >/dev/null 2>&1 \
-  && grep -qF 'run_sanitized_child npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
-  && grep -qF 'run_sanitized_child node "$PROXY" --runtime-dir "$RUNTIME_GENERATION"' "$MCP_LAUNCHER"; then
+  && grep -qF 'run_sanitized_child '\'''\'' npm ci --prefix "$RUNTIME_GENERATION" --ignore-scripts --no-audit --no-fund' "$MCP_LAUNCHER" \
+  && grep -qF 'run_sanitized_child '\'''\'' node "$PROXY" --runtime-dir "$RUNTIME_GENERATION"' "$MCP_LAUNCHER"; then
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" PASS
 else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
@@ -347,7 +347,7 @@ if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-brow
   && grep -qF 'natively rendered `${CLAUDE_PLUGIN_ROOT}` path' "$SKILL_MD" \
   && grep -qF '`browser_install` is not a tool in the pinned' "$SKILL_MD" \
   && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD" \
-  && grep -qF 'run_sanitized_child "$BIN" install-browser' "$MCP_LAUNCHER"; then
+  && grep -qF 'run_sanitized_child '\'''\'' "$BIN" install-browser' "$MCP_LAUNCHER"; then
   check "P6f missing browser recovery uses the pinned launcher install-browser command" PASS
 else
   check "P6f missing browser recovery uses the pinned launcher install-browser command" FAIL

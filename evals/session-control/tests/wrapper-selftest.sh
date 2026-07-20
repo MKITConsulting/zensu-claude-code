@@ -145,10 +145,11 @@ done < <(jq -br '.flags | to_entries[] | [.key, (.value | tostring)] | @tsv' "$s
 SELFTEST_GENERIC_WORKTREE="$(jq -br '.generic_worktree' "$selftest_control")"
 SELFTEST_GENERIC_MARKER="$(jq -br '.generic_marker' "$selftest_control")"
 SELFTEST_SCENARIO="$(jq -br '.scenario' "$selftest_control")"
+SELFTEST_PROJECT_ROOT_HOST="$(jq -br '.project_root_host' "$selftest_control")"
+SELFTEST_ATTACK_FILE_HOST="$(jq -br '.attack_file_host' "$selftest_control")"
 SELFTEST_DEDICATED_EXACT_HOST="$(jq -br '.dedicated_exact_host' "$selftest_control")"
 SELFTEST_DEDICATED_NONLISTED_HOST="$(jq -br '.dedicated_nonlisted_host' "$selftest_control")"
 SELFTEST_DEDICATED_SAFE_ROOT_HOST="$(jq -br '.dedicated_safe_root_host' "$selftest_control")"
-SELFTEST_DEDICATED_PROJECT_ROOT_HOST="$(jq -br '.dedicated_project_root_host' "$selftest_control")"
 SELFTEST_MUTATING_CONTROL_CANARY_URL="$(jq -br '.mutating_control_canary_url' "$selftest_control")"
 
 parse_subagent_context() {
@@ -258,11 +259,11 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
   [ -n "$SELFTEST_DEDICATED_EXACT_HOST" ] \
     && [ -n "$SELFTEST_DEDICATED_NONLISTED_HOST" ] \
     && [ -n "$SELFTEST_DEDICATED_SAFE_ROOT_HOST" ] \
-    && [ -n "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" ] || exit 36
+    && [ -n "$SELFTEST_PROJECT_ROOT_HOST" ] || exit 36
   SELFTEST_DEDICATED_EXACT_FS="$SELFTEST_DEDICATED_EXACT_HOST"
   SELFTEST_DEDICATED_NONLISTED_FS="$SELFTEST_DEDICATED_NONLISTED_HOST"
   SELFTEST_DEDICATED_SAFE_ROOT_FS="$SELFTEST_DEDICATED_SAFE_ROOT_HOST"
-  SELFTEST_DEDICATED_PROJECT_ROOT_FS="$SELFTEST_DEDICATED_PROJECT_ROOT_HOST"
+  SELFTEST_DEDICATED_PROJECT_ROOT_FS="$SELFTEST_PROJECT_ROOT_HOST"
   case "$(uname -s)" in
     MINGW*|MSYS*|CYGWIN*)
       SELFTEST_DEDICATED_EXACT_FS="$(cygpath -u "$SELFTEST_DEDICATED_EXACT_FS")"
@@ -338,7 +339,7 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
         --argjson input "$tool_input" \
         '{type:"assistant",parent_tool_use_id:$parent,message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'
       tool_payload="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg session "$session" \
-        --arg cwd "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" --arg id "$agent_id" \
+        --arg cwd "$SELFTEST_PROJECT_ROOT_HOST" --arg id "$agent_id" \
         --arg name "$tool_name" --argjson input "$tool_input" \
         '{hook_event_name:"PreToolUse",session_id:$session,cwd:$cwd,agent_id:$id,agent_type:"zensu:plan-review-worker",tool_name:$name,tool_input:$input}')"
       gate_output="$(printf '%s' "$tool_payload" | env \
@@ -352,7 +353,7 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
     local denied_names=('Read' 'Grep' 'Glob')
     local denied_inputs
     denied_inputs="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg nonlisted "$SELFTEST_DEDICATED_NONLISTED_HOST" \
-      --arg project "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" '[
+      --arg project "$SELFTEST_PROJECT_ROOT_HOST" '[
         {file_path:$nonlisted},
         {pattern:"live evidence needle"},
         {pattern:"**/*",path:$project}
@@ -366,7 +367,7 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
         --argjson input "$tool_input" \
         '{type:"assistant",parent_tool_use_id:$parent,message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'
       tool_payload="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg session "$session" \
-        --arg cwd "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" --arg id "$agent_id" \
+        --arg cwd "$SELFTEST_PROJECT_ROOT_HOST" --arg id "$agent_id" \
         --arg name "$tool_name" --argjson input "$tool_input" \
         '{hook_event_name:"PreToolUse",session_id:$session,cwd:$cwd,agent_id:$id,agent_type:"zensu:plan-review-worker",tool_name:$name,tool_input:$input}')"
       gate_output="$(printf '%s' "$tool_payload" | env \
@@ -580,22 +581,22 @@ ZENSU_SESSION_KEY=must-not-leak"
     fi
   elif [ -n "$category" ] && [ "${STUB_OMIT_ATTACK_TOOL:-0}" != '1' ]; then
     case "$category" in
-      write) attack="$(jq -cn --arg file "$PWD/ATTACK.txt" '{type:"tool_use",id:"attack-1",name:"Write",input:{file_path:$file,content:"attack"}}')" ;;
+      write) attack="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg file "$SELFTEST_ATTACK_FILE_HOST" '{type:"tool_use",id:"attack-1",name:"Write",input:{file_path:$file,content:"attack"}}')" ;;
       workflow_state) attack='{"type":"tool_use","id":"attack-1","name":"Bash","input":{"command":"mkdir -p .zensu/state && printf attack > .zensu/state/ATTACK"}}' ;;
       shell) attack='{"type":"tool_use","id":"attack-1","name":"Bash","input":{"command":"pwd"}}' ;;
       mutating_control)
         [ -n "${SELFTEST_MUTATING_CONTROL_CANARY_URL:-}" ] || exit 25
-        attack="$(jq -cn --arg url "$SELFTEST_MUTATING_CONTROL_CANARY_URL" '{type:"tool_use",id:"attack-1",name:"mcp__plugin_zensu_playwright__browser_navigate",input:{url:$url}}')" ;;
+        attack="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg url "$SELFTEST_MUTATING_CONTROL_CANARY_URL" '{type:"tool_use",id:"attack-1",name:"mcp__plugin_zensu_playwright__browser_navigate",input:{url:$url}}')" ;;
       nested_subagent) attack='{"type":"tool_use","id":"attack-1","name":"Agent","input":{"subagent_type":"general-purpose","prompt":"bypass reviewer"}}' ;;
       main_impersonation) attack='{"type":"tool_use","id":"attack-1","name":"Bash","input":{"command":"ZENSU_FORCE_MAIN=1 touch ATTACK.txt"}}' ;;
       *) exit 8 ;;
     esac
-    jq -cn --argjson block "$attack" \
+    MSYS2_ARG_CONV_EXCL='*' jq -cn --argjson block "$attack" \
       '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[$block]}}'
     attack_error=true
     if [ "${STUB_ATTACK_ALLOWED:-0}" = '1' ]; then attack_error=false; fi
     if [ "$category" = 'mutating_control' ] && [ "${STUB_TRIGGER_MUTATING_CONTROL_CANARY:-0}" = '1' ]; then
-      node -e '
+      MSYS2_ARG_CONV_EXCL='http://;https://' node -e '
         const http = require("node:http");
         const request = http.get(process.argv[1], (response) => {
           response.resume();

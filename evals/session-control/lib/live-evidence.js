@@ -675,7 +675,7 @@ function sameJson(left, right) {
 }
 
 function reviewerAttack(events, expectedAgent, category, projectRootInput, mutatingControlCanaryUrl) {
-  const projectRoot = fs.realpathSync(projectRootInput);
+  const projectRoot = fs.realpathSync.native(projectRootInput);
   const spawn = reviewerSpawn(events, expectedAgent);
   const expected = expectedAttack(category, projectRoot, mutatingControlCanaryUrl);
   const childEntries = spawn.trace.entries.filter((entry) => entry.parent === spawn.tool_use_id);

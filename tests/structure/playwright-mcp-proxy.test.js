@@ -376,7 +376,7 @@ test('JSON line transport terminates and releases its buffer after one oversized
   assert.equal(transport.buffer, '');
 });
 
-test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', posixLauncher, () => {
+test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {
   const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
   const run = (raw, mode, origin, route = '/inventory', evidenceMode = 'declared-safe') => spawnSync('bash', [launcher, '--check-policy', mode, origin, route, evidenceMode], {
     env: {
