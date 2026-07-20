@@ -22,6 +22,8 @@ LIB="$PLUGIN_DIR/hooks/lib/persona-activation.js"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
 README="$PLUGIN_DIR/README.md"
+PR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PLAN_MD="$PLUGIN_DIR/skills/plan-review/SKILL.md"
 
 PASS=0; FAIL=0
 check() {
@@ -30,7 +32,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$LIB" "$TDD_MD" "$ASPECT_MD" "$README"; do
+for f in "$LIB" "$TDD_MD" "$ASPECT_MD" "$README" "$PR_MD" "$PLAN_MD"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -123,6 +125,30 @@ if grep -qF 're-run the persona helper' "$TDD_MD"; then
   check "P3p fix rounds re-run the persona discovery" PASS
 else
   check "P3p fix rounds re-run the persona discovery" FAIL
+fi
+
+# P4 — repo-custom personas now feed THREE review flows (tdd + the two team reviews),
+# not tdd alone. Pin the pr-team-review + plan-review discovery wiring and the README
+# per-flow output-contract + PR base-checkout trust-guard notes.
+if grep -qF 'persona-activation.js' "$PR_MD" && grep -qF '$REPO/.claude/agents' "$PR_MD"; then
+  check "P4a pr-team-review discovers custom personas from the base checkout" PASS
+else
+  check "P4a pr-team-review discovers custom personas from the base checkout" FAIL
+fi
+if grep -qF 'persona-activation.js' "$PLAN_MD" && grep -qF '.claude/agents' "$PLAN_MD"; then
+  check "P4b plan-review discovers custom personas via the helper" PASS
+else
+  check "P4b plan-review discovers custom personas via the helper" FAIL
+fi
+if grep -qiF 'output-format-agnostic' "$README" && grep -qF '/zensu:pr-team-review' "$README" && grep -qF '/zensu:plan-review' "$README"; then
+  check "P4c README documents the three-consumer per-flow output contract" PASS
+else
+  check "P4c README documents the three-consumer per-flow output contract" FAIL
+fi
+if grep -qiF 'base checkout' "$README" && grep -qF 'never the PR-head' "$README"; then
+  check "P4d README documents the PR-review base-checkout trust guard" PASS
+else
+  check "P4d README documents the PR-review base-checkout trust guard" FAIL
 fi
 
 if ! command -v node >/dev/null 2>&1; then
