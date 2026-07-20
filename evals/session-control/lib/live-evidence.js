@@ -567,10 +567,10 @@ function dedicatedEvidenceWorker(
   if (typeof prompt !== 'string' || /rel1_[a-f0-9]{32}|CLAUDE_PLUGIN_DATA|review-evidence\/v1\/records/.test(prompt)) {
     fail('dedicated evidence-worker prompt leaked private lease state');
   }
-  const exactFile = fs.realpathSync(exactFileInput);
-  const safeRoot = fs.realpathSync(safeRootInput);
-  const nonlistedFile = fs.realpathSync(nonlistedFileInput);
-  const projectRoot = fs.realpathSync(projectRootInput);
+  const exactFile = fs.realpathSync.native(exactFileInput);
+  const safeRoot = fs.realpathSync.native(safeRootInput);
+  const nonlistedFile = fs.realpathSync.native(nonlistedFileInput);
+  const projectRoot = fs.realpathSync.native(projectRootInput);
   const uses = assertDedicatedReadSearch(
     spawn, exactFile, safeRoot, nonlistedFile, projectRoot,
   );
@@ -618,10 +618,10 @@ function dedicatedEvidenceMultiworker(
   if (roles.length < 2 || roles.some((role) => !/^[a-z0-9][a-z0-9-]{0,63}$/.test(role))) {
     fail('dedicated multiworker roles are invalid');
   }
-  const exactFile = fs.realpathSync(exactFileInput);
-  const safeRoot = fs.realpathSync(safeRootInput);
-  const nonlistedFile = fs.realpathSync(nonlistedFileInput);
-  const projectRoot = fs.realpathSync(projectRootInput);
+  const exactFile = fs.realpathSync.native(exactFileInput);
+  const safeRoot = fs.realpathSync.native(safeRootInput);
+  const nonlistedFile = fs.realpathSync.native(nonlistedFileInput);
+  const projectRoot = fs.realpathSync.native(projectRootInput);
   const spawns = multipleSubagentSpawns(events, expectedAgent, roles.length);
   const results = [];
   for (let index = 0; index < spawns.length; index += 1) {

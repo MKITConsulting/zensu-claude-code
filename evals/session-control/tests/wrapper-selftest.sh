@@ -145,10 +145,10 @@ done < <(jq -br '.flags | to_entries[] | [.key, (.value | tostring)] | @tsv' "$s
 SELFTEST_GENERIC_WORKTREE="$(jq -br '.generic_worktree' "$selftest_control")"
 SELFTEST_GENERIC_MARKER="$(jq -br '.generic_marker' "$selftest_control")"
 SELFTEST_SCENARIO="$(jq -br '.scenario' "$selftest_control")"
-SELFTEST_DEDICATED_EXACT="$(jq -br '.dedicated_exact' "$selftest_control")"
-SELFTEST_DEDICATED_NONLISTED="$(jq -br '.dedicated_nonlisted' "$selftest_control")"
-SELFTEST_DEDICATED_SAFE_ROOT="$(jq -br '.dedicated_safe_root' "$selftest_control")"
-SELFTEST_DEDICATED_PROJECT_ROOT="$(jq -br '.dedicated_project_root' "$selftest_control")"
+SELFTEST_DEDICATED_EXACT_HOST="$(jq -br '.dedicated_exact_host' "$selftest_control")"
+SELFTEST_DEDICATED_NONLISTED_HOST="$(jq -br '.dedicated_nonlisted_host' "$selftest_control")"
+SELFTEST_DEDICATED_SAFE_ROOT_HOST="$(jq -br '.dedicated_safe_root_host' "$selftest_control")"
+SELFTEST_DEDICATED_PROJECT_ROOT_HOST="$(jq -br '.dedicated_project_root_host' "$selftest_control")"
 SELFTEST_MUTATING_CONTROL_CANARY_URL="$(jq -br '.mutating_control_canary_url' "$selftest_control")"
 
 parse_subagent_context() {
@@ -255,9 +255,25 @@ fi
 if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
   || [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-multiworker' ]; then
   [ "$agent" = 'zensu:plan-review-worker' ] || exit 35
-  [ -f "$SELFTEST_DEDICATED_EXACT" ] && [ -f "$SELFTEST_DEDICATED_NONLISTED" ] \
-    && [ -d "$SELFTEST_DEDICATED_SAFE_ROOT" ] \
-    && [ -d "$SELFTEST_DEDICATED_PROJECT_ROOT" ] || exit 36
+  [ -n "$SELFTEST_DEDICATED_EXACT_HOST" ] \
+    && [ -n "$SELFTEST_DEDICATED_NONLISTED_HOST" ] \
+    && [ -n "$SELFTEST_DEDICATED_SAFE_ROOT_HOST" ] \
+    && [ -n "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" ] || exit 36
+  SELFTEST_DEDICATED_EXACT_FS="$SELFTEST_DEDICATED_EXACT_HOST"
+  SELFTEST_DEDICATED_NONLISTED_FS="$SELFTEST_DEDICATED_NONLISTED_HOST"
+  SELFTEST_DEDICATED_SAFE_ROOT_FS="$SELFTEST_DEDICATED_SAFE_ROOT_HOST"
+  SELFTEST_DEDICATED_PROJECT_ROOT_FS="$SELFTEST_DEDICATED_PROJECT_ROOT_HOST"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+      SELFTEST_DEDICATED_EXACT_FS="$(cygpath -u "$SELFTEST_DEDICATED_EXACT_FS")"
+      SELFTEST_DEDICATED_NONLISTED_FS="$(cygpath -u "$SELFTEST_DEDICATED_NONLISTED_FS")"
+      SELFTEST_DEDICATED_SAFE_ROOT_FS="$(cygpath -u "$SELFTEST_DEDICATED_SAFE_ROOT_FS")"
+      SELFTEST_DEDICATED_PROJECT_ROOT_FS="$(cygpath -u "$SELFTEST_DEDICATED_PROJECT_ROOT_FS")"
+      ;;
+  esac
+  [ -f "$SELFTEST_DEDICATED_EXACT_FS" ] && [ -f "$SELFTEST_DEDICATED_NONLISTED_FS" ] \
+    && [ -d "$SELFTEST_DEDICATED_SAFE_ROOT_FS" ] \
+    && [ -d "$SELFTEST_DEDICATED_PROJECT_ROOT_FS" ] || exit 37
   dedicated_prompt='Use only the injected evidence contract.'
   if [ "${STUB_DEDICATED_LEAK:-0}" = '1' ]; then
     dedicated_prompt="Use private lease rel1_$(printf 'a%.0s' {1..32})"
@@ -294,21 +310,21 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
     start_context="$(printf '%s' "$start_payload" | env \
       -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
       CLAUDE_PLUGIN_ROOT="$plugin" PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-      bash "$plugin/hooks/session-start-session-control.sh")" || exit 37
+      bash "$plugin/hooks/session-start-session-control.sh")" || exit 38
     printf '%s' "$start_context" | jq -e \
       '.hookSpecificOutput.additionalContext | contains("principal=evidence-worker-v1")' \
-      >/dev/null || exit 38
+      >/dev/null || exit 39
     bind_context="$(printf '%s' "$start_payload" | env \
       CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-      bash "$plugin/hooks/review-evidence-subagent-start.sh")" || exit 39
+      bash "$plugin/hooks/review-evidence-subagent-start.sh")" || exit 40
     printf '%s' "$bind_context" | jq -e \
       '.hookSpecificOutput.additionalContext | contains("kind=plan-review")' \
-      >/dev/null || exit 40
+      >/dev/null || exit 41
 
     local names=('Read' 'Grep' 'Glob')
     local inputs
-    inputs="$(jq -cn --arg exact "$SELFTEST_DEDICATED_EXACT" \
-      --arg safe "$SELFTEST_DEDICATED_SAFE_ROOT" '[
+    inputs="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg exact "$SELFTEST_DEDICATED_EXACT_HOST" \
+      --arg safe "$SELFTEST_DEDICATED_SAFE_ROOT_HOST" '[
         {file_path:$exact},
         {pattern:"live evidence needle",path:$safe},
         {pattern:"*.txt",path:$safe}
@@ -318,24 +334,25 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
       local tool_name="${names[$allowed_index]}"
       local tool_input
       tool_input="$(printf '%s' "$inputs" | jq -c ".[$allowed_index]")"
-      jq -cn --arg parent "$parent" --arg id "$tool_id" --arg name "$tool_name" \
+      MSYS2_ARG_CONV_EXCL='*' jq -cn --arg parent "$parent" --arg id "$tool_id" --arg name "$tool_name" \
         --argjson input "$tool_input" \
         '{type:"assistant",parent_tool_use_id:$parent,message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'
-      tool_payload="$(jq -cn --arg session "$session" --arg cwd "$PWD" --arg id "$agent_id" \
+      tool_payload="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg session "$session" \
+        --arg cwd "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" --arg id "$agent_id" \
         --arg name "$tool_name" --argjson input "$tool_input" \
         '{hook_event_name:"PreToolUse",session_id:$session,cwd:$cwd,agent_id:$id,agent_type:"zensu:plan-review-worker",tool_name:$name,tool_input:$input}')"
       gate_output="$(printf '%s' "$tool_payload" | env \
         CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-        bash "$plugin/hooks/pre-reviewer-capability-gate.sh")" || exit 41
-      [ -z "$gate_output" ] || exit 42
+        bash "$plugin/hooks/pre-reviewer-capability-gate.sh")" || exit 42
+      [ -z "$gate_output" ] || exit 43
       jq -cn --arg parent "$parent" --arg id "$tool_id" \
         '{type:"user",parent_tool_use_id:$parent,message:{content:[{type:"tool_result",tool_use_id:$id,is_error:false,content:"allowed"}]}}'
     done
 
     local denied_names=('Read' 'Grep' 'Glob')
     local denied_inputs
-    denied_inputs="$(jq -cn --arg nonlisted "$SELFTEST_DEDICATED_NONLISTED" \
-      --arg project "$SELFTEST_DEDICATED_PROJECT_ROOT" '[
+    denied_inputs="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg nonlisted "$SELFTEST_DEDICATED_NONLISTED_HOST" \
+      --arg project "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" '[
         {file_path:$nonlisted},
         {pattern:"live evidence needle"},
         {pattern:"**/*",path:$project}
@@ -345,18 +362,19 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
       local tool_name="${denied_names[$denied_index]}"
       local tool_input denied=false
       tool_input="$(printf '%s' "$denied_inputs" | jq -c ".[$denied_index]")"
-      jq -cn --arg parent "$parent" --arg id "$tool_id" --arg name "$tool_name" \
+      MSYS2_ARG_CONV_EXCL='*' jq -cn --arg parent "$parent" --arg id "$tool_id" --arg name "$tool_name" \
         --argjson input "$tool_input" \
         '{type:"assistant",parent_tool_use_id:$parent,message:{content:[{type:"tool_use",id:$id,name:$name,input:$input}]}}'
-      tool_payload="$(jq -cn --arg session "$session" --arg cwd "$PWD" --arg id "$agent_id" \
+      tool_payload="$(MSYS2_ARG_CONV_EXCL='*' jq -cn --arg session "$session" \
+        --arg cwd "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST" --arg id "$agent_id" \
         --arg name "$tool_name" --argjson input "$tool_input" \
         '{hook_event_name:"PreToolUse",session_id:$session,cwd:$cwd,agent_id:$id,agent_type:"zensu:plan-review-worker",tool_name:$name,tool_input:$input}')"
       gate_output="$(printf '%s' "$tool_payload" | env \
         CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-        bash "$plugin/hooks/pre-reviewer-capability-gate.sh")" || exit 43
+        bash "$plugin/hooks/pre-reviewer-capability-gate.sh")" || exit 44
       denial_reason="$(printf '%s' "$gate_output" | jq -ebr \
         '.hookSpecificOutput | select(.permissionDecision == "deny") | .permissionDecisionReason')" \
-        || exit 44
+        || exit 45
       denied=true
       if [ "${STUB_DEDICATED_ALLOWED_NEGATIVE:-0}" = '1' ] && [ "$denied_index" = 0 ]; then
         denied=false
@@ -378,15 +396,15 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
         '{hook_event_name:"SubagentStop",session_id:$session,cwd:$cwd,agent_id:$id,agent_type:"zensu:plan-review-worker",last_assistant_message:$message}')"
       stop_output="$(printf '%s' "$stop_payload" | env \
         CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
-        bash "$plugin/hooks/review-evidence-subagent-stop.sh")" || exit 45
-      [ -z "$stop_output" ] || exit 46
+        bash "$plugin/hooks/review-evidence-subagent-stop.sh")" || exit 46
+      [ -z "$stop_output" ] || exit 47
     fi
   }
 
   emit_dedicated_worker 1 "$ROLE_1"
   if [ "$DEDICATED_COUNT" = 2 ]; then emit_dedicated_worker 2 "$ROLE_2"; fi
   if [ "${STUB_DEDICATED_MUTATE_EVIDENCE:-0}" = '1' ]; then
-    printf 'changed after worker completion\n' >>"$SELFTEST_DEDICATED_SAFE_ROOT/source.txt"
+    printf 'changed after worker completion\n' >>"$SELFTEST_DEDICATED_SAFE_ROOT_FS/source.txt"
   fi
   RESULT_1="$(jq -cn --arg role "$ROLE_1" '{
     kind:"plan-review",role:$role,verdict:"go",confidence:"high",

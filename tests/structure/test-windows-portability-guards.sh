@@ -10,6 +10,7 @@ PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
 INSTALL_CONTRACT="$ROOT/evals/session-control/lib/installed-plugin-contract.js"
 CLAUDE_WRAPPER="$ROOT/scripts/session-control-claude-wrapper.sh"
 CLAUDE_WRAPPER_SELFTEST="$ROOT/evals/session-control/tests/wrapper-selftest.sh"
+LIVE_EVIDENCE="$ROOT/evals/session-control/lib/live-evidence.js"
 CLAUDE_STUB_BLOCK="$(sed -n "/^cat >.*<<'STUB'$/,/^STUB$/p" "$CLAUDE_WRAPPER_SELFTEST")"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
@@ -132,6 +133,50 @@ if grep -qF 'const [coreFileInput, pluginRootInput, pluginDataInput, projectRoot
   check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" PASS
 else
   check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" FAIL
+fi
+
+if grep -qF 'DEDICATED_EXACT_HOST=' "$CLAUDE_WRAPPER" \
+  && grep -qF 'DEDICATED_SAFE_ROOT_HOST=' "$CLAUDE_WRAPPER" \
+  && grep -qF 'DEDICATED_NONLISTED_HOST=' "$CLAUDE_WRAPPER" \
+  && grep -qF 'PROJECT_ROOT_HOST=' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const canonical = (input, type) =>' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const resolved = fs.realpathSync.native(input);' "$CLAUDE_WRAPPER" \
+  && grep -qF 'json_quote() {' "$CLAUDE_WRAPPER" \
+  && grep -qF 'printf '\''%s'\'' "$1" | jq -bRs .' "$CLAUDE_WRAPPER" \
+  && [ "$(grep -oF 'json_quote "$DEDICATED_EXACT_HOST"' "$CLAUDE_WRAPPER" | wc -l | tr -d ' ')" -eq 2 ] \
+  && [ "$(grep -oF 'json_quote "$DEDICATED_SAFE_ROOT_HOST"' "$CLAUDE_WRAPPER" | wc -l | tr -d ' ')" -eq 4 ] \
+  && [ "$(grep -oF 'json_quote "$DEDICATED_NONLISTED_HOST"' "$CLAUDE_WRAPPER" | wc -l | tr -d ' ')" -eq 2 ] \
+  && [ "$(grep -oF 'json_quote "$PROJECT_ROOT_HOST"' "$CLAUDE_WRAPPER" | wc -l | tr -d ' ')" -eq 2 ] \
+  && grep -qF 'SELFTEST_DEDICATED_EXACT_HOST="$DEDICATED_EXACT_HOST"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'SELFTEST_DEDICATED_SAFE_ROOT_HOST="$DEDICATED_SAFE_ROOT_HOST"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'SELFTEST_DEDICATED_NONLISTED_HOST="$DEDICATED_NONLISTED_HOST"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'SELFTEST_DEDICATED_PROJECT_ROOT_HOST="$PROJECT_ROOT_HOST"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'MSYS2_ENV_CONV_EXCL="$SELFTEST_HOST_PATH_ENV_EXCLUSIONS"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'SELFTEST_DEDICATED_EXACT_HOST=;SELFTEST_DEDICATED_NONLISTED_HOST=;SELFTEST_DEDICATED_SAFE_ROOT_HOST=;SELFTEST_DEDICATED_PROJECT_ROOT_HOST=' "$CLAUDE_WRAPPER" \
+  && [ "$(grep -cF '"$DEDICATED_NONLISTED_HOST" "$PROJECT_ROOT_HOST" "$DEDICATED_ROLES"' "$CLAUDE_WRAPPER")" -eq 2 ] \
+  && grep -qF 'SELFTEST_DEDICATED_EXACT_FS="$SELFTEST_DEDICATED_EXACT_HOST"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'SELFTEST_DEDICATED_EXACT_FS="$(cygpath -u "$SELFTEST_DEDICATED_EXACT_FS")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && awk '
+    /^if \[ "\$SELFTEST_SCENARIO" = '\''live-dedicated-evidence-worker'\'' \] \\/ { dedicated=1 }
+    dedicated && /SELFTEST_DEDICATED_EXACT_FS="\$SELFTEST_DEDICATED_EXACT_HOST"/ { assigned=1 }
+    dedicated && /SELFTEST_DEDICATED_EXACT_FS="\$\(cygpath -u/ { converted=1 }
+    /^elif / { exit(assigned && converted ? 0 : 1) }
+    END { if (!assigned || !converted) exit 1 }
+  ' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '[ -f "$SELFTEST_DEDICATED_EXACT_FS" ]' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '>>"$SELFTEST_DEDICATED_SAFE_ROOT_FS/source.txt"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'inputs="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg exact "$SELFTEST_DEDICATED_EXACT_HOST"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'denied_inputs="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg nonlisted "$SELFTEST_DEDICATED_NONLISTED_HOST"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && [ "$(grep -cF 'MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn --arg parent "$parent"' "$CLAUDE_WRAPPER_SELFTEST")" -eq 2 ] \
+  && [ "$(grep -cF 'tool_payload="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn' "$CLAUDE_WRAPPER_SELFTEST")" -eq 2 ] \
+  && [ "$(grep -cF -- '--arg cwd "$SELFTEST_DEDICATED_PROJECT_ROOT_HOST"' "$CLAUDE_WRAPPER_SELFTEST")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.realpathSync.native(exactFileInput)' "$LIVE_EVIDENCE")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.realpathSync.native(safeRootInput)' "$LIVE_EVIDENCE")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.realpathSync.native(nonlistedFileInput)' "$LIVE_EVIDENCE")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.realpathSync.native(projectRootInput)' "$LIVE_EVIDENCE")" -eq 2 ]; then
+  check "Dedicated evidence uses one exact native path spelling across prompt, stub, gate, and verifier" PASS
+else
+  check "Dedicated evidence uses one exact native path spelling across prompt, stub, gate, and verifier" FAIL
 fi
 
 if grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" "$CLAUDE_WRAPPER_SELFTEST" \
