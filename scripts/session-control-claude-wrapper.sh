@@ -151,6 +151,7 @@ git -C "$PROJECT_ROOT" init -q -b main 2>/dev/null || {
 git -C "$PROJECT_ROOT" config user.name 'Zensu Session Eval'
 git -C "$PROJECT_ROOT" config user.email 'session-eval@zensu.invalid'
 git -C "$PROJECT_ROOT" config core.hooksPath /dev/null
+git -C "$PROJECT_ROOT" config core.autocrlf false
 git -C "$PROJECT_ROOT" add README.md
 git -C "$PROJECT_ROOT" -c commit.gpgsign=false commit -qm 'test: seed session-control fixture'
 

@@ -199,6 +199,16 @@ else
   check "Reviewer write evidence preserves one native attack path from prompt through verifier" FAIL
 fi
 
+if awk '
+  /git -C "\$PROJECT_ROOT" config core\.autocrlf false/ { configured = NR }
+  /git -C "\$PROJECT_ROOT" add README\.md/ { added = NR }
+  END { exit !(configured > 0 && added > configured) }
+' "$CLAUDE_WRAPPER"; then
+  check "Session Control fixture ignores ambient Windows CRLF conversion before its first git add" PASS
+else
+  check "Session Control fixture ignores ambient Windows CRLF conversion before its first git add" FAIL
+fi
+
 if grep -qF 'MUTATING_CONTROL_CANARY_URL="$(jq -ebr '\''.url'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
   && grep -qF 'MUTATING_CONTROL_CANARY_ORIGIN="$(jq -ebr '\''.origin'\'' "$CANARY_READY")"' "$CLAUDE_WRAPPER" \
   && grep -qF 'MUTATING_CONTROL_CANARY_POLICY="$(MSYS2_ARG_CONV_EXCL='\''*'\'' jq -cn' "$CLAUDE_WRAPPER" \
