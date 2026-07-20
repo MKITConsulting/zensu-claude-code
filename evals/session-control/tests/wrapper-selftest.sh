@@ -130,29 +130,30 @@ done
 [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || exit 3
 registry="${HOME:?}/.claude/plugins/installed_plugins.json"
 [ -f "$registry" ] || exit 21
-plugin="$(jq -er '.plugins["zensu@zensu"][0].installPath' "$registry")"
+plugin="$(jq -ebr '.plugins["zensu@zensu"][0].installPath' "$registry")"
 case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) plugin="$(cygpath -u "$plugin")" ;;
 esac
 [ -n "$session" ] && [ -d "$plugin" ] || exit 2
 selftest_control="$(dirname "$CLAUDE_PLUGIN_DATA")/wrapper-control/stub-control.json"
 [ -f "$selftest_control" ] || exit 27
-[ "$(jq -r '.schema' "$selftest_control")" = 'zensu.session-control-wrapper-selftest' ] || exit 28
+[ "$(jq -br '.schema' "$selftest_control")" = 'zensu.session-control-wrapper-selftest' ] || exit 28
 while IFS=$'\t' read -r name value; do
+  value="${value%$'\r'}"
   case "$name" in STUB_*) printf -v "$name" '%s' "$value" ;; *) exit 29 ;; esac
-done < <(jq -r '.flags | to_entries[] | [.key, (.value | tostring)] | @tsv' "$selftest_control")
-SELFTEST_GENERIC_WORKTREE="$(jq -r '.generic_worktree' "$selftest_control")"
-SELFTEST_GENERIC_MARKER="$(jq -r '.generic_marker' "$selftest_control")"
-SELFTEST_SCENARIO="$(jq -r '.scenario' "$selftest_control")"
-SELFTEST_DEDICATED_EXACT="$(jq -r '.dedicated_exact' "$selftest_control")"
-SELFTEST_DEDICATED_NONLISTED="$(jq -r '.dedicated_nonlisted' "$selftest_control")"
-SELFTEST_DEDICATED_SAFE_ROOT="$(jq -r '.dedicated_safe_root' "$selftest_control")"
-SELFTEST_DEDICATED_PROJECT_ROOT="$(jq -r '.dedicated_project_root' "$selftest_control")"
-SELFTEST_MUTATING_CONTROL_CANARY_URL="$(jq -r '.mutating_control_canary_url' "$selftest_control")"
+done < <(jq -br '.flags | to_entries[] | [.key, (.value | tostring)] | @tsv' "$selftest_control")
+SELFTEST_GENERIC_WORKTREE="$(jq -br '.generic_worktree' "$selftest_control")"
+SELFTEST_GENERIC_MARKER="$(jq -br '.generic_marker' "$selftest_control")"
+SELFTEST_SCENARIO="$(jq -br '.scenario' "$selftest_control")"
+SELFTEST_DEDICATED_EXACT="$(jq -br '.dedicated_exact' "$selftest_control")"
+SELFTEST_DEDICATED_NONLISTED="$(jq -br '.dedicated_nonlisted' "$selftest_control")"
+SELFTEST_DEDICATED_SAFE_ROOT="$(jq -br '.dedicated_safe_root' "$selftest_control")"
+SELFTEST_DEDICATED_PROJECT_ROOT="$(jq -br '.dedicated_project_root' "$selftest_control")"
+SELFTEST_MUTATING_CONTROL_CANARY_URL="$(jq -br '.mutating_control_canary_url' "$selftest_control")"
 
 parse_subagent_context() {
   local expected_kind="$1"
-  node -e '
+  MSYS2_ARG_CONV_EXCL='*' node -e '
     const path = require("node:path");
     const kind = process.argv[1];
     let raw = "";
@@ -353,7 +354,7 @@ if [ "$SELFTEST_SCENARIO" = 'live-dedicated-evidence-worker' ] \
       gate_output="$(printf '%s' "$tool_payload" | env \
         CLAUDE_PLUGIN_ROOT="$plugin" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
         bash "$plugin/hooks/pre-reviewer-capability-gate.sh")" || exit 43
-      denial_reason="$(printf '%s' "$gate_output" | jq -er \
+      denial_reason="$(printf '%s' "$gate_output" | jq -ebr \
         '.hookSpecificOutput | select(.permissionDecision == "deny") | .permissionDecisionReason')" \
         || exit 44
       denied=true
@@ -417,12 +418,26 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
   if printf '%s' "$prompt" | grep -qF '[zensu-reviewer-context-probe]'; then
     if [ "${STUB_OMIT_REVIEW_CONTEXT:-0}" != '1' ]; then
       review_context="$(printf '%s' "$subagent_context" | parse_subagent_context reviewer)" || exit 23
-      review_project="$(printf '%s' "$review_context" | jq -r '.project_root')"
-      review_digest="$(printf '%s' "$review_context" | jq -r '.runtime_digest')"
-      review_principal="$(printf '%s' "$review_context" | jq -r '.principal')"
-      review_plugin="$(printf '%s' "$review_context" | jq -r '.plugin_root')"
-      marker="$review_project/.session-control-eval/${review_digest#sha256:}/$review_principal/context.json"
-      if [ "${STUB_REVIEW_CONTEXT_ROOT_MISMATCH:-0}" = '1' ]; then marker="$PWD/wrong-review-context.json"; fi
+      review_project="$(printf '%s' "$review_context" | jq -br '.project_root')"
+      review_digest="$(printf '%s' "$review_context" | jq -br '.runtime_digest')"
+      review_principal="$(printf '%s' "$review_context" | jq -br '.principal')"
+      review_plugin="$(printf '%s' "$review_context" | jq -br '.plugin_root')"
+      marker_fs="$review_project/.session-control-eval/${review_digest#sha256:}/$review_principal/context.json"
+      review_plugin_fs="$review_plugin"
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+          marker_fs="$(cygpath -u "$marker_fs")"
+          review_plugin_fs="$(cygpath -u "$review_plugin_fs")"
+          marker="$(cygpath -am "$marker_fs")"
+          ;;
+        *) marker="$marker_fs" ;;
+      esac
+      [ -d "$review_plugin_fs" ] && [ ! -L "$review_plugin_fs" ] || exit 23
+      review_plugin_fs="$(cd -P -- "$review_plugin_fs" && pwd -P)" || exit 23
+      if [ "${STUB_REVIEW_CONTEXT_ROOT_MISMATCH:-0}" = '1' ]; then
+        marker="$PWD/wrong-review-context.json"
+        marker_fs="$marker"
+      fi
       case "${STUB_EXTRA_REVIEW_CONTEXT_TOOL:-}" in
         glob)
           jq -cn '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"review-context-extra",name:"Glob",input:{pattern:".session-control-eval/**/context.json"}}]}}' ;;
@@ -436,8 +451,8 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
       jq -cn --arg file "$marker" \
         '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"review-context-1",name:"Read",input:{file_path:$file}}]}}'
       review_content='wrong context'
-      [ ! -f "$marker" ] || review_content="$(cat "$marker")"
-      if ! printf '%s' "$review_content" | jq -e --arg root "$review_plugin" --arg digest "$review_digest" \
+      [ ! -f "$marker_fs" ] || review_content="$(cat "$marker_fs")"
+      if ! printf '%s' "$review_content" | jq -e --arg root "$review_plugin_fs" --arg digest "$review_digest" \
         --arg principal "$review_principal" \
         '.plugin_root == $root and .runtime_digest == $digest and .principal == $principal' >/dev/null 2>&1; then
         review_content='wrong context'
@@ -451,15 +466,33 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
   elif [ "$agent" = 'general-purpose' ]; then
     [ -n "${SELFTEST_GENERIC_WORKTREE:-}" ] && [ -n "${SELFTEST_GENERIC_MARKER:-}" ] || exit 32
     host_context="$(printf '%s' "$subagent_context" | parse_subagent_context host)" || exit 33
-    host_principal="$(printf '%s' "$host_context" | jq -r '.principal')"
-    host_digest="$(printf '%s' "$host_context" | jq -r '.runtime_digest')"
-    marker="$SELFTEST_GENERIC_WORKTREE/.session-control-eval/${host_digest#sha256:}/$host_principal/neutral-context.json"
-    [ "$marker" = "$SELFTEST_GENERIC_MARKER" ] || exit 34
-    [ "${STUB_GENERIC_WRONG_READ:-0}" != '1' ] || marker="$PWD/README.md"
+    host_principal="$(printf '%s' "$host_context" | jq -br '.principal')"
+    host_digest="$(printf '%s' "$host_context" | jq -br '.runtime_digest')"
+    generic_worktree_fs="$SELFTEST_GENERIC_WORKTREE"
+    generic_marker_fs="$SELFTEST_GENERIC_MARKER"
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*)
+        generic_worktree_fs="$(cygpath -u "$generic_worktree_fs")"
+        generic_marker_fs="$(cygpath -u "$generic_marker_fs")"
+        ;;
+    esac
+    marker_fs="$generic_worktree_fs/.session-control-eval/${host_digest#sha256:}/$host_principal/neutral-context.json"
+    [ "$marker_fs" = "$generic_marker_fs" ] || exit 34
+    case "$(uname -s)" in
+      MINGW*|MSYS*|CYGWIN*) marker="$(cygpath -am "$marker_fs")" ;;
+      *) marker="$marker_fs" ;;
+    esac
+    if [ "${STUB_GENERIC_WRONG_READ:-0}" = '1' ]; then
+      marker_fs="$PWD/README.md"
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) marker="$(cygpath -am "$marker_fs")" ;;
+        *) marker="$marker_fs" ;;
+      esac
+    fi
     jq -cn --arg file "$marker" \
       '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"generic-read",name:"Read",input:{file_path:$file}}]}}'
     marker_content='wrong marker'
-    [ ! -f "$marker" ] || marker_content="$(cat "$marker")"
+    [ ! -f "$marker_fs" ] || marker_content="$(cat "$marker_fs")"
     read_error=false
     [ "${STUB_GENERIC_READ_ERROR:-0}" != '1' ] || read_error=true
     jq -cn --argjson failed "$read_error" --arg content "$marker_content" \
@@ -482,11 +515,21 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
   elif [ "$agent" = 'zensu:zensu-plm' ] || [ "$agent" = 'zensu-plm' ]; then
     if [ "${STUB_OMIT_CONTEXT_PROBE:-0}" != '1' ]; then
       neutral_context="$(printf '%s' "$subagent_context" | parse_subagent_context host)" || exit 30
-      neutral_project="$(printf '%s' "$neutral_context" | jq -r '.project_root')"
-      neutral_digest="$(printf '%s' "$neutral_context" | jq -r '.runtime_digest')"
-      neutral_principal="$(printf '%s' "$neutral_context" | jq -r '.principal')"
-      marker="$neutral_project/.session-control-eval/${neutral_digest#sha256:}/$neutral_principal/neutral-context.json"
-      if [ "${STUB_NEUTRAL_CONTEXT_ROOT_MISMATCH:-0}" = '1' ]; then marker="$PWD/wrong-neutral-context.json"; fi
+      neutral_project="$(printf '%s' "$neutral_context" | jq -br '.project_root')"
+      neutral_digest="$(printf '%s' "$neutral_context" | jq -br '.runtime_digest')"
+      neutral_principal="$(printf '%s' "$neutral_context" | jq -br '.principal')"
+      marker_fs="$neutral_project/.session-control-eval/${neutral_digest#sha256:}/$neutral_principal/neutral-context.json"
+      case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+          marker_fs="$(cygpath -u "$marker_fs")"
+          marker="$(cygpath -am "$marker_fs")"
+          ;;
+        *) marker="$marker_fs" ;;
+      esac
+      if [ "${STUB_NEUTRAL_CONTEXT_ROOT_MISMATCH:-0}" = '1' ]; then
+        marker="$PWD/wrong-neutral-context.json"
+        marker_fs="$marker"
+      fi
       case "${STUB_EXTRA_NEUTRAL_CONTEXT_TOOL:-}" in
         glob)
           jq -cn '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"neutral-context-extra",name:"Glob",input:{pattern:".session-control-eval/**/neutral-context.json"}}]}}' ;;
@@ -500,7 +543,7 @@ elif [ -n "$agent" ] && [ "${STUB_OMIT_REVIEWER_SPAWN:-0}" != '1' ]; then
       jq -cn --arg file "$marker" \
         '{type:"assistant",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_use",id:"context-1",name:"Read",input:{file_path:$file}}]}}'
       context_content='{}'
-      [ ! -f "$marker" ] || context_content="$(cat "$marker")"
+      [ ! -f "$marker_fs" ] || context_content="$(cat "$marker_fs")"
       if [ "${STUB_WRONG_PRINCIPAL:-0}" = '1' ]; then
         context_content="$(printf '%s' "$context_content" | jq -c '.principal="main-v1"')"
       fi
@@ -543,7 +586,7 @@ ZENSU_SESSION_KEY=must-not-leak"
         request.on("error", () => process.exit(1));
       ' "$SELFTEST_MUTATING_CONTROL_CANARY_URL"
     fi
-    denial_reason="reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -r .name); only Read, Grep, and Glob are allowed"
+    denial_reason="reviewer-capability-v1 deny: reviewer-readonly-v1 cannot invoke $(printf '%s' "$attack" | jq -br .name); only Read, Grep, and Glob are allowed"
     [ "${STUB_GENERIC_ATTACK_ERROR:-0}" != '1' ] || denial_reason='generic downstream tool failure'
     jq -cn --argjson denied "$attack_error" --arg content "$denial_reason" \
       '{type:"user",parent_tool_use_id:"agent-1",message:{content:[{type:"tool_result",tool_use_id:"attack-1",is_error:$denied,content:$content}]}}'

@@ -9,6 +9,8 @@ MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
 PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
 INSTALL_CONTRACT="$ROOT/evals/session-control/lib/installed-plugin-contract.js"
 CLAUDE_WRAPPER="$ROOT/scripts/session-control-claude-wrapper.sh"
+CLAUDE_WRAPPER_SELFTEST="$ROOT/evals/session-control/tests/wrapper-selftest.sh"
+CLAUDE_STUB_BLOCK="$(sed -n "/^cat >.*<<'STUB'$/,/^STUB$/p" "$CLAUDE_WRAPPER_SELFTEST")"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
@@ -130,6 +132,33 @@ if grep -qF 'const [coreFileInput, pluginRootInput, pluginDataInput, projectRoot
   check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" PASS
 else
   check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" FAIL
+fi
+
+if grep -qF "MSYS2_ARG_CONV_EXCL='*' node -e" "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'value="${value%$'\''\r'\''}"' <<<"$CLAUDE_STUB_BLOCK" \
+  && grep -qF "done < <(jq -br '.flags | to_entries[] | [.key, (.value | tostring)] | @tsv' \"\$selftest_control\")" <<<"$CLAUDE_STUB_BLOCK" \
+  && ! grep -Eq 'jq -(e)?r([[:space:]]|$)' <<<"$CLAUDE_STUB_BLOCK" \
+  && grep -qF 'match = text.match(/^\[zensu-host-context\]' <<<"$CLAUDE_STUB_BLOCK" \
+  && grep -qF 'match = text.match(/^\[zensu-reviewer-context\]' <<<"$CLAUDE_STUB_BLOCK" \
+  && ! grep -qF 'core.renderReviewerContext' <<<"$CLAUDE_STUB_BLOCK" \
+  && ! grep -qF 'core.renderHostContext' <<<"$CLAUDE_STUB_BLOCK" \
+  && grep -qF 'marker_fs="$review_project/.session-control-eval/${review_digest#sha256:}/$review_principal/context.json"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'review_plugin_fs="$review_plugin"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'marker_fs="$(cygpath -u "$marker_fs")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'review_plugin_fs="$(cygpath -u "$review_plugin_fs")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'marker="$(cygpath -am "$marker_fs")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '[ ! -f "$marker_fs" ] || review_content="$(cat "$marker_fs")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF -- '--arg root "$review_plugin_fs" --arg digest "$review_digest"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'marker_fs="$neutral_project/.session-control-eval/${neutral_digest#sha256:}/$neutral_principal/neutral-context.json"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '[ ! -f "$marker_fs" ] || context_content="$(cat "$marker_fs")"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'generic_worktree_fs="$SELFTEST_GENERIC_WORKTREE"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'generic_marker_fs="$SELFTEST_GENERIC_MARKER"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'marker_fs="$generic_worktree_fs/.session-control-eval/${host_digest#sha256:}/$host_principal/neutral-context.json"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '[ "$marker_fs" = "$generic_marker_fs" ] || exit 34' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF '[ ! -f "$marker_fs" ] || marker_content="$(cat "$marker_fs")"' "$CLAUDE_WRAPPER_SELFTEST"; then
+  check "Claude wrapper selftest protects inline context parsing and separates native evidence from MSYS filesystem paths" PASS
+else
+  check "Claude wrapper selftest protects inline context parsing and separates native evidence from MSYS filesystem paths" FAIL
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
