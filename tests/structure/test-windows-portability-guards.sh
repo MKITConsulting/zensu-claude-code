@@ -8,6 +8,7 @@ CORRUPTION="$ROOT/tests/structure/test-tdd-state-corruption-fail-closed.sh"
 MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
 PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
 INSTALL_CONTRACT="$ROOT/evals/session-control/lib/installed-plugin-contract.js"
+CLAUDE_WRAPPER="$ROOT/scripts/session-control-claude-wrapper.sh"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
@@ -110,6 +111,15 @@ if grep -qF 'return fs.realpathSync.native(input);' "$INSTALL_CONTRACT" \
   check "Installed-plugin contract uses native canonical paths across MSYS and Windows spellings" PASS
 else
   check "Installed-plugin contract uses native canonical paths across MSYS and Windows spellings" FAIL
+fi
+
+if grep -qF 'MINGW*|MSYS*|CYGWIN*) CONTEXT_PLUGIN_ROOT="$(cygpath -u "$CONTEXT_PLUGIN_ROOT")"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'CONTEXT_PLUGIN_ROOT="$(cd -P -- "$CONTEXT_PLUGIN_ROOT" && pwd -P)"' "$CLAUDE_WRAPPER" \
+  && grep -qF '[ "$CONTEXT_PLUGIN_ROOT" = "$PLUGIN_ROOT" ]' "$CLAUDE_WRAPPER" \
+  && grep -qF '|| [ "$CONTEXT_PLUGIN_ROOT" -ef "$PLUGIN_ROOT" ]' "$CLAUDE_WRAPPER"; then
+  check "Claude wrapper canonicalizes native Session Control roots before shell comparison" PASS
+else
+  check "Claude wrapper canonicalizes native Session Control roots before shell comparison" FAIL
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"

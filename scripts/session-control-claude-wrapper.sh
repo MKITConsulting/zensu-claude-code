@@ -491,7 +491,16 @@ CONTEXT_SOURCE_REVISION="$(node "$CORE" resolve --records-dir "$RECORDS_DIR" \
 CONTEXT_PLUGIN_ROOT="$(node "$CORE" resolve --records-dir "$RECORDS_DIR" \
   --session-id "$SESSION_ID" --host claude --field plugin_root)" \
   || die 'immutable Session Control plugin root is unreadable'
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) CONTEXT_PLUGIN_ROOT="$(cygpath -u "$CONTEXT_PLUGIN_ROOT")" \
+    || die 'immutable Session Control plugin root is unreadable' ;;
+esac
+[ -d "$CONTEXT_PLUGIN_ROOT" ] && [ ! -L "$CONTEXT_PLUGIN_ROOT" ] \
+  || die 'immutable Session Control plugin root is unreadable'
+CONTEXT_PLUGIN_ROOT="$(cd -P -- "$CONTEXT_PLUGIN_ROOT" && pwd -P)" \
+  || die 'immutable Session Control plugin root is unreadable'
 [ "$CONTEXT_PLUGIN_ROOT" = "$PLUGIN_ROOT" ] \
+  || [ "$CONTEXT_PLUGIN_ROOT" -ef "$PLUGIN_ROOT" ] \
   || die 'actual Claude SessionStart did not load the provisioned installed cache root'
 CONTEXT_RUNTIME_DIGEST="$(node "$CORE" resolve --records-dir "$RECORDS_DIR" \
   --session-id "$SESSION_ID" --host claude --field runtime_digest)" \
