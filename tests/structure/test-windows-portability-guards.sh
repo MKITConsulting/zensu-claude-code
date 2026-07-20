@@ -122,6 +122,16 @@ else
   check "Claude wrapper canonicalizes native Session Control roots before shell comparison" FAIL
 fi
 
+if grep -qF 'const [coreFileInput, pluginRootInput, pluginDataInput, projectRootInput, sessionId] = process.argv.slice(2);' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const coreFile = fs.realpathSync.native(coreFileInput);' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const pluginRoot = fs.realpathSync.native(pluginRootInput);' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const pluginData = fs.realpathSync.native(pluginDataInput);' "$CLAUDE_WRAPPER" \
+  && grep -qF 'const projectRoot = fs.realpathSync.native(projectRootInput);' "$CLAUDE_WRAPPER"; then
+  check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" PASS
+else
+  check "Dedicated-evidence bootstrap canonicalizes MSYS argv before Core comparisons" FAIL
+fi
+
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
 LOCK_KEEPER_BODY="$(sed -n '/^_tdd_core_lock_keeper() {$/,/^}$/p' "$PHASE")"
 if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'coproc $coproc_name' \

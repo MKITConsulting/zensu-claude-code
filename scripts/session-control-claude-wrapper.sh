@@ -241,7 +241,11 @@ if [ "$SCENARIO" = 'live-dedicated-evidence-worker' ] \
     || die 'cannot pre-register dedicated evidence-worker session context'
 const fs = require('node:fs');
 const path = require('node:path');
-const [coreFile, pluginRoot, pluginData, projectRoot, sessionId] = process.argv.slice(2);
+const [coreFileInput, pluginRootInput, pluginDataInput, projectRootInput, sessionId] = process.argv.slice(2);
+const coreFile = fs.realpathSync.native(coreFileInput);
+const pluginRoot = fs.realpathSync.native(pluginRootInput);
+const pluginData = fs.realpathSync.native(pluginDataInput);
+const projectRoot = fs.realpathSync.native(projectRootInput);
 const core = require(coreFile);
 const recordsDir = path.join(pluginData, 'session-control', 'v1', 'records');
 fs.mkdirSync(recordsDir, { recursive: true, mode: 0o700 });
