@@ -46,7 +46,7 @@ function realDirectory(input, label) {
   try { stat = fs.lstatSync(input); }
   catch (_error) { fail(`${label} is unavailable`); }
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail(`${label} must be a real directory`);
-  return fs.realpathSync(input);
+  return fs.realpathSync.native(input);
 }
 
 function inside(parent, child) {

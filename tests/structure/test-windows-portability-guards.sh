@@ -7,6 +7,7 @@ REVIEWER="$ROOT/tests/structure/test-reviewer-capability-gate.sh"
 CORRUPTION="$ROOT/tests/structure/test-tdd-state-corruption-fail-closed.sh"
 MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
 PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
+INSTALL_CONTRACT="$ROOT/evals/session-control/lib/installed-plugin-contract.js"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
@@ -102,6 +103,13 @@ if grep -qF 'MINGW*|MSYS*|CYGWIN*) MARKETPLACE_ROOT="$(cygpath -u "$MARKETPLACE_
   check "Installed-plugin provisioning canonicalizes native Windows paths before identity comparison" PASS
 else
   check "Installed-plugin provisioning canonicalizes native Windows paths before identity comparison" FAIL
+fi
+
+if grep -qF 'return fs.realpathSync.native(input);' "$INSTALL_CONTRACT" \
+  && ! grep -qF 'return fs.realpathSync(input);' "$INSTALL_CONTRACT"; then
+  check "Installed-plugin contract uses native canonical paths across MSYS and Windows spellings" PASS
+else
+  check "Installed-plugin contract uses native canonical paths across MSYS and Windows spellings" FAIL
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
