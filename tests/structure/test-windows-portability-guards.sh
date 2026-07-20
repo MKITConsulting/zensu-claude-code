@@ -11,6 +11,7 @@ INSTALL_CONTRACT="$ROOT/evals/session-control/lib/installed-plugin-contract.js"
 CLAUDE_WRAPPER="$ROOT/scripts/session-control-claude-wrapper.sh"
 CLAUDE_WRAPPER_SELFTEST="$ROOT/evals/session-control/tests/wrapper-selftest.sh"
 LIVE_EVIDENCE="$ROOT/evals/session-control/lib/live-evidence.js"
+LIVE_EVIDENCE_NEGATIVE="$ROOT/evals/session-control/tests/live-evidence-negative.test.js"
 CLAUDE_STUB_BLOCK="$(sed -n "/^cat >.*<<'STUB'$/,/^STUB$/p" "$CLAUDE_WRAPPER_SELFTEST")"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
@@ -179,6 +180,16 @@ if grep -qF 'DEDICATED_EXACT_HOST=' "$CLAUDE_WRAPPER" \
   check "Dedicated evidence uses one exact native path spelling across prompt, stub, gate, and verifier" PASS
 else
   check "Dedicated evidence uses one exact native path spelling across prompt, stub, gate, and verifier" FAIL
+fi
+
+if grep -qF 'const dedicatedProjectCanonical = fs.realpathSync.native(dedicatedProject);' "$LIVE_EVIDENCE_NEGATIVE" \
+  && grep -qF 'const dedicatedSafeCanonical = fs.realpathSync.native(dedicatedSafeRoot);' "$LIVE_EVIDENCE_NEGATIVE" \
+  && grep -qF 'const dedicatedExactCanonical = fs.realpathSync.native(dedicatedExact);' "$LIVE_EVIDENCE_NEGATIVE" \
+  && grep -qF 'const dedicatedNonlistedCanonical = fs.realpathSync.native(dedicatedNonlisted);' "$LIVE_EVIDENCE_NEGATIVE" \
+  && grep -qF 'const project = fs.realpathSync.native(temporary);' "$LIVE_EVIDENCE_NEGATIVE"; then
+  check "Live evidence fixtures use the verifier's native Windows path spelling" PASS
+else
+  check "Live evidence fixtures use the verifier's native Windows path spelling" FAIL
 fi
 
 if grep -qF 'PROJECT_HOST_PATHS="$(node - "$PROJECT_ROOT"' "$CLAUDE_WRAPPER" \

@@ -755,10 +755,10 @@ async function main() {
     fs.writeFileSync(dedicatedExact, 'live evidence needle\n', { mode: 0o600 });
     fs.writeFileSync(dedicatedNonlisted, 'not leased\n', { mode: 0o600 });
     fs.writeFileSync(path.join(dedicatedSafeRoot, 'source.txt'), 'live evidence needle\n', { mode: 0o600 });
-    const dedicatedProjectCanonical = fs.realpathSync(dedicatedProject);
-    const dedicatedSafeCanonical = fs.realpathSync(dedicatedSafeRoot);
-    const dedicatedExactCanonical = fs.realpathSync(dedicatedExact);
-    const dedicatedNonlistedCanonical = fs.realpathSync(dedicatedNonlisted);
+    const dedicatedProjectCanonical = fs.realpathSync.native(dedicatedProject);
+    const dedicatedSafeCanonical = fs.realpathSync.native(dedicatedSafeRoot);
+    const dedicatedExactCanonical = fs.realpathSync.native(dedicatedExact);
+    const dedicatedNonlistedCanonical = fs.realpathSync.native(dedicatedNonlisted);
     const dedicatedResult = (role) => ({
       kind: 'plan-review', role, verdict: 'go', confidence: 'high',
       summary: 'The live evidence supports this result.', blockers: [], improvements: [],
@@ -912,7 +912,7 @@ async function main() {
       dedicatedProjectCanonical, multiRoles.join(','),
     ]).status, 0, 'cross-worker role swap was accepted');
 
-    const project = fs.realpathSync(temporary);
+    const project = fs.realpathSync.native(temporary);
     const attack = { type: 'tool_use', id: 'attack-1', name: 'Write', input: { file_path: path.join(project, 'ATTACK.txt'), content: 'attack' } };
     const generic = eventFile('generic-error.jsonl', spawnEvents('review-aspect', [
       assistant('agent-1', [attack]),
