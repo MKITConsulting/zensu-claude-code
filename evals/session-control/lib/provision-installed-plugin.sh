@@ -57,8 +57,20 @@ EXPECTED_MARKETPLACE_ROOT="$STATE_ROOT/marketplace-fixture"
 MARKETPLACE_ROOT="$(node "$FIXTURE_GENERATOR" \
   "$SOURCE_ROOT" "$EXPECTED_MARKETPLACE_ROOT" "$EXPECTED_REVISION")" \
   || die 'exact-checkout local marketplace fixture creation failed'
+[ -n "$MARKETPLACE_ROOT" ] || die 'local marketplace fixture resolved to an unexpected root'
+case "$MARKETPLACE_ROOT" in
+  *$'\r'*|*$'\n'*) die 'local marketplace fixture resolved to an unexpected root' ;;
+esac
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) MARKETPLACE_ROOT="$(cygpath -u "$MARKETPLACE_ROOT")" ;;
+esac
+[ -d "$MARKETPLACE_ROOT" ] && [ ! -L "$MARKETPLACE_ROOT" ] \
+  || die 'local marketplace fixture resolved to an unexpected root'
+MARKETPLACE_ROOT="$(cd -P -- "$MARKETPLACE_ROOT" && pwd -P)" \
+  || die 'local marketplace fixture resolved to an unexpected root'
+EXPECTED_MARKETPLACE_ROOT="$(cd -P -- "$EXPECTED_MARKETPLACE_ROOT" && pwd -P)" \
+  || die 'local marketplace fixture resolved to an unexpected root'
 [ "$MARKETPLACE_ROOT" = "$EXPECTED_MARKETPLACE_ROOT" ] \
-  && [ -d "$MARKETPLACE_ROOT" ] && [ ! -L "$MARKETPLACE_ROOT" ] \
   || die 'local marketplace fixture resolved to an unexpected root'
 
 LOG_FILE="$STATE_ROOT/claude-plugin-cli.log"

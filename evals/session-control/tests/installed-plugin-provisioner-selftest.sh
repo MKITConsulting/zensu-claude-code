@@ -7,6 +7,15 @@ PROVISIONER="$EVAL_DIR/lib/provision-installed-plugin.sh"
 CONTRACT="$EVAL_DIR/lib/installed-plugin-contract.js"
 TEMPORARY="$(mktemp -d -t zensu-installed-plugin-selftest-XXXXXX)"
 trap 'rm -rf "$TEMPORARY"' EXIT
+REAL_NODE="$(command -v node)"
+
+physical_shell_directory() {
+  local input="$1"
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) input="$(cygpath -u "$input")" ;;
+  esac
+  cd -P -- "$input" && pwd -P
+}
 
 SOURCE="$TEMPORARY/source"
 mkdir -p "$SOURCE/.claude-plugin" "$SOURCE/hooks/lib" "$TEMPORARY/bin"
@@ -72,12 +81,15 @@ if [ "${1:-}" = plugin ] && [ "${2:-}" = install ]; then
     registry_path="$HOME/.claude/plugins/cache/zensu/zensu/other"
     mkdir -p "$registry_path"
   fi
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) registry_path="$(cygpath -am "$registry_path")" ;;
+  esac
   cat >"$HOME/.claude/settings.json" <<JSON
 {"enabledPlugins":{"zensu@zensu":true}}
 JSON
-  cat >"$HOME/.claude/plugins/installed_plugins.json" <<JSON
-{"version":2,"plugins":{"zensu@zensu":[{"scope":"user","installPath":"$registry_path","version":"$version","gitCommitSha":"$revision"}]}}
-JSON
+  jq -cn --arg path "$registry_path" --arg version "$version" --arg revision "$revision" \
+    '{version:2,plugins:{"zensu@zensu":[{scope:"user",installPath:$path,version:$version,gitCommitSha:$revision}]}}' \
+    >"$HOME/.claude/plugins/installed_plugins.json"
   exit 0
 fi
 if [ "${1:-}" = plugin ] && [ "${2:-}" = list ] && [ "${3:-}" = '--json' ]; then
@@ -90,6 +102,9 @@ if [ "${1:-}" = plugin ] && [ "${2:-}" = list ] && [ "${3:-}" = '--json' ]; then
     install="$HOME/not-the-plugin-cache"
     mkdir -p "$install"
   fi
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) install="$(cygpath -am "$install")" ;;
+  esac
   entry="$(jq -cn --arg path "$install" --arg version "$version" \
     '{id:"zensu@zensu",version:$version,scope:"user",enabled:true,installPath:$path}')"
   if [ "${STUB_AMBIGUOUS_LIST:-0}" = 1 ]; then jq -cn --argjson entry "$entry" '[$entry,$entry]'; else jq -cn --argjson entry "$entry" '[$entry]'; fi
@@ -99,12 +114,48 @@ exit 92
 STUB
 chmod +x "$TEMPORARY/bin/claude"
 
+cat >"$TEMPORARY/bin/node" <<'STUB'
+#!/bin/bash
+set -euo pipefail
+if [ "${1:-}" = "${STUB_FIXTURE_GENERATOR:-}" ]; then
+  output="$("${STUB_REAL_NODE:?}" "$@")"
+  if [ "${STUB_NODE_EMPTY_FIXTURE_ROOT:-0}" = 1 ]; then exit 0; fi
+  if [ "${STUB_NODE_CR_FIXTURE_ROOT:-0}" = 1 ]; then
+    printf '%s\runexpected\n' "$output"
+    exit 0
+  fi
+  if [ "${STUB_NODE_LF_FIXTURE_ROOT:-0}" = 1 ]; then
+    printf '%s\nunexpected\n' "$output"
+    exit 0
+  fi
+  if [ "${STUB_NODE_WRONG_PHYSICAL_FIXTURE_ROOT:-0}" = 1 ]; then
+    printf '%s\n' "${STUB_OTHER_FIXTURE_ROOT:?}"
+    exit 0
+  fi
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) printf '%s\n' "$output" ;;
+    *)
+      if [ "${STUB_NODE_ALIAS_FIXTURE_ROOT:-0}" = 1 ]; then
+        printf '%s/./%s\n' "${output%/*}" "${output##*/}"
+      else
+        printf '%s\n' "$output"
+      fi
+      ;;
+  esac
+  exit 0
+fi
+exec "${STUB_REAL_NODE:?}" "$@"
+STUB
+chmod +x "$TEMPORARY/bin/node"
+
 run_success() {
   local state="$TEMPORARY/state-success"
   local out="$TEMPORARY/success.out" err="$TEMPORARY/success.err"
   mkdir "$state"
   if ! ANTHROPIC_API_KEY='zensu-secret-allow-not-a-real-key' CLAUDE_CODE_OAUTH_TOKEN='zensu-secret-allow-not-a-real-token' \
     STUB_EXPECTED_REVISION="$REVISION" STUB_ORIGINAL_SOURCE_ROOT="$SOURCE" \
+    STUB_REAL_NODE="$REAL_NODE" STUB_FIXTURE_GENERATOR="$EVAL_DIR/lib/create-local-marketplace-fixture.js" \
+    STUB_NODE_ALIAS_FIXTURE_ROOT=1 \
     PATH="$TEMPORARY/bin:$PATH" bash "$PROVISIONER" "$SOURCE" "$state" "$REVISION" >"$out" 2>"$err"; then
     cat "$err" >&2
     exit 1
@@ -113,9 +164,9 @@ run_success() {
   manifest="$(cat "$out")"
   [ -f "$manifest" ] && [ -d "$state/home" ]
   local installed home
-  installed="$(jq -r .installed_plugin_root "$manifest")"
-  home="$(jq -r .isolated_home "$manifest")"
-  [ "$(jq -r .source_root "$manifest")" = "$SOURCE" ]
+  installed="$(physical_shell_directory "$(jq -r .installed_plugin_root "$manifest")")"
+  home="$(physical_shell_directory "$(jq -r .isolated_home "$manifest")")"
+  [ "$(physical_shell_directory "$(jq -r .source_root "$manifest")")" = "$SOURCE" ]
   [ "$(jq -r '.plugins[0].source' "$state/marketplace-fixture/.claude-plugin/marketplace.json")" = './plugin' ]
   [ "$(git -C "$state/marketplace-fixture/plugin" rev-parse HEAD)" = "$REVISION" ]
   [ -z "$(git -C "$state/marketplace-fixture/plugin" status --porcelain=v1 --untracked-files=all)" ]
@@ -126,35 +177,47 @@ run_success() {
 }
 
 run_failure() {
-  local name="$1" variable="$2"
+  local name="$1" variable="$2" expected="$3"
   local state="$TEMPORARY/state-$name"
   local out="$TEMPORARY/$name.out" err="$TEMPORARY/$name.err"
   mkdir "$state"
-  if env PATH="$TEMPORARY/bin:$PATH" STUB_EXPECTED_REVISION="$REVISION" \
+  if env PATH="$TEMPORARY/bin:$PATH" STUB_REAL_NODE="$REAL_NODE" \
+    STUB_FIXTURE_GENERATOR="$EVAL_DIR/lib/create-local-marketplace-fixture.js" \
+    STUB_EXPECTED_REVISION="$REVISION" \
     STUB_ORIGINAL_SOURCE_ROOT="$SOURCE" "$variable"=1 \
     bash "$PROVISIONER" "$SOURCE" "$state" "$REVISION" >"$out" 2>"$err"; then
     echo "provisioner accepted negative case: $name" >&2
     exit 1
   fi
   [ ! -e "$state" ] || { echo "provisioner left isolated cache after failure: $name" >&2; exit 1; }
+  grep -qF "$expected" "$err" \
+    || { echo "provisioner emitted the wrong diagnostic for: $name" >&2; cat "$err" >&2; exit 1; }
   ! grep -q 'not-a-real' "$out" "$err"
 }
 
 run_success
-run_failure wrong-list-path STUB_WRONG_LIST_PATH
-run_failure ambiguous-list STUB_AMBIGUOUS_LIST
-run_failure missing-list-entry STUB_MISSING_LIST_ENTRY
-run_failure registry-path-mismatch STUB_REGISTRY_PATH_MISMATCH
-run_failure wrong-sha STUB_WRONG_SHA
-run_failure missing-runtime STUB_MISSING_RUNTIME
-run_failure extra-runtime STUB_EXTRA_RUNTIME
-run_failure mutated-fixture STUB_MUTATE_FIXTURE
-run_failure install-failure STUB_INSTALL_FAIL
+run_failure wrong-list-path STUB_WRONG_LIST_PATH 'installed plugin failed provenance or runtime verification'
+run_failure ambiguous-list STUB_AMBIGUOUS_LIST 'installed plugin failed provenance or runtime verification'
+run_failure missing-list-entry STUB_MISSING_LIST_ENTRY 'installed plugin failed provenance or runtime verification'
+run_failure registry-path-mismatch STUB_REGISTRY_PATH_MISMATCH 'installed plugin failed provenance or runtime verification'
+run_failure wrong-sha STUB_WRONG_SHA 'installed plugin failed provenance or runtime verification'
+run_failure missing-runtime STUB_MISSING_RUNTIME 'installed plugin failed provenance or runtime verification'
+run_failure extra-runtime STUB_EXTRA_RUNTIME 'installed plugin failed provenance or runtime verification'
+run_failure mutated-fixture STUB_MUTATE_FIXTURE 'Claude plugin commands changed the exact-checkout marketplace fixture'
+run_failure install-failure STUB_INSTALL_FAIL 'Claude plugin installation failed'
+WRONG_PHYSICAL_ROOT="$TEMPORARY/wrong-physical-root"
+mkdir "$WRONG_PHYSICAL_ROOT"
+export STUB_OTHER_FIXTURE_ROOT="$WRONG_PHYSICAL_ROOT"
+run_failure empty-fixture-root STUB_NODE_EMPTY_FIXTURE_ROOT 'local marketplace fixture resolved to an unexpected root'
+run_failure cr-fixture-root STUB_NODE_CR_FIXTURE_ROOT 'local marketplace fixture resolved to an unexpected root'
+run_failure lf-fixture-root STUB_NODE_LF_FIXTURE_ROOT 'local marketplace fixture resolved to an unexpected root'
+run_failure wrong-physical-fixture-root STUB_NODE_WRONG_PHYSICAL_FIXTURE_ROOT 'local marketplace fixture resolved to an unexpected root'
 
 printf 'dirty\n' >"$SOURCE/untracked-runtime"
 DIRTY_STATE="$TEMPORARY/state-dirty-source"
 mkdir "$DIRTY_STATE"
-if PATH="$TEMPORARY/bin:$PATH" STUB_EXPECTED_REVISION="$REVISION" \
+if PATH="$TEMPORARY/bin:$PATH" STUB_REAL_NODE="$REAL_NODE" \
+  STUB_FIXTURE_GENERATOR="$EVAL_DIR/lib/create-local-marketplace-fixture.js" STUB_EXPECTED_REVISION="$REVISION" \
   STUB_ORIGINAL_SOURCE_ROOT="$SOURCE" \
   bash "$PROVISIONER" "$SOURCE" "$DIRTY_STATE" "$REVISION" >/dev/null 2>&1; then
   echo 'provisioner accepted a dirty source checkout' >&2; exit 1
@@ -164,12 +227,16 @@ rm -f "$SOURCE/untracked-runtime"
 rm -rf "$DIRTY_STATE"
 
 CLI_STATE="$TEMPORARY/state-wrong-cli"
+CLI_OUT="$TEMPORARY/wrong-cli.out"
+CLI_ERR="$TEMPORARY/wrong-cli.err"
 mkdir "$CLI_STATE"
-if PATH="$TEMPORARY/bin:$PATH" STUB_CLI_VERSION=2.1.212 \
+if PATH="$TEMPORARY/bin:$PATH" STUB_REAL_NODE="$REAL_NODE" \
+  STUB_FIXTURE_GENERATOR="$EVAL_DIR/lib/create-local-marketplace-fixture.js" STUB_CLI_VERSION=2.1.212 \
   STUB_EXPECTED_REVISION="$REVISION" STUB_ORIGINAL_SOURCE_ROOT="$SOURCE" \
-  bash "$PROVISIONER" "$SOURCE" "$CLI_STATE" "$REVISION" >/dev/null 2>&1; then
+  bash "$PROVISIONER" "$SOURCE" "$CLI_STATE" "$REVISION" >"$CLI_OUT" 2>"$CLI_ERR"; then
   echo 'provisioner accepted an unpinned Claude CLI' >&2; exit 1
 fi
 [ ! -e "$CLI_STATE" ]
+grep -qF 'Claude CLI must be exactly 2.1.211' "$CLI_ERR"
 
 printf 'installed-plugin-provisioner-selftest.sh: PASS\n'

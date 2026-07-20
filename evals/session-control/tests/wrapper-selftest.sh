@@ -24,6 +24,13 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$TEMPORARY/bin" "$INSTALLED_ROOT" "$ISOLATED_HOME/.claude/plugins"
 
+node_path() {
+  case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*) cygpath -am "$1" ;;
+    *) printf '%s\n' "$1" ;;
+  esac
+}
+
 MUTATING_CONTROL_CANARY_AVAILABLE=1
 CANARY_PROBE_READY="$TEMPORARY/canary-probe-ready.json"
 CANARY_PROBE_HIT="$TEMPORARY/canary-probe-hit"
@@ -81,16 +88,16 @@ for entry in mcp-runtime/package.json mcp-runtime/package-lock.json; do
 done
 
 REVISION="$(git -C "$ROOT" rev-parse HEAD)"
+INSTALLED_NODE_ROOT="$(node_path "$INSTALLED_ROOT")"
 cat >"$ISOLATED_HOME/.claude/settings.json" <<JSON
 {"enabledPlugins":{"zensu@zensu":true}}
 JSON
-cat >"$ISOLATED_HOME/.claude/plugins/installed_plugins.json" <<JSON
-{"version":2,"plugins":{"zensu@zensu":[{"scope":"user","installPath":"$INSTALLED_ROOT","version":"$PLUGIN_VERSION","gitCommitSha":"$REVISION"}]}}
-JSON
+jq -cn --arg path "$INSTALLED_NODE_ROOT" --arg version "$PLUGIN_VERSION" --arg revision "$REVISION" \
+  '{version:2,plugins:{"zensu@zensu":[{scope:"user",installPath:$path,version:$version,gitCommitSha:$revision}]}}' \
+  >"$ISOLATED_HOME/.claude/plugins/installed_plugins.json"
 LIST_FILE="$TEMPORARY/plugin-list.json"
-cat >"$LIST_FILE" <<JSON
-[{"id":"zensu@zensu","version":"$PLUGIN_VERSION","scope":"user","enabled":true,"installPath":"$INSTALLED_ROOT"}]
-JSON
+jq -cn --arg path "$INSTALLED_NODE_ROOT" --arg version "$PLUGIN_VERSION" \
+  '[{id:"zensu@zensu",version:$version,scope:"user",enabled:true,installPath:$path}]' >"$LIST_FILE"
 INSTALL_MANIFEST="$TEMPORARY/installed-plugin.json"
 node "$INSTALL_CONTRACT" resolve "$LIST_FILE" "$ROOT" "$ISOLATED_HOME" "$REVISION" 2.1.211 >"$INSTALL_MANIFEST"
 
@@ -124,6 +131,9 @@ done
 registry="${HOME:?}/.claude/plugins/installed_plugins.json"
 [ -f "$registry" ] || exit 21
 plugin="$(jq -er '.plugins["zensu@zensu"][0].installPath' "$registry")"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*) plugin="$(cygpath -u "$plugin")" ;;
+esac
 [ -n "$session" ] && [ -d "$plugin" ] || exit 2
 selftest_control="$(dirname "$CLAUDE_PLUGIN_DATA")/wrapper-control/stub-control.json"
 [ -f "$selftest_control" ] || exit 27

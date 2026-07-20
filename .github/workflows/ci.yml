@@ -26,10 +26,13 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Windows Core lease canary
+      - name: Windows path and Core lease canary
         if: runner.os == 'Windows'
         run: |
           bash tests/structure/test-msys-runtime-boundaries.sh
+          bash evals/session-control/tests/marketplace-fixture-selftest.sh
+          bash evals/session-control/tests/installed-plugin-provisioner-selftest.sh
+          bash evals/session-control/tests/wrapper-selftest.sh
           bash tests/structure/test-pre-edit-hook-mirror.sh
           bash tests/structure/test-session-control-claude.sh
           bash tests/structure/test-session-start-banner.sh

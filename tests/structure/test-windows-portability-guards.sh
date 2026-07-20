@@ -6,6 +6,7 @@ SESSION="$ROOT/tests/structure/test-session-control-claude.sh"
 REVIEWER="$ROOT/tests/structure/test-reviewer-capability-gate.sh"
 CORRUPTION="$ROOT/tests/structure/test-tdd-state-corruption-fail-closed.sh"
 MARKETPLACE="$ROOT/evals/session-control/tests/marketplace-fixture-selftest.sh"
+PROVISIONER="$ROOT/evals/session-control/lib/provision-installed-plugin.sh"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
 WORKFLOW="$ROOT/.github/workflows/ci.yml"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
@@ -29,7 +30,7 @@ check() {
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
 
-for file in "$SESSION" "$REVIEWER" "$CORRUPTION" "$MARKETPLACE"; do
+for file in "$SESSION" "$REVIEWER" "$CORRUPTION" "$MARKETPLACE" "$PROVISIONER"; do
   if grep -qF 'MINGW*|MSYS*|CYGWIN*' "$file"; then
     check "Windows guard exists: ${file#$ROOT/}" PASS
   else
@@ -65,24 +66,42 @@ else
 fi
 
 WINDOWS_CANARY_BLOCK="$(awk '
-  /^      - name: Windows Core lease canary$/ { capture=1 }
+  /^      - name: Windows path and Core lease canary$/ { capture=1 }
   capture && seen && /^      - / { exit }
   capture { print; seen=1 }
 ' "$WORKFLOW")"
+WINDOWS_CANARY_COMMANDS="$(printf '%s\n' "$WINDOWS_CANARY_BLOCK" \
+  | sed -nE 's/^[[:space:]]+(bash[[:space:]]+[^[:space:]#]+)[[:space:]]*$/\1/p')"
 if printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF "runner.os == 'Windows'" \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-msys-runtime-boundaries.sh' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | awk '
-    /test-msys-runtime-boundaries\.sh/ { getline; if ($0 ~ /test-pre-edit-hook-mirror\.sh/) found=1 }
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-msys-runtime-boundaries.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | awk '
+    /^bash tests\/structure\/test-msys-runtime-boundaries\.sh$/ { stage=1; next }
+    stage == 1 && /^bash evals\/session-control\/tests\/marketplace-fixture-selftest\.sh$/ { stage=2; next }
+    stage == 2 && /^bash evals\/session-control\/tests\/installed-plugin-provisioner-selftest\.sh$/ { stage=3; next }
+    stage == 3 && /^bash evals\/session-control\/tests\/wrapper-selftest\.sh$/ { stage=4; next }
+    stage == 4 && /^bash tests\/structure\/test-pre-edit-hook-mirror\.sh$/ { found=1 }
     END { exit(found ? 0 : 1) }
   ' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-deferred-review-claim.sh' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-id-v1.sh' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-session-start-banner.sh' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'test-tdd-no-flock-external-lease.sh' \
-  && printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF 'tests/session-control/run.sh'; then
-  check "Windows CI fails fast on MSYS path transport and the cross-process Core lease" PASS
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-deferred-review-claim.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-session-id-v1.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-session-start-banner.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-tdd-no-flock-external-lease.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/session-control/run.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/marketplace-fixture-selftest.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/installed-plugin-provisioner-selftest.sh' \
+  && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/wrapper-selftest.sh'; then
+  check "Windows CI fails fast on MSYS path transport, plugin provisioning, and the cross-process Core lease" PASS
 else
-  check "Windows CI fails fast on MSYS path transport and the cross-process Core lease" FAIL
+  check "Windows CI fails fast on MSYS path transport, plugin provisioning, and the cross-process Core lease" FAIL
+fi
+
+if grep -qF 'MINGW*|MSYS*|CYGWIN*) MARKETPLACE_ROOT="$(cygpath -u "$MARKETPLACE_ROOT")"' "$PROVISIONER" \
+  && grep -qF 'MARKETPLACE_ROOT="$(cd -P -- "$MARKETPLACE_ROOT" && pwd -P)"' "$PROVISIONER" \
+  && grep -qF 'EXPECTED_MARKETPLACE_ROOT="$(cd -P -- "$EXPECTED_MARKETPLACE_ROOT" && pwd -P)"' "$PROVISIONER" \
+  && grep -qF '[ "$MARKETPLACE_ROOT" = "$EXPECTED_MARKETPLACE_ROOT" ]' "$PROVISIONER"; then
+  check "Installed-plugin provisioning canonicalizes native Windows paths before identity comparison" PASS
+else
+  check "Installed-plugin provisioning canonicalizes native Windows paths before identity comparison" FAIL
 fi
 
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
