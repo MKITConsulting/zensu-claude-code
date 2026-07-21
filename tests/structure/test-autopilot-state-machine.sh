@@ -881,20 +881,44 @@ fi
 
 CONCURRENT_OK=true
 PIDS=""
-for worker in 1 2 3 4 5 6 7 8; do
+CONCURRENT_WORKERS="1 2 3 4 5 6 7 8"
+EXPECTED_CONCURRENT_BUDGET=10
+EXPECTED_CONCURRENT_OUTPUTS="3 4 5 6 7 8 9 10"
+if [ "$IS_WINDOWS" = true ]; then
+  # The Core lease deliberately fails closed after a bounded wait. Two
+  # simultaneous Windows mutations prove serialization without requiring an
+  # unfair eight-contender queue to drain within that same fixed deadline.
+  CONCURRENT_WORKERS="1 2"
+  EXPECTED_CONCURRENT_BUDGET=4
+  EXPECTED_CONCURRENT_OUTPUTS="3 4"
+fi
+for worker in $CONCURRENT_WORKERS; do
   (
     autopilot_increment_stop_budget "$RUN2" "PLANNING" "$PROJECT" \
-      >"$ROOT/budget-worker-$worker.out"
+      >"$ROOT/budget-worker-$worker.out" 2>"$ROOT/budget-worker-$worker.err"
   ) &
   PIDS="$PIDS $!"
 done
 for worker_pid in $PIDS; do
   wait "$worker_pid" || CONCURRENT_OK=false
 done
+CONCURRENT_OUTPUTS="$(
+  for worker in $CONCURRENT_WORKERS; do
+    tr -d '[:space:]' < "$ROOT/budget-worker-$worker.out"
+    printf '\n'
+  done | sort -n | paste -sd ' ' -
+)"
+for worker in $CONCURRENT_WORKERS; do
+  [ ! -s "$ROOT/budget-worker-$worker.err" ] || CONCURRENT_OK=false
+done
 if [ "$CONCURRENT_OK" = true ] \
-  && json_ok "$RUN2_FILE" 'value.stopBudget.stage === "PLANNING" && value.stopBudget.count === 10'; then
+  && [ "$CONCURRENT_OUTPUTS" = "$EXPECTED_CONCURRENT_OUTPUTS" ] \
+  && json_ok "$RUN2_FILE" "value.stopBudget.stage === \"PLANNING\" && value.stopBudget.count === $EXPECTED_CONCURRENT_BUDGET"; then
   check "B6 the Core lease serializes concurrent state updates" PASS
 else
+  for worker in $CONCURRENT_WORKERS; do
+    [ ! -s "$ROOT/budget-worker-$worker.err" ] || sed 's/^/    worker stderr: /' "$ROOT/budget-worker-$worker.err" >&2
+  done
   check "B6 the Core lease serializes concurrent state updates" FAIL
 fi
 

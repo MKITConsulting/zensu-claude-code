@@ -20,6 +20,7 @@ SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
+AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
 AUTOPILOT_FULL="$ROOT/tests/structure/test-autopilot-full-cycle.sh"
@@ -32,6 +33,7 @@ CORE_SNAPSHOT_BLOCK="$(awk '
   /^function readRegularFile\(/ { capture=0 }
   capture
 ' "$CORE")"
+AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -190,6 +192,22 @@ if grep -qF 'const dedicatedProjectCanonical = fs.realpathSync.native(dedicatedP
   check "Live evidence fixtures use the verifier's native Windows path spelling" PASS
 else
   check "Live evidence fixtures use the verifier's native Windows path spelling" FAIL
+fi
+
+if grep -qF 'CONCURRENT_WORKERS="1 2 3 4 5 6 7 8"' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF 'if [ "$IS_WINDOWS" = true ]; then' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF 'CONCURRENT_WORKERS="1 2"' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF 'EXPECTED_CONCURRENT_BUDGET=4' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF 'EXPECTED_CONCURRENT_OUTPUTS="3 4"' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && [ "$(grep -cF 'for worker in $CONCURRENT_WORKERS; do' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK")" -eq 4 ] \
+  && grep -qF '2>"$ROOT/budget-worker-$worker.err"' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF '[ ! -s "$ROOT/budget-worker-$worker.err" ] || CONCURRENT_OK=false' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF '[ "$CONCURRENT_OUTPUTS" = "$EXPECTED_CONCURRENT_OUTPUTS" ]' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF 'value.stopBudget.count === $EXPECTED_CONCURRENT_BUDGET' <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK" \
+  && grep -qF "sed 's/^/    worker stderr: /'" <<<"$AUTOPILOT_STATE_CONCURRENCY_BLOCK"; then
+  check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" PASS
+else
+  check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" FAIL
 fi
 
 if grep -qF 'PROJECT_HOST_PATHS="$(node - "$PROJECT_ROOT"' "$CLAUDE_WRAPPER" \
