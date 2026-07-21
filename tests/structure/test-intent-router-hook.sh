@@ -26,7 +26,7 @@ bash -n "$HOOK" 2>/dev/null && check "C2 bash -n syntax check passes" PASS || ch
 
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command);
+  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command||"");
   process.exit(ups.some(c=>/user-prompt-intent-router\.sh/.test(c))?0:1);
 ' "$HOOKS_JSON" 2>/dev/null; then
   check "C3 registered in hooks.json UserPromptSubmit" PASS
@@ -47,7 +47,12 @@ else
 fi
 
 payload() {
-  node -e 'process.stdout.write(JSON.stringify({prompt:process.argv[1]}))' "$1"
+  node -e '
+    const payload={hook_event_name:"UserPromptSubmit",prompt:process.argv[1]};
+    if(process.argv[2])payload.agent_type=process.argv[2];
+    if(process.argv[3])payload.agent_id=process.argv[3];
+    process.stdout.write(JSON.stringify(payload));
+  ' "$1" "${2:-}" "${3:-}"
 }
 
 classify() {
@@ -60,10 +65,10 @@ classify() {
         const j=JSON.parse(s);
         const o=j.hookSpecificOutput||{};
         const ac=o.additionalContext||"";
-        const plm=/zensu-plm/.test(ac)?"plm":"noplm";
+        const route=/top-level interactive thread/.test(ac)&&/\/zensu:bootstrap/.test(ac)&&/never delegate mutations/.test(ac)?"main":"nomaint";
         const triage=(/greenfield/i.test(ac)&&/brownfield/i.test(ac))?"triage":"notriage";
         const pm=/plan mode/i.test(ac)?"planmode":"noplanmode";
-        process.stdout.write((o.hookEventName||"?")+"|"+plm+"|"+triage+"|"+pm);
+        process.stdout.write((o.hookEventName||"?")+"|"+route+"|"+triage+"|"+pm);
       }catch(_){process.stdout.write("BADJSON");}
     });
   '
@@ -71,8 +76,8 @@ classify() {
 
 P6="$(mktemp -d -t introuter-XXXXXX)"
 OUT6="$(payload "I want to track Zensu as a product in Zensu itself" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P6" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-if [ "$OUT6" = "UserPromptSubmit|plm|triage|planmode" ]; then
-  check "C6 planning prompt -> zensu-plm delegation + greenfield/brownfield triage + Plan-mode-allowed" PASS
+if [ "$OUT6" = "UserPromptSubmit|main|triage|planmode" ]; then
+  check "C6 planning prompt -> main-thread skill routing + greenfield/brownfield triage + Plan-mode-allowed" PASS
 else
   check "C6 planning directive (got '$OUT6')" FAIL
 fi
@@ -90,7 +95,7 @@ OUT8="$(payload "bootstrap a new product roadmap in zensu" | env CLAUDE_PLUGIN_R
 rm -rf "$P8"
 
 P9="$(mktemp -d -t introuter-XXXXXX)"
-OUT9="$(printf '%s' '{"session_id":"s9"}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+OUT9="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"s9"}' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P9" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
 RC9=$?
 if [ "$RC9" = "0" ] && [ -z "$OUT9" ]; then
   check "C9 missing prompt field -> exit 0, silent (fail-open)" PASS
@@ -112,7 +117,7 @@ P11="$(mktemp -d -t introuter-XXXXXX)"
 KW_FAIL=0
 for kw in zensu product feature roadmap milestone bootstrap "ghost scan" journey tier; do
   OUTKW="$(payload "let us $kw the plan now" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P11" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-  [ "$OUTKW" = "UserPromptSubmit|plm|triage|planmode" ] || { KW_FAIL=$((KW_FAIL+1)); echo "      keyword '$kw' did not fire (got '$OUTKW')"; }
+  [ "$OUTKW" = "UserPromptSubmit|main|triage|planmode" ] || { KW_FAIL=$((KW_FAIL+1)); echo "      keyword '$kw' did not fire (got '$OUTKW')"; }
 done
 [ "$KW_FAIL" -eq 0 ] && check "C11 every planning keyword fires as a whole word" PASS || check "C11 per-keyword coverage ($KW_FAIL missed)" FAIL
 rm -rf "$P11"
@@ -129,7 +134,7 @@ rm -rf "$P12"
 
 P13="$(mktemp -d -t introuter-XXXXXX)"
 OUT13="$(payload "list all products on the roadmaps" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P13" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT13" = "UserPromptSubmit|plm|triage|planmode" ] && check "C13 inflected keywords (products/roadmaps) still fire" PASS || check "C13 inflection (got '$OUT13')" FAIL
+[ "$OUT13" = "UserPromptSubmit|main|triage|planmode" ] && check "C13 inflected keywords (products/roadmaps) still fire" PASS || check "C13 inflection (got '$OUT13')" FAIL
 rm -rf "$P13"
 
 P14="$(mktemp -d -t introuter-XXXXXX)"
@@ -169,6 +174,29 @@ else
   check "C16 pilot carve-out in directive (fired=$fired16)" FAIL
 fi
 rm -rf "$P16"
+
+P17="$(mktemp -d -t introuter-XXXXXX)"
+OUT17=''
+for agent_type in general-purpose zensu:review-aspect zensu:zensu-plm; do
+  OUT17="${OUT17}$(payload 'bootstrap a new Zensu product' "$agent_type" agent-17 \
+    | ZENSU_FORCE_MAIN=1 env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P17" \
+      ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+done
+if [ -z "$OUT17" ]; then
+  check "C17 explicit agent principals stay silent despite ZENSU_FORCE_MAIN" PASS
+else
+  check "C17 explicit agent principals stay silent despite ZENSU_FORCE_MAIN" FAIL
+fi
+rm -rf "$P17"
+
+P18="$(mktemp -d -t introuter-XXXXXX)"
+OUT18="$(printf '%s' '{"prompt":"bootstrap a new Zensu product"}' \
+  | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$P18" ZENSU_CONFIG="$NO_CONFIG" \
+    bash "$HOOK" 2>/dev/null)"
+[ -z "$OUT18" ] \
+  && check "C18 missing hook event cannot receive main-thread routing" PASS \
+  || check "C18 missing hook event cannot receive main-thread routing" FAIL
+rm -rf "$P18"
 
 echo "----"
 echo "test-intent-router-hook: $PASS PASS / $FAIL FAIL"

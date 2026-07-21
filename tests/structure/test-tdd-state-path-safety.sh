@@ -1,10 +1,13 @@
 #!/bin/bash
-# State/review budgets reject symlinked ancestors and non-regular leaves.
+# Canonical Session Control workflow state rejects symlinked ancestors and
+# non-regular leaves, and retired ambient state-root knobs cannot redirect it.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 POST="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
 PASS=0; FAIL=0
 check() {
@@ -16,22 +19,40 @@ ROOT="$(mktemp -d -t zensu-state-safety-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_CONFIG="$ROOT/no-config.json"
+unset TDD_STATE_DIR CLAUDE_PLUGIN_DATA_OVERRIDE 2>/dev/null || true
+
+# Start a real Claude SessionStart baseline and expose its canonical workflow
+# identity to the remainder of the current case.
+start_session() {
+  local project="$1" raw_sid="$2"
+  mkdir -p "$project"
+  export CLAUDE_PROJECT_DIR="$project"
+  export ZENSU_TEST_PLUGIN_DATA="$project/.session-control-test/plugin-data"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_sid" || return 1
+  CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT"; export CLAUDE_PROJECT_DIR
+  SID="$ZENSU_SESSION_KEY"
+  STATE_DIR="$ZENSU_PROJECT_ROOT/.zensu/state"
+  STATE_FILE="$STATE_DIR/tdd-phase-${SID}.json"
+}
 
 run_begin() {
-  local project="$1" state_dir="$2" rounds_dir="$3" sid="$4"
-  CLAUDE_PROJECT_DIR="$project" TDD_STATE_DIR="$state_dir" \
-    CLAUDE_PLUGIN_DATA_OVERRIDE="$rounds_dir" bash "$LOG" --tdd-begin --session "$sid" >/dev/null 2>&1
+  bash "$LOG" --tdd-begin --session "$1" >/dev/null 2>&1
 }
 
 run_post() {
-  local project="$1" state_dir="$2" rounds_dir="$3" sid="$4" ticket="$5"
-  SID="$sid" TICKET="$ticket" node -e '
-    process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_input:{
+  local sid="$1" ticket="$2" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" TICKET="$ticket" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name:"PostToolUse", tool_name:"Agent",
+      session_id:process.env.SID,tool_input:{
       subagent_type:"zensu:code-reviewer",
       prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nfixture`
     }}));
-  ' | CLAUDE_PROJECT_DIR="$project" TDD_STATE_DIR="$state_dir" \
-      CLAUDE_PLUGIN_DATA_OVERRIDE="$rounds_dir" bash "$POST" 2>/dev/null
+  ' | bash "$POST" 2>/dev/null
 }
 
 make_directory_symlink() {
@@ -44,121 +65,150 @@ make_directory_symlink() {
   ' "$1" "$2"
 }
 
-# Default project/.zensu is an untrusted path component, not a trusted anchor.
+# The project-local .zensu boundary is untrusted. The real SessionStart
+# baseline must fail before a symlink can redirect workflow initialization.
 P1="$ROOT/project-symlink"; V1="$ROOT/victim-symlink"
 mkdir -p "$P1" "$V1/state"
-printf 'sentinel\n' > "$V1/state/rounds-linkproof.json"
+printf 'sentinel\n' > "$V1/state/sentinel.txt"
 if make_directory_symlink "$V1" "$P1/.zensu" \
-  && ! CLAUDE_PROJECT_DIR="$P1" TDD_STATE_DIR= CLAUDE_PLUGIN_DATA_OVERRIDE= \
-    bash "$LOG" --tdd-begin --session linkproof >/dev/null 2>&1 \
-  && [ "$(cat "$V1/state/rounds-linkproof.json")" = sentinel ] \
-  && [ ! -e "$V1/state/tdd-phase-linkproof.json" ]; then
-  check "P1 intermediate project-state symlink cannot escape the worktree" PASS
+  && ! (start_session "$P1" linkproof) >/dev/null 2>&1 \
+  && [ "$(cat "$V1/state/sentinel.txt")" = sentinel ] \
+  && ! find "$V1" -name 'tdd-phase-scv1_*.json' -print -quit | grep -q .; then
+  check "P1 project-state symlink cannot escape the worktree at SessionStart" PASS
 else
-  check "P1 intermediate project-state symlink cannot escape the worktree" FAIL
+  check "P1 project-state symlink cannot escape the worktree at SessionStart" FAIL
 fi
 
-# A deeper explicit path through an intermediate symlink is rejected too.
-P2="$ROOT/project-explicit"; V2="$ROOT/victim-explicit"
-mkdir -p "$P2" "$V2/real-subdir/state"
-if make_directory_symlink "$V2" "$P2/link" \
-  && ! run_begin "$P2" "$P2/link/real-subdir/state" "$P2/link/real-subdir/state" deep-link \
-  && [ ! -e "$V2/real-subdir/state/tdd-phase-deep-link.json" ]; then
-  check "P2 deep intermediate symlink is checked below the trusted root" PASS
+# The fixed .zensu/state component is checked independently as well.
+P2="$ROOT/project-state-symlink"; V2="$ROOT/victim-state-symlink"
+mkdir -p "$P2/.zensu" "$V2"
+printf 'sentinel\n' > "$V2/sentinel.txt"
+if make_directory_symlink "$V2" "$P2/.zensu/state" \
+  && ! (start_session "$P2" state-linkproof) >/dev/null 2>&1 \
+  && [ "$(cat "$V2/sentinel.txt")" = sentinel ] \
+  && ! find "$V2" -name 'tdd-phase-scv1_*.json' -print -quit | grep -q .; then
+  check "P2 canonical state-directory symlink is rejected at SessionStart" PASS
 else
-  check "P2 deep intermediate symlink is checked below the trusted root" FAIL
+  check "P2 canonical state-directory symlink is rejected at SessionStart" FAIL
 fi
 
-# Directories and FIFOs cannot act as state-file leaves.
-P3="$ROOT/project-leaves"; S3="$P3/state"
-mkdir -p "$S3/tdd-phase-dirleaf.json"
-if ! run_begin "$P3" "$S3" "$S3" dirleaf \
-  && [ -d "$S3/tdd-phase-dirleaf.json" ] \
-  && [ -z "$(find "$S3/tdd-phase-dirleaf.json" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
-  check "P3 directory state leaf cannot report a successful begin" PASS
+# The remaining cases share one immutable SessionStart identity. Each case
+# restores the exact idle baseline bytes so no prior adversarial leaf can leak
+# state into the next assertion (and the runtime digest stays stable longer).
+P_CANONICAL="$ROOT/project-canonical"
+start_session "$P_CANONICAL" canonical-safety
+BASELINE_STATE="$P_CANONICAL/session-start-baseline.json"
+cp "$STATE_FILE" "$BASELINE_STATE"
+restore_baseline() {
+  if [ -d "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ]; then
+    rmdir "$STATE_FILE" 2>/dev/null || return 1
+  else
+    rm -f "$STATE_FILE" || return 1
+  fi
+  cp "$BASELINE_STATE" "$STATE_FILE"
+}
+
+# Directories and FIFOs cannot replace the canonical workflow-document leaf.
+rm -f "$STATE_FILE"
+mkdir "$STATE_FILE"
+if ! run_begin "$SID" \
+  && [ -d "$STATE_FILE" ] \
+  && [ -z "$(find "$STATE_FILE" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ]; then
+  check "P3 directory workflow leaf cannot report a successful begin" PASS
 else
-  check "P3 directory state leaf cannot report a successful begin" FAIL
+  check "P3 directory workflow leaf cannot report a successful begin" FAIL
 fi
 
-mkfifo "$S3/tdd-phase-fifoleaf.json"
-if ! run_begin "$P3" "$S3" "$S3" fifoleaf && [ -p "$S3/tdd-phase-fifoleaf.json" ]; then
-  check "P4 FIFO state leaf is rejected without replacement" PASS
+restore_baseline
+rm -f "$STATE_FILE"
+mkfifo "$STATE_FILE"
+if ! run_begin "$SID" && [ -p "$STATE_FILE" ]; then
+  check "P4 FIFO workflow leaf is rejected without replacement" PASS
 else
-  check "P4 FIFO state leaf is rejected without replacement" FAIL
+  check "P4 FIFO workflow leaf is rejected without replacement" FAIL
 fi
 
-# A non-regular derived counter must not consume its one-shot ticket.
-SID_DIR_COUNTER=dircounter
-run_begin "$P3" "$S3" "$S3" "$SID_DIR_COUNTER"
-CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --tdd-complete --session "$SID_DIR_COUNTER" >/dev/null
-TICKET_DIR="$(CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --review-ticket --session "$SID_DIR_COUNTER")"
-mkdir "$S3/rounds-${SID_DIR_COUNTER}.json"
-OUT_DIR="$(run_post "$P3" "$S3" "$S3" "$SID_DIR_COUNTER" "$TICKET_DIR")"
-STATE_DIR_COUNTER="$S3/tdd-phase-${SID_DIR_COUNTER}.json"
-if [ -z "$OUT_DIR" ] && [ -d "$S3/rounds-${SID_DIR_COUNTER}.json" ] \
-  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.reviewTicketConsumed===false&&j.reviewRound===0?0:1)' "$STATE_DIR_COUNTER"; then
-  check "P5 directory counter leaf cannot consume/reset the budget" PASS
+# Replacing an armed canonical workflow leaf with a non-regular object must not
+# let the reviewer hook emit a handoff or mutate the saved one-shot ticket.
+restore_baseline
+run_begin "$SID"
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+TICKET_DIR="$(bash "$LOG" --review-ticket --session "$SID")"
+SAVED_DIR="$P_CANONICAL/saved-before-directory.json"
+cp "$STATE_FILE" "$SAVED_DIR"
+rm -f "$STATE_FILE"
+mkdir "$STATE_FILE"
+OUT_DIR="$(run_post "$SID" "$TICKET_DIR")"
+if [ -z "$OUT_DIR" ] && [ -d "$STATE_FILE" ] \
+  && [ -z "$(find "$STATE_FILE" -mindepth 1 -maxdepth 1 -print -quit 2>/dev/null)" ] \
+  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.reviewTicketConsumed===false&&j.reviewRound===0?0:1)' "$SAVED_DIR"; then
+  check "P5 directory workflow leaf cannot consume the one-shot review ticket" PASS
 else
-  check "P5 directory counter leaf cannot consume/reset the budget" FAIL
+  check "P5 directory workflow leaf cannot consume the one-shot review ticket" FAIL
 fi
 
-SID_FIFO_COUNTER=fifocounter
-run_begin "$P3" "$S3" "$S3" "$SID_FIFO_COUNTER"
-CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --tdd-complete --session "$SID_FIFO_COUNTER" >/dev/null
-TICKET_FIFO="$(CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --review-ticket --session "$SID_FIFO_COUNTER")"
-mkfifo "$S3/rounds-${SID_FIFO_COUNTER}.json"
-OUT_FIFO="$(run_post "$P3" "$S3" "$S3" "$SID_FIFO_COUNTER" "$TICKET_FIFO")"
-if [ -z "$OUT_FIFO" ] && [ -p "$S3/rounds-${SID_FIFO_COUNTER}.json" ] \
-  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.reviewTicketConsumed===false&&j.reviewRound===0?0:1)' "$S3/tdd-phase-${SID_FIFO_COUNTER}.json"; then
-  check "P6 FIFO counter leaf cannot consume/reset the budget" PASS
+restore_baseline
+run_begin "$SID"
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+TICKET_FIFO="$(bash "$LOG" --review-ticket --session "$SID")"
+SAVED_FIFO="$P_CANONICAL/saved-before-fifo.json"
+cp "$STATE_FILE" "$SAVED_FIFO"
+rm -f "$STATE_FILE"
+mkfifo "$STATE_FILE"
+OUT_FIFO="$(run_post "$SID" "$TICKET_FIFO")"
+if [ -z "$OUT_FIFO" ] && [ -p "$STATE_FILE" ] \
+  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.reviewTicketConsumed===false&&j.reviewRound===0?0:1)' "$SAVED_FIFO"; then
+  check "P6 FIFO workflow leaf cannot consume the one-shot review ticket" PASS
 else
-  check "P6 FIFO counter leaf cannot consume/reset the budget" FAIL
+  check "P6 FIFO workflow leaf cannot consume the one-shot review ticket" FAIL
 fi
 
-# Deleting/corrupting the derived counter cannot lower authoritative reviewRound.
-SID_AUTH=authoritative
-run_begin "$P3" "$S3" "$S3" "$SID_AUTH"
-CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --tdd-complete --session "$SID_AUTH" >/dev/null
-node -e 'const fs=require("fs"),p=process.argv[1],j=JSON.parse(fs.readFileSync(p));j.reviewRound=4;fs.writeFileSync(p,JSON.stringify(j,null,2));' \
-  "$S3/tdd-phase-${SID_AUTH}.json"
-printf '{malformed\n' > "$S3/rounds-${SID_AUTH}.json"
-TICKET_AUTH="$(CLAUDE_PROJECT_DIR="$P3" TDD_STATE_DIR="$S3" CLAUDE_PLUGIN_DATA_OVERRIDE="$S3" \
-  bash "$LOG" --review-ticket --session "$SID_AUTH")"
-OUT_AUTH="$(run_post "$P3" "$S3" "$S3" "$SID_AUTH" "$TICKET_AUTH")"
+# reviewRound is integrated into the canonical CAS document. A malformed file
+# at the retired rounds-* pathname is inert and must remain byte-identical.
+restore_baseline
+run_begin "$SID"
+bash "$LOG" --tdd-complete --session "$SID" >/dev/null
+CONTROL_CORE="$CORE" PROJECT_ROOT="$ZENSU_PROJECT_ROOT" SESSION_KEY="$SID" node -e '
+  const core=require(process.env.CONTROL_CORE);
+  const previous=core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SESSION_KEY});
+  core.mutateWorkflowState({
+    projectRoot:process.env.PROJECT_ROOT,
+    sessionId:process.env.SESSION_KEY,
+    expectedRevision:previous.revision,
+    workflowState:"reviewing",
+    event:"review-budget-primed",
+  }, (state) => { state.reviewRound=4; return state; });
+'
+RETIRED_COUNTER="$STATE_DIR/rounds-${SID}.json"
+printf '{malformed\n' > "$RETIRED_COUNTER"
+TICKET_AUTH="$(bash "$LOG" --review-ticket --session "$SID")"
+OUT_AUTH="$(run_post "$SID" "$TICKET_AUTH")"
 if printf '%s' "$OUT_AUTH" | grep -q hookSpecificOutput \
-  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.reviewRound===5?0:1)' "$S3/tdd-phase-${SID_AUTH}.json" \
-  && node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.exit(j.count===5?0:1)' "$S3/rounds-${SID_AUTH}.json"; then
-  check "P7 state.reviewRound remains authoritative over the derived counter" PASS
+  && CONTROL_CORE="$CORE" PROJECT_ROOT="$ZENSU_PROJECT_ROOT" SESSION_KEY="$SID" node -e '
+    const core=require(process.env.CONTROL_CORE);
+    const j=core.readWorkflowState({projectRoot:process.env.PROJECT_ROOT,sessionId:process.env.SESSION_KEY});
+    process.exit(j.reviewRound===5?0:1);
+  ' \
+  && [ "$(cat "$RETIRED_COUNTER")" = '{malformed' ]; then
+  check "P7 integrated reviewRound ignores a malformed retired counter sidecar" PASS
 else
-  check "P7 state.reviewRound remains authoritative over the derived counter" FAIL
+  check "P7 integrated reviewRound ignores a malformed retired counter sidecar" FAIL
 fi
 
-# Explicit state roots may live on a mounted/shared sibling outside the project,
-# configured temp root, and configured home. Only the existing parents are
-# created up front so the validator must select an ancestor and inspect every
-# new component before either override is used.
-P8="$ROOT/project-outside-anchor"
-TMP8="$ROOT/runtime-temp-anchor"
-HOME8="$ROOT/runtime-home-anchor"
-STATE_PARENT8="$ROOT/external-state-parent"
-ROUNDS_PARENT8="$ROOT/external-rounds-parent"
-S8="$STATE_PARENT8/deep/state"
-R8="$ROUNDS_PARENT8/deep/rounds"
-mkdir -p "$P8" "$TMP8" "$HOME8" "$STATE_PARENT8" "$ROUNDS_PARENT8"
-if env TMPDIR="$TMP8" HOME="$HOME8" CLAUDE_PROJECT_DIR="$P8" \
-    TDD_STATE_DIR="$S8" CLAUDE_PLUGIN_DATA_OVERRIDE="$R8" \
-    bash "$LOG" --tdd-begin --session outside-anchor >/dev/null 2>&1 \
-  && [ -f "$S8/tdd-phase-outside-anchor.json" ] \
-  && [ ! -L "$S8/tdd-phase-outside-anchor.json" ] \
-  && [ -d "$R8" ] && [ ! -L "$R8" ]; then
-  check "P8 explicit state roots outside project, temp, and home use a safe existing ancestor" PASS
+# Retired ambient roots are not a compatibility fallback. Even when supplied,
+# all mutations remain in the SessionStart-bound project CAS document.
+S8="$ROOT/retired-state-override/deep/state"
+R8="$ROOT/retired-plugin-data-override/deep/rounds"
+restore_baseline
+export TDD_STATE_DIR="$S8"
+export CLAUDE_PLUGIN_DATA_OVERRIDE="$R8"
+if run_begin "$SID" \
+  && [ -f "$STATE_FILE" ] && [ ! -L "$STATE_FILE" ] \
+  && [[ "$(basename "$STATE_FILE")" =~ ^tdd-phase-scv1_[a-f0-9]{64}\.json$ ]] \
+  && [ ! -e "$S8" ] && [ ! -e "$R8" ]; then
+  check "P8 ambient state roots cannot redirect the canonical workflow document" PASS
 else
-  check "P8 explicit outside state roots remain supported" FAIL
+  check "P8 canonical project-bound state remains authoritative" FAIL
 fi
 
 echo "----"

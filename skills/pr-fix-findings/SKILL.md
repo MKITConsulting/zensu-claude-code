@@ -3,9 +3,9 @@ name: pr-fix-findings
 description: >
   [Zensu] Fix every open review comment / finding on a GitHub or GitLab pull/merge request end-to-end:
   locate the PR for the current branch (or a given URL/number), pull the unresolved
-  review threads, triage them into independent vs dependent work, implement each
-  fix through the Zensu workflow (vanilla `/zensu:tdd` + review chain), fan
-  independent fixes out across parallel workflows where sensible, push, resolve
+  review threads, triage them into independent vs dependent work, use neutral
+  workers only for parallel read-only analysis, implement every fix in the
+  interactive main thread through the Zensu workflow (vanilla `/zensu:tdd` + review chain), push, resolve
   the corresponding threads on the PR, and report a summary back. Use whenever the
   user wants to address, fix, or resolve PR review feedback / review comments /
   reviewer findings, "work through the review", "fix the review notes", "resolve
@@ -15,8 +15,9 @@ description: >
 
 # /zensu:pr-fix-findings
 
-Resolve **every open review comment** on a pull/merge request: implement each fix
-through the Zensu workflow, parallelize independent fixes, push, resolve the threads
+Resolve **every open review comment** on a pull/merge request: analyze independent
+findings in parallel when useful, implement every fix in the main thread through
+the Zensu workflow, push, resolve the threads
 on the PR/MR, and report back. Works on **GitHub or GitLab** — the forge is detected
 via the VCS driver (`hooks/lib/zensu-vcs.sh`) and every git-host call goes through it.
 
@@ -44,8 +45,9 @@ work (use `/zensu:bootstrap`).
 
 ## Invocation modes and delegated envelope
 
-Standalone mode keeps the interactive parallelism policy above and the ordinary next-step
-offer below. Delegated mode is activated by any delegated-envelope header and requires
+Standalone mode keeps the interactive parallelism policy above, limited to
+read-only analysis, and the ordinary next-step offer below. Delegated mode is
+activated by any delegated-envelope header and requires
 exactly these three contiguous lines with no intervening or additional delegated headers,
 in this order and exactly once:
 
@@ -60,9 +62,10 @@ attempt, and valid durable run/chain identifiers. A partial, duplicate, malforme
 mutation. A non-contiguous or extended envelope fails the same way. Never reinterpret it as a standalone request, and never accept or synthesize an
 `AUTOPILOT-REVIEW-OP` line for this skill.
 
-Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"`, read fresh state with
-`bash "$LOG" --autopilot-status`, and resolve the current session id through
-`hooks/lib/zensu-session.sh`. Fail closed unless `ownerSessionId` is this task/session;
+Resolve `LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"` and set
+`CURRENT_SESSION="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --session-key)"`.
+The helper must validate the immutable private Session Control binding. Read fresh
+state with `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status`. Fail closed unless `ownerSessionId` equals `CURRENT_SESSION`;
 `tdd.sessionId` equals that same current session; `runId`, `tdd.attempt`, and `tdd.chainId`
 equal the binding; `stage` equals both the
 envelope and `FIX_FINDINGS`; and `evidence.pr.number`, `evidence.pr.url`, and
@@ -105,15 +108,17 @@ the blocker, and stop without a question. Use the closed codes `fix-provider-unk
    `FINDINGS_CLEARED` only for authoritative count zero; otherwise repeat the entire
    aggregate bound loop for the remaining set.
 
-This delegated path supersedes the standalone parallelism clauses in Procedure steps 3–4.
+This delegated path supersedes the standalone analysis-parallelism clauses in Procedure steps 3–4.
 All other safety and reporting rules still apply.
 
 ## Procedure
 
 0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
    `ROOT="${CLAUDE_PLUGIN_ROOT}"` — if this is empty or
-   `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with a FATAL message and
-   start a fresh Claude Code session. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`, run `bash "$VCS" --detect`, and
+   `$ROOT/hooks/lib/zensu-vcs.sh` is missing, **ABORT** with the byte-identical
+   `FATAL: active plugin root is unavailable — start a fresh Claude Code session`
+   diagnostic. Then `VCS="$ROOT/hooks/lib/zensu-vcs.sh"`,
+   require `[ -f "$VCS" ]`, run `bash "$VCS" --detect`, and
    read `provider` + `cliReady` + `repo` from the `key=value` output.
    - `cliReady=false` → in standalone mode stop and ask the user to install/authenticate
      the detected forge CLI (GitHub: `gh auth login`; GitLab: `glab auth login`, installing
@@ -138,19 +143,19 @@ All other safety and reporting rules still apply.
      `resolvable && !resolved`).
    - Build a worklist of actionable items. Skip pure praise, already-addressed, and outdated-and-moot threads.
 
-3. **Triage for parallelism (standalone only).**
-   - Group items by independence. Items touching disjoint files/concerns are
-     independent → safe to fix in parallel. Items on the same file/region or with
-     ordering dependencies → sequential.
-   - When several items are independent, fan them out with the Workflow tool (one
-     agent per item or cluster, `isolation: "worktree"` if they edit files
-     concurrently). A single small item does not need a workflow — fix it inline.
+3. **Triage for analysis parallelism (standalone only).**
+   - Group items by independence. Neutral workers may inspect disjoint
+     files/concerns in parallel and return read-only analysis packets: root cause,
+     affected files, proposed tests, and constraints.
+   - Workers MUST NOT edit, run `/zensu:tdd`, open workflow windows, commit, push,
+     or resolve threads. Reconcile all packets in the interactive main thread;
+     overlapping or ordered items are analyzed and implemented sequentially there.
 
-4. **Implement each fix via the Zensu workflow (standalone only).**
-   - Code changes go through the Zensu vanilla workflow (`/zensu:tdd`) so the
-     evidence audit + review chain run. For parallel fan-out, each agent implements
-     its item and returns a structured result (files changed, what was fixed,
-     residual risk).
+4. **Implement each fix in the interactive main thread via the Zensu workflow (standalone only).**
+   - Code changes go through the Zensu vanilla workflow (`/zensu:tdd`) in this
+     top-level thread so the evidence audit + review chain run under `main-v1`.
+     Use any worker packets only as read-only input; never delegate implementation
+     or `/zensu:tdd` to a neutral child.
    - After edits: run the relevant type-check / tests. Fix what you broke.
 
 5. **Land the changes.**

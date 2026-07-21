@@ -8,6 +8,7 @@ STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 LOG_HELPER="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 PLAN_HOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 VCS_DRIVER="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0
 FAIL=0
@@ -21,7 +22,7 @@ check() {
   fi
 }
 
-for required in "$STATE_LIB" "$LOG_HELPER" "$PLAN_HOOK" "$VCS_DRIVER"; do
+for required in "$STATE_LIB" "$LOG_HELPER" "$PLAN_HOOK" "$VCS_DRIVER" "$BASELINE"; do
   if [ ! -f "$required" ] || ! bash -n "$required" 2>/dev/null; then
     check "F1 composed lifecycle dependencies exist and parse" FAIL
     printf '%s\n' "----" "test-autopilot-full-cycle: $PASS PASS / $FAIL FAIL"
@@ -53,6 +54,13 @@ HEAD_1="1111111111111111111111111111111111111111"
 HEAD_2="2222222222222222222222222222222222222222"
 PR_NUMBER=42
 RUN_FILE="$PROJECT/.zensu/state/autopilot-run-${RUN}.json"
+
+# Exercise the composed lifecycle with the same immutable project/session
+# binding that a real Claude SessionStart supplies. The durable Outer owner is
+# the canonical Session Control key, while hook payloads may keep the raw host
+# session id because the resolver proves that it maps to this exact binding.
+# shellcheck disable=SC1090
+source "$BASELINE" "$SESSION" || exit 1
 
 json_ok() {
   local file="$1" expression="$2"
@@ -120,7 +128,8 @@ if [ "${1:-}" = api ] && [ "${2:-}" = graphql ]; then
         function atomicWrite(path,value){
           const tmp=path+".tmp-"+process.pid;let fd;
           try{
-            fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+            const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+            fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
             fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
             fs.renameSync(tmp,path);
           }catch(_){if(fd!==undefined){try{fs.closeSync(fd);}catch(__){}}try{fs.unlinkSync(tmp);}catch(__){}fail();}
@@ -206,7 +215,8 @@ if [ "${1:-}" = api ] && [ "${2:-}" = -X ] && [ "${3:-}" = POST ]; then
       });
       const tmp=process.env.REVIEW_FILE+".tmp-"+process.pid;let fd;
       try{
-        fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+        const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+        fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
         fs.writeFileSync(fd,JSON.stringify(payload));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
         if(fs.existsSync(process.env.REVIEW_FILE))fail();
         fs.renameSync(tmp,process.env.REVIEW_FILE);
@@ -236,7 +246,8 @@ if [ "${1:-}" = api ]; then
         const value={threadId,replyTo,rootComment:root,body:process.env.REPLY_BODY};
         const tmp=process.env.REPLY_FILE+".tmp-"+process.pid;let fd;
         try{
-          fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|(fs.constants.O_NOFOLLOW||0),0o600);
+          const noFollow=process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0;
+          fd=fs.openSync(tmp,fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL|noFollow,0o600);
           fs.writeFileSync(fd,JSON.stringify(value));fs.fsyncSync(fd);fs.closeSync(fd);fd=undefined;
           fs.renameSync(tmp,process.env.REPLY_FILE);
         }catch(_){if(fd!==undefined){try{fs.closeSync(fd);}catch(__){}}try{fs.unlinkSync(tmp);}catch(__){}fail();}
@@ -265,6 +276,7 @@ Exercise the complete durable lifecycle.
 <!-- zensu-autopilot:${RUN} -->"
 PLAN_INPUT="$(PLAN="$PLAN" SESSION="$SESSION" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name:"PostToolUse",
     session_id:process.env.SESSION,
     tool_name:"ExitPlanMode",
     tool_input:{plan:process.env.PLAN}
@@ -272,7 +284,7 @@ PLAN_INPUT="$(PLAN="$PLAN" SESSION="$SESSION" node -e '
 ')"
 
 READY=true
-autopilot_begin_run "$RUN" "$SESSION" "$PROJECT" false true >/dev/null || READY=false
+autopilot_begin_run "$RUN" "$ZENSU_SESSION_KEY" "$PROJECT" false true >/dev/null || READY=false
 APPROVAL_OUT="$(printf '%s' "$PLAN_INPUT" | CLAUDE_PROJECT_DIR="$PROJECT" \
   bash "$PLAN_HOOK" 2>/dev/null)"
 if [ "$READY" = true ] \

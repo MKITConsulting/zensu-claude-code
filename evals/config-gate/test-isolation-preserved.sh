@@ -10,6 +10,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 SCRIPT_POSTREVIEW="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -27,10 +28,11 @@ fi
 check "post-review-tdd-delegate.sh exists and is executable" PASS
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
-export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
-export CLAUDE_PROJECT_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
-cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
+TMP_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
+cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 render_code_reviewer_fixture() {
@@ -42,7 +44,7 @@ render_code_reviewer_fixture() {
   '
 }
 
-TMP_CFG="/tmp/zensu-isolation-allenabled-$$.json"
+TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {
   "hooks": {
@@ -55,6 +57,8 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
+# shellcheck disable=SC1090
+source "$BASELINE" fixture-review
 bash "$LOG" --tdd-begin --session fixture-review >/dev/null
 bash "$LOG" --tdd-complete --session fixture-review >/dev/null
 

@@ -56,11 +56,12 @@ MCP connection, API key, or network.
 
 ## What This Skill Does
 
-Atomically resets only the current generation's `reviewRound`, `reviewTicket`,
-`reviewTicketConsumed`, `codeReviewDone`, `chainDone`, `selfReviewFixed`,
-`chainOutcome`, and `stopBlockCount`, then removes that session's derived
-rounds/Stop files. The next ticket can therefore be issued and its completion
-becomes round 1.
+Atomically resets only the current generation's `reviewTicket`,
+`reviewTicketConsumed`, `reviewRound`, `reviewRearm`, `stopBlockCount`,
+code-review/self-review terminus flags, and chain outcome in the same revisioned
+Session Control workflow document. There are no derived
+round-counter or Stop-budget files to discover or delete. The next ticket can
+therefore be issued and its completion becomes round 1.
 
 For a durable generation, the central `zensu-log.sh --review-rearm` composite
 locks Outer then Inner, validates the exact run/attempt/chain/ticket binding,
@@ -75,10 +76,17 @@ Resolve the current session and read its consumed generation ticket through the
 official helpers. Do not inspect state files yourself:
 
 ```sh
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-SESSION_ID="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
-REVIEW_TICKET="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --current-review-ticket)"
+ROOT="${CLAUDE_PLUGIN_ROOT}"
+LOG="$ROOT/hooks/lib/zensu-log.sh"
+[ -f "$LOG" ] || exit 1
+SESSION_ID="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --session-key)"
+REVIEW_TICKET="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --current-review-ticket)"
 ```
+
+Do not source `zensu-session.sh` or invoke its binder directly. Each stateful
+`zensu-log.sh` process binds the natively rendered plugin data and Claude's
+host-exposed session id to the private immutable record before it reads or
+mutates workflow state.
 
 If this command fails or prints an empty value, stop. The current session has no
 ticket-bound exhausted generation to reset. Never fall back to searching for a
@@ -87,7 +95,7 @@ different session.
 Then read the official durable status once:
 
 ```sh
-AUTOPILOT_STATUS="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --autopilot-status 2>/dev/null)"
+AUTOPILOT_STATUS="$(CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status 2>/dev/null)"
 AUTOPILOT_STATUS_RC=$?
 ```
 
@@ -117,8 +125,9 @@ a historical `DONE`/`CANCELLED` pointer, run exactly one generation-bound
 transition:
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" \
-  --review-rearm --claimed-review-ticket "$REVIEW_TICKET"
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" \
+  --review-rearm --session "$SESSION_ID" \
+  --claimed-review-ticket "$REVIEW_TICKET"
 ```
 
 If it exits non-zero, the generation changed after Phase 1, was not in a
@@ -126,10 +135,10 @@ terminal budget state, or the current Inner was not actually standalone.
 Treat that as a safe stale-operation rejection: do not reinterpret a historical
 pointer, retry with another ticket, or edit any state manually.
 
-On success, the same locked transaction resets the authoritative review and
-Stop budgets, invalidates the old ticket, clears terminal/self-review flags,
-and removes only this session's derived files. The next Stop resumes the
-code-reviewer sequence, which must issue a fresh ticket.
+On success, the same locked Session Control transaction resets the authoritative
+review and Stop budgets, invalidates the old ticket, and clears the
+terminal/self-review flags. The next Stop resumes the code-reviewer sequence,
+which must issue a fresh ticket.
 
 The standalone replay contract is deliberately unchanged: a second normal
 `--review-rearm` with the consumed ticket MUST fail.
@@ -140,8 +149,8 @@ For the exact current-session binding, call the central helper once with every
 binding dimension and the consumed ticket:
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" \
-  --review-rearm --autopilot-run "$RUN_ID" \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" \
+  --review-rearm --session "$SESSION_ID" --autopilot-run "$RUN_ID" \
   --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" \
   --claimed-review-ticket "$REVIEW_TICKET"
 ```
@@ -167,7 +176,10 @@ without reinterpretation.
 For a standalone or same-chain durable rearm, run the getter once more:
 
 ```sh
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --current-review-ticket
+if CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --current-review-ticket >/dev/null 2>&1; then
+  echo "FATAL: consumed review ticket is still active" >&2
+  exit 1
+fi
 ```
 
 It MUST now exit non-zero because the old ticket was invalidated. After the

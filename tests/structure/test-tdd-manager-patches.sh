@@ -6,6 +6,9 @@ set -u
 # This test now pins that content in its new home.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 AGENT="$PLUGIN_DIR/skills/tdd/SKILL.md"
+AUTOPILOT_SKILL="$PLUGIN_DIR/skills/autopilot/SKILL.md"
+PR_TEAM_REVIEW_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PR_FIX_FINDINGS_SKILL="$PLUGIN_DIR/skills/pr-fix-findings/SKILL.md"
 TPL_PLAN="$PLUGIN_DIR/templates/tdd-plan.md"
 
 PASS=0; FAIL=0
@@ -163,20 +166,29 @@ else
   check "R14-P3 Phase 6 schema includes Test Evidence section + via= non-Bash escape clause" FAIL
 fi
 
-# Round 15 — Native plugin root resolution to eliminate cross-session races
+# Round 15 — Native component root/data binding to eliminate cross-session races
 
 if grep -qF '${CLAUDE_PLUGIN_ROOT}' "$AGENT" \
-  && ! grep -qF '$HOME/.zensu/plugin-root' "$AGENT" \
-  && ! grep -qF '{PLUGIN_ROOT}' "$AGENT"; then
-  check "R15-P1 Phase 0 uses native CLAUDE_PLUGIN_ROOT with no legacy pointer" PASS
+  && grep -qF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"' "$AGENT" \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$AGENT" \
+  && ! grep -qF '.zensu/plugin-root' "$AGENT"; then
+  check "R15-P1 Phase 0 uses native root/data placeholders without legacy exports or pointer" PASS
 else
-  check "R15-P1 Phase 0 uses native CLAUDE_PLUGIN_ROOT with no legacy pointer" FAIL
+  check "R15-P1 Phase 0 native root/data binding drifted or legacy authority returned" FAIL
 fi
 
-if grep -qF 'FATAL: active plugin root unavailable' "$AGENT"; then
-  check "R15-P2 Phase 0 contains FATAL abort message when native plugin root is unavailable" PASS
+CANONICAL_ROOT_FAILURE='FATAL: active plugin root is unavailable — start a fresh Claude Code session'
+ROOT_FAILURE_DRIFT=""
+for skill in "$AGENT" "$AUTOPILOT_SKILL" "$PR_TEAM_REVIEW_SKILL" "$PR_FIX_FINDINGS_SKILL"; do
+  if ! grep -qF "$CANONICAL_ROOT_FAILURE" "$skill"; then
+    ROOT_FAILURE_DRIFT="${skill#$PLUGIN_DIR/}"
+    break
+  fi
+done
+if [ -z "$ROOT_FAILURE_DRIFT" ]; then
+  check "R15-P2 native-root workflows share one byte-identical fail-closed diagnostic" PASS
 else
-  check "R15-P2 Phase 0 contains FATAL abort message when native plugin root is unavailable" FAIL
+  check "R15-P2 native-root failure diagnostic drifted in $ROOT_FAILURE_DRIFT" FAIL
 fi
 
 if grep -qF 'NEVER search the filesystem to "discover" the zensu-log.sh helper' "$AGENT"; then
@@ -192,32 +204,35 @@ else
   check "R15-P4 zero unquoted native-root helper calls remain in agent" PASS
 fi
 
-NATIVE_COUNT=$(grep -cF 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"' "$AGENT")
-if [ "$NATIVE_COUNT" -ge 10 ]; then
-  check "R15-P5 at least 10 quoted native-root helper invocations present (got $NATIVE_COUNT)" PASS
+SAFE_HELPER_COUNT=$(grep -cF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"' "$AGENT")
+if [ "$SAFE_HELPER_COUNT" -ge 10 ]; then
+  check "R15-P5 at least 10 native per-call helper bindings present (got $SAFE_HELPER_COUNT)" PASS
 else
-  check "R15-P5 expected >=10 quoted native-root helper invocations; got $NATIVE_COUNT" FAIL
+  check "R15-P5 expected >=10 native per-call helper bindings; got $SAFE_HELPER_COUNT" FAIL
 fi
 
-# Fix-round 2: Phase 0 validates the session-scoped root rather than discovering one
+# Fix-round 2: Phase 0 validates the native component root rather than discovering one
 
-if grep -qF '[ -n "${CLAUDE_PLUGIN_ROOT}" ] && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" ]' "$AGENT"; then
-  check "F1.a Phase 0 Step 1 validates the native root and helper" PASS
+if grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$AGENT" \
+  && grep -qF 'require `[ -f "$ROOT/hooks/lib/zensu-log.sh" ]`' "$AGENT" \
+  && grep -qF 'pass the natively rendered `CLAUDE_PLUGIN_DATA` on every stateful helper invocation' "$AGENT"; then
+  check "F1.a Phase 0 validates native CLAUDE_PLUGIN_ROOT and requires per-call plugin data" PASS
 else
-  check "F1.a Phase 0 Step 1 validates the native root and helper" FAIL
+  check "F1.a Phase 0 native root/data validation contract" FAIL
 fi
 
-if grep -qF 'Use the quoted native path in every subsequent helper invocation' "$AGENT" \
-  && grep -qF 'Never discover or persist a replacement root yourself' "$AGENT"; then
-  check "F1.b Phase 0 Step 1 keeps root resolution session-scoped" PASS
+if grep -qF 'Never source the internal Session Control binder, discover or persist a replacement root, or cache plugin-private selectors yourself.' "$AGENT"; then
+  check "F1.b Phase 0 forbids binder use, root discovery, persistence, and selector caching" PASS
 else
-  check "F1.b Phase 0 Step 1 keeps root resolution session-scoped" FAIL
+  check "F1.b Phase 0 forbids binder use, root discovery, persistence, and selector caching" FAIL
 fi
 
-if grep -qF 'start a fresh Claude Code session' "$AGENT"; then
-  check "F1.c Phase 0 Step 1 FATAL message gives the native-root recovery" PASS
+if grep -qF 'require `[ -f "$ROOT/hooks/lib/zensu-log.sh" ]`' "$AGENT" \
+  && grep -qF 'on failure abort with:' "$AGENT" \
+  && grep -qF 'start a fresh Claude Code session' "$AGENT"; then
+  check "F1.c Phase 0 validates the helper and aborts to a fresh session" PASS
 else
-  check "F1.c Phase 0 Step 1 FATAL message gives the native-root recovery" FAIL
+  check "F1.c Phase 0 validates the helper and aborts to a fresh session" FAIL
 fi
 
 if grep -qF '.zensu/plugin-root' "$AGENT" || grep -qF '{PLUGIN_ROOT}' "$AGENT"; then

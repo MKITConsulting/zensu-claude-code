@@ -1,0 +1,15 @@
+description: "Retired-sidecar isolation: a hostile .stopblocks symlink and rounds JSON remain inert and untouched while only the integrated CAS fields reset."
+vars:
+  scenario_id: reset-sidecar-isolation
+  spec_block: |
+    The eval provider synchronously pre-seeded and snapshotted the CURRENT
+    session before this process started: reviewRound=2, stopBlockCount=2,
+    chainDone=true, codeReviewDone=true, plus an inert `.stopblocks` symlink and
+    `rounds-retired.json`. Do not seed, recreate, inspect, or mutate these
+    fixtures before the skill.
+
+    Invoke `/zensu:reset-review-limit` now through exactly one Skill tool call,
+    then follow the loaded skill instructions completely. Do not spawn an agent,
+    search for files, delete files, or edit repository source. Report the reset,
+    but note that the provider independently verifies the exact one-revision
+    CAS delta and byte-identical sidecars; your prose is not grading evidence.

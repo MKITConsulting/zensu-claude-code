@@ -1,14 +1,10 @@
 #!/bin/bash
 set -u
 
-case "$(uname -s)" in
-  MINGW*|MSYS*|CYGWIN*)
-    echo "  SKIP  test-pre-edit-concurrent-write on Windows — no flock on Git Bash; mkdir-fallback lock serialization is unverified/flaky under N-way contention (follow-up: harden flock-less locking)"
-    exit 0 ;;
-esac
-
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -17,15 +13,32 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
+WORK_DIR="$(mktemp -d)"
+WORK_DIR="$(cd "$WORK_DIR" && pwd -P)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
 source "$LIB"
 
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
+state_path_for() {
+  local session_id="$1" path
+  path="$(tdd_state_file "$session_id")" || return 1
+  case "$path" in
+    "$WORK_DIR"/*) printf '%s\n' "$path" ;;
+    *)
+      printf 'unsafe Session Control state path for %s: %s\n' "$session_id" "${path:-<empty>}" >&2
+      return 1
+      ;;
+  esac
+}
+
 SID="concurrent-1"
-STATE_PATH="$(tdd_state_file "$SID")"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID"
+if ! STATE_PATH="$(state_path_for "$SID")"; then exit 1; fi
+STATE_DIR="$(dirname "$STATE_PATH")"
 
 N=10
 PIDS=()
@@ -68,18 +81,15 @@ else
   check "history contains $N DISTINCT step IDs (got: $DISTINCT_STEPS)" FAIL
 fi
 
-if command -v flock >/dev/null 2>&1; then
-  TDD_DISABLE_FLOCK=1
-  export TDD_DISABLE_FLOCK
-fi
-
 SID_STALE="stale-lock-1"
-STATE_PATH_STALE="$(tdd_state_file "$SID_STALE")"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_STALE"
+if ! STATE_PATH_STALE="$(state_path_for "$SID_STALE")"; then exit 1; fi
 mkdir -p "$(dirname "$STATE_PATH_STALE")"
-LOCK_DIR="${STATE_PATH_STALE}.lockd"
-mkdir "$LOCK_DIR"
-echo "99999" > "$LOCK_DIR/owner"
-touch -t 200001010000 "$LOCK_DIR" 2>/dev/null || true
+STALE_KEY="$(node "$CORE" session-key "$SID_STALE")"
+LOCK_FILE="$STATE_DIR/.state-${STALE_KEY}.lock"
+printf '%s\n' '{"pid":2147483647,"token":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","created_at":"2000-01-01T00:00:00.000Z"}' > "$LOCK_FILE"
+touch -t 200001010000 "$LOCK_FILE" 2>/dev/null || true
 
 START_NS=$(node -e 'process.stdout.write(String(Date.now()))')
 tdd_write_phase "$SID_STALE" "S1" "RED_WRITE" "" >/dev/null
@@ -87,28 +97,28 @@ END_NS=$(node -e 'process.stdout.write(String(Date.now()))')
 ELAPSED_MS=$((END_NS - START_NS))
 
 if [ -f "$STATE_PATH_STALE" ]; then
-  check "stale-lock recovery: write succeeded after recovering dead lock" PASS
+  check "Session Control stale-lock recovery: write succeeded" PASS
 else
-  check "stale-lock recovery: write succeeded after recovering dead lock (state file missing)" FAIL
+  check "Session Control stale-lock recovery: write succeeded (state file missing)" FAIL
 fi
 
 GOT_STALE_PHASE=$(tdd_phase "$STATE_PATH_STALE")
 if [ "$GOT_STALE_PHASE" = "RED_WRITE" ]; then
-  check "stale-lock recovery: phase RED_WRITE recorded" PASS
+  check "Session Control stale-lock recovery: phase RED_WRITE recorded" PASS
 else
-  check "stale-lock recovery: phase RED_WRITE recorded (got: $GOT_STALE_PHASE)" FAIL
+  check "Session Control stale-lock recovery: phase RED_WRITE recorded (got: $GOT_STALE_PHASE)" FAIL
 fi
 
-if [ "$ELAPSED_MS" -lt 5000 ]; then
-  check "stale-lock recovery: completed in <5s (got ${ELAPSED_MS}ms)" PASS
+if [ "$ELAPSED_MS" -lt 5000 ] && [ ! -e "$LOCK_FILE" ]; then
+  check "Session Control stale-lock recovery completed in <5s and released its generation" PASS
 else
-  check "stale-lock recovery: completed in <5s (got ${ELAPSED_MS}ms — likely blocked on stale lock)" FAIL
+  check "Session Control stale-lock recovery completed cleanly (got ${ELAPSED_MS}ms)" FAIL
 fi
-
-unset TDD_DISABLE_FLOCK
 
 SID_ENV="env-var-honored-1"
-STATE_PATH_ENV="$(tdd_state_file "$SID_ENV")"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_ENV"
+if ! STATE_PATH_ENV="$(state_path_for "$SID_ENV")"; then exit 1; fi
 mkdir -p "$(dirname "$STATE_PATH_ENV")"
 LOCK_DIR_ENV="${STATE_PATH_ENV}.lockd"
 mkdir "$LOCK_DIR_ENV"
@@ -124,10 +134,10 @@ else
   check "TDD_DISABLE_FLOCK=1: state file exists after write (missing!)" FAIL
 fi
 
-if [ ! -f "$LOCK_DIR_ENV/sentinel.txt" ]; then
-  check "TDD_DISABLE_FLOCK=1: mkdir-fallback executed (sentinel removed during stale-lock recovery)" PASS
+if [ -f "$LOCK_DIR_ENV/sentinel.txt" ]; then
+  check "TDD_DISABLE_FLOCK cannot select the removed shell mutex protocol" PASS
 else
-  check "TDD_DISABLE_FLOCK=1: mkdir-fallback executed (sentinel survived — env var not honored, flock branch taken)" FAIL
+  check "TDD_DISABLE_FLOCK unexpectedly selected the removed shell mutex protocol" FAIL
 fi
 
 echo "----"

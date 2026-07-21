@@ -5,6 +5,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 
@@ -21,24 +23,44 @@ review_marker() {
   '
 }
 
-TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d -t zensu-autopilot-plan-XXXXXX)"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$(bash "$HOST_PATH" "$RAW_TMP")" || exit 1
+trap 'rm -rf "$RAW_TMP"' EXIT
 PROJECT="$TMP/project"; mkdir -p "$PROJECT"
-RUN="plan_run_01"; SID="plan_session_01"
+provision_session() {
+  local project="$1" raw_session="$2" label="$3"
+  export CLAUDE_PROJECT_DIR="$project"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/$label"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_session" || return 1
+  PROVISIONED_KEY="$ZENSU_SESSION_KEY"
+  PROVISIONED_DATA="$CLAUDE_PLUGIN_DATA"
+}
+
+RUN="plan_run_01"; SID_RAW="plan_session_01"
+provision_session "$PROJECT" "$SID_RAW" main || exit 1
+SID="$PROVISIONED_KEY"; MAIN_DATA="$PROVISIONED_DATA"
 PLAN="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN} -->"
 autopilot_begin_run "$RUN" "$SID" "$PROJECT" >/dev/null || exit 1
 CFG_OFF="$TMP/off.json"; printf '%s\n' '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
 
 payload() {
-  PLAN="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))'
+  PLAN="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))'
 }
 invoke() {
-  printf '%s' "$1" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" ZENSU_CONFIG="${3:-$CFG_OFF}" bash "$HOOK" 2>/dev/null
+  local input="$1" project="$2" config="${3:-$CFG_OFF}" plugin_data="$4"
+  (
+    printf '%s' "$input" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+      -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$plugin_data" \
+      CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$config" bash "$HOOK" 2>/dev/null
+  )
 }
 digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 RUN_FILE="$(autopilot_run_file "$RUN" "$PROJECT")"
 
-OUT="$(invoke "$(payload "$PLAN" "$SID")" "$PROJECT")"
+OUT="$(invoke "$(payload "$PLAN" "$SID_RAW")" "$PROJECT" "$CFG_OFF" "$MAIN_DATA")"
 if printf '%s' "$OUT" | node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{const j=JSON.parse(s),t=j.hookSpecificOutput.additionalContext;process.exit(j.hookSpecificOutput.hookEventName==="PostToolUse"&&t.includes("PLAN_APPROVED")&&t.includes("skill=\u0027zensu:tdd\u0027")&&!t.includes("AskUserQuestion")?0:1)}catch(_){process.exit(1)}})'; then
   check "P3 approved Autopilot plan delegates directly without a routine question" PASS
 else check "P3 approved Autopilot plan delegates directly without a routine question" FAIL; fi
@@ -48,77 +70,113 @@ if RUN_FILE="$RUN_FILE" SHA="$EXPECTED_SHA" node -e 'const j=require(process.env
   check "P4 approval persists the exact plan digest and AWAIT_TDD stage" PASS
 else check "P4 approval persists the exact plan digest and AWAIT_TDD stage" FAIL; fi
 
-BEFORE="$(digest "$RUN_FILE")"; OUT_REPEAT="$(invoke "$(payload "$PLAN" "$SID")" "$PROJECT")"; AFTER="$(digest "$RUN_FILE")"
+BEFORE="$(digest "$RUN_FILE")"; OUT_REPEAT="$(invoke "$(payload "$PLAN" "$SID_RAW")" "$PROJECT" "$CFG_OFF" "$MAIN_DATA")"; AFTER="$(digest "$RUN_FILE")"
 [ "$OUT_REPEAT" = "$OUT" ] && [ "$BEFORE" = "$AFTER" ] \
   && check "P5 repeated ExitPlanMode delivery is byte-stable" PASS \
   || check "P5 repeated ExitPlanMode delivery is byte-stable" FAIL
 
-autopilot_apply_event "$RUN" plan-retry-tdd-start TDD_STARTED \
-  '{"attempt":1,"chainId":"plan-retry-chain-01","sessionId":"plan_session_01"}' "$PROJECT" >/dev/null
+PLAN_CONTEXT="$(printf '%s' "$OUT" | node -e '
+  try{process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).hookSpecificOutput.additionalContext)}
+  catch(_){process.exit(1)}
+')"
+PLAN_HELPER_Q="$(printf '%q' "$PLUGIN_DIR/hooks/lib/zensu-log.sh")"
+PLAN_DATA_Q="$(printf '%q' "$MAIN_DATA")"
+PLAN_EXPECTED_COMMAND="CLAUDE_PLUGIN_DATA=$PLAN_DATA_Q bash $PLAN_HELPER_Q --tdd-begin --session $SID --autopilot-run $RUN --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id <chain-id>"
+PLAN_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${PLAN_MSYS_EXCL}"
+PLAN_EMITTED_COMMAND="$(printf '%s' "$PLAN_CONTEXT" | MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" EXPECTED="$PLAN_EXPECTED_COMMAND" node -e '
+  const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
+  const at=body.indexOf(expected);if(at<0)process.exit(1);
+  process.stdout.write(body.slice(at,at+expected.length));
+')"
+PLAN_EXTRACT_RC=$?
+PLAN_EXEC_COMMAND="${PLAN_EMITTED_COMMAND/<chain-id>/plan-retry-chain-01}"
+CLAUDE_CODE_SESSION_ID="$SID_RAW" CLAUDE_PROJECT_DIR="$PROJECT" eval "$PLAN_EXEC_COMMAND" >/dev/null 2>&1
+PLAN_EXEC_RC=$?
+if [ "$PLAN_EXTRACT_RC" = 0 ] && [ "$PLAN_EXEC_RC" = 0 ]; then
+  check "P5a exact emitted TDD-begin command executes through native per-call binding" PASS
+else
+  check "P5a emitted TDD-begin command executes (extract=$PLAN_EXTRACT_RC exec=$PLAN_EXEC_RC)" FAIL
+fi
+
 autopilot_apply_event "$RUN" plan-retry-tdd-done TDD_CHAIN_DONE \
-  '{"attempt":1,"chainId":"plan-retry-chain-01","sessionId":"plan_session_01","outcome":"pass"}' "$PROJECT" >/dev/null
+  "{\"attempt\":1,\"chainId\":\"plan-retry-chain-01\",\"sessionId\":\"$SID\",\"outcome\":\"pass\"}" "$PROJECT" >/dev/null
 autopilot_apply_event "$RUN" plan-retry-gates-failed GATES_FAILED \
   '{"headSha":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","reason":"retry fixture"}' "$PROJECT" >/dev/null
 BEFORE_STALE="$(digest "$RUN_FILE")"
-OUT_STALE="$(invoke "$(payload "$PLAN" "$SID")" "$PROJECT")"
+OUT_STALE="$(invoke "$(payload "$PLAN" "$SID_RAW")" "$PROJECT" "$CFG_OFF" "$MAIN_DATA")"
 if printf '%s' "$OUT_STALE" | grep -qF -- '--autopilot-attempt 2 --autopilot-return-stage GATES' \
   && [ "$(digest "$RUN_FILE")" = "$BEFORE_STALE" ]; then
   check "P5b delayed plan replay delegates the durable next attempt instead of stale attempt 1" PASS
 else check "P5b delayed plan replay uses durable attempt and return stage" FAIL; fi
 
 BEFORE_OWNER="$(digest "$RUN_FILE")"
-OUT_OWNER="$(invoke "$(payload "$PLAN" other_session)" "$PROJECT")"
+provision_session "$PROJECT" other_session foreign || exit 1
+FOREIGN_DATA="$PROVISIONED_DATA"
+OUT_OWNER="$(invoke "$(payload "$PLAN" other_session)" "$PROJECT" "$CFG_OFF" "$FOREIGN_DATA")"
 if printf '%s' "$OUT_OWNER" | grep -qF 'OWNER_SESSION_MISMATCH' && [ "$(digest "$RUN_FILE")" = "$BEFORE_OWNER" ]; then
   check "P6 foreign session cannot approve or mutate the run" PASS
 else check "P6 foreign session cannot approve or mutate the run" FAIL; fi
 
 BAD_PROJECT="$TMP/bad-project"; mkdir -p "$BAD_PROJECT"
-autopilot_begin_run bad_plan_run bad_plan_session "$BAD_PROJECT" >/dev/null || exit 1
-BAD_OUT="$(invoke "$(payload '# no bound marker' bad_plan_session)" "$BAD_PROJECT")"
+provision_session "$BAD_PROJECT" bad_plan_session bad || exit 1
+BAD_OWNER="$PROVISIONED_KEY"; BAD_DATA="$PROVISIONED_DATA"
+autopilot_begin_run bad_plan_run "$BAD_OWNER" "$BAD_PROJECT" >/dev/null || exit 1
+BAD_OUT="$(invoke "$(payload '# no bound marker' bad_plan_session)" "$BAD_PROJECT" "$CFG_OFF" "$BAD_DATA")"
 if printf '%s' "$BAD_OUT" | grep -qF 'PLAN_MARKER_MISSING_OR_AMBIGUOUS' \
   && RUN_FILE="$(autopilot_run_file bad_plan_run "$BAD_PROJECT")" node -e 'const j=require(process.env.RUN_FILE);process.exit(j.stage==="PLANNING"?0:1)'; then
   check "P7 missing marker fails closed without advancing" PASS
 else check "P7 missing marker fails closed without advancing" FAIL; fi
 
 DANGLING_PROJECT="$TMP/dangling-project"; mkdir -p "$DANGLING_PROJECT"
-autopilot_begin_run dangling_plan_run dangling_plan_session "$DANGLING_PROJECT" >/dev/null
+provision_session "$DANGLING_PROJECT" dangling_plan_session dangling || exit 1
+DANGLING_OWNER="$PROVISIONED_KEY"; DANGLING_DATA="$PROVISIONED_DATA"
+autopilot_begin_run dangling_plan_run "$DANGLING_OWNER" "$DANGLING_PROJECT" >/dev/null
 rm -f "$(autopilot_run_file dangling_plan_run "$DANGLING_PROJECT")"
 DANGLING_PLAN='# dangling
 
 <!-- zensu-autopilot:dangling_plan_run -->'
-DANGLING_OUT="$(invoke "$(payload "$DANGLING_PLAN" dangling_plan_session)" "$DANGLING_PROJECT")"
+DANGLING_OUT="$(invoke "$(payload "$DANGLING_PLAN" dangling_plan_session)" "$DANGLING_PROJECT" "$CFG_OFF" "$DANGLING_DATA")"
 if printf '%s' "$DANGLING_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$DANGLING_OUT" | grep -qF 'AskUserQuestion'; then
   check "P7b dangling pointer blocks instead of falling through to standalone planning" PASS
 else check "P7b dangling pointer is fail-closed" FAIL; fi
 
 ORPHAN_PROJECT="$TMP/orphan-project"; mkdir -p "$ORPHAN_PROJECT"
-autopilot_begin_run orphan_plan_run orphan_plan_owner "$ORPHAN_PROJECT" >/dev/null
+provision_session "$ORPHAN_PROJECT" orphan_plan_owner orphan || exit 1
+ORPHAN_OWNER="$PROVISIONED_KEY"; ORPHAN_DATA="$PROVISIONED_DATA"
+autopilot_begin_run orphan_plan_run "$ORPHAN_OWNER" "$ORPHAN_PROJECT" >/dev/null
 rm -f "$(autopilot_active_file "$ORPHAN_PROJECT")"
-ORPHAN_OUT="$(invoke "$(payload 'ordinary plan during orphan crash' orphan_plan_owner)" "$ORPHAN_PROJECT" "$CFG_OFF")"
+ORPHAN_OUT="$(invoke "$(payload 'ordinary plan during orphan crash' orphan_plan_owner)" "$ORPHAN_PROJECT" "$CFG_OFF" "$ORPHAN_DATA")"
 if printf '%s' "$ORPHAN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$ORPHAN_OUT" | grep -qF 'AskUserQuestion'; then
   check "P7c nonterminal run without a pointer blocks plan fallthrough" PASS
 else check "P7c orphan nonterminal run cannot look standalone" FAIL; fi
 
 HIDDEN_PROJECT="$TMP/hidden-orphan-project"; mkdir -p "$HIDDEN_PROJECT"
-autopilot_begin_run old_plan_terminal old_plan_owner "$HIDDEN_PROJECT" >/dev/null
+provision_session "$HIDDEN_PROJECT" old_plan_owner hidden-old || exit 1
+OLD_PLAN_OWNER="$PROVISIONED_KEY"
+autopilot_begin_run old_plan_terminal "$OLD_PLAN_OWNER" "$HIDDEN_PROJECT" >/dev/null
 autopilot_apply_event old_plan_terminal cancel-old-plan CANCEL '{}' "$HIDDEN_PROJECT" >/dev/null
 OLD_PLAN_POINTER="$TMP/old-plan-pointer.json"
 cp "$(autopilot_active_file "$HIDDEN_PROJECT")" "$OLD_PLAN_POINTER"
-autopilot_begin_run hidden_plan_run hidden_plan_owner "$HIDDEN_PROJECT" >/dev/null
+provision_session "$HIDDEN_PROJECT" hidden_plan_owner hidden-new || exit 1
+HIDDEN_OWNER="$PROVISIONED_KEY"; HIDDEN_DATA="$PROVISIONED_DATA"
+autopilot_begin_run hidden_plan_run "$HIDDEN_OWNER" "$HIDDEN_PROJECT" >/dev/null
 cp "$OLD_PLAN_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT")"
-HIDDEN_OUT="$(invoke "$(payload 'ordinary plan behind terminal pointer' hidden_plan_owner)" "$HIDDEN_PROJECT" "$CFG_OFF")"
+HIDDEN_OUT="$(invoke "$(payload 'ordinary plan behind terminal pointer' hidden_plan_owner)" "$HIDDEN_PROJECT" "$CFG_OFF" "$HIDDEN_DATA")"
 if printf '%s' "$HIDDEN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$HIDDEN_OUT" | grep -qF 'AskUserQuestion'; then
   check "P7d terminal pointer cannot hide a newer nonterminal run from plan routing" PASS
 else check "P7d hidden nonterminal run cannot inherit standalone plan policy" FAIL; fi
 
 STANDALONE="$TMP/standalone"; mkdir -p "$STANDALONE"
-STANDALONE_OFF="$(invoke "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE" "$CFG_OFF")"
+provision_session "$STANDALONE" standalone_sid standalone || exit 1
+STANDALONE_DATA="$PROVISIONED_DATA"
+STANDALONE_OFF="$(invoke "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE" "$CFG_OFF" "$STANDALONE_DATA")"
 [ -z "$STANDALONE_OFF" ] && check "P8 standalone autoTdd=false remains silent" PASS || check "P8 standalone autoTdd=false remains silent" FAIL
 DEFAULT_CFG="$TMP/missing.json"
-STANDALONE_ON="$(invoke "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE" "$DEFAULT_CFG")"
+STANDALONE_ON="$(invoke "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE" "$DEFAULT_CFG" "$STANDALONE_DATA")"
 printf '%s' "$STANDALONE_ON" | grep -qF 'AskUserQuestion' \
   && check "P9 standalone default remains ask-first" PASS \
   || check "P9 standalone default remains ask-first" FAIL
@@ -126,24 +184,30 @@ printf '%s' "$STANDALONE_ON" | grep -qF 'AskUserQuestion' \
 # DONE/CANCELLED pointers are retained as durable history, but they no longer
 # own future ExitPlanMode events. Both must use the ordinary standalone policy.
 CANCEL_PROJECT="$TMP/cancel-project"; mkdir -p "$CANCEL_PROJECT"
-autopilot_begin_run cancel_plan_run cancel_plan_owner "$CANCEL_PROJECT" >/dev/null 2>&1
+provision_session "$CANCEL_PROJECT" cancel_plan_owner cancel-owner || exit 1
+CANCEL_OWNER="$PROVISIONED_KEY"
+autopilot_begin_run cancel_plan_run "$CANCEL_OWNER" "$CANCEL_PROJECT" >/dev/null 2>&1
 autopilot_apply_event cancel_plan_run cancel-plan-event CANCEL '{}' "$CANCEL_PROJECT" >/dev/null 2>&1
-CANCEL_OFF="$(invoke "$(payload 'ordinary plan after cancel' later_plan_session)" "$CANCEL_PROJECT" "$CFG_OFF")"
-CANCEL_ON="$(invoke "$(payload 'ordinary plan after cancel' later_plan_session)" "$CANCEL_PROJECT" "$DEFAULT_CFG")"
+provision_session "$CANCEL_PROJECT" later_plan_session cancel-later || exit 1
+CANCEL_LATER_DATA="$PROVISIONED_DATA"
+CANCEL_OFF="$(invoke "$(payload 'ordinary plan after cancel' later_plan_session)" "$CANCEL_PROJECT" "$CFG_OFF" "$CANCEL_LATER_DATA")"
+CANCEL_ON="$(invoke "$(payload 'ordinary plan after cancel' later_plan_session)" "$CANCEL_PROJECT" "$DEFAULT_CFG" "$CANCEL_LATER_DATA")"
 if [ -z "$CANCEL_OFF" ] && printf '%s' "$CANCEL_ON" | grep -qF 'AskUserQuestion' \
   && ! printf '%s' "$CANCEL_ON" | grep -qF 'PLAN_GATE_BLOCKED'; then
   check "P10 CANCELLED pointer falls through to standalone plan policy" PASS
 else check "P10 CANCELLED pointer does not own later plans" FAIL; fi
 rm -f "$(autopilot_active_file "$CANCEL_PROJECT")"
-CANCEL_HISTORY_OFF="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$CFG_OFF")"
-CANCEL_HISTORY_ON="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$DEFAULT_CFG")"
+CANCEL_HISTORY_OFF="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$CFG_OFF" "$CANCEL_LATER_DATA")"
+CANCEL_HISTORY_ON="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$DEFAULT_CFG" "$CANCEL_LATER_DATA")"
 if [ -z "$CANCEL_HISTORY_OFF" ] && printf '%s' "$CANCEL_HISTORY_ON" | grep -qF 'AskUserQuestion' \
   && ! printf '%s' "$CANCEL_HISTORY_ON" | grep -qF 'PLAN_GATE_BLOCKED'; then
   check "P10b terminal history without a pointer remains standalone-compatible" PASS
 else check "P10b terminal-only history is treated as absent" FAIL; fi
 
 DONE_PROJECT="$TMP/done-project"; mkdir -p "$DONE_PROJECT"
-DONE_RUN="done_plan_run_01"; DONE_OWNER="done_plan_owner_01"
+DONE_RUN="done_plan_run_01"; DONE_OWNER_RAW="done_plan_owner_01"
+provision_session "$DONE_PROJECT" "$DONE_OWNER_RAW" done-owner || exit 1
+DONE_OWNER="$PROVISIONED_KEY"
 DONE_HEAD="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 DONE_READY=true
 autopilot_begin_run "$DONE_RUN" "$DONE_OWNER" "$DONE_PROJECT" >/dev/null 2>&1 || DONE_READY=false
@@ -173,48 +237,124 @@ done_plan_event done-validation VALIDATION_PASSED "{\"headSha\":\"$DONE_HEAD\"}"
 done_plan_event done-delivery DELIVERY_COMPLETE "{\"headSha\":\"$DONE_HEAD\"}"
 DONE_FILE="$(autopilot_run_file "$DONE_RUN" "$DONE_PROJECT")"
 DONE_BEFORE="$(digest "$DONE_FILE")"
-DONE_ON="$(invoke "$(payload 'ordinary plan after delivery' later_done_session)" "$DONE_PROJECT" "$DEFAULT_CFG")"
+provision_session "$DONE_PROJECT" later_done_session done-later || exit 1
+DONE_LATER_DATA="$PROVISIONED_DATA"
+DONE_ON="$(invoke "$(payload 'ordinary plan after delivery' later_done_session)" "$DONE_PROJECT" "$DEFAULT_CFG" "$DONE_LATER_DATA")"
 if [ "$DONE_READY" = true ] && printf '%s' "$DONE_ON" | grep -qF 'AskUserQuestion' \
   && ! printf '%s' "$DONE_ON" | grep -qF 'PLAN_GATE_BLOCKED' \
   && [ "$(digest "$DONE_FILE")" = "$DONE_BEFORE" ]; then
   check "P11 DONE pointer falls through without mutating terminal history" PASS
 else check "P11 DONE pointer does not own or mutate later plans" FAIL; fi
 
-NO_NODE_BIN="$TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
+# PATH is a POSIX colon-separated list under Bash, including Git Bash. Keep
+# the one-shot shim in the shell path namespace: a native `D:/...` component
+# would be split at the drive colon before command lookup ever reaches it.
+NO_NODE_BIN="$RAW_TMP/no-node-bin"; mkdir -p "$NO_NODE_BIN"
+ZENSU_TEST_REAL_NODE="$(command -v node)"
+export ZENSU_TEST_REAL_NODE
+NO_NODE_PATH="$NO_NODE_BIN"
+_zensu_old_ifs="$IFS"; IFS=:
+for _zensu_path_dir in $PATH; do
+  if [ ! -x "$_zensu_path_dir/node" ] && [ ! -x "$_zensu_path_dir/node.exe" ]; then
+    NO_NODE_PATH="$NO_NODE_PATH:$_zensu_path_dir"
+  fi
+done
+IFS="$_zensu_old_ifs"
+unset _zensu_old_ifs _zensu_path_dir
+arm_one_shot_node() {
+  # Let Session Control validate the sealed project binding, then model the
+  # runtime disappearing before the Autopilot library can be loaded. A node
+  # binary absent at hook entry cannot authenticate project context at all and
+  # is covered by the silent/unavailable cases below.
+  printf '%s\n' '#!/bin/bash' '/bin/rm -f "$0"' \
+    'exec "$ZENSU_TEST_REAL_NODE" "$@"' > "$NO_NODE_BIN/node"
+  chmod 700 "$NO_NODE_BIN/node"
+}
 invoke_without_node() {
-  printf '%s' "$1" | PATH="$NO_NODE_BIN" ZENSU_FORCE_MAIN='' \
-    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$2" /bin/bash "$HOOK" 2>/dev/null
+  local input="$1" project="$2" plugin_data="$3"
+  (
+    printf '%s' "$input" | PATH="$NO_NODE_PATH" ZENSU_FORCE_MAIN='' \
+      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$plugin_data" \
+      CLAUDE_PROJECT_DIR="$project" /bin/bash "$HOOK" 2>/dev/null
+  )
+}
+invoke_with_disappearing_node() {
+  arm_one_shot_node
+  invoke_without_node "$@"
 }
 
-MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"; mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib"
-OUT_NO_NODE="$(invoke_without_node "$(payload "$PLAN" "$SID")" "$PROJECT")"
-OUT_NO_STATE="$(printf '%s' "$(payload "$PLAN" "$SID")" | ZENSU_FORCE_MAIN='' \
-  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PROJECT_DIR="$PROJECT" /bin/bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$OUT_NO_NODE" | grep -qF 'RUNTIME_UNAVAILABLE' \
-  && printf '%s' "$OUT_NO_STATE" | grep -qF 'RUNTIME_UNAVAILABLE' \
+arm_one_shot_node
+ONE_SHOT_NODE="$(PATH="$NO_NODE_PATH" /bin/bash -c 'command -v node' 2>/dev/null || true)"
+if [ "$ONE_SHOT_NODE" = "$NO_NODE_BIN/node" ]; then
+  check "P11b one-shot Node shim is addressable through the POSIX PATH" PASS
+else
+  check "P11b one-shot Node shim path survives host-path normalization" FAIL
+fi
+
+MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"; mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib" "$MISSING_STATE_PLUGIN/.claude-plugin"
+MISSING_STATE_PLUGIN="$(cd "$MISSING_STATE_PLUGIN" && pwd -P)"
+printf '%s\n' '{"name":"zensu","version":"test-missing-state"}' \
+  > "$MISSING_STATE_PLUGIN/.claude-plugin/plugin.json"
+cp "$HOOK" "$MISSING_STATE_PLUGIN/hooks/plan-approved-delegate.sh"
+cp "$PLUGIN_DIR/hooks/session-start-session-control.sh" "$MISSING_STATE_PLUGIN/hooks/session-start-session-control.sh"
+cp "$PLUGIN_DIR/hooks/lib/zensu-session.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-msys-env.sh" \
+  "$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/claude-session-control-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/claude-path-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/claude-principal-v1.js" \
+  "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" \
+  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$MISSING_STATE_PLUGIN/hooks/lib/"
+MISSING_STATE_DATA="$TMP/missing-state-plugin-data"
+mkdir -p "$MISSING_STATE_DATA"
+bind_missing_state_session() {
+  local raw_session="$1" project="$2"
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name:"SessionStart", source:"startup",
+    session_id:process.argv[1], cwd:process.argv[2]
+  }))' "$raw_session" "$project" \
+    | CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PLUGIN_DATA="$MISSING_STATE_DATA" \
+      env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+      bash "$MISSING_STATE_PLUGIN/hooks/session-start-session-control.sh" >/dev/null
+}
+bind_missing_state_session "$SID_RAW" "$PROJECT" || exit 1
+bind_missing_state_session orphan_plan_owner "$ORPHAN_PROJECT" || exit 1
+OUT_NO_NODE="$(invoke_with_disappearing_node "$(payload "$PLAN" "$SID_RAW")" "$PROJECT" "$MAIN_DATA")"
+OUT_NO_STATE="$(
+  printf '%s' "$(payload "$PLAN" "$SID_RAW")" | ZENSU_FORCE_MAIN='' \
+    CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PLUGIN_DATA="$MISSING_STATE_DATA" CLAUDE_PROJECT_DIR="$PROJECT" \
+    /bin/bash "$MISSING_STATE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null
+)"
+if printf '%s' "$OUT_NO_NODE" | grep -qF 'PLAN_GATE_BLOCKED' \
+  && printf '%s' "$OUT_NO_STATE" | grep -qF 'PLAN_GATE_BLOCKED' \
   && ! printf '%s' "$OUT_NO_NODE" | grep -qF 'AskUserQuestion'; then
   check "P12 active pointer plus missing Node or state library fails closed" PASS
 else check "P12 missing durable runtime is not treated as standalone" FAIL; fi
 
 ORPHAN_RUNTIME_PAYLOAD="$(payload 'ordinary plan while orphan runtime is missing' orphan_plan_owner)"
-OUT_NO_NODE_ORPHAN="$(invoke_without_node "$ORPHAN_RUNTIME_PAYLOAD" "$ORPHAN_PROJECT")"
-OUT_NO_STATE_ORPHAN="$(printf '%s' "$ORPHAN_RUNTIME_PAYLOAD" | ZENSU_FORCE_MAIN='' \
-  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PROJECT_DIR="$ORPHAN_PROJECT" /bin/bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$OUT_NO_NODE_ORPHAN" | grep -qF 'RUNTIME_UNAVAILABLE' \
-  && printf '%s' "$OUT_NO_STATE_ORPHAN" | grep -qF 'RUNTIME_UNAVAILABLE' \
+OUT_NO_NODE_ORPHAN="$(invoke_with_disappearing_node "$ORPHAN_RUNTIME_PAYLOAD" "$ORPHAN_PROJECT" "$ORPHAN_DATA")"
+OUT_NO_STATE_ORPHAN="$(
+  printf '%s' "$ORPHAN_RUNTIME_PAYLOAD" | ZENSU_FORCE_MAIN='' \
+    CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PLUGIN_DATA="$MISSING_STATE_DATA" CLAUDE_PROJECT_DIR="$ORPHAN_PROJECT" \
+    /bin/bash "$MISSING_STATE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null
+)"
+if printf '%s' "$OUT_NO_NODE_ORPHAN" | grep -qF 'PLAN_GATE_BLOCKED' \
+  && printf '%s' "$OUT_NO_STATE_ORPHAN" | grep -qF 'PLAN_GATE_BLOCKED' \
   && ! printf '%s' "$OUT_NO_NODE_ORPHAN" | grep -qF 'AskUserQuestion'; then
   check "P12b orphan run plus missing Node or state library blocks plan routing" PASS
 else check "P12b orphan durable state cannot fall through without its runtime" FAIL; fi
 
-OUT_NO_NODE_ABSENT="$(invoke_without_node "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE")"
-AGENT_PAYLOAD="$(PLAN='agent plan' SID='agent_sid' node -e 'process.stdout.write(JSON.stringify({session_id:process.env.SID,agent_id:"child-plan",tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))')"
-OUT_NO_NODE_AGENT="$(invoke_without_node "$AGENT_PAYLOAD" "$PROJECT")"
-ORPHAN_AGENT_PAYLOAD="$(PLAN='orphan agent plan' SID='orphan_agent_sid' node -e 'process.stdout.write(JSON.stringify({session_id:process.env.SID,agent_id:"child-orphan-plan",tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))')"
-OUT_NO_NODE_ORPHAN_AGENT="$(invoke_without_node "$ORPHAN_AGENT_PAYLOAD" "$ORPHAN_PROJECT")"
-if [ -z "$OUT_NO_NODE_ABSENT" ] && [ -z "$OUT_NO_NODE_AGENT" ] \
+OUT_NO_NODE_ABSENT="$(invoke_without_node "$(payload 'ordinary plan' standalone_sid)" "$STANDALONE" "$STANDALONE_DATA")"
+AGENT_PAYLOAD="$(PLAN='agent plan' SID='agent_sid' node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,agent_id:"child-plan",tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))')"
+OUT_NO_NODE_AGENT="$(invoke_without_node "$AGENT_PAYLOAD" "$PROJECT" "$MAIN_DATA")"
+ORPHAN_AGENT_PAYLOAD="$(PLAN='orphan agent plan' SID='orphan_agent_sid' node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,agent_id:"child-orphan-plan",tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))')"
+OUT_NO_NODE_ORPHAN_AGENT="$(invoke_without_node "$ORPHAN_AGENT_PAYLOAD" "$ORPHAN_PROJECT" "$ORPHAN_DATA")"
+if [ -z "$OUT_NO_NODE_ABSENT" ] \
+  && [ -z "$OUT_NO_NODE_AGENT" ] \
   && [ -z "$OUT_NO_NODE_ORPHAN_AGENT" ]; then
-  check "P13 unavailable runtime stays silent without a pointer and for spawned agents" PASS
-else check "P13 unavailable runtime distinguishes absence and spawned-agent no-op" FAIL; fi
+  check "P13 missing Node cannot authenticate any principal and stays silent" PASS
+else check "P13 unauthenticated missing-Node delivery must be a no-op" FAIL; fi
 
 if grep -qF 'PAYLOAD="$INPUT"' "$HOOK" || grep -qF 'zensu_hook_agent_id "$INPUT"' "$HOOK"; then
   check "P14 plan hook copies the full payload into a process environment or argv" FAIL

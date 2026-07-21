@@ -7,6 +7,9 @@ STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 PHASE_LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+SESSION_INIT="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 
 PASS=0
 FAIL=0
@@ -28,9 +31,55 @@ fi
 # shellcheck disable=SC1090
 source "$STATE_LIB"
 
-ROOT="$(mktemp -d -t zensu-autopilot-adversarial-XXXXXX)"
+ROOT="$(mktemp -d -t za-adv-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+mkdir -p "$ROOT/session-control/plugin-data"
+ZENSU_TEST_PLUGIN_DATA="$(cd "$ROOT/session-control/plugin-data" && pwd -P)"
+export ZENSU_TEST_PLUGIN_DATA
+
+native_directory() {
+  local rendered
+  rendered="$(bash "$HOST_PATH" "$1")" || return 1
+  MSYS2_ARG_CONV_EXCL='*' node -e '
+    const fs = require("fs");
+    process.stdout.write(fs.realpathSync.native(process.argv[1]));
+  ' "$rendered"
+}
+
+activate_session() {
+  local project="$1" supplied="$2" key context native_project native_plugin_data
+  mkdir -p "$project" || return 1
+  project="$(cd "$project" && pwd -P)" || return 1
+  native_project="$(native_directory "$project")" || return 1
+  native_plugin_data="$(native_directory "$ZENSU_TEST_PLUGIN_DATA")" || return 1
+  key="$(node "$SESSION_CORE" session-key "$supplied")" || return 1
+  context="$(MSYS2_ARG_CONV_EXCL='*' node -e '
+    const path = require("path");
+    process.stdout.write(path.join(process.argv[1], "session-control", "v1", "records", `${process.argv[2]}.json`));
+  ' "$native_plugin_data" "$key")" || return 1
+  if [ "${ZENSU_PROJECT_ROOT:-}" = "$native_project" ] \
+      && [ "${ZENSU_SESSION_KEY:-}" = "$key" ] \
+      && [ "${ZENSU_SESSION_CONTEXT:-}" = "$context" ] \
+      && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
+      && [ "$(node "$SESSION_CORE" session-key "$CLAUDE_CODE_SESSION_ID" 2>/dev/null)" = "$key" ]; then
+    export CLAUDE_PROJECT_DIR="$project"
+    return 0
+  fi
+  # A derived key cannot recreate the raw host identity. New bindings must be
+  # initialized from the same raw session id Claude places in hook payloads.
+  case "$supplied" in scv1_*) return 1 ;; esac
+  export CLAUDE_PROJECT_DIR="$project"
+  # shellcheck disable=SC1090
+  source "$SESSION_INIT" "$supplied" || return 1
+  [ "$ZENSU_SESSION_KEY" = "$key" ] && [ "$ZENSU_SESSION_CONTEXT" = "$context" ]
+}
+
+prepare_session() {
+  local project="$1" supplied="$2" variable="$3"
+  activate_session "$project" "$supplied" || return 1
+  printf -v "$variable" '%s' "$ZENSU_SESSION_KEY"
+}
 
 decision() {
   node -e '
@@ -45,7 +94,8 @@ decision() {
 
 invoke_stop() {
   local project="$1" session_id="$2"
-  printf '{"session_id":"%s"}' "$session_id" \
+  activate_session "$project" "$session_id" || return 1
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$CLAUDE_CODE_SESSION_ID" \
     | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$ROOT/missing-config.json" \
       bash "$STOP" 2>/dev/null
 }
@@ -69,6 +119,27 @@ digest() {
   node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"
 }
 
+copy_runtime() {
+  local destination="$1" runtime_entry
+  mkdir -p "$destination"
+  destination="$(cd "$destination" && pwd -P)" || return 1
+  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+    cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
+  done
+  mkdir -p "$destination/mcp-runtime"
+  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
+    "$destination/mcp-runtime/" || return 1
+}
+
+bind_runtime_session() {
+  local plugin_root="$1" project="$2" raw_session="$3" label="$4"
+  local ZENSU_TEST_PLUGIN_DATA="$ROOT/$label-plugin-data"
+  export ZENSU_TEST_PLUGIN_DATA
+  export CLAUDE_PROJECT_DIR="$project"
+  # shellcheck disable=SC1090
+  source "$SESSION_INIT" "$raw_session" "$plugin_root"
+}
+
 IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
 make_file_symlink() {
   node -e '
@@ -83,6 +154,7 @@ make_file_symlink() {
 approve() {
   local project="$1" run_id="$2" session_id="$3"
   local plan_sha=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  activate_session "$project" "$session_id" || return 1
   mkdir -p "$project"
   autopilot_begin_run "$run_id" "$session_id" "$project" >/dev/null \
     && autopilot_apply_event "$run_id" "plan-${run_id}" PLAN_APPROVED \
@@ -103,14 +175,13 @@ mark_complete() {
 
 seed_exhausted_review() {
   local project="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
-  local ticket counter_file
+  local ticket
   approve "$project" "$run_id" "$session_id" || return 1
   begin_bound "$project" "$run_id" "$session_id" "$attempt" "$chain_id" || return 1
   mark_complete "$project" "$run_id" "$session_id" "$attempt" "$chain_id" || return 1
   ticket="$(CLAUDE_PROJECT_DIR="$project" tdd_issue_review_ticket "$session_id")" || return 1
-  counter_file="$project/.zensu/state/rounds-${session_id}.json"
   CLAUDE_PROJECT_DIR="$project" tdd_consume_review_ticket \
-    "$session_id" "$ticket" "$counter_file" >/dev/null || return 1
+    "$session_id" "$ticket" >/dev/null || return 1
   CLAUDE_PROJECT_DIR="$project" tdd_set_chain_outcome \
     "$session_id" max-rounds "$run_id" "$attempt" "$chain_id" "$ticket" >/dev/null || return 1
   CLAUDE_PROJECT_DIR="$project" tdd_mark_review_converged \
@@ -120,6 +191,20 @@ seed_exhausted_review() {
 
 check "X1 durable state libraries exist" PASS
 
+if grep -qF "path_indexes=(0 1 2 3 6)" "$STATE_LIB" \
+  && grep -qF "MSYS2_ARG_CONV_EXCL='*' node -" "$STATE_LIB" \
+  && grep -qF '_tdd_native_project_path "$input"' "$STATE_LIB" \
+  && grep -qF '_autopilot_native_project_root "$input"' "$STATE_LIB" \
+  && grep -qF 'root="$(cd -P -- "$input" 2>/dev/null && pwd -P)"' "$STATE_LIB" \
+  && grep -qF '_autopilot_msys_env_exclusions' "$STATE_LIB" \
+  && ! grep -qF 'PAYLOAD_FILE="$payload_file"' "$STATE_LIB" \
+  && ! grep -qF 'TARGET_FILE="$target" node -e' "$STATE_LIB" \
+  && ! grep -qF 'STATE_FILE="$state_file" SID=' "$STATE_LIB"; then
+  check "X1a native Node filesystem boundaries are explicit and mode-complete" PASS
+else
+  check "X1a native Node filesystem boundaries are explicit and mode-complete" FAIL
+fi
+
 # A bound Inner generation is proof that an outer run exists. Removing only
 # the project-local active pointer must never turn that proof into "no run",
 # including after the Inner terminus was durably committed first.
@@ -127,11 +212,12 @@ P2="$ROOT/missing-pointer-active"
 R2=adversarial_pointer_active_run
 S2=adversarial_pointer_active_session
 C2=adversarial-pointer-active-chain
+prepare_session "$P2" "$S2" S2 || exit 1
 approve "$P2" "$R2" "$S2" && begin_bound "$P2" "$R2" "$S2" 1 "$C2" \
   && mark_complete "$P2" "$R2" "$S2" 1 "$C2" || exit 1
 rm -f "$(autopilot_active_file "$P2")"
 RF2="$(autopilot_run_file "$R2" "$P2")"
-TF2="$P2/.zensu/state/tdd-phase-${S2}.json"
+TF2="$(tdd_state_file "$S2")"
 BEFORE2_OUTER="$(digest "$RF2")"; BEFORE2_INNER="$(digest "$TF2")"
 OUT2="$(invoke_stop "$P2" "$S2")"
 if [ "$(printf '%s' "$OUT2" | decision)" = block ] \
@@ -147,13 +233,14 @@ P3="$ROOT/missing-pointer-done"
 R3=adversarial_pointer_done_run
 S3=adversarial_pointer_done_session
 C3=adversarial-pointer-done-chain
+prepare_session "$P3" "$S3" S3 || exit 1
 approve "$P3" "$R3" "$S3" && begin_bound "$P3" "$R3" "$S3" 1 "$C3" \
   && mark_complete "$P3" "$R3" "$S3" 1 "$C3" \
   && CLAUDE_PROJECT_DIR="$P3" tdd_finish_autopilot_chain \
     "$S3" "$R3" 1 "$C3" pass >/dev/null || exit 1
 rm -f "$(autopilot_active_file "$P3")"
 RF3="$(autopilot_run_file "$R3" "$P3")"
-TF3="$P3/.zensu/state/tdd-phase-${S3}.json"
+TF3="$(tdd_state_file "$S3")"
 BEFORE3_OUTER="$(digest "$RF3")"; BEFORE3_INNER="$(digest "$TF3")"
 OUT3="$(invoke_stop "$P3" "$S3")"
 if [ "$(printf '%s' "$OUT3" | decision)" = block ] \
@@ -170,34 +257,35 @@ fi
 # intentionally have no outer pointer and therefore exercise standalone TDD.
 P4="$ROOT/standalone-runtime"
 S4=adversarial_standalone_runtime
+S4_RAW="$S4"
 mkdir -p "$P4"
+prepare_session "$P4" "$S4" S4 || exit 1
 CLAUDE_PROJECT_DIR="$P4" bash "$LOG" --tdd-begin --session "$S4" >/dev/null \
   && CLAUDE_PROJECT_DIR="$P4" bash "$LOG" --tdd-complete --session "$S4" >/dev/null \
   || exit 1
 NO_NODE_PATH="$ROOT/no-node-path"
 mkdir -p "$NO_NODE_PATH"
-for utility in cat grep; do
+for utility in cat dirname grep; do
   utility_path="$(command -v "$utility")"
   [ -n "$utility_path" ] && ln -s "$utility_path" "$NO_NODE_PATH/$utility"
 done
-OUT4="$(printf '{"session_id":"%s"}' "$S4" \
+OUT4="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$S4_RAW" \
   | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" PATH="$NO_NODE_PATH" \
     /bin/bash "$STOP" 2>/dev/null)"
-if [ "$(printf '%s' "$OUT4" | decision)" = block ] \
-  && printf '%s' "$OUT4" | grep -qF 'project-local inner state exists'; then
-  check "X4 missing Node blocks an active standalone Inner chain" PASS
+if [ -z "$OUT4" ]; then
+  check "X4 missing Node stays silent before unauthenticated principal/state inspection" PASS
 else
-  check "X4 missing Node cannot release standalone Inner work" FAIL
+  check "X4 missing Node must not guess a main-thread Stop decision" FAIL
 fi
 
 MISSING_PHASE_ROOT="$ROOT/missing-phase-root"
-mkdir -p "$MISSING_PHASE_ROOT/hooks/lib"
-for library in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-autopilot-state.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$library" "$MISSING_PHASE_ROOT/hooks/lib/$library"
-done
-OUT5="$(printf '{"session_id":"%s"}' "$S4" \
+copy_runtime "$MISSING_PHASE_ROOT"
+MISSING_PHASE_ROOT="$(cd "$MISSING_PHASE_ROOT" && pwd -P)"
+rm -f "$MISSING_PHASE_ROOT/hooks/lib/zensu-tdd-phase.sh"
+bind_runtime_session "$MISSING_PHASE_ROOT" "$P4" "$S4_RAW" missing-phase
+OUT5="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$S4_RAW" \
   | CLAUDE_PROJECT_DIR="$P4" CLAUDE_PLUGIN_ROOT="$MISSING_PHASE_ROOT" \
-    bash "$STOP" 2>/dev/null)"
+    bash "$MISSING_PHASE_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT5" | decision)" = block ] \
   && printf '%s' "$OUT5" | grep -qF 'project-local inner state exists'; then
   check "X5 missing TDD core library blocks an active standalone Inner chain" PASS
@@ -208,8 +296,10 @@ fi
 P6="$ROOT/corrupt-inner"
 S6=adversarial_corrupt_inner
 mkdir -p "$P6"
+prepare_session "$P6" "$S6" S6 || exit 1
 CLAUDE_PROJECT_DIR="$P6" bash "$LOG" --tdd-begin --session "$S6" >/dev/null || exit 1
-printf '%s\n' '{not-json' > "$P6/.zensu/state/tdd-phase-${S6}.json"
+TF6="$(tdd_state_file "$S6")"
+printf '%s\n' '{not-json' > "$TF6"
 OUT6="$(invoke_stop "$P6" "$S6")"
 if [ "$(printf '%s' "$OUT6" | decision)" = block ] \
   && printf '%s' "$OUT6" | grep -qF 'current-session inner state is corrupt or unsafe'; then
@@ -226,11 +316,12 @@ P7="$ROOT/rearm-crash-window"
 R7=adversarial_rearm_crash_run
 S7=adversarial_rearm_crash_session
 C7=adversarial-rearm-crash-chain
+prepare_session "$P7" "$S7" S7 || exit 1
 T7="$(seed_exhausted_review "$P7" "$R7" "$S7" 1 "$C7")" || exit 1
 CLAUDE_PROJECT_DIR="$P7" tdd_finish_autopilot_chain \
   "$S7" "$R7" 1 "$C7" max-rounds "$T7" >/dev/null || exit 1
 RF7="$(autopilot_run_file "$R7" "$P7")"
-TF7="$P7/.zensu/state/tdd-phase-${S7}.json"
+TF7="$(tdd_state_file "$S7")"
 if field_ok "$RF7" 'value.stage === "TDD_RUNNING"' \
   && field_ok "$TF7" 'value.chainDone === true && value.chainOutcome === "max-rounds"' \
   && CLAUDE_PROJECT_DIR="$P7" autopilot_rearm_review \
@@ -258,6 +349,7 @@ P8="$ROOT/rearm-finish-race"
 R8=adversarial_rearm_race_run
 S8=adversarial_rearm_race_session
 C8=adversarial-rearm-race-chain
+prepare_session "$P8" "$S8" S8 || exit 1
 T8="$(seed_exhausted_review "$P8" "$R8" "$S8" 1 "$C8")" || exit 1
 (
   CLAUDE_PROJECT_DIR="$P8" autopilot_rearm_review \
@@ -275,7 +367,7 @@ FINISH_PID=$!
 wait "$REARM_PID"
 wait "$FINISH_PID"
 RF8="$(autopilot_run_file "$R8" "$P8")"
-TF8="$P8/.zensu/state/tdd-phase-${S8}.json"
+TF8="$(tdd_state_file "$S8")"
 if [ "$(cat "$P8/rearm.rc")" = 0 ] \
   && pair_ok "$RF8" "$TF8" '
     !(outer.stage === "BLOCKED" && inner.active === true && inner.chainDone === false)
@@ -299,6 +391,7 @@ S9=adversarial_stale_reset_session
 C9A=adversarial-stale-reset-chain-a
 C9B=adversarial-stale-reset-chain-b
 HEAD9=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+prepare_session "$P9" "$S9" S9 || exit 1
 approve "$P9" "$R9" "$S9" && begin_bound "$P9" "$R9" "$S9" 1 "$C9A" \
   && mark_complete "$P9" "$R9" "$S9" 1 "$C9A" \
   && CLAUDE_PROJECT_DIR="$P9" autopilot_finish_tdd_attempt \
@@ -308,7 +401,7 @@ approve "$P9" "$R9" "$S9" && begin_bound "$P9" "$R9" "$S9" 1 "$C9A" \
   && begin_bound "$P9" "$R9" "$S9" 2 "$C9B" \
   && autopilot_apply_event "$R9" adversarial-cancel-newer CANCEL '{}' \
     "$P9" "$S9" >/dev/null || exit 1
-TF9="$P9/.zensu/state/tdd-phase-${S9}.json"
+TF9="$(tdd_state_file "$S9")"
 BEFORE9="$(digest "$TF9")"
 STALE_RESET_REJECTED=true
 CLAUDE_PROJECT_DIR="$P9" tdd_clear_autopilot_session \
@@ -332,10 +425,11 @@ fi
 P10="$ROOT/strict-cli"
 S10=adversarial_strict_cli_session
 mkdir -p "$P10"
+prepare_session "$P10" "$S10" S10 || exit 1
 CLAUDE_PROJECT_DIR="$P10" bash "$LOG" --tdd-begin --session "$S10" >/dev/null \
   && CLAUDE_PROJECT_DIR="$P10" bash "$LOG" --tdd-complete --session "$S10" >/dev/null \
   || exit 1
-TF10="$P10/.zensu/state/tdd-phase-${S10}.json"
+TF10="$(tdd_state_file "$S10")"
 BEFORE10="$(digest "$TF10")"
 cli_rc() {
   CLAUDE_PROJECT_DIR="$P10" bash "$LOG" "$@" >/dev/null 2>&1
@@ -359,13 +453,14 @@ fi
 P11="$ROOT/adopt-absent"
 S11=adversarial_adopt_absent_session
 mkdir -p "$P11"
+prepare_session "$P11" "$S11" S11 || exit 1
 CLAUDE_PROJECT_DIR="$P11" TDD_STATE_DIR="$P11/.zensu/state" \
   tdd_write_pending_review absent.ts "absent outer fixture" >/dev/null || exit 1
 if CLAUDE_PROJECT_DIR="$P11" TDD_STATE_DIR="$P11/.zensu/state" \
     autopilot_adopt_pending_review "$P11" "$S11" true 0 >/dev/null 2>&1 \
   && [ -f "$P11/.zensu/state/pending-review.json.claim" ] \
   && [ ! -e "$P11/.zensu/state/pending-review.json" ] \
-  && field_ok "$P11/.zensu/state/tdd-phase-${S11}.json" \
+  && field_ok "$(tdd_state_file "$S11")" \
     'value.active === true && value.implComplete === true && value.chainDone === false'; then
   check "X11 absent Outer inventory permits composite pending-review adoption" PASS
 else
@@ -378,16 +473,20 @@ fi
 P11B="$ROOT/adopt-no-marker"
 S11B=adversarial_adopt_no_marker_session
 mkdir -p "$P11B"
+prepare_session "$P11B" "$S11B" S11B || exit 1
+TF11B="$(tdd_state_file "$S11B")"; BEFORE11B_INNER="$(digest "$TF11B")"
 _autopilot_prepare_storage "$P11B" || exit 1
 CLAUDE_PROJECT_DIR="$P11B" TDD_STATE_DIR="$P11B/.zensu/state" \
   autopilot_adopt_pending_review "$P11B" "$S11B" true 0 >/dev/null 2>&1
 RC11B=$?
 FILES11B="$(find "$P11B/.zensu/state" -maxdepth 1 -type f \
   ! -name 'autopilot.lock' ! -name 'pending-review.json.lock' \
+  ! -name "$(basename "$TF11B")" ! -name "$(basename "$TF11B").lock" \
   | wc -l | tr -d '[:space:]')"
 if [ "$RC11B" = 6 ] && [ "$FILES11B" = 0 ] \
   && [ ! -e "$P11B/.zensu/state/pending-review.json.claim" ] \
-  && [ ! -e "$P11B/.zensu/state/tdd-phase-${S11B}.json" ]; then
+  && [ "$(digest "$TF11B")" = "$BEFORE11B_INNER" ] \
+  && field_ok "$TF11B" 'value.active === false && value.implComplete === false && value.chainDone === false'; then
   check "X11b empty pending queue returns distinct no-work rc=6 byte-stably" PASS
 else
   check "X11b no-work cannot collide with corrupt Outer rc=2 (rc=$RC11B files=$FILES11B)" FAIL
@@ -398,6 +497,8 @@ fi
 P11C="$ROOT/adopt-inner-failure"
 S11C=adversarial_adopt_inner_failure_session
 mkdir -p "$P11C/.zensu/state"
+prepare_session "$P11C" "$S11C" S11C || exit 1
+TF11C="$(tdd_state_file "$S11C")"; BEFORE11C_INNER="$(digest "$TF11C")"
 printf '%s\n' '{"files":["safe.ts"],"summary":"must stay outside"}' > "$P11C/outside-pending.json"
 if make_file_symlink "$P11C/outside-pending.json" \
     "$P11C/.zensu/state/pending-review.json"; then
@@ -409,7 +510,7 @@ if make_file_symlink "$P11C/outside-pending.json" \
     && [ "$(digest "$P11C/outside-pending.json")" = "$BEFORE11C" ] \
     && [ -L "$P11C/.zensu/state/pending-review.json" ] \
     && [ ! -e "$P11C/.zensu/state/pending-review.json.claim" ] \
-    && [ ! -e "$P11C/.zensu/state/tdd-phase-${S11C}.json" ]; then
+    && [ "$(digest "$TF11C")" = "$BEFORE11C_INNER" ]; then
     check "X11c pending/Inner mutation failure remains distinct rc=1" PASS
   else
     check "X11c inner failure cannot look like no-work or Outer corruption (rc=$RC11C)" FAIL
@@ -427,14 +528,16 @@ R12=adversarial_adopt_cancelled_run
 O12=adversarial_adopt_cancelled_owner
 S12=adversarial_adopt_after_cancel
 mkdir -p "$P12"
+prepare_session "$P12" "$O12" O12 || exit 1
 autopilot_begin_run "$R12" "$O12" "$P12" >/dev/null \
   && autopilot_apply_event "$R12" adversarial-adopt-cancel CANCEL '{}' \
     "$P12" "$O12" >/dev/null \
   && CLAUDE_PROJECT_DIR="$P12" TDD_STATE_DIR="$P12/.zensu/state" \
     tdd_write_pending_review cancelled.ts "cancelled outer fixture" >/dev/null || exit 1
+prepare_session "$P12" "$S12" S12 || exit 1
 if CLAUDE_PROJECT_DIR="$P12" TDD_STATE_DIR="$P12/.zensu/state" \
     autopilot_adopt_pending_review "$P12" "$S12" false 0 >/dev/null 2>&1 \
-  && field_ok "$P12/.zensu/state/tdd-phase-${S12}.json" \
+  && field_ok "$(tdd_state_file "$S12")" \
     'value.active === true && value.implComplete === true && value.chainDone === false' \
   && field_ok "$(autopilot_run_file "$R12" "$P12")" 'value.stage === "CANCELLED"'; then
   check "X12 CANCELLED Outer history permits composite pending-review adoption" PASS
@@ -449,11 +552,14 @@ R13=adversarial_adopt_blocked_run
 O13=adversarial_adopt_blocked_owner
 S13=adversarial_adopt_blocked_contender
 mkdir -p "$P13"
+prepare_session "$P13" "$O13" O13 || exit 1
 autopilot_begin_run "$R13" "$O13" "$P13" >/dev/null \
   && autopilot_apply_event "$R13" adversarial-adopt-block BLOCK \
     '{"code":"ADOPTION_BLOCKED_FIXTURE"}' "$P13" "$O13" >/dev/null \
   && CLAUDE_PROJECT_DIR="$P13" TDD_STATE_DIR="$P13/.zensu/state" \
     tdd_write_pending_review blocked.ts "blocked outer fixture" >/dev/null || exit 1
+prepare_session "$P13" "$S13" S13 || exit 1
+TF13="$(tdd_state_file "$S13")"; BEFORE13_INNER="$(digest "$TF13")"
 RF13="$(autopilot_run_file "$R13" "$P13")"
 PF13="$P13/.zensu/state/pending-review.json"
 BEFORE13_OUTER="$(digest "$RF13")"; BEFORE13_PENDING="$(digest "$PF13")"
@@ -464,7 +570,7 @@ if [ "$RC13" = 4 ] \
   && [ "$(digest "$RF13")" = "$BEFORE13_OUTER" ] \
   && [ "$(digest "$PF13")" = "$BEFORE13_PENDING" ] \
   && [ ! -e "${PF13}.claim" ] \
-  && [ ! -e "$P13/.zensu/state/tdd-phase-${S13}.json" ]; then
+  && [ "$(digest "$TF13")" = "$BEFORE13_INNER" ]; then
   check "X13 BLOCKED Outer rejects pending adoption byte-stably" PASS
 else
   check "X13 BLOCKED cannot be mistaken for a terminal adoption window" FAIL
@@ -477,9 +583,12 @@ R14=adversarial_adopt_corrupt_run
 O14=adversarial_adopt_corrupt_owner
 S14=adversarial_adopt_corrupt_contender
 mkdir -p "$P14"
+prepare_session "$P14" "$O14" O14 || exit 1
 autopilot_begin_run "$R14" "$O14" "$P14" >/dev/null \
   && CLAUDE_PROJECT_DIR="$P14" TDD_STATE_DIR="$P14/.zensu/state" \
     tdd_write_pending_review corrupt.ts "corrupt outer fixture" >/dev/null || exit 1
+prepare_session "$P14" "$S14" S14 || exit 1
+TF14="$(tdd_state_file "$S14")"; BEFORE14_INNER="$(digest "$TF14")"
 AF14="$(autopilot_active_file "$P14")"; RF14="$(autopilot_run_file "$R14" "$P14")"
 AF14="$AF14" node -e '
   const fs=require("fs"),p=process.env.AF14,j=JSON.parse(fs.readFileSync(p));
@@ -496,7 +605,7 @@ if [ "$RC14" = 2 ] \
   && [ "$(digest "$RF14")" = "$BEFORE14_OUTER" ] \
   && [ "$(digest "$PF14")" = "$BEFORE14_PENDING" ] \
   && [ ! -e "${PF14}.claim" ] \
-  && [ ! -e "$P14/.zensu/state/tdd-phase-${S14}.json" ]; then
+  && [ "$(digest "$TF14")" = "$BEFORE14_INNER" ]; then
   check "X14 corrupt Outer inventory fails pending adoption closed" PASS
 else
   check "X14 corrupt inventory never degrades to absent adoption" FAIL
@@ -517,9 +626,12 @@ R15=adversarial_adopt_race_run
 O15=adversarial_adopt_race_owner
 S15=adversarial_adopt_race_contender
 mkdir -p "$P15"
+prepare_session "$P15" "$O15" O15 || exit 1
 P15_CANON="$(_autopilot_project_root "$P15")" || exit 1
 CLAUDE_PROJECT_DIR="$P15" TDD_STATE_DIR="$P15/.zensu/state" \
   tdd_write_pending_review race.ts "concurrent begin fixture" >/dev/null || exit 1
+prepare_session "$P15" "$S15" S15 || exit 1
+TF15="$(tdd_state_file "$S15")"; BEFORE15_INNER="$(digest "$TF15")"
 PF15="$P15/.zensu/state/pending-review.json"; BEFORE15_PENDING="$(digest "$PF15")"
 _autopilot_prepare_storage "$P15_CANON" || exit 1
 (
@@ -552,7 +664,7 @@ if [ "$ADOPT_WAITED" = true ] \
   && [ "$(cat "$P15/begin.rc")" = 0 ] && [ "$(cat "$P15/adopt.rc")" = 4 ] \
   && [ "$(digest "$PF15")" = "$BEFORE15_PENDING" ] \
   && [ ! -e "${PF15}.claim" ] \
-  && [ ! -e "$P15/.zensu/state/tdd-phase-${S15}.json" ] \
+  && [ "$(digest "$TF15")" = "$BEFORE15_INNER" ] \
   && field_ok "$(autopilot_run_file "$R15" "$P15")" 'value.stage === "PLANNING"'; then
   check "X15 Outer lock serializes pending adoption behind concurrent begin" PASS
 else
@@ -565,8 +677,10 @@ fi
 P16="$ROOT/nonretry-inner-failure"
 S16=adversarial_nonretry_inner
 mkdir -p "$P16/.zensu/state"
+prepare_session "$P16" "$S16" S16 || exit 1
+P16_CANON="$(_autopilot_project_root "$P16")" || exit 1
 tdd_adopt_pending_review() { return 1; }
-if _autopilot_adopt_pending_review_critical "$P16" "$S16" true 0 >/dev/null 2>&1; then
+if _autopilot_adopt_pending_review_critical "$P16_CANON" "$S16" true 0 "$$" >/dev/null 2>&1; then
   INNER_RC16=0
 else
   INNER_RC16=$?
@@ -586,6 +700,296 @@ if [ "$INNER_RC16" -eq 7 ] && [ "$PUBLIC_RC16" -eq 1 ] \
   check "X16 permanent Inner adoption failure preserves public rc=1 without transaction retries" PASS
 else
   check "X16 Inner failure mapping (inner=$INNER_RC16 public=$PUBLIC_RC16 calls=$ADOPT_CALLS16)" FAIL
+fi
+# X16 intentionally replaces the public lock wrapper to count retries. Restore
+# the production implementation before the native-path integration fixture.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
+# Outer-lock contention must not turn a safely foreign-owned deferred review
+# into repeated fail-closed Stop prompts. After a fresh absent-Outer read, the
+# public composite may prove the foreign claim read-only and return no-work.
+P16B="$ROOT/owned-claim-contention"
+O16B=adversarial_contention_owner
+S16B=adversarial_contention_contender
+mkdir -p "$P16B"
+prepare_session "$P16B" "$O16B" O16B || exit 1
+CLAUDE_PROJECT_DIR="$P16B" TDD_STATE_DIR="$P16B/.zensu/state" \
+  tdd_write_pending_review owned.ts "owned contention fixture" >/dev/null || exit 1
+tdd_adopt_pending_review "$O16B" true 0 "${BASHPID:-$$}" >/dev/null || exit 1
+tdd_mark_pending_review_handoff "$O16B" "${BASHPID:-$$}" >/dev/null || exit 1
+OWNER_STATE16B="$(tdd_state_file "$O16B")"
+CLAIM16B="$P16B/.zensu/state/pending-review.json.claim"
+BEFORE_OWNER16B="$(digest "$OWNER_STATE16B")"
+BEFORE_CLAIM16B="$(digest "$CLAIM16B")"
+prepare_session "$P16B" "$S16B" S16B || exit 1
+CONTENDER_STATE16B="$(tdd_state_file "$S16B")"
+BEFORE_CONTENDER16B="$(digest "$CONTENDER_STATE16B")"
+LOCK_ATTEMPTS16B=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B=$((LOCK_ATTEMPTS16B + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B=0
+else
+  RC16B=$?
+fi
+if [ "$RC16B" -eq 6 ] && [ "$LOCK_ATTEMPTS16B" -eq 1 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b foreign-owned claim releases Outer-lock contention as byte-stable no-work" PASS
+else
+  check "X16b owned contention fallback (rc=$RC16B attempts=$LOCK_ATTEMPTS16B)" FAIL
+fi
+
+# rc=1 can also mean unsafe Outer storage rather than ordinary lease
+# contention. A valid foreign claim must never mask that evidence as no-work.
+mkdir "$P16B/.zensu/state/autopilot" || exit 1
+LOCK_ATTEMPTS16B_UNSAFE=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_UNSAFE=$((LOCK_ATTEMPTS16B_UNSAFE + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_UNSAFE=0
+else
+  RC16B_UNSAFE=$?
+fi
+rmdir "$P16B/.zensu/state/autopilot" || exit 1
+if [ "$RC16B_UNSAFE" -eq 2 ] && [ "$LOCK_ATTEMPTS16B_UNSAFE" -eq 1 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b2 unsafe Outer storage cannot masquerade as owned-claim no-work" PASS
+else
+  check "X16b2 unsafe contention evidence (rc=$RC16B_UNSAFE attempts=$LOCK_ATTEMPTS16B_UNSAFE)" FAIL
+fi
+
+# read-active is intentionally unlocked in the fallback. During begin it may
+# see the run before the active pointer and return rc=2 even though storage is
+# safe; that observation is inconclusive and must go back through all bounded
+# serialized retries rather than becoming an immediate corruption decision.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+prepare_session "$P16B" adversarial_contention_contender S16B || exit 1
+LOCK_ATTEMPTS16B_TRANSIENT_FIRST=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_TRANSIENT_FIRST=$((LOCK_ATTEMPTS16B_TRANSIENT_FIRST + 1))
+  return 1
+}
+_autopilot_node() { return 2; }
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_TRANSIENT_FIRST=0
+else
+  RC16B_TRANSIENT_FIRST=$?
+fi
+if [ "$RC16B_TRANSIENT_FIRST" -eq 1 ] \
+    && [ "$LOCK_ATTEMPTS16B_TRANSIENT_FIRST" -eq 5 ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b3 transient first Outer read returns to bounded serialized retry" PASS
+else
+  check "X16b3 first-read transient routing (rc=$RC16B_TRANSIENT_FIRST attempts=$LOCK_ATTEMPTS16B_TRANSIENT_FIRST)" FAIL
+fi
+
+# The second read is the linearization fence and can hit the same transient.
+# It likewise cannot authorize no-work or emit an immediate corruption result.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+prepare_session "$P16B" adversarial_contention_contender S16B || exit 1
+LOCK_ATTEMPTS16B_TRANSIENT_FENCE=0
+READ_MARKER16B_TRANSIENT="$P16B/first-transient-fence-read"
+rm -f "$READ_MARKER16B_TRANSIENT"
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16B_TRANSIENT_FENCE=$((LOCK_ATTEMPTS16B_TRANSIENT_FENCE + 1))
+  return 1
+}
+_autopilot_node() {
+  if [ ! -e "$READ_MARKER16B_TRANSIENT" ]; then
+    : > "$READ_MARKER16B_TRANSIENT"
+    return 1
+  fi
+  return 2
+}
+if autopilot_adopt_pending_review "$P16B" "$S16B" true 0 >/dev/null 2>&1; then
+  RC16B_TRANSIENT_FENCE=0
+else
+  RC16B_TRANSIENT_FENCE=$?
+fi
+if [ "$RC16B_TRANSIENT_FENCE" -eq 1 ] \
+    && [ "$LOCK_ATTEMPTS16B_TRANSIENT_FENCE" -eq 5 ] \
+    && [ -e "$READ_MARKER16B_TRANSIENT" ] \
+    && [ "$(digest "$OWNER_STATE16B")" = "$BEFORE_OWNER16B" ] \
+    && [ "$(digest "$CLAIM16B")" = "$BEFORE_CLAIM16B" ] \
+    && [ "$(digest "$CONTENDER_STATE16B")" = "$BEFORE_CONTENDER16B" ]; then
+  check "X16b4 transient final Outer fence returns to bounded serialized retry" PASS
+else
+  check "X16b4 final-fence transient routing (rc=$RC16B_TRANSIENT_FENCE attempts=$LOCK_ATTEMPTS16B_TRANSIENT_FENCE marker=$([ -e "$READ_MARKER16B_TRANSIENT" ] && echo yes || echo no))" FAIL
+fi
+
+# A current nonterminal Outer generation remains authoritative even when a
+# foreign deferred claim is present: the same contention fallback must route
+# back to the Outer state instead of using the no-work proof.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+P16C="$ROOT/active-outer-contention"
+R16C=adversarial_active_outer_contention_run
+O16C=adversarial_active_outer_contention_owner
+S16C=adversarial_active_outer_contention_contender
+mkdir -p "$P16C"
+prepare_session "$P16C" "$O16C" O16C || exit 1
+CLAUDE_PROJECT_DIR="$P16C" TDD_STATE_DIR="$P16C/.zensu/state" \
+  tdd_write_pending_review outer-owned.ts "active outer contention fixture" >/dev/null || exit 1
+tdd_adopt_pending_review "$O16C" true 0 "${BASHPID:-$$}" >/dev/null || exit 1
+tdd_mark_pending_review_handoff "$O16C" "${BASHPID:-$$}" >/dev/null || exit 1
+autopilot_begin_run "$R16C" "$O16C" "$P16C" >/dev/null || exit 1
+CLAIM16C="$P16C/.zensu/state/pending-review.json.claim"
+RUN16C="$(autopilot_run_file "$R16C" "$P16C")"
+BEFORE_CLAIM16C="$(digest "$CLAIM16C")"
+BEFORE_RUN16C="$(digest "$RUN16C")"
+prepare_session "$P16C" "$S16C" S16C || exit 1
+LOCK_ATTEMPTS16C=0
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16C=$((LOCK_ATTEMPTS16C + 1))
+  return 1
+}
+if autopilot_adopt_pending_review "$P16C" "$S16C" true 0 >/dev/null 2>&1; then
+  RC16C=0
+else
+  RC16C=$?
+fi
+if [ "$RC16C" -eq 4 ] && [ "$LOCK_ATTEMPTS16C" -eq 1 ] \
+    && [ "$(digest "$CLAIM16C")" = "$BEFORE_CLAIM16C" ] \
+    && [ "$(digest "$RUN16C")" = "$BEFORE_RUN16C" ]; then
+  check "X16c active Outer remains authoritative during owned-claim contention" PASS
+else
+  check "X16c active Outer contention routing (rc=$RC16C attempts=$LOCK_ATTEMPTS16C)" FAIL
+fi
+# Restore the production lock wrapper before the remaining integration cases.
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
+# The final unlocked Outer read is the contention proof's linearization fence.
+# Force the first read to report absence, keep the foreign claim valid, then let
+# the real second read reveal the already-active run; routing must still be rc=4.
+eval "$(declare -f _autopilot_node | sed '1s/_autopilot_node/_adversarial_original_node_16d/')"
+LOCK_ATTEMPTS16D=0
+READ_MARKER16D="$P16C/first-contention-read"
+rm -f "$READ_MARKER16D"
+_autopilot_locked_run() {
+  LOCK_ATTEMPTS16D=$((LOCK_ATTEMPTS16D + 1))
+  return 1
+}
+_autopilot_node() {
+  if [ "${1:-}" = read-active ] && [ ! -e "$READ_MARKER16D" ]; then
+    : > "$READ_MARKER16D"
+    return 1
+  fi
+  _adversarial_original_node_16d "$@"
+}
+if autopilot_adopt_pending_review "$P16C" "$S16C" true 0 >/dev/null 2>&1; then
+  RC16D=0
+else
+  RC16D=$?
+fi
+if [ "$RC16D" -eq 4 ] && [ "$LOCK_ATTEMPTS16D" -eq 1 ] \
+    && [ -e "$READ_MARKER16D" ] \
+    && [ "$(digest "$CLAIM16C")" = "$BEFORE_CLAIM16C" ] \
+    && [ "$(digest "$RUN16C")" = "$BEFORE_RUN16C" ]; then
+  check "X16d second Outer read fences the owned-claim contention proof" PASS
+else
+  check "X16d contention TOCTOU fence (rc=$RC16D attempts=$LOCK_ATTEMPTS16D marker=$([ -e "$READ_MARKER16D" ] && echo yes || echo no))" FAIL
+fi
+# shellcheck disable=SC1090
+source "$STATE_LIB" || exit 1
+
+# Git Bash skips or misapplies its heuristic path conversion for some quoted
+# values (notably apostrophes). Exercise every Autopilot worker path schema plus
+# direct payload and Inner-state Node boundaries under one immutable binding.
+P17="$ROOT/native path O'Brien project"
+SOURCE_DIR17="$ROOT/external review O'Brien source"
+FOREIGN17="$ROOT/foreign project O'Brien"
+R17=adversarial_native_path_run
+RAW17=adversarial_native_path_session
+C17=adversarial-native-path-chain
+HEAD17=1717171717171717171717171717171717171717
+PLAN17=1717171717171717171717171717171717171717171717171717171717171717
+mkdir -p "$P17" "$SOURCE_DIR17" "$FOREIGN17"
+prepare_session "$P17" "$RAW17" S17 || exit 1
+SOURCE17="$SOURCE_DIR17/review payload with spaces.json"
+printf '%s\n' \
+  "{\"comments\":[],\"body\":\"special-path review\",\"event\":\"COMMENT\",\"commit_id\":\"$HEAD17\"}" \
+  > "$SOURCE17"
+NATIVE17_OK=true
+SHELL_ROOT17="$(zensu_resolve_project_dir)" || NATIVE17_OK=false
+NATIVE_DESC17="${ZENSU_PROJECT_ROOT%/}/.zensu/state"
+FOREIGN_NATIVE17="$(bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$FOREIGN17")" \
+  || NATIVE17_OK=false
+[ "$(_autopilot_native_project_path "$NATIVE_DESC17" 2>/dev/null)" = "$NATIVE_DESC17" ] \
+  || NATIVE17_OK=false
+if _autopilot_native_project_path "$FOREIGN_NATIVE17" >/dev/null 2>&1; then
+  NATIVE17_OK=false
+fi
+if _autopilot_native_project_path \
+    "$SHELL_ROOT17/../$(basename "$FOREIGN17")/.zensu/state" >/dev/null 2>&1; then
+  NATIVE17_OK=false
+fi
+if autopilot_begin_run adversarial_foreign_path_run "$S17" "$FOREIGN17" \
+    >/dev/null 2>&1 || [ -e "$FOREIGN17/.zensu" ]; then
+  NATIVE17_OK=false
+fi
+autopilot_begin_run "$R17" "$S17" "$P17" >/dev/null || NATIVE17_OK=false
+[ "$(autopilot_increment_stop_budget "$R17" PLANNING "$P17" "$S17" 2>/dev/null)" = 1 ] \
+  || NATIVE17_OK=false
+printf '%s' "$(autopilot_increment_stop_budget_capped \
+  "$R17" PLANNING "$P17" "$S17" 5 SPECIAL_PATH_CAP 2>/dev/null)" \
+  | grep -qF '"count":2,"blocked":false' || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-plan PLAN_APPROVED \
+  "{\"approvedPlanSha256\":\"$PLAN17\"}" "$P17" "$S17" >/dev/null \
+  || NATIVE17_OK=false
+begin_bound "$P17" "$R17" "$S17" 1 "$C17" || NATIVE17_OK=false
+# Exact replay enters the direct Inner STATE_FILE verifier.
+begin_bound "$P17" "$R17" "$S17" 1 "$C17" || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-tdd-done TDD_CHAIN_DONE \
+  "{\"attempt\":1,\"chainId\":\"$C17\",\"sessionId\":\"$S17\",\"outcome\":\"pass\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-gates GATES_PASSED \
+  "{\"headSha\":\"$HEAD17\"}" "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-converge CONVERGENCE_PASSED '{}' \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+PR_KEY17="pr:$R17"
+autopilot_apply_event "$R17" native-path-pr-request PR_OPEN_REQUESTED \
+  "{\"operationKey\":\"$PR_KEY17\"}" "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-pr-open PR_OPENED \
+  "{\"operationKey\":\"$PR_KEY17\",\"pr\":{\"number\":17,\"url\":\"https://github.com/acme/repo/pull/17\",\"headSha\":\"$HEAD17\"}}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+REVIEW_KEY17="$(autopilot_team_review_operation_key "$R17" "$HEAD17")" \
+  || NATIVE17_OK=false
+autopilot_apply_event "$R17" native-path-review-request TEAM_REVIEW_REQUESTED \
+  "{\"operationKey\":\"$REVIEW_KEY17\",\"provider\":\"github\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+SNAPSHOT17="$(autopilot_store_team_review_payload "$R17" "$REVIEW_KEY17" "$HEAD17" \
+  "$SOURCE17" github "$P17" 2>/dev/null)" || NATIVE17_OK=false
+DIGEST17="$(_autopilot_team_review_payload_inspect \
+  "$SNAPSHOT17" "$HEAD17" true canonical 2>/dev/null)" || NATIVE17_OK=false
+OP_DIGEST17="$(printf '%s' "$REVIEW_KEY17" \
+  | node -e 'const c=require("crypto"),f=require("fs");process.stdout.write(c.createHash("sha256").update(f.readFileSync(0)).digest("hex"));')"
+MARKER17="<!-- zensu-review:v1:${OP_DIGEST17}:${DIGEST17}:${HEAD17}:1:part=1/1 -->"
+autopilot_apply_event "$R17" native-path-review-published TEAM_REVIEW_PUBLISHED \
+  "{\"operationKey\":\"$REVIEW_KEY17\",\"marker\":\"$MARKER17\",\"headSha\":\"$HEAD17\",\"provider\":\"github\"}" \
+  "$P17" "$S17" >/dev/null || NATIVE17_OK=false
+FINAL17="$ROOT/native-path-final.json"
+autopilot_read_run "$R17" "$P17" > "$FINAL17" 2>/dev/null || NATIVE17_OK=false
+if [ "$NATIVE17_OK" = true ] \
+  && [ -n "$SNAPSHOT17" ] && cmp -s "$SOURCE17" "$SNAPSHOT17" \
+  && field_ok "$FINAL17" 'value.stage === "FIX_FINDINGS" && value.evidence.review.provider === "github"' \
+  && [ -f "$(tdd_state_file "$S17")" ]; then
+  check "X17 immutable native paths survive spaces and apostrophes across the full worker flow" PASS
+else
+  check "X17 native special-path flow remains coherent (ready=$NATIVE17_OK snapshot=${SNAPSHOT17:-missing})" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-adversarial-recovery: $PASS PASS / $FAIL FAIL"

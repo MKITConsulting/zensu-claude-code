@@ -5,6 +5,8 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
 VCS_LIB="$PLUGIN_DIR/hooks/lib/zensu-vcs.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+HOST_PATH="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -45,7 +47,8 @@ if grep -qF 'if (process.platform !== "win32") {' "$LIB" \
 else
   check "S2c directory fsync remains POSIX-only" FAIL
 fi
-if grep -qF 'tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));' "$LIB" \
+if grep -qF 'const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$LIB" \
+  && grep -qF 'tempFd = fs.openSync(temp, fs.constants.O_WRONLY | noFollow);' "$LIB" \
   && grep -qF 'fs.ftruncateSync(tempFd, 0);' "$LIB"; then
   check "S2d payload temp identity is verified before truncation" PASS
 else
@@ -57,11 +60,21 @@ source "$LIB"
 # shellcheck disable=SC1090
 source "$VCS_LIB"
 
-ROOT="$(mktemp -d -t zensu-autopilot-state-XXXXXX)"
+ROOT="$(mktemp -d -t za-state-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 PROJECT="$ROOT/project"
 mkdir -p "$PROJECT"
-PROJECT_PHYSICAL="$(cd "$PROJECT" && pwd -P)"
+
+native_directory() {
+  local rendered
+  rendered="$(bash "$HOST_PATH" "$1")" || return 1
+  MSYS2_ARG_CONV_EXCL='*' node -e '
+    const fs = require("fs");
+    process.stdout.write(fs.realpathSync.native(process.argv[1]));
+  ' "$rendered"
+}
+
+PROJECT_PHYSICAL="$(native_directory "$PROJECT")"
 export CLAUDE_PROJECT_DIR="$PROJECT"
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export ZENSU_CONFIG="$ROOT/no-config.json"
@@ -450,7 +463,7 @@ prepare_provider_project() {
   mkdir -p "$state_dir" || return 1
   cp "$ACTIVE_FILE" "$state_dir/autopilot-active.json" || return 1
   cp "$RUN_FILE" "$run_file" || return 1
-  physical="$(cd "$target" && pwd -P)" || return 1
+  physical="$(native_directory "$target")" || return 1
   PROJECT_PHYSICAL="$physical" REQUEST_PROVIDER="$provider" node -e '
   const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
   const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
@@ -516,7 +529,9 @@ fi
 # Deployed v1 completed receipts remain readable below, but an in-flight v1
 # request never had a trusted provider. It must fail closed instead of learning
 # the forge from a new publication event.
-LEGACY_REQUEST_PROJECT="$ROOT/legacy-requested-providerless"
+# Keep the directory name short: the private payload temp suffix is long and
+# must retain headroom beneath legacy Windows MAX_PATH on hosted runners.
+LEGACY_REQUEST_PROJECT="$ROOT/p0"
 LEGACY_REQUEST_FILE="$LEGACY_REQUEST_PROJECT/.zensu/state/autopilot-run-${RUN}.json"
 LEGACY_REQUEST_READY=false
 if prepare_provider_project "$LEGACY_REQUEST_PROJECT" github; then
@@ -533,8 +548,9 @@ if prepare_provider_project "$LEGACY_REQUEST_PROJECT" github; then
   ' "$LEGACY_REQUEST_FILE" && LEGACY_REQUEST_READY=true
 fi
 LEGACY_REQUEST_BEFORE="$(file_digest "$LEGACY_REQUEST_FILE" 2>/dev/null || true)"
-if [ "$LEGACY_REQUEST_READY" = true ] \
-  && ! autopilot_apply_event "$RUN" evt_legacy_request_provider_choice TEAM_REVIEW_PUBLISHED \
+if [ "$LEGACY_REQUEST_READY" != true ]; then
+  check "R7ad providerless v1 fixture prepares within Windows path limits" FAIL
+elif ! autopilot_apply_event "$RUN" evt_legacy_request_provider_choice TEAM_REVIEW_PUBLISHED \
     "{\"operationKey\":\"$REVIEW_KEY\",\"marker\":\"$REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}" \
     "$LEGACY_REQUEST_PROJECT" >/dev/null 2>&1 \
   && [ "$(file_digest "$LEGACY_REQUEST_FILE")" = "$LEGACY_REQUEST_BEFORE" ]; then
@@ -614,7 +630,7 @@ LEGACY_RUN_FILE="$LEGACY_STATE_DIR/autopilot-run-${RUN}.json"
 mkdir -p "$LEGACY_STATE_DIR"
 cp "$ACTIVE_FILE" "$LEGACY_STATE_DIR/autopilot-active.json"
 cp "$RUN_FILE" "$LEGACY_RUN_FILE"
-LEGACY_PROJECT_PHYSICAL="$(cd "$LEGACY_PROJECT" && pwd -P)"
+LEGACY_PROJECT_PHYSICAL="$(native_directory "$LEGACY_PROJECT")"
 LEGACY_PROJECT_PHYSICAL="$LEGACY_PROJECT_PHYSICAL" node -e '
   const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
   const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
@@ -865,21 +881,45 @@ fi
 
 CONCURRENT_OK=true
 PIDS=""
-for worker in 1 2 3 4 5 6 7 8; do
+CONCURRENT_WORKERS="1 2 3 4 5 6 7 8"
+EXPECTED_CONCURRENT_BUDGET=10
+EXPECTED_CONCURRENT_OUTPUTS="3 4 5 6 7 8 9 10"
+if [ "$IS_WINDOWS" = true ]; then
+  # The Core lease deliberately fails closed after a bounded wait. Two
+  # simultaneous Windows mutations prove serialization without requiring an
+  # unfair eight-contender queue to drain within that same fixed deadline.
+  CONCURRENT_WORKERS="1 2"
+  EXPECTED_CONCURRENT_BUDGET=4
+  EXPECTED_CONCURRENT_OUTPUTS="3 4"
+fi
+for worker in $CONCURRENT_WORKERS; do
   (
-    AUTOPILOT_DISABLE_FLOCK=1 autopilot_increment_stop_budget \
-      "$RUN2" "PLANNING" "$PROJECT" >"$ROOT/budget-worker-$worker.out"
+    autopilot_increment_stop_budget "$RUN2" "PLANNING" "$PROJECT" \
+      >"$ROOT/budget-worker-$worker.out" 2>"$ROOT/budget-worker-$worker.err"
   ) &
   PIDS="$PIDS $!"
 done
 for worker_pid in $PIDS; do
   wait "$worker_pid" || CONCURRENT_OK=false
 done
+CONCURRENT_OUTPUTS="$(
+  for worker in $CONCURRENT_WORKERS; do
+    tr -d '[:space:]' < "$ROOT/budget-worker-$worker.out"
+    printf '\n'
+  done | sort -n | paste -sd ' ' -
+)"
+for worker in $CONCURRENT_WORKERS; do
+  [ ! -s "$ROOT/budget-worker-$worker.err" ] || CONCURRENT_OK=false
+done
 if [ "$CONCURRENT_OK" = true ] \
-  && json_ok "$RUN2_FILE" 'value.stopBudget.stage === "PLANNING" && value.stopBudget.count === 10'; then
-  check "B6 the mkdir-lock fallback serializes concurrent state updates" PASS
+  && [ "$CONCURRENT_OUTPUTS" = "$EXPECTED_CONCURRENT_OUTPUTS" ] \
+  && json_ok "$RUN2_FILE" "value.stopBudget.stage === \"PLANNING\" && value.stopBudget.count === $EXPECTED_CONCURRENT_BUDGET"; then
+  check "B6 the Core lease serializes concurrent state updates" PASS
 else
-  check "B6 the mkdir-lock fallback serializes concurrent state updates" FAIL
+  for worker in $CONCURRENT_WORKERS; do
+    [ ! -s "$ROOT/budget-worker-$worker.err" ] || sed 's/^/    worker stderr: /' "$ROOT/budget-worker-$worker.err" >&2
+  done
+  check "B6 the Core lease serializes concurrent state updates" FAIL
 fi
 
 BEFORE_WRONG_BUDGET="$(file_digest "$RUN2_FILE")"
@@ -976,8 +1016,18 @@ FILE="$SEMANTIC_FILE" PLAN_SHA="$PLAN_SHA" node -e '
 '
 autopilot_read_run "$SEMANTIC_RUN" "$SEMANTIC_PROJECT" >/dev/null 2>&1
 SEMANTIC_READ_RC=$?
-CLAUDE_PROJECT_DIR="$SEMANTIC_PROJECT" CLAUDE_SESSION_ID="$SEMANTIC_OWNER" \
+# Prove that the public command reaches the semantic validator through a real
+# native model binding. A binder failure has a distinct synthetic status, so an
+# exit 2 below can only be the intentionally corrupt event history.
+(
+  export CLAUDE_PROJECT_DIR="$SEMANTIC_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/semantic-plugin-data"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$SEMANTIC_OWNER" || exit 90
+  MODEL_KEY="$(bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --session-key 2>/dev/null)" || exit 91
+  [ "$MODEL_KEY" = "$ZENSU_SESSION_KEY" ] || exit 92
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >/dev/null 2>&1
+)
 SEMANTIC_STATUS_RC=$?
 if [ "$SEMANTIC_READ_RC" -eq 2 ] && [ "$SEMANTIC_STATUS_RC" -eq 2 ]; then
   check "S3b impossible event-history jumps fail closed on read and status" PASS

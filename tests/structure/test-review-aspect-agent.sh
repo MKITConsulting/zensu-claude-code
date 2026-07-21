@@ -47,12 +47,15 @@ done
 [ "$DENIED" -eq 0 ] && check "A5 tools line grants NO write/edit tools (read-only)" PASS \
   || check "A5 tools line grants NO write/edit tools (read-only)" FAIL
 
-# Bash, if present, is restricted by prose to git diff only (mirror code-reviewer discipline).
-grep -qF 'git diff HEAD --' "$AGENT_MD" \
-  && check "A6 restricts Bash to 'git diff HEAD -- <file>'" PASS || check "A6 restricts Bash to git diff" FAIL
+# reviewer-readonly-v1 exposes dedicated repository reads only.
+if printf '%s' "$TOOLS_LINE" | grep -qw Bash || ! grep -qF 'use Bash' "$AGENT_MD"; then
+  check "A6 excludes Bash and states the shell ban" FAIL
+else
+  check "A6 excludes Bash and states the shell ban" PASS
+fi
 
 # Hard prohibition on running build/test commands (five run in parallel; suite already ran).
-grep -qiE 'never run (any )?(build|test)|do not run (any )?(build|test)|MUST NOT run (any )?(build|test)|no build|no test (commands|execution)' "$AGENT_MD" \
+grep -qiE 'never .*run builds?/tests?|do not re-run.*build.*tests|no (shell/)?build/test' "$AGENT_MD" \
   && check "A7 prose forbids build/test execution" PASS || check "A7 prose forbids build/test execution" FAIL
 
 # Single-perspective: the perspective is a spawn-time parameter, and all five are named.

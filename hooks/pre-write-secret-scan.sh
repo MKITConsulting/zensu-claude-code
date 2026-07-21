@@ -27,11 +27,29 @@
 # discipline nudge that keeps real-looking credentials out of files.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
 
 INPUT="$(cat 2>/dev/null || true)"
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$INPUT"; then
+  zensu_emit_hook_session_deny
+  exit 0
+fi
 
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the escape checks so all Bash gates share the order).
@@ -50,7 +68,10 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-VERDICT="$(printf '%s' "$INPUT" | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/secret-scan-decide.js")"
+VERDICT="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  printf '%s' "$INPUT" | node ./secret-scan-decide.js
+)"
 NODE_RC=$?
 if [ "$NODE_RC" -ne 0 ]; then
   echo "zensu secret-scan: scanner error (rc=$NODE_RC), failing open" >&2

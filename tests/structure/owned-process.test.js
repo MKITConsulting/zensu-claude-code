@@ -67,12 +67,15 @@ test('a descendant forked by a TERM handler remains inside the owned group and i
   const script = `
     const { spawn } = require('node:child_process');
     const fs = require('node:fs');
-    fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
     process.on('SIGTERM', () => {
       const child = spawn(process.execPath, ['-e', 'process.on("SIGTERM",()=>{});setInterval(()=>{},1000)'], { stdio: 'ignore' });
       fs.writeFileSync(${JSON.stringify(descendantFile)}, String(child.pid));
       setTimeout(() => process.exit(0), 50);
     });
+    // Publish readiness only after the TERM handler is installed. Publishing
+    // first lets the parent deliver TERM in the few instructions before the
+    // handler exists, turning this cleanup regression into a timing flake.
+    fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
     setInterval(() => {}, 1000);
   `;
   const handle = spawn(process.execPath, [ownedProcess, process.execPath, '-e', script], { stdio: 'ignore' });

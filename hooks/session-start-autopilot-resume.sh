@@ -4,7 +4,19 @@
 # changes ownership, advances a stage, or records an event.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 INPUT=""
 IFS= read -r -d '' INPUT || true
@@ -15,12 +27,6 @@ emit_runtime_unavailable() {
 
 emit_corrupt_active_state() {
   printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"SessionStart","additionalContext":"ZENSU_AUTOPILOT_RESUME CORRUPT_ACTIVE_STATE. The project-local Autopilot pointer and run inventory did not validate as one unambiguous active state. Do not infer progress, resume effects, or create a replacement run. Inspect and repair or explicitly cancel the durable state first."}}'
-}
-
-shell_spawned_agent() {
-  [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
-  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
 }
 
 NODE_AVAILABLE=true
@@ -36,25 +42,89 @@ json_field() {
   ' 2>/dev/null
 }
 
-# A spawned worker must never inherit outer-run context. Keep this no-op ahead
-# of runtime enforcement so a missing Node binary cannot deadlock a child.
-if [ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ]; then
-  # shellcheck disable=SC1090
-  source "$AGENT_CONTEXT_LIB"
-  if [ "$(zensu_is_spawned_agent "$(json_field agent_id)" "$(json_field agent_type)")" = "true" ]; then
-    exit 0
-  fi
-elif shell_spawned_agent; then
+# Only a trusted top-level SessionStart principal may inherit outer-run context.
+# Keep this no-op ahead of runtime enforcement so a missing Node binary cannot
+# deadlock a child.
+[ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ] || exit 0
+# shellcheck disable=SC1090
+source "$AGENT_CONTEXT_LIB"
+zensu_hook_is_main_principal "$INPUT" SessionStart || exit 0
+
+# Without Node this sibling cannot authenticate the lifecycle source or a
+# private session record. Stay silent before inspecting any project path.
+[ "$NODE_AVAILABLE" = "true" ] || exit 0
+
+# A malformed payload cannot prove that this is a top-level SessionStart event.
+if ! printf '%s' "$INPUT" | node -e '
+  try {
+    const value = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
+    process.exit(value && typeof value === "object" && !Array.isArray(value)
+      && value.hook_event_name === "SessionStart" ? 0 : 1);
+  } catch (_) { process.exit(1); }
+' 2>/dev/null; then
   exit 0
 fi
 
-# Resolve project-local durable-state hints with shell primitives before
-# requiring Node. Either a pointer or a run file means a missing runtime cannot
-# prove absence or terminal history and must therefore fail closed.
-PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-}"
-if [ -z "$PROJECT_ROOT" ]; then
-  PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || exit 0
-fi
+read_field() {
+  json_field "$1"
+}
+
+# SessionStart supplies exactly one of these four lifecycle sources. Ambiguous
+# or future values stay silent until their security semantics are explicit.
+SOURCE="$(read_field source)"
+case "$SOURCE" in
+  startup|resume|compact|clear) ;;
+  *) exit 0 ;;
+esac
+
+SESSION_ID="$(read_field session_id)"
+SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+[ -r "$AGENT_CONTEXT_LIB" ] && [ -r "$SESSION_LIB" ] || exit 0
+unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+  ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+source "$SESSION_LIB"
+
+case "$SOURCE" in
+  resume|compact)
+    # Continuations already have a record created by their original fresh
+    # SessionStart. CwdChanged may point anywhere; only the private record may
+    # select the durable project. Missing or invalid records remain silent and
+    # never trigger a payload-cwd probe.
+    zensu_bind_hook_session "$INPUT" >/dev/null 2>&1 || exit 0
+    PROJECT_ROOT="$(zensu_resolve_project_dir 2>/dev/null)" || exit 0
+    ;;
+  startup|clear)
+    # Equal-match SessionStart hooks run concurrently. Prefer a valid existing
+    # record on retries; while the first record is not yet present, use Claude's
+    # stable project variable. The mutable payload cwd is never authoritative.
+    NATIVE_PLUGIN_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PLUGIN_ROOT")" \
+      || exit 0
+    NATIVE_PLUGIN_DATA="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" \
+      || exit 0
+    NATIVE_PROJECT_ROOT=""
+    if [ -n "${CLAUDE_PROJECT_DIR:-}" ]; then
+      NATIVE_PROJECT_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PROJECT_DIR")" \
+        || exit 0
+    fi
+    PROJECT_ROOT="$(
+      cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+      printf '%s' "$INPUT" \
+        | CLAUDE_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" \
+          CLAUDE_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
+          CLAUDE_PROJECT_DIR="$NATIVE_PROJECT_ROOT" \
+          node -e '
+      const fs = require("node:fs");
+      const binder = require("./claude-hook-session-v1.js");
+      const payload = JSON.parse(fs.readFileSync(0, "utf8"));
+      process.stdout.write(binder.resolveFreshHookProject(payload));
+      ' 2>/dev/null
+    )" || exit 0
+    unset NATIVE_PLUGIN_ROOT NATIVE_PLUGIN_DATA NATIVE_PROJECT_ROOT
+    ;;
+esac
+[ -n "$PROJECT_ROOT" ] || exit 0
+
 ACTIVE_POINTER_HINT="$PROJECT_ROOT/.zensu/state/autopilot-active.json"
 AUTOPILOT_STATE_HINT=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
@@ -68,48 +138,12 @@ for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; 
 done
 unset _zensu_autopilot_hint
 
-if [ "$NODE_AVAILABLE" != "true" ]; then
+if [ ! -r "$AUTOPILOT_STATE_LIB" ]; then
   [ "$AUTOPILOT_STATE_HINT" = "true" ] && emit_runtime_unavailable
   exit 0
 fi
 
-SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-if [ ! -r "$AGENT_CONTEXT_LIB" ] || [ ! -r "$SESSION_LIB" ] || [ ! -r "$AUTOPILOT_STATE_LIB" ]; then
-  [ "$AUTOPILOT_STATE_HINT" = "true" ] && emit_runtime_unavailable
-  exit 0
-fi
-
-# A malformed payload cannot prove that this is a top-level SessionStart event.
-# Stay silent rather than guessing and potentially leaking outer-run context to
-# an unknown caller.
-if ! printf '%s' "$INPUT" | node -e '
-  try {
-    const value = JSON.parse(require("fs").readFileSync(0, "utf8") || "{}");
-    process.exit(value && typeof value === "object" && !Array.isArray(value) ? 0 : 1);
-  } catch (_) { process.exit(1); }
-' 2>/dev/null; then
-  exit 0
-fi
-
-read_field() {
-  json_field "$1"
-}
-
-# SessionStart currently supplies one of these four sources. Treat an omitted
-# source like startup for compatibility with older Claude Code hook payloads;
-# unknown values fail closed and stay silent.
-SOURCE="$(read_field source)"
-case "$SOURCE" in
-  ""|startup|resume|compact|clear) ;;
-  *) exit 0 ;;
-esac
-
-SESSION_ID="$(read_field session_id)"
-TRANSCRIPT_PATH=""
-[ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(read_field transcript_path)"
-source "$SESSION_LIB"
-SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID" 2>/dev/null)" || exit 0
 
 # The state library owns path validation and the active-pointer/run-file
 # consistency check. Keep this project-local even when the hook's cwd differs.

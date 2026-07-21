@@ -13,7 +13,7 @@ description: >
 
 # /zensu:implement
 
-Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then runs disciplined implementation via the **`/zensu:tdd` skill** in the main thread (strict RED-GREEN TDD, PreToolUse phase-gate, guaranteed code-review chain). After TDD completes, links all artifacts and creates a revision.
+Implement a tracked Zensu feature end-to-end. Loads feature context and security profile, then runs disciplined implementation via the **`/zensu:tdd` skill** in the main thread (vanilla by default, strict RED-GREEN when configured, guaranteed evidence/review chain). After the workflow completes, links all artifacts and creates a revision.
 
 ## When to Use
 
@@ -31,7 +31,7 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 ## Workflow
 
-**Workflow gate (first + last action).** As the VERY FIRST action, run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
+**Workflow gate (first + last action).** As the VERY FIRST action, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "analyze_feature_security,link_test,link_source_files,bulk_link_source_files,link_docs,create_wiki_page,create_revision,update_feature"`. This marks the Zensu product workflow active so the CLI write-gate (`hooks.mcpGate`, default-on) recognizes this skill's `zensu link test` / `zensu link source` / `zensu link docs` / `zensu features revision` commands as workflow-driven rather than freelance and does not block them. As the LAST gated action (after Step 8, or on early exit), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end` — only the ungated standalone `## Next step` offer may follow it.
 
 ### Step 1: Load Feature Context
 
@@ -72,11 +72,11 @@ If the TDD workflow cannot proceed or all steps are blocked, continue manually f
 The /zensu:tdd workflow will:
 - Split the work into atomic steps and classify each (Feature / Refactor / Bug-fix / Integration)
 - Create a plan document in `.zensu/plans/`
-- Execute strict RED-GREEN TDD cycles in-thread, enforced by the PreToolUse phase-gate (or direct vanilla implementation when `hooks.tddImplementation` is `false` — the skill branches itself at `--tdd-begin`)
+- Execute direct vanilla implementation by default, or strict RED-GREEN TDD cycles in-thread when `hooks.tddImplementation:true` — the skill freezes and reports the effective mode at `--tdd-begin`
 - Run a completeness audit at the end (build, coverage, mtime, precondition drift)
 - Provide a progress log at `.zensu/logs/`
 
-At the end of the workflow (Phase 6) it marks implementation complete and spawns `@zensu:code-reviewer` for the 5-perspective review. The `Stop` hook (`stop-chain-enforcer.sh`) guarantees the review chain runs, and `post-review-tdd-delegate.sh` routes any findings back for in-thread fixing until PASS or max rounds.
+At the end of the workflow (Phase 6) it marks implementation complete, fans out five parallel `zensu:review-aspect` agents, optionally runs `zensu:review-judge` (default on), and passes the merge to one consume-mode `zensu:code-reviewer`. The `Stop` hook (`stop-chain-enforcer.sh`) guarantees the review chain runs, and `post-review-tdd-delegate.sh` routes findings back for in-thread fixing until PASS or max rounds before terminal self-review.
 
 **For trivial changes** (single-line fix, config change, migration-only): Skip the /zensu:tdd skill and implement directly, then continue with Step 4.
 

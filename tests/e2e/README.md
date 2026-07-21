@@ -1,7 +1,7 @@
 # Plugin Guardrails E2E Test Harness
 
-End-to-end tests for the anti-loop guardrails added to `agents/code-reviewer.md`
-and `agents/tdd-manager.md`. Fires the reviewer against fixture git-repos and
+End-to-end tests for the anti-loop guardrails in `agents/code-reviewer.md` and
+the main-thread `skills/tdd/SKILL.md` review chain. Fires the reviewer against fixture git-repos and
 asserts the expected guardrail signals appear in its output.
 
 ## What it tests

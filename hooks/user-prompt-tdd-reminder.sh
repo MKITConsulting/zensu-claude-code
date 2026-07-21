@@ -18,12 +18,27 @@
 # toward the reminder). Advisory steering only — it never blocks an edit.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+INPUT="$(cat)"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+zensu_bind_hook_session "$INPUT" || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled tddReminder || exit 0
 command -v node >/dev/null 2>&1 || exit 0
-
-INPUT="$(cat)"
 
 PROMPT="$(PAYLOAD="$INPUT" node -e '
   try {
@@ -40,7 +55,6 @@ SESSION_ID="$(PAYLOAD="$INPUT" node -e '
     process.stdout.write(typeof j.session_id === "string" ? j.session_id : "");
   } catch (_) { process.stdout.write(""); }
 ' 2>/dev/null)"
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"

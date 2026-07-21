@@ -1,0 +1,8 @@
+- description: "Q01 isolated fresh session A"
+  vars: { scenario_id: concurrency-a, expected_valid: true, expected_host: claude, expected_workflow_state: live_verified, expected_revision: 2, expected_exit_code: 0, expected_hook: "Host:SessionStart", expect_no_changes: true }
+- description: "Q02 isolated fresh session B"
+  vars: { scenario_id: concurrency-b, expected_valid: true, expected_host: claude, expected_workflow_state: live_verified, expected_revision: 2, expected_exit_code: 0, expected_hook: "Host:SessionStart", expect_no_changes: true }
+- description: "Q03 isolated fresh session C"
+  vars: { scenario_id: concurrency-c, expected_valid: true, expected_host: claude, expected_workflow_state: live_verified, expected_revision: 2, expected_exit_code: 0, expected_hook: "Host:SessionStart", expect_no_changes: true }
+- description: "Q04 isolated fresh session D"
+  vars: { scenario_id: concurrency-d, expected_valid: true, expected_host: claude, expected_workflow_state: live_verified, expected_revision: 2, expected_exit_code: 0, expected_hook: "Host:SessionStart", expect_no_changes: true }

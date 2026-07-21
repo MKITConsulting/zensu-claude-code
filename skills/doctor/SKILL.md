@@ -8,9 +8,10 @@ description: >
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
-  dir writable, stale/expired markers). The only write is an explicit,
-  user-confirmed cleanup of leftover state markers — everything else is
-  read-only. Use when the user asks to "diagnose zensu", "check my zensu
+  dir writable, canonical CAS workflow documents valid, expired pending-review
+  surfaced). The only write is an explicit, user-confirmed cleanup of one
+  expired pending-review.json — CAS workflow documents are never deleted. Use
+  when the user asks to "diagnose zensu", "check my zensu
   setup", "why is a zensu hook/gate not firing", "zensu doctor", or the slash
   command /zensu:doctor.
 ---
@@ -20,9 +21,9 @@ description: >
 Read-only health check for the Zensu plugin install. It answers the questions
 that otherwise get debugged by hand: is the CLI authenticated, are the hooks
 actually wired, is the config being read the way you think it is (the
-quoted-boolean trap bites silently), and are there leftover state markers from a
-crashed session. It prints one four-block ✅/⚠️/❌ table and changes nothing —
-the single exception is a leftover-marker cleanup you explicitly confirm.
+quoted-boolean trap bites silently), and are the revisioned workflow documents
+valid. It prints one four-block ✅/⚠️/❌ table and changes nothing — the single
+exception is removal of an expired `pending-review.json` you explicitly confirm.
 
 > One command to see why something is not firing. Nothing is changed unless you say so.
 
@@ -32,15 +33,15 @@ the single exception is a leftover-marker cleanup you explicitly confirm.
   or invokes `/zensu:doctor`.
 - A hook or gate is not firing and you need to see whether it is wired,
   configured, or authenticated.
-- After onboarding a new machine or switching worktrees (`CLAUDE_PROJECT_DIR`
-  surprises, stale markers).
+- After onboarding a new machine or switching worktrees (native project-root
+  surprises, invalid CAS workflow state).
 - Before a release, to confirm `plugin.json` and `marketplace.json` versions agree.
 
 ## Do NOT Use For
 
 - Changing configuration — that is `/zensu:setup` (guided writes).
 - Resetting the auto-fix round counter — that is `/zensu:reset-review-limit`.
-- Any repair beyond the confirmed leftover-marker cleanup below. Doctor diagnoses;
+- Any repair beyond the confirmed expired-pending-review cleanup below. Doctor diagnoses;
   it does not fix wiring, versions, or auth.
 
 ## Prerequisites
@@ -53,24 +54,36 @@ files. A configured MCP row remains a warning until the loaded MCP tools are con
 
 ## Phase 1: Run the diagnostics
 
-Use the session-scoped `${CLAUDE_PLUGIN_ROOT}` supplied by Claude Code. Before invoking the helper, inspect the tools
+Use Claude's natively rendered `${CLAUDE_PLUGIN_ROOT}` directly.
+Before invoking the helper, inspect the tools
 already available in this Claude Code session — do not call the browser. Runtime readiness
 requires the core operation suffixes used by `/zensu:verify-feature`: `browser_navigate`,
 `browser_snapshot`, `browser_take_screenshot`, `browser_click`, `browser_type` or
 `browser_fill_form`, `browser_wait_for`, `browser_console_messages`,
 `browser_network_requests`, and `browser_close`. Accept each
-suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`. If the complete
-set is loaded, pass that signal separately; the helper still
-validates this plugin's pinned MCP declaration before it can emit `ready`:
+suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`.
 
-```
-ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
-```
+Run the following as one Bash call. Replace `READY=0` with `READY=1` only when
+that complete tool set is loaded. The explicit preflight intentionally does not
+use `${VAR:?…}`: a missing or invalid root must still print the same standardized
+doctor table fragment instead of terminating in an unformatted shell error.
+Never paste the root value into shell source.
 
-Otherwise run, once:
-
-```
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
+```bash
+READY=0
+ROOT="${CLAUDE_PLUGIN_ROOT}"
+case "$ROOT" in /*) ;; *) ROOT="" ;; esac
+if [ -z "$ROOT" ] || [ -L "$ROOT" ] || [ ! -d "$ROOT" ] \
+  || [ -L "$ROOT/hooks/lib/zensu-doctor.sh" ] || [ ! -f "$ROOT/hooks/lib/zensu-doctor.sh" ]; then
+  printf '%s\n' \
+    'Zensu doctor — read-only setup diagnostics' '' 'Plugin integrity' \
+    '  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' \
+    '' 'Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.'
+elif [ "$READY" = 1 ]; then
+  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
+else
+  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"
+fi
 ```
 
 The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but
@@ -103,35 +116,35 @@ concrete next step for each — but only for rows the table actually marked ⚠�
 
 If everything is green, say so in one line and stop — there is nothing to do.
 
-## Phase 3: Leftover-marker cleanup (the ONLY write, always user-gated)
+## Phase 3: Expired pending-review cleanup (the ONLY write, always user-gated)
 
-If the **Session state** block reported leftover per-session markers or an expired
-`pending-review.json`, you MAY offer to remove them — under strict rules:
+Canonical `tdd-phase-<scv1-session-key>.json` files are revisioned CAS workflow
+documents, not leftover markers. Never delete, rename, rewrite, or enumerate
+them for cleanup. Their ticket-bound `reviewRound` and `stopBlockCount` fields
+are re-armed only by `/zensu:reset-review-limit` through the trusted
+`zensu-log.sh --review-rearm` composite transaction.
 
-1. **Scope**: operate ONLY on the current worktree's state dir
-   (`${TDD_STATE_DIR:-${CLAUDE_PROJECT_DIR:-.}/.zensu/state}`). NEVER run
-   `git worktree list`, NEVER touch sibling `.claude/worktrees/*/.zensu/state`,
-   NEVER traverse parents. If the user wants other worktrees cleaned, they invoke
-   `/zensu:doctor` there.
-2. **Never delete the current session's own markers.** Resolve this session's id
-   (`~/.zensu` session helpers, or the `CLAUDE_SESSION_ID` the hooks use) and
-   EXCLUDE `tdd-phase-<sid>.json`, `rounds-<sid>.json`, `review-pass-<sid>`, and
-   `<sid>.stopblocks` for the live session. Deleting them would break the chain
-   you are running in.
-3. **List before you delete.** Show the exact files that would be removed and how
-   many. A marker may belong to another session that is still running — when in
-   doubt, prefer the expired `pending-review.json` and markers whose
-   `tdd-phase-*.json` carries `chainDone: true`.
-4. **Confirm via `AskUserQuestion`.** Offer "Remove N leftover marker(s)" vs
-   "Keep everything". Delete ONLY on explicit confirmation, with `rm -f` on the
-   listed paths (symlink-safe: skip any path that is a symlink).
-5. **Non-interactive runs are report-only.** If you cannot ask (Auto Mode / no
-   interactive channel), do NOT delete — state what would be cleaned and stop.
+Only when the **Session state** block explicitly reports
+`pending-review.json ... expired`, you MAY offer to remove that one exact file:
 
-Never delete anything outside this list, and never as a side effect of Phase 1/2.
+1. Derive the current worktree's exact state directory without scanning:
+   `${CLAUDE_PROJECT_DIR}/.zensu/state`; Claude concretizes the native project
+   placeholder when this skill is loaded.
+   Reject a missing directory or any symlink.
+2. Set `PENDING="$STATE_DIR/pending-review.json"`. Require a regular,
+   non-symlink file. Show this exact path; do not list the directory.
+3. Confirm via `AskUserQuestion`: "Remove expired pending-review.json" or
+   "Keep it".
+4. On explicit confirmation only, run `rm -f -- "$PENDING"`. Never use a glob,
+   `find`, parent traversal, or worktree discovery.
+5. Non-interactive runs remain report-only.
+
+An invalid CAS workflow document is a fail-closed diagnostic, never a cleanup
+candidate. Recommend a fresh session and code-level investigation instead of
+mutating it.
 
 ## Response Style
 
 Terse and concrete. Lead with the table (verbatim), then at most two lines of
-interpretation, then the cleanup offer only if there is something to clean.
+interpretation, then the cleanup offer only for an expired pending-review file.
 Reference config keys and file paths exactly as the table printed them.

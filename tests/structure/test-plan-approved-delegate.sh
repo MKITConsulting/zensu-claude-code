@@ -13,6 +13,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -33,11 +34,22 @@ else
   check "D1 bash -n syntax check passes" FAIL
 fi
 
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
+# Exercise the hook with the same sealed context a real SessionStart supplies.
+# shellcheck disable=SC1090
+SESSION_ID="plan-approved-session"
+source "$BASELINE" "$SESSION_ID"
 # Force defaults (autoTdd enabled) by pointing config resolution at a missing file.
-export ZENSU_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"
+export ZENSU_CONFIG="$TMP_DIR/no-such-config.json"
 
-OUT="$(printf '%s' '{"tool_name":"ExitPlanMode","tool_input":{"plan":"add a function"}}' | bash "$HOOK" 2>/dev/null)"
+OUT="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode", tool_input: {plan: "add a function"}
+}))' | bash "$HOOK" 2>/dev/null)"
 
 # D2 valid additionalContext JSON for PostToolUse
 if printf '%s' "$OUT" | node -e '
@@ -92,9 +104,12 @@ else
 fi
 
 # D7 hooks.autoTdd=false -> silent (hook can be disabled)
-CFG_OFF="$PLUGIN_DIR/.autotdd-off-$$.json"
+CFG_OFF="$TMP_DIR/autotdd-off.json"
 printf '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
-OUT_OFF="$(printf '%s' '{"tool_name":"ExitPlanMode"}' | ZENSU_CONFIG="$CFG_OFF" bash "$HOOK" 2>/dev/null)"
+OUT_OFF="$(SESSION_ID="$SESSION_ID" node -e 'process.stdout.write(JSON.stringify({
+  hook_event_name: "PostToolUse", session_id: process.env.SESSION_ID,
+  tool_name: "ExitPlanMode"
+}))' | ZENSU_CONFIG="$CFG_OFF" bash "$HOOK" 2>/dev/null)"
 rm -f "$CFG_OFF"
 if [ -z "$OUT_OFF" ]; then
   check "D7 hooks.autoTdd=false -> silent (no output)" PASS

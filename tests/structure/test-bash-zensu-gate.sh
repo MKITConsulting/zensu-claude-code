@@ -49,7 +49,7 @@ grep -qF 'zensu-mcp-tools.sh' "$HOOK" && grep -qF 'zensu-cli-map.sh' "$HOOK" \
 payload() {
   CMD="$1" AT="${2:-}" SID="${3:-gate-test}" node -e '
     const o={hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:process.env.CMD},session_id:process.env.SID,cwd:"/tmp"};
-    if(process.env.AT) o.agent_type=process.env.AT;
+    if(process.env.AT) { o.agent_id="gate-subagent-1"; o.agent_type=process.env.AT; }
     process.stdout.write(JSON.stringify(o));
   '
 }
@@ -70,17 +70,21 @@ classify() {
 run() {
   local label="$1" cmd="$2" at="$3" exp="$4" sd="${5:-}"
   local out
-  out="$(payload "$cmd" "$at" gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ${sd:+TDD_STATE_DIR=$sd} bash "$HOOK" 2>/dev/null | classify)"
+  out="$(payload "$cmd" "$at" gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ${sd:+STATE_DIR=$sd} bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 
 CFG_ON="$(mktemp -t bashgate-on-XXXXXX)";   printf '%s' '{"hooks":{"mcpGate":true}}'  > "$CFG_ON"
 CFG_OFF="$(mktemp -t bashgate-def-XXXXXX)";  printf '%s' '{"hooks":{}}'                 > "$CFG_OFF"
 CFG_FALSE="$(mktemp -t bashgate-no-XXXXXX)"; printf '%s' '{"hooks":{"mcpGate":false}}' > "$CFG_FALSE"
+PROJECT="$(mktemp -d -t bashgate-project-XXXXXX)"
+export CLAUDE_PROJECT_DIR="$PROJECT"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" gate-test
 
 run "B5 read (features get)"                "zensu features get f1"                                      '' ALLOW
 run "B6 freelance mutation (classify)"      "zensu security classify f1 --classification confidential"   '' DENY
-run "B7 mutation + zensu-plm agent"         "zensu security classify f1"                          zensu-plm ALLOW
+run "B7 neutral zensu-plm has no mutation exemption" "zensu security classify f1"                    zensu-plm DENY
 run "B12 alias mutation (sec classify)"     "zensu sec classify f1"                                      '' DENY
 run "B12b alias read (feature get)"         "zensu feature get f1"                                       '' ALLOW
 run "B13 api passthrough removed (ungated)" "zensu api POST /features -f title=x"                        '' ALLOW
@@ -93,16 +97,13 @@ run "B18 knowledge search (POST-but-read)"  "zensu knowledge search --query x"  
 run "B25 compound: read && mutation"        "zensu features get f1 && zensu security classify f2"        '' DENY
 
 # B8 workflow-active (skill running) -> mutation in declared set ALLOW
-SDF="$(mktemp -d -t bashgate-wf-XXXXXX)"
-CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDF" bash -c '
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-  sid="$(zensu_resolve_session_id gate-test)"
-  tdd_workflow_begin "$sid" "set_security_classification" "$(( $(date +%s) + 3600 ))"
-' 2>/dev/null
-run "B8 mutation + workflowActive (in set)" "zensu security classify f1"                                '' ALLOW "$SDF"
-run "B27b out-of-scope mutation -> DENY"    "zensu link test f1 --test-type unit --file a.go"            '' DENY "$SDF"
-rm -rf "$SDF"
+source "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+tdd_workflow_begin gate-test "set_security_classification" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+run "B8 mutation + workflowActive (in set)" "zensu security classify f1"                                '' ALLOW
+run "B8a arbitrary subagent cannot borrow the active main workflow window" "zensu security classify f1" general-purpose DENY
+run "B8b arbitrary subagent keeps Zensu CLI reads" "zensu features get f1" general-purpose ALLOW
+run "B27b out-of-scope mutation -> DENY"    "zensu link test f1 --test-type unit --file a.go"            '' DENY
+tdd_set_flag gate-test workflowActive false >/dev/null 2>&1
 
 # B9 env escape; B10 default-on; B11 explicit false
 OUT="$(payload 'zensu security classify f1' '' gate-test | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_ON" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
@@ -135,17 +136,21 @@ else
   check "B20 fail-open (empty='$OUT' nonjson='$OUT2' nonzensu='$OUT3')" FAIL
 fi
 
-# B22 dual session-resolution: workflow under CLAUDE_SESSION_ID, payload session mismatched -> ALLOW
-SDD="$(mktemp -d -t bashgate-dual-XXXXXX)"
-CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDD" CLAUDE_SESSION_ID="skill-sess" bash -c '
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-  source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
-  sid="$(zensu_resolve_session_id "$CLAUDE_SESSION_ID")"
-  tdd_workflow_begin "$sid" "set_security_classification" "$(( $(date +%s) + 3600 ))"
-' 2>/dev/null
-OUT="$(payload 'zensu security classify f1' '' other-sess | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDD" CLAUDE_SESSION_ID="skill-sess" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
-[ "$OUT" = "ALLOW" ] && check "B22 dual session-resolution finds skill flag -> ALLOW" PASS || check "B22 dual-resolution (got '$OUT')" FAIL
-rm -rf "$SDD"
+# B22 Session Control authorization is single-session. An ambient legacy
+# CLAUDE_SESSION_ID must never donate another session's workflow grant to the
+# current hook payload; the exact current payload session remains authorized.
+# A missing payload session is denied: hook subprocesses do not inherit the
+# SessionStart export block, so ambient ZENSU_SESSION_KEY is never authority.
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" skill-sess
+tdd_workflow_begin skill-sess "set_security_classification" "$(( $(date +%s) + 3600 ))" 2>/dev/null
+OUT="$(payload 'zensu security classify f1' '' other-sess | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_SESSION_ID="skill-sess" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "DENY" ] && check "B22a foreign CLAUDE_SESSION_ID workflow cannot authorize current payload -> DENY" PASS || check "B22a cross-session isolation (got '$OUT')" FAIL
+OUT="$(payload 'zensu security classify f1' '' skill-sess | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_SESSION_ID="foreign-ambient" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "ALLOW" ] && check "B22b exact current payload workflow remains authorized -> ALLOW" PASS || check "B22b exact-current authorization (got '$OUT')" FAIL
+SKILL_SESSION_KEY="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key skill-sess)"
+PAYLOAD_NO_SESSION="$(node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PreToolUse",tool_name:"Bash",tool_input:{command:"zensu security classify f1"},cwd:"/tmp"}))')"
+OUT="$(printf '%s' "$PAYLOAD_NO_SESSION" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_SESSION_ID="foreign-ambient" ZENSU_SESSION_KEY="$SKILL_SESSION_KEY" ZENSU_CONFIG="$CFG_ON" bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT" = "DENY" ] && check "B22c omitted payload session cannot use ambient exported key -> DENY" PASS || check "B22c missing-payload authorization (got '$OUT')" FAIL
 
 # B23 representative mutations across nouns -> DENY (freelance)
 M_FAIL=0
@@ -193,7 +198,7 @@ run "B31 reads then mutation (3rd invoc.)"    "zensu features get f1 && zensu fe
 
 # B32 stale-flag guard — after workflow-end / --tdd-reset, the same in-scope mutation DENIES again (ports the deleted MCP test's C19/C20)
 SDR="$(mktemp -d -t bashgate-end-XXXXXX)"
-CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDR" bash -c '
+CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" STATE_DIR="$SDR" bash -c '
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
   sid="$(zensu_resolve_session_id gate-test)"
@@ -204,7 +209,7 @@ run "B32 mutation after workflow-end -> DENY" "zensu security classify f1"      
 rm -rf "$SDR"
 
 SDX="$(mktemp -d -t bashgate-rst-XXXXXX)"
-CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" TDD_STATE_DIR="$SDX" bash -c '
+CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" STATE_DIR="$SDX" bash -c '
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
   source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-tdd-phase.sh"
   sid="$(zensu_resolve_session_id gate-test)"
@@ -238,6 +243,7 @@ else
 fi
 
 rm -f "$CFG_ON" "$CFG_OFF" "$CFG_FALSE"
+rm -rf "$PROJECT"
 
 echo "----"
 echo "test-bash-zensu-gate: $PASS PASS / $FAIL FAIL"

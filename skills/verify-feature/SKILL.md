@@ -39,11 +39,6 @@ Slash form: `/zensu:verify-feature [<feature>] [--flag=value ...]`.
 Ask one batched question for missing information that cannot be derived safely. In
 particular, ask for the remote base URL and for genuinely ambiguous acceptance criteria.
 
-`{ACTIVE_PLUGIN_ROOT}` in bundled rules loaded later with `Read` is a model placeholder
-for the concrete `${CLAUDE_PLUGIN_ROOT}` expanded in this registered skill component.
-Substitute that concrete value before running a referenced command; raw rule resources
-are not plugin components and must not assume the variable exists in a Bash subprocess.
-
 ## Non-negotiable boundaries
 
 - **Report only.** Do not edit application code, alter tracked tests, commit, push, or fix a
@@ -183,6 +178,10 @@ This common `$RUN_DIR` must exist before runtime or authentication preparation.
 ### Local mode
 
 Local means the application process actually uses files from the current worktree.
+Set `ROOT="${CLAUDE_PLUGIN_ROOT}"` once before loading a bundled rule. Whenever
+`rules/zensu-monorepo.md` says `<absolute-plugin-root>`, replace it with this
+concrete absolute `ROOT`; supporting files loaded through `Read` do not receive
+Claude's native placeholder substitution.
 
 1. Inspect the explicit `--config` path or `.zensu/autopilot.yaml` as a **candidate**, using
    `../autopilot/rules/config.md`. An autopilot recipe is not automatically safe for live
@@ -329,14 +328,17 @@ This plugin ships a pinned, lockfile-backed Playwright runtime behind a Zensu ca
 navigation broker. The broker creates an isolated context and exposes only the exact operations
 listed by `scripts/playwright-mcp-proxy.js`; upstream `browser_evaluate`,
 `browser_run_code_unsafe`, storage/cookie/session getters, file upload/drop, raw request-detail,
-route, and configuration tools are never advertised or callable. First use may require
-npm/network access to install the integrity-locked runtime. For every required browser operation, accept either the
+route, and configuration tools are never advertised or callable. Every MCP server start
+materializes a private generation from the SRI-pinned lockfile outside the plugin root;
+concurrent servers never share `node_modules`. The normal npm cache remains enabled, but a
+cache miss may require network access. For every required browser operation, accept either the
 direct `mcp__playwright__<operation>` name or Claude's plugin namespace
 `mcp__plugin_zensu_playwright__<operation>`. If the complete operation set is absent, report
 that the plugin MCP server was not loaded and ask the user to restart Claude Code after
-checking the plugin installation. If the browser binary is missing, use the session-scoped
-`${CLAUDE_PLUGIN_ROOT}`, obtain explicit approval for the networked browser installation,
-then run `bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser` and ask the user to
+checking the plugin installation. If the browser binary is missing, require the validated
+natively rendered `${CLAUDE_PLUGIN_ROOT}` path, obtain explicit approval for the networked
+browser installation, then run
+`bash "${CLAUDE_PLUGIN_ROOT}/scripts/playwright-mcp.sh" install-browser` and ask the user to
 restart Claude Code so the MCP server reloads. `browser_install` is not a tool in the pinned
 runtime. Do not silently replace the browser driver with ad-hoc `curl` checks; that cannot
 prove the UI.

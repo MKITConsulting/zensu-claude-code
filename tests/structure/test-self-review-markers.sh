@@ -7,6 +7,7 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 POST_REVIEW="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 
 PASS=0; FAIL=0
@@ -16,15 +17,18 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
+CLAUDE_PROJECT_DIR="$(mktemp -d)"; export CLAUDE_PROJECT_DIR
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PROJECT_DIR="$TDD_STATE_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$TDD_STATE_DIR"
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data"
+cleanup() { rm -rf "$STATE_DIR" "$CLAUDE_PROJECT_DIR"; }
 trap cleanup EXIT
 
 SID="markers-test"
-SF="$TDD_STATE_DIR/tdd-phase-${SID}.json"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
+SID_KEY="$(node "$SESSION_CORE" session-key "$SID")"
+SF="$ZENSU_PROJECT_ROOT/.zensu/state/tdd-phase-${SID_KEY}.json"
 flag() { node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));console.log(j[process.argv[2]]===true?"true":"false")}catch(_){console.log("false")}' "$SF" "$1"; }
 
 bash "$LOG" --tdd-begin --session "$SID" >/dev/null
@@ -32,6 +36,7 @@ bash "$LOG" --tdd-complete --session "$SID" >/dev/null
 TICKET="$(bash "$LOG" --review-ticket --session "$SID")"
 SID_VALUE="$SID" TICKET_VALUE="$TICKET" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
     tool_name: "Agent",
     tool_input: {
       subagent_type: "zensu:code-reviewer",

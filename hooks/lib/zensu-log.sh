@@ -1,47 +1,50 @@
 #!/bin/bash
 set -u
-export ZENSU_BASH_START="${ZENSU_BASH_START:-}"
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/../.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
-# Recover CLAUDE_PROJECT_DIR for non-hook Bash invocations (Claude Code sets it
-# only for hooks). Without it the state files anchor to ${CLAUDE_PROJECT_DIR:-.}
-# = cwd and the session id falls through resolve-session-id.js to gitToplevel()/
-# cwd() — both diverge from the Stop hook (which HAS CLAUDE_PROJECT_DIR) inside a
-# git worktree, so a marker like --chain-done lands in a state file the enforcer
-# never reads and the review chain deadlocks. Recovering the launch/project dir
-# from the active transcript's cwd (cwd-independent) realigns every verb below
-# with the (project-dir, session-id) the hook uses. Gated to the state verbs
-# (--*) so the hot `timestamp`/`style` path never spawns node; skipped entirely
-# when CLAUDE_PROJECT_DIR is already set (all hooks, all hermetic tests) —
-# behavior then is byte-for-byte unchanged. ZENSU_OWN_CMD is hoisted default-if-
-# unset so this recovery and the per-verb session resolution tail-match the same
-# command in the transcript.
+# State verbs bind from the skill-rendered plugin-data path and Claude's host
+# session id inside this helper process only. SessionStart deliberately exports
+# no Zensu selectors because CLAUDE_ENV_FILE reaches subsequent subagent Bash
+# calls too. Missing context is a hard failure; transcript and PPID discovery
+# remain absent.
 case "${1:-}" in
   --*)
-    if [ -z "${CLAUDE_PROJECT_DIR:-}" ]; then
-      # Build a quote-safe, reason-free tail-match needle. Claude Code stores a
-      # --reason value QUOTED in the transcript, so an unquoted "$*" would not
-      # substring-match; the per-verb session needles below are likewise reason-
-      # free. Assemble it from the verb/step tokens only (dropping any --reason
-      # <val> pair), without consuming $@, so this recovery and the per-verb
-      # resolution tail-match the same command in the active transcript.
-      _zensu_needle="bash $0"; _zensu_skip=0
-      for _zensu_a in "$@"; do
-        if [ "$_zensu_skip" = "1" ]; then _zensu_skip=0; continue; fi
-        if [ "$_zensu_a" = "--reason" ]; then _zensu_skip=1; continue; fi
-        _zensu_needle="$_zensu_needle $_zensu_a"
-      done
-      export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-$_zensu_needle}"
-      unset _zensu_needle _zensu_skip _zensu_a
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      _zensu_pd="$(zensu_resolve_project_dir)" && [ -n "$_zensu_pd" ] && export CLAUDE_PROJECT_DIR="$_zensu_pd"
-      unset _zensu_pd
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    if ! zensu_bind_model_session; then
+      echo "zensu-log.sh: rendered Session Control binding unavailable" >&2
+      exit 2
     fi
+    if ! _zensu_pd="$(zensu_resolve_project_dir)" || [ -z "$_zensu_pd" ]; then
+      echo "zensu-log.sh: Session Control project context unavailable" >&2
+      exit 2
+    fi
+    export CLAUDE_PROJECT_DIR="$_zensu_pd"
+    unset _zensu_pd
     ;;
 esac
 
 case "${1:-}" in
+  --session-key)
+    session_val="$(zensu_resolve_session_id)" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
+    printf '%s\n' "$session_val"
+    exit 0
+    ;;
   --phase)
     phase_val=""
     step_val=""
@@ -62,8 +65,10 @@ case "${1:-}" in
     fi
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --phase $phase_val --step $step_val}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     tdd_write_phase "$session_val" "$step_val" "$phase_val" "$reason_val"
@@ -79,8 +84,10 @@ case "${1:-}" in
     done
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --mode}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     if [ "$(tdd_vanilla_mode "$(tdd_state_file "$session_val")")" = "true" ]; then
@@ -107,8 +114,10 @@ case "${1:-}" in
     fi
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --bypass-note $gate_val}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
     fi
     tdd_record_bypass "$session_val" "$gate_val"
     exit $?
@@ -123,8 +132,10 @@ case "${1:-}" in
     done
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --bypass-list}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    fi
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     bypass_list="$(tdd_bypasses "$(tdd_state_file "$session_val")")"
@@ -193,12 +204,12 @@ case "${1:-}" in
     case "$validate_val" in true|false) ;; *) echo "zensu-log.sh --autopilot-begin: --validate must be true or false" >&2; exit 2 ;; esac
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-begin --run $run_val}"
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
-    else
-      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-      session_val="$(zensu_resolve_session_id "$session_val")"
     fi
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    session_val="$(zensu_resolve_session_id "$session_val")" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
     autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val"
     exit $?
@@ -246,7 +257,10 @@ case "${1:-}" in
     esac
     export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-event --run $run_val --event $event_val --event-id $event_id_val}"
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-    caller_session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
+    caller_session_val="$(zensu_resolve_session_id)" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
     autopilot_apply_event "$run_val" "$event_id_val" "$event_val" "$payload_val" \
       "${CLAUDE_PROJECT_DIR:-.}" "$caller_session_val"
@@ -359,16 +373,26 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 $verb}"
-      session_val="$(zensu_resolve_session_id "${CLAUDE_SESSION_ID:-}")"
-    else
-      # Explicit session values are still untrusted CLI input. Canonicalize
-      # them before they participate in counter or lock paths.
-      session_val="$(zensu_resolve_session_id "$session_val")"
+    fi
+    if ! session_val="$(zensu_resolve_session_id "$session_val")" || [ -z "$session_val" ]; then
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
     case "$verb" in
       --tdd-begin)
-        outgoing_bypasses="$(tdd_bypasses "$(tdd_state_file "$session_val")" 2>/dev/null)"
+        begin_state_file="$(tdd_state_file "$session_val")" || {
+          echo "zensu-log.sh --tdd-begin: current-session workflow path unavailable" >&2
+          exit 1
+        }
+        # Inspect the canonical leaf before reading prior-generation metadata.
+        # A FIFO/device/directory must fail immediately rather than letting any
+        # convenience read block before the transactional begin guard runs.
+        _tdd_state_storage_safe "$begin_state_file" || {
+          echo "zensu-log.sh --tdd-begin: current-session workflow storage is unsafe" >&2
+          exit 1
+        }
+        outgoing_bypasses="$(tdd_bypasses "$begin_state_file" 2>/dev/null)"
         if zensu_tdd_strict_enabled; then
           begin_vanilla=false
         else
@@ -594,11 +618,7 @@ case "${1:-}" in
           fi
           reset_rc=0
         else
-          tdd_clear_standalone_session "$session_val"
-          reset_rc=$?
-        fi
-        if [ "$reset_rc" -eq 0 ]; then
-          tdd_release_pending_review_claim "$session_val"
+          tdd_reset_pending_review_claim "$session_val"
           reset_rc=$?
         fi
         exit "$reset_rc"

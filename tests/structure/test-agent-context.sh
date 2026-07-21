@@ -1,9 +1,6 @@
 #!/bin/bash
-# Pins hooks/lib/zensu-agent-context.sh: the spawned-agent discriminator used by
-# stop-chain-enforcer.sh to no-op inside Task/Agent reviewers and Claude Code
-# Workflow workers. agent_id (present only in spawned subagents) is primary;
-# a small zensu-subagent agent_type allowlist is the corroborating fallback;
-# ZENSU_FORCE_MAIN=1 forces main-thread treatment.
+# Pins hooks/lib/zensu-agent-context.sh: the trusted-payload principal and event
+# discriminator shared by every hook that carries main-thread authority.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -22,28 +19,52 @@ fi
 check "A0 hooks/lib/zensu-agent-context.sh exists" PASS
 source "$HELPER"
 
-[ "$(zensu_hook_agent_id '{"agent_id":"sub-xyz"}')" = "sub-xyz" ] \
-  && check "A1 agent_id extracted from hook input" PASS || check "A1 agent_id extract" FAIL
-[ -z "$(zensu_hook_agent_id '{"session_id":"s"}')" ] \
-  && check "A2 missing agent_id -> empty" PASS || check "A2 missing agent_id" FAIL
-[ -z "$(zensu_hook_agent_id 'not json at all')" ] \
-  && check "A3 malformed json -> empty (no crash)" PASS || check "A3 malformed json" FAIL
-[ "$(zensu_hook_agent_type '{"agent_type":"zensu:code-reviewer"}')" = "zensu:code-reviewer" ] \
-  && check "A4 agent_type extracted" PASS || check "A4 agent_type extract" FAIL
+MAIN_PAYLOAD='{"hook_event_name":"PreToolUse","session_id":"main-session"}'
+[ "$(zensu_hook_principal "$MAIN_PAYLOAD" PreToolUse)" = "main-v1" ] \
+  && zensu_hook_is_main_principal "$MAIN_PAYLOAD" PreToolUse \
+  && check "A1 trusted payload with both agent fields absent is main-v1" PASS \
+  || check "A1 trusted main principal" FAIL
 
-[ "$(zensu_is_spawned_agent "" "")" = "false" ] \
-  && check "A5 no agent_id + no agent_type -> false (main thread)" PASS || check "A5 main" FAIL
-[ "$(zensu_is_spawned_agent "sub-abc" "")" = "true" ] \
-  && check "A6 agent_id present -> true (spawned)" PASS || check "A6 agent_id spawned" FAIL
-[ "$(zensu_is_spawned_agent "" "zensu:code-reviewer")" = "true" ] \
-  && check "A7 known zensu subagent type -> true" PASS || check "A7 reviewer type" FAIL
-[ "$(zensu_is_spawned_agent "" "zensu:review-aspect")" = "true" ] \
-  && check "A8 review-aspect type -> true" PASS || check "A8 review-aspect" FAIL
-[ "$(zensu_is_spawned_agent "" "some-custom-agent")" = "false" ] \
-  && check "A9 unknown agent_type alone -> false (could be --agent main thread)" PASS || check "A9 unknown type" FAIL
+for NON_MAIN_PAYLOAD in \
+  '{"agent_type":"zensu:code-reviewer"}' \
+  '{"agent_type":"zensu:zensu-plm"}' \
+  '{"agent_type":"custom-agent"}' \
+  '{"agent_id":"child-only"}' \
+  '{"agent_type":""}' \
+  '{"agent_id":null}' \
+  '{"agent_type":"custom-agent","agent_id":""}'; do
+  NON_MAIN_EVENT_PAYLOAD="$(PAYLOAD="$NON_MAIN_PAYLOAD" node -e 'const p=JSON.parse(process.env.PAYLOAD);p.hook_event_name="PreToolUse";process.stdout.write(JSON.stringify(p))')"
+  if zensu_hook_is_main_principal "$NON_MAIN_EVENT_PAYLOAD" PreToolUse; then
+    check "A2 explicit/partial principal never classifies as main-v1 ($NON_MAIN_PAYLOAD)" FAIL
+  else
+    check "A2 explicit/partial principal never classifies as main-v1 ($NON_MAIN_PAYLOAD)" PASS
+  fi
+done
 
-[ "$(ZENSU_FORCE_MAIN=1 zensu_is_spawned_agent "sub-abc" "zensu:code-reviewer")" = "false" ] \
-  && check "A10 ZENSU_FORCE_MAIN=1 forces main-thread treatment" PASS || check "A10 force-main" FAIL
+if ZENSU_FORCE_MAIN=1 zensu_hook_is_main_principal '{"hook_event_name":"PreToolUse","agent_type":"custom-agent"}' PreToolUse; then
+  check "A3 ambient ZENSU_FORCE_MAIN cannot promote a trusted-payload principal" FAIL
+else
+  check "A3 ambient ZENSU_FORCE_MAIN cannot promote a trusted-payload principal" PASS
+fi
+
+if zensu_hook_is_main_principal 'not-json' PreToolUse; then
+  check "A4 malformed payload is never main-v1" FAIL
+else
+  check "A4 malformed payload is never main-v1" PASS
+fi
+
+if zensu_hook_is_main_principal '{"hook_event_name":"PostToolUse"}' PreToolUse \
+  || zensu_hook_is_main_principal '{}' PreToolUse; then
+  check "A5 wrong or missing hook event is never main-v1" FAIL
+else
+  check "A5 wrong or missing hook event is never main-v1" PASS
+fi
+
+if grep -R -E -q 'zensu_is_spawned_agent|zensu_hook_agent_(id|type)|ZENSU_FORCE_MAIN' "$PLUGIN_DIR/hooks"; then
+  check "A6 legacy ambient-force principal helpers are absent from production hooks" FAIL
+else
+  check "A6 legacy ambient-force principal helpers are absent from production hooks" PASS
+fi
 
 echo "----"
 echo "test-agent-context: $PASS PASS / $FAIL FAIL"

@@ -63,20 +63,18 @@ else
   check "P3d 422 guidance demoted to last-resort" FAIL
 fi
 WF_SECTION="$(awk '/Anchor validation \(mandatory/,/eliminates the 422/' "$WORKFLOW_MD")"
-if grep -qF '{ACTIVE_PLUGIN_ROOT}/hooks/lib/valid-diff-lines.js' "$PUBLISH_MD" \
-  && printf '%s' "$WF_SECTION" | grep -qF 'valid-diff-lines.js' \
-  && printf '%s' "$WF_SECTION" | grep -qF '{ACTIVE_PLUGIN_ROOT}'; then
-  check "P3e both raw-rule validation fences use the active-root placeholder" PASS
+if grep -qF 'node "<absolute-plugin-root>/hooks/lib/valid-diff-lines.js"' "$PUBLISH_MD" \
+   && printf '%s' "$WF_SECTION" | grep -qF 'node "<absolute-plugin-root>/hooks/lib/valid-diff-lines.js"' \
+   && grep -qF 'this supporting file is loaded through `Read`' "$PUBLISH_MD" \
+   && grep -qF 'not receive native placeholder substitution.' "$PUBLISH_MD" \
+   && printf '%s' "$WF_SECTION" | grep -qF 'concrete `ROOT` already' \
+   && ! grep -qF '${CLAUDE_PLUGIN_ROOT' "$PUBLISH_MD" \
+   && ! printf '%s' "$WF_SECTION" | grep -qF '${CLAUDE_PLUGIN_ROOT' \
+   && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$PUBLISH_MD" \
+   && ! printf '%s' "$WF_SECTION" | grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT'; then
+  check "P3e both supporting rules require the parent's concretized native root" PASS
 else
-  check "P3e both raw-rule validation fences use the active-root placeholder" FAIL
-fi
-if ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$PUBLISH_MD" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$WORKFLOW_MD" \
-  && grep -qF '`{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read`' "$SKILL_MD" \
-  && grep -qF 'concrete `${CLAUDE_PLUGIN_ROOT}`' "$SKILL_MD"; then
-  check "P3e2 registered parent maps native root into raw Read resources" PASS
-else
-  check "P3e2 registered parent maps native root into raw Read resources" FAIL
+  check "P3e validation commands bypass or omit the concretized native root" FAIL
 fi
 if grep -qF "'<path>'" "$PUBLISH_MD" && grep -qF 'single quotes exactly as shown' "$PUBLISH_MD" && grep -qF 'escape it as' "$PUBLISH_MD"; then
   check "P3f untrusted path is single-quoted with an escape instruction" PASS

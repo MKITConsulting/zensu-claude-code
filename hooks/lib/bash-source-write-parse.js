@@ -10,7 +10,7 @@
 // pre-write-secret-scan.sh via the module export detectChannels(); the deny
 // caller pins BSWG_MODE= so an ambient value can never flip its behavior.
 //
-// Kept in its own file (like hooks/lib/resolve-session-id.js) so the logic uses
+// Kept in its own file (like hooks/lib/session-control-core-v1.js) so the logic uses
 // normal quoting instead of being escaped inside a bash single-quoted node -e.
 //
 // Paths are resolved LEXICALLY (path.resolve/path.relative, no realpath), so a
@@ -109,6 +109,132 @@ function detectChannels(cmd) {
   return Array.from(found).join("\n");
 }
 
+const CONTROL_BINDINGS = new Set([
+  "CLAUDE_ENV_FILE",
+  "CLAUDE_CODE_SESSION_ID",
+  "ZENSU_CLAUDE_PLUGIN_ROOT",
+  "ZENSU_SESSION_KEY",
+  "ZENSU_SESSION_CONTEXT",
+  "ZENSU_RUNTIME_DIGEST",
+  "ZENSU_PROJECT_ROOT"
+]);
+
+function bindingFromAssignment(raw) {
+  const m = unquote(raw).match(/^([A-Za-z_][A-Za-z0-9_]*)=/);
+  return m && CONTROL_BINDINGS.has(m[1]) ? m[1] : "";
+}
+
+// Git Bash and native Windows processes can spell the same absolute path in
+// different namespaces. In particular, the Bash command in the hook payload
+// keeps `/d/work/file`, while MSYS converts an exported CLAUDE_ENV_FILE to
+// `D:\\work\\file` before launching native Node. Normalize both spellings to a
+// drive-qualified, slash-separated comparison namespace. This is deliberately
+// lexical: the SessionStart exporter has already canonicalized and validated
+// CLAUDE_ENV_FILE, and the mutation gate must not follow an attacker-controlled
+// command path through the filesystem merely to compare its spelling.
+function controlPathNamespace(value) {
+  if (typeof value !== "string" || !value || /[\u0000-\u001f]/.test(value)) return "";
+  let normalized = value.replace(/\\/g, "/");
+  normalized = normalized.replace(/^\/\/\?\/([A-Za-z]:\/)/, "$1");
+  normalized = normalized.replace(/^\/([A-Za-z])(?=\/)/, "$1:");
+  if (!/^[A-Za-z]:\//.test(normalized)) return normalized;
+  const drive = normalized.slice(0, 2).toLowerCase();
+  const tail = path.posix.normalize("/" + normalized.slice(3));
+  return (drive + tail).toLowerCase();
+}
+
+function commandRefersToControlPath(cmd, envFile) {
+  const target = controlPathNamespace(envFile);
+  if (!target) return false;
+  const windowsDriveTarget = /^[a-z]:\//.test(target);
+
+  // Normalize drive-root spellings wherever a shell token may begin. Keeping
+  // token boundaries in the comparison prevents `.claude-env.backup` from
+  // being mistaken for the protected file while still covering glued redirects
+  // such as `>>/d/work/.claude-env` and quoted paths containing spaces.
+  let normalizedCommand = cmd
+    .replace(/\\/g, "/")
+    .replace(/(^|[\s"'`=<>|&;(])\/([A-Za-z])(?=\/)/g, "$1$2:");
+  // Drive-letter paths are case-insensitive; POSIX paths are not. Lowercase
+  // only for the Windows namespace so the existing Unix exact-path behavior
+  // remains case-sensitive.
+  if (windowsDriveTarget) normalizedCommand = normalizedCommand.toLowerCase();
+  let offset = 0;
+  while (offset <= normalizedCommand.length - target.length) {
+    const index = normalizedCommand.indexOf(target, offset);
+    if (index === -1) return false;
+    const before = index === 0 ? "" : normalizedCommand[index - 1];
+    const afterIndex = index + target.length;
+    const after = afterIndex === normalizedCommand.length ? "" : normalizedCommand[afterIndex];
+    const startsAtBoundary = !before || /[\s"'`=<>|&;(]/.test(before);
+    const endsAtBoundary = !after || /[\s"'`<>|&;)]/.test(after);
+    if (startsAtBoundary && endsAtBoundary) return true;
+    offset = index + 1;
+  }
+  return false;
+}
+
+// Claude's host session selector and Zensu's helper-private bindings must not
+// be rebound by a model-issued Bash call. Likewise, model commands may not
+// write CLAUDE_ENV_FILE and poison later Bash environments. This check is
+// deliberately independent of the source-write config and escape hatches.
+function detectControlMutation(cmd) {
+  if (!cmd) return "";
+  const envFile = process.env.CLAUDE_ENV_FILE || "";
+  // Keep the symbolic reference check independent from path normalization: a
+  // command that writes through $CLAUDE_ENV_FILE must stay denied even if the
+  // ambient value is missing, native Windows, or otherwise uncomparable.
+  const refersToEnvFile = /\$\{?CLAUDE_ENV_FILE\}?/.test(cmd)
+    || commandRefersToControlPath(cmd, envFile);
+  if (refersToEnvFile && detectChannels(cmd)) {
+    return "Blocked a Bash write to CLAUDE_ENV_FILE. Model commands must not alter the environment inherited by later Claude Code Bash calls.";
+  }
+
+  for (const event of lex(stripHeredocs(cmd))) {
+    if (event.t !== "seg") continue;
+    const toks = event.text.trim().split(/\s+/).filter(Boolean);
+    if (!toks.length) continue;
+    let i = 0;
+    while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
+      const name = bindingFromAssignment(toks[i]);
+      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+      i++;
+    }
+    while (i < toks.length && WRAP.has(unquote(toks[i]).split("/").pop())) {
+      i++;
+      while (i < toks.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(toks[i])) {
+        const name = bindingFromAssignment(toks[i]);
+        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+        i++;
+      }
+    }
+    if (i >= toks.length) continue;
+    const cmd0 = unquote(toks[i]).split("/").pop();
+    const args = toks.slice(i + 1).map(unquote);
+    if (["export", "readonly", "declare", "typeset", "local"].includes(cmd0)) {
+      for (const arg of args) {
+        const name = bindingFromAssignment(arg);
+        if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+      }
+    }
+    if (cmd0 === "unset") {
+      const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
+      if (name) return "Blocked removal of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+    }
+    if (cmd0 === "printf") {
+      const vi = args.indexOf("-v");
+      if (vi !== -1 && CONTROL_BINDINGS.has(args[vi + 1])) {
+        return "Blocked a Bash rebind of protected Session Control input " + args[vi + 1] + ". Start a fresh Claude Code session instead.";
+      }
+    }
+    if (cmd0 === "read") {
+      const name = args.find((arg) => CONTROL_BINDINGS.has(arg));
+      if (name) return "Blocked a Bash rebind of protected Session Control input " + name + ". Start a fresh Claude Code session instead.";
+    }
+  }
+  return "";
+}
+
 function main() {
   let cmd = "";
   let cwd0 = "";
@@ -121,6 +247,7 @@ function main() {
   }
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
+  if (process.env.BSWG_MODE === "control") return detectControlMutation(cmd);
 
   const HOME = process.env.HOME || "";
   const projectRoot = stripSlash(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
@@ -322,5 +449,5 @@ function main() {
 if (require.main === module) {
   process.stdout.write(main());
 } else {
-  module.exports = { detectChannels, stripHeredocs };
+  module.exports = { detectChannels, detectControlMutation, stripHeredocs };
 }

@@ -2,30 +2,56 @@
 # The code-reviewer completion hook is scoped to one live TDD review chain.
 set -u
 
-PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd -P)"
 HOOK="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+PHASE="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
-PASS=0; FAIL=0
+PASS=0
+FAIL=0
 check() {
   local label="$1" cond="$2"
-  if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
-  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+  if [ "$cond" = "PASS" ]; then
+    echo "  PASS  $label"
+    PASS=$((PASS + 1))
+  else
+    echo "  FAIL  $label"
+    FAIL=$((FAIL + 1))
+  fi
 }
 
 ROOT="$(mktemp -d -t zensu-postreview-scope-XXXXXX)"
-STATE="$ROOT/state"
+ROOT="$(cd "$ROOT" && pwd -P)"
 PROJECT="$ROOT/project"
-mkdir -p "$STATE" "$PROJECT"
+mkdir -p "$PROJECT"
+PROJECT="$(cd "$PROJECT" && pwd -P)"
 trap 'rm -rf "$ROOT"' EXIT
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 export CLAUDE_PROJECT_DIR="$PROJECT"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$STATE"
-export TDD_STATE_DIR="$STATE"
 export ZENSU_CONFIG="$ROOT/no-config.json"
+unset CLAUDE_PLUGIN_DATA ZENSU_PROJECT_ROOT ZENSU_SESSION_CONTEXT ZENSU_SESSION_KEY \
+  ZENSU_TEST_PLUGIN_DATA 2>/dev/null || true
+
+# shellcheck disable=SC1090
+source "$PHASE"
 
 MARKER='PRE-MERGED FINDINGS (fan-out)'
+STARTED_SESSION_KEY=""
+
+start_session() {
+  local raw_session="$1" label="${2:-$1}"
+  export ZENSU_TEST_PLUGIN_DATA="$ROOT/plugin-data-$label"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_session"
+  STARTED_SESSION_KEY="$ZENSU_SESSION_KEY"
+}
+
+log() {
+  bash "$LOG" "$@" >/dev/null 2>/dev/null
+}
 
 issue_ticket() {
   bash "$LOG" --review-ticket --session "$1" 2>/dev/null
@@ -36,9 +62,15 @@ review_prompt() {
 }
 
 run_hook() {
-  local sid="$1" subtype="$2" prompt="$3"
-  SID="$sid" SUBTYPE="$subtype" PROMPT="$prompt" node -e '
+  local sid="$1" subtype="$2" prompt="$3" payload_sid="$1"
+  # Stateful helper calls may use the canonical key after model binding, but
+  # Claude hook payloads always carry the raw host session id.
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" SUBTYPE="$subtype" PROMPT="$prompt" node -e '
     process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
       tool_name: "Agent",
       tool_input: {subagent_type: process.env.SUBTYPE, prompt: process.env.PROMPT},
       session_id: process.env.SID
@@ -46,249 +78,425 @@ run_hook() {
   ' | bash "$HOOK" 2>/dev/null
 }
 
-counter() { printf '%s/rounds-%s.json' "$STATE" "$1"; }
-state() { printf '%s/tdd-phase-%s.json' "$STATE" "$1"; }
-ticket_consumed() {
-  node -e 'try{const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(j.reviewTicketConsumed===true?"true":"false")}catch(_){process.stdout.write("invalid")}' "$(state "$1")"
+run_hook_as() {
+  local sid="$1" subtype="$2" prompt="$3" principal_kind="$4" payload_sid="$1"
+  if [ -n "${ZENSU_SESSION_KEY:-}" ] && [ "$sid" = "$ZENSU_SESSION_KEY" ]; then
+    payload_sid="${CLAUDE_CODE_SESSION_ID:?native host session id unavailable}"
+  fi
+  SID="$payload_sid" SUBTYPE="$subtype" PROMPT="$prompt" PRINCIPAL_KIND="$principal_kind" node -e '
+    const p={
+      hook_event_name:"PostToolUse",
+      tool_name:"Agent",
+      tool_input:{subagent_type:process.env.SUBTYPE,prompt:process.env.PROMPT},
+      session_id:process.env.SID,
+    };
+    if(process.env.PRINCIPAL_KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.PRINCIPAL_KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.PRINCIPAL_KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.PRINCIPAL_KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ' | ZENSU_FORCE_MAIN=1 bash "$HOOK" 2>/dev/null
 }
 
-# A different Agent type is invisible to the hook.
-OUT="$(run_hook other-type general-purpose "$MARKER")"
-[ -z "$OUT" ] && [ ! -e "$(counter other-type)" ] \
+state() {
+  tdd_state_file "$1"
+}
+
+state_for_unstarted_raw_session() {
+  local key
+  key="$(node "$SESSION_CORE" session-key "$1")"
+  printf '%s/.zensu/state/tdd-phase-%s.json' "$PROJECT" "$key"
+}
+
+digest() {
+  node -e '
+    const fs = require("fs"), crypto = require("crypto");
+    process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));
+  ' "$1"
+}
+
+state_value() {
+  FILE="$1" FIELD="$2" node -e '
+    try {
+      const value = JSON.parse(require("fs").readFileSync(process.env.FILE, "utf8"));
+      process.stdout.write(String(value[process.env.FIELD]));
+    } catch (_) { process.stdout.write("invalid"); }
+  '
+}
+
+ticket_consumed() {
+  state_value "$(state "$1")" reviewTicketConsumed
+}
+
+review_round() {
+  state_value "$(state "$1")" reviewRound
+}
+
+flags_are_false() {
+  FILE="$(state "$1")" FIELDS="$2" node -e '
+    try {
+      const state = JSON.parse(require("fs").readFileSync(process.env.FILE, "utf8"));
+      const fields = process.env.FIELDS.split(",");
+      process.exit(fields.every(field => state[field] === false) ? 0 : 1);
+    } catch (_) { process.exit(1); }
+  '
+}
+
+# A different Agent type is invisible to the hook, even without Session
+# Control context.
+OUT="$(run_hook other-type general-purpose "$(review_prompt rt_other_type)")"
+[ -z "$OUT" ] && [ ! -e "$(state_for_unstarted_raw_session other-type)" ] \
   && check "S1 wrong subagent type is a total no-op" PASS \
   || check "S1 wrong subagent type is a total no-op" FAIL
 
-# A stale counter without a live TDD state must not be read or incremented.
-printf '%s\n' '{"count":5,"ts":"sentinel"}' > "$(counter no-state)"
-BEFORE="$(cat "$(counter no-state)")"
-OUT="$(run_hook no-state zensu:code-reviewer "$MARKER")"
-AFTER="$(cat "$(counter no-state)")"
-[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] && [ ! -e "$(state no-state)" ] \
-  && check "S2 reviewer without TDD state preserves stale counter byte-for-byte" PASS \
-  || check "S2 reviewer without TDD state preserves stale counter byte-for-byte" FAIL
+# A reviewer without a real SessionStart baseline cannot create workflow state.
+NO_STATE_FILE="$(state_for_unstarted_raw_session no-state)"
+OUT="$(run_hook no-state zensu:code-reviewer "$(review_prompt rt_no_state)")"
+[ -z "$OUT" ] && [ ! -e "$NO_STATE_FILE" ] \
+  && check "S2 reviewer without Session Control state is a total no-op" PASS \
+  || check "S2 reviewer without Session Control state is a total no-op" FAIL
 
 # Active but not implementation-complete is still outside the review chain.
-bash "$LOG" --tdd-begin --session active-only >/dev/null
-OUT="$(run_hook active-only zensu:code-reviewer "$MARKER")"
-[ -z "$OUT" ] && [ ! -e "$(counter active-only)" ] \
-  && check "S3 active session before implComplete is a no-op" PASS \
-  || check "S3 active session before implComplete is a no-op" FAIL
+start_session active-only
+S3="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S3"
+S3_STATE="$(state "$S3")"
+BEFORE="$(digest "$S3_STATE")"
+OUT="$(run_hook "$S3" zensu:code-reviewer "$(review_prompt rt_active_only)")"
+AFTER="$(digest "$S3_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S3 active session before implComplete is a byte-stable no-op" PASS \
+  || check "S3 active session before implComplete is a byte-stable no-op" FAIL
 
 # A completed inner chain cannot be re-opened by a late reviewer completion.
-bash "$LOG" --tdd-begin --session chain-done >/dev/null
-bash "$LOG" --tdd-complete --session chain-done >/dev/null
-bash "$LOG" --chain-done --session chain-done >/dev/null
-OUT="$(run_hook chain-done zensu:code-reviewer "$MARKER")"
-[ -z "$OUT" ] && [ ! -e "$(counter chain-done)" ] \
-  && check "S4 chainDone reviewer completion is a no-op" PASS \
-  || check "S4 chainDone reviewer completion is a no-op" FAIL
+start_session chain-done
+S4="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S4"
+log --tdd-complete --session "$S4"
+log --chain-done --session "$S4"
+S4_STATE="$(state "$S4")"
+BEFORE="$(digest "$S4_STATE")"
+OUT="$(run_hook "$S4" zensu:code-reviewer "$(review_prompt rt_chain_done)")"
+AFTER="$(digest "$S4_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S4 chainDone reviewer completion is a byte-stable no-op" PASS \
+  || check "S4 chainDone reviewer completion is a byte-stable no-op" FAIL
 
 # Once code review converged, another reviewer completion is stale too.
-bash "$LOG" --tdd-begin --session review-done >/dev/null
-bash "$LOG" --tdd-complete --session review-done >/dev/null
-bash "$LOG" --code-review-done --session review-done >/dev/null
-OUT="$(run_hook review-done zensu:code-reviewer "$MARKER")"
-[ -z "$OUT" ] && [ ! -e "$(counter review-done)" ] \
-  && check "S5 codeReviewDone reviewer completion is a no-op" PASS \
-  || check "S5 codeReviewDone reviewer completion is a no-op" FAIL
+start_session review-done
+S5="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S5"
+log --tdd-complete --session "$S5"
+log --code-review-done --session "$S5"
+S5_STATE="$(state "$S5")"
+BEFORE="$(digest "$S5_STATE")"
+OUT="$(run_hook "$S5" zensu:code-reviewer "$(review_prompt rt_review_done)")"
+AFTER="$(digest "$S5_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S5 codeReviewDone reviewer completion is a byte-stable no-op" PASS \
+  || check "S5 codeReviewDone reviewer completion is a byte-stable no-op" FAIL
 
 # A live chain still requires the exact consume-mode marker on the first line.
-bash "$LOG" --tdd-begin --session no-marker >/dev/null
-bash "$LOG" --tdd-complete --session no-marker >/dev/null
-OUT="$(run_hook no-marker zensu:code-reviewer 'ordinary reviewer prompt')"
-[ -z "$OUT" ] && [ ! -e "$(counter no-marker)" ] \
-  && check "S6 live chain without fan-out marker is a no-op" PASS \
-  || check "S6 live chain without fan-out marker is a no-op" FAIL
+start_session no-marker
+S6="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S6"
+log --tdd-complete --session "$S6"
+S6_STATE="$(state "$S6")"
+BEFORE="$(digest "$S6_STATE")"
+OUT="$(run_hook "$S6" zensu:code-reviewer 'ordinary reviewer prompt')"
+AFTER="$(digest "$S6_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S6 live chain without fan-out marker is a byte-stable no-op" PASS \
+  || check "S6 live chain without fan-out marker is a byte-stable no-op" FAIL
 
-bash "$LOG" --tdd-begin --session late-marker >/dev/null
-bash "$LOG" --tdd-complete --session late-marker >/dev/null
-OUT="$(run_hook late-marker zensu:code-reviewer "ordinary first line
+start_session late-marker
+S7="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7"
+log --tdd-complete --session "$S7"
+S7_STATE="$(state "$S7")"
+BEFORE="$(digest "$S7_STATE")"
+OUT="$(run_hook "$S7" zensu:code-reviewer "ordinary first line
 $MARKER")"
-[ -z "$OUT" ] && [ ! -e "$(counter late-marker)" ] \
-  && check "S7 marker appearing after the first line is rejected" PASS \
-  || check "S7 marker appearing after the first line is rejected" FAIL
+AFTER="$(digest "$S7_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S7 marker appearing after the first line is rejected byte-stably" PASS \
+  || check "S7 marker appearing after the first line is rejected byte-stably" FAIL
 
 # Both header lines are positional contracts. An otherwise armed ticket stays
 # unconsumed when the second line is absent, displaced, malformed, or the first
 # line contains even a small decoration.
-bash "$LOG" --tdd-begin --session missing-ticket >/dev/null
-bash "$LOG" --tdd-complete --session missing-ticket >/dev/null
-MISSING_TICKET="$(issue_ticket missing-ticket)"
-OUT="$(run_hook missing-ticket zensu:code-reviewer "$MARKER")"
-[ -n "$MISSING_TICKET" ] && [ -z "$OUT" ] && [ ! -e "$(counter missing-ticket)" ] \
-  && [ "$(ticket_consumed missing-ticket)" = "false" ] \
+start_session missing-ticket
+S7A="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7A"
+log --tdd-complete --session "$S7A"
+MISSING_TICKET="$(issue_ticket "$S7A")"
+S7A_STATE="$(state "$S7A")"
+BEFORE="$(digest "$S7A_STATE")"
+OUT="$(run_hook "$S7A" zensu:code-reviewer "$MARKER")"
+AFTER="$(digest "$S7A_STATE")"
+[ -n "$MISSING_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S7A")" = "false" ] \
   && check "S7a exact first line without the required second line is rejected" PASS \
   || check "S7a exact first line without the required second line is rejected" FAIL
 
-bash "$LOG" --tdd-begin --session late-ticket >/dev/null
-bash "$LOG" --tdd-complete --session late-ticket >/dev/null
-LATE_TICKET="$(issue_ticket late-ticket)"
-OUT="$(run_hook late-ticket zensu:code-reviewer "$MARKER
+start_session late-ticket
+S7B="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7B"
+log --tdd-complete --session "$S7B"
+LATE_TICKET="$(issue_ticket "$S7B")"
+S7B_STATE="$(state "$S7B")"
+BEFORE="$(digest "$S7B_STATE")"
+OUT="$(run_hook "$S7B" zensu:code-reviewer "$MARKER
 merged findings
 REVIEW-TICKET: $LATE_TICKET")"
-[ -n "$LATE_TICKET" ] && [ -z "$OUT" ] && [ ! -e "$(counter late-ticket)" ] \
-  && [ "$(ticket_consumed late-ticket)" = "false" ] \
+AFTER="$(digest "$S7B_STATE")"
+[ -n "$LATE_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S7B")" = "false" ] \
   && check "S7b review ticket on the third line is rejected" PASS \
   || check "S7b review ticket on the third line is rejected" FAIL
 
-bash "$LOG" --tdd-begin --session decorated-marker >/dev/null
-bash "$LOG" --tdd-complete --session decorated-marker >/dev/null
-DECORATED_TICKET="$(issue_ticket decorated-marker)"
-OUT="$(run_hook decorated-marker zensu:code-reviewer "$MARKER extra
+start_session decorated-marker
+S7C="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7C"
+log --tdd-complete --session "$S7C"
+DECORATED_TICKET="$(issue_ticket "$S7C")"
+S7C_STATE="$(state "$S7C")"
+BEFORE="$(digest "$S7C_STATE")"
+OUT="$(run_hook "$S7C" zensu:code-reviewer "$MARKER extra
 REVIEW-TICKET: $DECORATED_TICKET")"
-[ -n "$DECORATED_TICKET" ] && [ -z "$OUT" ] && [ ! -e "$(counter decorated-marker)" ] \
-  && [ "$(ticket_consumed decorated-marker)" = "false" ] \
+AFTER="$(digest "$S7C_STATE")"
+[ -n "$DECORATED_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S7C")" = "false" ] \
   && check "S7c decorated first-line marker is rejected" PASS \
   || check "S7c decorated first-line marker is rejected" FAIL
 
-bash "$LOG" --tdd-begin --session malformed-ticket >/dev/null
-bash "$LOG" --tdd-complete --session malformed-ticket >/dev/null
-MALFORMED_TICKET="$(issue_ticket malformed-ticket)"
-OUT="$(run_hook malformed-ticket zensu:code-reviewer "$MARKER
+start_session malformed-ticket
+S7D="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S7D"
+log --tdd-complete --session "$S7D"
+MALFORMED_TICKET="$(issue_ticket "$S7D")"
+S7D_STATE="$(state "$S7D")"
+BEFORE="$(digest "$S7D_STATE")"
+OUT="$(run_hook "$S7D" zensu:code-reviewer "$MARKER
 REVIEW-TICKET: $MALFORMED_TICKET extra")"
-[ -n "$MALFORMED_TICKET" ] && [ -z "$OUT" ] && [ ! -e "$(counter malformed-ticket)" ] \
-  && [ "$(ticket_consumed malformed-ticket)" = "false" ] \
+AFTER="$(digest "$S7D_STATE")"
+[ -n "$MALFORMED_TICKET" ] && [ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S7D")" = "false" ] \
   && check "S7d malformed second-line ticket is rejected" PASS \
   || check "S7d malformed second-line ticket is rejected" FAIL
 
 # Fully armed and correctly marked is the only routed path.
-bash "$LOG" --tdd-begin --session valid >/dev/null
-bash "$LOG" --tdd-complete --session valid >/dev/null
-VALID_TICKET="$(issue_ticket valid)"
+start_session valid
+S8="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S8"
+log --tdd-complete --session "$S8"
+VALID_TICKET="$(issue_ticket "$S8")"
 VALID_PROMPT="$(review_prompt "$VALID_TICKET" 'merged findings')"
-OUT="$(run_hook valid zensu:code-reviewer "$VALID_PROMPT")"
-COUNT="$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count))}catch(_){process.stdout.write("")}' "$(counter valid)")"
-printf '%s' "$OUT" | grep -q 'hookSpecificOutput' && [ "$COUNT" = "1" ] \
+OUT="$(run_hook "$S8" zensu:code-reviewer "$VALID_PROMPT")"
+printf '%s' "$OUT" | grep -q 'hookSpecificOutput' \
+  && [ "$(review_round "$S8")" = "1" ] \
+  && [ "$(ticket_consumed "$S8")" = "true" ] \
   && check "S8 armed consume-mode reviewer is routed exactly once" PASS \
   || check "S8 armed consume-mode reviewer is routed exactly once" FAIL
 
 # A repeated delivery of the same Agent completion cannot claim the ticket twice.
-OUT="$(run_hook valid zensu:code-reviewer "$VALID_PROMPT")"
-COUNT="$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count))}catch(_){process.stdout.write("")}' "$(counter valid)")"
-[ -z "$OUT" ] && [ "$COUNT" = "1" ] \
+S8_STATE="$(state "$S8")"
+BEFORE="$(digest "$S8_STATE")"
+OUT="$(run_hook "$S8" zensu:code-reviewer "$VALID_PROMPT")"
+AFTER="$(digest "$S8_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] && [ "$(review_round "$S8")" = "1" ] \
   && check "S8a duplicate completion is a byte-stable no-op" PASS \
   || check "S8a duplicate completion is a byte-stable no-op" FAIL
 
 # Re-arming the same Claude session invalidates every ticket from the old chain.
-bash "$LOG" --tdd-begin --session valid >/dev/null
-bash "$LOG" --tdd-complete --session valid >/dev/null
-NEW_VALID_TICKET="$(issue_ticket valid)"
-OUT_OLD="$(run_hook valid zensu:code-reviewer "$VALID_PROMPT")"
-OUT_NEW="$(run_hook valid zensu:code-reviewer "$(review_prompt "$NEW_VALID_TICKET" 'new chain')")"
-COUNT="$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count))}catch(_){process.stdout.write("")}' "$(counter valid)")"
-[ -z "$OUT_OLD" ] && printf '%s' "$OUT_NEW" | grep -q 'hookSpecificOutput' && [ "$COUNT" = "1" ] \
+log --tdd-begin --session "$S8"
+log --tdd-complete --session "$S8"
+NEW_VALID_TICKET="$(issue_ticket "$S8")"
+OUT_OLD="$(run_hook "$S8" zensu:code-reviewer "$VALID_PROMPT")"
+OUT_NEW="$(run_hook "$S8" zensu:code-reviewer "$(review_prompt "$NEW_VALID_TICKET" 'new chain')")"
+[ -z "$OUT_OLD" ] && printf '%s' "$OUT_NEW" | grep -q 'hookSpecificOutput' \
+  && [ "$(review_round "$S8")" = "1" ] \
   && check "S8b late completion from a prior chain cannot mutate the re-armed chain" PASS \
   || check "S8b late completion from a prior chain cannot mutate the re-armed chain" FAIL
 
-# State and counters remain session-local.
-bash "$LOG" --tdd-begin --session session-a >/dev/null
-bash "$LOG" --tdd-complete --session session-a >/dev/null
-bash "$LOG" --tdd-begin --session session-b >/dev/null
-bash "$LOG" --tdd-complete --session session-b >/dev/null
-TICKET_B="$(issue_ticket session-b)"
-run_hook session-b zensu:code-reviewer "$(review_prompt "$TICKET_B")" >/dev/null
-[ ! -e "$(counter session-a)" ] && [ -e "$(counter session-b)" ] \
-  && check "S9 reviewer completion cannot mutate another session counter" PASS \
-  || check "S9 reviewer completion cannot mutate another session counter" FAIL
+# State remains session-local even when another canonical baseline becomes current.
+start_session session-a
+S9A="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S9A"
+log --tdd-complete --session "$S9A"
+S9A_STATE="$(state "$S9A")"
+A_BEFORE="$(digest "$S9A_STATE")"
 
-# Corrupt state fails open without replacing the file or creating a counter.
-printf '%s\n' '{malformed' > "$(state malformed)"
-BEFORE="$(cat "$(state malformed)")"
-OUT="$(run_hook malformed zensu:code-reviewer "$MARKER")"
-AFTER="$(cat "$(state malformed)")"
-[ -z "$OUT" ] && [ "$BEFORE" = "$AFTER" ] && [ ! -e "$(counter malformed)" ] \
-  && check "S10 malformed state is a no-op with no repair write" PASS \
-  || check "S10 malformed state is a no-op with no repair write" FAIL
+start_session session-b
+S9B="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S9B"
+log --tdd-complete --session "$S9B"
+TICKET_B="$(issue_ticket "$S9B")"
+run_hook "$S9B" zensu:code-reviewer "$(review_prompt "$TICKET_B")" >/dev/null
+[ "$(digest "$S9A_STATE")" = "$A_BEFORE" ] && [ "$(review_round "$S9B")" = "1" ] \
+  && check "S9 reviewer completion cannot mutate another session state" PASS \
+  || check "S9 reviewer completion cannot mutate another session state" FAIL
 
-# Syntactically valid but incomplete or cross-session state is malformed too.
-printf '%s\n' '{"session_id":"partial","active":true,"implComplete":true,"reviewTicket":"partial-ticket","reviewTicketConsumed":false}' > "$(state partial)"
-BEFORE="$(cat "$(state partial)")"
-OUT="$(run_hook partial zensu:code-reviewer "$(review_prompt partial-ticket)")"
-AFTER="$(cat "$(state partial)")"
-[ -z "$OUT" ] && [ "$BEFORE" = "$AFTER" ] && [ ! -e "$(counter partial)" ] \
-  && check "S11 incomplete typed state is a no-op" PASS \
-  || check "S11 incomplete typed state is a no-op" FAIL
+# Corrupt state fails open without replacing or repairing the real baseline file.
+start_session malformed
+S10="$STARTED_SESSION_KEY"
+S10_STATE="$(state "$S10")"
+printf '%s\n' '{malformed' > "$S10_STATE"
+BEFORE="$(digest "$S10_STATE")"
+OUT="$(run_hook "$S10" zensu:code-reviewer "$(review_prompt rt_malformed)")"
+AFTER="$(digest "$S10_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S10 malformed Session Control state is a no-op with no repair write" PASS \
+  || check "S10 malformed Session Control state is a no-op with no repair write" FAIL
 
-# All routing flags and a shape-valid ticket are not sufficient: the hook must
-# validate the complete chain schema before claiming the ticket. This fixture
-# deliberately omits only the mandatory boolean `vanilla` field.
-printf '%s\n' '{"session_id":"missing-required","phase":"UNINITIALIZED","history":[],"active":true,"implComplete":true,"chainDone":false,"codeReviewDone":false,"selfReviewFixed":false,"reviewTicket":"schema-ticket","reviewTicketConsumed":false,"bypasses":[]}' > "$(state missing-required)"
-BEFORE="$(cat "$(state missing-required)")"
-OUT="$(run_hook missing-required zensu:code-reviewer "$(review_prompt schema-ticket)")"
-AFTER="$(cat "$(state missing-required)")"
-[ -z "$OUT" ] && [ "$BEFORE" = "$AFTER" ] && [ ! -e "$(counter missing-required)" ] \
+# Syntactically valid but incomplete state is malformed too. Derive it from a
+# real armed baseline so only the mandatory revision field is missing.
+start_session partial
+S11="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S11"
+log --tdd-complete --session "$S11"
+PARTIAL_TICKET="$(issue_ticket "$S11")"
+S11_STATE="$(state "$S11")"
+FILE="$S11_STATE" node -e '
+  const fs = require("fs"), state = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  delete state.revision;
+  fs.writeFileSync(process.env.FILE, JSON.stringify(state, null, 2));
+'
+BEFORE="$(digest "$S11_STATE")"
+OUT="$(run_hook "$S11" zensu:code-reviewer "$(review_prompt "$PARTIAL_TICKET")")"
+AFTER="$(digest "$S11_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S11 incomplete typed state derived from a baseline is a byte-stable no-op" PASS \
+  || check "S11 incomplete typed state derived from a baseline is a byte-stable no-op" FAIL
+
+# All routing flags and a real ticket are not sufficient: the hook must validate
+# the complete chain schema before claiming the ticket.
+start_session missing-required
+S11A="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S11A"
+log --tdd-complete --session "$S11A"
+SCHEMA_TICKET="$(issue_ticket "$S11A")"
+S11A_STATE="$(state "$S11A")"
+FILE="$S11A_STATE" node -e '
+  const fs = require("fs"), state = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  delete state.vanilla;
+  fs.writeFileSync(process.env.FILE, JSON.stringify(state, null, 2));
+'
+BEFORE="$(digest "$S11A_STATE")"
+OUT="$(run_hook "$S11A" zensu:code-reviewer "$(review_prompt "$SCHEMA_TICKET")")"
+AFTER="$(digest "$S11A_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
   && check "S11a missing mandatory schema field is a byte-stable no-op" PASS \
   || check "S11a missing mandatory schema field is a byte-stable no-op" FAIL
 
-printf '%s\n' '{"session_id":"different-session","active":true,"implComplete":true,"chainDone":false,"codeReviewDone":false,"reviewTicket":"wrong-session-ticket","reviewTicketConsumed":false}' > "$(state wrong-session)"
-BEFORE="$(cat "$(state wrong-session)")"
-OUT="$(run_hook wrong-session zensu:code-reviewer "$(review_prompt wrong-session-ticket)")"
-AFTER="$(cat "$(state wrong-session)")"
-[ -z "$OUT" ] && [ "$BEFORE" = "$AFTER" ] && [ ! -e "$(counter wrong-session)" ] \
-  && check "S12 state owned by another session is a no-op" PASS \
-  || check "S12 state owned by another session is a no-op" FAIL
+start_session wrong-session
+S12="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S12"
+log --tdd-complete --session "$S12"
+WRONG_SESSION_TICKET="$(issue_ticket "$S12")"
+S12_STATE="$(state "$S12")"
+OTHER_SESSION_KEY="$(node "$SESSION_CORE" session-key different-session)"
+FILE="$S12_STATE" OTHER_KEY="$OTHER_SESSION_KEY" node -e '
+  const fs = require("fs"), state = JSON.parse(fs.readFileSync(process.env.FILE, "utf8"));
+  state.session_id_hash = `sha256:${process.env.OTHER_KEY.slice("scv1_".length)}`;
+  fs.writeFileSync(process.env.FILE, JSON.stringify(state, null, 2));
+'
+BEFORE="$(digest "$S12_STATE")"
+OUT="$(run_hook "$S12" zensu:code-reviewer "$(review_prompt "$WRONG_SESSION_TICKET")")"
+AFTER="$(digest "$S12_STATE")"
+[ -z "$OUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && check "S12 state owned by another canonical session is a byte-stable no-op" PASS \
+  || check "S12 state owned by another canonical session is a byte-stable no-op" FAIL
+
+# Explicit or partial hook principals must never borrow the main thread's
+# consume-mode reviewer authority, even when ambient force-main is set.
+start_session principal-guard
+S12B="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S12B"
+log --tdd-complete --session "$S12B"
+PRINCIPAL_TICKET="$(issue_ticket "$S12B")"
+PRINCIPAL_PROMPT="$(review_prompt "$PRINCIPAL_TICKET")"
+S12B_STATE="$(state "$S12B")"
+BEFORE="$(digest "$S12B_STATE")"
+PRINCIPAL_OUTPUT=""
+for PRINCIPAL_KIND in reviewer plm neutral partial; do
+  PRINCIPAL_OUTPUT="${PRINCIPAL_OUTPUT}$(run_hook_as "$S12B" zensu:code-reviewer "$PRINCIPAL_PROMPT" "$PRINCIPAL_KIND")"
+done
+AFTER="$(digest "$S12B_STATE")"
+if [ -z "$PRINCIPAL_OUTPUT" ] && [ "$AFTER" = "$BEFORE" ] \
+  && [ "$(ticket_consumed "$S12B")" = false ] && [ "$(review_round "$S12B")" = 0 ]; then
+  check "S12b reviewer/PLM/neutral/partial principals cannot consume a ticket or emit helper text" PASS
+else
+  check "S12b non-main principals are a byte-stable post-review no-op" FAIL
+fi
 
 # Parallel duplicate deliveries race on one atomic ticket claim; exactly one wins.
-bash "$LOG" --tdd-begin --session concurrent >/dev/null
-bash "$LOG" --tdd-complete --session concurrent >/dev/null
-CONCURRENT_TICKET="$(issue_ticket concurrent)"
+start_session concurrent
+S13="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S13"
+log --tdd-complete --session "$S13"
+CONCURRENT_TICKET="$(issue_ticket "$S13")"
 CONCURRENT_PROMPT="$(review_prompt "$CONCURRENT_TICKET")"
 i=1
 while [ "$i" -le 20 ]; do
-  run_hook concurrent zensu:code-reviewer "$CONCURRENT_PROMPT" > "$ROOT/concurrent-$i.out" &
+  run_hook "$S13" zensu:code-reviewer "$CONCURRENT_PROMPT" > "$ROOT/concurrent-$i.out" &
   i=$((i + 1))
 done
 wait
-COUNT="$(node -e 'try{process.stdout.write(String(JSON.parse(require("fs").readFileSync(process.argv[1])).count))}catch(_){process.stdout.write("")}' "$(counter concurrent)")"
 WINNERS="$(grep -l 'hookSpecificOutput' "$ROOT"/concurrent-*.out 2>/dev/null | wc -l | tr -d '[:space:]')"
-[ "$COUNT" = "1" ] && [ "$WINNERS" = "1" ] \
-  && check "S13 parallel duplicate completions produce one routed round" PASS \
-  || check "S13 parallel duplicate completions produce one routed round" FAIL
+[ "$(review_round "$S13")" = "1" ] && [ "$WINNERS" = "1" ] \
+  && check "S13 parallel duplicate completions produce one routed CAS round" PASS \
+  || check "S13 parallel duplicate completions produce one routed CAS round" FAIL
 
 # Every delayed terminus is bound to the consumed ticket. Re-arming between
 # claim and close invalidates old PASS/max/self-review commands.
-SID_STALE="stale-terminus"
-bash "$LOG" --tdd-begin --session "$SID_STALE" >/dev/null
-bash "$LOG" --tdd-complete --session "$SID_STALE" >/dev/null
-STALE_TICKET="$(issue_ticket "$SID_STALE")"
-ROUND="$(bash -c 'source "$1"; tdd_consume_review_ticket "$2" "$3" "$4"' _ \
-  "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" "$SID_STALE" "$STALE_TICKET" "$(counter "$SID_STALE")")"
-bash "$LOG" --tdd-begin --session "$SID_STALE" >/dev/null
-bash "$LOG" --tdd-complete --session "$SID_STALE" >/dev/null
+start_session stale-terminus
+S14="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S14"
+log --tdd-complete --session "$S14"
+STALE_TICKET="$(issue_ticket "$S14")"
+ROUND="$(tdd_consume_review_ticket "$S14" "$STALE_TICKET")"
+log --tdd-begin --session "$S14"
+log --tdd-complete --session "$S14"
 if [ "$ROUND" = "1" ] \
-  && ! bash "$LOG" --code-review-done --session "$SID_STALE" --claimed-review-ticket "$STALE_TICKET" >/dev/null 2>&1 \
-  && ! bash "$LOG" --chain-done --session "$SID_STALE" --claimed-review-ticket "$STALE_TICKET" >/dev/null 2>&1 \
-  && [ "$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(String(j.codeReviewDone||j.chainDone));' "$(state "$SID_STALE")")" = "false" ]; then
+  && ! log --code-review-done --session "$S14" --claimed-review-ticket "$STALE_TICKET" \
+  && ! log --chain-done --session "$S14" --claimed-review-ticket "$STALE_TICKET" \
+  && flags_are_false "$S14" 'codeReviewDone,chainDone'; then
   check "S14 stale PASS/max close cannot mark a re-armed generation" PASS
 else
   check "S14 stale PASS/max close cannot mark a re-armed generation" FAIL
 fi
 
-SID_SELF="stale-self-review"
-bash "$LOG" --tdd-begin --session "$SID_SELF" >/dev/null
-bash "$LOG" --tdd-complete --session "$SID_SELF" >/dev/null
-SELF_TICKET="$(issue_ticket "$SID_SELF")"
-bash -c 'source "$1"; tdd_consume_review_ticket "$2" "$3" "$4" >/dev/null' _ \
-  "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" "$SID_SELF" "$SELF_TICKET" "$(counter "$SID_SELF")"
-bash "$LOG" --code-review-done --session "$SID_SELF" --claimed-review-ticket "$SELF_TICKET" >/dev/null
-bash "$LOG" --tdd-begin --session "$SID_SELF" >/dev/null
-bash "$LOG" --tdd-complete --session "$SID_SELF" >/dev/null
-if ! bash "$LOG" --self-review-fixed --session "$SID_SELF" --claimed-review-ticket "$SELF_TICKET" >/dev/null 2>&1 \
-  && ! bash "$LOG" --chain-done --session "$SID_SELF" --claimed-review-ticket "$SELF_TICKET" >/dev/null 2>&1 \
-  && [ "$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(String(j.selfReviewFixed||j.chainDone));' "$(state "$SID_SELF")")" = "false" ]; then
+start_session stale-self-review
+S15="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S15"
+log --tdd-complete --session "$S15"
+SELF_TICKET="$(issue_ticket "$S15")"
+SELF_ROUND="$(tdd_consume_review_ticket "$S15" "$SELF_TICKET")"
+SELF_CODE_REVIEW_DONE=false
+if log --code-review-done --session "$S15" --claimed-review-ticket "$SELF_TICKET"; then
+  SELF_CODE_REVIEW_DONE=true
+fi
+log --tdd-begin --session "$S15"
+log --tdd-complete --session "$S15"
+if [ "$SELF_ROUND" = "1" ] && [ "$SELF_CODE_REVIEW_DONE" = "true" ] \
+  && ! log --self-review-fixed --session "$S15" --claimed-review-ticket "$SELF_TICKET" \
+  && ! log --chain-done --session "$S15" --claimed-review-ticket "$SELF_TICKET" \
+  && flags_are_false "$S15" 'selfReviewFixed,chainDone'; then
   check "S15 stale self-review latch/terminus cannot close a new generation" PASS
 else
   check "S15 stale self-review latch/terminus cannot close a new generation" FAIL
 fi
 
-SID_UNBOUND="unbound-after-ticket"
-bash "$LOG" --tdd-begin --session "$SID_UNBOUND" >/dev/null
-bash "$LOG" --tdd-complete --session "$SID_UNBOUND" >/dev/null
-UNBOUND_TICKET="$(issue_ticket "$SID_UNBOUND")"
-bash -c 'source "$1"; tdd_consume_review_ticket "$2" "$3" "$4" >/dev/null' _ \
-  "$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh" "$SID_UNBOUND" "$UNBOUND_TICKET" "$(counter "$SID_UNBOUND")"
-if ! bash "$LOG" --chain-done --session "$SID_UNBOUND" >/dev/null 2>&1 \
-  && [ "$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1]));process.stdout.write(String(j.chainDone));' "$(state "$SID_UNBOUND")")" = "false" ]; then
+start_session unbound-after-ticket
+S16="$STARTED_SESSION_KEY"
+log --tdd-begin --session "$S16"
+log --tdd-complete --session "$S16"
+UNBOUND_TICKET="$(issue_ticket "$S16")"
+UNBOUND_ROUND="$(tdd_consume_review_ticket "$S16" "$UNBOUND_TICKET")"
+if [ "$UNBOUND_ROUND" = "1" ] \
+  && ! log --chain-done --session "$S16" \
+  && flags_are_false "$S16" chainDone; then
   check "S16 unqualified terminus is rejected after a ticket was consumed" PASS
 else
   check "S16 unqualified terminus is rejected after a ticket was consumed" FAIL

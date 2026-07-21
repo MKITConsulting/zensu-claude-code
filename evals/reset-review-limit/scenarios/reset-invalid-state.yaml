@@ -1,0 +1,14 @@
+description: "Fail closed: tamper the current workflow so reviewRound is a string, invoke /zensu:reset-review-limit, and prove the invalid evidence remains byte-for-byte unchanged."
+vars:
+  scenario_id: reset-invalid-state
+  spec_block: |
+    The eval provider synchronously pre-seeded, malformed, hashed, and
+    snapshotted the CURRENT session before this process started. Its exact
+    canonical state has reviewRound as the string "3". Do not seed, repair,
+    replace, or otherwise mutate it before the skill.
+
+    Invoke `/zensu:reset-review-limit` now through exactly one Skill tool call.
+    Follow its preflight and allow it to fail closed. Do not repair the state,
+    start a new workflow, spawn an agent, search for files, delete files, or
+    edit repository source. Report the failure, but never claim reset success;
+    the provider independently verifies byte-for-byte preservation.

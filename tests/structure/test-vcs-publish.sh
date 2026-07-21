@@ -49,7 +49,9 @@ fails() { local l="$1"; shift; local o rc; o="$(argv "$@" 2>/dev/null)"; rc=$?; 
 
 # ---- payload fixture (read by the GitLab publish planner) ----
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/vcs-publish.XXXXXXXX")"
-PAY="$WORK/synth.json"
+SPECIAL_PAYLOAD_DIR="$WORK/review path's boundary"
+mkdir -p "$SPECIAL_PAYLOAD_DIR"
+PAY="$SPECIAL_PAYLOAD_DIR/synth payload's copy.json"
 cat > "$PAY" <<'JSON'
 {"commit_id":"abc123","event":"REQUEST_CHANGES","body":"Overall review body.","comments":[{"path":"src/a.js","line":10,"side":"RIGHT","body":"fix new line"},{"path":"src/b.js","line":5,"side":"LEFT","body":"removed line note"}]}
 JSON

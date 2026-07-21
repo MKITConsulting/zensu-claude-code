@@ -15,8 +15,8 @@
 // Inputs (all overridable so the structure test can point at a sandbox):
 //   ZENSU_DOCTOR_PLUGIN_DIR  plugin root holding .claude-plugin/ + hooks/
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
-//   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots
-//   TDD_STATE_DIR            state dir (else CLAUDE_PROJECT_DIR/.zensu/state)
+//   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots; session state
+//                            is always CLAUDE_PROJECT_DIR/.zensu/state
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
@@ -147,7 +147,7 @@ function pluginBlock() {
     var matchers = events[ev] || [];
     matchers.forEach(function (m) {
       (m && m.hooks || []).forEach(function (h) {
-        var cmd = (h && h.command) || '';
+        var cmd = (h && typeof h.command === 'string') ? h.command : '';
         var mm = cmd.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
         if (mm) wired[mm[1]] = true;
       });
@@ -217,8 +217,8 @@ function ttlHours() {
 }
 function stateBlock(nowMs) {
   block('Session state');
-  var dir = env.TDD_STATE_DIR ||
-    path.join(env.CLAUDE_PROJECT_DIR || '.', '.zensu', 'state');
+  var projectRoot = path.resolve(env.CLAUDE_PROJECT_DIR || '.');
+  var dir = path.join(projectRoot, '.zensu', 'state');
   var entries;
   try {
     entries = fs.readdirSync(dir);
@@ -231,20 +231,36 @@ function stateBlock(nowMs) {
   } catch (e) {
     line(BAD, 'state: ' + dir + ' is not writable — chain markers cannot be recorded');
   }
-  var phase = 0, rounds = 0, reviewPass = 0, stopblocks = 0;
-  entries.forEach(function (f) {
-    if (/^tdd-phase-.*\.json$/.test(f)) phase++;
-    else if (/^rounds-.*\.json$/.test(f)) rounds++;
-    else if (/^review-pass-/.test(f)) reviewPass++;
-    else if (/\.stopblocks$/.test(f)) stopblocks++;
-  });
-  var stale = phase + rounds + reviewPass + stopblocks;
-  if (stale) {
-    line(WARN, 'state: ' + stale + ' per-session marker file(s) present (' +
-      phase + ' tdd-phase, ' + rounds + ' rounds, ' + reviewPass + ' review-pass, ' +
-      stopblocks + ' stopblocks) — offer cleanup of ones not tied to a live session');
+  var workflowDocs = entries.filter(function (f) {
+    return /^tdd-phase-scv1_[a-f0-9]{64}\.json$/.test(f);
+  }).sort();
+  if (!workflowDocs.length) {
+    line(OK, 'state: no CAS workflow documents yet');
   } else {
-    line(OK, 'state: no leftover per-session marker files');
+    var core;
+    var invalid = [];
+    try {
+      core = require(path.join(pluginDir(), 'hooks', 'lib', 'session-control-core-v1.js'));
+    } catch (e) {
+      invalid = workflowDocs.slice();
+    }
+    if (core) {
+      workflowDocs.forEach(function (file) {
+        var match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(file);
+        try {
+          core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] });
+        } catch (e) {
+          invalid.push(file);
+        }
+      });
+    }
+    var valid = workflowDocs.length - invalid.length;
+    if (valid) {
+      line(OK, 'state: ' + valid + ' validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields');
+    }
+    if (invalid.length) {
+      line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));
+    }
   }
   var pr = path.join(dir, 'pending-review.json');
   try {

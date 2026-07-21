@@ -3,14 +3,29 @@
 # priority; after it permits a stop, a durable outer Autopilot run may still
 # block until it reaches DONE, BLOCKED, or CANCELLED.
 set -u
+DEFERRED_OWNER_PID="${BASHPID:-$$}"
+case "$DEFERRED_OWNER_PID" in ''|*[!0-9]*) exit 2 ;; esac
+[ "$DEFERRED_OWNER_PID" -gt 0 ] || exit 2
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 INPUT=""
 IFS= read -r -d '' INPUT || true
 
-# This response deliberately has no dynamic fields and must remain writable
-# without Node.  A durable pointer or run file is evidence that Stop needs an
-# outer-state decision; a missing runtime may never be interpreted as success.
+# These responses deliberately have no dynamic fields. Once a trusted main
+# Stop event has been authenticated, durable or inner state plus a missing
+# workflow library must never be interpreted as successful completion.
 emit_runtime_unavailable_block() {
   printf '%s\n' '{"decision":"block","reason":"Zensu Autopilot Stop denied: durable state exists but the durable state runtime is unavailable."}'
 }
@@ -19,29 +34,36 @@ emit_inner_runtime_unavailable_block() {
   printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: project-local inner state exists but the required runtime is unavailable."}'
 }
 
-shell_spawned_agent() {
-  [ "${ZENSU_FORCE_MAIN:-}" = "1" ] && return 1
-  [[ $INPUT =~ \"agent_id\"[[:space:]]*:[[:space:]]*\"([^\"\\]|\\.)+\" ]] && return 0
-  [[ $INPUT =~ \"agent_type\"[[:space:]]*:[[:space:]]*\"zensu:(code-reviewer|review-aspect|zensu-plm)\" ]]
+emit_session_binding_unavailable_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable main-session binding is unavailable, so review-chain and Autopilot completion cannot be proven."}'
 }
 
-NODE_AVAILABLE=true
-command -v node >/dev/null 2>&1 || NODE_AVAILABLE=false
-
 AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
-if [ "$NODE_AVAILABLE" = "true" ] && [ -r "$AGENT_CONTEXT_LIB" ]; then
-  # shellcheck disable=SC1090
-  source "$AGENT_CONTEXT_LIB"
-  if [ "$(zensu_is_spawned_agent "$(zensu_hook_agent_id "$INPUT")" "$(zensu_hook_agent_type "$INPUT")")" = "true" ]; then
-    exit 0
-  fi
-elif shell_spawned_agent; then
-  # Spawned-agent Stop is always the first no-op, even when the main-thread
-  # runtime is unavailable. Blocking a worker here deadlocks its parent.
+# Without Node or the principal classifier, this hook cannot authenticate a
+# top-level Stop event. Stay silent rather than risk deadlocking a child.
+command -v node >/dev/null 2>&1 || exit 0
+[ -r "$AGENT_CONTEXT_LIB" ] || exit 0
+# shellcheck disable=SC1090
+source "$AGENT_CONTEXT_LIB"
+zensu_hook_is_main_principal "$INPUT" Stop || exit 0
+
+
+SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if [ ! -r "$SESSION_LIB" ]; then
+  emit_session_binding_unavailable_block
+  exit 0
+fi
+# shellcheck disable=SC1090
+source "$SESSION_LIB"
+if ! zensu_bind_hook_session "$INPUT"; then
+  emit_session_binding_unavailable_block
   exit 0
 fi
 
-PROJECT_ROOT="${CLAUDE_PROJECT_DIR:-.}"
+PROJECT_ROOT="$(zensu_resolve_project_dir)" || {
+  emit_session_binding_unavailable_block
+  exit 0
+}
 ACTIVE_POINTER_HINT="$PROJECT_ROOT/.zensu/state/autopilot-active.json"
 ACTIVE_POINTER_EXISTS=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
@@ -69,15 +91,7 @@ for _zensu_inner_hint in "$INNER_STATE_DIR_HINT"/tdd-phase-*.json; do
 done
 unset _zensu_inner_hint
 
-if [ "$NODE_AVAILABLE" != "true" ]; then
-  if [ "$DURABLE_STATE_HINT_EXISTS" = "true" ]; then emit_runtime_unavailable_block
-  elif [ "$INNER_STATE_EXISTS" = "true" ]; then emit_inner_runtime_unavailable_block
-  fi
-  exit 0
-fi
-
 AUTOPILOT_STATE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 CONFIG_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 TDD_PHASE_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 if [ ! -r "$SESSION_LIB" ] || [ ! -r "$CONFIG_LIB" ] || [ ! -r "$TDD_PHASE_LIB" ] \
@@ -99,10 +113,9 @@ read_field() {
 }
 
 SESSION_ID="$(read_field session_id)"
-TRANSCRIPT_PATH=""
-[ -z "$SESSION_ID" ] && TRANSCRIPT_PATH="$(read_field transcript_path)"
 source "$SESSION_LIB"
-SESSION_ID="$(ZENSU_TRANSCRIPT_PATH="$TRANSCRIPT_PATH" zensu_resolve_session_id "$SESSION_ID")"
+PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
+SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || exit 0
 source "$CONFIG_LIB"
 source "$TDD_PHASE_LIB"
 STATE_FILE="$(tdd_state_file "$SESSION_ID")"
@@ -132,9 +145,11 @@ case "$INNER_STATUS" in
       INNER_BOUND_RETURN_STAGE INNER_BOUND_CHAIN <<<"$INNER_FIELDS"
     ;;
   1)
-    SESSION_ACTIVE=false; SESSION_IMPL_COMPLETE=false; SESSION_CHAIN_DONE=false
-    _SESSION_CODE_REVIEW_DONE=false; INNER_BOUND_RUN=""; INNER_BOUND_ATTEMPT=""
-    INNER_BOUND_RETURN_STAGE=""; INNER_BOUND_CHAIN=""
+    # SessionStart creates this baseline before any model action. Once the
+    # immutable session context is bound, a missing baseline is deletion or an
+    # incomplete initialization and must never be reinterpreted as inactivity.
+    printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: the mandatory current-session workflow baseline is missing. Start a fresh Claude Code session or repair the Session Control state; do not infer completion."}'
+    exit 0
     ;;
   *)
     printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: current-session inner state is corrupt or unsafe."}'
@@ -155,7 +170,10 @@ if [ -r "$AUTOPILOT_STATE_LIB" ]; then
 fi
 
 emit_block() {
-  node -e 'process.stdout.write(JSON.stringify({decision:"block",reason:process.argv[1]}))' "$1"
+  printf '%s' "$1" | node -e '
+    const reason = require("node:fs").readFileSync(0, "utf8");
+    process.stdout.write(JSON.stringify({decision:"block",reason}));
+  '
   echo
 }
 
@@ -261,7 +279,6 @@ if [ "$OUTER_STATUS" -eq 0 ] && { [ "${ZENSU_AUTOPILOT:-}" = "off" ] || ! zensu_
   esac
   exit 0
 fi
-
 outer_finish() {
   local fields run_id owner stage action head_update_required count cap
   local budget_json budget_fields budget_blocked reconcile_rc budget_rc
@@ -435,20 +452,18 @@ if [ "$ADOPT_ELIGIBLE" = "true" ]; then
     exit 0
   fi
   if autopilot_adopt_pending_review "$PROJECT_ROOT" "$SESSION_ID" \
-      "$VANILLA_SEED" "$(zensu_pending_review_ttl_hours)"; then
+      "$VANILLA_SEED" "$(zensu_pending_review_ttl_hours)" "$DEFERRED_OWNER_PID"; then
     :
   else
     ADOPT_RC=$?
     case "$ADOPT_RC" in
       6) ;; # no pending marker/claim; this is a normal no-work result
       4)
-        # A durable run won the race after the initial read. Route from its
-        # fresh authoritative state; the pending marker remains untouched.
-        outer_reload
-        if [ "$OUTER_STATUS" -eq 0 ]; then outer_finish
-        elif [ "$OUTER_STATUS" -ne 1 ]; then
-          emit_block "Zensu Autopilot Stop denied: durable state changed while deferred review adoption was waiting for the Outer lock."
-        fi
+        # The locked read or its descriptor-backed contention fallback proved
+        # that a durable run became active after the initial absent snapshot.
+        # Do not take a second contended read here: its legacy rc=1 conflates
+        # lock timeout with absence and could erase that stronger proof.
+        emit_block "Zensu Autopilot Stop denied: a durable run became active while deferred review adoption was waiting for the Outer lock. Retry Stop so the current durable state can be routed safely."
         exit 0
         ;;
       *)
@@ -570,8 +585,10 @@ else
 fi
 
 if [ "$BLOCKS" -gt "$CAP" ]; then
-  tdd_release_pending_review_claim "$SESSION_ID" 2>/dev/null || \
-    echo "zensu chain-enforcer: failed to release this session's deferred-review claim at the Stop cap; manual state repair may be required." >&2
+  if ! tdd_release_pending_review_claim "$SESSION_ID" 2>/dev/null; then
+    emit_block "Zensu review-chain Stop denied: the deferred-review cancellation receipt could not be persisted safely at the Stop cap. Repair storage and retry; the guard remains active."
+    exit 0
+  fi
   if [ "$INNER_CAP_BLOCKED" = "true" ]; then
     echo "zensu chain-enforcer: inner review did not converge; active Autopilot run moved to audited BLOCKED." >&2
     exit 0
@@ -635,6 +652,8 @@ fi
 
 CODE_REVIEW_DONE="$FRESH_CODE_REVIEW_DONE"
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
+PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
+LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
 INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
 INNER_SELF_REVIEW_ENVELOPE=" "
@@ -654,14 +673,17 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   SELF_REVIEW_TICKET="$(tdd_ensure_self_review_ticket "$SESSION_ID" 2>/dev/null)" || SELF_REVIEW_TICKET=""
   if _tdd_review_ticket_shape_ok "$SELF_REVIEW_TICKET"; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
-    REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: bash ${LOG_HELPER_Q} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
+    REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
   else
     REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. Run /zensu:reset-review-limit for this current session, then resume the reviewer chain with a fresh ticket."
   fi
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: bash ${LOG_HELPER_Q} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop."
 fi
 
+if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then
+  emit_block "Zensu review-chain Stop denied: the review handoff lease could not be persisted safely. No actionable review instruction was emitted; repair storage and retry Stop."
+  exit 0
+fi
 emit_block "$REASON"
-tdd_mark_pending_review_handoff "$SESSION_ID" 2>/dev/null || true
 exit 0

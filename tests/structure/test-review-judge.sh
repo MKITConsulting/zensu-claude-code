@@ -44,22 +44,22 @@ if grep -qE '^name: *review-judge *$' "$AGENT_MD"; then
 else
   check "P1a frontmatter declares 'name: review-judge'" FAIL
 fi
-if grep -qE '^tools: *Read, *Grep, *Glob, *Bash *$' "$AGENT_MD"; then
-  check "P1b frontmatter tools are the read-only quartet" PASS
+if grep -qE '^tools: *Read, *Grep, *Glob *$' "$AGENT_MD"; then
+  check "P1b frontmatter tools are dedicated reads only" PASS
 else
-  check "P1b frontmatter tools are the read-only quartet" FAIL
+  check "P1b frontmatter tools are dedicated reads only" FAIL
 fi
 
 # P2 — judge contract in the agent body
 PINS_AGENT=(
-  "P2a fresh-read mandate|Read the changed files FRESH"
-  "P2b cross-cutting dimension|Cross-cutting / Integration"
-  "P2c requirement-drift dimension|Requirement drift"
-  "P2d missed-edge-cases dimension|Missed edge cases"
-  "P2e panel-quality dimension|Panel quality (meta-verdicts)"
+  "P2a fresh-read mandate|Read every listed changed file fresh"
+  "P2b cross-cutting dimension|cross-cutting integration"
+  "P2c requirement-drift dimension|behavioral drift"
+  "P2d missed-edge-cases dimension|edge cases missed by the panel"
+  "P2e panel-quality dimension|panel false positives or false negatives"
   "P2f Panel-FP: protocol|Panel-FP:"
   "P2g JUDGE-* finding IDs|JUDGE-1"
-  "P2h no-build rule|NEVER run build or test commands"
+  "P2h no-build rule|Never write/edit files, use Bash, run builds/tests"
   "P2i never repeats panel findings|Never repeat a panel finding"
   "P2j aspect-shaped output|## Aspect: judge"
 )
@@ -71,19 +71,19 @@ for entry in "${PINS_AGENT[@]}"; do
     check "$label" FAIL
   fi
 done
-if grep -qF "**Confidence**: 0-100 (only report >= 80)" "$AGENT_MD"; then
+if grep -qF "Report only confidence >= 80" "$AGENT_MD"; then
   check "P2k confidence floor 80 pinned" PASS
 else
   check "P2k confidence floor 80 pinned" FAIL
 fi
-if grep -qiF 'READ-ONLY' "$AGENT_MD" && grep -qF 'git diff HEAD --' "$AGENT_MD" && grep -qF 'NEVER use Bash with' "$AGENT_MD"; then
-  check "P2l read-only promise + git-diff-only Bash scope + shell-tool ban pinned" PASS
+if grep -qiF 'read-only' "$AGENT_MD" && grep -qF 'tools: Read, Grep, Glob' "$AGENT_MD" && grep -qF 'use Bash' "$AGENT_MD"; then
+  check "P2l read-only promise + dedicated reads + shell ban pinned" PASS
 else
-  check "P2l read-only promise + git-diff-only Bash scope + shell-tool ban pinned" FAIL
+  check "P2l read-only promise + dedicated reads + shell ban pinned" FAIL
 fi
 
 # P3 — tdd SKILL Phase 6 judge stage
-if grep -qF "Judge second pass (config-gated)" "$TDD_MD" && grep -qF "subagent_type='zensu:review-judge'" "$TDD_MD"; then
+if grep -qF "Judge second pass" "$TDD_MD" && grep -qF "subagent_type='zensu:review-judge'" "$TDD_MD"; then
   check "P3a Phase 6 carries the judge stage spawning zensu:review-judge" PASS
 else
   check "P3a Phase 6 carries the judge stage spawning zensu:review-judge" FAIL
@@ -98,7 +98,7 @@ if grep -qF "neutralizes the finding it references" "$TDD_MD" && grep -qF "BEFOR
 else
   check "P3c Panel-FP neutralization happens before fix routing" FAIL
 fi
-if grep -qF "including the step-4b judge deltas when the judge ran" "$TDD_MD"; then
+if grep -qF "including the step-4b judge deltas" "$TDD_MD"; then
   check "P3d consume-mode reviewer receives merge + judge deltas" PASS
 else
   check "P3d consume-mode reviewer receives merge + judge deltas" FAIL
@@ -137,10 +137,13 @@ else
 fi
 
 # P5 — README + workflow doc
-if grep -qxF '### Agents (4)' "$README" && grep -qF '| **review-judge** |' "$README"; then
-  check "P5a README agents table is (4) with the judge row" PASS
+if grep -qxF '### Agents (6)' "$README" \
+   && grep -qF '| **review-judge** |' "$README" \
+   && grep -qF '| **plan-review-worker** |' "$README" \
+   && grep -qF '| **pr-review-worker** |' "$README"; then
+  check "P5a README agents table is (6) with judge and dedicated review workers" PASS
 else
-  check "P5a README agents table is (4) with the judge row" FAIL
+  check "P5a README agents table is (6) with judge and dedicated review workers" FAIL
 fi
 if grep -qF '| `reviewJudge` |' "$README"; then
   check "P5b README config table carries the reviewJudge row" PASS

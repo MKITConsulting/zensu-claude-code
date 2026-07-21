@@ -1,0 +1,23 @@
+description: "Claude Code Session Control v1 twelve-process shared-contention suite"
+
+providers:
+  - id: 'exec: ../../scripts/session-control-claude-wrapper.sh'
+    config:
+      source_dir: ../..
+      mode: concurrency
+
+prompts:
+  - id: session-control-concurrency
+    raw: 'Session isolation probe {{scenario_id}}. Do not use tools or edit files; finish immediately.'
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/control-attestation.js
+
+tests:
+  - file://scenarios/concurrency.yaml
+
+evaluateOptions:
+  maxConcurrency: 4
+  repeat: 3

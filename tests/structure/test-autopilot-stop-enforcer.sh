@@ -6,6 +6,8 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 source "$LIB"
@@ -20,16 +22,58 @@ review_marker() {
 TMP="$(mktemp -d -t zensu-autopilot-stop-XXXXXX)"; trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
-start() { mkdir -p "$1"; autopilot_begin_run "$2" "$3" "$1" >/dev/null; }
+activate_session() {
+  local project="$1" raw_session="$2" project_root session_key
+  project_root="$(cd "$project" && pwd -P)" || return 1
+  session_key="$(node "$CORE" session-key "$raw_session")" || return 1
+  export CLAUDE_PROJECT_DIR="$project"
+  if [ "${ZENSU_PROJECT_ROOT:-}" = "$project_root" ] \
+      && [ "${ZENSU_SESSION_KEY:-}" = "$session_key" ] \
+      && [ "${ZENSU_CLAUDE_PLUGIN_ROOT:-}" = "$PLUGIN_DIR" ] \
+      && [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] \
+      && [ "$(node "$CORE" session-key "$CLAUDE_CODE_SESSION_ID" 2>/dev/null)" = "$session_key" ] \
+      && [ -f "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    return 0
+  fi
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_session"
+}
+start() {
+  mkdir -p "$1"
+  activate_session "$1" "$3" || return 1
+  autopilot_begin_run "$2" "$ZENSU_SESSION_KEY" "$1" >/dev/null
+}
 invoke() {
   local project="$1" sid="$2" cfg="${3:-$TMP/missing.json}" chain="${4:-}" autopilot="${5:-}"
-  printf '{"session_id":"%s"}' "$sid" | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" \
+  activate_session "$project" "$sid" || return 1
+  printf '{"hook_event_name":"Stop","session_id":"%s"}' "$sid" | CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" \
     ZENSU_CHAIN="$chain" ZENSU_AUTOPILOT="$autopilot" bash "$STOP" 2>/dev/null
 }
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).decision||"allow")}catch(_){console.log("allow")}})'; }
 context() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{process.stdout.write(JSON.parse(s).reason||"")}catch(_){process.exit(1)}})'; }
 field_ok() { FILE="$1" EXPR="$2" node -e 'const j=require(process.env.FILE);process.exit(Function("j",`return Boolean(${process.env.EXPR})`)(j)?0:1)' 2>/dev/null; }
 digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
+
+copy_runtime() {
+  local destination="$1" runtime_entry
+  mkdir -p "$destination"
+  destination="$(cd "$destination" && pwd -P)" || return 1
+  for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+    cp -R "$PLUGIN_DIR/$runtime_entry" "$destination/$runtime_entry" || return 1
+  done
+  mkdir -p "$destination/mcp-runtime"
+  cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
+    "$destination/mcp-runtime/" || return 1
+}
+
+bind_runtime_session() {
+  local plugin_root="$1" project="$2" raw_session="$3" label="$4"
+  export CLAUDE_PROJECT_DIR="$project"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/$label-plugin-data"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_session" "$plugin_root"
+  unset ZENSU_TEST_PLUGIN_DATA
+}
 
 P1="$TMP/planning"; start "$P1" stop_run_01 stop_session_01
 OUT1="$(invoke "$P1" stop_session_01)"
@@ -38,14 +82,15 @@ if [ "$(printf '%s' "$OUT1" | decision)" = block ] && printf '%s' "$OUT1" | grep
 else check "S1 non-terminal outer stage blocks Stop" FAIL; fi
 
 P1H="$TMP/head-prerequisite"; start "$P1H" stop_run_head stop_session_head
+HEAD_SESSION_KEY="$ZENSU_SESSION_KEY"
 HEAD_SHA=bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 HEAD_READY=true
 head_event() {
   autopilot_apply_event stop_run_head "$1" "$2" "$3" "$P1H" >/dev/null 2>&1 || HEAD_READY=false
 }
 head_event stop-head-plan PLAN_APPROVED '{"approvedPlanSha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}'
-head_event stop-head-tdd-start-1 TDD_STARTED '{"attempt":1,"chainId":"stop-head-chain-01","sessionId":"stop_session_head"}'
-head_event stop-head-tdd-done-1 TDD_CHAIN_DONE '{"attempt":1,"chainId":"stop-head-chain-01","sessionId":"stop_session_head","outcome":"pass"}'
+head_event stop-head-tdd-start-1 TDD_STARTED "{\"attempt\":1,\"chainId\":\"stop-head-chain-01\",\"sessionId\":\"$HEAD_SESSION_KEY\"}"
+head_event stop-head-tdd-done-1 TDD_CHAIN_DONE "{\"attempt\":1,\"chainId\":\"stop-head-chain-01\",\"sessionId\":\"$HEAD_SESSION_KEY\",\"outcome\":\"pass\"}"
 head_event stop-head-gates GATES_PASSED "{\"headSha\":\"$HEAD_SHA\"}"
 head_event stop-head-converge CONVERGENCE_PASSED '{}'
 head_event stop-head-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:stop-head"}'
@@ -62,8 +107,8 @@ HEAD_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
 HEAD_REVIEW_MARKER="$(review_marker "$HEAD_REVIEW_KEY" "$HEAD_SHA" "$HEAD_REVIEW_DIGEST")"
 head_event stop-head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEAD_REVIEW_KEY\",\"marker\":\"$HEAD_REVIEW_MARKER\",\"headSha\":\"$HEAD_SHA\",\"provider\":\"github\"}"
 head_event stop-head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
-head_event stop-head-tdd-start-2 TDD_STARTED '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head"}'
-head_event stop-head-tdd-done-2 TDD_CHAIN_DONE '{"attempt":2,"chainId":"stop-head-chain-02","sessionId":"stop_session_head","outcome":"pass"}'
+head_event stop-head-tdd-start-2 TDD_STARTED "{\"attempt\":2,\"chainId\":\"stop-head-chain-02\",\"sessionId\":\"$HEAD_SESSION_KEY\"}"
+head_event stop-head-tdd-done-2 TDD_CHAIN_DONE "{\"attempt\":2,\"chainId\":\"stop-head-chain-02\",\"sessionId\":\"$HEAD_SESSION_KEY\",\"outcome\":\"pass\"}"
 OUT1H="$(invoke "$P1H" stop_session_head)"
 if [ "$HEAD_READY" = true ] \
   && [ "$(printf '%s' "$OUT1H" | decision)" = block ] \
@@ -154,6 +199,37 @@ if [ "$(printf '%s' "$OUT8D" | decision)" = block ] && printf '%s' "$OUT8D" | gr
   check "S8d nonterminal run without a pointer blocks Stop" PASS
 else check "S8d orphan nonterminal run cannot look absent" FAIL; fi
 
+# Model the exact adoption race: the initial locked read reports absent, the
+# adoption lease stays contended, and its descriptor-backed fallback proves a
+# nonterminal run is active. That proof must block this Stop directly; a second
+# contended read must never turn the active generation back into "absent".
+P6G="$TMP/adoption-active-contention"; start "$P6G" stop_run_contention stop_session_contention
+RF6G="$(autopilot_run_file stop_run_contention "$P6G")"
+BEFORE8G="$(digest "$RF6G")"
+CONTENTION_PLUGIN="$TMP/adoption-contention-plugin"; copy_runtime "$CONTENTION_PLUGIN"
+CONTENTION_PLUGIN="$(cd "$CONTENTION_PLUGIN" && pwd -P)"
+CONTENTION_STATE_LIB="$CONTENTION_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
+printf '%s\n' \
+  'source "$REAL_AUTOPILOT_STATE_LIB"' \
+  'autopilot_read_active() { printf '\''read\n'\'' >> "$ZENSU_CONTENTION_READ_MARKER"; return 1; }' \
+  '_autopilot_locked_run() { printf '\''lock\n'\'' >> "$ZENSU_CONTENTION_LOCK_MARKER"; return 1; }' \
+  > "$CONTENTION_STATE_LIB"
+bind_runtime_session "$CONTENTION_PLUGIN" "$P6G" stop_session_contention adoption-contention
+OUT8G="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_contention"}' \
+  | CLAUDE_PROJECT_DIR="$P6G" CLAUDE_PLUGIN_ROOT="$CONTENTION_PLUGIN" \
+    REAL_AUTOPILOT_STATE_LIB="$LIB" \
+    ZENSU_CONTENTION_READ_MARKER="$TMP/adoption-contention-read" \
+    ZENSU_CONTENTION_LOCK_MARKER="$TMP/adoption-contention-lock" \
+    bash "$CONTENTION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+AFTER8G="$(digest "$RF6G")"
+if [ "$(printf '%s' "$OUT8G" | decision)" = block ] \
+  && printf '%s' "$OUT8G" | grep -qF 'became active while deferred review adoption was waiting for the Outer lock' \
+  && [ -s "$TMP/adoption-contention-read" ] \
+  && [ -s "$TMP/adoption-contention-lock" ] \
+  && [ "$BEFORE8G" = "$AFTER8G" ]; then
+  check "S8g active Outer proof cannot degrade to absent after adoption contention" PASS
+else check "S8g adoption contention must fail closed on the proven active Outer" FAIL; fi
+
 P6E="$TMP/hidden-orphan"; start "$P6E" stop_run_old_terminal stop_session_old_terminal
 autopilot_apply_event stop_run_old_terminal cancel-old-terminal CANCEL '{}' "$P6E" >/dev/null
 OLD_POINTER8E="$TMP/old-terminal-pointer.json"
@@ -225,12 +301,15 @@ CLAUDE_PROJECT_DIR="$P7F" bash "$LOG" --tdd-complete --session stop_session_fres
   --autopilot-run stop_run_fresh --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-fresh-001 >/dev/null
 TICKET9F="$(CLAUDE_PROJECT_DIR="$P7F" bash "$LOG" --review-ticket --session stop_session_fresh)"
-COUNTER9F="$P7F/.zensu/state/rounds-stop_session_fresh.json"
-CLAUDE_PROJECT_DIR="$P7F" tdd_consume_review_ticket stop_session_fresh "$TICKET9F" "$COUNTER9F" >/dev/null
-FRESH_PLUGIN="$TMP/fresh-prompt-plugin"; mkdir -p "$FRESH_PLUGIN/hooks/lib"
-for fresh_lib in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-tdd-phase.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$fresh_lib" "$FRESH_PLUGIN/hooks/lib/$fresh_lib"
+CLAUDE_PROJECT_DIR="$P7F" tdd_consume_review_ticket "$ZENSU_SESSION_KEY" "$TICKET9F" >/dev/null
+FRESH_PLUGIN="$TMP/fresh-prompt-plugin"; mkdir -p "$FRESH_PLUGIN"
+FRESH_PLUGIN="$(cd "$FRESH_PLUGIN" && pwd -P)"
+for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+  cp -R "$PLUGIN_DIR/$runtime_entry" "$FRESH_PLUGIN/$runtime_entry"
 done
+mkdir -p "$FRESH_PLUGIN/mcp-runtime"
+cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
+  "$FRESH_PLUGIN/mcp-runtime/"
 FRESH_STATE_LIB="$FRESH_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \
@@ -242,10 +321,18 @@ printf '%s\n' \
   '  CLAUDE_PROJECT_DIR="$7" tdd_mark_review_converged "$8" "$ZENSU_FRESH_REVIEW_TICKET" codeReviewDone || return 5' \
   '  printf '\''%s\n'\'' "$result"' \
   '}' > "$FRESH_STATE_LIB"
-OUT9F="$(printf '%s' '{"session_id":"stop_session_fresh"}' \
+ZENSU_TEST_PLUGIN_DATA="$TMP/fresh-prompt-plugin-data"
+export ZENSU_TEST_PLUGIN_DATA
+# The instrumented runtime is a distinct installation. Bootstrap its own
+# authenticated session context so the handoff acknowledgement exercises the
+# real plugin-root boundary instead of relying on the original fixture's root.
+# shellcheck disable=SC1090
+source "$BASELINE" stop_session_fresh "$FRESH_PLUGIN"
+unset ZENSU_TEST_PLUGIN_DATA
+OUT9F="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_fresh"}' \
   | CLAUDE_PROJECT_DIR="$P7F" CLAUDE_PLUGIN_ROOT="$FRESH_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_FRESH_REVIEW_TICKET="$TICKET9F" \
-    bash "$STOP" 2>/dev/null)"
+    bash "$FRESH_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 CTX9F="$(printf '%s' "$OUT9F" | context)"
 if [ "$(printf '%s' "$OUT9F" | decision)" = block ] \
   && printf '%s' "$OUT9F" | grep -qF "skill='zensu:self-review'" \
@@ -269,16 +356,14 @@ CLAUDE_PROJECT_DIR="$P7G" bash "$LOG" --tdd-begin --session stop_session_generat
 CLAUDE_PROJECT_DIR="$P7G" bash "$LOG" --tdd-complete --session stop_session_generation \
   --autopilot-run stop_run_generation --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-generation-stop-001 >/dev/null
-TF7G="$P7G/.zensu/state/tdd-phase-stop_session_generation.json"
+TF7G="$(tdd_state_file stop_session_generation)"
 RF7G="$(autopilot_run_file stop_run_generation "$P7G")"
 INITIAL7G=false
 field_ok "$TF7G" \
   'j.autopilotAttempt===1&&j.chainId==="chain-generation-stop-001"&&j.implComplete===true&&j.stopBlockCount===0' \
   && INITIAL7G=true
-GENERATION_PLUGIN="$TMP/stale-inner-budget-plugin"; mkdir -p "$GENERATION_PLUGIN/hooks/lib"
-for generation_lib in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-tdd-phase.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$generation_lib" "$GENERATION_PLUGIN/hooks/lib/$generation_lib"
-done
+GENERATION_PLUGIN="$TMP/stale-inner-budget-plugin"; copy_runtime "$GENERATION_PLUGIN"
+GENERATION_PLUGIN="$(cd "$GENERATION_PLUGIN" && pwd -P)"
 GENERATION_STATE_LIB="$GENERATION_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \
@@ -294,12 +379,14 @@ printf '%s\n' \
   '  fi' \
   '  _autopilot_read_active_real "$@"' \
   '}' > "$GENERATION_STATE_LIB"
-OUT9G="$(printf '%s' '{"session_id":"stop_session_generation"}' \
+bind_runtime_session "$GENERATION_PLUGIN" "$P7G" stop_session_generation generation-race
+OUT9G="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_generation"}' \
   | CLAUDE_PROJECT_DIR="$P7G" CLAUDE_PLUGIN_ROOT="$GENERATION_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_GENERATION_RACE_MARKER="$TMP/generation-race-fired" \
-    ZENSU_GENERATION_RUN=stop_run_generation ZENSU_GENERATION_SID=stop_session_generation \
+    ZENSU_GENERATION_RUN=stop_run_generation ZENSU_GENERATION_SID="$ZENSU_SESSION_KEY" \
     ZENSU_GENERATION_CHAIN_1=chain-generation-stop-001 \
-    ZENSU_GENERATION_CHAIN_2=chain-generation-stop-002 bash "$STOP" 2>/dev/null)"
+    ZENSU_GENERATION_CHAIN_2=chain-generation-stop-002 \
+    bash "$GENERATION_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$INITIAL7G" = true ] && [ -e "$TMP/generation-race-fired" ] \
   && [ "$(printf '%s' "$OUT9G" | decision)" = block ] \
   && printf '%s' "$OUT9G" | grep -qF 'generation changed' \
@@ -336,10 +423,8 @@ CLAUDE_PROJECT_DIR="$P7U" bash "$LOG" --tdd-complete --session stop_session_term
   --autopilot-run stop_run_terminal_old --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-terminal-old-001 >/dev/null
 autopilot_apply_event stop_run_terminal_old cancel-terminal-old CANCEL '{}' "$P7U" >/dev/null
-TERMINAL_PLUGIN="$TMP/stale-terminal-plugin"; mkdir -p "$TERMINAL_PLUGIN/hooks/lib"
-for terminal_lib in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-tdd-phase.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$terminal_lib" "$TERMINAL_PLUGIN/hooks/lib/$terminal_lib"
-done
+TERMINAL_PLUGIN="$TMP/stale-terminal-plugin"; copy_runtime "$TERMINAL_PLUGIN"
+TERMINAL_PLUGIN="$(cd "$TERMINAL_PLUGIN" && pwd -P)"
 TERMINAL_STATE_LIB="$TERMINAL_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \
@@ -354,11 +439,12 @@ printf '%s\n' \
   '  fi' \
   '  printf '\''%s\n'\'' "$cached"' \
   '}' > "$TERMINAL_STATE_LIB"
-OUT9U="$(printf '%s' '{"session_id":"stop_session_terminal_race"}' \
+bind_runtime_session "$TERMINAL_PLUGIN" "$P7U" stop_session_terminal_race terminal-race
+OUT9U="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_terminal_race"}' \
   | CLAUDE_PROJECT_DIR="$P7U" CLAUDE_PLUGIN_ROOT="$TERMINAL_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_TERMINAL_RACE_MARKER="$TMP/terminal-race-fired" \
-    ZENSU_TERMINAL_NEW_RUN=stop_run_terminal_new ZENSU_TERMINAL_SID=stop_session_terminal_race \
-    bash "$STOP" 2>/dev/null)"
+    ZENSU_TERMINAL_NEW_RUN=stop_run_terminal_new ZENSU_TERMINAL_SID="$ZENSU_SESSION_KEY" \
+    bash "$TERMINAL_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 RF7U_NEW="$(autopilot_run_file stop_run_terminal_new "$P7U")"
 if [ -e "$TMP/terminal-race-fired" ] \
   && [ "$(printf '%s' "$OUT9U" | decision)" = block ] \
@@ -382,11 +468,12 @@ CLAUDE_PROJECT_DIR="$P7V" bash "$LOG" --tdd-complete --session stop_session_esca
   --autopilot-run stop_run_escape_old --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-escape-old-001 >/dev/null
 autopilot_apply_event stop_run_escape_old cancel-escape-old CANCEL '{}' "$P7V" >/dev/null
-OUT9V="$(printf '%s' '{"session_id":"stop_session_escape_race"}' \
+bind_runtime_session "$TERMINAL_PLUGIN" "$P7V" stop_session_escape_race terminal-race
+OUT9V="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_escape_race"}' \
   | CLAUDE_PROJECT_DIR="$P7V" CLAUDE_PLUGIN_ROOT="$TERMINAL_PLUGIN" ZENSU_AUTOPILOT=off \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_TERMINAL_RACE_MARKER="$TMP/terminal-escape-race-fired" \
-    ZENSU_TERMINAL_NEW_RUN=stop_run_escape_new ZENSU_TERMINAL_SID=stop_session_escape_race \
-    bash "$STOP" 2>/dev/null)"
+    ZENSU_TERMINAL_NEW_RUN=stop_run_escape_new ZENSU_TERMINAL_SID="$ZENSU_SESSION_KEY" \
+    bash "$TERMINAL_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 RF7V_NEW="$(autopilot_run_file stop_run_escape_new "$P7V")"
 if [ -e "$TMP/terminal-escape-race-fired" ] && [ -z "$OUT9V" ] \
   && field_ok "$RF7V_NEW" \
@@ -396,6 +483,7 @@ else check "S9i explicit escape cannot release a new active run from stale termi
 
 P7S="$TMP/stale-terminal"; start "$P7S" stop_run_stale stop_session_stale
 autopilot_apply_event stop_run_stale cancel-stale CANCEL '{}' "$P7S" >/dev/null
+activate_session "$P7S" later_standalone || exit 1
 CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --tdd-begin --session later_standalone >/dev/null
 CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --tdd-complete --session later_standalone >/dev/null
 OUT9S="$(invoke "$P7S" later_standalone)"
@@ -406,7 +494,8 @@ else check "S9c old terminal does not bypass standalone inner chain" FAIL; fi
 CLAUDE_PROJECT_DIR="$P7S" bash "$LOG" --pending-review --files 'src/pending.ts' \
   --summary 'review queued after terminal autopilot' >/dev/null
 OUT9SP="$(invoke "$P7S" pending_after_terminal)"
-TF9SP="$P7S/.zensu/state/tdd-phase-pending_after_terminal.json"
+activate_session "$P7S" pending_after_terminal || exit 1
+TF9SP="$(tdd_state_file pending_after_terminal)"
 if [ "$(printf '%s' "$OUT9SP" | decision)" = block ] \
   && printf '%s' "$OUT9SP" | grep -qF 'zensu:code-reviewer' \
   && field_ok "$TF9SP" 'j.active===true&&j.implComplete===true&&j.chainDone===false'; then
@@ -419,6 +508,7 @@ else check "S9c2 terminal pointer preserves deferred review compatibility" FAIL;
 # queued forever behind the stale terminal ownership shortcut. The existing
 # S9e assertion below keeps resumable BLOCKED deliberately conservative.
 P7P="$TMP/cancelled-pending-same-session"; start "$P7P" stop_run_pending_old stop_session_pending_same
+activate_session "$P7P" stop_session_pending_same || exit 1
 autopilot_apply_event stop_run_pending_old plan-pending-old PLAN_APPROVED \
   "{\"approvedPlanSha256\":\"$SHA\"}" "$P7P" >/dev/null
 CLAUDE_PROJECT_DIR="$P7P" bash "$LOG" --tdd-begin --session stop_session_pending_same \
@@ -432,7 +522,7 @@ CLAUDE_PROJECT_DIR="$P7P" bash "$LOG" --pending-review --files 'src/same-session
   --summary 'must supersede cancelled exact inner binding' >/dev/null
 PF7P="$P7P/.zensu/state/pending-review.json"
 OUT9P="$(invoke "$P7P" stop_session_pending_same)"
-TF7P="$P7P/.zensu/state/tdd-phase-stop_session_pending_same.json"
+TF7P="$(tdd_state_file stop_session_pending_same)"
 if [ "$(printf '%s' "$OUT9P" | decision)" = block ] \
   && printf '%s' "$OUT9P" | grep -qF 'zensu:code-reviewer' \
   && [ ! -e "$PF7P" ] && [ -f "$PF7P.claim" ] \
@@ -448,7 +538,8 @@ CLAUDE_PROJECT_DIR="$P7R" bash "$LOG" --tdd-begin --session stop_session_reconci
 CLAUDE_PROJECT_DIR="$P7R" bash "$LOG" --tdd-complete --session stop_session_reconcile \
   --autopilot-run stop_run_reconcile --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-reconcile-001 >/dev/null
-CLAUDE_PROJECT_DIR="$P7R" tdd_finish_autopilot_chain stop_session_reconcile stop_run_reconcile 1 chain-reconcile-001 max-rounds
+CLAUDE_PROJECT_DIR="$P7R" tdd_finish_autopilot_chain "$ZENSU_SESSION_KEY" \
+  stop_run_reconcile 1 chain-reconcile-001 max-rounds
 OUT9R="$(invoke "$P7R" stop_session_reconcile)"; RF7R="$(autopilot_run_file stop_run_reconcile "$P7R")"
 if [ -z "$OUT9R" ] && field_ok "$RF7R" 'j.stage==="BLOCKED"&&j.blocked.code==="TDD_MAX_ROUNDS"'; then
   check "S9d crash-window reconciliation re-applies terminal release after BLOCKED" PASS
@@ -457,7 +548,7 @@ else check "S9d reconciled terminal permits Stop" FAIL; fi
 # BLOCKED is resumable and still owns its exact Inner generation. A deferred
 # review marker must remain queued; Stop must never overwrite that binding with
 # an unbound seed merely because chainDone already released the hook.
-TF7R="$P7R/.zensu/state/tdd-phase-stop_session_reconcile.json"
+TF7R="$(tdd_state_file stop_session_reconcile)"
 BEFORE9RB="$(digest "$TF7R")"
 CLAUDE_PROJECT_DIR="$P7R" bash "$LOG" --pending-review --files 'src/blocked-pending.ts' \
   --summary 'must remain queued behind blocked outer' >/dev/null
@@ -475,12 +566,13 @@ else check "S9e BLOCKED outer cannot seed an unbound deferred review" FAIL; fi
 P7W="$TMP/blocked-after-standalone"; mkdir -p "$P7W"
 S7W=stop_session_blocked_after_standalone
 R7W=stop_run_blocked_after_standalone
+activate_session "$P7W" "$S7W" || exit 1
 CLAUDE_PROJECT_DIR="$P7W" bash "$LOG" --tdd-begin --session "$S7W" >/dev/null
 CLAUDE_PROJECT_DIR="$P7W" bash "$LOG" --tdd-complete --session "$S7W" >/dev/null
 start "$P7W" "$R7W" "$S7W"
 autopilot_apply_event "$R7W" block-after-standalone BLOCK \
   '{"code":"MANUAL_BLOCK"}' "$P7W" >/dev/null
-TF7W="$P7W/.zensu/state/tdd-phase-${S7W}.json"
+TF7W="$(tdd_state_file "$S7W")"
 RF7W="$(autopilot_run_file "$R7W" "$P7W")"
 BEFORE9W="$(digest "$RF7W")"
 OUT9W="$(invoke "$P7W" "$S7W")"
@@ -513,6 +605,7 @@ P8C="$TMP/standalone-cap-with-outer"; mkdir -p "$P8C"
 S8C=stop_session_standalone_cap; R8C=stop_run_after_standalone
 CFG8C="$TMP/standalone-cap-one.json"
 printf '%s\n' '{"hooks":{"autoFixMaxRounds":1}}' > "$CFG8C"
+activate_session "$P8C" "$S8C" || exit 1
 CLAUDE_PROJECT_DIR="$P8C" bash "$LOG" --tdd-begin --session "$S8C" >/dev/null
 CLAUDE_PROJECT_DIR="$P8C" bash "$LOG" --tdd-complete --session "$S8C" >/dev/null
 start "$P8C" "$R8C" "$S8C"
@@ -536,10 +629,8 @@ else check "S10c standalone cap must still enforce the durable Outer" FAIL; fi
 # simulates that concurrent transition and returns the helper's stale rc=4;
 # Stop must re-read, route the new action, and increment only that generation.
 P8B="$TMP/cap-stale-stage"; start "$P8B" stop_run_cap_stale stop_session_cap_stale
-STALE_PLUGIN="$TMP/stale-cap-plugin"; mkdir -p "$STALE_PLUGIN/hooks/lib"
-for stale_lib in zensu-agent-context.sh zensu-session.sh zensu-config.sh zensu-tdd-phase.sh; do
-  ln -s "$PLUGIN_DIR/hooks/lib/$stale_lib" "$STALE_PLUGIN/hooks/lib/$stale_lib"
-done
+STALE_PLUGIN="$TMP/stale-cap-plugin"; copy_runtime "$STALE_PLUGIN"
+STALE_PLUGIN="$(cd "$STALE_PLUGIN" && pwd -P)"
 STALE_STATE_LIB="$STALE_PLUGIN/hooks/lib/zensu-autopilot-state.sh"
 printf '%s\n' \
   'source "$REAL_AUTOPILOT_STATE_LIB"' \
@@ -552,10 +643,11 @@ printf '%s\n' \
   '  fi' \
   '  _autopilot_increment_stop_budget_capped_real "$@"' \
   '}' > "$STALE_STATE_LIB"
-OUT10B="$(printf '%s' '{"session_id":"stop_session_cap_stale"}' \
+bind_runtime_session "$STALE_PLUGIN" "$P8B" stop_session_cap_stale stale-cap
+OUT10B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_cap_stale"}' \
   | CLAUDE_PROJECT_DIR="$P8B" CLAUDE_PLUGIN_ROOT="$STALE_PLUGIN" \
     REAL_AUTOPILOT_STATE_LIB="$LIB" ZENSU_STALE_CAP_MARKER="$TMP/stale-cap-fired" \
-    bash "$STOP" 2>/dev/null)"
+    bash "$STALE_PLUGIN/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 RF8B="$(autopilot_run_file stop_run_cap_stale "$P8B")"
 if [ "$(printf '%s' "$OUT10B" | decision)" = block ] \
   && printf '%s' "$OUT10B" | grep -qF 'stage=AWAIT_TDD; nextActionCode=START_TDD' \
@@ -566,35 +658,38 @@ else check "S10b stale outer-cap CAS cannot mutate or describe the old stage" FA
 
 P9="$TMP/runtime-missing"; start "$P9" stop_run_runtime stop_session_runtime
 NO_NODE_PATH="$TMP/no-node-path"; mkdir -p "$NO_NODE_PATH"
-OUT11="$(printf '%s' '{"session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
-if [ "$(printf '%s' "$OUT11" | decision)" = block ] && printf '%s' "$OUT11" | grep -qF 'durable state runtime is unavailable'; then
-  check "S11 missing Node with an active pointer fails closed using shell-only JSON" PASS
-else check "S11 missing Node fails closed" FAIL; fi
-OUT11B="$(printf '%s' '{"session_id":"stop_session_orphan"}' | CLAUDE_PROJECT_DIR="$P6D" \
+ln -s "$(command -v dirname)" "$NO_NODE_PATH/dirname"
+OUT11="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
+if [ -z "$OUT11" ]; then
+  check "S11 missing Node stays silent before principal/state authentication" PASS
+else check "S11 missing Node must not guess a main-thread Stop decision" FAIL; fi
+OUT11B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_orphan"}' | CLAUDE_PROJECT_DIR="$P6D" \
   PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
-if [ "$(printf '%s' "$OUT11B" | decision)" = block ] \
-  && printf '%s' "$OUT11B" | grep -qF 'durable state runtime is unavailable'; then
-  check "S11b missing Node with an orphan run fails closed from the run-file hint" PASS
-else check "S11b orphan run cannot look absent without Node" FAIL; fi
+if [ -z "$OUT11B" ]; then
+  check "S11b orphan missing-Node path also stays unauthenticated and silent" PASS
+else check "S11b orphan missing-Node path must not guess a Stop principal" FAIL; fi
 
-MISSING_LIB_ROOT="$TMP/missing-state-lib"; mkdir -p "$MISSING_LIB_ROOT/hooks/lib"
-ln -s "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" "$MISSING_LIB_ROOT/hooks/lib/zensu-agent-context.sh"
-OUT12="$(printf '%s' '{"session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" CLAUDE_PLUGIN_ROOT="$MISSING_LIB_ROOT" bash "$STOP" 2>/dev/null)"
+MISSING_LIB_ROOT="$TMP/missing-state-lib"; copy_runtime "$MISSING_LIB_ROOT"
+MISSING_LIB_ROOT="$(cd "$MISSING_LIB_ROOT" && pwd -P)"
+rm -f "$MISSING_LIB_ROOT/hooks/lib/zensu-autopilot-state.sh"
+bind_runtime_session "$MISSING_LIB_ROOT" "$P9" stop_session_runtime missing-state
+OUT12="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_runtime"}' | CLAUDE_PROJECT_DIR="$P9" CLAUDE_PLUGIN_ROOT="$MISSING_LIB_ROOT" bash "$MISSING_LIB_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT12" | decision)" = block ] && printf '%s' "$OUT12" | grep -qF 'durable state runtime is unavailable'; then
   check "S12 missing outer-state library with an active pointer fails closed" PASS
 else check "S12 missing state library fails closed" FAIL; fi
-OUT12B="$(printf '%s' '{"session_id":"stop_session_orphan"}' | CLAUDE_PROJECT_DIR="$P6D" \
-  CLAUDE_PLUGIN_ROOT="$MISSING_LIB_ROOT" bash "$STOP" 2>/dev/null)"
+bind_runtime_session "$MISSING_LIB_ROOT" "$P6D" stop_session_orphan missing-state
+OUT12B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_orphan"}' | CLAUDE_PROJECT_DIR="$P6D" \
+  CLAUDE_PLUGIN_ROOT="$MISSING_LIB_ROOT" bash "$MISSING_LIB_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 if [ "$(printf '%s' "$OUT12B" | decision)" = block ] \
   && printf '%s' "$OUT12B" | grep -qF 'durable state runtime is unavailable'; then
   check "S12b missing state library with an orphan run fails closed" PASS
 else check "S12b orphan run cannot look absent without the state library" FAIL; fi
 
-OUT13="$(printf '%s' '{"session_id":"stop_session_runtime","agent_id":"spawned-no-runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
+OUT13="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_runtime","agent_id":"spawned-no-runtime"}' | CLAUDE_PROJECT_DIR="$P9" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
 [ -z "$OUT13" ] \
   && check "S13 spawned-agent no-op still precedes missing-runtime enforcement" PASS \
   || check "S13 spawned agent remains first no-op" FAIL
-OUT13B="$(printf '%s' '{"session_id":"stop_session_orphan","agent_id":"spawned-orphan-no-runtime"}' \
+OUT13B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_orphan","agent_id":"spawned-orphan-no-runtime"}' \
   | CLAUDE_PROJECT_DIR="$P6D" PATH="$NO_NODE_PATH" /bin/bash "$STOP" 2>/dev/null)"
 [ -z "$OUT13B" ] \
   && check "S13b spawned-agent no-op precedes orphan runtime enforcement" PASS \

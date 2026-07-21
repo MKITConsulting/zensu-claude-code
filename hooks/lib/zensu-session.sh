@@ -1,86 +1,180 @@
 #!/bin/bash
 
-zensu_session_key() {
-  local proc_start proc_hash
-  proc_start="$(ps -o lstart= -p "$PPID" 2>/dev/null)"
-  if [ -n "$proc_start" ]; then
-    proc_hash="$(printf '%s' "$proc_start" | cksum 2>/dev/null | cut -d' ' -f1)"
-  fi
-  if [ -n "${proc_hash:-}" ]; then
-    echo "${PPID}_${proc_hash}"
-  else
-    echo "${PPID}"
-  fi
-}
-
-zensu_resolve_session_via_helper() {
-  local helper_root="${CLAUDE_PLUGIN_ROOT:-}"
-  if [ -z "$helper_root" ]; then
-    helper_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-  fi
-  local helper="${helper_root}/hooks/lib/resolve-session-id.js"
-  [ -f "$helper" ] || return 1
-  command -v node >/dev/null 2>&1 || return 1
-  local out
-  out="$(ZENSU_TRANSCRIPT_PATH="${ZENSU_TRANSCRIPT_PATH:-}" node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
-  out="${out//$'\n'/}"
-  out="${out//$'\r'/}"
-  if [ -n "$out" ]; then
-    local sanitized="${out//[^A-Za-z0-9_-]/_}"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
+_ZENSU_SESSION_MSYS_ENV_READY=false
+_ZENSU_SESSION_LIB_DIR=''
+_ZENSU_SESSION_MSYS_ENV=''
+unset -f zensu_msys_env_exclusions 2>/dev/null || true
+if _ZENSU_SESSION_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"; then
+  _ZENSU_SESSION_MSYS_ENV="$_ZENSU_SESSION_LIB_DIR/zensu-msys-env.sh"
+  if [ -f "$_ZENSU_SESSION_MSYS_ENV" ] && [ ! -L "$_ZENSU_SESSION_MSYS_ENV" ]; then
+    # shellcheck disable=SC1090
+    if source "$_ZENSU_SESSION_MSYS_ENV" \
+        && declare -F zensu_msys_env_exclusions >/dev/null 2>&1; then
+      _ZENSU_SESSION_MSYS_ENV_READY=true
     fi
   fi
-  return 1
+fi
+if [ "$_ZENSU_SESSION_MSYS_ENV_READY" != true ]; then
+  # Keep every public session function available to its caller. Stateful hooks
+  # can then render their normal fail-closed deny even when this dependency is
+  # missing, symlinked, or otherwise unsafe to source.
+  zensu_msys_env_exclusions() { return 1; }
+fi
+export -f zensu_msys_env_exclusions 2>/dev/null || true
+unset _ZENSU_SESSION_LIB_DIR _ZENSU_SESSION_MSYS_ENV _ZENSU_SESSION_MSYS_ENV_READY
+
+zensu_bind_hook_session() {
+  local payload="${1:-}"
+  local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  # Native Windows Node cannot reliably consume an MSYS module path when the
+  # plugin root contains shell metacharacters. Resolve the already-validated
+  # module from its own directory and let the binder normalize the declared
+  # root before it compares identities.
+  bindings="$(
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js
+  )" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  eval "$bindings" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+}
+
+zensu_bind_model_session() {
+  local lib_dir binder bindings plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  bindings="$(
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      node ./claude-hook-session-v1.js model-bind
+  )" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  eval "$bindings" || {
+    unset ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+      ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+    return 1
+  }
+  export ZENSU_CLAUDE_PLUGIN_ROOT ZENSU_SESSION_KEY ZENSU_SESSION_CONTEXT \
+    ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
+}
+
+zensu_emit_hook_session_deny() {
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid. Start a fresh Claude Code session before using stateful tools."}}'
 }
 
 zensu_resolve_session_id() {
-  local from_json="${1:-}"
-  local sanitized helper_out
-  if [ -n "$from_json" ]; then
-    sanitized="${from_json//[^A-Za-z0-9_-]/_}"
-    if [ -n "$sanitized" ]; then
-      echo "$sanitized"
-      return 0
-    fi
+  local raw="${1:-}"
+  local lib_dir core resolved injected_key
+  injected_key="${ZENSU_SESSION_KEY:-}"
+  if [ -z "$raw" ]; then
+    raw="$injected_key"
   fi
-  if helper_out="$(zensu_resolve_session_via_helper)"; then
-    if [ -n "$helper_out" ]; then
-      echo "$helper_out"
-      return 0
-    fi
-  fi
-  echo "fallback_$(zensu_session_key)"
-}
-
-# Resolve the active session's project dir (absolute) when CLAUDE_PROJECT_DIR is
-# unavailable — the non-hook Bash-call counterpart to zensu_resolve_session_via_helper.
-# Delegates to resolve-project-dir.js (active-transcript cwd), threading the same
-# ZENSU_TRANSCRIPT_PATH / ZENSU_BASH_START env the session helper uses. Prints an
-# absolute, EXISTING directory on success; returns non-zero (no output) otherwise,
-# so callers can leave CLAUDE_PROJECT_DIR untouched on a miss.
-zensu_resolve_project_dir() {
-  local helper_root="${CLAUDE_PLUGIN_ROOT:-}"
-  if [ -z "$helper_root" ]; then
-    helper_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)"
-  fi
-  local helper="${helper_root}/hooks/lib/resolve-project-dir.js"
-  [ -f "$helper" ] || return 1
+  [ -n "$raw" ] || return 1
   command -v node >/dev/null 2>&1 || return 1
-  local out
-  out="$(ZENSU_TRANSCRIPT_PATH="${ZENSU_TRANSCRIPT_PATH:-}" node "$helper" "${ZENSU_BASH_START:-}" 2>/dev/null)"
-  out="${out//$'\n'/}"
-  out="${out//$'\r'/}"
-  [ -n "$out" ] || return 1
-  # Only adopt an ABSOLUTE, existing directory. The transcript cwd is always an
-  # absolute canonical path, so this never rejects the happy path; it hardens the
-  # value that is about to be exported as CLAUDE_PROJECT_DIR and interpolated into
-  # state-file mkdir/rm paths against a relative or otherwise unexpected result.
-  case "$out" in /*) ;; *) return 1 ;; esac
-  [ -d "$out" ] || return 1
-  echo "$out"
-  return 0
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  core="$lib_dir/session-control-core-v1.js"
+  [ -f "$core" ] || return 1
+  resolved="$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$raw")" \
+    || return 1
+  if [ -n "$injected_key" ]; then
+    # SessionStart injects a canonical key. Once present, it is an immutable
+    # binding: explicit raw ids and explicit keys are accepted only when their
+    # normalized key is exactly this session's key. This prevents model-side
+    # helpers from reading or mutating another session's CAS state.
+    [ "$(cd -P -- "$lib_dir" && node ./session-control-core-v1.js session-key "$injected_key")" \
+      = "$injected_key" ] || return 1
+    [ "$resolved" = "$injected_key" ] || return 1
+  fi
+  printf '%s\n' "$resolved"
 }
 
-export -f zensu_session_key zensu_resolve_session_via_helper zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true
+zensu_session_key() {
+  zensu_resolve_session_id "${1:-}"
+}
+
+zensu_resolve_project_dir() {
+  local candidate="${ZENSU_PROJECT_ROOT:-}"
+  local context_file="${ZENSU_SESSION_CONTEXT:-}"
+  local session_key="${ZENSU_SESSION_KEY:-}"
+  local lib_dir core msys_env_exclusions
+  [ -n "$candidate" ] && [ -n "$context_file" ] && [ -n "$session_key" ] || return 1
+  [ ! -L "$candidate" ] && [ -d "$candidate" ] || return 1
+  [ ! -L "$context_file" ] && [ -f "$context_file" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  core="$lib_dir/session-control-core-v1.js"
+  [ -f "$core" ] || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      PROJECT_CANDIDATE="$candidate" CONTEXT_FILE="$context_file" SESSION_KEY="$session_key" node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const core = require("./session-control-core-v1.js");
+    const key = core.sessionKey(process.env.SESSION_KEY);
+    if (key !== process.env.SESSION_KEY) process.exit(1);
+    const contextFile = path.resolve(process.env.CONTEXT_FILE);
+    if (path.basename(contextFile) !== `${key}.json`) process.exit(1);
+    const stat = fs.lstatSync(contextFile);
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) process.exit(1);
+    if (fs.realpathSync.native(contextFile) !== contextFile) process.exit(1);
+    const recordsDir = path.dirname(contextFile);
+    const context = core.readContext({ recordsDir, sessionId: key });
+    const requested = path.resolve(process.env.PROJECT_CANDIDATE);
+    const canonical = fs.realpathSync.native(requested);
+    if (requested !== canonical || context.project_root !== canonical) process.exit(1);
+    ' 2>/dev/null
+  ) || return 1
+
+  # Session Control records the host-native canonical path. On Git Bash that
+  # is a Windows path (for example C:\\work\\repo), while subsequent shell
+  # helpers need the MSYS spelling (/c/work/repo) for path concatenation and
+  # Bash builtins. Validate the immutable native value above, then render the
+  # same directory in the executing shell's canonical namespace.
+  (cd -P -- "$candidate" && pwd -P)
+}
+
+export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
+  zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

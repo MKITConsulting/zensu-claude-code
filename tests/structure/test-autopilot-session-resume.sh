@@ -4,7 +4,9 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/session-start-autopilot-resume.sh"
+SESSION_CONTROL_HOOK="$PLUGIN_DIR/hooks/session-start-session-control.sh"
 STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 
 PASS=0
 FAIL=0
@@ -44,12 +46,15 @@ else
   exit 1
 fi
 
-TMP="$(mktemp -d -t zensu-autopilot-resume-XXXXXX)"
-trap 'rm -rf "$TMP"' EXIT
+RAW_TMP="$(mktemp -d -t zensu-autopilot-resume-XXXXXX)"
+RAW_TMP="$(cd -P -- "$RAW_TMP" && pwd -P)"
+TMP="$RAW_TMP"
+trap 'rm -rf "$RAW_TMP"' EXIT
 PROJECT="$TMP/project"
 EMPTY_PROJECT="$TMP/empty-project"
 OTHER_CWD="$TMP/other-cwd"
-mkdir -p "$PROJECT" "$EMPTY_PROJECT" "$OTHER_CWD"
+PLUGIN_DATA="$TMP/plugin-data"
+mkdir -p "$PROJECT" "$EMPTY_PROJECT" "$OTHER_CWD" "$PLUGIN_DATA"
 
 source "$STATE_LIB"
 review_marker() {
@@ -61,7 +66,8 @@ review_marker() {
   '
 }
 RUN_ID="resume_run_01"
-OWNER="owner_session_01"
+OWNER_RAW="owner_session_01"
+OWNER="$(node "$CORE" session-key "$OWNER_RAW")"
 if autopilot_begin_run "$RUN_ID" "$OWNER" "$PROJECT" >/dev/null 2>&1; then
   check "R3 fixture run begins through the public state API" PASS
 else
@@ -70,10 +76,40 @@ fi
 
 invoke() {
   local project="$1" payload="$2"
+  local normalized="$payload"
+  normalized="$(printf '%s' "$payload" | PROJECT="$project" node -e '
+    let input = "";
+    process.stdin.on("data", chunk => { input += chunk; });
+    process.stdin.on("end", () => {
+      try {
+        const value = JSON.parse(input);
+        if (!value || typeof value !== "object" || Array.isArray(value)) process.exit(1);
+        value.hook_event_name = "SessionStart";
+        value.cwd = process.env.PROJECT;
+        process.stdout.write(JSON.stringify(value));
+      } catch (_) {
+        process.stdout.write(input);
+      }
+    });
+  ')"
   (
     cd "$OTHER_CWD" || exit 1
-    printf '%s' "$payload" | ZENSU_FORCE_MAIN='' CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$project" bash "$HOOK" 2>/dev/null
+    printf '%s' "$normalized" | ZENSU_FORCE_MAIN='' CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" CLAUDE_PROJECT_DIR="$project" bash "$HOOK" 2>/dev/null
   )
+}
+
+bind_session() {
+  local session_id="$1" project="$2" payload
+  payload="$(node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name: "SessionStart",
+    source: "startup",
+    session_id: process.argv[1],
+    cwd: process.argv[2]
+  }))' "$session_id" "$project")" || return 1
+  printf '%s' "$payload" | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    bash "$SESSION_CONTROL_HOOK" >/dev/null 2>&1
 }
 
 valid_session_context() {
@@ -108,7 +144,8 @@ session_context_contains() {
   '
 }
 
-BASE_PAYLOAD="{\"source\":\"startup\",\"session_id\":\"$OWNER\"}"
+BASE_PAYLOAD="{\"source\":\"startup\",\"session_id\":\"$OWNER_RAW\"}"
+bind_session "$OWNER_RAW" "$PROJECT" || check "R3a fixture session binds to its immutable project" FAIL
 OUT_START="$(invoke "$PROJECT" "$BASE_PAYLOAD")"
 if printf '%s' "$OUT_START" | valid_session_context 'ACTIVE_RUN' "$RUN_ID" \
   && printf '%s' "$OUT_START" | grep -qF 'stage=PLANNING nextActionCode=AWAIT_PLAN_APPROVAL tddAttempt=0 returnStage=NONE prStatus=none teamReviewStatus=none'; then
@@ -117,17 +154,42 @@ else
   check "R4 matching top-level session receives the closed next action" FAIL
 fi
 
-# The event source does not alter durable semantics. Startup, resume, compact,
-# and clear therefore render the exact same canonical context bytes.
+# All four lifecycle sources render the same bytes when the fresh-event host
+# project and the continuation-event immutable record select the same project.
 SOURCES_STABLE=true
 for source_name in startup resume compact clear; do
-  current="$(invoke "$PROJECT" "{\"source\":\"$source_name\",\"session_id\":\"$OWNER\"}")"
+  current="$(invoke "$PROJECT" "{\"source\":\"$source_name\",\"session_id\":\"$OWNER_RAW\"}")"
   [ "$current" = "$OUT_START" ] || SOURCES_STABLE=false
 done
 if [ "$SOURCES_STABLE" = "true" ]; then
   check "R5 startup/resume/compact/clear are handled byte-stably" PASS
 else
   check "R5 startup/resume/compact/clear are handled byte-stably" FAIL
+fi
+
+EXTERNAL_PROJECT="$TMP/external-project"; mkdir -p "$EXTERNAL_PROJECT"
+EXTERNAL_RUN="external_resume_run_01"
+autopilot_begin_run "$EXTERNAL_RUN" "$OWNER" "$EXTERNAL_PROJECT" >/dev/null 2>&1
+OUT_EXTERNAL_RESUME="$(invoke "$EXTERNAL_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER_RAW\"}")"
+OUT_EXTERNAL_COMPACT="$(invoke "$EXTERNAL_PROJECT" "{\"source\":\"compact\",\"session_id\":\"$OWNER_RAW\"}")"
+if [ "$OUT_EXTERNAL_RESUME" = "$OUT_START" ] \
+  && [ "$OUT_EXTERNAL_COMPACT" = "$OUT_START" ] \
+  && ! printf '%s' "$OUT_EXTERNAL_RESUME$OUT_EXTERNAL_COMPACT" | grep -qF "$EXTERNAL_RUN"; then
+  check "R5b resume/compact ignore CwdChanged state outside the immutable project" PASS
+else
+  check "R5b resume/compact ignore CwdChanged state outside the immutable project" FAIL
+fi
+
+UNBOUND_RAW="unbound_external_session_01"
+UNBOUND_OWNER="$(node "$CORE" session-key "$UNBOUND_RAW")"
+UNBOUND_PROJECT="$TMP/unbound-external-project"; mkdir -p "$UNBOUND_PROJECT"
+autopilot_begin_run unbound_external_run_01 "$UNBOUND_OWNER" "$UNBOUND_PROJECT" >/dev/null 2>&1
+OUT_UNBOUND_RESUME="$(invoke "$UNBOUND_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$UNBOUND_RAW\"}")"
+OUT_UNBOUND_COMPACT="$(invoke "$UNBOUND_PROJECT" "{\"source\":\"compact\",\"session_id\":\"$UNBOUND_RAW\"}")"
+if [ -z "$OUT_UNBOUND_RESUME" ] && [ -z "$OUT_UNBOUND_COMPACT" ]; then
+  check "R5c continuation without a private record cannot inspect external state" PASS
+else
+  check "R5c continuation without a private record cannot inspect external state" FAIL
 fi
 
 BEFORE_STATE="$(find "$PROJECT/.zensu/state" -type f -exec cksum {} \; | sort)"
@@ -141,7 +203,8 @@ fi
 
 BIND_PROJECT="$TMP/binding-project"; mkdir -p "$BIND_PROJECT"
 BIND_RUN="resume_binding_run_01"
-BIND_OWNER="resume_binding_owner_01"
+BIND_OWNER_RAW="resume_binding_owner_01"
+BIND_OWNER="$(node "$CORE" session-key "$BIND_OWNER_RAW")"
 BIND_CHAIN="resume-binding-chain-01"
 BIND_READY=true
 autopilot_begin_run "$BIND_RUN" "$BIND_OWNER" "$BIND_PROJECT" >/dev/null 2>&1 || BIND_READY=false
@@ -151,7 +214,8 @@ autopilot_apply_event "$BIND_RUN" binding-plan PLAN_APPROVED \
 autopilot_apply_event "$BIND_RUN" binding-tdd-start TDD_STARTED \
   "{\"attempt\":1,\"chainId\":\"$BIND_CHAIN\",\"sessionId\":\"$BIND_OWNER\"}" \
   "$BIND_PROJECT" >/dev/null 2>&1 || BIND_READY=false
-OUT_BINDING="$(invoke "$BIND_PROJECT" "{\"source\":\"compact\",\"session_id\":\"$BIND_OWNER\"}")"
+bind_session "$BIND_OWNER_RAW" "$BIND_PROJECT" || BIND_READY=false
+OUT_BINDING="$(invoke "$BIND_PROJECT" "{\"source\":\"compact\",\"session_id\":\"$BIND_OWNER_RAW\"}")"
 if [ "$BIND_READY" = true ] \
   && printf '%s' "$OUT_BINDING" | valid_session_context 'ACTIVE_RUN' "$BIND_RUN" \
   && printf '%s' "$OUT_BINDING" | grep -qF "tddAttempt=1 returnStage=GATES" \
@@ -161,7 +225,8 @@ else
   check "R6b TDD_RUNNING recovery carries exact binding dimensions" FAIL
 fi
 
-OUT_ABSENT="$(invoke "$EMPTY_PROJECT" "$BASE_PAYLOAD")"
+ABSENT_PAYLOAD='{"source":"startup","session_id":"absent_session_01"}'
+OUT_ABSENT="$(invoke "$EMPTY_PROJECT" "$ABSENT_PAYLOAD")"
 if [ -z "$OUT_ABSENT" ]; then
   check "R7 absent active state stays silent" PASS
 else
@@ -171,6 +236,7 @@ fi
 DANGLING_PROJECT="$TMP/dangling-project"; mkdir -p "$DANGLING_PROJECT"
 autopilot_begin_run dangling_resume_run dangling_resume_owner "$DANGLING_PROJECT" >/dev/null
 rm -f "$(autopilot_run_file dangling_resume_run "$DANGLING_PROJECT")"
+bind_session dangling_resume_owner "$DANGLING_PROJECT" || true
 OUT_DANGLING="$(invoke "$DANGLING_PROJECT" '{"source":"resume","session_id":"dangling_resume_owner"}')"
 if printf '%s' "$OUT_DANGLING" | valid_session_context 'CORRUPT_ACTIVE_STATE'; then
   check "R7b dangling pointer emits corrupt-state recovery context" PASS
@@ -178,6 +244,7 @@ else
   check "R7b dangling pointer is not treated as absent" FAIL
 fi
 
+bind_session other_session_02 "$PROJECT" || true
 OUT_MISMATCH="$(invoke "$PROJECT" '{"source":"resume","session_id":"other_session_02"}')"
 if printf '%s' "$OUT_MISMATCH" | valid_session_context 'OWNER_MISMATCH' "$RUN_ID" \
   && ! printf '%s' "$OUT_MISMATCH" | grep -qF 'owner_session_01'; then
@@ -191,7 +258,8 @@ fi
 # enforce their historical owner against a later top-level session.
 EVIDENCE_PROJECT="$TMP/evidence-project"; mkdir -p "$EVIDENCE_PROJECT"
 EVIDENCE_RUN="resume_evidence_run_01"
-EVIDENCE_OWNER="resume_evidence_owner_01"
+EVIDENCE_OWNER_RAW="resume_evidence_owner_01"
+EVIDENCE_OWNER="$(node "$CORE" session-key "$EVIDENCE_OWNER_RAW")"
 EVIDENCE_HEAD="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 EVIDENCE_READY=true
 autopilot_begin_run "$EVIDENCE_RUN" "$EVIDENCE_OWNER" "$EVIDENCE_PROJECT" >/dev/null 2>&1 || EVIDENCE_READY=false
@@ -218,7 +286,8 @@ EVIDENCE_REVIEW_MARKER="$(review_marker "$EVIDENCE_REVIEW_KEY" "$EVIDENCE_HEAD" 
 evidence_event evidence-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$EVIDENCE_REVIEW_KEY\",\"marker\":\"$EVIDENCE_REVIEW_MARKER\",\"headSha\":\"$EVIDENCE_HEAD\",\"provider\":\"github\"}"
 
 EVIDENCE_FRAGMENT="evidence={\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$EVIDENCE_HEAD\"},\"review\":{\"published\":true,\"marker\":\"$EVIDENCE_REVIEW_MARKER\",\"headSha\":\"$EVIDENCE_HEAD\",\"payloadDigest\":\"$EVIDENCE_REVIEW_DIGEST\",\"partCount\":1,\"provider\":\"github\"}}"
-OUT_EVIDENCE="$(invoke "$EVIDENCE_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$EVIDENCE_OWNER\"}")"
+bind_session "$EVIDENCE_OWNER_RAW" "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
+OUT_EVIDENCE="$(invoke "$EVIDENCE_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$EVIDENCE_OWNER_RAW\"}")"
 if [ "$EVIDENCE_READY" = true ] \
   && printf '%s' "$OUT_EVIDENCE" | valid_session_context 'ACTIVE_RUN' "$EVIDENCE_RUN" \
   && printf '%s' "$OUT_EVIDENCE" | session_context_contains "$EVIDENCE_FRAGMENT"; then
@@ -231,7 +300,8 @@ fi
 # head handoff. Recovery must advertise UPDATE_PR_HEAD before the stage action.
 HEAD_PROJECT="$TMP/head-update-project"; mkdir -p "$HEAD_PROJECT"
 HEAD_RUN="resume_head_run_01"
-HEAD_OWNER="resume_head_owner_01"
+HEAD_OWNER_RAW="resume_head_owner_01"
+HEAD_OWNER="$(node "$CORE" session-key "$HEAD_OWNER_RAW")"
 HEAD_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 HEAD_READY=true
 autopilot_begin_run "$HEAD_RUN" "$HEAD_OWNER" "$HEAD_PROJECT" >/dev/null 2>&1 || HEAD_READY=false
@@ -259,7 +329,8 @@ head_event head-review-published TEAM_REVIEW_PUBLISHED "{\"operationKey\":\"$HEA
 head_event head-fix-required FIX_REQUIRED "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":1}"
 head_event head-tdd-start-2 TDD_STARTED "{\"attempt\":2,\"chainId\":\"head-chain-02\",\"sessionId\":\"$HEAD_OWNER\"}"
 head_event head-tdd-done-2 TDD_CHAIN_DONE "{\"attempt\":2,\"chainId\":\"head-chain-02\",\"sessionId\":\"$HEAD_OWNER\",\"outcome\":\"pass\"}"
-OUT_HEAD="$(invoke "$HEAD_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$HEAD_OWNER\"}")"
+bind_session "$HEAD_OWNER_RAW" "$HEAD_PROJECT" || HEAD_READY=false
+OUT_HEAD="$(invoke "$HEAD_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$HEAD_OWNER_RAW\"}")"
 if [ "$HEAD_READY" = true ] \
   && printf '%s' "$OUT_HEAD" | grep -qF 'stage=FIX_FINDINGS prerequisiteActionCode=UPDATE_PR_HEAD nextActionCode=FIX_REVIEW_FINDINGS' \
   && printf '%s' "$OUT_HEAD" | grep -qF 'tddAttempt=2 returnStage=FIX_FINDINGS' \
@@ -274,6 +345,7 @@ fi
 evidence_event evidence-findings FINDINGS_CLEARED "{\"headSha\":\"$EVIDENCE_HEAD\",\"unresolvedCount\":0}"
 evidence_event evidence-validation VALIDATION_PASSED "{\"headSha\":\"$EVIDENCE_HEAD\"}"
 evidence_event evidence-delivery DELIVERY_COMPLETE "{\"headSha\":\"$EVIDENCE_HEAD\"}"
+bind_session later_session_01 "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
 OUT_DONE="$(invoke "$EVIDENCE_PROJECT" '{"source":"resume","session_id":"later_session_01"}')"
 if [ "$EVIDENCE_READY" = true ] \
   && printf '%s' "$OUT_DONE" | valid_session_context 'TERMINAL_RUN' "$EVIDENCE_RUN" \
@@ -288,6 +360,7 @@ fi
 CANCEL_PROJECT="$TMP/cancel-project"; mkdir -p "$CANCEL_PROJECT"
 autopilot_begin_run cancel_resume_run cancel_resume_owner "$CANCEL_PROJECT" >/dev/null 2>&1
 autopilot_apply_event cancel_resume_run cancel-resume-event CANCEL '{}' "$CANCEL_PROJECT" >/dev/null 2>&1
+bind_session later_session_02 "$CANCEL_PROJECT" || true
 OUT_CANCELLED="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"later_session_02"}')"
 if printf '%s' "$OUT_CANCELLED" | valid_session_context 'TERMINAL_RUN' cancel_resume_run \
   && printf '%s' "$OUT_CANCELLED" | grep -qF 'stage=CANCELLED' \
@@ -298,8 +371,10 @@ else
   check "R8c CANCELLED is terminal and does not claim ownership of later work" FAIL
 fi
 
+bind_session hx "$EVIDENCE_PROJECT" || true
+bind_session hy "$CANCEL_PROJECT" || true
 OUT_DONE_SHORT_SESSION="$(invoke "$EVIDENCE_PROJECT" '{"source":"resume","session_id":"hx"}')"
-OUT_CANCELLED_SHORT_SESSION="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"hx"}')"
+OUT_CANCELLED_SHORT_SESSION="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"hy"}')"
 if printf '%s' "$OUT_DONE_SHORT_SESSION" | valid_session_context 'TERMINAL_RUN' "$EVIDENCE_RUN" \
   && printf '%s' "$OUT_DONE_SHORT_SESSION" | grep -qF 'stage=DONE' \
   && ! printf '%s' "$OUT_DONE_SHORT_SESSION" | grep -qF 'CORRUPT_ACTIVE_STATE' \
@@ -318,15 +393,15 @@ else
   check "R8d terminal-only history does not create resume ownership" FAIL
 fi
 
-OUT_AGENT="$(invoke "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER\",\"agent_id\":\"child-1\"}")"
-OUT_KNOWN_AGENT="$(invoke "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER\",\"agent_type\":\"zensu:code-reviewer\"}")"
+OUT_AGENT="$(invoke "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER_RAW\",\"agent_id\":\"child-1\"}")"
+OUT_KNOWN_AGENT="$(invoke "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER_RAW\",\"agent_type\":\"zensu:code-reviewer\"}")"
 if [ -z "$OUT_AGENT" ] && [ -z "$OUT_KNOWN_AGENT" ]; then
   check "R9 spawned agents never receive outer-run resume context" PASS
 else
   check "R9 spawned agents never receive outer-run resume context" FAIL
 fi
 
-OUT_UNKNOWN_SOURCE="$(invoke "$PROJECT" "{\"source\":\"future-event\",\"session_id\":\"$OWNER\"}")"
+OUT_UNKNOWN_SOURCE="$(invoke "$PROJECT" "{\"source\":\"future-event\",\"session_id\":\"$OWNER_RAW\"}")"
 OUT_MALFORMED="$(invoke "$PROJECT" 'not-json')"
 if [ -z "$OUT_UNKNOWN_SOURCE" ] && [ -z "$OUT_MALFORMED" ]; then
   check "R10 unknown or malformed SessionStart input fails closed" PASS
@@ -357,6 +432,7 @@ cp "$TMP/run-good.json" "$RUN_FILE"
 ORPHAN_PROJECT="$TMP/orphan-project"; mkdir -p "$ORPHAN_PROJECT"
 autopilot_begin_run orphan_resume_run orphan_resume_owner "$ORPHAN_PROJECT" >/dev/null 2>&1
 rm -f "$(autopilot_active_file "$ORPHAN_PROJECT")"
+bind_session orphan_resume_owner "$ORPHAN_PROJECT" || true
 OUT_ORPHAN="$(invoke "$ORPHAN_PROJECT" '{"source":"resume","session_id":"orphan_resume_owner"}')"
 if printf '%s' "$OUT_ORPHAN" | valid_session_context 'CORRUPT_ACTIVE_STATE'; then
   check "R11b nonterminal run without a pointer fails closed on SessionStart" PASS
@@ -371,6 +447,7 @@ OLD_RESUME_POINTER="$TMP/old-resume-pointer.json"
 cp "$(autopilot_active_file "$HIDDEN_PROJECT")" "$OLD_RESUME_POINTER"
 autopilot_begin_run hidden_resume_run hidden_resume_owner "$HIDDEN_PROJECT" >/dev/null 2>&1
 cp "$OLD_RESUME_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT")"
+bind_session hidden_resume_owner "$HIDDEN_PROJECT" || true
 OUT_HIDDEN="$(invoke "$HIDDEN_PROJECT" '{"source":"resume","session_id":"hidden_resume_owner"}')"
 if printf '%s' "$OUT_HIDDEN" | valid_session_context 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$OUT_HIDDEN" | grep -qF 'TERMINAL_RUN'; then
@@ -379,8 +456,9 @@ else
   check "R11c hidden nonterminal run cannot inherit terminal resume context" FAIL
 fi
 
-# State resolution is anchored to CLAUDE_PROJECT_DIR rather than hook cwd.
-OUT_PROJECT_LOCAL="$(invoke "$EMPTY_PROJECT" "$BASE_PAYLOAD")"
+# Fresh state resolution is anchored to CLAUDE_PROJECT_DIR rather than the
+# hook process cwd; use an unbound session so no retry record takes precedence.
+OUT_PROJECT_LOCAL="$(invoke "$EMPTY_PROJECT" '{"source":"clear","session_id":"project_local_session_01"}')"
 if [ -z "$OUT_PROJECT_LOCAL" ]; then
   check "R12 active state is strictly project-local" PASS
 else
@@ -401,36 +479,50 @@ invoke_without_node() {
   (
     cd "$OTHER_CWD" || exit 1
     printf '%s' "$payload" | PATH="$NO_NODE_BIN" ZENSU_FORCE_MAIN='' \
-      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$project" /bin/bash "$HOOK" 2>/dev/null
+      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+      CLAUDE_PROJECT_DIR="$project" /bin/bash "$HOOK" 2>/dev/null
   )
 }
 
 MISSING_STATE_PLUGIN="$TMP/missing-state-plugin"
 mkdir -p "$MISSING_STATE_PLUGIN/hooks/lib"
-ln -s "$PLUGIN_DIR/hooks/lib/zensu-agent-context.sh" "$MISSING_STATE_PLUGIN/hooks/lib/zensu-agent-context.sh"
-ln -s "$PLUGIN_DIR/hooks/lib/zensu-session.sh" "$MISSING_STATE_PLUGIN/hooks/lib/zensu-session.sh"
+MISSING_STATE_PLUGIN="$(cd "$MISSING_STATE_PLUGIN" && pwd -P)"
+cp "$HOOK" "$MISSING_STATE_PLUGIN/hooks/session-start-autopilot-resume.sh"
+for runtime_file in zensu-agent-context.sh zensu-session.sh zensu-msys-env.sh zensu-host-path.sh claude-principal-v1.js claude-path-v1.js claude-hook-session-v1.js session-control-core-v1.js; do
+  cp "$PLUGIN_DIR/hooks/lib/$runtime_file" "$MISSING_STATE_PLUGIN/hooks/lib/$runtime_file"
+done
+MISSING_STATE_DATA="$TMP/missing-state-data"
+mkdir -p "$MISSING_STATE_DATA"
+missing_state_payload() {
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name: "SessionStart", source: "startup",
+    session_id: process.argv[1], cwd: process.argv[2]
+  }))' "$1" "$2"
+}
 OUT_NO_NODE="$(invoke_without_node "$PROJECT" "$BASE_PAYLOAD")"
-OUT_NO_STATE="$(printf '%s' "$BASE_PAYLOAD" | ZENSU_FORCE_MAIN='' \
-  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PROJECT_DIR="$PROJECT" /bin/bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$OUT_NO_NODE" | valid_session_context 'RUNTIME_UNAVAILABLE' \
+OUT_NO_STATE="$(missing_state_payload missing_state_session_01 "$PROJECT" | ZENSU_FORCE_MAIN='' \
+  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PLUGIN_DATA="$MISSING_STATE_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" /bin/bash "$MISSING_STATE_PLUGIN/hooks/session-start-autopilot-resume.sh" 2>/dev/null)"
+if [ -z "$OUT_NO_NODE" ] \
   && printf '%s' "$OUT_NO_STATE" | valid_session_context 'RUNTIME_UNAVAILABLE'; then
-  check "R14 active pointer plus missing Node or state library fails closed" PASS
+  check "R14 unauthenticated no-Node path stays silent; missing state runtime is explicit" PASS
 else
-  check "R14 active pointer plus missing Node or state library fails closed" FAIL
+  check "R14 unauthenticated no-Node path stays silent; missing state runtime is explicit" FAIL
 fi
 
 OUT_NO_NODE_ORPHAN="$(invoke_without_node "$ORPHAN_PROJECT" '{"source":"resume","session_id":"orphan_resume_owner"}')"
-OUT_NO_STATE_ORPHAN="$(printf '%s' '{"source":"resume","session_id":"orphan_resume_owner"}' | ZENSU_FORCE_MAIN='' \
-  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PROJECT_DIR="$ORPHAN_PROJECT" /bin/bash "$HOOK" 2>/dev/null)"
-if printf '%s' "$OUT_NO_NODE_ORPHAN" | valid_session_context 'RUNTIME_UNAVAILABLE' \
+OUT_NO_STATE_ORPHAN="$(missing_state_payload missing_orphan_state_session_01 "$ORPHAN_PROJECT" | ZENSU_FORCE_MAIN='' \
+  CLAUDE_PLUGIN_ROOT="$MISSING_STATE_PLUGIN" CLAUDE_PLUGIN_DATA="$MISSING_STATE_DATA" \
+  CLAUDE_PROJECT_DIR="$ORPHAN_PROJECT" /bin/bash "$MISSING_STATE_PLUGIN/hooks/session-start-autopilot-resume.sh" 2>/dev/null)"
+if [ -z "$OUT_NO_NODE_ORPHAN" ] \
   && printf '%s' "$OUT_NO_STATE_ORPHAN" | valid_session_context 'RUNTIME_UNAVAILABLE'; then
-  check "R14b orphan run plus missing Node or state library fails closed" PASS
+  check "R14b orphan state follows the same authenticated runtime policy" PASS
 else
-  check "R14b orphan durable state cannot look absent without its runtime" FAIL
+  check "R14b orphan state follows the same authenticated runtime policy" FAIL
 fi
 
 OUT_NO_NODE_ABSENT="$(invoke_without_node "$EMPTY_PROJECT" "$BASE_PAYLOAD")"
-OUT_NO_NODE_AGENT="$(invoke_without_node "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER\",\"agent_id\":\"child-runtime\"}")"
+OUT_NO_NODE_AGENT="$(invoke_without_node "$PROJECT" "{\"source\":\"resume\",\"session_id\":\"$OWNER_RAW\",\"agent_id\":\"child-runtime\"}")"
 OUT_NO_NODE_ORPHAN_AGENT="$(invoke_without_node "$ORPHAN_PROJECT" \
   '{"source":"resume","session_id":"orphan_resume_owner","agent_id":"child-orphan-runtime"}')"
 if [ -z "$OUT_NO_NODE_ABSENT" ] && [ -z "$OUT_NO_NODE_AGENT" ] \

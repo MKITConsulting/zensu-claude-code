@@ -28,7 +28,7 @@ cat > "$TMP_CFG" <<'EOF'
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
-OUT_DISABLED="$("$SCRIPT" 2>/dev/null)"
+OUT_DISABLED="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 EXIT_DISABLED=$?
 
 case "$OUT_DISABLED" in
@@ -46,18 +46,20 @@ cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"pulseSession": true}}
 EOF
 
-OUT_ENABLED="$("$SCRIPT" 2>/dev/null)"
+OUT_ENABLED="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
+EXIT_ENABLED=$?
 
-case "$OUT_ENABLED" in
-  *"pulse session ready"*|*"not a git repository"*) check "pulseSession=true: stdout contains banner (or graceful 'not a git' skip)" PASS ;;
-  *)                                                  check "pulseSession=true: stdout contains banner (or graceful 'not a git' skip)" FAIL ;;
-esac
+if [ "$EXIT_ENABLED" = "0" ] && printf '%s' "$OUT_ENABLED" | grep -qF 'zensu: pulse session ready — HEAD='; then
+  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted" PASS
+else
+  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted (rc=$EXIT_ENABLED, out=$OUT_ENABLED)" FAIL
+fi
 
 unset ZENSU_CONFIG
 NOTHING_CFG="/tmp/zensu-no-config-session-$$.json"
 rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
-OUT_DEFAULT="$("$SCRIPT" 2>/dev/null)"
+OUT_DEFAULT="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 case "$OUT_DEFAULT" in
   *"pulse session ready"*|*"not a git repository"*) check "no config (default): stdout contains banner (enabled)" PASS ;;
   *)                                                  check "no config (default): stdout contains banner (enabled)" FAIL ;;

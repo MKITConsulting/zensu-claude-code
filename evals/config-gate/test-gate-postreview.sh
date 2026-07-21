@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 PASS=0; FAIL=0
@@ -21,10 +22,11 @@ if [ ! -x "$SCRIPT" ]; then
 fi
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export CLAUDE_PLUGIN_DATA_OVERRIDE="$(mktemp -d)"
-export TDD_STATE_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
-export CLAUDE_PROJECT_DIR="$CLAUDE_PLUGIN_DATA_OVERRIDE"
-cleanup() { rm -rf "$CLAUDE_PLUGIN_DATA_OVERRIDE"; }
+TMP_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+export STATE_DIR="$TMP_DIR/state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
+cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT
 
 render_code_reviewer_fixture() {
@@ -36,12 +38,14 @@ render_code_reviewer_fixture() {
   '
 }
 
-TMP_CFG="/tmp/zensu-gate-postreview-disabled-$$.json"
+TMP_CFG="$TMP_DIR/config.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoFix": false}}
 EOF
 export ZENSU_CONFIG="$TMP_CFG"
 
+# shellcheck disable=SC1090
+source "$BASELINE" fixture-review
 bash "$LOG" --tdd-begin --session fixture-review >/dev/null
 bash "$LOG" --tdd-complete --session fixture-review >/dev/null
 
@@ -84,7 +88,7 @@ else
 fi
 
 unset ZENSU_CONFIG
-NOTHING_CFG="/tmp/zensu-no-config-postreview-$$.json"
+NOTHING_CFG="$TMP_DIR/no-config.json"
 rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 TICKET_DEFAULT="$(bash "$LOG" --review-ticket --session fixture-review)"

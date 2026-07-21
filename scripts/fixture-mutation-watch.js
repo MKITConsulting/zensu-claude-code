@@ -22,7 +22,9 @@ function runOwned(relativePath) {
 function main() {
   const [rootInput, marker, ready, option] = process.argv.slice(2);
   if (!rootInput || !marker || !ready) throw new Error('usage: fixture-mutation-watch.js <root> <marker> <ready>');
-  if (option && option !== '--force-fallback') throw new Error('unknown fixture watcher option');
+  if (option && !['--force-fallback', '--test-polling'].includes(option)) {
+    throw new Error('unknown fixture watcher option');
+  }
   const root = fs.realpathSync(rootInput);
   const baseline = digest(root);
   const watchers = new Map();
@@ -114,7 +116,11 @@ function main() {
   process.on('SIGTERM', () => stop(0));
   process.on('SIGHUP', () => stop(0));
 
-  if (!watchRecursive()) watchTree(root);
+  // The wrapper's explicit test mode exercises manifest attestation in managed
+  // runners where the host may forbid every fs.watch backend. Production never
+  // selects this polling-only path: it remains fail-closed when an event watcher
+  // cannot be established.
+  if (option !== '--test-polling' && !watchRecursive()) watchTree(root);
   pollTimer = setInterval(() => {
     if (stopping || polling) return;
     polling = true;

@@ -26,18 +26,70 @@
 # /private/tmp, /var/folders). mv/cp are out of scope.
 set -u
 
-: "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "$0")/.." && pwd)}"
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 command -v node >/dev/null 2>&1 || exit 0
+
+_ZENSU_MSYS2_ENV_CONV_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
+case ";${_ZENSU_MSYS2_ENV_CONV_EXCL};" in
+  *';CLAUDE_ENV_FILE;'*) ;;
+  *) _ZENSU_MSYS2_ENV_CONV_EXCL="${_ZENSU_MSYS2_ENV_CONV_EXCL:+${_ZENSU_MSYS2_ENV_CONV_EXCL};}CLAUDE_ENV_FILE" ;;
+esac
 
 # Drain stdin before any early exit so an upstream writer never sees a broken
 # pipe (mirrors pre-bash-zensu-gate.sh's ordering).
 INPUT="$(cat 2>/dev/null || true)"
 
+emit_deny() {
+  REASON="$1" node -e '
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "deny",
+        permissionDecisionReason: process.env.REASON
+      }
+    }));
+  '
+  echo
+}
+
+# Session Control export rebinding is a trust-boundary violation, not a
+# configurable source-write convention. Check it before config/escape hatches.
+if ! CONTROL_REASON="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
+    BSWG_MODE=control PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+)"; then
+  emit_deny "Zensu could not validate protected Session Control bindings; retry in a fresh session."
+  exit 0
+fi
+if [ -n "$CONTROL_REASON" ]; then
+  emit_deny "$CONTROL_REASON"
+  exit 0
+fi
+
 # Config-disabled gate has no decision point — nothing to bypass, nothing to
 # ledger (kept ahead of the escape checks so all Bash gates share the order).
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 zensu_hook_enabled bashWriteGate || exit 0
+
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+if ! zensu_bind_hook_session "$INPUT"; then
+  zensu_emit_hook_session_deny
+  exit 0
+fi
 
 # Bypass ledger: escapes stay free, but while a TDD session is active the
 # opt-out is recorded to chain state (fail-open, gate name only). Inline
@@ -52,7 +104,11 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-REASON="$(BSWG_MODE= PAYLOAD="$INPUT" node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/bash-source-write-parse.js" 2>/dev/null)"
+REASON="$(
+  cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+  BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
+    node ./bash-source-write-parse.js 2>/dev/null
+)"
 case "$REASON" in
   __bypass__*)
     for gate in $(printf '%s\n' "$REASON" | awk -F'\t' '$1=="__bypass__"{print $2}'); do
@@ -67,14 +123,5 @@ case "$REASON" in
 esac
 [ -z "$REASON" ] && exit 0
 
-REASON="$REASON" node -e '
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: "PreToolUse",
-      permissionDecision: "deny",
-      permissionDecisionReason: process.env.REASON
-    }
-  }));
-'
-echo
+emit_deny "$REASON"
 exit 0

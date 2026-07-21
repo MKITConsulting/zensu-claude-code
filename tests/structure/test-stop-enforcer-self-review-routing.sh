@@ -19,15 +19,17 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"; export TDD_STATE_DIR
-PROJ="$(mktemp -d)"; export CLAUDE_PROJECT_DIR="$PROJ"
-export ZENSU_CONFIG="$TDD_STATE_DIR/no-such-config.json"   # force defaults -> selfReview enabled
+STATE_DIR="$(mktemp -d)"; export STATE_DIR
+PROJ="$(mktemp -d)"
+PROJ="$(cd "$PROJ" && pwd -P)"; export CLAUDE_PROJECT_DIR="$PROJ"
+export ZENSU_CONFIG="$STATE_DIR/no-such-config.json"   # force defaults -> selfReview enabled
 unset CLAUDE_AGENT_TYPE ZENSU_CHAIN 2>/dev/null || true
-cleanup() { rm -rf "$TDD_STATE_DIR" "$PROJ"; }
+cleanup() { rm -rf "$STATE_DIR" "$PROJ"; }
 trap cleanup EXIT
 
 stop_run() {
   local payload="$1" cfg="${2:-}"
+  payload="$(printf '%s' "$payload" | node -e 'const p=JSON.parse(require("fs").readFileSync(0,"utf8"));p.hook_event_name="Stop";process.stdout.write(JSON.stringify(p))')"
   if [ -n "$cfg" ]; then
     printf '%s' "$payload" | ZENSU_CONFIG="$cfg" bash "$STOP" 2>/dev/null
   else
@@ -37,11 +39,26 @@ stop_run() {
 decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){console.log("allow");return}try{console.log(JSON.parse(s).decision==="block"?"block":"allow")}catch(_){console.log("allow")}});'; }
 reason()   { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(s).reason||"")}catch(_){console.log("")}});'; }
 
+start_session() {
+  local raw_session="$1" project="${2:-$PROJ}" label="${3:-$1}" plugin_root="${4:-$PLUGIN_DIR}"
+  project="$(cd "$project" && pwd -P)"
+  export CLAUDE_PROJECT_DIR="$project"
+  export ZENSU_TEST_PLUGIN_DATA="$STATE_DIR/plugin-data/$label"
+  # shellcheck disable=SC1091
+  source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$raw_session" "$plugin_root" \
+    || exit 1
+  [ -n "${ZENSU_SESSION_KEY:-}" ] && [ -n "${ZENSU_PROJECT_ROOT:-}" ] || exit 1
+  STARTED_SESSION_KEY="$ZENSU_SESSION_KEY"
+  STARTED_PROJECT_ROOT="$ZENSU_PROJECT_ROOT"
+}
+
 # --- Scenario 1: codeReviewDone=false -> force code-reviewer (unchanged) ---
-SID1="stop-cr-pending"
+SID1_RAW="stop-cr-pending"
+start_session "$SID1_RAW"
+SID1="$STARTED_SESSION_KEY"
 bash "$LOG" --tdd-begin --session "$SID1" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID1" >/dev/null
-OUT1="$(stop_run '{"session_id":"'"$SID1"'"}')"
+OUT1="$(stop_run '{"session_id":"'"$SID1_RAW"'"}')"
 [ "$(printf '%s' "$OUT1" | decision)" = "block" ] && check "T1 implComplete + !codeReviewDone -> block" PASS || check "T1 block" FAIL
 printf '%s' "$OUT1" | reason | grep -q "zensu:code-reviewer" && check "T2 !codeReviewDone reason forces zensu:code-reviewer" PASS || check "T2 reason code-reviewer" FAIL
 if printf '%s' "$OUT1" | reason | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" \
@@ -52,11 +69,13 @@ else
 fi
 
 # --- Scenario 2: codeReviewDone=true -> force self-review (NEW) ---
-SID2="stop-cr-done"
+SID2_RAW="stop-cr-done"
+start_session "$SID2_RAW"
+SID2="$STARTED_SESSION_KEY"
 bash "$LOG" --tdd-begin --session "$SID2" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID2" >/dev/null
 bash "$LOG" --code-review-done --session "$SID2" >/dev/null
-OUT2="$(stop_run '{"session_id":"'"$SID2"'"}')"
+OUT2="$(stop_run '{"session_id":"'"$SID2_RAW"'"}')"
 [ "$(printf '%s' "$OUT2" | decision)" = "block" ] && check "T3 codeReviewDone + !chainDone -> block" PASS || check "T3 block" FAIL
 printf '%s' "$OUT2" | reason | grep -q "skill='zensu:self-review'" && check "T4 codeReviewDone reason forces skill='zensu:self-review'" PASS || check "T4 reason self-review" FAIL
 if printf '%s' "$OUT2" | reason | grep -q "zensu:code-reviewer"; then
@@ -74,18 +93,37 @@ fi
 # A root with shell syntax in its filename must survive JSON serialization and
 # be emitted as one runnable, inert shell token in the stop reason.
 SPECIAL_BASE="$(mktemp -d -t zensu-stop-root-XXXXXX)"
-SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value quote"back\slash'
-mkdir -p "$SPECIAL_ROOT/hooks" "$SPECIAL_BASE/run"
-cp -R "$PLUGIN_DIR/hooks/lib" "$SPECIAL_ROOT/hooks/lib"
-cp "$STOP" "$SPECIAL_ROOT/hooks/stop-chain-enforcer.sh"
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value [windows]'
+    ;;
+  *)
+    SPECIAL_ROOT="$SPECIAL_BASE/"'plugin root $(touch STOP_PWNED) `touch STOP_TICKED`;touch STOP_SEMI; apostrophe'"'"'value quote"back\slash'
+    ;;
+esac
+mkdir -p "$SPECIAL_ROOT" "$SPECIAL_BASE/run"
+SPECIAL_ROOT="$(cd "$SPECIAL_ROOT" && pwd -P)"
+for runtime_entry in .claude-plugin .mcp.json hooks agents skills docs templates scripts README.md CHANGELOG.md LICENSE; do
+  cp -R "$PLUGIN_DIR/$runtime_entry" "$SPECIAL_ROOT/$runtime_entry"
+done
+mkdir -p "$SPECIAL_ROOT/mcp-runtime"
+cp "$PLUGIN_DIR/mcp-runtime/package.json" "$PLUGIN_DIR/mcp-runtime/package-lock.json" \
+  "$SPECIAL_ROOT/mcp-runtime/"
 SPECIAL_LOG="$SPECIAL_ROOT/hooks/lib/zensu-log.sh"
-SPECIAL_SID="stop-special-root"
-CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-begin --session "$SPECIAL_SID" >/dev/null
-CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-complete --session "$SPECIAL_SID" >/dev/null
-CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --code-review-done --session "$SPECIAL_SID" >/dev/null
-SPECIAL_OUT="$(printf '%s' '{"session_id":"'"$SPECIAL_SID"'"}' | CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" \
-  bash "$SPECIAL_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
+SPECIAL_SID_RAW="stop-special-root"
+SPECIAL_LABEL='special data $(touch STOP_DATA_PWNED) `touch STOP_DATA_TICKED`;touch STOP_DATA_SEMI'
+start_session "$SPECIAL_SID_RAW" "$SPECIAL_BASE/run" "$SPECIAL_LABEL" "$SPECIAL_ROOT"
+SPECIAL_SID="$STARTED_SESSION_KEY"
+SPECIAL_PROJECT="$STARTED_PROJECT_ROOT"
+SPECIAL_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
+CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-begin --session "$SPECIAL_SID" >/dev/null
+CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --tdd-complete --session "$SPECIAL_SID" >/dev/null
+CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" --code-review-done --session "$SPECIAL_SID" >/dev/null
+SPECIAL_OUT="$(printf '%s' '{"hook_event_name":"Stop","session_id":"'"$SPECIAL_SID_RAW"'"}' | CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" \
+  CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" bash "$SPECIAL_ROOT/hooks/stop-chain-enforcer.sh" 2>/dev/null)"
 EXPECTED_Q="$(printf '%q' "$SPECIAL_LOG")"
+EXPECTED_DATA_Q="$(printf '%q' "$SPECIAL_PLUGIN_DATA")"
+EXPECTED_PREFIX="CLAUDE_PLUGIN_DATA=$EXPECTED_DATA_Q bash $EXPECTED_Q"
 SPECIAL_REASON="$(printf '%s' "$SPECIAL_OUT" | node -e '
   let s=""; process.stdin.on("data", c => s += c);
   process.stdin.on("end", () => {
@@ -97,50 +135,68 @@ SPECIAL_REASON="$(printf '%s' "$SPECIAL_OUT" | node -e '
   });
 ' 2>/dev/null)"
 SPECIAL_PARSE_RC=$?
-SPECIAL_BOUND_TICKET="$(CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" \
+SPECIAL_BOUND_TICKET="$(CLAUDE_PROJECT_DIR="$SPECIAL_PROJECT" CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" bash "$SPECIAL_LOG" \
   --current-review-ticket --session "$SPECIAL_SID" 2>/dev/null)"
 SPECIAL_TICKET_Q="$(printf '%q' "$SPECIAL_BOUND_TICKET")"
+SPECIAL_EXPECTED_COMMAND="$EXPECTED_PREFIX --chain-done --claimed-review-ticket $SPECIAL_TICKET_Q"
+SPECIAL_MSYS_EXCL="EXPECTED"
+[ -z "${MSYS2_ENV_CONV_EXCL:-}" ] || SPECIAL_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL};${SPECIAL_MSYS_EXCL}"
+SPECIAL_EMITTED_COMMAND="$(printf '%s' "$SPECIAL_REASON" | MSYS2_ENV_CONV_EXCL="$SPECIAL_MSYS_EXCL" EXPECTED="$SPECIAL_EXPECTED_COMMAND" node -e '
+  const body=require("fs").readFileSync(0,"utf8"),expected=process.env.EXPECTED;
+  const at=body.indexOf(expected);if(at<0)process.exit(1);
+  process.stdout.write(body.slice(at,at+expected.length));
+' 2>/dev/null)"
+SPECIAL_COMMAND_RC=$?
 (
   cd "$SPECIAL_BASE/run" || exit 1
-  CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT" eval "bash $EXPECTED_Q --chain-done --claimed-review-ticket $SPECIAL_TICKET_Q --session $SPECIAL_SID" >/dev/null 2>&1
+  unset CLAUDE_PLUGIN_DATA
+  export CLAUDE_PLUGIN_ROOT="$SPECIAL_ROOT"
+  eval "$SPECIAL_EMITTED_COMMAND" >/dev/null 2>&1
 )
 SPECIAL_EXEC_RC=$?
-if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
-  && printf '%s' "$SPECIAL_REASON" | grep -qF "bash $EXPECTED_Q --chain-done" \
+if [ "$SPECIAL_PARSE_RC" = "0" ] && [ "$SPECIAL_COMMAND_RC" = "0" ] && [ "$SPECIAL_EXEC_RC" = "0" ] \
+  && printf '%s' "$SPECIAL_REASON" | grep -qF "$EXPECTED_PREFIX --chain-done" \
   && printf '%s' "$SPECIAL_REASON" | grep -qF -- "--claimed-review-ticket $SPECIAL_TICKET_Q" \
   && ! printf '%s' "$SPECIAL_REASON" | grep -qF '${CLAUDE_PLUGIN_ROOT}' \
   && [ ! -e "$SPECIAL_BASE/run/STOP_PWNED" ] \
   && [ ! -e "$SPECIAL_BASE/run/STOP_TICKED" ] \
-  && [ ! -e "$SPECIAL_BASE/run/STOP_SEMI" ]; then
-  check "T5b special-character root stays valid JSON and inert in stop command" PASS
+  && [ ! -e "$SPECIAL_BASE/run/STOP_SEMI" ] \
+  && [ ! -e "$SPECIAL_BASE/run/STOP_DATA_PWNED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/STOP_DATA_TICKED" ] \
+  && [ ! -e "$SPECIAL_BASE/run/STOP_DATA_SEMI" ]; then
+  check "T5b exact emitted stop command executes with inert quoted root and plugin data" PASS
 else
-  check "T5b special-character root stays valid JSON and inert in stop command" FAIL
+  check "T5b exact emitted stop command executes with inert quoted root and plugin data" FAIL
 fi
 if grep -qE 'LOG_HELPER_Q=.*printf.*%q.*CLAUDE_PLUGIN_ROOT.*zensu-log\.sh' "$STOP" \
-  && grep -qF 'bash ${LOG_HELPER_Q}' "$STOP"; then
-  check "T5c generated stop commands serialize the active root through printf %q" PASS
+  && grep -qF 'LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"' "$STOP"; then
+  check "T5c generated stop commands quote plugin data and active root" PASS
 else
-  check "T5c generated stop commands serialize the active root through printf %q" FAIL
+  check "T5c generated stop commands quote plugin data and active root" FAIL
 fi
 rm -rf "$SPECIAL_BASE"
 
 # --- Scenario 3: chainDone -> allow (terminus) ---
-SID3="stop-chain-done"
+SID3_RAW="stop-chain-done"
+start_session "$SID3_RAW"
+SID3="$STARTED_SESSION_KEY"
 bash "$LOG" --tdd-begin --session "$SID3" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID3" >/dev/null
 bash "$LOG" --code-review-done --session "$SID3" >/dev/null
 bash "$LOG" --chain-done --session "$SID3" >/dev/null
-OUT3="$(stop_run '{"session_id":"'"$SID3"'"}')"
+OUT3="$(stop_run '{"session_id":"'"$SID3_RAW"'"}')"
 [ "$(printf '%s' "$OUT3" | decision)" = "allow" ] && check "T6 chainDone -> allow stop (self-review owns terminus)" PASS || check "T6 allow" FAIL
 
 # --- Scenario 4: persisted handoff wins over a later selfReview=false config ---
-SID4="stop-selfreview-off"
-OFFCFG="$TDD_STATE_DIR/selfreview-off.json"
+SID4_RAW="stop-selfreview-off"
+start_session "$SID4_RAW"
+SID4="$STARTED_SESSION_KEY"
+OFFCFG="$STATE_DIR/selfreview-off.json"
 printf '{"hooks":{"selfReview":false}}' > "$OFFCFG"
 bash "$LOG" --tdd-begin --session "$SID4" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID4" >/dev/null
 bash "$LOG" --code-review-done --session "$SID4" >/dev/null
-OUT4="$(stop_run '{"session_id":"'"$SID4"'"}' "$OFFCFG")"
+OUT4="$(stop_run '{"session_id":"'"$SID4_RAW"'"}' "$OFFCFG")"
 [ "$(printf '%s' "$OUT4" | decision)" = "block" ] && check "T7 selfReview flip after codeReviewDone -> block" PASS || check "T7 block" FAIL
 if printf '%s' "$OUT4" | reason | grep -q "skill='zensu:self-review'" \
   && ! printf '%s' "$OUT4" | reason | grep -q "zensu:code-reviewer"; then
@@ -153,12 +209,16 @@ fi
 # consumes the ticket while selfReview is enabled, its instructed close freezes
 # codeReviewDone, and a subsequent Stop under selfReview=false must retain that
 # exact ticket/terminus instead of asking for an impossible fresh reviewer ticket.
-SID5="stop-selfreview-ticket-flip"
+SID5_RAW="stop-selfreview-ticket-flip"
+start_session "$SID5_RAW"
+SID5="$STARTED_SESSION_KEY"
 bash "$LOG" --tdd-begin --session "$SID5" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID5" >/dev/null
 TICKET5="$(bash "$LOG" --review-ticket --session "$SID5")"
-PAYLOAD5="$(SID="$SID5" TICKET="$TICKET5" node -e '
+PAYLOAD5="$(SID="$SID5_RAW" TICKET="$TICKET5" node -e '
   process.stdout.write(JSON.stringify({
+    hook_event_name: "PostToolUse",
+    tool_name: "Agent",
     session_id: process.env.SID,
     tool_input: {
       subagent_type: "zensu:code-reviewer",
@@ -169,7 +229,7 @@ PAYLOAD5="$(SID="$SID5" TICKET="$TICKET5" node -e '
 printf '%s' "$PAYLOAD5" | bash "$POSTREV" >/dev/null 2>&1
 bash "$LOG" --code-review-done --session "$SID5" \
   --claimed-review-ticket "$TICKET5" >/dev/null
-OUT5="$(stop_run '{"session_id":"'"$SID5"'"}' "$OFFCFG")"
+OUT5="$(stop_run '{"session_id":"'"$SID5_RAW"'"}' "$OFFCFG")"
 BOUND5="$(bash "$LOG" --current-review-ticket --session "$SID5" 2>/dev/null)"
 bash "$LOG" --review-ticket --session "$SID5" >/dev/null 2>&1
 FRESH5_RC=$?

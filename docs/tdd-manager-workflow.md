@@ -1,14 +1,14 @@
 # TDD Workflow (`/zensu:tdd`)
 
-End-to-end reference for the Zensu main-thread TDD workflow that drives strict Red/Green TDD with a PreToolUse phase gate.
+End-to-end reference for the Zensu main-thread implementation workflow: vanilla by default, with strict Red/Green TDD and its PreToolUse phase gate available when configured.
 
-> **0.4.0 migration.** TDD execution moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in the `skills/tdd/SKILL.md` skill. `zensu:code-reviewer` is the only remaining subagent. Sections 7–8 below describe the eval harness, whose port to the main-thread model is tracked as a follow-up.
+> **0.4.0+ architecture.** Implementation moved from the `zensu:tdd-manager` *subagent* into the **main agent** (the subagent lost too much implementation context). The workflow now lives in `skills/tdd/SKILL.md`; its review stage uses five parallel `zensu:review-aspect` subagents, an optional `zensu:review-judge`, and one consume-mode `zensu:code-reviewer`. Sections 7–8 describe the shipped installed-plugin eval harness.
 
 ---
 
 ## 1. Overview
 
-**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code through a strict TDD discipline. The main agent runs it directly. It writes a plan, declares phase transitions (RED → IMPL → GREEN → REFACTOR), and is enforced by a PreToolUse hook that blocks edits which violate the cycle. With `hooks.tddImplementation:false` the same workflow runs in **vanilla implementation mode** — the RED→GREEN discipline and the edit gate are off while the evidence audits and the review chain stay enforced (see §5).
+**What it is.** A main-thread skill (`/zensu:tdd`) that takes a feature specification and produces working, tested code. It runs in **vanilla implementation mode by default**: no RED→GREEN ceremony, while the plan, evidence audits, and review chain stay enforced. With `hooks.tddImplementation:true`, it additionally declares RED → IMPL → GREEN → REFACTOR transitions and a PreToolUse FSM gate blocks edits that violate the strict cycle (see §5).
 
 **When to invoke.**
 
@@ -29,11 +29,13 @@ The skill is also auto-invoked by the `ExitPlanMode` PostToolUse hook when the u
 |----------|------|---------|
 | Plan | `.zensu/plans/{ts}_tdd-{slug}.md` | Design decisions, Requirements table (stable AC-###/FR-### IDs), step table with per-step `Covers` traceability, preconditions, audit checklist |
 | Log | `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
-| State | `.zensu/state/tdd-phase-{session}.json` | Runtime FSM state (per session, ephemeral) |
+| State | `.zensu/state/tdd-phase-<scv1-session-key>.json` | Runtime FSM/review state (per session, ephemeral) |
 | Source | test + implementation files | The actual code |
 | Audit | included in log + final report | Build, coverage, mtime discipline, precondition drift |
 
-The plan and log are durable repo artifacts. They are auto-staged and committed (see [CLAUDE.md](../CLAUDE.md) repo conventions).
+The plan and log are local per-run working artifacts. They are gitignored and
+never auto-staged or committed; the tracked source/tests and final user-facing
+report are the durable repository outputs (see [CLAUDE.md](../CLAUDE.md)).
 
 ---
 
@@ -90,7 +92,7 @@ flowchart TD
 | 5. Checkpoint | Run full test suite + linter, batch-update plan statuses | checkpoint log entry |
 | 6. Audit & Final Report | Build verification, coverage, mtime discipline, precondition drift audit, requirements coverage cross-check (warning level), summary | audit log + final report |
 
-See [agents/tdd-manager.md](../agents/tdd-manager.md) for the canonical phase definitions.
+See [skills/tdd/SKILL.md](../skills/tdd/SKILL.md) for the canonical main-thread phase definitions.
 
 ---
 
@@ -132,10 +134,29 @@ stateDiagram-v2
 Phase transitions are recorded by invoking the log helper:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "..."]
+CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" \
+  bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
+  --phase {PHASE} --step {step_id} [--reason "..."]
 ```
 
-The helper writes both a log line and updates the state file under a `flock` (or `mkdir`-based fallback) mutex.
+The top-level `/zensu:tdd` Skill receives Claude's native plugin root/data
+substitution and replaces both angle-bracket values before the command runs.
+This supporting document is loaded through `Read`, so it deliberately does not
+assume a second native-substitution pass. Each stateful invocation passes only
+the concrete plugin-data directory to the helper process. The helper reads the
+host-exposed `CLAUDE_CODE_SESSION_ID`, validates it against the private immutable
+record, and derives its internal selectors in that process only. Do not source
+the internal binder, cache its selectors, or use a shared home-directory pointer.
+
+The phase helper mutates workflow state through the Session Control v1 CAS API;
+narrative log lines are appended separately by the skill. Its token- and inode-bound lock generations
+serialize concurrent processes, recover only dead stale owners, and reject
+malformed state instead of resetting its revision. `SessionStart` creates a
+mandatory baseline before tools run. A subsequently missing baseline or an
+existing malformed, non-object, or unreadable state file is therefore a
+fail-closed integrity failure: the all-tool context gate denies further tools,
+and the edit/Stop guards deny rather than treating the session as inactive.
+A fresh session is required to create trustworthy state.
 
 ---
 
@@ -162,23 +183,29 @@ The PreToolUse hook fires on `Edit | Write | MultiEdit` tool calls. It allows or
 4. Symlink rejection: `[ -L "$path" ]` → not a test
 5. Inline-header sniff (last resort): read first 20 lines, strip BOM, match `^(func Test|describe\(|it\(|test\(|@Test|def test_|#\[test\]|#\[cfg\(test\)\])`. Comment-prefix lines like `// describe(` are NOT matched (anchored at line start, no leading comment chars).
 
-**Hook scope.** The gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. Before `--tdd-begin`, and for any session with no active TDD chain-state (other main-thread work, other subagents, plain CLI), the hook exits 0 silently and lets the action through. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary: in-moment reminders for the main-thread TDD session, not bulletproofing against malicious actors.
+**Hook scope.** With a valid SessionStart baseline, the phase gate is active **only** while the per-session chain-state `active` flag is set — written by `zensu-log.sh --tdd-begin` in Phase 0 of the `/zensu:tdd` skill. A valid inactive baseline exits silently before `--tdd-begin`; it must not be confused with a deleted, malformed, or unreadable mandatory baseline, which fails closed in the all-tool Session Control gate and the edit/Stop guards. This replaces the pre-0.4.0 `CLAUDE_AGENT_TYPE=zensu:tdd-manager` scoping that only worked while TDD ran in a subagent. It remains a deliberate trust-boundary for Claude host-tool workflow decisions, not an OS sandbox against malicious same-UID processes.
 
 **Vanilla implementation mode (`hooks.tddImplementation:false`).** At `--tdd-begin` the config is read ONCE and frozen into the state file's `vanilla` flag; the command echoes the effective mode (`mode: strict` / `mode: vanilla`) so the skill knows which deltas to apply. While `vanilla` is `true` the gate exits 0 right after the `active` check — the whole phase matrix above is bypassed, no phase markers are required, and tests are at the agent's discretion. The gate reads ONLY the state flag, never live config: flipping the config mid-session can neither un-gate a strict session nor re-arm a vanilla one (whose phase stays `UNINITIALIZED` and would otherwise deny everything). Still enforced in vanilla mode: the Bash witness, the Phase 5/6 evidence audits (build, coverage, witness cross-check), the review fan-out → judge second pass (`review-judge`, gated by `hooks.reviewJudge`, default on — fresh-read deltas + `Panel-FP:` neutralization between the aspect merge and the consume-mode reviewer) → `code-reviewer` → auto-fix loop → `/zensu:self-review`, and the Stop-hook chain guarantee. `--tdd-reset` clears the flag; a later `--tdd-begin` re-freezes it from the then-current config.
 
 ---
 
-## 6. Environment Variables
+## 6. Host Environment and Native Placeholders
 
 | Variable | Where set | Effect |
 |----------|-----------|--------|
-| `CLAUDE_AGENT_TYPE` | Claude-code harness sets it on subagent spawn (e.g. `zensu:code-reviewer`). | Since 0.4.0 it no longer gates the TDD phase-gate/witness — activation moved to the chain-state `active` flag. Retained for other introspection and the eval harness. |
+| `CLAUDE_AGENT_TYPE` | Legacy environment hint. | Never trusted for Session Control or reviewer authorization. Those decisions use the top-level host hook payload. |
+| `CLAUDE_PLUGIN_ROOT` | Claude native substitution in top-level Skill/Agent content; hook environment. | Supplies the exact installed helper path. The helper independently verifies that path against its own executable. |
+| `CLAUDE_PLUGIN_DATA` | Claude native substitution in top-level Skill/Agent content; hook environment. | Passed to each stateful helper invocation and validated as the private record store. It is not exported by SessionStart. |
+| `CLAUDE_CODE_SESSION_ID` | Claude Bash/hook environment. | Host session id used to locate the private record. It is not secret and grants no authority without all record checks. |
+| `CLAUDE_ENV_FILE` | Claude shell environment propagation mechanism. | Deliberately ignored: SessionStart neither reads nor writes it, and no plugin-private selector is exported through it. |
 | `ZENSU_TDD_GATE` | User sets in shell | Set to `off` to bypass the phase-gate entirely for legitimate non-TDD edits (docs, config, one-offs). |
 | `ZENSU_CHAIN` | User sets in shell | Set to `off` to disable the `Stop`-hook review-chain backstop ([hooks/stop-chain-enforcer.sh](../hooks/stop-chain-enforcer.sh)) so the main agent may end its turn without completing the review chain. |
 | `ZENSU_HOOK_LOG` | Eval wrapper sets per isolated test dir | Opt-in mirror of denial reasons. Hook writes 4 lines (`TDD-Phase-Gate`, `Current phase:`, `Expected:`, `permissionDecision=deny`) on denial. Empty file in production. |
-| `TDD_STATE_DIR` | Caller may override | State file location. Default `${CLAUDE_PROJECT_DIR}/.zensu/state`. |
-| `TDD_DISABLE_FLOCK` | Test fixture sets | Test-only. Forces the `mkdir`-fallback mutex path (exercises stale-lock recovery on Linux/CI where `flock` is present). |
-| `CLAUDE_PROJECT_DIR` | Claude-code harness | Root for relative state paths. |
+| `CLAUDE_PROJECT_DIR` | Claude host environment/native substitution. | Stable input for fresh registration. Each stateful helper resolves and uses the immutable record's project root even after `CwdChanged`. |
+
+Session Control stores its baseline and all TDD workflow transitions only in
+the immutable record-bound project's `.zensu/state`. There is no
+caller-controlled state-directory override.
 
 ---
 
@@ -194,7 +221,8 @@ flowchart LR
       Log[.zensu/logs/<br/>ts_tdd-slug.log]
     end
     subgraph Runtime_State[Phase 4: Runtime State]
-      State[.zensu/state/<br/>tdd-phase-session.json<br/>rounds-session.json]
+      State[.zensu/state/<br/>tdd-phase-scv1_hash.json<br/>FSM + reviewRound + stopBlockCount]
+      Context[&lt;plugin-data&gt;/session-control/v1/<br/>records/scv1_hash.json]
     end
     subgraph Production[Phase 4: Production Artifacts]
       Tests[test files]
@@ -204,15 +232,117 @@ flowchart LR
     Spec --> Log
     Plan --> State
     Log --> State
+    Context --> State
     State --> Tests
     State --> Code
 ```
 
-The plan + log files form a durable audit pair. State files are ephemeral per session. All three live under `.zensu/` and are auto-staged for commit per repo convention.
+The plan + log files form a local, per-run audit pair for the active session;
+they are gitignored and not repository provenance. Mutable state files are
+also ephemeral per session and live project-locally under `.zensu/state/`; the
+immutable session record lives separately under
+`CLAUDE_PLUGIN_DATA/session-control/v1/records/`. State filenames use the
+domain-separated `scv1_…` key, contain the matching session hash, and increment
+a monotonic revision on every atomic mutation. The raw host session id is not
+persisted, but Claude exposes it as `CLAUDE_CODE_SESSION_ID` in Bash and hook
+subprocesses; it is not a secret or capability on its own. The review-loop
+budget (`reviewRound`) and Stop anti-deadlock budget
+(`stopBlockCount`) are validated bounded integers in this same CAS document. They
+have no independently writable `rounds-*.json` or `*.stopblocks` sidecars.
 
-Per-session state files (`tdd-phase-<session>.json`, `rounds-<session>.json`) are all project-local under `${CLAUDE_PROJECT_DIR:-.}/.zensu/state/` by default since 0.3.23 (0.3.20 attempted this but the `CLAUDE_PLUGIN_DATA` fallback was unreachable inside claude-code — fixed in 0.3.23 by introducing a new opt-in `CLAUDE_PLUGIN_DATA_OVERRIDE` env var and ignoring claude-code's auto-set `CLAUDE_PLUGIN_DATA`). Power-users can still relocate the rounds counter via `CLAUDE_PLUGIN_DATA_OVERRIDE` (e.g. `$HOME/.zensu/state` to centralize across worktrees). Session id is resolved file-lessly: hooks use the stdin `session_id`, while main-thread skill calls derive it from the session transcript via `resolve-session-id.js` (anchored on the git worktree root), falling back to a deterministic `fallback_<key>` only when the transcript cannot be located.
+`SessionStart` is the only context writer. It binds the canonical project and
+executed plugin roots, plugin-data directory, plugin version, source revision,
+and a digest over all runtime-relevant files. A fresh `startup`/`clear` may
+create the record; an existing fresh event must still name the bound project.
+`resume`/`compact` require the existing record and preserve its exact project
+and workflow-state bytes even when `CwdChanged` reports a descendant or an
+external detached worktree. Missing or unknown lifecycle sources fail closed.
+Only a host payload with neither `agent_id` nor `agent_type` receives `main-v1`.
+Claude also reports `agent_type` on `SessionStart` for top-level `claude --agent`
+sessions; those events use the same exact reviewer/neutral classifier as
+PreToolUse and can never inherit main authority. Claude reports plugin-shipped
+agents to hooks through their scoped `agent_type`. `SubagentStart` reads that same parent record and
+injects `reviewer-readonly-v1` for the five exact reviewer identities
+`zensu:code-reviewer`, `zensu:review-aspect`, and
+`zensu:review-judge`, plus the dedicated `zensu:plan-review-worker` and
+`zensu:pr-review-worker`. Every other child receives neutral `host-profile-v1`,
+including the plugin-scoped PLM identity `zensu:zensu-plm`; that exact PLM
+identity is nevertheless subject to the strict read-only capability profile
+described below. Claude Code cannot block a child from `SubagentStart`, so the
+first all-tool `PreToolUse` hook revalidates session id, plugin root, plugin
+data, project, record path, and live runtime digest before every tool call. The
+session id plus its private
+plugin-data record bind the session; the record's `project_root` remains the
+immutable anchor for workflow state. By contrast, the host-reported payload
+`cwd` is canonical location metadata, not a session authenticator. It may point
+inside the original project or at an external detached review worktree after a
+`CwdChanged` event, and relative tool paths resolve against that canonical
+current directory without rebinding `project_root`. Missing identity/context,
+any record mismatch, runtime drift, or an attempted control-context rebind is
+denied there. Legacy transcript, PPID, newest-file, and fallback-id discovery is
+deliberately ignored; concurrent fresh sessions therefore remain isolated even
+inside the same worktree.
 
-**Limitations of file-less resolution.** Because the main-thread path depends on the session transcript existing on disk: (1) the very first phase write of a session — before claude-code has flushed the session `.jsonl` — may briefly resolve to `fallback_<key>` while stdin-fed hooks already see the real UUID; in practice the transcript is flushed well before the first `/zensu:tdd` phase marker, so the window is narrow. (2) Two `/zensu:tdd` sessions running concurrently in the **same** worktree are not supported: they share one `~/.claude/projects/<subdir>` bucket, and the `ZENSU_OWN_CMD` transcript needle cannot disambiguate identical `--phase`/`--step` writes across them, so their `tdd-phase-<session>.json` state can cross-bind. Run concurrent TDD sessions in separate worktrees (the default workflow), which gives each its own transcript subdir and `.zensu/state/`.
+The read-only Autopilot SessionStart sibling follows the same location split.
+For `resume`/`compact` it resolves the immutable private record before examining
+project state and stays silent when that record is unavailable. Because equal
+SessionStart matchers run concurrently, `startup`/`clear` prefer an already
+valid record and otherwise use Claude's stable `CLAUDE_PROJECT_DIR`; mutable
+payload `cwd` is never an Autopilot-state selector.
+
+The plugin-scoped reviewers and `zensu:zensu-plm` expose only the host's `Read`,
+`Grep`, and `Glob` tools. The `PreToolUse` gate repeats that exact allowlist after
+context revalidation: no shell, Git, control, MCP, or other tool outside that
+trio is available to those identities. Other `host-profile-v1` children retain
+ordinary non-command tools granted by their agent frontmatter and the Claude
+host, including file, Agent/Task, coordination, and report-writing operations
+where the host provides them. They cannot invoke `Bash`, `shell`, `exec`,
+`exec_command`, `terminal`, or `command`: arbitrary command execution cannot be
+confined by scanning its source text for protected tokens. The plugin gate adds
+no separate Agent/Task or nesting policy; Claude's host and agent definition
+decide those capabilities, and Claude currently prevents a subagent from
+spawning another subagent.
+
+The plan/PR worker pair has a second, workflow-specific boundary. Before spawn,
+the interactive main thread creates one private lease generation containing
+exact evidence files, exact candidates, and narrow safe subtrees; the lease id
+and plugin-data path never enter the worker prompt. Creation canonicalizes path
+chains, rejects symlink aliases and unsafe roots, and snapshots identity/content
+metadata. Every leased `Read`/`Grep`/`Glob` call revalidates that snapshot, so a
+replacement, symlink swap, or other TOCTOU drift fails closed. The workers have
+no file mutation, task, messaging, nested-agent, Skill, MCP, Web, or command
+capability. They return one raw JSON final message with exact `kind` and `role`;
+`SubagentStop` captures it privately, and collection binds the host worker id,
+kind, role, size, and schema before the main thread may materialize it. The lease
+closes after collection and on every failure path. Repository instructions,
+diffs, source text, overlays, and refinement context remain untrusted data and
+cannot alter this contract.
+
+For every reviewer, PLM, and neutral principal, `Grep`/`Glob` must name a
+concrete safe source/docs/test subtree. A protected root, an ancestor that could
+recursively expose protected descendants, or an omitted path whose effective
+`cwd` is such an ancestor is denied. Grep content regexes may still mention
+terms such as `session-control` or `main-v1`; only traversal roots and path
+filters carry this restriction.
+
+For a neutral child, the gate derives the principal only from the trusted hook
+payload. It denies command execution independently of command text, blocks
+actual canonical access to protected Session Control and workflow-root paths,
+blocks every file mutation below the installed-plugin/private plugin-data roots
+(including symlink, case, and hard-link aliases), and blocks mutating Zensu
+operations. It does not mistake ordinary report text that mentions those terms
+for a control attempt, and tool-input prose cannot claim `main-v1`. Mutating
+Zensu workflows therefore remain in the interactive main thread and are entered
+through the matching skill.
+
+This enforcement boundary is intentionally narrower than an OS sandbox. It
+protects Claude host-tool/subagent workflow decisions and serializes
+project-local CAS mutations, but it cannot make project-local files a
+cryptographic authority against user-authorized build/test programs, external
+processes, or a same-UID process racing after a path check. Untrusted repository
+code requires an OS sandbox/container, separate identity, and restricted mounts.
+Likewise, a third-party MCP tool that exposes arbitrary local execution is
+outside this host-tool boundary and must not be granted to an untrusted agent.
 
 ---
 
@@ -228,10 +358,9 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 | **4. Preconditions table in plan** | Plan template includes `## Preconditions` section listing every dependency + verification + user decision. | Auditable record of what was assumed present. |
 | **5. Per-step precondition gate** | If a step's IMPL plan references a precondition marked `skip`, the step gets `[!]` status and is bypassed. No partial test, no placeholder. | Skipped dependencies don't leak into half-broken implementations. |
 | **6. Phase 6 Precondition Drift Audit** | Greps the log for the contracted tool name versus the user-named substitute. Flags `PRECONDITION DRIFT — {tool}: decision={d}, actual={observed}` when reality diverges from the plan. | Catches silent substitution after the fact. |
-| **7. Claude-code CLI promptfoo provider** | Wrapper [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) invokes local `claude` as promptfoo `exec:` provider. APFS `cp -cR` per-test isolation. | Eval suite runs without an API key, isolated per test, deterministic. |
+| **7. Installed-plugin Claude CLI provider** | Wrapper [scripts/session-control-claude-wrapper.sh](../scripts/session-control-claude-wrapper.sh) invokes pinned Claude Code from a fresh isolated user-scope registry, never with `--plugin-dir`, and emits one wrapper-owned `[control-attestation]`. | Contract runs stay deterministic; live runs prove the real installed cache root, content revision, exact source Git SHA, session hash, runtime digest, state revision, normal/reviewer subagent context, hook sequence, reviewer capabilities, and changed-file hashes. See the [release-gate contract](session-control-release-gate.md). |
 | **8. Hook event mirror** | Opt-in via `ZENSU_HOOK_LOG`. Hook writes denial reason lines into the log when the gate fires. | Eval assertions can verify gate behavior without reading hook stderr. |
-| **9. FSM state enrichment** | Wrapper appends `===== fsm state =====` block (jq-scraped from state file) to its output. | Eval assertions see the phase history. |
-| **B. CLAUDE_AGENT_TYPE export** | Wrapper explicitly `export`s the env var before exec'ing claude. | Hook fires in subagent context where the harness doesn't propagate it natively. |
+| **9. Trusted control attestation** | The wrapper reads trusted runtime artifacts before cleanup, neutralizes reserved prefixes in model output, and produces exactly one schema-versioned attestation line. | Assertions never grade model prose or accept a spoofed success claim. |
 
 ---
 
@@ -276,34 +405,39 @@ Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin
 
 ## 10. Four-Channel Logging Contract
 
-Every TDD-Manager task writes to four channels:
+Every `/zensu:tdd` run uses four channels:
 
 | Channel | What | Lifetime | Format |
 |---------|------|----------|--------|
-| **Plan** | Design decisions, step table, Preconditions, audit checklist | Durable (git-committed) | Markdown |
-| **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Durable (git-committed) | Append-only timestamped text |
+| **Plan** | Design decisions, step table, Preconditions, audit checklist | Local per session — **gitignored, never committed** | Markdown |
+| **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Local per session — **gitignored, never committed** | Append-only timestamped text |
 | **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
 | **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail, interrupted flag) | Ephemeral per session — **local only, gitignored, never committed** (consumed solely by the in-session Phase 6 cross-check); under promptfoo it lives in the per-test isolated dir | Append-only timestamped text, JSON-escaped fields |
 
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" timestamp $SESSION_EPOCH)" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
+printf '%s%s\n' "$(CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" timestamp "$SESSION_EPOCH")" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
 ```
 
 The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
 
-Phase transitions are atomic:
+Workflow-state phase transitions are atomic:
 
 ```bash
-bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase {PHASE} --step {step_id} [--reason "{reason}"]
+CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" \
+  bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
+  --phase {PHASE} --step {step_id} [--reason "{reason}"]
 ```
 
-This writes a log line AND updates the state file in a single critical section (under `flock` or mkdir-mutex), preventing concurrent-write races between parallel agents.
+This command updates only the state document through one Session Control v1 CAS
+transaction. The CAS serialization prevents lost state revisions between
+parallel processes. Narrative log appends use the separate command above and
+are intentionally not part of the state transaction.
 
 ### Witness channel — anti-hallucination evidence
 
-The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<session>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook records lines only while the session's chain-state `active` flag is set (set by `zensu-log.sh --tdd-begin` in Phase 0; no other actor records witness lines) and can be disabled with `ZENSU_TEST_WITNESS=off`. The witness log is **gitignored and never committed** — it is ephemeral, single-session evidence; only the narrative `.log` and the plan are durable git-tracked artifacts.
+The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook records lines only while that exact Session Control key's chain-state `active` flag is set; it never scans for or adopts another session's state. Disable it with `ZENSU_TEST_WITNESS=off`. The witness log, narrative `.log`, and plan are all **gitignored and never committed** — they are local, single-session working evidence summarized in the final report.
 
 Each line has the form:
 
@@ -321,7 +455,7 @@ Non-Bash test invocations (rare; e.g. an MCP test runner) use the `via=tool_name
 
 ## See Also
 
-- [agents/tdd-manager.md](../agents/tdd-manager.md) — canonical agent prompt
+- [skills/tdd/SKILL.md](../skills/tdd/SKILL.md) — canonical main-thread workflow skill
 - [hooks/pre-edit-tdd-reminder.sh](../hooks/pre-edit-tdd-reminder.sh) — gate enforcement
 - [hooks/lib/zensu-tdd-phase.sh](../hooks/lib/zensu-tdd-phase.sh) — state file I/O
 - [hooks/lib/zensu-log.sh](../hooks/lib/zensu-log.sh) — log + phase helper CLI

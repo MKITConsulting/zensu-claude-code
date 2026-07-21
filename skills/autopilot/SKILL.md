@@ -87,14 +87,15 @@ Autopilot progress is a project-local state machine, not conversation memory. Ne
 `.zensu/state/autopilot-*.json` directly. Resolve the native helper once:
 
 ```bash
-LOG="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"
+LOG="$ROOT/hooks/lib/zensu-log.sh"
+[ -f "$LOG" ] || { echo "FATAL: Session Control helper unavailable" >&2; exit 1; }
 ```
 
 Before presenting the Phase-0 plan, generate one token-safe run id (`run_<random-hex>`) and
 persist it from the worktree root:
 
 ```bash
-bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
 ```
 
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
@@ -114,9 +115,9 @@ that exact stage. Never start an unbound TDD generation during an active run.
 Every other transition goes through the closed API (stable event ids; exact JSON payload):
 
 ```bash
-bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event <EVENT> \
   --event-id <stable-id> --payload '<exact-json>'
-bash "$LOG" --autopilot-status
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status
 ```
 
 The closed stage sequence is `PLANNING → AWAIT_TDD ↔ TDD_RUNNING → GATES → CONVERGE →
@@ -136,7 +137,7 @@ A successful TDD return to `FIX_FINDINGS`, `VALIDATE`, or `COVER` arms a mandato
 handoff. Re-run the gates, push the fix, read the resulting PR head, then apply exactly:
 
 ```bash
-bash "$LOG" --autopilot-event --run "$RUN_ID" --event PR_HEAD_UPDATED \
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-event --run "$RUN_ID" --event PR_HEAD_UPDATED \
   --event-id "head:<previous-sha>:<new-sha>" \
   --payload '{"previousHeadSha":"<previous-sha>","headSha":"<new-sha>","gatesPassed":true,"pushCompleted":true}'
 ```
@@ -164,7 +165,7 @@ conflicting event ids, and incomplete delivery evidence.
 ### Delegated review and finding-fix envelopes
 
 Do not delegate either PR skill from conversational context alone. Immediately before each
-delegation, read fresh state with `bash "$LOG" --autopilot-status` and render the envelope
+delegation, read fresh state with `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-status` and render the envelope
 from the current durable `tdd.attempt` and `tdd.chainId`, the current outer stage, and the
 current durable PR number, URL, and head SHA. The active run must still be owned by this
 task/session; any absent, terminal, corrupt, mismatched, or incomplete value blocks the
@@ -179,7 +180,7 @@ review payload. Generate it through the state library's canonical helper, never 
 ad-hoc shell hash:
 
 ```bash
-source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+source "$ROOT/hooks/lib/zensu-autopilot-state.sh"
 REVIEW_OPERATION_KEY="$(autopilot_team_review_operation_key "$RUN_ID" "$PR_HEAD_SHA")" \
   || { echo "cannot bind team-review operation" >&2; exit 1; }
 ```
@@ -264,7 +265,7 @@ the detected app type — see `rules/drivers.md`.
 
 **0.C — Plan.** Turn the feature into (shape it on the resolved spec template:
 `$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-spec.md` when that file
-exists, else `${CLAUDE_PLUGIN_ROOT}/templates/autopilot-spec.md`):
+exists, else `$ROOT/templates/autopilot-spec.md` under the validated session plugin root):
 1. A short **spec** — what it does, who it's for, who it's NOT for, success, out-of-scope.
    Read the relevant domain docs first if the feature touches an existing area.
 2. **Acceptance criteria** — a NUMBERED list with **stable `AC-###` IDs** (AC-001, AC-002, …),
@@ -336,12 +337,12 @@ Run these in order. Implement **via the Zensu workflow** throughout.
 
    Render the body (`$BODY_FILE`, English title + body) from the resolved template
    (`$(git rev-parse --show-toplevel)/.zensu/templates/autopilot-pr-body.md` when that file
-   exists, else `${CLAUDE_PLUGIN_ROOT}/templates/autopilot-pr-body.md`): it carries a per-AC checklist table keyed
+   exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
    step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
-   each fix loop), run `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list`
+   each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
    and union the non-`none` entries —
    each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`

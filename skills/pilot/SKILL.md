@@ -59,8 +59,8 @@ Slash form: `/zensu:pilot [<feature>]`.
 
 - Unattended end-to-end builds — that is `/zensu:autopilot` (one planning gate,
   then zero questions). Pilot is the opposite trade: a question at every seam.
-- Product planning, bootstrap, or scans — route to the zensu-plm agent
-  (`/zensu:bootstrap`, `/zensu:ghost-scan`).
+- Product planning, bootstrap, or scans — return to the interactive main thread
+  and invoke `/zensu:bootstrap` or `/zensu:ghost-scan` there.
 - Ad-hoc coding without a tracked feature — use `/zensu:tdd` directly.
 
 ## The loop contract
@@ -164,9 +164,9 @@ and the relevant slice of the status card as the skill's input. Rules:
    the server rejects it as `invalid_status_transition` anyway.
 2. **Execute only after explicit confirm** (the AskUserQuestion answer IS the
    confirm), and wrap each transition in its own gate window:
-   1. `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "update_feature"`
+   1. `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-begin --tools "update_feature"`
    2. `zensu features status <id> <new-status>`
-   3. `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`
+   3. `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --workflow-end`
    The workflow gate is a single flat per-session flag — no nesting, and every
    delegated skill arms and ends its OWN window — so pilot arms **per
    mutation**, never once per session. Run step iii regardless of the

@@ -4,11 +4,106 @@ set -u
 
 : "${CLAUDE_PLUGIN_ROOT:=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)}"
 
-# Reuse the hardened path, atomic-rename, and flock/mkdir mutex primitives used
-# by the inner TDD state. Autopilot has its own single project-wide lock below.
+# Reuse the hardened path, atomic-rename, and Core external-process lease used
+# by the inner TDD state. Autopilot maps all mutations to one project sentinel.
 # shellcheck source=hooks/lib/zensu-tdd-phase.sh
 # shellcheck disable=SC1091
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+
+# Render filesystem operands for native Node explicitly. When Session Control
+# has already established an immutable project binding, project descendants
+# are translated by preserving their suffix beneath that exact shell/native
+# root pair. Pre-session public helpers retain their historical behavior, but
+# still use cygpath explicitly instead of MSYS' quote-sensitive heuristics.
+_autopilot_native_path() {
+  local input="${1:-}" shell_root
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  case "$input" in
+    "$shell_root"|"$shell_root"/*) _tdd_native_project_path "$input" ;;
+    *) _tdd_native_path "$input" ;;
+  esac
+}
+
+# Project authority is stricter than generic file transport. Once a session is
+# bound, an explicit project root (and every derived state operand) must be the
+# bound root or one of its descendants; it may never fall back to a different
+# path merely because cygpath can render it for native Node.
+_autopilot_native_project_path() {
+  local input="${1:-}" shell_root native_root suffix
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # Reject traversal before selecting a namespace. The suffix mapper is
+  # intentionally lexical so it can handle not-yet-created state files; dot
+  # segments must therefore never reach either its shell or native branch.
+  case "/$input/" in */../*|*/./*) return 1 ;; esac
+  # Validate the private record before accepting either namespace. Public
+  # helpers normally pass the shell spelling returned by pwd -P; accepting the
+  # exact native spelling as well keeps internal callers namespace-stable.
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  native_root="${ZENSU_PROJECT_ROOT%/}"
+  case "$input" in
+    "$shell_root"|"$shell_root"/*) _tdd_native_project_path "$input" ;;
+    "$native_root") printf '%s\n' "$native_root" ;;
+    "$native_root"/*)
+      suffix="${input#"$native_root"/}"
+      [ -n "$suffix" ] || return 1
+      case "$suffix" in *\\*|*$'\r'*|*$'\n'*) return 1 ;; esac
+      printf '%s/%s\n' "$native_root" "$suffix"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+_autopilot_native_project_root() {
+  local input="${1:-}" shell_input shell_root
+  [ "$#" -eq 1 ] && [ -n "$input" ] || return 1
+  if [ -z "${ZENSU_PROJECT_ROOT:-}" ] \
+      && [ -z "${ZENSU_SESSION_KEY:-}" ] \
+      && [ -z "${ZENSU_SESSION_CONTEXT:-}" ]; then
+    _tdd_native_path "$input"
+    return $?
+  fi
+  [ -n "${ZENSU_PROJECT_ROOT:-}" ] \
+    && [ -n "${ZENSU_SESSION_KEY:-}" ] \
+    && [ -n "${ZENSU_SESSION_CONTEXT:-}" ] || return 1
+  # shellcheck source=hooks/lib/zensu-session.sh
+  # shellcheck disable=SC1091
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  shell_root="$(zensu_resolve_project_dir)" || return 1
+  shell_input="$(cd -P -- "$input" 2>/dev/null && pwd -P)" || return 1
+  [ "$shell_input" = "$shell_root" ] || return 1
+  _tdd_native_project_path "$shell_root"
+}
+
+_autopilot_msys_env_exclusions() {
+  local additions="${1:-}" existing="${MSYS2_ENV_CONV_EXCL:-}"
+  [ "$#" -eq 1 ] && [ -n "$additions" ] || return 1
+  printf '%s%s%s\n' "$existing" "${existing:+;}" "$additions"
+}
 
 _autopilot_shell_path() {
   local value="${1:-}"
@@ -23,8 +118,10 @@ _autopilot_shell_path() {
 }
 
 _autopilot_project_root() {
-  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root
-  ROOT_INPUT="$input" node -e '
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" root native_input env_exclusions
+  native_input="$(_autopilot_native_project_root "$input")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions ROOT_INPUT)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" ROOT_INPUT="$native_input" node -e '
     const fs = require("fs");
     const path = require("path");
     const logicalRoot = path.resolve(process.env.ROOT_INPUT || ".");
@@ -113,13 +210,8 @@ _autopilot_locked_run() {
   local root="$1" run_id="$2"
   shift 2
   local sentinel="$root/.zensu/state/autopilot"
-  if [ "${AUTOPILOT_DISABLE_FLOCK:-}" = "1" ]; then
-    CLAUDE_PROJECT_DIR="$root" TDD_DISABLE_FLOCK=1 \
-      _tdd_locked_run "$sentinel" _autopilot_locked_dispatch "$root" "$run_id" "$@"
-  else
-    CLAUDE_PROJECT_DIR="$root" \
-      _tdd_locked_run "$sentinel" _autopilot_locked_dispatch "$root" "$run_id" "$@"
-  fi
+  CLAUDE_PROJECT_DIR="$root" \
+    _tdd_locked_run "$sentinel" _autopilot_locked_dispatch "$root" "$run_id" "$@"
 }
 
 _autopilot_locked_dispatch() {
@@ -132,10 +224,27 @@ _autopilot_locked_dispatch() {
 # All schema and transition decisions live in one worker so every caller uses
 # the same closed vocabulary and canonical payload digest.
 _autopilot_node() {
-  # Keep Bash-facing roots in the Git-Bash namespace, but let MSYS translate
-  # the worker arguments for native Node. Durable projectRoot identity and all
-  # filesystem operands then share Node's canonical Windows namespace.
-  node - "$@" <<'NODE'
+  # Every worker mode has a closed positional schema. Convert every filesystem
+  # operand before native Node starts, then disable MSYS argv rewriting so
+  # spaces, apostrophes, and path-list punctuation cannot influence transport.
+  local mode="${1:-}" native index
+  shift || return 3
+  local args=("$@") path_indexes=()
+  case "$mode" in
+    read-active) path_indexes=(0 1 2) ;;
+    read-run) path_indexes=(0 2) ;;
+    begin) path_indexes=(0 1 2 3 6) ;;
+    apply) path_indexes=(0 1 2 7) ;;
+    team-review-receipt-meta) path_indexes=(0) ;;
+    increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
+    *) return 3 ;;
+  esac
+  for index in "${path_indexes[@]}"; do
+    [ "$index" -lt "${#args[@]}" ] || return 3
+    native="$(_autopilot_native_project_path "${args[$index]}")" || return 2
+    args[$index]="$native"
+  done
+  MSYS2_ARG_CONV_EXCL='*' node - "$mode" "${args[@]}" <<'NODE'
 const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
@@ -149,6 +258,29 @@ const fail = (code, message) => {
   if (message) process.stderr.write(`[zensu-autopilot-state] ${message}\n`);
   process.exit(code);
 };
+const projectRootIndex = Object.freeze({
+  "read-active": 2,
+  "read-run": 2,
+  begin: 6,
+  apply: 7,
+  "increment-budget": 5,
+  "increment-budget-capped": 5,
+})[mode];
+if (projectRootIndex !== undefined) {
+  const requestedProjectRoot = args[projectRootIndex];
+  if (typeof requestedProjectRoot !== "string" || requestedProjectRoot.length === 0
+      || /[\u0000-\u001f]/.test(requestedProjectRoot)) {
+    fail(3, "invalid physical project root");
+  }
+  try {
+    const canonicalProjectRoot = fs.realpathSync.native(path.resolve(requestedProjectRoot));
+    const stat = fs.lstatSync(canonicalProjectRoot);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) fail(2, "unsafe physical project root");
+    args[projectRootIndex] = canonicalProjectRoot;
+  } catch (_) {
+    fail(2, "physical project root is unavailable");
+  }
+}
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const exact = (value, keys) => isObject(value)
   && Object.keys(value).length === keys.length
@@ -1295,13 +1427,18 @@ _autopilot_team_review_payload_identity_critical() {
 # closes the leaf-swap window and rejects hard-linked files.
 _autopilot_team_review_payload_inspect() {
   local payload_file="${1:-}" head_sha="${2:-}" private="${3:-false}" digest_mode="${4:-raw}" provider="${5:-}"
+  local native_payload_file env_exclusions
   [ "$#" -ge 3 ] && [ "$#" -le 5 ] || return 3
   case "$private" in true|false) ;; *) return 3 ;; esac
   case "$digest_mode" in raw|canonical) [ -z "$provider" ] || return 3 ;; receipt) case "$provider" in github|gitlab) ;; *) return 3 ;; esac ;; *) return 3 ;; esac
-  PAYLOAD_FILE="$payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
+  native_payload_file="$(_autopilot_native_path "$payload_file")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions PAYLOAD_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" PAYLOAD_FILE="$native_payload_file" HEAD_SHA="$head_sha" PRIVATE="$private" DIGEST_MODE="$digest_mode" \
     PROVIDER="$provider" node -e '
     const fs = require("fs");
     const crypto = require("crypto");
+    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
     const max = 8 * 1024 * 1024;
     const file = process.env.PAYLOAD_FILE;
     const head = String(process.env.HEAD_SHA || "").toLowerCase();
@@ -1359,7 +1496,7 @@ _autopilot_team_review_payload_inspect() {
       if (!before.isFile() || before.isSymbolicLink() || before.nlink !== 1
           || before.size < 1 || before.size > max
           || (requirePrivate && !privateMode(before))) fail(2);
-      fd = fs.openSync(file, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
       const opened = fs.fstatSync(fd);
       if (!opened.isFile() || opened.nlink !== 1 || opened.dev !== before.dev
           || opened.ino !== before.ino || opened.size !== before.size
@@ -1394,11 +1531,15 @@ _autopilot_team_review_payload_inspect() {
 # sibling pointing at the same private inode. Anything ambiguous stays
 # fail-closed and untouched.
 _autopilot_recover_team_review_payload_alias() {
-  local target="${1:-}"
+  local target="${1:-}" native_target env_exclusions
   [ "$#" -eq 1 ] && [ -n "$target" ] || return 3
-  TARGET_FILE="$target" node -e '
+  native_target="$(_autopilot_native_project_path "$target")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions TARGET_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" TARGET_FILE="$native_target" node -e '
     const fs = require("fs");
     const path = require("path");
+    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
     const target = process.env.TARGET_FILE;
     const directory = path.dirname(target);
     const basename = path.basename(target);
@@ -1442,8 +1583,8 @@ _autopilot_recover_team_review_payload_alias() {
       const tempBefore = fs.lstatSync(temp);
       if (!privateRegular(tempBefore) || tempBefore.nlink !== 2
           || tempBefore.dev !== targetBefore.dev || tempBefore.ino !== targetBefore.ino) fail(2);
-      targetFd = fs.openSync(target, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
-      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+      targetFd = fs.openSync(target, fs.constants.O_RDONLY | noFollow);
+      tempFd = fs.openSync(temp, fs.constants.O_RDONLY | noFollow);
       const targetOpen = fs.fstatSync(targetFd);
       const tempOpen = fs.fstatSync(tempFd);
       if (!privateRegular(targetOpen) || !privateRegular(tempOpen)
@@ -1518,6 +1659,7 @@ autopilot_read_team_review_payload() {
 _autopilot_store_team_review_payload_critical() {
   local root="$1" run_id="$2" operation_key="$3" head_sha="$4" source_file="$5" provider="$6"
   local state_dir="$root/.zensu/state" target tmp rc source_digest target_digest
+  local native_source_file native_target native_tmp env_exclusions
   _autopilot_team_review_payload_identity_critical \
     "$root" "$run_id" "$operation_key" "$head_sha" "$provider" || return $?
   target="$(_autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha")" \
@@ -1542,11 +1684,22 @@ _autopilot_store_team_review_payload_critical() {
   tmp="$(mktemp "${target}.tmp.XXXXXXXX" 2>/dev/null)" || return 5
   CLAUDE_PROJECT_DIR="$root" _tdd_paths_safe "$tmp" regular "$target" regular-or-absent \
     || { rm -f "$tmp"; return 2; }
-  SOURCE_FILE="$source_file" TARGET_FILE="$target" TEMP_FILE="$tmp" \
+  native_source_file="$(_autopilot_native_path "$source_file")" \
+    || { rm -f "$tmp"; return 2; }
+  native_target="$(_autopilot_native_project_path "$target")" \
+    || { rm -f "$tmp"; return 2; }
+  native_tmp="$(_autopilot_native_project_path "$tmp")" \
+    || { rm -f "$tmp"; return 2; }
+  env_exclusions="$(_autopilot_msys_env_exclusions 'SOURCE_FILE;TARGET_FILE;TEMP_FILE')" \
+    || { rm -f "$tmp"; return 2; }
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" \
+    SOURCE_FILE="$native_source_file" TARGET_FILE="$native_target" TEMP_FILE="$native_tmp" \
     EXPECTED_DIGEST="$source_digest" \
     node -e '
       const fs = require("fs");
       const crypto = require("crypto");
+      const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+        ? fs.constants.O_NOFOLLOW : 0;
       const source = process.env.SOURCE_FILE;
       const target = process.env.TARGET_FILE;
       const temp = process.env.TEMP_FILE;
@@ -1555,7 +1708,7 @@ _autopilot_store_team_review_payload_critical() {
       try {
         const sourceBefore = fs.lstatSync(source);
         if (!sourceBefore.isFile() || sourceBefore.isSymbolicLink() || sourceBefore.nlink !== 1) process.exit(2);
-        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0));
+        sourceFd = fs.openSync(source, fs.constants.O_RDONLY | noFollow);
         const sourceOpen = fs.fstatSync(sourceFd);
         if (!sourceOpen.isFile() || sourceOpen.nlink !== 1 || sourceOpen.dev !== sourceBefore.dev
             || sourceOpen.ino !== sourceBefore.ino || sourceOpen.size !== sourceBefore.size) process.exit(2);
@@ -1568,7 +1721,7 @@ _autopilot_store_team_review_payload_critical() {
 
         const tempBefore = fs.lstatSync(temp);
         if (!tempBefore.isFile() || tempBefore.isSymbolicLink() || tempBefore.nlink !== 1) process.exit(2);
-        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | (fs.constants.O_NOFOLLOW || 0));
+        tempFd = fs.openSync(temp, fs.constants.O_WRONLY | noFollow);
         const tempOpen = fs.fstatSync(tempFd);
         if (!tempOpen.isFile() || tempOpen.nlink !== 1 || tempOpen.dev !== tempBefore.dev
             || tempOpen.ino !== tempBefore.ino) process.exit(2);
@@ -1618,13 +1771,15 @@ _autopilot_store_team_review_payload_critical() {
 
 autopilot_store_team_review_payload() {
   local run_id="${1:-}" operation_key="${2:-}" head_sha="${3:-}" source_file="${4:-}" \
-    provider="${5:-}" root
+    provider="${5:-}" root native_source_file env_exclusions
   [ "$#" -eq 6 ] && _autopilot_identifier_ok "$run_id" || return 3
   case "$provider" in github|gitlab) ;; *) return 3 ;; esac
   root="$(_autopilot_project_root "${6:-}")" || return 2
   _autopilot_team_review_payload_target "$root" "$operation_key" "$head_sha" \
     >/dev/null || return 3
-  SOURCE_FILE="$source_file" node -e '
+  native_source_file="$(_autopilot_native_path "$source_file")" || return 3
+  env_exclusions="$(_autopilot_msys_env_exclusions SOURCE_FILE)" || return 3
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" SOURCE_FILE="$native_source_file" node -e '
     const path = require("path");
     const source = process.env.SOURCE_FILE;
     const resolved = path.resolve(source || "");
@@ -1684,7 +1839,7 @@ autopilot_begin_standalone_tdd() {
 # a concurrent durable begin must publish both run and pointer before adoption
 # decides, and adoption must finish its claim+seed before the Outer lock releases.
 _autopilot_adopt_pending_review_critical() {
-  local root="$1" session_id="$2" vanilla="$3" ttl_hours="$4"
+  local root="$1" session_id="$2" vanilla="$3" ttl_hours="$4" owner_pid="$5"
   local state_dir="$1/.zensu/state" state read_rc stage adopt_rc
   if state="$(_autopilot_node read-active \
       "$state_dir/autopilot-active.json" "$state_dir" "$root" 2>/dev/null)"; then
@@ -1708,7 +1863,7 @@ _autopilot_adopt_pending_review_critical() {
     1) ;;
     *) return "$read_rc" ;;
   esac
-  if tdd_adopt_pending_review "$session_id" "$vanilla" "$ttl_hours"; then
+  if tdd_adopt_pending_review "$session_id" "$vanilla" "$ttl_hours" "$owner_pid"; then
     return 0
   else
     adopt_rc=$?
@@ -1724,23 +1879,79 @@ _autopilot_adopt_pending_review_critical() {
   return "$adopt_rc"
 }
 
+# When the Outer lease is saturated, avoid sending every safely losing Stop a
+# generic storage-error prompt. This is a read-only proof: check Outer, prove a
+# stable foreign plain claim, then check Outer again as the TOCTOU fence. A run
+# published after that final absent/terminal read linearizes after this Stop.
+_autopilot_deferred_contention_result() {
+  local root="$1" session_id="$2" ttl_hours="$3" state read_rc stage
+  _autopilot_storage_safe "$root" "" || return 2
+  if state="$(_autopilot_node read-active \
+      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
+        catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in DONE|CANCELLED) ;; *) return 4 ;; esac
+      ;;
+    1) ;;
+    # This unlocked read may observe begin's durable run before its active
+    # pointer is published. Storage safety was proven above, so this is
+    # inconclusive and must return to the serialized retry path.
+    2) return 8 ;;
+    *) return "$read_rc" ;;
+  esac
+
+  tdd_pending_review_owned_by_other "$session_id" "$ttl_hours" || return 8
+
+  _autopilot_storage_safe "$root" "" || return 2
+  if state="$(_autopilot_node read-active \
+      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+    read_rc=0
+  else
+    read_rc=$?
+  fi
+  case "$read_rc" in
+    0)
+      stage="$(printf '%s' "$state" | node -e '
+        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
+        catch (_) { process.exit(3); }
+      ' 2>/dev/null)" || return 2
+      case "$stage" in DONE|CANCELLED) return 6 ;; *) return 4 ;; esac
+      ;;
+    1) return 6 ;;
+    # The final fence can see the same valid run->pointer publication window.
+    # Without a conclusive absent/terminal/active result, retry under Outer.
+    2) return 8 ;;
+    *) return "$read_rc" ;;
+  esac
+}
+
 autopilot_adopt_pending_review() {
   local root session_id="${2:-}" vanilla="${3:-false}" ttl_hours="${4:-0}"
-  local lock_attempt=0 rc
-  [ "$#" -eq 4 ] || return 3
+  local owner_pid="${5:-$$}" lock_attempt=0 rc contention_rc
+  [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || return 3
   _autopilot_session_id_ok "$session_id" || return 3
   case "$vanilla" in true|false) ;; *) return 3 ;; esac
   case "$ttl_hours" in ''|*[!0-9]*) return 3 ;; esac
+  case "$owner_pid" in ''|*[!0-9]*) return 3 ;; esac
+  [ "$owner_pid" -gt 0 ] || return 3
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   _autopilot_prepare_storage "$root" || return 2
-  # The mkdir-lock fallback has a deliberately short per-acquisition timeout.
+  # The Core lease has a deliberately bounded per-acquisition wait.
   # A burst of Stop hooks can legitimately queue many slow Outer->pending->Inner
   # composites behind one another, so retry that rc=1 transaction as a whole.
   # Claim/seed is idempotent and crash-recoverable; unsafe/corrupt/owned/no-work
   # results have distinct codes and are never retried here.
   while [ "$lock_attempt" -lt 5 ]; do
     if _autopilot_locked_run "$root" "" _autopilot_adopt_pending_review_critical \
-        "$root" "$session_id" "$vanilla" "$ttl_hours"; then
+        "$root" "$session_id" "$vanilla" "$ttl_hours" "$owner_pid"; then
       return 0
     else
       rc=$?
@@ -1749,6 +1960,13 @@ autopilot_adopt_pending_review() {
     # but do not retry them as though the Outer project lock were contended.
     [ "$rc" -eq 7 ] && return 1
     [ "$rc" -eq 1 ] || return "$rc"
+    _autopilot_deferred_contention_result "$root" "$session_id" "$ttl_hours"
+    contention_rc=$?
+    case "$contention_rc" in
+      4|6) return "$contention_rc" ;;
+      8) ;;
+      *) return "$contention_rc" ;;
+    esac
     lock_attempt=$((lock_attempt + 1))
   done
   return 1
@@ -1939,18 +2157,22 @@ autopilot_reconcile_stop_active() {
 _autopilot_increment_inner_budget_critical() {
   local root="$1" run_id="$2" session_id="$3" attempt="$4" chain_id="$5"
   local return_stage="$6" cap="$7" block_code="$8" state_file="$9"
-  local budget_file="${10}" result_file="${11}"
-  local count blocked=false
-  _tdd_increment_stop_budget_critical "$state_file" "$session_id" "$budget_file" \
+  local _budget_file="${10}" result_file="${11}"
+  local count blocked=false native_state_file env_exclusions
+  _tdd_increment_stop_budget_critical "$state_file" "$session_id" "" \
     "$result_file" "$run_id" "$attempt" "$chain_id" "$return_stage" || return $?
   count="$(cat "$result_file" 2>/dev/null)" || return 1
   case "$count" in ''|*[!0-9]*) return 1 ;; esac
   if [ "$count" -gt "$cap" ]; then
-    STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+    native_state_file="$(_autopilot_native_project_path "$state_file")" || return 2
+    env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" || return 2
+    MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_state_file" \
+      SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
       CHAIN_ID="$chain_id" COUNT="$count" node -e '
         try {
           const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
-          const exact=s.session_id===process.env.SID && s.active===true
+          const exact=s.session_id_hash===`sha256:${process.env.SID.slice("scv1_".length)}`
+            && s.active===true
             && s.implComplete===true && s.chainDone===false
             && s.autopilotRunId===process.env.RUN_ID
             && s.autopilotAttempt===Number(process.env.ATTEMPT)
@@ -1972,7 +2194,7 @@ _autopilot_increment_inner_budget_outer_critical() {
   local session_id="$8" cap="$9" block_code="${10}" state_dir="$1/.zensu/state"
   local state meta run_id owner stage events attempt chain_id return_stage tdd_session
   local state_file state_dir_inner
-  local budget_file result_file result rc
+  local result_file result rc
   state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
     || return $?
   meta="$(printf '%s' "$state" | node -e '
@@ -1992,14 +2214,12 @@ _autopilot_increment_inner_budget_outer_critical() {
 
   state_file="$(tdd_state_file "$session_id")"
   state_dir_inner="$(dirname "$state_file")"
-  budget_file="${state_file}.stopblocks"
   _tdd_path_safe "$state_file" regular "$state_dir_inner" || return 2
-  _tdd_path_safe "$budget_file" regular-or-absent "$state_dir_inner" || return 2
   result_file="$(mktemp "${state_file}.stop-count.XXXXXX" 2>/dev/null)" || return 5
   result="$(_tdd_locked_run "$state_file" _autopilot_increment_inner_budget_critical \
     "$root" "$run_id" "$session_id" "$expected_attempt" "$expected_chain" \
     "$expected_return_stage" "$cap" "$block_code" \
-    "$state_file" "$budget_file" "$result_file")"
+    "$state_file" "" "$result_file")"
   rc=$?
   rm -f "$result_file" 2>/dev/null || true
   [ "$rc" -eq 0 ] || return "$rc"
@@ -2027,15 +2247,19 @@ autopilot_increment_inner_stop_budget_capped() {
 
 _autopilot_verify_inner_binding_critical() {
   local state_file="$1" session_id="$2" run_id="$3" attempt="$4"
-  local return_stage="$5" chain_id="$6"
-  STATE_FILE="$state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
+  local return_stage="$5" chain_id="$6" native_state_file env_exclusions
+  native_state_file="$(_autopilot_native_project_path "$state_file")" || return 2
+  env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" || return 2
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_state_file" \
+    SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
       const fs=require("fs");
       let s;
       try { s=JSON.parse(fs.readFileSync(process.env.STATE_FILE,"utf8")); }
       catch (_) { process.exit(3); }
       const ok=s && typeof s==="object" && !Array.isArray(s)
-        && s.session_id===process.env.SID && s.active===true
+        && s.session_id_hash===`sha256:${process.env.SID.slice("scv1_".length)}`
+        && s.active===true
         && s.autopilotRunId===process.env.RUN_ID
         && s.autopilotAttempt===Number(process.env.ATTEMPT)
         && s.autopilotReturnStage===process.env.RETURN_STAGE
@@ -2063,6 +2287,7 @@ _autopilot_begin_tdd_critical() {
   local root="$1" run_id="$2" event_id="$3" session_id="$4" vanilla="$5"
   local attempt="$6" return_stage="$7" chain_id="$8"
   local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  local native_run_tmp env_exclusions
   run_file="$state_dir/autopilot-run-${run_id}.json"
   active_file="$state_dir/autopilot-active.json"
   run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
@@ -2081,7 +2306,12 @@ _autopilot_begin_tdd_critical() {
     rm -f "$run_tmp"
     return "$rc"
   fi
-  if ! STATE_FILE="$run_tmp" RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
+  native_run_tmp="$(_autopilot_native_project_path "$run_tmp")" \
+    || { rm -f "$run_tmp"; return 2; }
+  env_exclusions="$(_autopilot_msys_env_exclusions STATE_FILE)" \
+    || { rm -f "$run_tmp"; return 2; }
+  if ! MSYS2_ENV_CONV_EXCL="$env_exclusions" STATE_FILE="$native_run_tmp" \
+      RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
       RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
         try {
           const s=JSON.parse(require("fs").readFileSync(process.env.STATE_FILE,"utf8"));
@@ -2342,7 +2572,7 @@ _autopilot_reset_inner_critical() {
         process.exit(exact?0:3);
       } catch (_) { process.exit(3); }
     ' 2>/dev/null || return 3
-  tdd_clear_autopilot_session "$session_id" "$run_id" "$attempt" "$chain_id"
+  tdd_reset_pending_review_claim "$session_id" "$run_id" "$attempt" "$chain_id"
 }
 
 autopilot_reset_inner() {

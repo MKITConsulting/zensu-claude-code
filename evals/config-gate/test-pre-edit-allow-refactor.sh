@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -13,11 +14,13 @@ check() {
 }
 
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-TDD_STATE_DIR="$(mktemp -d)"
-export TDD_STATE_DIR
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+export STATE_DIR="$WORK_DIR/retired-state"
+mkdir -p "$CLAUDE_PROJECT_DIR" "$STATE_DIR"
 unset ZENSU_TDD_GATE
 
-cleanup() { rm -rf "$TDD_STATE_DIR"; }
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 source "$LIB"
@@ -29,10 +32,12 @@ eval "$(declare -f tdd_write_phase | sed '1s/^tdd_write_phase/_zensu_orig_write_
 tdd_write_phase() { tdd_set_flag "$1" active true >/dev/null 2>&1; _zensu_orig_write_phase "$@"; }
 
 SID_RF="s-refactor-1"
+# shellcheck disable=SC1090
+source "$BASELINE" "$SID_RF"
 tdd_write_phase "$SID_RF" "S1" "REFACTOR" "" >/dev/null
 
 for fp in "src/strings.ts" "src/strings.test.ts" "backend/handlers.go"; do
-  PAYLOAD='{"tool_name":"Edit","tool_input":{"file_path":"'"$fp"'"},"session_id":"'$SID_RF'"}'
+  PAYLOAD='{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":"'"$fp"'"},"session_id":"'$SID_RF'"}'
   OUT=$(echo "$PAYLOAD" | "$SCRIPT" 2>/dev/null)
   if [ -z "$OUT" ]; then
     check "REFACTOR + $fp: allowed" PASS

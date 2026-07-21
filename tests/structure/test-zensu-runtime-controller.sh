@@ -37,7 +37,19 @@ check() {
   else echo "  FAIL  $1"; FAIL=$((FAIL + 1)); fi
 }
 
-if node --test "$SUPERVISOR_TEST" >/dev/null 2>&1; then
+LOOPBACK_AVAILABLE=0
+if node -e '
+  const net = require("node:net");
+  const server = net.createServer();
+  server.once("error", () => process.exit(1));
+  server.listen(0, "127.0.0.1", () => server.close(() => process.exit(0)));
+' >/dev/null 2>&1; then
+  LOOPBACK_AVAILABLE=1
+fi
+
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
+elif node --test "$SUPERVISOR_TEST" >/dev/null 2>&1; then
   check "process supervisor authenticates status/stop and terminates its child group" PASS
 else
   check "process supervisor authenticates status/stop and terminates its child group" FAIL
@@ -45,6 +57,7 @@ fi
 
 mkdir -p "$STUBS" "$RUN_DIR" "$DOCKER_STATE" "$WORKTREE/backend/cmd/zensu" \
   "$WORKTREE/frontend/node_modules"
+: >"$DOCKER_STATE/events"
 touch "$WORKTREE/backend/Makefile" "$WORKTREE/frontend/package.json" "$WORKTREE/frontend/pnpm-lock.yaml"
 
 cat >"$STUBS/docker" <<'STUB'
@@ -118,6 +131,7 @@ POLICY='{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:45173
 COMMON_ENV=(PATH="$STUBS:$PATH" DOCKER_STATE="$DOCKER_STATE" EVENTS="$EVENTS" ZENSU_VERIFY_NAVIGATION_POLICY_V1="$POLICY")
 
 PLANNED_ORIGIN="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" planned-origin "$RUN_DIR" "$WORKTREE" 2>&1)"
+if [ "$LOOPBACK_AVAILABLE" = 1 ]; then
 UP_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" up "$RUN_DIR" "$WORKTREE" 2>&1)"
 UP_RC=$?
 READY_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" ready "$RUN_DIR" "$WORKTREE" 2>&1)"
@@ -168,6 +182,24 @@ if [ "$MISSING_UP_RC" = 0 ] && [ "$MISSING_DOWN_RC" = 0 ] \
 else
   check "missing container still tears down both supervisors (up=$MISSING_UP_RC down=$MISSING_DOWN_RC)" FAIL
 fi
+else
+  if [ "$PLANNED_ORIGIN" = 'http://127.0.0.1:45173' ]; then
+    check "controller resolves the immutable planned origin without starting a listener" PASS
+  else
+    check "controller resolves the immutable planned origin without starting a listener" FAIL
+  fi
+  DOWN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" 2>&1)"
+  DOWN_RC=$?
+  SECOND_DOWN_OUT="$(env "${COMMON_ENV[@]}" bash "$CONTROLLER" down "$RUN_DIR" "$WORKTREE" 2>&1)"
+  SECOND_DOWN_RC=$?
+  if [ "$DOWN_RC" = 0 ] && [ "$SECOND_DOWN_RC" = 0 ] \
+    && [ ! -e "$RUN_DIR/zensu-runtime.json" ] && [ ! -e "$RUN_DIR/zensu-runtime.secrets" ]; then
+    check "down remains idempotent when no listener-backed runtime was started" PASS
+  else
+    check "down remains idempotent when no listener-backed runtime was started" FAIL
+  fi
+  check "missing-container supervisor integration skipped because the managed host forbids loopback listeners" PASS
+fi
 
 mkdir -p "$RUN_PARENT/run-invalid"
 INVALID="$RUN_PARENT/run-invalid"
@@ -195,6 +227,9 @@ fi
 
 PARTIAL="$RUN_PARENT/run-partial"
 mkdir -p "$PARTIAL"
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "frontend-start cleanup integration skipped because the managed host forbids supervisor listeners" PASS
+else
 env "${COMMON_ENV[@]}" PNPM_FAIL_START=1 bash "$CONTROLLER" up "$PARTIAL" "$WORKTREE" >/dev/null 2>&1
 PARTIAL_RC=$?
 if [ "$PARTIAL_RC" != 0 ] && [ ! -e "$PARTIAL/zensu-runtime.json" ] \
@@ -204,9 +239,13 @@ if [ "$PARTIAL_RC" != 0 ] && [ ! -e "$PARTIAL/zensu-runtime.json" ] \
 else
   check "failed frontend startup tears down the already-started backend and container" FAIL
 fi
+fi
 
 INSTALL_PARTIAL="$RUN_PARENT/run-install-partial"
 mkdir -p "$INSTALL_PARTIAL"
+if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
+  check "dependency-install cleanup integration skipped because the managed host forbids supervisor listeners" PASS
+else
 rmdir "$WORKTREE/frontend/node_modules"
 env "${COMMON_ENV[@]}" PNPM_FAIL_INSTALL=1 bash "$CONTROLLER" up "$INSTALL_PARTIAL" "$WORKTREE" >/dev/null 2>&1
 INSTALL_PARTIAL_RC=$?
@@ -217,6 +256,7 @@ if [ "$INSTALL_PARTIAL_RC" != 0 ] && [ ! -e "$INSTALL_PARTIAL/zensu-runtime.json
   check "dependency install failure after backend handshake still tears down the owned supervisor" PASS
 else
   check "dependency install failure tears down the already-started backend (rc=$INSTALL_PARTIAL_RC)" FAIL
+fi
 fi
 
 MALICIOUS="$RUN_PARENT/run-malicious-secrets"

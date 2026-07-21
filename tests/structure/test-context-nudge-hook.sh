@@ -10,6 +10,10 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/user-prompt-context-nudge.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 NO_CONFIG="$PLUGIN_DIR/.no-such-config-$$.json"
+CONTROL_TMP="$(mktemp -d -t ctxnudge-control-XXXXXX)"
+export CLAUDE_PLUGIN_DATA="$CONTROL_TMP/plugin-data"
+mkdir -p "$CLAUDE_PLUGIN_DATA"
+trap 'rm -rf "$CONTROL_TMP"' EXIT
 
 PASS=0; FAIL=0
 check() {
@@ -31,7 +35,7 @@ bash -n "$HOOK" 2>/dev/null && check "C2 bash -n syntax check passes" PASS || ch
 # C3 registered in hooks.json under UserPromptSubmit
 if node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command);
+  const ups=(h.hooks.UserPromptSubmit||[]).flatMap(x=>x.hooks||[]).map(z=>z.command||"");
   process.exit(ups.some(c=>/user-prompt-context-nudge\.sh/.test(c))?0:1);
 ' "$HOOKS_JSON" 2>/dev/null; then
   check "C3 registered in hooks.json UserPromptSubmit" PASS
@@ -65,7 +69,19 @@ make_transcript() {
   ' "$1" _ "$2"
 }
 payload() {
-  node -e 'process.stdout.write(JSON.stringify({transcript_path:process.argv[1],session_id:process.argv[2],prompt:"do a thing"}))' "$1" "$2"
+  local transcript="$1" session_id="$2" project
+  project="$(dirname "$transcript")"
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name:"SessionStart", source:"startup",
+    session_id:process.argv[1], cwd:process.argv[2]
+  }))' "$session_id" "$project" \
+    | CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+      env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+      bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null || return 1
+  node -e 'process.stdout.write(JSON.stringify({
+    hook_event_name:"UserPromptSubmit", transcript_path:process.argv[1],
+    session_id:process.argv[2], prompt:"do a thing"
+  }))' "$transcript" "$session_id"
 }
 # emits "EVENT|HASCOMPACT|PCT" or "EMPTY"
 classify() {
@@ -292,6 +308,29 @@ else
   check "C26 cross-session (a='$OUT26A' b='$OUT26B')" FAIL
 fi
 rm -rf "$P26"
+
+P27="$(mktemp -d -t ctxnudge-XXXXXX)"; T27="$P27/t.jsonl"; make_transcript "$T27" 600000
+BASE27="$(payload "$T27" "s27-$$")"
+OUT27=""
+for KIND27 in reviewer plm neutral partial; do
+  PAYLOAD27="$(BASE="$BASE27" KIND="$KIND27" node -e '
+    const p=JSON.parse(process.env.BASE);
+    if(process.env.KIND==="reviewer")p.agent_type="zensu:code-reviewer";
+    if(process.env.KIND==="plm")p.agent_type="zensu:zensu-plm";
+    if(process.env.KIND==="neutral")p.agent_type="custom-agent";
+    if(process.env.KIND==="partial")p.agent_id="child-only";
+    process.stdout.write(JSON.stringify(p));
+  ')"
+  OUT27="${OUT27}$(printf '%s' "$PAYLOAD27" | ZENSU_FORCE_MAIN=1 CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+    CLAUDE_PROJECT_DIR="$P27" ZENSU_CONFIG="$NO_CONFIG" bash "$HOOK" 2>/dev/null)"
+done
+NUDGE_FILES27="$(find "$P27/.zensu/state" -maxdepth 1 -name 'context-nudge-*.txt' -print 2>/dev/null)"
+if [ -z "$OUT27" ] && [ -z "$NUDGE_FILES27" ]; then
+  check "C27 reviewer/PLM/neutral/partial principals emit no nudge and write no debounce state" PASS
+else
+  check "C27 non-main principals are a total context-nudge no-op" FAIL
+fi
+rm -rf "$P27"
 
 echo "----"
 echo "test-context-nudge-hook: $PASS PASS / $FAIL FAIL"

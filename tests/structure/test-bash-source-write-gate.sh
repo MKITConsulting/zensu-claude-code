@@ -56,6 +56,10 @@ mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
 
 CFG_DEF="$(mktemp -t bswgate-def-XXXXXX)";  printf '%s' '{"hooks":{}}'                    > "$CFG_DEF"
 CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGate":false}}' > "$CFG_OFF"
+export CLAUDE_PROJECT_DIR="$PROJ"
+export ZENSU_TEST_PLUGIN_DATA="$WORKROOT/plugin-data"
+# shellcheck disable=SC1091
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test
 
 payload() {
   CMD="$1" CWD="${2:-$PROJ}" node -e '
@@ -74,11 +78,13 @@ classify() {
     });
   '
 }
-# run <label> <cmd> <expected> [cwd] [cfg]
+# run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
-  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}"
+  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}" env_file="${6:-$PROJ/.claude-env}"
   local out
-  out="$(payload "$cmd" "$cwd" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  out="$(payload "$cmd" "$cwd" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+        -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+        CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$env_file" \
         ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
@@ -127,12 +133,13 @@ OUT="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" C
 [ "$OUT" = "ALLOW" ] && check "W30 process-env ZENSU_BASH_WRITE_GATE=off -> ALLOW" PASS \
   || check "W30 process-env escape (got '$OUT')" FAIL
 
-# Fail-open: empty + non-JSON -> ALLOW
+# The parser remains fail-open only after a trusted hook session is bound;
+# empty/non-JSON payloads cannot establish that binding and are denied.
 OUT="$(printf '' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
 OUT2="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
-{ [ "$OUT" = "ALLOW" ] && [ "$OUT2" = "ALLOW" ]; } \
-  && check "W31 fail-open: empty + non-JSON -> ALLOW" PASS \
-  || check "W31 fail-open (empty='$OUT' nonjson='$OUT2')" FAIL
+{ [ "$OUT" = "DENY" ] && [ "$OUT2" = "DENY" ]; } \
+  && check "W31 empty + non-JSON cannot bind a hook session -> DENY" PASS \
+  || check "W31 binding failure (empty='$OUT' nonjson='$OUT2')" FAIL
 
 # Deny-reason content
 REASON_A="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
@@ -191,6 +198,58 @@ run "W46 here-string does not swallow next write" "$HS"                         
 
 # escape suppressed by config also covers rule B (escape), not just rule A
 run "W40 escape suppressed by bashWriteGate:false" "printf x >> ../sibling/src/lib.rs" ALLOW "$PROJ" "$CFG_OFF"
+
+# Protected Session Control inputs and CLAUDE_ENV_FILE remain immutable even
+# when the source-write convention is disabled or an escape hatch is present.
+run "W63 direct Session Control export assignment" "ZENSU_PROJECT_ROOT=/tmp/other env" DENY
+run "W64 exported Session Control rebind" "export ZENSU_SESSION_CONTEXT=/tmp/other" DENY
+run "W65 unset Session Control export" "unset ZENSU_SESSION_KEY" DENY
+run "W66 printf -v Session Control rebind" "printf -v ZENSU_RUNTIME_DIGEST bad" DENY
+run "W67 append through CLAUDE_ENV_FILE variable" 'printf '\''export ZENSU_PROJECT_ROOT=/tmp/other\n'\'' >> "$CLAUDE_ENV_FILE"' DENY
+run "W68 native CLAUDE_ENV_FILE vs Git-Bash command path" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
+run "W69 control rebind ignores bashWriteGate:false" "ZENSU_CLAUDE_PLUGIN_ROOT=/tmp/other env" DENY "$PROJ" "$CFG_OFF"
+run "W70 control rebind ignores inline escape" "ZENSU_BASH_WRITE_GATE=off ZENSU_PROJECT_ROOT=/tmp/other env" DENY
+run "W71 protected path prefix is not an exact CLAUDE_ENV_FILE match" \
+  "printf x >> /d/a/zensu-claude-code/session/.claude-env.backup" ALLOW "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
+run "W72 symbolic CLAUDE_ENV_FILE reference is independent of native path parsing" \
+  'printf x >> "$CLAUDE_ENV_FILE"' DENY "$PROJ" "$CFG_DEF" \
+  'D:\a\zensu-claude-code\session\.claude-env'
+run "W73 POSIX CLAUDE_ENV_FILE comparison remains case-sensitive and exact" \
+  "printf x >> /Users/Runner/Session/.claude-env" DENY "$PROJ" "$CFG_DEF" \
+  '/Users/Runner/Session/.claude-env'
+run "W74 POSIX CLAUDE_ENV_FILE does not fold case" \
+  "printf x >> /users/runner/session/.claude-env" ALLOW "$PROJ" "$CFG_DEF" \
+  '/Users/Runner/Session/.claude-env'
+run "W75 direct host session-id assignment" "CLAUDE_CODE_SESSION_ID=other env" DENY
+run "W76 exported host session-id rebind" "export CLAUDE_CODE_SESSION_ID=other" DENY
+run "W77 unset host session-id" "unset CLAUDE_CODE_SESSION_ID" DENY
+run "W78 printf -v host session-id rebind" "printf -v CLAUDE_CODE_SESSION_ID other" DENY
+run "W79 host session-id rebind ignores bashWriteGate:false" \
+  "CLAUDE_CODE_SESSION_ID=other env" DENY "$PROJ" "$CFG_OFF"
+
+# The mandatory control parser is a trust boundary. A selective runtime failure
+# must deny before config and escape hatches instead of falling through.
+REAL_NODE="$(command -v node)"
+CONTROL_FAIL_BIN="$WORKROOT/control-fail-bin"
+mkdir -p "$CONTROL_FAIL_BIN"
+printf '%s\n' \
+  '#!/bin/bash' \
+  'if [ "${BSWG_MODE:-}" = "control" ]; then exit 23; fi' \
+  'exec "${ZENSU_TEST_REAL_NODE:?}" "$@"' \
+  > "$CONTROL_FAIL_BIN/node"
+chmod +x "$CONTROL_FAIL_BIN/node"
+OUT_CONTROL_FAIL="$(payload 'git status' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+  -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+  PATH="$CONTROL_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$REAL_NODE" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$PROJ/.claude-env" \
+  ZENSU_CONFIG="$CFG_OFF" ZENSU_BASH_WRITE_GATE=off \
+  bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT_CONTROL_FAIL" = "DENY" ] \
+  && check "W80 control-parser runtime failure denies before config and escapes" PASS \
+  || check "W80 control-parser runtime failure (got '$OUT_CONTROL_FAIL')" FAIL
 
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \

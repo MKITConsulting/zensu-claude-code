@@ -11,13 +11,16 @@ name: Release
 #   1. Dispatch this workflow (Actions -> Release) with a version_type.
 #   2. The `prepare` job computes the next version, bumps the version files,
 #      generates the CHANGELOG section from the commits since the last tag
-#      (git-cliff), pushes a `release/vX.Y.Z` branch, and prints a Compare link.
+#      (git-cliff), creates the release commit, runs the installed-plugin
+#      Session Control gate against that exact clean commit, uploads SHA-bound
+#      evidence, then pushes `release/vX.Y.Z` and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
 #   4. The `publish` job fires on the release commit landing on main, tags main
 #      HEAD and creates a PUBLISHED GitHub Release whose notes are the new
-#      CHANGELOG section (already reviewed in the bump PR body). Plugin go-live
-#      is the merge itself (users install from main HEAD); the Release + tag are
-#      the record, published atomically with the merge.
+#      CHANGELOG section (already reviewed in the bump PR body). The merge only
+#      publishes a catalog entry for an as-yet unavailable immutable ref.
+#      Only successful tag creation makes the new plugin source resolvable;
+#      it runs only after the exact-main-SHA gate and evidence upload.
 
 on:
   workflow_dispatch:
@@ -31,7 +34,7 @@ on:
           - minor
           - major
       dry_run:
-        description: 'Dry run: compute version + notes only, do not open a PR'
+        description: 'Offline dry run: compute version + notes only; no commit, live gate, or branch push'
         required: false
         default: false
         type: boolean
@@ -39,7 +42,7 @@ on:
     branches: [main]
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: release-${{ github.ref }}
@@ -49,15 +52,22 @@ jobs:
   prepare:
     name: Prepare release branch
     if: github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: write
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
+          cache: npm
+
+      - run: npm ci
 
       - name: Deterministic test gate
         run: bash tests/run-all.sh
@@ -86,24 +96,28 @@ jobs:
         run: |
           set -euo pipefail
           VER="${{ steps.ver.outputs.version }}"
+          TAG="${{ steps.ver.outputs.tag }}"
           # Edit only the version line (format-preserving). jq would rewrite the
           # whole file in canonical style and reformat e.g. inline arrays.
           sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/plugin.json
           sed -i -E 's/("version"[[:space:]]*:[[:space:]]*")[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$VER"'\2/' .claude-plugin/marketplace.json
+          sed -i -E 's/("ref"[[:space:]]*:[[:space:]]*")v[0-9]+\.[0-9]+\.[0-9]+(")/\1'"$TAG"'\2/' .claude-plugin/marketplace.json
           sed -i -E "s#version-[0-9]+\.[0-9]+\.[0-9]+-green#version-${VER}-green#" README.md
-          echo "Bumped plugin.json, marketplace.json, README badge -> $VER"
+          echo "Bumped plugin.json, marketplace.json, README badge -> $VER; marketplace source ref -> $TAG"
           # Sanity: files stay valid JSON and carry the new version.
           test "$(jq -r .version .claude-plugin/plugin.json)" = "$VER"
           test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
+          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
 
       - name: Generate CHANGELOG section (git-cliff)
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
         with:
           config: cliff.toml
           args: --unreleased --tag ${{ steps.ver.outputs.tag }}
         env:
           OUTPUT: ${{ runner.temp }}/section.md
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepend section into CHANGELOG.md
         run: |
@@ -122,18 +136,27 @@ jobs:
           echo "----- generated section -----"
           cat "$SECTION"
 
+      - name: Revalidate generated release and immutable-source invariants
+        run: |
+          set -euo pipefail
+          bash tests/structure/test-version-sync.sh "${{ steps.ver.outputs.version }}"
+          bash tests/structure/test-immutable-marketplace-release.sh
+
       - name: Dry-run summary
         if: ${{ inputs.dry_run }}
         run: |
           {
             echo "## Dry run — v${{ steps.ver.outputs.version }}"
             echo ""
+            echo "Offline preview only: no release commit was created, no paid Session Control live gate ran, and no branch was pushed."
+            echo ""
             echo '```markdown'
             cat "${{ runner.temp }}/section.md"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Push release branch + print PR link
+      - name: Create release commit
+        id: release_commit
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
@@ -143,6 +166,70 @@ jobs:
           git checkout -b "$BR"
           git add .claude-plugin/plugin.json .claude-plugin/marketplace.json README.md CHANGELOG.md
           git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          test -n "$RELEASE_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          echo "branch=$BR" >> "$GITHUB_OUTPUT"
+          echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Install pinned Claude Code CLI for release gate
+        if: ${{ !inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          npm install --global @anthropic-ai/claude-code@2.1.211
+          test "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" = 2.1.211
+
+      - name: Session Control release gate (created commit SHA)
+        if: ${{ !inputs.dry_run }}
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'
+          ZENSU_EXPECTED_SOURCE_ROOT: ${{ github.workspace }}
+          ZENSU_EXPECTED_SOURCE_REVISION: ${{ steps.release_commit.outputs.sha }}
+          ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-release-evidence/suites
+        run: |
+          set -euo pipefail
+          if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::release requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
+            exit 1
+          fi
+          test "$ZENSU_E2E_DISPOSABLE_ENVIRONMENT" = 1
+          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          npm run session-control:release
+          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          EVIDENCE_DIR="$RUNNER_TEMP/session-control-release-evidence"
+          mkdir -p "$EVIDENCE_DIR"
+          RUNTIME_DIGEST="$(node hooks/lib/session-control-core-v1.js runtime-digest --plugin-root "$GITHUB_WORKSPACE" --host claude)"
+          jq -n \
+            --arg source_git_revision "$ZENSU_EXPECTED_SOURCE_REVISION" \
+            --arg claude_code_version "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" \
+            --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
+            --arg runtime_digest "$RUNTIME_DIGEST" \
+            '{schema:"zensu-session-control-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, claude_code_version:$claude_code_version, plugin_version:$plugin_version}' \
+            > "$EVIDENCE_DIR/release-gate.json"
+
+      - name: Upload created-commit release evidence
+        if: ${{ !inputs.dry_run }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-control-release-${{ steps.release_commit.outputs.sha }}
+          path: ${{ runner.temp }}/session-control-release-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Push release branch + print PR link
+        if: ${{ !inputs.dry_run }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          gh auth setup-git
+          BR="${{ steps.release_commit.outputs.branch }}"
+          test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
           # Force-push so re-running for the same version overwrites a stale branch.
           git push -f origin "$BR"
           TITLE_ENC="$(printf '%s' 'chore(release): bump version to ${{ steps.ver.outputs.version }}' | jq -sRr @uri)"
@@ -164,27 +251,106 @@ jobs:
       github.event_name == 'push' &&
       startsWith(github.event.head_commit.message, 'chore(release): bump version to')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    timeout-minutes: 120
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      - name: Resolve version + idempotency guard
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+
+      - name: Require repository Immutable Releases before paid validation
+        env:
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::IMMUTABLE_RELEASES_ADMIN_TOKEN with read access to repository settings is required"
+            exit 1
+          fi
+          SETTING="$(gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases")"
+          printf '%s' "$SETTING" | jq -e '.enabled == true' >/dev/null || {
+            echo "::error::GitHub Immutable Releases must be enabled before publishing a marketplace tag"
+            exit 1
+          }
+
+      - name: Verify immutable marketplace release target
         id: v
         run: |
           set -euo pipefail
           VER="$(jq -r '.version' .claude-plugin/plugin.json)"
+          TAG="v$VER"
+          [[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$(jq -r '.plugins[0].version' .claude-plugin/marketplace.json)" = "$VER"
+          test "$(jq -r '.plugins[0].source.source' .claude-plugin/marketplace.json)" = github
+          test "$(jq -r '.plugins[0].source.repo' .claude-plugin/marketplace.json)" = MKITConsulting/zensu-claude-code
+          test "$(jq -r '.plugins[0].source.ref' .claude-plugin/marketplace.json)" = "$TAG"
           echo "version=$VER" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VER" >> "$GITHUB_OUTPUT"
-          if git rev-parse "v$VER" >/dev/null 2>&1; then
-            echo "Tag v$VER already exists — skipping."
-            echo "skip=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "skip=false" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          if git rev-parse --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+            TAG_SHA="$(git rev-list -n 1 "$TAG")"
+            if [ "$TAG_SHA" != "${{ github.sha }}" ]; then
+              echo "::error::$TAG already exists at $TAG_SHA, not exact main SHA ${{ github.sha }}"
+              exit 1
+            fi
           fi
 
+      - name: Install pinned Claude Code CLI
+        run: |
+          set -euo pipefail
+          npm install --global @anthropic-ai/claude-code@2.1.211
+          test "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" = 2.1.211
+
+      - name: Session Control publish gate (exact main SHA)
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'
+          ZENSU_EXPECTED_SOURCE_ROOT: ${{ github.workspace }}
+          ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
+          ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-publish-evidence/suites
+        run: |
+          set -euo pipefail
+          if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+            echo "::error::publishing requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
+            exit 1
+          fi
+          test "$ZENSU_E2E_DISPOSABLE_ENVIRONMENT" = 1
+          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          npm run session-control:release
+          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
+          EVIDENCE_DIR="$RUNNER_TEMP/session-control-publish-evidence"
+          mkdir -p "$EVIDENCE_DIR"
+          RUNTIME_DIGEST="$(node hooks/lib/session-control-core-v1.js runtime-digest --plugin-root "$GITHUB_WORKSPACE" --host claude)"
+          jq -n \
+            --arg source_git_revision "$ZENSU_EXPECTED_SOURCE_REVISION" \
+            --arg claude_code_version "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" \
+            --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
+            --arg runtime_digest "$RUNTIME_DIGEST" \
+            '{schema:"zensu-session-control-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, claude_code_version:$claude_code_version, plugin_version:$plugin_version}' \
+            > "$EVIDENCE_DIR/publish-gate.json"
+
+      - name: Upload exact-main-SHA publish evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: session-control-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/session-control-publish-evidence/
+          if-no-files-found: error
+          retention-days: 90
+
       - name: Extract release notes from CHANGELOG
-        if: steps.v.outputs.skip == 'false'
         run: |
           set -euo pipefail
           VER="${{ steps.v.outputs.version }}"
@@ -198,19 +364,154 @@ jobs:
           fi
 
       - name: Package plugin source
-        if: steps.v.outputs.skip == 'false'
         run: git archive --format=zip -o "zensu-claude-code-v${{ steps.v.outputs.version }}.zip" HEAD
 
-      - name: Create release
-        if: steps.v.outputs.skip == 'false'
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.v.outputs.tag }}
-          name: ${{ steps.v.outputs.tag }}
-          target_commitish: ${{ github.sha }}
-          draft: false
-          prerelease: false
-          body_path: ${{ runner.temp }}/notes.md
-          files: zensu-claude-code-v${{ steps.v.outputs.version }}.zip
+      - name: Recheck Immutable Releases immediately before publish
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::error::IMMUTABLE_RELEASES_ADMIN_TOKEN is required for the final settings check"
+            exit 1
+          fi
+          gh api -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2026-03-10' \
+            "repos/$GITHUB_REPOSITORY/immutable-releases" \
+            --jq '.enabled' | grep -qx true || {
+              echo "::error::GitHub Immutable Releases was disabled before publish"
+              exit 1
+            }
+
+      - name: Draft, attach, publish, and verify immutable release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          VER="${{ steps.v.outputs.version }}"
+          TAG="${{ steps.v.outputs.tag }}"
+          ASSET="zensu-claude-code-v${VER}.zip"
+          EXPECTED_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
+          RELEASE_API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+          NOTES_FILE="${{ runner.temp }}/notes.md"
+          METADATA_FILE="${{ runner.temp }}/release-metadata.json"
+
+          release_json() {
+            gh api -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' "$RELEASE_API"
+          }
+          verify_asset() {
+            printf '%s' "$1" | jq -e --arg name "$ASSET" --arg digest "$EXPECTED_DIGEST" '
+              (.assets | length) == 1
+              and .assets[0].name == $name
+              and .assets[0].state == "uploaded"
+              and .assets[0].digest == $digest
+            ' >/dev/null
+          }
+          verify_exact_tag() {
+            test "$(gh api -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha)" = "${{ github.sha }}"
+          }
+          verify_metadata() {
+            local release_json="$1" expected_draft="$2" expected_immutable="$3"
+            printf '%s' "$release_json" | jq -e \
+              --arg tag "$TAG" \
+              --arg sha "${{ github.sha }}" \
+              --arg title "$TAG" \
+              --argjson draft "$expected_draft" \
+              --argjson immutable "$expected_immutable" \
+              --rawfile body "$NOTES_FILE" '
+                .draft == $draft
+                and .immutable == $immutable
+                and .prerelease == false
+                and .tag_name == $tag
+                and .target_commitish == $sha
+                and .name == $title
+                and .body == $body
+              ' >/dev/null
+          }
+          normalize_draft_metadata() {
+            local release_json="$1" release_id
+            release_id="$(printf '%s' "$release_json" | jq -er '.id | select(type == "number")')"
+            jq -n \
+              --arg tag "$TAG" \
+              --arg sha "${{ github.sha }}" \
+              --arg title "$TAG" \
+              --rawfile body "$NOTES_FILE" \
+              '{tag_name:$tag,target_commitish:$sha,name:$title,body:$body,draft:true,prerelease:false}' \
+              > "$METADATA_FILE"
+            gh api --method PATCH \
+              -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+              --input "$METADATA_FILE" >/dev/null
+          }
+
+          if RELEASE="$(release_json 2>/dev/null)"; then
+            if printf '%s' "$RELEASE" | jq -e '.draft == false' >/dev/null; then
+              verify_metadata "$RELEASE" false true || {
+                echo "::error::existing published release metadata is not the exact immutable contract; refusing repair"
+                exit 1
+              }
+              verify_exact_tag
+              verify_asset "$RELEASE" || {
+                echo "::error::existing immutable release asset is incomplete or has the wrong digest"
+                exit 1
+              }
+              echo "$TAG is already published, immutable, SHA-bound, and carries exactly the expected asset."
+              exit 0
+            fi
+            printf '%s' "$RELEASE" | jq -e '
+              .draft == true and .immutable == false and (.assets | length) <= 1
+            ' >/dev/null || {
+              echo "::error::existing draft release is not a mutable single-asset retry candidate"
+              exit 1
+            }
+            if [ "$(printf '%s' "$RELEASE" | jq '.assets | length')" -eq 1 ]; then
+              verify_asset "$RELEASE" || {
+                echo "::error::existing draft asset is incomplete or has the wrong digest"
+                exit 1
+              }
+            else
+              gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
+            fi
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft --title "$TAG" --target "${{ github.sha }}" \
+              --notes-file "${{ runner.temp }}/notes.md"
+            RELEASE="$(release_json)"
+            printf '%s' "$RELEASE" | jq -e '
+              .draft == true and .immutable == false and (.assets | length) == 0
+            ' >/dev/null || {
+              echo "::error::new draft release is not a mutable empty draft"
+              exit 1
+            }
+            gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
+          fi
+
+          RELEASE="$(release_json)"
+          normalize_draft_metadata "$RELEASE"
+          RELEASE="$(release_json)"
+          verify_metadata "$RELEASE" true false || {
+            echo "::error::draft tag/target/prerelease/title/body metadata differs immediately before publish"
+            exit 1
+          }
+          verify_asset "$RELEASE"
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
+
+          PUBLISHED=""
+          for ATTEMPT in $(seq 1 10); do
+            CANDIDATE="$(release_json)"
+            if verify_metadata "$CANDIDATE" false true && verify_asset "$CANDIDATE"; then
+              PUBLISHED="$CANDIDATE"
+              break
+            fi
+            if [ "$ATTEMPT" -eq 10 ]; then
+              echo "::error::published release did not become immutable with the expected asset digest"
+              exit 1
+            fi
+            sleep 2
+          done
+          verify_exact_tag
+          verify_asset "$PUBLISHED"

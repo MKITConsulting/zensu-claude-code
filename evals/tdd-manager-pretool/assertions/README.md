@@ -25,7 +25,7 @@ Reference for each post-hoc assertion script in this directory. Each script read
 - quoted inner redirects (`sh -c "echo >foo"`) where the outer text does not contain the pattern
 - no-space redirects (`echo hi;echo>foo.ts`)
 
-This is a deliberate scope: post-hoc transcript scanning cannot enumerate every interpreter that writes files. The defense-in-depth for `tdd-manager` drift is the agent's prompt discipline (Principle 1 in `agents/tdd-manager.md`), the PreToolUse gate on `Edit|Write|MultiEdit` (`hooks/pre-edit-tdd-reminder.sh`), and the PostToolUse code-reviewer chain with mtime audit (Phase 6 step 5 of `agents/tdd-manager.md`). This script is a low-cost lexical canary that catches the most common drift pattern (`echo > file`, `>> file`, `sed -i`) — not a security boundary.
+This is a deliberate scope: post-hoc transcript scanning cannot enumerate every interpreter that writes files. The defense-in-depth for implementation drift is the main-thread prompt discipline (Principle 1 in `skills/tdd/SKILL.md`), the PreToolUse gate on `Edit|Write|MultiEdit` (`hooks/pre-edit-tdd-reminder.sh`), and the PostToolUse code-reviewer chain with mtime audit (Phase 6 in `skills/tdd/SKILL.md`). This script is a low-cost lexical canary that catches the most common drift pattern (`echo > file`, `>> file`, `sed -i`) — not a security boundary.
 
 ## assert-no-gate-fired.js
 

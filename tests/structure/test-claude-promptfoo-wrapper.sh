@@ -236,9 +236,11 @@ fi
 rm -rf "$STUB_STREAM_DIR" "$SRC_STREAM_DIR"
 
 if ! grep -qF 'CLAUDE_RAW=' "$WRAPPER" \
-  && ! grep -qF 'PIPESTATUS' "$WRAPPER" \
   && grep -qF 'CLAUDE_PID=$!' "$WRAPPER" \
-  && grep -qF 'RENDER_PID=$!' "$WRAPPER" \
+  && grep -qF 'RAW_STREAM_MAX_BLOCKS=32768' "$WRAPPER" \
+  && grep -qF 'chmod 600 "$RAW_STREAM"' "$WRAPPER" \
+  && grep -qF 'ulimit -f "$RAW_STREAM_MAX_BLOCKS"' "$WRAPPER" \
+  && grep -qF 'node "$STREAM_RENDERER" <"$RAW_STREAM"' "$WRAPPER" \
   && grep -qF 'MAX_EVENT_BYTES' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
   && grep -qF 'MAX_EVENTS' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
   && grep -qF 'MAX_OUTPUT_BYTES' "$PLUGIN_DIR/scripts/claude-stream-render.js" \
@@ -828,7 +830,61 @@ else
 fi
 rm -rf "$STUB_P13S7_DIR" "$SRC_P13S7_DIR"
 
+exact_isolated_failure() {
+  local output="$1" expected="$2" forbidden="${3:-}"
+  local first_line second_line line_count
+  first_line="$(printf '%s\n' "$output" | sed -n '1p')"
+  second_line="$(printf '%s\n' "$output" | sed -n '2p')"
+  line_count="$(printf '%s\n' "$output" | awk 'END { print NR }')"
+  case "$first_line" in
+    "claude-promptfoo-wrapper: isolated working dir: "/*/claude-eval-*) ;;
+    *) return 1 ;;
+  esac
+  [ "$line_count" = 2 ] && [ "$second_line" = "$expected" ] || return 1
+  if [ -n "$forbidden" ] && printf '%s\n' "$output" | grep -qF "$forbidden"; then
+    return 1
+  fi
+}
+
+SYNTHETIC_ISOLATED_FAILURE=$'claude-promptfoo-wrapper: isolated working dir: /tmp/claude-eval-AbC123\nclaude-promptfoo-wrapper: synthetic failure'
+if exact_isolated_failure "$SYNTHETIC_ISOLATED_FAILURE" \
+    'claude-promptfoo-wrapper: synthetic failure' 'claude-should-not-run' \
+  && ! exact_isolated_failure 'claude-promptfoo-wrapper: synthetic failure' \
+    'claude-promptfoo-wrapper: synthetic failure' \
+  && ! exact_isolated_failure "$SYNTHETIC_ISOLATED_FAILURE" \
+    'claude-promptfoo-wrapper: different failure' \
+  && ! exact_isolated_failure "${SYNTHETIC_ISOLATED_FAILURE}"$'\nextra line' \
+    'claude-promptfoo-wrapper: synthetic failure' \
+  && ! exact_isolated_failure "${SYNTHETIC_ISOLATED_FAILURE}"$'\nclaude-should-not-run' \
+    'claude-promptfoo-wrapper: synthetic failure' 'claude-should-not-run'; then
+  check "P13-S7b isolated failure transcript requires one preamble plus one exact diagnostic" PASS
+else
+  check "P13-S7b isolated failure transcript matcher rejects malformed output" FAIL
+fi
+
 if command -v sandbox-exec >/dev/null 2>&1 || command -v bwrap >/dev/null 2>&1; then
+  WATCH_PROBE_DIR="$(mktemp -d -t p13-watch-probe-XXXXXX)"
+  WATCH_PROBE_MARKER="$WATCH_PROBE_DIR.marker"
+  WATCH_PROBE_READY="$WATCH_PROBE_DIR.ready"
+  node "$WATCHER" "$WATCH_PROBE_DIR" "$WATCH_PROBE_MARKER" "$WATCH_PROBE_READY" \
+    >/dev/null 2>&1 &
+  WATCH_PROBE_PID=$!
+  for ((attempt=0; attempt<100; attempt++)); do
+    [ -e "$WATCH_PROBE_READY" ] && break
+    kill -0 "$WATCH_PROBE_PID" 2>/dev/null || break
+    sleep 0.01
+  done
+  if [ -e "$WATCH_PROBE_READY" ] && kill -0 "$WATCH_PROBE_PID" 2>/dev/null; then
+    NATIVE_WATCH_AVAILABLE=1
+  else
+    NATIVE_WATCH_AVAILABLE=0
+  fi
+  kill "$WATCH_PROBE_PID" 2>/dev/null || true
+  wait "$WATCH_PROBE_PID" 2>/dev/null || true
+  rm -rf "$WATCH_PROBE_DIR" "$WATCH_PROBE_MARKER" "$WATCH_PROBE_READY"
+
+  if [ "$NATIVE_WATCH_AVAILABLE" = 1 ]; then
+  WATCH_START_FAILURE='claude-promptfoo-wrapper: failed to start immutable fixture monitor'
   STUB_P13S8_DIR="$(mktemp -d)"
   cat >"$STUB_P13S8_DIR/claude" <<'STUB'
 #!/bin/bash
@@ -846,10 +902,13 @@ STUB
   mkdir -p "$SRC_P13S8_DIR/.zensu"
   printf 'version: 1\n' >"$SRC_P13S8_DIR/.zensu/autopilot.yaml"
   OPT_P13S8="$(printf '{"config":{"working_dir":"%s","init_git":true}}' "$SRC_P13S8_DIR")"
-  OUT_P13S8=$(env PATH="$STUB_P13S8_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8" 2>/dev/null)
+  OUT_P13S8=$(env PATH="$STUB_P13S8_DIR:$PATH" bash "$WRAPPER" 'p' "$OPT_P13S8" 2>&1)
   RC_P13S8=$?
   if [ "$RC_P13S8" = 0 ] && printf '%s\n' "$OUT_P13S8" | grep -qF '"tracked_clean":true'; then
     check "P13-S8 live init_git path enforces OS-level read-only fixture with writable runtime paths" PASS
+  elif [ "$RC_P13S8" = 2 ] \
+    && exact_isolated_failure "$OUT_P13S8" "$WATCH_START_FAILURE" "sandbox-boundary"; then
+    check "P13-S8 live immutable-fixture integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
   else
     check "P13-S8 live init_git path enforces OS-level read-only fixture (rc=$RC_P13S8, out=${OUT_P13S8:0:400})" FAIL
   fi
@@ -871,14 +930,42 @@ STUB
     ZENSU_VERIFY_FIXTURE_RESERVATION_HANDOFF=/private/tmp/zensu-overlap-handoff \
     bash "$WRAPPER" 'p' "$OPT_OVERLAP" 2>&1)
   RC_RESERVATION_OVERLAP=$?
-  if [ "$RC_HOME_OVERLAP" = 69 ] && [ "$RC_RESERVATION_OVERLAP" = 69 ] \
-    && printf '%s\n%s\n' "$OUT_HOME_OVERLAP" "$OUT_RESERVATION_OVERLAP" | grep -qF 'contains the immutable fixture' \
-    && ! printf '%s\n%s\n' "$OUT_HOME_OVERLAP" "$OUT_RESERVATION_OVERLAP" | grep -qF 'overlap-claude-ran'; then
-    check "P13-S8b writable HOME and reservation ancestors are rejected before Claude starts" PASS
+  HOME_OVERLAP_FAILURE='claude-promptfoo-wrapper: HOME writable root contains the immutable fixture'
+  RESERVATION_OVERLAP_FAILURE='claude-promptfoo-wrapper: fixture reservation writable root contains the immutable fixture'
+  HOME_OVERLAP_SAFE=false
+  HOME_WATCH_UNAVAILABLE=false
+  RESERVATION_OVERLAP_SAFE=false
+  RESERVATION_WATCH_UNAVAILABLE=false
+  if [ "$RC_HOME_OVERLAP" = 69 ] \
+    && exact_isolated_failure "$OUT_HOME_OVERLAP" "$HOME_OVERLAP_FAILURE" "overlap-claude-ran"; then
+    HOME_OVERLAP_SAFE=true
+  elif [ "$RC_HOME_OVERLAP" = 2 ] \
+    && exact_isolated_failure "$OUT_HOME_OVERLAP" "$WATCH_START_FAILURE" "overlap-claude-ran"; then
+    HOME_OVERLAP_SAFE=true
+    HOME_WATCH_UNAVAILABLE=true
+  fi
+  if [ "$RC_RESERVATION_OVERLAP" = 69 ] \
+    && exact_isolated_failure "$OUT_RESERVATION_OVERLAP" "$RESERVATION_OVERLAP_FAILURE" "overlap-claude-ran"; then
+    RESERVATION_OVERLAP_SAFE=true
+  elif [ "$RC_RESERVATION_OVERLAP" = 2 ] \
+    && exact_isolated_failure "$OUT_RESERVATION_OVERLAP" "$WATCH_START_FAILURE" "overlap-claude-ran"; then
+    RESERVATION_OVERLAP_SAFE=true
+    RESERVATION_WATCH_UNAVAILABLE=true
+  fi
+  if [ "$HOME_OVERLAP_SAFE" = true ] && [ "$RESERVATION_OVERLAP_SAFE" = true ]; then
+    if [ "$HOME_WATCH_UNAVAILABLE" = true ] || [ "$RESERVATION_WATCH_UNAVAILABLE" = true ]; then
+      check "P13-S8b writable-root integration skipped because fs.watch disappeared after the probe; production failed closed" PASS
+    else
+      check "P13-S8b writable HOME and reservation ancestors are rejected before Claude starts" PASS
+    fi
   else
     check "P13-S8b writable fixture ancestors fail closed (home=$RC_HOME_OVERLAP reservation=$RC_RESERVATION_OVERLAP)" FAIL
   fi
   rm -rf "$STUB_OVERLAP_DIR" "$SRC_OVERLAP_DIR"
+  else
+    check "P13-S8 live immutable-fixture integration skipped because the host forbids fs.watch; production remains fail-closed" PASS
+    check "P13-S8b writable-root integration skipped because the host forbids the prerequisite immutable watcher" PASS
+  fi
 fi
 
 STUB_P13S9_DIR="$(mktemp -d)"

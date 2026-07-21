@@ -18,7 +18,11 @@
       },
       "category": "productivity",
       "homepage": "https://github.com/MKITConsulting/zensu-claude-code",
-      "source": "./",
+      "source": {
+        "source": "github",
+        "repo": "MKITConsulting/zensu-claude-code",
+        "ref": "v0.16.1"
+      },
       "version": "0.16.1"
     }
   ]

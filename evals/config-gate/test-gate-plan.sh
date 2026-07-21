@@ -4,6 +4,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SCRIPT="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
 EVAL_DIR="$(cd "$(dirname "$0")" && pwd)"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -19,7 +20,13 @@ if [ ! -x "$SCRIPT" ]; then
   exit 1
 fi
 
+TMP_DIR="$(mktemp -d)"
+trap 'rm -rf "$TMP_DIR"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
+export CLAUDE_PROJECT_DIR="$TMP_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
+# shellcheck disable=SC1090
+source "$BASELINE" "gate-plan-session"
 
 export ZENSU_CONFIG="$EVAL_DIR/fixtures/config-only-tdd.json"
 OUT_DISABLED="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
@@ -37,7 +44,7 @@ else
   check "autoTdd=false: exit code 0" FAIL
 fi
 
-TMP_CFG="/tmp/zensu-gate-plan-enabled-$$.json"
+TMP_CFG="$TMP_DIR/config-enabled.json"
 cat > "$TMP_CFG" <<'EOF'
 {"hooks": {"autoTdd": true}}
 EOF
@@ -56,7 +63,7 @@ case "$OUT_ENABLED" in
 esac
 
 unset ZENSU_CONFIG
-NOTHING_CFG="/tmp/zensu-no-config-$$.json"
+NOTHING_CFG="$TMP_DIR/no-config.json"
 rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$("$SCRIPT" < "$EVAL_DIR/fixtures/stdin-exitplanmode.json" 2>/dev/null)"
@@ -65,8 +72,6 @@ case "$OUT_DEFAULT" in
   *"skill='zensu:tdd'"*) check "no config (default): routes to skill='zensu:tdd' (enabled)" PASS ;;
   *)                     check "no config (default): routes to skill='zensu:tdd' (enabled)" FAIL ;;
 esac
-
-rm -f "$TMP_CFG"
 
 echo "----"
 echo "test-gate-plan: $PASS PASS / $FAIL FAIL"

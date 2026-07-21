@@ -29,10 +29,12 @@ check() {
 run_test() {
   local script="$1"
   local label="$2"
+  local output
   if [ -x "$script" ]; then
-    if "$script" >/dev/null 2>&1; then
+    if output="$("$script" 2>&1)"; then
       check "$label" PASS
     else
+      printf '%s\n' "$output" | sed 's/^/    /' | tee -a "$REPORT"
       check "$label" FAIL
     fi
   else
@@ -71,7 +73,7 @@ else
   check "hooks/session-start-pulse.sh is executable" FAIL
 fi
 
-SS_CMD=$(node -e "const j=JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8'));console.log((j.hooks.SessionStart[0].hooks[0].command)||'')" 2>/dev/null)
+SS_CMD=$(node -e "const j=JSON.parse(require('fs').readFileSync('hooks/hooks.json','utf8'));console.log((j.hooks.SessionStart[0].hooks||[]).map(h=>h.command||'').join('\\n'))" 2>/dev/null)
 case "$SS_CMD" in
   *session-start-pulse.sh*) check "SessionStart hook wired to session-start-pulse.sh" PASS ;;
   *)                         check "SessionStart hook wired to session-start-pulse.sh" FAIL ;;
@@ -107,7 +109,6 @@ run_test "$EVAL_DIR/test-gate-plan.sh"        "test-gate-plan.sh"
 run_test "$EVAL_DIR/test-gate-postreview.sh"  "test-gate-postreview.sh"
 run_test "$EVAL_DIR/test-gate-session.sh"     "test-gate-session.sh"
 run_test "$EVAL_DIR/test-isolation-preserved.sh" "test-isolation-preserved.sh"
-run_test "$EVAL_DIR/test-no-pluginroot-env.sh"   "test-no-pluginroot-env.sh"
 run_test "$EVAL_DIR/test-pluginroot-default-setu.sh" "test-pluginroot-default-setu.sh"
 
 echo "" | tee -a "$REPORT"
@@ -126,7 +127,7 @@ run_test "$EVAL_DIR/test-autofix-rounds-convergence.sh"       "test-autofix-roun
 run_test "$EVAL_DIR/test-autofix-rounds-session-isolation.sh" "test-autofix-rounds-session-isolation.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-sanitize.sh"          "test-autofix-rounds-sanitize.sh"
 run_test "$EVAL_DIR/test-autofix-rounds-reset-on-fresh-tdd.sh" "test-autofix-rounds-reset-on-fresh-tdd.sh"
-run_test "$EVAL_DIR/test-rounds-default-location.sh"          "test-rounds-default-location.sh"
+run_test "$EVAL_DIR/test-review-counters-state-location.sh"   "test-review-counters-state-location.sh"
 run_test "$EVAL_DIR/test-post-review-combined-summary.sh"     "test-post-review-combined-summary.sh"
 
 echo "" | tee -a "$REPORT"

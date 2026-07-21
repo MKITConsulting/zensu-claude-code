@@ -47,16 +47,18 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 ## Three Layers (embedded — architecture overview)
 
-1. **Planning** (`zensu-plm` agent) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
-2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + `zensu:code-reviewer` subagent) — strict RED→IMPL→GREEN TDD enforced by a PreToolUse FSM gate, followed by 5 sequential code-review perspectives, then an auto-fix loop guaranteed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 the TDD workflow runs in the main agent (was a `tdd-manager` subagent); `zensu:code-reviewer` is the only remaining subagent.
+1. **Planning** (main-thread skills) — `/zensu:bootstrap` (greenfield: a plan/vision doc, no code yet) or `/zensu:ghost-scan` (brownfield: an existing codebase) produce tracked features, user journeys, and linked docs. **Hybrid** (existing code *and* a forward plan doc): ghost-scan first to import what is built, then create the plan's not-yet-built items as `planned` features. The interactive agent triages by asking: (1) code already built or starting fresh? (2) plan/vision doc present? (3) if both, does the plan describe things not yet built?
+2. **Implementation** (`/zensu:tdd` skill in the MAIN thread + read-only reviewer panel) — vanilla implementation is the default; setting `hooks.tddImplementation:true` enables strict RED→IMPL→GREEN FSM-gated edits. Both modes keep the Phase 5/6 evidence audits and review chain: five parallel `zensu:review-aspect` agents, the optional `zensu:review-judge` second pass (default on), then one consume-mode `zensu:code-reviewer`, an auto-fix loop, and terminal self-review, all backed by the `Stop` hook (`stop-chain-enforcer.sh`). Since 0.4.0 implementation runs in the main agent rather than a `tdd-manager` subagent.
 3. **Tracking** — web dashboard surfaces security scores, journey health, tier matrix, coverage trends.
 
 ## Agents (embedded — one-liners)
 
-- `zensu-plm` — orchestrates planning workflows (bootstrap, ghost-scan, security review, release readiness).
-- `code-reviewer` — single READ-ONLY subagent running 5 sequential perspectives: conventions, bugs, architecture, tests, security.
+- `zensu-plm` — optional read-only planning analyst; it recommends a skill but never performs mutations. The interactive main thread runs bootstrap, ghost-scan, security review, and release-readiness workflows.
+- `review-aspect` — five READ-ONLY instances run in parallel, one each for conventions, bugs, architecture, tests, and security.
+- `review-judge` — optional READ-ONLY second pass over the merged panel findings; enabled by default.
+- `code-reviewer` — one READ-ONLY consume-mode subagent that consolidates the panel + judge findings and triggers the auto-fix hook.
 
-TDD discipline (RED→IMPL→GREEN, FSM-gated edits, 3-retry IMPL escalation, completeness audit) is NOT a subagent — it runs in the main thread via the `/zensu:tdd` skill (migrated from the `tdd-manager` subagent in 0.4.0).
+Implementation is NOT delegated to a subagent: `/zensu:tdd` runs in the main thread, in vanilla mode by default or with strict RED→IMPL→GREEN discipline when configured. The completeness/evidence audits and reviewer chain run in both modes.
 
 ## Topic Routing (live read for volatile facts)
 
@@ -69,13 +71,13 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
 | Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
 | Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
-| Environment variables (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`) | `README.md` § Environment Variables |
-| TDD FSM details, phase transitions, gate logic, three-channel logging | `docs/tdd-manager-workflow.md` |
+| Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `README.md` § Claude Environment and Native Placeholders |
+| TDD FSM details, phase transitions, gate logic, four-channel logging | `docs/tdd-manager-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
 | Hook scripts (what each does, when it fires) | `README.md` § Hooks table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
-| Resetting the auto-fix rounds counter / "max rounds reached" recovery | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh:100-101` (convergence branch) |
+| Transactionally resetting `reviewRound`/`stopBlockCount` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
 | Live feature/worktree/preview verification, local vs remote mode, browser evidence, Playwright MCP | `skills/verify-feature/SKILL.md` + `skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof) |
 | Durable unit/integration/E2E test authoring for existing code | `skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |
@@ -85,7 +87,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
 | Platform support, Windows caveats | `README.md` § Platform Support |
 | Troubleshooting (`zensu` CLI not found, OAuth login, gate blocking) | `README.md` § Troubleshooting |
-| Diagnosing the install (CLI auth, hooks wired, config validity + quoted-boolean trap, stale markers, version sync) | `skills/doctor/SKILL.md` (`/zensu:doctor` — read-only status table) |
+| Diagnosing the install (CLI auth, hooks wired, config validity + quoted-boolean trap, validated CAS workflow state, version sync) | `skills/doctor/SKILL.md` (`/zensu:doctor` — read-only status table) |
 
 ## Response Style
 

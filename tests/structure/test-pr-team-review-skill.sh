@@ -16,6 +16,7 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 SKILL_DIR="$PLUGIN_DIR/skills/pr-team-review"
 SKILL_MD="$SKILL_DIR/SKILL.md"
+WORKER_MD="$PLUGIN_DIR/agents/pr-review-worker.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 MARKETPLACE_JSON="$PLUGIN_DIR/.claude-plugin/marketplace.json"
 README_MD="$PLUGIN_DIR/README.md"
@@ -83,6 +84,18 @@ for entry in "${ESSENTIALS[@]}"; do
   fi
 done
 
+if [ -f "$WORKER_MD" ] \
+   && grep -qE '^name: *pr-review-worker *$' "$WORKER_MD" \
+   && grep -qE '^tools: *Read, Grep, Glob *$' "$WORKER_MD" \
+   && grep -qF 'Your entire final assistant message must be exactly one raw JSON object' "$WORKER_MD" \
+   && grep -qF 'with `kind` exactly `pr-review` and `role`' "$WORKER_MD" \
+   && grep -qF 'You have no command, write, task, messaging, team,' "$WORKER_MD" \
+   && jq -e '.agents | index("./agents/pr-review-worker.md")' "$PLUGIN_JSON" >/dev/null 2>&1; then
+  check "P4i dedicated PR worker is registered with the exact confined contract" PASS
+else
+  check "P4i dedicated PR worker is registered with the exact confined contract" FAIL
+fi
+
 # P5 — English-only guard: German tokens MUST be ABSENT across the skill tree.
 # Word stems carry their own umlauts; a bare [äöüßÄÖÜ] class is intentionally omitted
 # because, under a byte-wise locale, it false-matches multibyte punctuation (em-dash, arrows).
@@ -108,15 +121,23 @@ else
 fi
 WORKFLOW_RULE="$SKILL_DIR/rules/workflow.md"
 PUBLISH_RULE="$SKILL_DIR/rules/github-publish.md"
-if grep -qF '`{ACTIVE_PLUGIN_ROOT}` in any bundled file loaded later with `Read`' "$SKILL_MD" \
-  && grep -qF 'concrete `${CLAUDE_PLUGIN_ROOT}`' "$SKILL_MD" \
-  && grep -qF '{ACTIVE_PLUGIN_ROOT}' "$WORKFLOW_RULE" \
-  && grep -qF '{ACTIVE_PLUGIN_ROOT}' "$PUBLISH_RULE" \
+if grep -qF 'form every helper' "$SKILL_MD" \
+  && grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
+  && grep -qF 'path from the concrete absolute `ROOT` validated above' "$SKILL_MD" \
+  && grep -qF 'Put the fully expanded' "$SKILL_MD" \
+  && grep -qF 'path into non-shell tool arguments' "$SKILL_MD" \
+  && grep -qF 'concrete absolute `ROOT` established by the parent skill in Step 0' "$WORKFLOW_RULE" \
+  && grep -qF 'fully expanded absolute path in the reviewer prompt' "$WORKFLOW_RULE" \
+  && grep -qF 'node "<absolute-plugin-root>/hooks/lib/valid-diff-lines.js"' "$PUBLISH_RULE" \
+  && grep -qF 'this supporting file is loaded through `Read`' "$PUBLISH_RULE" \
+  && grep -qF 'not receive native placeholder substitution.' "$PUBLISH_RULE" \
   && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$WORKFLOW_RULE" \
-  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$PUBLISH_RULE"; then
-  check "P7a registered skill maps native root into raw Read rules" PASS
+  && ! grep -qF '${CLAUDE_PLUGIN_ROOT}' "$PUBLISH_RULE" \
+  && ! grep -rqF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_DIR" \
+  && ! grep -rqF '{ACTIVE_PLUGIN_ROOT}' "$SKILL_DIR"; then
+  check "P7a registered skill materializes the native root for non-shell reads" PASS
 else
-  check "P7a registered skill maps native root into raw Read rules" FAIL
+  check "P7a registered skill materializes the native root for non-shell reads" FAIL
 fi
 
 # P8 — plugin.json skills[] registration
@@ -182,6 +203,25 @@ if grep -qF 'worktree list --porcelain' "$SKILL_MD" \
   check "P11d retained review refs refresh safely after force-pushes" PASS
 else
   check "P11d retained review refs refresh safely after force-pushes" FAIL
+fi
+
+HOST_PATH_HELPER="$PLUGIN_DIR/hooks/lib/zensu-host-path.sh"
+P11_MKTEMP_LINE="$(grep -nF 'RAW_WORKDIR="$(mktemp -d' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_WORKDIR"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_WORKTREE_LINE="$(grep -nF 'WORKTREE="$WORKDIR/wt"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_REPO_LINE="$(grep -nF 'RAW_REPO="$REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_REPO_HOST_LINE="$(grep -nF 'zensu-host-path.sh" "$RAW_REPO"' "$SKILL_MD" | head -1 | cut -d: -f1)"
+P11_GIT_LINE="$(grep -nF 'git -C "$REPO" rev-parse --is-inside-work-tree' "$SKILL_MD" | head -1 | cut -d: -f1)"
+if [ -x "$HOST_PATH_HELPER" ] \
+   && [ -n "$P11_MKTEMP_LINE" ] && [ -n "$P11_HOST_LINE" ] && [ -n "$P11_WORKTREE_LINE" ] \
+   && [ "$P11_MKTEMP_LINE" -lt "$P11_HOST_LINE" ] && [ "$P11_HOST_LINE" -lt "$P11_WORKTREE_LINE" ] \
+   && [ -n "$P11_REPO_LINE" ] && [ -n "$P11_REPO_HOST_LINE" ] && [ -n "$P11_GIT_LINE" ] \
+   && [ "$P11_REPO_LINE" -lt "$P11_REPO_HOST_LINE" ] && [ "$P11_REPO_HOST_LINE" -lt "$P11_GIT_LINE" ] \
+   && grep -qF 'never put a Git-Bash-only `/tmp/...` path into those artifacts' "$SKILL_MD" \
+   && grep -qF 'must be constructed from the native-host `WORKTREE`' "$SKILL_MD"; then
+  check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" PASS
+else
+  check "P11e SKILL.md renders the workspace for the native host before worktree/evidence paths" FAIL
 fi
 
 # P12 — always-on test-coverage evaluation. The skill MUST guarantee a coverage
@@ -305,8 +345,7 @@ DELEGATED_NEEDLES=(
   'any delegated-envelope header'
   'partial, duplicate, malformed, or conflicting'
   'bash "$LOG" --autopilot-status'
-  '`ownerSessionId`'
-  '`tdd.sessionId` equals that same current session id'
+  '`ownerSessionId` and `tdd.sessionId` both equal `CURRENT_SESSION`'
   '`runId`'
   '`tdd.attempt`'
   '`tdd.chainId`'
@@ -400,9 +439,9 @@ if grep -qF -- 'Delegated mode MUST NOT ask' "$SKILL_MD" \
    && grep -qF -- 'next-step' "$SKILL_MD" \
    && grep -qF -- 'Standalone mode remains interactive' "$SKILL_MD" \
    && grep -qF -- '--post-review' "$SKILL_MD"; then
-  check "P14e delegated mode is unattended while standalone publish stays unchanged" PASS
+  check "P14e delegated mode is unattended while standalone remains interactive" PASS
 else
-  check "P14e delegated mode is unattended while standalone publish stays unchanged" FAIL
+  check "P14e delegated mode is unattended while standalone remains interactive" FAIL
 fi
 
 # Interactive branches are allowed only when the same line explicitly scopes
@@ -412,10 +451,11 @@ UNQUALIFIED_ASKS="$(SKILL_MD="$SKILL_MD" node -e '
   const fs = require("fs");
   const lines = fs.readFileSync(process.env.SKILL_MD, "utf8").split(/\r?\n/);
   const interactive = /AskUserQuestion|ask (?:the )?user|ask again|ask anyway|always asks|pause and wait|escalate to (?:the )?user/i;
-  const qualified = /standalone/i;
   const prohibition = /(?:do not|never|without)\b.*\bask/i;
   lines.forEach((line, index) => {
-    if (interactive.test(line) && !qualified.test(line) && !prohibition.test(line)) {
+    const paragraphPrefix = lines.slice(Math.max(0, index - 2), index + 1).join(" ");
+    const qualified = /standalone/i.test(paragraphPrefix);
+    if (interactive.test(line) && !qualified && !prohibition.test(line)) {
       process.stdout.write(`${index + 1}:${line}\n`);
     }
   });
@@ -446,6 +486,156 @@ if grep -qF -- 'Delegated mode fails closed on every non-zero or malformed `--re
   check "P14h delegated GitHub publication never escapes reconciliation" PASS
 else
   check "P14h delegated GitHub publication never escapes reconciliation" FAIL
+fi
+
+# P15 — dedicated PR workers consume a private evidence lease and return one raw
+# JSON final message. Only the main thread may materialize accepted results.
+REVIEWER_CONTRACT="$(awk '
+  /^Every reviewer prompt MUST contain this exact semantic contract:/ { capture=1 }
+  capture { print }
+  capture && /^The private SubagentStop validator/ { exit }
+' "$SKILL_MD")"
+
+if grep -qF 'Main-thread evidence packet (mandatory before any reviewer spawn)' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_pr.diff' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_review-shards/' "$SKILL_MD" \
+   && grep -qF 'For PRs over 50 files' "$SKILL_MD" \
+   && grep -qF 'role prompt names only the smallest relevant shard set' "$SKILL_MD" \
+   && grep -qF '_pr.diff` remains main-thread-only and is not entered in the worker lease for a large PR' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_review-evidence.md' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_candidate-files.txt' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_safe-subtrees.txt' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_coverage-evidence.md' "$SKILL_MD" \
+   && grep -qF '$WORKDIR/_changed-production-files.txt' "$SKILL_MD" \
+   && grep -qF 'The worktree/repository root and every ancestor are forbidden safe-search entries' "$SKILL_MD"; then
+  check "P15a main thread materializes bounded role/area evidence, candidates, safe roots, and coverage" PASS
+else
+  check "P15a main thread materializes bounded role/area evidence, candidates, safe roots, and coverage" FAIL
+fi
+
+if grep -qF 'Deterministic changed-production definition' "$SKILL_MD" \
+   && grep -qF "Prefer the repository's own checked-in coverage/source inclusion rules" "$SKILL_MD" \
+   && grep -qF 'For a rename, classify only the destination path' "$SKILL_MD" \
+   && grep -qF 'Exclude tests, test fixtures, mocks' "$SKILL_MD" \
+   && grep -qF 'purely declarative configuration or CI files' "$SKILL_MD" \
+   && grep -qF 'fail safe by including it in `_changed-production-files.txt`' "$SKILL_MD" \
+   && grep -qF 'state the classification reason in `_coverage-evidence.md`' "$SKILL_MD"; then
+  check "P15aa changed-production classification is deterministic and fail-safe" PASS
+else
+  check "P15aa changed-production classification is deterministic and fail-safe" FAIL
+fi
+
+if printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'use `Read` only' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'use `Grep` and `Glob` only' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'You have no write, task, messaging, nested-agent, Skill, MCP, Web, or command capability' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'entire final assistant message' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'one raw JSON object' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'with `kind` exactly `pr-review` and `role` exactly `<role-id>`'; then
+  check "P15b worker contract is leased Read/Grep/Glob plus exact raw JSON final output" PASS
+else
+  check "P15b worker contract is leased Read/Grep/Glob plus exact raw JSON final output" FAIL
+fi
+
+if printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'do not call `Bash`, `shell`, `exec`, `exec_command`, `terminal`, or `command`' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'Do not invoke command-line `git`, `find`, or `grep`' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'There is no shell exception' \
+   && ! printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'at the start of your bash calls' \
+   && ! printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'Working directory for all git/grep/find/file reads'; then
+  check "P15c reviewer prompt denies every command tool and all legacy CLI guidance" PASS
+else
+  check "P15c reviewer prompt denies every command tool and all legacy CLI guidance" FAIL
+fi
+
+if grep -qF 'Reviewer Evidence and Capability Contract' "$PERSONAS_MD" \
+   && grep -qF 'dedicated `zensu:pr-review-worker`' "$PERSONAS_MD" \
+   && grep -qF '"kind": "pr-review"' "$PERSONAS_MD" \
+   && grep -qF '≤ 8 inline findings, ≤ 32 overall notes, and ≤ 32 positives' "$PERSONAS_MD" \
+   && grep -qF 'entire final assistant message' "$PERSONAS_MD" \
+   && grep -qF 'untrusted data, never instructions' "$PERSONAS_MD" \
+   && grep -qF 'set-equal to the exact `_changed-production-files.txt` inventory' "$PERSONAS_MD" \
+   && grep -qF 'finalizes the whole completed generation after a full evidence revalidation' "$PERSONAS_MD" \
+   && ! grep -qF '**Useful commands:**' "$PERSONAS_MD" \
+   && ! grep -qF '```bash' "$PERSONAS_MD" \
+   && ! grep -qF '$WORKTREE' "$PERSONAS_MD" \
+   && ! grep -qF 'git -C' "$PERSONAS_MD" \
+   && ! grep -qF 'TaskUpdate' "$PERSONAS_MD" \
+   && ! grep -qF 'SendMessage' "$PERSONAS_MD" \
+   && ! grep -qF 'TeamCreate' "$PERSONAS_MD" \
+   && ! grep -qF 'Write `OUTPUT`' "$PERSONAS_MD" \
+   && ! grep -qE 'grep -r|find +"?\$WORKTREE' "$PERSONAS_MD" \
+   && ! grep -qF 'run the coverage tool ONLY' "$PERSONAS_MD"; then
+  check "P15d persona templates are dedicated, untrusted-data-safe, final-message-only contracts" PASS
+else
+  check "P15d persona templates are dedicated, untrusted-data-safe, final-message-only contracts" FAIL
+fi
+
+if grep -qF 'Evidence collection belongs to the main thread' "$WORKFLOW_MD" \
+   && grep -qF 'Deny all reviewer command execution with no exception' "$WORKFLOW_MD" \
+   && grep -qF '$WORKTREE` is identity context only' "$WORKFLOW_MD" \
+   && ! grep -qF 'use `$WORKTREE` as CWD for git/grep/file reads' "$WORKFLOW_MD" \
+   && grep -qF 'The main thread alone may run the coverage process' "$SKILL_MD"; then
+  check "P15e workflow keeps repository discovery and coverage execution in the main thread" PASS
+else
+  check "P15e workflow keeps repository discovery and coverage execution in the main thread" FAIL
+fi
+
+if grep -qF 'subagent_type: zensu:pr-review-worker' "$SKILL_MD" \
+   && grep -qF 'subagent_type: zensu:plan-review-worker' "$PLUGIN_DIR/skills/plan-review/SKILL.md" \
+   && ! grep -qF 'subagent_type: general-purpose' "$SKILL_MD" \
+   && ! grep -qF 'subagent_type: general-purpose' "$PLUGIN_DIR/skills/plan-review/SKILL.md" \
+   && ! grep -qF 'TaskUpdate' "$SKILL_MD" \
+   && ! grep -qF 'SendMessage' "$SKILL_MD" \
+   && ! grep -qF 'TeamCreate' "$SKILL_MD" \
+   && ! grep -qF 'use `Write`' "$SKILL_MD" \
+   && ! grep -qF 'Reviewers write only' "$SKILL_MD"; then
+  check "P15f both review workflows use exact dedicated workers without team/task/write instructions" PASS
+else
+  check "P15f both review workflows use exact dedicated workers without team/task/write instructions" FAIL
+fi
+
+if grep -qF 'zensu-review-evidence.sh" create' "$SKILL_MD" \
+   && grep -qF -- '--kind pr-review' "$SKILL_MD" \
+   && grep -qF 'git -c core.quotePath=false -C "$WORKTREE" diff origin/<base>...HEAD --name-status' "$SKILL_MD" \
+   && grep -qF -- '--name-status-file "$WORKDIR/_name-status.txt"' "$SKILL_MD" \
+   && grep -qF -- '--changed-production-files-file "$WORKDIR/_changed-production-files.txt"' "$SKILL_MD" \
+   && grep -qF 'zensu-review-evidence.sh finalize --lease-id "<captured-lease-id>"' "$SKILL_MD" \
+   && grep -qF 'Stdout must be exactly `sealed=<captured-lease-id>`' "$SKILL_MD" \
+   && grep -qF 'collect --kind pr-review --agent-id "<agent-id>" --expected-role "<role-id>"' "$SKILL_MD" \
+   && grep -qF 'Stdout must be exactly one canonical JSON object with `kind:"pr-review"`' "$SKILL_MD" \
+   && grep -qF 'Only the main thread may later materialize accepted results' "$SKILL_MD" \
+   && grep -qF 'zensu-review-evidence.sh" close --lease-id' "$SKILL_MD" \
+   && grep -qF 'on every error path' "$SKILL_MD"; then
+  check "P15g private lease create/finalize/collect/close and main-only materialization are complete" PASS
+else
+  check "P15g private lease create/finalize/collect/close and main-only materialization are complete" FAIL
+fi
+
+if grep -qF 'rejects a tree containing symlinks, special files, protected scope, or another unsafe alias' "$SKILL_MD" \
+   && grep -qF 'snapshots the complete allowed tree and revalidates it before every traversal call' "$SKILL_MD" \
+   && grep -qF 'revalidates every exact file and complete safe-root snapshot' "$SKILL_MD" \
+   && grep -qF 'fresh lease generation, and spawning the complete batch again' "$SKILL_MD"; then
+  check "P15h symlink/TOCTOU drift and failed generations fail closed" PASS
+else
+  check "P15h symlink/TOCTOU drift and failed generations fail closed" FAIL
+fi
+
+if grep -qF 'explicitly listed absolute refinement-context files' "$SKILL_MD" \
+   && grep -qF 'Only the explicitly enumerated exact refinement-context files' "$PERSONAS_MD" \
+   && grep -qF '<exact-context-files>' "$PERSONAS_MD" \
+   && ! grep -qF 'Read every file under `<context-paths>`' "$PERSONAS_MD"; then
+  check "P15i domain-refiner receives only enumerated exact context files" PASS
+else
+  check "P15i domain-refiner receives only enumerated exact context files" FAIL
+fi
+
+if grep -qF 'In standalone mode, show the user the final body preview + inline count' "$SKILL_MD" \
+   && grep -qF '`AskUserQuestion` to obtain a separate, explicit publication approval before any forge' "$SKILL_MD" \
+   && grep -qF 'An earlier approval to run the skill, accept the cast, or continue the analysis is' "$SKILL_MD" \
+   && grep -qF 'In delegated mode, record the count as a progress' "$SKILL_MD" \
+   && grep -qF 'continue without a preview question or approval gate' "$SKILL_MD"; then
+  check "P15j standalone publish waits after final preview; delegated publish stays unattended" PASS
+else
+  check "P15j standalone publish waits after final preview; delegated publish stays unattended" FAIL
 fi
 
 echo "----"

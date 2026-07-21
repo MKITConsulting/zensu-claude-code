@@ -3,6 +3,8 @@ set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
+SESSION_CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 
 PASS=0; FAIL=0
 check() {
@@ -19,6 +21,11 @@ if [ ! -f "$LIB" ]; then
 fi
 check "hooks/lib/zensu-tdd-phase.sh exists" PASS
 
+WORK_DIR="$(mktemp -d)"
+export CLAUDE_PROJECT_DIR="$WORK_DIR/project"
+mkdir -p "$CLAUDE_PROJECT_DIR"
+# shellcheck disable=SC1090
+source "$BASELINE" sid-abc123
 source "$LIB"
 
 for fn in tdd_state_file tdd_is_test_path; do
@@ -30,9 +37,10 @@ for fn in tdd_state_file tdd_is_test_path; do
 done
 
 STATE_PATH="$(tdd_state_file "sid-abc123")"
+EXPECTED_KEY="$(node "$SESSION_CORE" session-key sid-abc123)"
 case "$STATE_PATH" in
-  */tdd-phase-sid-abc123.json) check "tdd_state_file returns expected path" PASS ;;
-  *)                            check "tdd_state_file returns expected path (got: $STATE_PATH)" FAIL ;;
+  */tdd-phase-${EXPECTED_KEY}.json) check "tdd_state_file returns the v1 session-key path" PASS ;;
+  *)                            check "tdd_state_file returns the v1 session-key path (got: $STATE_PATH)" FAIL ;;
 esac
 
 assert_test_path() {
@@ -58,8 +66,9 @@ assert_test_path "tests/test_foo.py"                "true"  "tests/ dir + test_ 
 assert_test_path "specs/SomethingSpec.scala"        "true"  "specs/ dir pattern"
 assert_test_path "src/test/java/FooTest.java"       "true"  "FooTest.java under src/test/java/ path"
 
-INLINE_DIR="$(mktemp -d)"
-cleanup() { rm -rf "$INLINE_DIR"; }
+INLINE_DIR="$WORK_DIR/inline"
+mkdir -p "$INLINE_DIR"
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 cat > "$INLINE_DIR/inline_go.go" <<'EOF'

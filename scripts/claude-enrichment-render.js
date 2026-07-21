@@ -28,11 +28,19 @@ function emit(value) {
 
 function openSafe(file, root) {
   const info = fs.lstatSync(file);
-  if (!info.isFile() || info.isSymbolicLink()) throw new Error('unsafe enrichment file');
+  if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) {
+    throw new Error('unsafe enrichment file');
+  }
   const physical = fs.realpathSync(file);
   if (!physical.startsWith(`${root}${path.sep}`)) throw new Error('out-of-root enrichment file');
-  const fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
-  if (!fs.fstatSync(fd).isFile()) {
+  const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
+  const fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow);
+  const opened = fs.fstatSync(fd);
+  const sameIdentity = info.ino !== 0 || opened.ino !== 0
+    ? info.dev === opened.dev && info.ino === opened.ino
+    : info.birthtimeMs === opened.birthtimeMs && info.mode === opened.mode;
+  if (!opened.isFile() || opened.nlink !== 1 || !sameIdentity) {
     fs.closeSync(fd);
     throw new Error('non-regular enrichment file');
   }

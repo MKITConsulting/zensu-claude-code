@@ -9,16 +9,23 @@ POST="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 PHASE="$PLUGIN_DIR/hooks/lib/zensu-tdd-phase.sh"
 STATE_LIB="$PLUGIN_DIR/hooks/lib/zensu-autopilot-state.sh"
+BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
 PASS=0; FAIL=0
 check() { if [ "$2" = PASS ]; then echo "  PASS  $1"; PASS=$((PASS+1)); else echo "  FAIL  $1"; FAIL=$((FAIL+1)); fi; }
 
 TMP="$(mktemp -d -t zensu-autopilot-post-max-XXXXXX)"; trap 'rm -rf "$TMP"' EXIT
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
-export TDD_STATE_DIR="$TMP/tdd-state"
-mkdir -p "$TDD_STATE_DIR"
 source "$STATE_LIB"
 # shellcheck disable=SC1090
 source "$PHASE"
+
+start_session() {
+  local project="$1" raw_session="$2" label="$3"
+  export CLAUDE_PROJECT_DIR="$project"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/$label"
+  # shellcheck disable=SC1090
+  source "$BASELINE" "$raw_session"
+}
 
 approve() {
   local project="$1" run="$2" owner="$3"
@@ -37,17 +44,18 @@ field_ok() {
 digest() { node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));' "$1"; }
 inode() { stat -c %i "$1" 2>/dev/null || stat -f %i "$1" 2>/dev/null; }
 run_max_hook() {
-  local project="$1" session="$2" cfg="$3" state ticket payload context
-  state="$TDD_STATE_DIR/tdd-phase-${session}.json"
-  FILE="$state" node -e '
-    const fs=require("fs"),j=JSON.parse(fs.readFileSync(process.env.FILE,"utf8"));
-    j.reviewRound=1; fs.writeFileSync(process.env.FILE,JSON.stringify(j,null,2));
-  '
+  local project="$1" session="$2" raw_session="$3" cfg="$4" state ticket payload context
+  state="$(tdd_state_file "$session")" || return 1
+  tdd_increment_counter "$session" reviewRound >/dev/null || return 1
   ticket="$(CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$cfg" bash "$LOG" --review-ticket --session "$session")" || return 1
   context="$(tdd_autopilot_context "$state" "$session")" || return 1
-  payload="$(SID="$session" TICKET="$ticket" CONTEXT="$context" node -e '
+  payload="$(SID="$raw_session" TICKET="$ticket" CONTEXT="$context" node -e '
     const c=JSON.parse(process.env.CONTEXT);
-    process.stdout.write(JSON.stringify({session_id:process.env.SID,tool_input:{
+    process.stdout.write(JSON.stringify({
+      hook_event_name:"PostToolUse",
+      tool_name:"Agent",
+      session_id:process.env.SID,
+      tool_input:{
       subagent_type:"zensu:code-reviewer",
       prompt:`PRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: ${process.env.TICKET}\nZENSU-DELEGATED-CALLER: autopilot\nAUTOPILOT-BINDING: run=${c.runId} attempt=${c.attempt} chain=${c.chainId}\nAUTOPILOT-STAGE: ${c.returnStage}\nfixture`
     }}));
@@ -57,20 +65,22 @@ run_max_hook() {
 
 CFG_ON="$TMP/self-review-on.json"
 printf '%s\n' '{"hooks":{"autoFixMaxRounds":1,"selfReview":true}}' >"$CFG_ON"
-P1="$TMP/on"; mkdir -p "$P1"; R1=post_max_review_on; S1=post_max_session_on; C1=post-max-chain-on
+P1="$TMP/on"; mkdir -p "$P1"; R1=post_max_review_on; S1_RAW=post_max_session_on; C1=post-max-chain-on
+start_session "$P1" "$S1_RAW" on || exit 1
+S1="$ZENSU_SESSION_KEY"
 approve "$P1" "$R1" "$S1" || exit 1
 CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$LOG" --tdd-begin --session "$S1" \
   --autopilot-run "$R1" --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id "$C1" >/dev/null
 CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$LOG" --tdd-complete --session "$S1" \
   --autopilot-run "$R1" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C1" >/dev/null
-run_max_hook "$P1" "$S1" "$CFG_ON"
-TF1="$TDD_STATE_DIR/tdd-phase-${S1}.json"; RF1="$(autopilot_run_file "$R1" "$P1")"
+run_max_hook "$P1" "$S1" "$S1_RAW" "$CFG_ON"
+TF1="$(tdd_state_file "$S1")"; RF1="$(autopilot_run_file "$R1" "$P1")"
 if field_ok "$TF1" 'j.chainOutcome==="max-rounds"&&j.codeReviewDone===true&&j.chainDone===false' \
   && field_ok "$RF1" 'j.stage==="TDD_RUNNING"'; then
   check "M1 self-review handoff persists bound max-rounds without closing early" PASS
 else check "M1 self-review handoff persists bound max-rounds without closing early" FAIL; fi
-OUT1_STOP="$(printf '%s' "{\"session_id\":\"$S1\"}" \
+OUT1_STOP="$(printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"$S1_RAW\"}" \
   | CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$STOP" 2>/dev/null)"
 if printf '%s' "$OUT1_STOP" | grep -qF "skill='zensu:self-review'" \
   && ! printf '%s' "$OUT1_STOP" | grep -qF 'nextActionCode=AWAIT_TDD_CHAIN' \
@@ -95,7 +105,7 @@ else check "M1a max-round handoff exact retry contract" FAIL; fi
 # still live and Stop must resume self-review rather than falling back to the
 # Outer AWAIT_TDD_CHAIN action.
 if tdd_mark_review_converged "$S1" "$T1" selfReviewFixed; then
-  OUT1_FIXED_STOP="$(printf '%s' "{\"session_id\":\"$S1\"}" \
+  OUT1_FIXED_STOP="$(printf '%s' "{\"hook_event_name\":\"Stop\",\"session_id\":\"$S1_RAW\"}" \
     | CLAUDE_PROJECT_DIR="$P1" ZENSU_CONFIG="$CFG_ON" bash "$STOP" 2>/dev/null)"
 else
   OUT1_FIXED_STOP=""
@@ -118,15 +128,17 @@ else check "M2 terminal self-review carries the immutable max outcome into outer
 
 CFG_OFF="$TMP/self-review-off.json"
 printf '%s\n' '{"hooks":{"autoFixMaxRounds":1,"selfReview":false}}' >"$CFG_OFF"
-P2="$TMP/off"; mkdir -p "$P2"; R2=post_max_review_off; S2=post_max_session_off; C2=post-max-chain-off
+P2="$TMP/off"; mkdir -p "$P2"; R2=post_max_review_off; S2_RAW=post_max_session_off; C2=post-max-chain-off
+start_session "$P2" "$S2_RAW" off || exit 1
+S2="$ZENSU_SESSION_KEY"
 approve "$P2" "$R2" "$S2" || exit 1
 CLAUDE_PROJECT_DIR="$P2" ZENSU_CONFIG="$CFG_OFF" bash "$LOG" --tdd-begin --session "$S2" \
   --autopilot-run "$R2" --autopilot-attempt 1 --autopilot-return-stage GATES --chain-id "$C2" >/dev/null
 CLAUDE_PROJECT_DIR="$P2" ZENSU_CONFIG="$CFG_OFF" bash "$LOG" --tdd-complete --session "$S2" \
   --autopilot-run "$R2" --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id "$C2" >/dev/null
-run_max_hook "$P2" "$S2" "$CFG_OFF"
-TF2="$TDD_STATE_DIR/tdd-phase-${S2}.json"; RF2="$(autopilot_run_file "$R2" "$P2")"
+run_max_hook "$P2" "$S2" "$S2_RAW" "$CFG_OFF"
+TF2="$(tdd_state_file "$S2")"; RF2="$(autopilot_run_file "$R2" "$P2")"
 if field_ok "$TF2" 'j.chainOutcome==="max-rounds"&&j.chainDone===true' \
   && field_ok "$RF2" 'j.stage==="BLOCKED"&&j.blocked.code==="TDD_MAX_ROUNDS"'; then
   check "M3 no-self-review path closes inner and outer max-rounds atomically" PASS
@@ -136,12 +148,12 @@ else check "M3 no-self-review path closes inner and outer max-rounds atomically"
 # only the atomically returned binding and must be able to land outcome plus
 # codeReviewDone in one exact, retry-safe inner CAS.
 P3="$TMP/crash"; mkdir -p "$P3"
-export CLAUDE_PROJECT_DIR="$P3"
-S3=post_max_crash_session; R3=post_max_crash_run; C3=post-max-crash-chain
+S3_RAW=post_max_crash_session; R3=post_max_crash_run; C3=post-max-crash-chain
+start_session "$P3" "$S3_RAW" crash || exit 1
+S3="$ZENSU_SESSION_KEY"
 tdd_begin_session "$S3" false true false "" "$R3" 3 VALIDATE "$C3" >/dev/null
 T3="$(tdd_issue_review_ticket "$S3")"
-CF3="$P3/.zensu/state/rounds-${S3}.json"
-CLAIM3="$(tdd_consume_review_ticket_context "$S3" "$T3" "$CF3" 2>/dev/null)"
+CLAIM3="$(tdd_consume_review_ticket_context "$S3" "$T3" 2>/dev/null)"
 TF3="$(tdd_state_file "$S3")"
 if [ -n "$CLAIM3" ] \
   && CLAIM="$CLAIM3" node -e '

@@ -1,7 +1,6 @@
 'use strict';
 
 const assert = require('node:assert/strict');
-const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const { PassThrough } = require('node:stream');
@@ -14,6 +13,10 @@ const installedMcpAvailable = fs.existsSync(path.join(installedMcpDir, 'package.
 const posixLauncher = process.platform === 'win32'
   ? { skip: 'the live launcher requires macOS, Linux, or WSL' }
   : {};
+
+function shellQuote(value) {
+  return `'${String(value).replaceAll("'", `'"'"'`)}'`;
+}
 
 const {
   ALLOWED_TOOLS,
@@ -373,59 +376,108 @@ test('JSON line transport terminates and releases its buffer after one oversized
   assert.equal(transport.buffer, '');
 });
 
-test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', posixLauncher, () => {
+test('launcher check-policy subprocess pins parent mode, origin, route, and evidence mode', () => {
   const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
-  const runtime = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-mcp-policy-runtime-'));
-  const lock = '{"lockfileVersion":3}\n';
-  const binDir = path.join(runtime, 'node_modules', '.bin');
-  fs.mkdirSync(binDir, { recursive: true });
-  fs.writeFileSync(path.join(runtime, 'package.json'), '{"private":true}\n');
-  fs.writeFileSync(path.join(runtime, 'package-lock.json'), lock);
-  fs.writeFileSync(path.join(runtime, 'node_modules', '.zensu-lock-sha256'),
-    `${crypto.createHash('sha256').update(lock).digest('hex')}\n`);
-  fs.writeFileSync(path.join(binDir, 'playwright-mcp'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
   const run = (raw, mode, origin, route = '/inventory', evidenceMode = 'declared-safe') => spawnSync('bash', [launcher, '--check-policy', mode, origin, route, evidenceMode], {
     env: {
       ...process.env,
-      ZENSU_MCP_TEST_MODE: '1',
-      ZENSU_MCP_RUNTIME_DIR_OVERRIDE: runtime,
       ZENSU_VERIFY_NAVIGATION_POLICY_V1: raw,
     },
     encoding: 'utf8',
   });
-  try {
-    assert.equal(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173').status, 0);
-    assert.notEqual(run('', 'local', 'http://127.0.0.1:5173').status, 0);
-    assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'remote', 'http://127.0.0.1:5173').status, 0);
-    assert.notEqual(run('{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/*"]}]}', 'local', 'http://127.0.0.1:5173').status, 0);
-    assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:9999').status, 0);
-    assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173', '/admin').status, 0);
-    assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173', '/inventory', 'pre-model-redaction').status, 0);
-  } finally {
-    fs.rmSync(runtime, { recursive: true, force: true });
-  }
+  assert.equal(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173').status, 0);
+  assert.notEqual(run('', 'local', 'http://127.0.0.1:5173').status, 0);
+  assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'remote', 'http://127.0.0.1:5173').status, 0);
+  assert.notEqual(run('{"version":1,"mode":"local","targets":[{"origin":"http://127.0.0.1:5173","evidenceMode":"declared-safe","routes":["/*"]}]}', 'local', 'http://127.0.0.1:5173').status, 0);
+  assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:9999').status, 0);
+  assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173', '/admin').status, 0);
+  assert.notEqual(run(rawPolicy('local', 'http://127.0.0.1:5173'), 'local', 'http://127.0.0.1:5173', '/inventory', 'pre-model-redaction').status, 0);
 });
 
-test('launcher install-browser delegates to the integrity-matched pinned runtime', posixLauncher, () => {
+test('launcher install-browser rematerializes and delegates to the lockfile-installed runtime', posixLauncher, () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-mcp-runtime-'));
-  const binDir = path.join(root, 'node_modules', '.bin');
+  const tools = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-mcp-tools-'));
+  const fixture = path.join(root, 'plugin');
+  const fixtureScripts = path.join(fixture, 'scripts');
+  const fixtureRuntime = path.join(fixture, 'mcp-runtime');
+  const binDir = path.join(fixtureRuntime, 'node_modules', '.bin');
+  fs.mkdirSync(fixtureScripts, { recursive: true });
   fs.mkdirSync(binDir, { recursive: true });
+  fs.copyFileSync(
+    path.resolve(__dirname, '../../scripts/playwright-mcp.sh'),
+    path.join(fixtureScripts, 'playwright-mcp.sh'),
+  );
   const lock = '{"lockfileVersion":3}\n';
-  fs.writeFileSync(path.join(root, 'package.json'), '{"private":true}\n');
-  fs.writeFileSync(path.join(root, 'package-lock.json'), lock);
-  fs.writeFileSync(path.join(root, 'node_modules', '.zensu-lock-sha256'), `${crypto.createHash('sha256').update(lock).digest('hex')}\n`);
+  fs.writeFileSync(path.join(fixtureRuntime, 'package.json'), '{"private":true}\n');
+  fs.writeFileSync(path.join(fixtureRuntime, 'package-lock.json'), lock);
   const executable = path.join(binDir, 'playwright-mcp');
-  fs.writeFileSync(executable, '#!/bin/sh\nprintf "stub:%s\\n" "$1"\n', { mode: 0o755 });
+  fs.writeFileSync(executable, '#!/bin/sh\nprintf "tampered:%s\\n" "$1"\n', { mode: 0o755 });
+  fs.mkdirSync(path.join(fixtureRuntime, 'node_modules', '@playwright', 'mcp'), { recursive: true });
+  fs.writeFileSync(path.join(fixtureRuntime, 'node_modules', '@playwright', 'mcp', 'tampered.txt'), 'tampered\n');
+  const npmCalls = path.join(root, 'npm-calls');
+  fs.writeFileSync(path.join(tools, 'npm'), `#!/bin/sh
+set -eu
+[ -z "\${ANTHROPIC_API_KEY:-}" ] || exit 82
+[ "\${1:-}" = ci ] || exit 81
+prefix=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = --prefix ]; then prefix="$2"; shift 2; else shift; fi
+done
+printf '%s\\n' "$prefix" >>${JSON.stringify(npmCalls)}
+rm -rf "$prefix/node_modules"
+mkdir -p "$prefix/node_modules/.bin"
+cat >"$prefix/node_modules/.bin/playwright-mcp" <<'MCP_STUB'
+#!/bin/sh
+[ -z "\${ANTHROPIC_API_KEY:-}" ] || exit 83
+printf "trusted:%s\\n" "$1"
+MCP_STUB
+chmod +x "$prefix/node_modules/.bin/playwright-mcp"
+`, { mode: 0o755 });
+  // Reproduce the old cross-runtime representation bug even on POSIX: the
+  // former launcher printed Node's realpath and compared it with a shell path.
+  // A Windows-shaped result made that valid contained executable look external.
+  fs.writeFileSync(path.join(tools, 'node'), `#!/bin/sh
+case "\${2:-}" in
+  *process.stdout.write*)
+    printf '%s' 'C:\\synthetic\\node_modules\\.bin\\playwright-mcp'
+    exit 0
+    ;;
+esac
+exec ${shellQuote(process.execPath)} "$@"
+`, { mode: 0o755 });
   try {
-    const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
+    const launcher = path.join(fixtureScripts, 'playwright-mcp.sh');
     const result = spawnSync('bash', [launcher, 'install-browser'], {
-      env: { ...process.env, ZENSU_MCP_TEST_MODE: '1', ZENSU_MCP_RUNTIME_DIR_OVERRIDE: root },
+      env: {
+        ...process.env,
+        PATH: `${tools}:${process.env.PATH}`,
+        ANTHROPIC_API_KEY: 'must-not-reach-child',
+      },
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr);
-    assert.equal(result.stdout, 'stub:install-browser\n');
+    assert.equal(result.stdout, 'trusted:install-browser\n');
+    const generation = fs.readFileSync(npmCalls, 'utf8').trim();
+    assert.notEqual(generation, fixtureRuntime);
+    assert.equal(generation.startsWith(`${fixture}${path.sep}`), false);
+    assert.equal(fs.existsSync(generation), false);
+    assert.equal(fs.existsSync(path.join(fixtureRuntime, 'node_modules', '@playwright', 'mcp', 'tampered.txt')), true);
+    assert.match(fs.readFileSync(executable, 'utf8'), /tampered:/);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(tools, { recursive: true, force: true });
+  }
+});
+
+test('production launcher rejects former test bypass controls', posixLauncher, () => {
+  const launcher = path.resolve(__dirname, '../../scripts/playwright-mcp.sh');
+  for (const name of ['ZENSU_MCP_TEST_MODE', 'ZENSU_MCP_TEST_PASSTHROUGH', 'ZENSU_MCP_RUNTIME_DIR_OVERRIDE']) {
+    const result = spawnSync('bash', [launcher, '--check-policy'], {
+      env: { ...process.env, [name]: '1' },
+      encoding: 'utf8',
+    });
+    assert.equal(result.status, 2);
+    assert.match(result.stderr, /test-only launcher controls are not supported/);
   }
 });
 
