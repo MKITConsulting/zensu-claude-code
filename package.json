@@ -14,5 +14,8 @@
   "devDependencies": {
     "promptfoo": "0.121.18",
     "yaml": "2.9.0"
+  },
+  "overrides": {
+    "adm-zip": "^0.6.0"
   }
 }
