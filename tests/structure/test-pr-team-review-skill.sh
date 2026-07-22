@@ -638,6 +638,51 @@ else
   check "P15j standalone publish waits after final preview; delegated publish stays unattended" FAIL
 fi
 
+# P16 — repo-custom reviewer seats: the cast ingests .claude/agents/zensu-review-*.md
+# personas via persona-activation.js, discovered from the BASE checkout ($REPO), never
+# the untrusted PR head ($WORKTREE). Custom seats run as confined zensu:pr-review-worker
+# under the read lease (Session Control v1), NOT as their own subagent_type.
+if grep -qF 'persona-activation.js' "$SKILL_MD"; then
+  check "P16a SKILL.md Phase A.2 runs persona-activation.js for repo-custom seats" PASS
+else
+  check "P16a SKILL.md Phase A.2 runs persona-activation.js for repo-custom seats" FAIL
+fi
+if grep -qF '$REPO/.claude/agents' "$SKILL_MD" && ! grep -qF '$WORKTREE/.claude/agents' "$SKILL_MD"; then
+  check "P16b discovery reads \$REPO/.claude/agents, never \$WORKTREE/.claude/agents (trust guard)" PASS
+else
+  check "P16b discovery reads \$REPO/.claude/agents, never \$WORKTREE/.claude/agents (trust guard)" FAIL
+fi
+if grep -qF '(repo-custom)' "$SKILL_MD"; then
+  check "P16c custom seats are marked (repo-custom) in the cast" PASS
+else
+  check "P16c custom seats are marked (repo-custom) in the cast" FAIL
+fi
+if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$SKILL_MD" && grep -qF '(unreadable)' "$SKILL_MD"; then
+  check "P16d discovery-unavailable + unreadable-persona logging pinned" PASS
+else
+  check "P16d discovery-unavailable + unreadable-persona logging pinned" FAIL
+fi
+if grep -qF -- '--no-custom-roles' "$SKILL_MD"; then
+  check "P16e --no-custom-roles opt-out documented" PASS
+else
+  check "P16e --no-custom-roles opt-out documented" FAIL
+fi
+if grep -qF 'Repo-custom seats spawn as confined workers' "$SKILL_MD" && grep -qF 'zensu:pr-review-worker' "$SKILL_MD"; then
+  check "P16f custom seats spawn as confined zensu:pr-review-worker (not their own subagent_type)" PASS
+else
+  check "P16f custom seats spawn as confined zensu:pr-review-worker (not their own subagent_type)" FAIL
+fi
+if grep -qF '## Repo-custom seats' "$PERSONAS_MD"; then
+  check "P16g reviewer-personas.md documents the Repo-custom seats contract" PASS
+else
+  check "P16g reviewer-personas.md documents the Repo-custom seats contract" FAIL
+fi
+if grep -qF 'BASE checkout' "$WORKFLOW_MD"; then
+  check "P16h workflow.md documents the base-checkout discovery trust guard" PASS
+else
+  check "P16h workflow.md documents the base-checkout discovery trust guard" FAIL
+fi
+
 echo "----"
 echo "test-pr-team-review-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

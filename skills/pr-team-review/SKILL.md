@@ -22,13 +22,14 @@ Parse from the user prompt. Slash form: `/zensu:pr-team-review <pr-url> [--flag=
 | Arg | Required | Default | Notes |
 |---|---|---|---|
 | `<pr-url>` | yes | — | `https://github.com/<owner>/<repo>/pull/<n>` |
-| `--roles=<comma-list>` | no | auto-cast per PR (see `rules/reviewer-personas.md`) | Override the auto-cast |
+| `--roles=<comma-list>` | no | auto-cast per PR (see `rules/reviewer-personas.md`) | Override the auto-cast. Ids may name built-in pool personas OR repo-custom seats (`.claude/agents/zensu-review-*.md`, discovered in Phase A.2). |
 | `--context=<path>[,<path>...]` | no | none | Extra reference docs (refinement wiki, glossary). Activates `domain-refiner`. |
 | `--conversation=<text-or-path>` | no | none | Inline conversation context (naming debate, design decisions, screenshot OCR) |
 | `--verdict=<COMMENT\|REQUEST_CHANGES\|APPROVE>` | no | `COMMENT` | Final review event |
 | `--max-inline=<n>` | no | 25 | Cap on consolidated inline comments (unrelated to the persona-pool size) |
 | `--run-coverage` | no | off | Opt-in: the main thread runs the repo's coverage tool once in the worktree and records line/branch evidence before reviewers spawn. Off = main-thread static mapping + existing-report ingestion only (fast). |
 | `--coverage-gate` | no | off | When set, uncovered changed **production** files escalate the final verdict to `REQUEST_CHANGES`. Off = coverage is reported but advisory (verdict unchanged). |
+| `--no-custom-roles` | no | off | Skip repo-custom persona discovery (`.claude/agents/zensu-review-*.md`) — cast from the built-in pool only. |
 
 If `<pr-url>` is missing in standalone mode, ask the user via `AskUserQuestion`. A delegated
 invocation with no URL is malformed and must abort without asking.
@@ -268,7 +269,20 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 **A.2 Persona-Cast:**
 
-Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`). In standalone mode, present the cast to the user before spawning; in delegated mode, log the same cast as a progress update and continue without a question:
+Read `rules/reviewer-personas.md` for the 25-persona pool with trigger signals. Based on the diff file types + paths, select the personas whose trigger signals match. **The always-on holistic core — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial` — is cast on every code PR** (not trigger-gated), so no code PR is reviewed by specialist lenses alone; docs-only PRs stay lean (`docs-only` + `coverage-audit`).
+
+**Repo-custom seats (discovery).** The pool is not the whole cast: a repo can define its own reviewer seats using the SAME `.claude/agents/zensu-review-*.md` convention `/zensu:tdd` consumes (see `rules/reviewer-personas.md` § Repo-custom seats). Unless `--no-custom-roles` was passed, pipe the worktree's changed paths into the activation matcher **on the main thread**:
+
+```bash
+# TRUST GUARD: discover from the BASE checkout ($REPO), NEVER $WORKTREE (the PR head).
+# A PR must not inject its own reviewer seats — mirrors the overlay rule in Step 0.
+git -C "$WORKTREE" diff origin/<base>...HEAD --name-only \
+  | node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/persona-activation.js" "$REPO/.claude/agents"
+```
+
+Each `spawn <name>` line is a castable repo-custom seat; join it to the cast marked `(repo-custom)` with its reason (the matched activation glob, or `always-join` for a seat with no `activation:` field). Log every other verdict humanized — `PERSONA SKIPPED — <name> (no activation match | malformed)`, `PERSONA DROPPED — <name> (over cap)` — never silently omit one. If the helper itself fails (node missing, non-zero exit), log `PERSONA DISCOVERY UNAVAILABLE — <reason>` and continue with the pool only. Custom seats are capped at 5 (the helper's cap), count toward `ROLE_COUNT`, and each spawns as a confined `zensu:pr-review-worker` with the custom persona's concern injected as its focus (Phase B) — never as its own `subagent_type`.
+
+In standalone mode, present the cast to the user before spawning; in delegated mode, log the same cast as a progress update and continue without a question:
 
 ```
 Cast for PR #<n> (<X> files, <Y>+/<Z>-):
@@ -282,9 +296,10 @@ Cast for PR #<n> (<X> files, <Y>+/<Z>-):
   security        — Auth config + new endpoints
   rest-api        — Controller files + OpenAPI annotations
   tests-qa        — Test files present (97 @Test)
+  zensu-review-fee-calc — (repo-custom) via .claude/agents/zensu-review-fee-calc.md (activation **/fee/** matched)
 ```
 
-Standalone only: ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list; the always-on holistic core (`coverage-audit`, `bug-hunter`, `maintainability`, `adversarial`) stays in regardless (re-add any the user's custom list omits — for a docs-only PR only `coverage-audit` applies). If `--roles=` arg was provided → still append the holistic core if the user left it out. Delegated mode never calls `AskUserQuestion` here.
+Standalone only: ask via `AskUserQuestion`: "Cast OK? [Go / Reduce / Expand / Custom]". On `Custom` → user gives comma list; the always-on holistic core (`coverage-audit`, `bug-hunter`, `maintainability`, `adversarial`) stays in regardless (re-add any the user's custom list omits — for a docs-only PR only `coverage-audit` applies). If `--roles=` arg was provided → still append the holistic core if the user left it out. Repo-custom seats (from `.claude/agents/zensu-review-*.md`) are valid ids in the `Custom` list and in `--roles=`; an explicitly named custom id is force-cast (it bypasses its activation gate), so an explicit override is never dropped by a non-matching glob. Delegated mode never calls `AskUserQuestion` here.
 
 Before Phase B, set `PERSONA_RULES` to the fully expanded concrete path formed from the validated `ROOT`, count the final roles as `ROLE_COUNT`, and register one private read lease. Do not register a lease when `REUSE_DURABLE_PAYLOAD=true`:
 
@@ -324,6 +339,8 @@ Every reviewer prompt MUST contain this exact semantic contract:
 > Review only from supplied evidence and allowlisted files. If evidence is insufficient, state the gap in `overall_notes`; never widen scope. Return your verdict as your entire final assistant message: one raw JSON object using the shared schema, with `kind` exactly `pr-review` and `role` exactly `<role-id>`, no Markdown fence, preface, suffix, or extra keys.
 
 The private SubagentStop validator captures a bounded, exact-role JSON result and revokes that worker binding. Only the main thread may later materialize accepted results as `$WORKDIR/<role>.json`. Schema in `rules/reviewer-personas.md` (key fields: `inline_findings[]`, `overall_notes[]`, `verdict_hint`).
+
+**Repo-custom seats spawn as confined workers too.** A `(repo-custom)` seat from Phase A.2 is NOT spawned as its own `subagent_type` — that would bypass the private read lease and capability confinement. Spawn it exactly like a pool seat, as a confined `zensu:pr-review-worker` under the same lease, injecting the custom persona's concern (read on the main thread from its `.claude/agents/zensu-review-*.md` body in the base checkout `$REPO`, never `$WORKTREE`) as the `<role-id>` focus. Its verdict flows through the same finalized leased-evidence path, is materialized to `$WORKDIR/<role>.json`, and is debated / synthesised / published exactly like a pool persona's, namespaced by the persona id. A persona file that cannot be read on the main thread is logged `PERSONA SKIPPED — <name> (unreadable)` and dropped before `ROLE_COUNT` is fixed.
 
 ### Phase C — Wait + Debate
 

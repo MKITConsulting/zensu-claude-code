@@ -282,6 +282,41 @@ else
   check "P10g workers receive no team, task, messaging, or file-mutation instruction" FAIL
 fi
 
+# P11 — repo-custom reviewer seats: plan-review also ingests .claude/agents/zensu-review-*.md
+# personas, discovered from the trusted working checkout (git toplevel), cast additively.
+# Under Session Control v1 they spawn as confined zensu:plan-review-worker (injected focus),
+# NOT as their own subagent_type.
+if grep -qF 'persona-activation.js' "$SKILL_MD"; then
+  check "P11a SKILL.md discovers repo-custom personas via persona-activation.js" PASS
+else
+  check "P11a SKILL.md discovers repo-custom personas via persona-activation.js" FAIL
+fi
+if grep -qF 'git rev-parse --show-toplevel' "$SKILL_MD" && grep -qF '.claude/agents' "$SKILL_MD"; then
+  check "P11b discovery dir is the working-checkout .claude/agents (git toplevel)" PASS
+else
+  check "P11b discovery dir is the working-checkout .claude/agents (git toplevel)" FAIL
+fi
+if grep -qF '(repo-custom)' "$SKILL_MD"; then
+  check "P11c custom seats join additively marked (repo-custom)" PASS
+else
+  check "P11c custom seats join additively marked (repo-custom)" FAIL
+fi
+if grep -qF 'Repo-custom seats spawn as confined workers' "$SKILL_MD" && grep -qF 'zensu:plan-review-worker' "$SKILL_MD"; then
+  check "P11d custom seats spawn as confined zensu:plan-review-worker (not their own subagent_type)" PASS
+else
+  check "P11d custom seats spawn as confined zensu:plan-review-worker (not their own subagent_type)" FAIL
+fi
+if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$SKILL_MD" && grep -qF '(unreadable)' "$SKILL_MD"; then
+  check "P11e discovery-unavailable + unreadable-persona logging pinned" PASS
+else
+  check "P11e discovery-unavailable + unreadable-persona logging pinned" FAIL
+fi
+if grep -qF -- '--no-custom-roles' "$SKILL_MD"; then
+  check "P11f --no-custom-roles opt-out documented" PASS
+else
+  check "P11f --no-custom-roles opt-out documented" FAIL
+fi
+
 echo "----"
 echo "test-plan-review-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

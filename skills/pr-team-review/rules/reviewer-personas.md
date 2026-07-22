@@ -331,3 +331,12 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 - `domain-refiner` requires `--context=` — otherwise it has nothing to compare against.
 - Pure docs PR → `docs-only` reviewer PLUS `coverage-audit` (reports N/A); the rest of the holistic core (`bug-hunter` / `maintainability` / `adversarial`) and the specialist cast are skipped, as is the debate phase — still synthesize + publish **with the mandatory `### Test Coverage` section**.
 - Mixed-stack PRs (frontend + backend) → cast from both sides; with the always-on core a typical code PR runs 6-12 reviewers (see `workflow.md` for the size band).
+
+## Repo-custom seats
+
+The 25-persona pool above is the built-in set. A repo can ALSO define its own reviewer seats — fully custom roles tailored to that codebase (e.g. `fee-calc-integrity`, `api-contract-integrity`, `angular-architecture`) — without forking the plugin, using the SAME `.claude/agents/zensu-review-*.md` convention that `/zensu:tdd`'s review fan-out consumes. They are additive: they never displace the always-on holistic core.
+
+- **Discovery.** In Phase A.2 the lead runs `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/persona-activation.js" "$REPO/.claude/agents"` with the worktree diff's changed paths on stdin. Each `spawn <name>` is a castable seat; the `activation:` glob field decides relevance (a seat with no `activation:` field always joins), and the helper caps customs at 5 (matched-before-always-join). Pass `--no-custom-roles` to skip discovery entirely.
+- **Trust guard.** Discovery reads the BASE checkout `$REPO/.claude/agents`, NEVER the PR-head worktree. A PR must not introduce its own reviewer seats — the same rule the repo overlay follows.
+- **Output contract.** A custom seat emits the SAME shared JSON schema above (materialized to `$WORKDIR/<persona-name>.json`); the lead injects that contract at spawn (Phase B). The seat runs as a confined `zensu:pr-review-worker` under the read lease — never as its own `subagent_type` (that would bypass the lease) — with the persona's concern injected as its focus. The persona *file* declares only the concern (body) + activation (frontmatter), staying output-format-agnostic so one file works across `/zensu:tdd`'s `## Aspect:` markdown and this skill's JSON. Findings are namespaced by the persona id and flow through debate → synthesis → publish exactly like a pool persona's.
+- **Authoring.** See the README "Custom review personas (repo-local)" section for the file format, the `name:` = filename-stem rule, and the activation-glob semantics.
