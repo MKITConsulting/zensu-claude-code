@@ -7,8 +7,8 @@ PROMPTFOO="$ROOT/node_modules/.bin/promptfoo"
 MODE="${1:-contract}"
 shift || true
 
-case "$MODE" in contract|live|concurrency|adversarial|release) ;; *)
-  echo "usage: $0 contract|live|concurrency|adversarial|release" >&2; exit 2 ;;
+case "$MODE" in contract|upgrade|live|concurrency|adversarial|release) ;; *)
+  echo "usage: $0 contract|upgrade|live|concurrency|adversarial|release" >&2; exit 2 ;;
 esac
 
 test -x "$PROMPTFOO" || { echo 'session-control eval: run npm ci first' >&2; exit 127; }
@@ -37,9 +37,12 @@ test "$(git -C "$ROOT" rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION" \
   || { echo 'session-control eval: exact expected source revision does not match checkout' >&2; exit 1; }
 
 if [ "$MODE" = release ]; then
+  test "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" != 1 \
+    || { echo 'session-control eval: release evidence forbids non-authoritative existing-login mode' >&2; exit 1; }
   bash "$EVAL_DIR/lib/release-preflight.sh" "$ROOT" "$ZENSU_EXPECTED_SOURCE_REVISION"
   bash "$EVAL_DIR/run-self-check.sh"
   bash "$EVAL_DIR/run-eval.sh" contract "$@"
+  bash "$EVAL_DIR/run-eval.sh" upgrade "$@"
   bash "$EVAL_DIR/run-eval.sh" live "$@"
   bash "$EVAL_DIR/run-eval.sh" concurrency "$@"
   bash "$EVAL_DIR/run-eval.sh" adversarial "$@"
@@ -47,12 +50,29 @@ if [ "$MODE" = release ]; then
   exit 0
 fi
 
+if [ "$MODE" = upgrade ]; then
+  test "${ZENSU_EXPECTED_CLAUDE_VERSION:-}" != '' \
+    || { echo 'session-control eval: ZENSU_EXPECTED_CLAUDE_VERSION is mandatory for the upgrade profile' >&2; exit 1; }
+  case "$ZENSU_EXPECTED_CLAUDE_VERSION" in
+    [0-9]*.[0-9]*.[0-9]*) ;;
+    *) echo 'session-control eval: expected Claude version is malformed' >&2; exit 1 ;;
+  esac
+  export ZENSU_EXPECTED_CLAUDE_VERSION
+  if [ "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" = 1 ] \
+    && [ -n "${ZENSU_SESSION_CONTROL_EVIDENCE_DIR:-}" ]; then
+    echo 'session-control eval: existing-login upgrade mode is a local diagnostic and cannot publish evidence' >&2
+    exit 1
+  fi
+fi
+
 if [ "$MODE" != contract ]; then
   command -v claude >/dev/null 2>&1 || { echo 'session-control eval: claude CLI unavailable' >&2; exit 127; }
   test "${ZENSU_E2E_DISPOSABLE_ENVIRONMENT:-0}" = 1 \
     || { echo 'session-control eval: set ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 only on a disposable live-eval host' >&2; exit 64; }
-  test -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-    || { echo 'session-control eval: explicit Claude credentials unavailable' >&2; exit 1; }
+  if [ "$MODE" != upgrade ] || [ "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" != 1 ]; then
+    test -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+      || { echo 'session-control eval: explicit Claude credentials unavailable' >&2; exit 1; }
+  fi
 fi
 
 STATE="$(mktemp -d -t zensu-session-promptfoo-XXXXXX)"
@@ -64,7 +84,7 @@ export PROMPTFOO_CONFIG_DIR="$STATE"
 export PROMPTFOO_DISABLE_TELEMETRY=1
 export PROMPTFOO_DISABLE_UPDATE=1
 RESULT_ROOT="$ROOT"
-if [ "$MODE" != contract ]; then
+if [ "$MODE" != contract ] && [ "$MODE" != upgrade ]; then
   INSTALL_STATE="$STATE/installed-plugin"
   mkdir -p "$INSTALL_STATE"
   chmod 700 "$INSTALL_STATE"
@@ -102,9 +122,19 @@ if [ -n "${ZENSU_SESSION_CONTROL_EVIDENCE_DIR:-}" ]; then
     || { echo 'session-control eval: evidence directory must be a real directory' >&2; exit 1; }
   EVIDENCE_DIR="$(cd "$EVIDENCE_DIR" && pwd -P)"
   chmod 700 "$EVIDENCE_DIR"
-  node "$EVAL_DIR/lib/verify-results.js" "$MODE" "$RESULT_FILE" "$RESULT_ROOT" \
-    "$ZENSU_EXPECTED_SOURCE_REVISION" "$EVIDENCE_DIR/${MODE}.json"
+  if [ "$MODE" = upgrade ]; then
+    node "$EVAL_DIR/lib/verify-upgrade-results.js" "$RESULT_FILE" \
+      "$ZENSU_EXPECTED_SOURCE_REVISION" "$EVIDENCE_DIR/${MODE}.json"
+  else
+    node "$EVAL_DIR/lib/verify-results.js" "$MODE" "$RESULT_FILE" "$RESULT_ROOT" \
+      "$ZENSU_EXPECTED_SOURCE_REVISION" "$EVIDENCE_DIR/${MODE}.json"
+  fi
 else
-  node "$EVAL_DIR/lib/verify-results.js" "$MODE" "$RESULT_FILE" "$RESULT_ROOT" \
-    "$ZENSU_EXPECTED_SOURCE_REVISION"
+  if [ "$MODE" = upgrade ]; then
+    node "$EVAL_DIR/lib/verify-upgrade-results.js" "$RESULT_FILE" \
+      "$ZENSU_EXPECTED_SOURCE_REVISION"
+  else
+    node "$EVAL_DIR/lib/verify-results.js" "$MODE" "$RESULT_FILE" "$RESULT_ROOT" \
+      "$ZENSU_EXPECTED_SOURCE_REVISION"
+  fi
 fi

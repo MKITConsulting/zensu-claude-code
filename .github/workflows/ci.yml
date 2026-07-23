@@ -20,6 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -65,6 +66,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -78,6 +80,7 @@ jobs:
           mkdir -p "$PROMPTFOO_CONFIG_DIR"
           npx --no-install promptfoo validate config -c \
             evals/session-control/promptfooconfig-contract.yaml \
+            evals/session-control/promptfooconfig-upgrade.yaml \
             evals/session-control/promptfooconfig-live.yaml \
             evals/session-control/promptfooconfig-concurrency.yaml \
             evals/session-control/promptfooconfig-adversarial.yaml \

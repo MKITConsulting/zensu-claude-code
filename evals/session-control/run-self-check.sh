@@ -16,7 +16,7 @@ PROMPTFOO_VERSION="$(
 )"
 test "$PROMPTFOO_VERSION" = '0.121.18'
 
-for file in "$EVAL_DIR"/promptfooconfig-{contract,live,concurrency,adversarial}.yaml; do
+for file in "$EVAL_DIR"/promptfooconfig-{contract,upgrade,live,concurrency,adversarial}.yaml; do
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
     "$PROMPTFOO" validate config --config "$file" >/dev/null
 done
@@ -24,6 +24,8 @@ done
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/catalog.yaml")" -eq 67
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/adversarial.yaml")" -eq 6
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/live.yaml")" -eq 6
+test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/upgrade.yaml")" -eq 1
+grep -q 'maxConcurrency: 1' "$EVAL_DIR/promptfooconfig-upgrade.yaml"
 grep -q 'maxConcurrency: 4' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 3' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 5' "$EVAL_DIR/promptfooconfig-adversarial.yaml"
@@ -53,5 +55,7 @@ node "$EVAL_DIR/tests/live-evidence-negative.test.js"
 bash "$EVAL_DIR/tests/preflight-selftest.sh"
 bash "$EVAL_DIR/tests/marketplace-fixture-selftest.sh"
 bash "$EVAL_DIR/tests/installed-plugin-provisioner-selftest.sh"
+node "$EVAL_DIR/tests/upgrade-provider-selftest.js"
+node "$EVAL_DIR/tests/upgrade-results.test.js"
 bash "$EVAL_DIR/tests/wrapper-selftest.sh"
 printf 'session-control self-check: PASS\n'

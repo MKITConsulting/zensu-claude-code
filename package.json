@@ -5,6 +5,7 @@
   "scripts": {
     "session-control:selfcheck": "bash evals/session-control/run-self-check.sh",
     "session-control:contract": "bash evals/session-control/run-eval.sh contract",
+    "session-control:upgrade": "bash evals/session-control/run-eval.sh upgrade",
     "session-control:live": "bash evals/session-control/run-eval.sh live",
     "session-control:concurrency": "bash evals/session-control/run-eval.sh concurrency",
     "session-control:adversarial": "bash evals/session-control/run-eval.sh adversarial",

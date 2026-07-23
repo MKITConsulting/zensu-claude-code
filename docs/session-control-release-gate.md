@@ -113,6 +113,28 @@ through `--plugin-dir`.
   preserve both its project anchor and baseline CAS bytes after `CwdChanged`.
   The Autopilot recovery sibling likewise reads continuation state only from the
   record-bound project and stays silent when the binding is missing.
+- Upgrade validation installs the previous release and candidate as distinct
+  SemVer cache roots. The previous release is not just a mutable tag lookup:
+  `v0.16.1` must resolve to exact commit
+  `3e4f4ab4c1ea5c075effb743ae00af6f915ddb82`, and that commit must be an
+  ancestor of the exact candidate SHA. One long-lived Claude process
+  completes turns both before and after a concurrent fresh candidate process;
+  all three old-process results must invoke only the previous root. The fresh
+  process must invoke the candidate root, pass both `Read` and a harmless `Bash`
+  probe through every matching `PreToolUse` hook, and create exactly one normal
+  Session Control record below the exact `zensu-zensu` plugin-data directory.
+  Each Read target holds an opaque token omitted from the prompt; both the
+  structured Read result and the terminal answer must contain it. A model that
+  merely repeats prompt text therefore cannot forge a successful tool proof.
+  Claude uses fail-closed `dontAsk` permissions, only `Read,Bash`, exact
+  absolute `Read(//...)` rules for the four fixture files, and the harmless
+  `Bash(printf ...)` preapproval. A harness-owned `PreToolUse(Bash)` guard
+  rejects every other Bash input before execution, including background and
+  unsandboxed variants; the Bash sandbox is mandatory and fail-closed.
+  Permission bypass is forbidden. Never
+  overwrite an already-loaded cache root or use `/reload-plugins` as part of a
+  release migration. This mirrors Claude Code's documented
+  [versioned-cache and running-session behavior](https://code.claude.com/docs/en/plugins-reference#plugin-caching-and-file-resolution).
 - `SessionStart` payloads carrying Claude's documented `agent_type` for
   `claude --agent` use the same fail-closed principal classifier as PreToolUse:
   exact reviewers remain read-only and every other explicit identity stays
@@ -132,6 +154,7 @@ npm run session-control:selfcheck
 npm run session-control:contract
 
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 \
+ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211 \
 ZENSU_EXPECTED_SOURCE_ROOT="$PWD" \
 ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)" \
 ANTHROPIC_API_KEY='…' \
@@ -143,6 +166,51 @@ explicit credential to Claude. Plugin marketplace/install/list commands run
 with Claude credentials removed from their environment. Missing credentials,
 CLI drift, dirty source, registry ambiguity, runtime drift, or incomplete host
 evidence fails instead of skipping.
+Failure diagnostics are equally credential-blind: child-controlled tool,
+event, input-key, and runtime-entry names are reduced to allowlisted
+categories, bounded counts/lengths, and SHA-256 values before stderr output.
+Unexpected host exceptions receive the same redacted treatment.
+
+The authoritative upgrade gate currently runs only on macOS or Linux. Windows
+continues to run the deterministic fake-provider, path, hook, and Promptfoo
+tamper matrix in CI, but it is not claimed as real Claude lifecycle coverage.
+Release/nightly evidence always uses an explicit API/OAuth token with an
+  isolated `HOME`, config, plugin cache/data, `TMPDIR`/`TEMP`/`TMP`, and
+  Claude's internal `CLAUDE_CODE_TMPDIR`.
+The runtime payload-byte invariant excludes only Claude's direct-root
+`.in_use/<pid>` and `.orphaned_at` lifecycle metadata. The provider validates
+the active marker's directory/file shape, exact owning PID while active, and
+removal after process exit. It also validates `.orphaned_at` as Claude's exact
+13-digit epoch-millisecond marker, ties its value and `mtime` to the relevant
+activation window, and requires its fingerprint to remain stable. In the
+authoritative installed-plugin mode and the local existing-login diagnostic,
+the active candidate remains marker-free while only the retired old root
+becomes orphaned. No other old or candidate root entry may change.
+On the pinned Ubuntu 24.04 runner, every paid gate first installs and verifies
+Claude's required `bubblewrap` and `socat` packages. It applies
+[Claude's documented Linux `bwrap` AppArmor profile](https://code.claude.com/docs/en/sandboxing#set-up-linux-and-wsl2)
+only when the kernel reports restricted unprivileged
+user namespaces, then requires both basic and network-namespace `bwrap` probes
+to succeed. The live gate never falls back to an unsandboxed Bash process.
+
+`ZENSU_UPGRADE_EXISTING_LOGIN=1` is a macOS-only local diagnostic. It preserves the
+host `HOME` and leaves `CLAUDE_CONFIG_DIR` unset solely so the
+already-authenticated Claude CLI may reuse its macOS Keychain identity. User,
+project, and local setting sources are disabled; each real process receives
+exactly one old/candidate
+`--plugin-dir`; plugin cache/data and temporary files stay in the disposable
+test root; session plus prompt-history persistence are disabled; and only the
+non-secret `USER`/`LOGNAME` Keychain account selectors are forwarded. A
+mandatory Bash sandbox denies reads from the host home and forbids unsandboxed
+tool calls. The diagnostic reads no credential file and publishes no release
+evidence. Metadata-only canaries cover Claude settings, the installed plugin
+registry, and the production plugin cache before and after every outcome.
+Claude may still update volatile startup/UI metadata in `~/.claude.json`; that
+file is outside this non-authoritative invariant. This path validates real
+hooks and concurrent process lifetime,
+but intentionally does not claim the marketplace-registry transition or full
+host-`HOME` immutability. Linux and CI use explicit credentials with the fully
+isolated authoritative mode instead.
 
 ## Automated release ordering
 
@@ -158,7 +226,9 @@ The `Release` workflow has two exact-SHA gates:
 2. The prepare job requires `ANTHROPIC_API_KEY` or
    `CLAUDE_CODE_OAUTH_TOKEN`, sets
    `ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, and installs Claude Code CLI exactly
-   `2.1.211`. Missing credentials, a different HEAD, a dirty checkout, CLI
+   `2.1.211`. Its pinned Ubuntu 24.04 host must also pass the verified
+   `bubblewrap`/`socat` and AppArmor namespace preparation. Missing credentials,
+   a different HEAD, a dirty checkout, CLI
    drift, installation mistargeting, or any failed profile stops the workflow
    before the release branch can be pushed.
 3. Each profile writes a sanitized receipt below the release artifact's

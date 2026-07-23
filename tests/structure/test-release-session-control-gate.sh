@@ -95,10 +95,10 @@ contains "Push rechecks the created commit" "$PREPARE" 'test "$(git rev-parse HE
 
 contains "Dry run is documented as offline" "$PREPARE" 'Offline preview only:'
 contains "Dry run reports no paid live gate" "$PREPARE" 'no paid Session Control live gate ran'
-if [ "$(printf '%s\n' "$PREPARE" | grep -Fc 'if: ${{ !inputs.dry_run }}')" -eq 5 ]; then
-  check "Commit, CLI, gate, evidence, and push are all disabled for dry runs" PASS
+if [ "$(printf '%s\n' "$PREPARE" | grep -Fc 'if: ${{ !inputs.dry_run }}')" -eq 6 ]; then
+  check "Commit, sandbox, CLI, gate, evidence, and push are all disabled for dry runs" PASS
 else
-  check "Commit, CLI, gate, evidence, and push are all disabled for dry runs" FAIL
+  check "Commit, sandbox, CLI, gate, evidence, and push are all disabled for dry runs" FAIL
 fi
 
 contains "Publish installs the exact Claude Code CLI" "$PUBLISH" 'npm install --global @anthropic-ai/claude-code@2.1.211'
