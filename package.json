@@ -16,6 +16,9 @@
     "yaml": "2.9.0"
   },
   "overrides": {
-    "adm-zip": "^0.6.0"
+    "adm-zip": "^0.6.0",
+    "promptfoo": {
+      "js-yaml": "^5.2.1"
+    }
   }
 }
