@@ -16,6 +16,7 @@ INSTALLER="$ROOT/tests/structure/fixtures/install-claude-runtime-fixture.js"
 RUNNER="$ROOT/evals/session-control/run-eval.sh"
 SELFTEST="$ROOT/evals/session-control/tests/upgrade-provider-selftest.js"
 COVERAGE="$ROOT/evals/session-control/tests/enforce-upgrade-coverage.js"
+COVERAGE_PARSER_TEST="$ROOT/evals/session-control/tests/coverage-report.test.js"
 RESULT_TEST="$ROOT/evals/session-control/tests/upgrade-results.test.js"
 NIGHTLY="$ROOT/.github/workflows/session-control-nightly.yml"
 RELEASE="$ROOT/.github/workflows/release.yml"
@@ -431,6 +432,12 @@ contains 'Coverage gate feature-detects Node coverage include support' \
 contains 'Coverage gate keeps a no-include fallback for Node 20' \
   "$COVERAGE" \
   'const coverageIncludeArgs = coverageIncludeSupported'
+contains 'Coverage parser regression covers the Node 20 TAP marker' \
+  "$COVERAGE_PARSER_TEST" \
+  "'# evals"
+contains 'Coverage parser regression covers the newer TAP marker' \
+  "$COVERAGE_PARSER_TEST" \
+  "'ℹ tests"
 contains 'Coverage gate measures the canonical upgrade attestation' \
   "$COVERAGE" \
   'evals/session-control/lib/upgrade-attestation.js'
@@ -470,9 +477,23 @@ contains 'Linux sandbox helper probes a detached TERM-ignoring grandchild' \
 contains 'Linux sandbox helper proves the detached grandchild cannot escape' \
   "$SANDBOX_PREP" \
   'test ! -e "$ESCAPE_SENTINEL"'
-contains 'Linux sandbox helper transports sensitive arguments only through FD3' \
+contains 'Linux sandbox helper keeps the command outside the argument FD' \
   "$SANDBOX_PREP" \
-  '/usr/bin/bwrap --args 3'
+  '-- /bin/sh -c \'
+contains 'Linux sandbox helper transports sensitive environment arguments through FD3' \
+  "$SANDBOX_PREP" \
+  '  --args 3 \'
+FD_PAYLOAD="$(
+  sed -n '/3< <(/,/^[[:space:]]*) \&/p' "$SANDBOX_PREP"
+)"
+if grep -Fq -- '--clearenv' <<<"$FD_PAYLOAD" \
+  && grep -Fq -- '--setenv ANTHROPIC_API_KEY "$ESCAPE_SECRET"' <<<"$FD_PAYLOAD" \
+  && ! grep -Fq -- '--unshare-user' <<<"$FD_PAYLOAD" \
+  && ! grep -Fq -- '/bin/sh -c' <<<"$FD_PAYLOAD"; then
+  check 'Linux sandbox helper limits FD3 to sensitive environment options' PASS
+else
+  check 'Linux sandbox helper limits FD3 to sensitive environment options' FAIL
+fi
 contains 'Linux sandbox helper audits the host Bubblewrap command line' \
   "$SANDBOX_PREP" \
   '"/proc/$ESCAPE_BWRAP_PID/cmdline"'

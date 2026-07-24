@@ -4,10 +4,12 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
+const { parseCoverageRows } = require('./coverage-report.js');
 
 const root = path.resolve(__dirname, '..', '..', '..');
 const minimumLineCoverage = 90;
 const testFiles = [
+  'evals/session-control/tests/coverage-report.test.js',
   'evals/session-control/tests/safe-file-read.test.js',
   'evals/session-control/tests/upgrade-results.test.js',
   'evals/session-control/tests/upgrade-credentials.test.js',
@@ -133,22 +135,7 @@ if (reportStart < 0 || reportEnd < reportStart) {
   return;
 }
 const report = output.slice(reportStart, reportEnd);
-const coverageRows = new Map();
-const hierarchy = [];
-for (const rawLine of report.split(/\r?\n/)) {
-  const line = rawLine.replace(/^\s*ℹ ?/, '');
-  const match = line.match(/^(\s*)([^|]+?)\s*\|\s*([^|]*)\|/);
-  if (!match) continue;
-  const indentation = match[1].length;
-  const name = match[2].trim();
-  const lineCoverage = match[3].trim();
-  hierarchy.length = indentation;
-  hierarchy[indentation] = name;
-  if (!/^[0-9]+(?:\.[0-9]+)?$/.test(lineCoverage)) continue;
-  const fullPath = hierarchy.slice(0, indentation + 1).join('/');
-  if (!coverageRows.has(fullPath)) coverageRows.set(fullPath, []);
-  coverageRows.get(fullPath).push(Number(lineCoverage));
-}
+const coverageRows = parseCoverageRows(report);
 const failures = [];
 for (const file of enforcedFiles) {
   const matches = coverageRows.get(file) || [];

@@ -77,26 +77,31 @@ ESCAPE_SENTINEL="$ESCAPE_PROBE_ROOT/escaped"
 ESCAPE_READY="$ESCAPE_PROBE_ROOT/ready"
 ESCAPE_SECRET="zensu-bwrap-fd3-canary-${RANDOM}-${RANDOM}-$$"
 
+# Bubblewrap's --args input expands options, not the trailing command. Keep the
+# command on the host argv exactly as the production builder does, while the
+# sensitive environment options cross only the inherited descriptor.
 # The quoted variables below intentionally expand only inside the sandbox.
 # shellcheck disable=SC2016
-/usr/bin/bwrap --args 3 3< <(
-  printf '%s\0' \
-    --unshare-user \
-    --unshare-pid \
-    --die-with-parent \
-    --new-session \
-    --clearenv \
-    --setenv PATH /usr/bin:/bin \
-    --setenv ANTHROPIC_API_KEY "$ESCAPE_SECRET" \
-    --ro-bind / / \
-    --bind "$ESCAPE_PROBE_ROOT" "$ESCAPE_PROBE_ROOT" \
-    /bin/sh -c \
-    'case "${ANTHROPIC_API_KEY:-}" in zensu-bwrap-fd3-canary-*) ;; *) exit 97 ;; esac
-     setsid /bin/sh -c '"'"'trap "" TERM HUP INT; sleep 4; echo escaped > "$1"'"'"' sh "$1" >/dev/null 2>&1 &
-     echo ready > "$2"
-     sleep 2' \
-    sh "$ESCAPE_SENTINEL" "$ESCAPE_READY"
-) &
+/usr/bin/bwrap \
+  --unshare-user \
+  --unshare-pid \
+  --die-with-parent \
+  --new-session \
+  --ro-bind / / \
+  --bind "$ESCAPE_PROBE_ROOT" "$ESCAPE_PROBE_ROOT" \
+  --args 3 \
+  -- /bin/sh -c \
+  'case "${ANTHROPIC_API_KEY:-}" in zensu-bwrap-fd3-canary-*) ;; *) exit 97 ;; esac
+   setsid /bin/sh -c '"'"'trap "" TERM HUP INT; sleep 4; echo escaped > "$1"'"'"' sh "$1" >/dev/null 2>&1 &
+   echo ready > "$2"
+   sleep 2' \
+  sh "$ESCAPE_SENTINEL" "$ESCAPE_READY" \
+  3< <(
+    printf '%s\0' \
+      --clearenv \
+      --setenv PATH /usr/bin:/bin \
+      --setenv ANTHROPIC_API_KEY "$ESCAPE_SECRET"
+  ) &
 ESCAPE_BWRAP_PID=$!
 
 for _ in $(seq 1 100); do
