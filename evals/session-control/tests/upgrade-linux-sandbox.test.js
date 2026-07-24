@@ -368,6 +368,67 @@ test('canonicalizes a resolver symlink and rejects a retarget before spawn', () 
   );
 });
 
+test('accepts a resolver target owned by a distinct system service, not the evaluator', () => {
+  const target = '/run/systemd/resolve/resolv.conf';
+  const base = fakeFs({
+    extraFiles: {
+      [target]: 'nameserver 127.0.0.53\n',
+    },
+  });
+  const supplied = {
+    ...base.lstatSync('/etc/resolv.conf'),
+    isFile: () => false,
+    isSymbolicLink: () => true,
+    mode: 0o120777,
+    uid: 0,
+  };
+  const targetInode = base.lstatSync(target).ino;
+  const runtimeWithTargetUid = (targetUid) => ({
+    ...base,
+    lstatSync(file) {
+      if (file === '/etc/resolv.conf') return supplied;
+      const stat = base.lstatSync(file);
+      return stat.ino === targetInode ? { ...stat, uid: targetUid } : stat;
+    },
+    fstatSync(descriptor) {
+      const stat = base.fstatSync(descriptor);
+      return stat.ino === targetInode ? { ...stat, uid: targetUid } : stat;
+    },
+    realpathSync: {
+      native(file) {
+        return file === '/etc/resolv.conf' ? target : file;
+      },
+    },
+  });
+  const options = {
+    command: '/usr/bin/node',
+    args: [],
+    cwd: '/tmp/eval/project',
+    disposableRoot: '/tmp/eval',
+    writableRoots: ['/tmp/eval'],
+    environment: { PATH: '/usr/bin' },
+    platform: 'linux',
+  };
+
+  const invocation = buildBubblewrapInvocation({
+    ...options,
+    runtime: runtimeWithTargetUid(998),
+  });
+  const resolverAt = invocation.args.findIndex(
+    (entry, index) => (
+      entry === '--ro-bind'
+      && invocation.args[index + 2] === '/etc/resolv.conf'
+    ),
+  );
+  assert.notEqual(resolverAt, -1);
+  assert.equal(invocation.args[resolverAt + 1], target);
+
+  assert.throws(() => buildBubblewrapInvocation({
+    ...options,
+    runtime: runtimeWithTargetUid(EVALUATOR_UID),
+  }), /network resolver configuration is unsafe/);
+});
+
 test('requires exactly the declared credential and keeps host credentials out of bwrap env', () => {
   const invocation = buildBubblewrapInvocation({
     command: '/usr/bin/node',

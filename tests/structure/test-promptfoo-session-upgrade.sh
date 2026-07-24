@@ -425,6 +425,12 @@ contains 'Coverage gate measures the installer subprocess harness' \
 contains 'Coverage gate executes the installer subprocess policy tests' \
   "$COVERAGE" \
   'evals/session-control/tests/runtime-fixture-installer.test.js'
+contains 'Coverage gate feature-detects Node coverage include support' \
+  "$COVERAGE" \
+  "process.allowedNodeEnvironmentFlags.has('--test-coverage-include')"
+contains 'Coverage gate keeps a no-include fallback for Node 20' \
+  "$COVERAGE" \
+  'const coverageIncludeArgs = coverageIncludeSupported'
 contains 'Coverage gate measures the canonical upgrade attestation' \
   "$COVERAGE" \
   'evals/session-control/lib/upgrade-attestation.js'

@@ -178,7 +178,7 @@ function captureNetworkResolutionFile(input, runtime) {
       || !targetAfter.isFile() || targetAfter.isSymbolicLink()
       || !sameExecutableIdentity(targetBefore, opened)
       || !sameExecutableIdentity(targetBefore, targetAfter)
-      || targetAfter.uid !== 0
+      || targetAfter.uid === evaluatorUid(runtime)
       || (targetAfter.mode & 0o022) !== 0
       || !Number.isSafeInteger(targetAfter.size)
       || targetAfter.size <= 0
