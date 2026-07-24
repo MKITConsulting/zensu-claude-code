@@ -18,6 +18,29 @@ const {
 const verifier = path.resolve(__dirname, '..', 'lib', 'verify-upgrade-results.js');
 const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-upgrade-results-selftest-'));
 const revision = '1'.repeat(40);
+const RECEIPT_KEYS = Object.freeze([
+  'schema',
+  'schema_version',
+  'host',
+  'mode',
+  'gate',
+  'execution_mode',
+  'authenticated_canary_status',
+  'candidate_model_backend',
+  'candidate_containment',
+  'source_git_revision',
+  'old_release_ref',
+  'old_release_revision',
+  'old_version',
+  'candidate_installed_version',
+  'candidate_version_synthetic',
+  'old_runtime_digest',
+  'candidate_runtime_digest',
+  'lifecycle_evidence_count',
+  'promptfoo_version',
+  'claude_code_version',
+  'evidence_digest',
+]);
 
 function digest(value) {
   return `sha256:${crypto.createHash('sha256').update(value).digest('hex')}`;
@@ -26,10 +49,19 @@ function digest(value) {
 function evidence(executionMode = EXECUTION_MODES.authoritative) {
   return {
     schema: 'zensu.session-control-upgrade-evidence',
-    schema_version: 1,
+    schema_version: 2,
     host: 'claude',
     gate: 'passed',
     execution_mode: executionMode,
+    authenticated_canary_status: executionMode === EXECUTION_MODES.authoritative
+      ? 'passed-plugin-free-live'
+      : executionMode === EXECUTION_MODES.diagnostic
+        ? 'not-applicable-hermetic-existing-login-test' : 'passed-deterministic-fake',
+    candidate_model_backend: executionMode === EXECUTION_MODES.authoritative
+      ? 'deterministic-loopback-anthropic-mock' : 'deterministic-fake-cli',
+    candidate_containment: executionMode === EXECUTION_MODES.authoritative
+      ? 'linux-bwrap-pid-mount-with-nested-hook-net-v1'
+      : 'deterministic-fake-process-tree',
     host_config_cache_canary_status: executionMode === EXECUTION_MODES.authoritative
       ? 'not-applicable-isolated-home'
       : executionMode === EXECUTION_MODES.diagnostic
@@ -72,12 +104,47 @@ function verify(value, expectedStatus, publishEvidence = true) {
   assert.equal(result.status, expectedStatus, result.stderr || result.stdout);
   if (expectedStatus === 0 && publishEvidence) {
     const receipt = JSON.parse(fs.readFileSync(evidenceFile, 'utf8'));
+    assert.deepEqual(Object.keys(receipt), RECEIPT_KEYS);
     assert.equal(receipt.schema, 'zensu.session-control-upgrade-suite-evidence');
+    assert.equal(receipt.schema_version, 2);
+    assert.equal(receipt.host, 'claude');
     assert.equal(receipt.mode, 'upgrade');
+    assert.equal(receipt.gate, 'passed');
+    assert.equal(
+      receipt.execution_mode,
+      'authoritative-split-auth-canary-contained-candidate',
+    );
+    assert.equal(receipt.authenticated_canary_status, 'passed-plugin-free-live');
+    assert.equal(
+      receipt.candidate_model_backend,
+      'deterministic-loopback-anthropic-mock',
+    );
+    assert.equal(
+      receipt.candidate_containment,
+      'linux-bwrap-pid-mount-with-nested-hook-net-v1',
+    );
     assert.equal(receipt.source_git_revision, revision);
+    assert.equal(receipt.old_release_ref, 'v0.16.1');
+    assert.equal(receipt.old_release_revision, OLD_RELEASE_REVISION);
+    assert.equal(receipt.old_version, '0.16.1');
     assert.equal(receipt.candidate_installed_version, '0.16.2');
+    assert.equal(receipt.candidate_version_synthetic, true);
+    assert.equal(receipt.old_runtime_digest, digest('old'));
+    assert.equal(receipt.candidate_runtime_digest, digest('candidate'));
+    assert.equal(receipt.lifecycle_evidence_count, REQUIRED_SEQUENCE.length);
+    assert.equal(receipt.promptfoo_version, '0.121.18');
     assert.equal(receipt.claude_code_version, '2.1.211');
     assert.match(receipt.evidence_digest, /^sha256:[a-f0-9]{64}$/);
+    const canonicalReceipt = Object.fromEntries(
+      RECEIPT_KEYS
+        .filter((key) => key !== 'evidence_digest')
+        .map((key) => [key, receipt[key]]),
+    );
+    assert.equal(
+      receipt.evidence_digest,
+      digest(JSON.stringify(canonicalReceipt)),
+      'receipt digest must independently bind the exact schema-v2 receipt fields',
+    );
     assert.doesNotMatch(
       JSON.stringify(receipt),
       /(?:"(?:response|prompt|session_id)"\s*:|\/private\/|\/Users\/)/,
@@ -105,6 +172,13 @@ try {
   verify(fake, 1, true);
 
   for (const mutate of [
+    (value) => { value.schema_version = 1; },
+    (value) => { value.unexpected_boundary = true; },
+    (value) => { delete value.candidate_containment; },
+    (value) => { value.authenticated_canary_status = 'passed-deterministic-fake'; },
+    (value) => { value.candidate_model_backend = 'deterministic-fake-cli'; },
+    (value) => { value.candidate_containment = 'deterministic-fake-process-tree'; },
+    (value) => { value.host_config_cache_canary_status = 'not-applicable-test-mode'; },
     (value) => { value.hook_sequence.splice(4, 1); },
     (value) => { value.hook_sequence.reverse(); },
     (value) => { value.old_runtime_digest = value.candidate_runtime_digest; },

@@ -5,18 +5,52 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { spawn, spawnSync } = require('node:child_process');
 const {
   EXECUTION_MODES,
   OLD_RELEASE_REVISION,
   line,
   REQUIRED_SEQUENCE,
 } = require('./upgrade-attestation.js');
+const { readStableRegularFile } = require('./safe-file-read.js');
+const {
+  captureEvaluatorOwnedHookContract,
+  injectCandidateHookContractFaultForTest,
+  loadCanonicalHookConfig,
+  verifyCapturedHookContract,
+} = require('./upgrade-hook-contract.js');
+const { startUpgradeAnthropicMock } = require('./upgrade-anthropic-mock.js');
+const { buildBubblewrapInvocation } = require('./upgrade-linux-sandbox.js');
+const { selectExplicitCredential } = require('./upgrade-credentials.js');
+const {
+  credentialFreeEnvironment,
+  withoutClaudeCredentials,
+} = require('./upgrade-environment.js');
+const {
+  computeClaudeRuntimeDigest,
+  readAndValidateContext,
+  readAndValidateInitialWorkflow,
+  sessionIdHash: independentSessionIdHash,
+  sessionKey: independentSessionKey,
+} = require('./upgrade-independent-verifier.js');
+const {
+  runProcessTreeBounded,
+  runSyncBounded,
+  signalProcessTree,
+  spawnProcessTree,
+  terminateProcessTree,
+} = require('./upgrade-process.js');
+const {
+  captureOwnedDirectory,
+  quarantineAndRemoveOwnedDirectory,
+} = require('./upgrade-owned-directory.js');
 
 const OLD_REF = 'v0.16.1';
 const OLD_VERSION = '0.16.1';
 const MAX_STREAM_BYTES = 32 * 1024 * 1024;
 const PROCESS_TIMEOUT_MS = 180000;
+const GIT_TIMEOUT_MS = 60000;
+const INSTALL_TIMEOUT_MS = 120000;
+const PROBE_TIMEOUT_MS = 30000;
 const BASH_PROBE_COMMAND = "printf '%s\\n' ZENSU_UPGRADE_BASH_OK";
 const BASH_PROBE_OUTPUT = 'ZENSU_UPGRADE_BASH_OK';
 const OLD_TURN_TOKENS = [
@@ -43,6 +77,29 @@ function fail(message) {
   throw providerError(message);
 }
 
+function boundedSync(command, args, options, label, timeoutMs, maxBuffer) {
+  try {
+    return runSyncBounded(command, args, options, {
+      label,
+      timeoutMs,
+      maxBuffer,
+      trustedEvaluatorCommand: true,
+    });
+  } catch (error) {
+    fail(error.message.replace(/^upgrade process: /, ''));
+  }
+}
+
+function testBoundedTimeout(name, fallback) {
+  const value = process.env[name] || '';
+  if (process.env.ZENSU_UPGRADE_TEST_MODE !== '1' || !/^[1-9][0-9]*$/.test(value)) {
+    return fallback;
+  }
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed >= 50 && parsed <= fallback
+    ? parsed : fallback;
+}
+
 function safeJson(text, label) {
   try { return JSON.parse(text); }
   catch (_error) { fail(`${label} is invalid JSON`); }
@@ -54,7 +111,8 @@ function realDirectory(input, label) {
   try { stat = fs.lstatSync(input); }
   catch (_error) { fail(`${label} is unavailable`); }
   if (!stat.isDirectory() || stat.isSymbolicLink()) fail(`${label} must be a real directory`);
-  return fs.realpathSync.native(input);
+  try { return fs.realpathSync.native(input); }
+  catch (_error) { fail(`${label} is unavailable`); }
 }
 
 function inside(parent, child) {
@@ -63,21 +121,107 @@ function inside(parent, child) {
     && !path.isAbsolute(relative));
 }
 
+function sameDirectoryIdentity(left, right) {
+  return left.dev === right.dev
+    && left.ino === right.ino
+    && left.mode === right.mode
+    && left.mtimeMs === right.mtimeMs
+    && left.ctimeMs === right.ctimeMs;
+}
+
+function directoryIdentity(directory, label) {
+  let stat;
+  let canonical;
+  try {
+    stat = fs.lstatSync(directory);
+    canonical = fs.realpathSync.native(directory);
+  } catch (_error) {
+    fail(`${label} is unavailable`);
+  }
+  if (stat.isSymbolicLink() || !stat.isDirectory() || canonical !== directory) {
+    fail(`${label} must be a real directory`);
+  }
+  return { canonical, stat };
+}
+
+function requireUnchangedDirectory(directory, before, label) {
+  let after;
+  try { after = directoryIdentity(directory, label); }
+  catch (_error) { fail(`${label} changed while being inspected`); }
+  if (before.canonical !== after.canonical
+      || !sameDirectoryIdentity(before.stat, after.stat)) {
+    fail(`${label} changed while being inspected`);
+  }
+}
+
+function optionalDescendantDirectory(root, input, label) {
+  const resolved = path.resolve(input);
+  if (!inside(root, resolved)) fail(`${label} escaped its expected root`);
+  let current = root;
+  const relative = path.relative(root, resolved);
+  if (!relative) return root;
+  for (const name of relative.split(path.sep)) {
+    const candidate = path.join(current, name);
+    let stat;
+    try { stat = fs.lstatSync(candidate); }
+    catch (error) {
+      if (error.code === 'ENOENT') return null;
+      fail(`${label} is unavailable`);
+    }
+    if (stat.isSymbolicLink()) fail('candidate plugin data contains a symlink');
+    if (!stat.isDirectory()) fail(`${label} must be a real directory`);
+    let canonical;
+    try { canonical = fs.realpathSync.native(candidate); }
+    catch (_error) { fail(`${label} is unavailable`); }
+    if (path.dirname(canonical) !== current) fail(`${label} escaped its direct parent`);
+    current = canonical;
+  }
+  return current;
+}
+
+function boundedDirectoryEntries(directory, label, limit) {
+  const before = directoryIdentity(directory, label);
+  const entries = [];
+  let handle;
+  try {
+    handle = fs.opendirSync(directory);
+    while (entries.length <= limit) {
+      const entry = handle.readSync();
+      if (entry === null) break;
+      entries.push(entry);
+    }
+  } catch (_error) {
+    fail(`${label} cannot be inspected`);
+  } finally {
+    if (handle) {
+      try { handle.closeSync(); }
+      catch (_error) { fail(`${label} cannot be inspected`); }
+    }
+  }
+  requireUnchangedDirectory(directory, before, label);
+  return {
+    entries,
+    overflow: entries.length > limit,
+  };
+}
+
+function gitHelperEnvironment() {
+  return credentialFreeEnvironment(process.env, {
+    LANG: 'C',
+    LC_ALL: 'C',
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
+    GIT_TERMINAL_PROMPT: '0',
+    GIT_NO_REPLACE_OBJECTS: '1',
+  });
+}
+
 function gitProcess(root, gitArguments) {
-  return spawnSync('git', ['-C', root, ...gitArguments], {
+  return boundedSync('git', ['--no-replace-objects', '-C', root, ...gitArguments], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: {
-      PATH: process.env.PATH || '',
-      HOME: process.env.HOME || os.homedir(),
-      TMPDIR: process.env.TMPDIR || os.tmpdir(),
-      LANG: 'C',
-      LC_ALL: 'C',
-      GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null',
-      GIT_TERMINAL_PROMPT: '0',
-    },
-  });
+    env: gitHelperEnvironment(),
+  }, `git ${gitArguments[0]} probe`, GIT_TIMEOUT_MS, 16 * 1024 * 1024);
 }
 
 function git(root, gitArguments) {
@@ -97,11 +241,16 @@ function gitIsAncestor(root, ancestor, descendant) {
 
 function safeManifest(root, label) {
   const file = path.join(root, '.claude-plugin', 'plugin.json');
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 1024 * 1024) {
+  let content;
+  try {
+    content = readStableRegularFile(file, {
+      minBytes: 2,
+      maxBytes: 1024 * 1024,
+    }).buffer.toString('utf8');
+  } catch (_error) {
     fail(`${label} plugin manifest is unsafe`);
   }
-  const manifest = safeJson(fs.readFileSync(file, 'utf8'), `${label} plugin manifest`);
+  const manifest = safeJson(content, `${label} plugin manifest`);
   if (manifest?.name !== 'zensu' || !/^\d+\.\d+\.\d+$/.test(manifest.version || '')) {
     fail(`${label} plugin manifest identity is invalid`);
   }
@@ -149,15 +298,24 @@ function snapshotTree(rootInput, inventory = null) {
         visit(file, rel);
       } else if (stat.isFile()) {
         files += 1;
-        bytes += stat.size;
-        if (files > 12000 || stat.size > 8 * 1024 * 1024 || bytes > 96 * 1024 * 1024) {
+        let stable;
+        try {
+          stable = readStableRegularFile(file, {
+            maxBytes: 8 * 1024 * 1024,
+          });
+        } catch (_error) {
+          fail(`runtime snapshot entry changed or became unsafe; entry_sha256=${hash(Buffer.from(rel, 'utf8'))}`);
+        }
+        bytes += stable.stat.size;
+        if (files > 12000 || bytes > 96 * 1024 * 1024) {
           fail('runtime snapshot exceeds its bounded surface');
         }
-        const content = fs.readFileSync(file);
-        digest.update(`f\0${rel}\0${stat.size}\0`, 'utf8');
-        digest.update(content);
+        digest.update(`f\0${rel}\0${stable.stat.size}\0`, 'utf8');
+        digest.update(stable.buffer);
         digest.update('\0', 'utf8');
-        if (inventory) inventory.set(rel, `file:${stat.size}:${hash(content)}`);
+        if (inventory) {
+          inventory.set(rel, `file:${stable.stat.size}:${hash(stable.buffer)}`);
+        }
       } else {
         fail(`runtime snapshot contains an unsupported entry; entry_sha256=${hash(Buffer.from(rel, 'utf8'))}`);
       }
@@ -176,17 +334,23 @@ function changedTreeEntries(before, after) {
 function orphanMarker(rootInput, label) {
   const root = realDirectory(rootInput, `${label} runtime root`);
   const file = path.join(root, '.orphaned_at');
-  let stat;
-  try { stat = fs.lstatSync(file); }
+  try { fs.lstatSync(file); }
   catch (error) {
     if (error.code === 'ENOENT') return null;
     fail(`${label} .orphaned_at marker cannot be inspected`);
   }
+  let stable;
+  try {
+    stable = readStableRegularFile(file, { minBytes: 13, maxBytes: 13 });
+  } catch (_error) {
+    fail(`${label} .orphaned_at marker is unsafe`);
+  }
+  const stat = stable.stat;
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== 13
       || (process.platform !== 'win32' && (stat.mode & 0o022) !== 0)) {
     fail(`${label} .orphaned_at marker is unsafe`);
   }
-  const content = fs.readFileSync(file, 'utf8');
+  const content = stable.buffer.toString('utf8');
   if (!/^[1-9][0-9]{12}$/.test(content)) fail(`${label} .orphaned_at marker is unsafe`);
   const timestampMs = Number(content);
   if (!Number.isSafeInteger(timestampMs) || Math.abs(stat.mtimeMs - timestampMs) > 2000) {
@@ -240,9 +404,12 @@ function inUseMarkerPids(rootInput, label) {
 
 function requireInUseMarker(root, pid, present, label) {
   const expected = String(pid || '');
-  if (!/^[1-9][0-9]*$/.test(expected)) fail(`${label} process id is invalid`);
+  if (pid !== null && !/^[1-9][0-9]*$/.test(expected)) fail(`${label} process id is invalid`);
   const actual = inUseMarkerPids(root, label);
-  if (present && (actual.length !== 1 || actual[0] !== expected)) {
+  if (present && (
+    actual.length !== 1
+      || (pid !== null && actual[0] !== expected)
+  )) {
     fail(`${label} does not have exactly its own active .in_use marker`);
   }
   if (!present && actual.length !== 0) fail(`${label} retained an .in_use marker after process exit`);
@@ -285,20 +452,36 @@ function existingLoginCanary(hostHome) {
   ]);
 }
 
-function runtimeDigest(core, root) {
-  const value = core.computeRuntimeDigest(root, 'claude');
-  if (!/^sha256:[a-f0-9]{64}$/.test(value)) fail('runtime digest is malformed');
-  return value;
+function runtimeDigest(root) {
+  let independent;
+  try { independent = computeClaudeRuntimeDigest(root); }
+  catch (_error) { fail('runtime digest failed independent verification'); }
+  return independent;
 }
 
-function install(source, destination, version) {
-  if (fs.existsSync(destination)) fail('immutable version destination already exists');
-  const result = spawnSync(process.execPath, [INSTALLER, source, destination, version], {
+function verifiedSessionIdHash(sessionId) {
+  let independent;
+  try { independent = independentSessionIdHash(sessionId); }
+  catch (_error) { fail('session hash failed independent verification'); }
+  return independent;
+}
+
+function install(source, cacheParent, version, revision) {
+  const canonicalParent = realDirectory(cacheParent, 'runtime cache parent');
+  const result = boundedSync(process.execPath, [
+    INSTALLER, source, canonicalParent, version, revision,
+  ], {
     encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
-  });
+    env: credentialFreeEnvironment(),
+  }, 'runtime fixture installer', INSTALL_TIMEOUT_MS, 16 * 1024 * 1024);
   if (result.status !== 0) fail('runtime installation failed');
-  const installed = realDirectory(result.stdout.trim(), 'installed runtime root');
-  if (installed !== fs.realpathSync.native(destination)) fail('runtime installer returned the wrong root');
+  const lines = String(result.stdout || '').split(/\r?\n/).filter(Boolean);
+  if (lines.length !== 1) fail('runtime installer returned an ambiguous root');
+  const installed = realDirectory(lines[0], 'installed runtime root');
+  if (path.dirname(installed) !== canonicalParent
+      || !path.basename(installed).startsWith(`.zensu-runtime-v${version}-`)) {
+    fail('runtime installer returned a root outside its direct cache parent');
+  }
   if (safeManifest(installed, 'installed').version !== version) fail('installed runtime version drifted');
   return installed;
 }
@@ -338,7 +521,13 @@ function createProject(root) {
   fs.writeFileSync(path.join(root, 'old-turn-2.txt'), `${OLD_TURN_TOKENS[1]}\n`, { mode: 0o600 });
   fs.writeFileSync(path.join(root, 'old-turn-3.txt'), `${OLD_TURN_TOKENS[2]}\n`, { mode: 0o600 });
   fs.writeFileSync(path.join(root, 'candidate-turn.txt'), `${CANDIDATE_TOKEN}\n`, { mode: 0o600 });
-  const result = spawnSync('git', ['init', '-q'], { cwd: root, encoding: 'utf8' });
+  const result = boundedSync(
+    'git',
+    ['--no-replace-objects', 'init', '-q'],
+    { cwd: root, encoding: 'utf8', env: gitHelperEnvironment() },
+    'isolated project git init',
+    GIT_TIMEOUT_MS,
+  );
   if (result.status !== 0) fail('cannot initialize isolated upgrade project');
   for (const args of [
     ['config', 'user.name', 'Zensu Upgrade Eval'],
@@ -347,7 +536,13 @@ function createProject(root) {
     ['add', '.'],
     ['-c', 'commit.gpgsign=false', 'commit', '-qm', 'test: seed upgrade fixture'],
   ]) {
-    const command = spawnSync('git', args, { cwd: root, encoding: 'utf8' });
+    const command = boundedSync(
+      'git',
+      ['--no-replace-objects', ...args],
+      { cwd: root, encoding: 'utf8', env: gitHelperEnvironment() },
+      `isolated project git ${args[0]}`,
+      GIT_TIMEOUT_MS,
+    );
     if (command.status !== 0) fail(`cannot prepare isolated upgrade project: git ${args[0]}`);
   }
 }
@@ -385,14 +580,24 @@ function createBashGuard(control) {
   return { script, trace };
 }
 
-function commandLineSettings(guard, hostHome) {
+function commandLineSettings(guard, forbiddenRoots) {
   const sandbox = {
     enabled: true,
     failIfUnavailable: true,
     autoAllowBashIfSandboxed: false,
     allowUnsandboxedCommands: false,
   };
-  if (hostHome) sandbox.filesystem = { denyRead: [hostHome] };
+  if (!Array.isArray(forbiddenRoots) || forbiddenRoots.some(
+    (entry) => typeof entry !== 'string' || !path.isAbsolute(entry),
+  )) {
+    fail('Claude sandbox forbidden-root policy is invalid');
+  }
+  if (forbiddenRoots.length > 0) {
+    sandbox.filesystem = {
+      denyRead: [...forbiddenRoots],
+      denyWrite: [...forbiddenRoots],
+    };
+  }
   return JSON.stringify({
     sandbox,
     hooks: {
@@ -404,11 +609,23 @@ function commandLineSettings(guard, hostHome) {
   });
 }
 
-function createTraceBoundary(control, oldRoot, candidateRoot) {
+function createTraceBoundary(
+  control,
+  cacheBase,
+  home,
+  projectRoot,
+  pluginData,
+  config,
+) {
   const trace = path.join(control, 'hook-trace.jsonl');
   const testMode = process.env.ZENSU_UPGRADE_TEST_MODE === '1';
-  if (testMode) return { bin: null, trace };
-  const realBashProbe = spawnSync('bash', ['--noprofile', '--norc', '-c', 'command -v bash'], { encoding: 'utf8' });
+  const realBashProbe = boundedSync(
+    'bash',
+    ['--noprofile', '--norc', '-c', 'command -v bash'],
+    { encoding: 'utf8', env: credentialFreeEnvironment() },
+    'Bash runtime probe',
+    PROBE_TIMEOUT_MS,
+  );
   if (realBashProbe.status !== 0) fail('cannot resolve the real Bash runtime');
   const realBash = fs.realpathSync.native(realBashProbe.stdout.trim());
   const bin = path.join(control, 'trace-bin');
@@ -416,29 +633,117 @@ function createTraceBoundary(control, oldRoot, candidateRoot) {
   fs.mkdirSync(bin, { mode: 0o700 });
   fs.writeFileSync(logger, [
     "'use strict';",
+    "const crypto=require('node:crypto');",
     "const fs=require('node:fs');",
-    'const [file,hook,status]=process.argv.slice(2);',
-    "if(!/^[0-9]+$/.test(status||''))process.exit(2);",
-    "fs.appendFileSync(file,`${JSON.stringify({hook,status:Number(status)})}\\n`,'utf8');",
+    'const [mode,file,invocation,hook,status]=process.argv.slice(2);',
+    "if(!['start','end'].includes(mode)||!file||!hook||/[\\0\\r\\n]/.test(hook))process.exit(2);",
+    "const id=mode==='start'?crypto.randomUUID():invocation;",
+    "if(!/^[a-f0-9-]{36}$/.test(id||'')||(mode==='end'&&!/^[0-9]+$/.test(status||'')))process.exit(2);",
+    "const flags=fs.constants.O_WRONLY|fs.constants.O_APPEND|fs.constants.O_CREAT|(fs.constants.O_NOFOLLOW||0);",
+    "let descriptor;try{",
+    "  descriptor=fs.openSync(file,flags,0o600);",
+    "  const stat=fs.fstatSync(descriptor);",
+    "  if(!stat.isFile()||(process.platform!=='win32'&&(stat.mode&0o077)!==0))process.exit(2);",
+    "  const record=mode==='start'?{type:'START',id,hook}:{type:'END',id,hook,status:Number(status)};",
+    "  fs.writeSync(descriptor,`${JSON.stringify(record)}\\n`);fs.fsyncSync(descriptor);",
+    "}finally{if(descriptor!==undefined)fs.closeSync(descriptor);}",
+    "if(mode==='start')process.stdout.write(id);",
   ].join('\n'), { mode: 0o500 });
   const wrapper = path.join(bin, 'bash');
-  fs.writeFileSync(wrapper, `#!/bin/bash\nset +e\ntarget="\${1:-}"\n${shellQuote(realBash)} "$@"\nstatus=$?\ncase "$target" in\n  ${shellQuote(oldRoot)}/hooks/*|${shellQuote(candidateRoot)}/hooks/*)\n    ${shellQuote(process.execPath)} ${shellQuote(logger)} ${shellQuote(trace)} "$target" "$status"\n    ;;\nesac\nexit "$status"\n`, { mode: 0o700 });
+  const safePath = (process.env.PATH || '').split(path.delimiter)
+    .filter((entry) => entry && path.resolve(entry) !== path.resolve(bin))
+    .join(path.delimiter);
+  const directCommand = '/usr/bin/true';
+  const containedCommand = [
+    '/usr/bin/bwrap',
+    '--unshare-user --unshare-pid --unshare-net --unshare-ipc --unshare-uts --unshare-cgroup',
+    '--die-with-parent --new-session',
+    '--ro-bind / /',
+    '--tmpfs /tmp',
+    `--bind ${shellQuote(home)} ${shellQuote(home)}`,
+    `--bind ${shellQuote(projectRoot)} ${shellQuote(projectRoot)}`,
+    '--ro-bind "$plugin_root" "$plugin_root"',
+    `--tmpfs ${shellQuote(control)}`,
+    '--proc /proc --dev /dev',
+    `--chdir ${shellQuote(projectRoot)}`,
+    '--clearenv',
+    `--setenv PATH ${shellQuote(safePath)}`,
+    `--setenv HOME ${shellQuote(home)}`,
+    '--setenv TMPDIR /tmp',
+    '--setenv TEMP /tmp',
+    '--setenv TMP /tmp',
+    `--setenv ZENSU_CONFIG ${shellQuote(config)}`,
+    '--setenv CLAUDE_PLUGIN_ROOT "$plugin_root"',
+    `--setenv CLAUDE_PLUGIN_DATA ${shellQuote(pluginData)}`,
+    `--setenv CLAUDE_PROJECT_DIR ${shellQuote(projectRoot)}`,
+    `-- ${shellQuote(realBash)} "$@"`,
+  ].join(' ');
+  fs.writeFileSync(wrapper, `#!/bin/bash
+set +e
+target="\${1:-}"
+plugin_root="\${CLAUDE_PLUGIN_ROOT:-}"
+is_hook=0
+case "$plugin_root" in
+  ${shellQuote(cacheBase)}/*) ;;
+  *) exit 125 ;;
+esac
+case "$target" in
+  "$plugin_root"/hooks/*.sh) is_hook=1 ;;
+esac
+invocation=""
+if [ "$is_hook" -eq 1 ]; then
+  invocation="$(${shellQuote(process.execPath)} ${shellQuote(logger)} start ${shellQuote(trace)} unused "$target")" || exit 125
+fi
+${testMode ? directCommand : containedCommand}
+status=$?
+${testMode ? `if [ "\${ZENSU_UPGRADE_SELFTEST_FAULT:-}" = nonzero-hook ] && [ "$is_hook" -eq 1 ]; then
+  status=7
+fi` : ''}
+if [ "$is_hook" -eq 1 ]; then
+  ${shellQuote(process.execPath)} ${shellQuote(logger)} end ${shellQuote(trace)} "$invocation" "$target" "$status" || exit 125
+fi
+exit "$status"
+`, { mode: 0o700 });
   return { bin, trace };
 }
 
 function traceEntries(file) {
   if (!fs.existsSync(file)) return [];
-  const stat = fs.lstatSync(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 4 * 1024 * 1024) {
+  let stable;
+  try {
+    stable = readStableRegularFile(file, { maxBytes: 4 * 1024 * 1024 });
+  } catch (_error) {
     fail('hook trace is unsafe');
   }
-  return fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean).map((raw) => {
+  const records = stable.buffer.toString('utf8').split(/\r?\n/).filter(Boolean).map((raw) => {
     const entry = safeJson(raw, 'hook trace entry');
-    if (!entry || typeof entry.hook !== 'string' || !Number.isInteger(entry.status)) {
+    if (!entry || !['START', 'END'].includes(entry.type)
+        || !/^[a-f0-9-]{36}$/.test(entry.id || '')
+        || typeof entry.hook !== 'string'
+        || (entry.type === 'END' && !Number.isInteger(entry.status))) {
       fail('hook trace entry shape is invalid');
     }
     return entry;
   });
+  const pending = new Map();
+  const completed = [];
+  for (const record of records) {
+    if (record.type === 'START') {
+      if (Object.keys(record).length !== 3 || pending.has(record.id)) {
+        fail('hook trace START record is duplicated or malformed');
+      }
+      pending.set(record.id, record);
+    } else {
+      const start = pending.get(record.id);
+      if (Object.keys(record).length !== 4 || !start || start.hook !== record.hook) {
+        fail('hook trace END record is unmatched or malformed');
+      }
+      pending.delete(record.id);
+      completed.push({ hook: record.hook, status: record.status });
+    }
+  }
+  if (pending.size !== 0) fail('hook trace contains an incomplete invocation');
+  return completed;
 }
 
 function requireBashGuardTrace(file) {
@@ -470,11 +775,11 @@ function requireTrace(entries, root, basename, count, label) {
   }
 }
 
-function requireTraceScope(entries, expectedRoot, forbiddenRoot, label) {
+function requireTraceScope(entries, expectedRoot, label) {
   if (entries.length === 0) fail(`${label} produced no hook trace`);
   for (const entry of entries) {
     const hook = path.resolve(entry.hook);
-    if (!inside(expectedRoot, hook) || inside(forbiddenRoot, hook)) {
+    if (!inside(expectedRoot, hook)) {
       fail(`${label} executed a hook from the wrong plugin root`);
     }
     if (entry.status !== 0) fail(`${label} observed a nonzero hook response`);
@@ -488,14 +793,41 @@ function cliCommand() {
     if (!stat || !stat.isFile() || stat.isSymbolicLink()) fail('fake Claude script is unavailable');
     return { command: process.execPath, prefix: [fs.realpathSync.native(file)] };
   }
-  return { command: 'claude', prefix: [] };
+  const result = boundedSync(
+    'bash',
+    ['--noprofile', '--norc', '-c', 'command -v claude'],
+    { encoding: 'utf8', env: credentialFreeEnvironment() },
+    'Claude CLI path probe',
+    PROBE_TIMEOUT_MS,
+  );
+  if (result.status !== 0) fail('Claude CLI is unavailable');
+  const raw = String(result.stdout || '').trim();
+  if (!path.isAbsolute(raw) || /[\0\r\n]/.test(raw)) fail('Claude CLI path is invalid');
+  let command;
+  let stat;
+  try {
+    command = fs.realpathSync.native(raw);
+    stat = fs.lstatSync(command);
+  } catch (_error) {
+    fail('Claude CLI path is unavailable');
+  }
+  if (!stat.isFile() || stat.isSymbolicLink() || (stat.mode & 0o111) === 0) {
+    fail('Claude CLI path is unsafe');
+  }
+  return { command, prefix: [] };
 }
 
-function childEnvironment(home, temporary, config, traceBoundary) {
+function childEnvironment(home, temporary, config, traceBoundary, modelBackend) {
   const existingLogin = process.env.ZENSU_UPGRADE_EXISTING_LOGIN === '1';
   const configRoot = path.join(home, '.claude');
   const pluginRoot = path.join(configRoot, 'plugins');
   const isolatedTemp = path.join(temporary, 'tmp');
+  if (!modelBackend || typeof modelBackend.apiKey !== 'string' || !modelBackend.apiKey
+      || typeof modelBackend.baseUrl !== 'string' || !modelBackend.baseUrl
+      || /[\0\r\n]/.test(modelBackend.apiKey)
+      || /[\0\r\n]/.test(modelBackend.baseUrl)) {
+    fail('candidate model backend is invalid');
+  }
   const env = {
     PATH: traceBoundary.bin ? `${traceBoundary.bin}${path.delimiter}${process.env.PATH || ''}` : (process.env.PATH || ''),
     HOME: existingLogin ? process.env.HOME : home,
@@ -510,17 +842,14 @@ function childEnvironment(home, temporary, config, traceBoundary) {
     CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
     CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
     ZENSU_CONFIG: config,
+    ANTHROPIC_API_KEY: modelBackend.apiKey,
+    ANTHROPIC_BASE_URL: modelBackend.baseUrl,
   };
   if (!existingLogin) env.CLAUDE_CONFIG_DIR = configRoot;
   const forwarded = [
-    'ANTHROPIC_BASE_URL',
-    'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-    'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy',
-    'SSL_CERT_FILE', 'SSL_CERT_DIR', 'NODE_EXTRA_CA_CERTS',
     'SHELL', 'TERM', 'LANG', 'LC_ALL', 'CI', 'USER', 'LOGNAME',
     'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT',
   ];
-  if (!existingLogin) forwarded.unshift('ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN');
   for (const name of forwarded) {
     if (process.env[name]) env[name] = process.env[name];
   }
@@ -528,13 +857,48 @@ function childEnvironment(home, temporary, config, traceBoundary) {
     env.ZENSU_UPGRADE_SELFTEST_TRACE_FILE = traceBoundary.trace;
     env.ZENSU_UPGRADE_SELFTEST_CONTROL_DIR = path.dirname(traceBoundary.trace);
     env.ZENSU_UPGRADE_SELFTEST_PLUGIN_DATA = pluginDataPath(pluginRoot);
+    env.ZENSU_UPGRADE_SELFTEST_REGISTRY_FILE = path.join(
+      home,
+      '.claude',
+      'plugins',
+      'installed_plugins.json',
+    );
     env.ZENSU_UPGRADE_SELFTEST_FAULT = process.env.ZENSU_UPGRADE_SELFTEST_FAULT || '';
+    if (existingLogin) {
+      env.ZENSU_UPGRADE_SELFTEST_EXISTING_LOGIN_HOME =
+        process.env.ZENSU_UPGRADE_TEST_EXISTING_LOGIN_HOME || '';
+    }
   }
   fs.mkdirSync(env.XDG_CONFIG_HOME, { recursive: true, mode: 0o700 });
   fs.mkdirSync(env.XDG_CACHE_HOME, { recursive: true, mode: 0o700 });
   fs.mkdirSync(env.XDG_DATA_HOME, { recursive: true, mode: 0o700 });
   fs.mkdirSync(env.TMPDIR, { recursive: true, mode: 0o700 });
   return env;
+}
+
+function lifecycleInvocation(cli, args, env, temporary, projectRoot, testMode) {
+  if (testMode) {
+    return {
+      command: cli.command,
+      args: [...cli.prefix, ...args],
+      env,
+      containment: 'deterministic-fake-process-tree',
+    };
+  }
+  try {
+    return buildBubblewrapInvocation({
+      command: cli.command,
+      args: [...cli.prefix, ...args],
+      cwd: projectRoot,
+      disposableRoot: temporary,
+      writableRoots: [temporary],
+      environment: env,
+      allowedCredential: 'ANTHROPIC_API_KEY',
+      shareNetwork: true,
+    });
+  } catch (_error) {
+    fail('Linux bubblewrap candidate containment is unavailable or unsafe');
+  }
 }
 
 class StreamSession {
@@ -545,13 +909,15 @@ class StreamSession {
     this.stdoutBytes = 0;
     this.buffer = '';
     this.closed = false;
+    this.closing = false;
     this.error = null;
     this.waiters = [];
-    this.child = spawn(command, args, {
+    this.tree = spawnProcessTree(command, args, {
       cwd: options.cwd,
       env: options.env,
       stdio: ['pipe', 'pipe', 'pipe'],
-    });
+    }, { label: options.label || 'Claude lifecycle process' });
+    this.child = this.tree.child;
     this.child.stdout.setEncoding('utf8');
     this.child.stderr.setEncoding('utf8');
     this.child.stdout.on('data', (chunk) => this.onStdout(chunk));
@@ -559,30 +925,47 @@ class StreamSession {
       this.stderr += chunk;
       if (Buffer.byteLength(this.stderr) > MAX_STREAM_BYTES) this.abort('stderr exceeded its bound');
     });
-    this.exit = new Promise((resolve) => {
-      this.child.on('error', (error) => {
-        const diagnostic = redactedTextDiagnostic(error?.message);
-        this.error = providerError([
-          'Claude process could not start',
-          `error_category=${diagnostic.category}`,
-          `error_bytes=${diagnostic.bytes}`,
-          `error_sha256=${diagnostic.sha256}`,
-        ].join('; '));
-        this.flushWaiters();
-      });
-      this.child.on('close', (status, signal) => {
-        this.closed = true;
-        this.status = status;
-        this.signal = signal;
-        this.flushWaiters();
-        resolve({ status, signal });
-      });
+    this.child.on('error', (error) => {
+      const diagnostic = redactedTextDiagnostic(error?.message);
+      this.error = providerError([
+        'Claude process could not start',
+        `error_category=${diagnostic.category}`,
+        `error_bytes=${diagnostic.bytes}`,
+        `error_sha256=${diagnostic.sha256}`,
+      ].join('; '));
+      this.flushWaiters();
     });
+    this.child.stdin.on('error', (error) => {
+      if (!this.closing && !this.closed) this.recordStdinFailure(error);
+    });
+    this.exit = this.tree.exit.then(({ status, signal }) => {
+      this.closed = true;
+      this.status = status;
+      this.signal = signal;
+      this.flushWaiters();
+      return { status, signal };
+    });
+  }
+
+  recordStdinFailure(error) {
+    if (!this.error) {
+      const diagnostic = redactedTextDiagnostic(error?.message);
+      this.error = providerError([
+        'Claude stdin closed before prompt could be sent',
+        `error_category=${diagnostic.category}`,
+        `error_bytes=${diagnostic.bytes}`,
+        `error_sha256=${diagnostic.sha256}`,
+      ].join('; '));
+    }
+    this.flushWaiters();
   }
 
   abort(message) {
     if (!this.error) this.error = providerError(message);
-    this.child.kill('SIGKILL');
+    try { signalProcessTree(this.tree, 'SIGKILL'); }
+    catch (_error) {
+      this.error.message += '; process_tree_signal_failed=true';
+    }
     this.flushWaiters();
   }
 
@@ -628,13 +1011,29 @@ class StreamSession {
   }
 
   send(prompt) {
-    if (this.closed || this.error) fail('cannot write to a closed Claude stream');
+    if (this.error) throw this.error;
+    if (this.closed) fail('cannot write to a closed Claude stream');
     const envelope = {
       type: 'user',
       message: { role: 'user', content: prompt },
       parent_tool_use_id: null,
     };
-    this.child.stdin.write(`${JSON.stringify(envelope)}\n`);
+    const payload = `${JSON.stringify(envelope)}\n`;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const finish = (error) => {
+        if (settled) return;
+        settled = true;
+        this.child.stdin.removeListener('error', onError);
+        if (error) this.recordStdinFailure(error);
+        if (this.error) reject(this.error);
+        else resolve();
+      };
+      const onError = (error) => finish(error);
+      this.child.stdin.once('error', onError);
+      try { this.child.stdin.write(payload, finish); }
+      catch (error) { finish(error); }
+    });
   }
 
   waitForResult(count) {
@@ -643,7 +1042,7 @@ class StreamSession {
       const timer = setTimeout(() => {
         this.abort(`Claude timed out before result ${count}`);
         reject(this.error);
-      }, PROCESS_TIMEOUT_MS);
+      }, testBoundedTimeout('ZENSU_UPGRADE_TEST_PROCESS_TIMEOUT_MS', PROCESS_TIMEOUT_MS));
       this.waiters.push({
         count,
         resolve: (value) => { clearTimeout(timer); resolve(value); },
@@ -654,10 +1053,33 @@ class StreamSession {
   }
 
   async close() {
-    this.child.stdin.end();
-    const timer = setTimeout(() => this.abort('Claude did not exit after stream EOF'), 60000);
-    const result = await this.exit;
+    this.closing = true;
+    try { this.child.stdin.end(); } catch (_error) { /* already closed */ }
+    const closeTimeoutMs = testBoundedTimeout(
+      'ZENSU_UPGRADE_TEST_CLOSE_TIMEOUT_MS',
+      60000,
+    );
+    let timer;
+    const deadline = new Promise((resolve) => {
+      timer = setTimeout(() => resolve(null), closeTimeoutMs);
+    });
+    const result = await Promise.race([this.exit, deadline]);
     clearTimeout(timer);
+    if (result === null) {
+      if (!this.error) this.error = providerError('Claude did not exit after stream EOF');
+      try {
+        await terminateProcessTree(this.tree, { graceMs: 1000, forceMs: 5000 });
+      } catch (_error) {
+        this.error.message += '; process_tree_termination_failed=true';
+      }
+      this.flushWaiters();
+      throw this.error;
+    }
+    try {
+      await terminateProcessTree(this.tree, { graceMs: 1000, forceMs: 5000 });
+    } catch (_error) {
+      fail('Claude process tree did not terminate after stream EOF');
+    }
     if (this.buffer.trim()) fail('Claude stream ended with an unterminated JSON record');
     if (this.error) throw this.error;
     if (result.status !== 0 || result.signal) {
@@ -666,26 +1088,13 @@ class StreamSession {
   }
 
   async terminate() {
-    const waitForClose = async (timeoutMs) => {
-      let timer;
-      const closed = await Promise.race([
-        this.exit.then(() => true),
-        new Promise((resolve) => { timer = setTimeout(() => resolve(false), timeoutMs); }),
-      ]);
-      if (timer) clearTimeout(timer);
-      return closed;
-    };
-    if (this.closed) {
-      await this.exit;
-      return;
-    }
+    this.closing = true;
     try { this.child.stdin.destroy(); } catch (_error) { /* already closed */ }
-    this.child.kill('SIGTERM');
-    if (!await waitForClose(5000)) {
-      this.child.kill('SIGKILL');
-      if (!await waitForClose(5000)) fail('Claude process did not close after SIGKILL');
+    try {
+      await terminateProcessTree(this.tree, { graceMs: 5000, forceMs: 5000 });
+    } catch (_error) {
+      fail('Claude process tree did not terminate during cleanup');
     }
-    await this.exit;
   }
 }
 
@@ -910,25 +1319,19 @@ function validateCandidateTurn(events, resultIndex, expectedFile, token) {
   }
 }
 
-function expectedPreToolHooks(root, toolName) {
-  const config = safeJson(fs.readFileSync(path.join(root, 'hooks', 'hooks.json'), 'utf8'), 'candidate hooks');
-  const basenames = [];
-  for (const group of config?.hooks?.PreToolUse || []) {
-    let matches = false;
-    try { matches = new RegExp(group.matcher || '.*').test(toolName); }
-    catch (_error) { fail('candidate PreToolUse matcher is invalid'); }
-    if (!matches) continue;
-    for (const hook of group.hooks || []) {
-      if (hook?.type !== 'command' || typeof hook.command !== 'string') fail('candidate PreToolUse hook is invalid');
-      const match = hook.command.match(/\/hooks\/([A-Za-z0-9._-]+\.sh)/);
-      if (!match) fail('candidate PreToolUse hook command is not an exact plugin hook');
-      basenames.push(match[1]);
-    }
-  }
-  if (basenames.length === 0 || new Set(basenames).size !== basenames.length) {
-    fail(`candidate ${toolName} PreToolUse hook set is empty or duplicated`);
-  }
-  return basenames;
+function canonicalHooks(root, label) {
+  try { return loadCanonicalHookConfig(root); }
+  catch (_error) { fail(`${label} hook configuration is not canonical`); }
+}
+
+function candidateHookContract(root) {
+  try { return captureEvaluatorOwnedHookContract(root); }
+  catch (_error) { fail('candidate hook configuration violates the evaluator-owned contract'); }
+}
+
+function verifyCandidateHookContract(root, contract) {
+  try { verifyCapturedHookContract(root, contract); }
+  catch (_error) { fail('candidate hook integrity changed after evaluator capture'); }
 }
 
 function initEvents(events) {
@@ -949,64 +1352,157 @@ function validateFreshState(
   temporary,
   expectedPluginDataInput,
   diagnosticPluginDataParentInput,
+  expectedRuntimeDigest,
 ) {
-  const core = require(path.join(candidateRoot, 'hooks', 'lib', 'session-control-core-v1.js'));
-  const key = core.sessionKey(sessionId);
-  const records = [];
-  const visit = (directory) => {
-    if (!fs.existsSync(directory)) return;
-    const stat = fs.lstatSync(directory);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) fail('candidate plugin data contains an unsafe directory');
-    for (const name of fs.readdirSync(directory)) {
-      const file = path.join(directory, name);
-      const item = fs.lstatSync(file);
-      if (item.isSymbolicLink()) fail('candidate plugin data contains a symlink');
-      if (item.isDirectory()) visit(file);
-      else if (item.isFile() && path.basename(path.dirname(file)) === 'records' && name.endsWith('.json')) records.push(file);
-    }
-  };
-  visit(temporary);
-  if (records.length !== 1 || path.basename(records[0]) !== `${key}.json`) {
-    fail(`fresh candidate created ${records.length} total context records or used the wrong plugin-data path`);
-  }
-  const expectedRecordsDir = realDirectory(path.dirname(records[0]), 'candidate records directory');
-  const expectedPluginData = realDirectory(
-    path.resolve(expectedRecordsDir, '..', '..', '..'),
-    'candidate plugin data',
-  );
-  if (!inside(temporary, expectedPluginData)) fail('candidate plugin data escaped the isolated filesystem root');
+  let key;
+  try { key = independentSessionKey(sessionId); }
+  catch (_error) { fail('session key failed independent verification'); }
+  const temporaryRoot = realDirectory(temporary, 'isolated filesystem root');
+  let expectedPluginData;
   if (expectedPluginDataInput !== null) {
-    if (expectedPluginData !== realDirectory(expectedPluginDataInput, 'expected candidate plugin data')) {
-      fail('fresh candidate used the wrong installed-plugin data directory');
+    expectedPluginData = optionalDescendantDirectory(
+      temporaryRoot,
+      expectedPluginDataInput,
+      'expected candidate plugin data',
+    );
+    if (expectedPluginData === null) {
+      fail('fresh candidate created 0 total context records or used the wrong plugin-data path');
+    }
+    if (!inside(temporaryRoot, expectedPluginData)) {
+      fail('candidate plugin data escaped the isolated filesystem root');
     }
   } else {
-    const parent = realDirectory(diagnosticPluginDataParentInput, 'diagnostic plugin data parent');
-    if (!inside(temporary, parent) || path.dirname(expectedPluginData) !== parent) {
+    const parent = optionalDescendantDirectory(
+      temporaryRoot,
+      diagnosticPluginDataParentInput,
+      'diagnostic plugin data parent',
+    );
+    if (parent === null || !inside(temporaryRoot, parent)) {
+      fail('fresh diagnostic candidate plugin data escaped its isolated direct parent');
+    }
+    const children = boundedDirectoryEntries(
+      parent,
+      'diagnostic plugin data parent',
+      1,
+    );
+    if (children.overflow || children.entries.length !== 1) {
+      fail('fresh diagnostic candidate plugin data did not create exactly one direct child');
+    }
+    const child = children.entries[0];
+    if (child.isSymbolicLink()) fail('candidate plugin data contains a symlink');
+    if (!child.isDirectory()) {
+      fail('diagnostic candidate plugin data must be a real directory');
+    }
+    expectedPluginData = optionalDescendantDirectory(
+      parent,
+      path.join(parent, child.name),
+      'diagnostic candidate plugin data',
+    );
+    if (expectedPluginData === null || path.dirname(expectedPluginData) !== parent) {
       fail('fresh diagnostic candidate plugin data escaped its isolated direct parent');
     }
   }
-  const context = core.readContext({ recordsDir: expectedRecordsDir, sessionId, expectedHost: 'claude' });
-  if (context.plugin_root !== candidateRoot || context.project_root !== projectRoot
-      || context.principal_profiles?.main !== 'main-v1' || context.plugin_version !== safeManifest(candidateRoot, 'candidate').version
-      || context.plugin_data !== expectedPluginData) {
-    fail('fresh candidate context did not bind main-v1 to the exact isolated roots');
+  const expectedRecordsDir = optionalDescendantDirectory(
+    expectedPluginData,
+    path.join(expectedPluginData, 'session-control', 'v1', 'records'),
+    'candidate records directory',
+  );
+  if (expectedRecordsDir === null) {
+    fail('fresh candidate created 0 total context records or used the wrong plugin-data path');
   }
-  const baselines = fs.existsSync(path.join(projectRoot, '.zensu', 'state'))
-    ? fs.readdirSync(path.join(projectRoot, '.zensu', 'state')).filter((name) => name.startsWith('tdd-phase-') && name.endsWith('.json'))
-    : [];
-  if (baselines.length !== 1 || baselines[0] !== `tdd-phase-${key}.json`) {
+  const recordListing = boundedDirectoryEntries(
+    expectedRecordsDir,
+    'candidate records directory',
+    2,
+  );
+  if (recordListing.overflow) {
+    fail('candidate records directory exceeds its bounded entry count');
+  }
+  if (recordListing.entries.length !== 1
+      || recordListing.entries[0].name !== `${key}.json`) {
+    fail(`fresh candidate created ${recordListing.entries.length} total context records or used the wrong plugin-data path`);
+  }
+  const recordEntry = recordListing.entries[0];
+  if (recordEntry.isSymbolicLink() || !recordEntry.isFile()) {
+    fail('fresh candidate context record is unsafe');
+  }
+  const guardedDirectories = [
+    expectedPluginData,
+    path.join(expectedPluginData, 'session-control'),
+    path.join(expectedPluginData, 'session-control', 'v1'),
+    expectedRecordsDir,
+  ].map((directory) => ({
+    directory,
+    identity: directoryIdentity(directory, 'candidate plugin data directory'),
+  }));
+  const recordFile = path.join(expectedRecordsDir, `${key}.json`);
+  const candidateManifestVersion = safeManifest(candidateRoot, 'candidate').version;
+  let independentContext;
+  try {
+    independentContext = readAndValidateContext(recordFile, {
+      sessionId,
+      projectRoot,
+      pluginRoot: candidateRoot,
+      pluginData: expectedPluginData,
+      pluginVersion: candidateManifestVersion,
+      runtimeDigest: expectedRuntimeDigest,
+    });
+  } catch (_error) {
+    fail('fresh candidate context failed independent verification');
+  }
+  for (const guarded of guardedDirectories) {
+    requireUnchangedDirectory(
+      guarded.directory,
+      guarded.identity,
+      'candidate plugin data directory',
+    );
+  }
+  const stateDirectory = optionalDescendantDirectory(
+    temporaryRoot,
+    path.join(projectRoot, '.zensu', 'state'),
+    'candidate workflow state directory',
+  );
+  if (stateDirectory === null) {
     fail('fresh candidate did not create exactly one matching workflow baseline');
   }
-  const state = core.readWorkflowState({ projectRoot, sessionId });
-  if (state.revision !== 1 || state.workflow_state !== 'idle' || state.phase !== 'UNINITIALIZED'
-      || state.active !== false || state.actor !== 'main-v1' || state.history?.length !== 0) {
-    fail('fresh candidate workflow baseline is invalid');
+  const stateListing = boundedDirectoryEntries(
+    stateDirectory,
+    'candidate workflow state directory',
+    2,
+  );
+  if (stateListing.overflow || stateListing.entries.length !== 1
+      || stateListing.entries[0].name !== `tdd-phase-${key}.json`
+      || stateListing.entries[0].isSymbolicLink()
+      || !stateListing.entries[0].isFile()) {
+    fail('fresh candidate did not create exactly one matching workflow baseline');
   }
-  return core;
+  const stateDirectoryBefore = directoryIdentity(
+    stateDirectory,
+    'candidate workflow state directory',
+  );
+  const stateFile = path.join(stateDirectory, `tdd-phase-${key}.json`);
+  let independentState;
+  try {
+    independentState = readAndValidateInitialWorkflow(stateFile, { sessionId });
+  } catch (_error) {
+    fail('fresh candidate workflow baseline failed independent verification');
+  }
+  requireUnchangedDirectory(
+    stateDirectory,
+    stateDirectoryBefore,
+    'candidate workflow state directory',
+  );
+  return { context: independentContext, state: independentState };
 }
 
 function probeCli(command, prefix, env, expectedVersion) {
-  const result = spawnSync(command, [...prefix, '--version'], { encoding: 'utf8', env });
+  const result = boundedSync(
+    command,
+    [...prefix, '--version'],
+    { encoding: 'utf8', env: withoutClaudeCredentials(env) },
+    'Claude CLI version probe',
+    testBoundedTimeout('ZENSU_UPGRADE_TEST_CLI_TIMEOUT_MS', PROBE_TIMEOUT_MS),
+  );
   if (result.status !== 0) fail('Claude CLI version probe failed');
   const match = String(result.stdout || '').match(/^([0-9]+\.[0-9]+\.[0-9]+)/);
   if (!match || match[1] !== expectedVersion) {
@@ -1015,16 +1511,104 @@ function probeCli(command, prefix, env, expectedVersion) {
 }
 
 function probeExistingLogin(command, prefix, env, cwd) {
-  const result = spawnSync(command, [...prefix, 'auth', 'status', '--json'], {
+  const result = boundedSync(command, [...prefix, 'auth', 'status', '--json'], {
     cwd,
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env,
-  });
+    env: withoutClaudeCredentials(env),
+  }, 'existing-login Claude auth preflight', PROBE_TIMEOUT_MS);
   if (result.status !== 0) fail('existing-login Claude auth preflight failed');
   const status = safeJson(result.stdout || '', 'existing-login Claude auth status');
   if (status?.loggedIn !== true || typeof status?.authMethod !== 'string' || !status.authMethod) {
     fail('existing-login credentials are unavailable to the isolated diagnostic process');
+  }
+}
+
+async function runAuthenticatedCliCanary(
+  command,
+  prefix,
+  credential,
+  temporary,
+) {
+  if (!credential || !['ANTHROPIC_API_KEY', 'CLAUDE_CODE_OAUTH_TOKEN'].includes(credential.name)
+      || typeof credential.value !== 'string' || !credential.value) {
+    fail('authenticated Claude canary credential is invalid');
+  }
+  const root = path.join(temporary, 'authenticated-canary');
+  const home = path.join(root, 'home');
+  const project = path.join(root, 'project');
+  const temp = path.join(root, 'tmp');
+  for (const directory of [home, project, temp]) {
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+  }
+  const env = credentialFreeEnvironment(process.env, {
+    HOME: home,
+    CLAUDE_CONFIG_DIR: path.join(home, '.claude'),
+    XDG_CONFIG_HOME: path.join(home, '.config'),
+    XDG_CACHE_HOME: path.join(home, '.cache'),
+    XDG_DATA_HOME: path.join(home, '.local', 'share'),
+    TMPDIR: temp,
+    TEMP: temp,
+    TMP: temp,
+    CLAUDE_CODE_TMPDIR: temp,
+    CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+    CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
+  });
+  env[credential.name] = credential.value;
+  if (process.env.ZENSU_UPGRADE_TEST_MODE === '1') {
+    env.ZENSU_UPGRADE_SELFTEST_FAULT = process.env.ZENSU_UPGRADE_SELFTEST_FAULT || '';
+    env.ZENSU_UPGRADE_SELFTEST_LAUNCH_SENTINEL =
+      process.env.ZENSU_UPGRADE_SELFTEST_LAUNCH_SENTINEL || '';
+  }
+  const canaryArgs = [
+    ...prefix,
+    '--print',
+    '--output-format', 'text',
+    '--safe-mode',
+    '--setting-sources', '',
+    '--strict-mcp-config',
+    '--mcp-config', '{"mcpServers":{}}',
+    '--tools', '',
+    '--no-session-persistence',
+    'Reply with exactly ZENSU_AUTH_CANARY_OK and no other text.',
+  ];
+  let invocation = {
+    command,
+    args: canaryArgs,
+    env,
+    argumentInput: null,
+  };
+  if (process.env.ZENSU_UPGRADE_TEST_MODE !== '1') {
+    try {
+      invocation = buildBubblewrapInvocation({
+        command,
+        args: canaryArgs,
+        cwd: project,
+        disposableRoot: temporary,
+        writableRoots: [temporary],
+        environment: env,
+        allowedCredential: credential.name,
+        environmentArgumentFd: 3,
+        shareNetwork: true,
+      });
+    } catch (_error) {
+      fail('plugin-free authenticated Claude canary containment is unavailable or unsafe');
+    }
+  }
+  const result = await runProcessTreeBounded(invocation.command, invocation.args, {
+    cwd: project,
+    encoding: 'utf8',
+    env: invocation.env,
+  }, {
+    label: 'plugin-free authenticated Claude canary',
+    timeoutMs: PROCESS_TIMEOUT_MS,
+    maxBuffer: 4 * 1024 * 1024,
+    trustedEvaluatorCommand: true,
+    argumentInput: invocation.argumentInput,
+  });
+  if (result.status !== 0 || result.signal
+      || String(result.stdout || '').trim() !== 'ZENSU_AUTH_CANARY_OK') {
+    fail('plugin-free authenticated Claude canary failed');
   }
 }
 
@@ -1038,12 +1622,24 @@ async function main() {
   if (!prompt.includes('side-by-side') || scenarioId !== 'upgrade-v0161-side-by-side') {
     fail('Promptfoo scenario identity is missing');
   }
-  if (!testMode && process.platform !== 'darwin' && process.platform !== 'linux') {
-    fail('real Claude upgrade validation is currently supported only on macOS and Linux');
+  if (process.platform === 'win32') {
+    fail('Windows candidate containment is unsupported; no helper or Claude process was started');
   }
-  if (testMode && existingLogin) fail('deterministic test mode cannot use existing-login mode');
-  if (!testMode && existingLogin && process.platform !== 'darwin') {
-    fail('existing-login upgrade diagnostics are supported only on macOS');
+  if (!testMode && process.platform !== 'linux') {
+    fail('real Claude candidate upgrade validation requires Linux bubblewrap containment');
+  }
+  if (!testMode && existingLogin) {
+    fail('existing-login candidate execution is forbidden; use the plugin-free authenticated canary with an explicit credential');
+  }
+  const testExistingLoginHome = process.env.ZENSU_UPGRADE_TEST_EXISTING_LOGIN_HOME || '';
+  if (testMode && existingLogin) {
+    if (!path.isAbsolute(testExistingLoginHome)
+        || realDirectory(testExistingLoginHome, 'test existing-login HOME')
+          !== realDirectory(process.env.HOME || '', 'existing-login host HOME')) {
+      fail('deterministic existing-login mode requires its exact hermetic test HOME');
+    }
+  } else if (testExistingLoginHome) {
+    fail('test existing-login HOME is forbidden outside deterministic existing-login mode');
   }
   const sourceInput = options?.config?.source_dir;
   if (typeof sourceInput !== 'string' || !sourceInput) fail('config.source_dir is mandatory');
@@ -1070,38 +1666,64 @@ async function main() {
   if (!/^\d+\.\d+\.\d+$/.test(expectedCliVersion)) {
     fail('ZENSU_EXPECTED_CLAUDE_VERSION must be an explicit semantic version');
   }
-  if (!testMode && !existingLogin
-      && !process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN) {
+  let explicitCredential = null;
+  if (!existingLogin) {
+    try { explicitCredential = selectExplicitCredential(process.env); }
+    catch (_error) { fail('explicit Claude credential is invalid'); }
+  }
+  if (!testMode && !existingLogin && !explicitCredential) {
     fail('explicit Claude credentials are unavailable');
   }
   if (existingLogin && (!process.env.HOME || !path.isAbsolute(process.env.HOME))) {
     fail('existing-login mode requires an absolute host HOME');
   }
-  const executionMode = testMode
-    ? EXECUTION_MODES.fake
-    : existingLogin ? EXECUTION_MODES.diagnostic : EXECUTION_MODES.authoritative;
+  const executionMode = existingLogin
+    ? EXECUTION_MODES.diagnostic
+    : testMode ? EXECUTION_MODES.fake : EXECUTION_MODES.authoritative;
   const hostHome = existingLogin ? realDirectory(process.env.HOME, 'existing-login host HOME') : null;
   const hostCanaryBefore = existingLogin ? existingLoginCanary(hostHome) : null;
-  const temporary = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-claude-upgrade-')));
+  const temporaryBase = testMode ? os.tmpdir() : '/tmp';
+  const temporary = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(temporaryBase, 'zensu-claude-upgrade-')),
+  );
+  const temporaryIdentity = captureOwnedDirectory(temporary, 'isolated upgrade temporary root');
+  const temporaryParentIdentity = captureOwnedDirectory(
+    path.dirname(temporary),
+    'isolated upgrade temporary parent',
+  );
   const activeProcesses = new Set();
   let primaryError = null;
+  let pendingAttestationLine = null;
+  let mockBackend = null;
   try {
     const home = path.join(temporary, 'home');
     const projectRoot = path.join(temporary, 'project');
     const control = path.join(temporary, 'control');
     const oldCheckout = path.join(temporary, 'old-v0.16.1-source');
+    const pluginStore = path.join(home, '.claude', 'plugins');
+    const pluginData = pluginDataPath(pluginStore);
     const cacheBase = path.join(home, '.claude', 'plugins', 'cache', 'zensu', 'zensu');
-    for (const directory of [home, control, cacheBase]) fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    for (const directory of [home, control, cacheBase, pluginData]) {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
     createProject(projectRoot);
     const bashGuard = createBashGuard(control);
-    const cliSettings = commandLineSettings(bashGuard, hostHome);
-    const config = path.join(control, 'zensu-config.json');
+    const cliSettings = commandLineSettings(
+      bashGuard,
+      [control, ...(hostHome ? [hostHome] : [])],
+    );
+    const config = path.join(home, '.zensu-upgrade-config.json');
     fs.writeFileSync(config, '{"context":{"compactionNudge":false},"hooks":{"intentRouter":false,"tddReminder":false,"pulseSession":false,"sessionBanner":false}}\n', { mode: 0o400 });
 
-    const clone = spawnSync('git', [
+    const clone = boundedSync('git', [
+      '--no-replace-objects',
       '-c', 'protocol.file.allow=always', '-c', 'core.hooksPath=/dev/null',
       'clone', '--no-local', '--no-hardlinks', '--no-checkout', '--', sourceRoot, oldCheckout,
-    ], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    ], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: gitHelperEnvironment(),
+    }, 'local source clone', GIT_TIMEOUT_MS, 16 * 1024 * 1024);
     if (clone.status !== 0) fail('cannot clone local upgrade source');
     git(oldCheckout, ['checkout', '--detach', '--force', oldRevision]);
     if (git(oldCheckout, ['status', '--porcelain=v1', '--untracked-files=all'])) fail('v0.16.1 checkout is dirty');
@@ -1109,27 +1731,95 @@ async function main() {
 
     const candidateSourceVersion = safeManifest(sourceRoot, 'candidate source').version;
     const candidateVersion = installedVersion(candidateSourceVersion);
-    const oldDestination = path.join(cacheBase, OLD_VERSION);
-    const candidateDestination = path.join(cacheBase, candidateVersion.version);
-    if (oldDestination === candidateDestination) fail('old and candidate version roots alias');
-    const oldRoot = install(oldCheckout, oldDestination, OLD_VERSION);
-    const core = require(path.join(sourceRoot, 'hooks', 'lib', 'session-control-core-v1.js'));
-    const oldRuntimeDigest = runtimeDigest(core, oldRoot);
-    if (oldRuntimeDigest !== runtimeDigest(core, oldCheckout)) fail('installed v0.16.1 runtime is not byte-identical to its tag');
+    const oldRoot = install(oldCheckout, cacheBase, OLD_VERSION, oldRevision);
+    canonicalHooks(oldRoot, 'v0.16.1');
+    const oldRuntimeDigest = runtimeDigest(oldRoot);
+    if (oldRuntimeDigest !== runtimeDigest(oldCheckout)) fail('installed v0.16.1 runtime is not byte-identical to its tag');
     const oldInventoryBefore = new Map();
     const oldBytesBefore = snapshotTree(oldRoot, oldInventoryBefore);
     requireOrphanMarker(oldRoot, false, null, 'old runtime before process activation');
 
-    const traceBoundary = createTraceBoundary(control, oldRoot, candidateDestination);
-    const env = childEnvironment(home, temporary, config, traceBoundary);
+    const traceBoundary = createTraceBoundary(
+      control,
+      cacheBase,
+      home,
+      projectRoot,
+      pluginData,
+      config,
+    );
     const cli = cliCommand();
-    probeCli(cli.command, cli.prefix, env, expectedCliVersion);
+    const probeHome = path.join(temporary, 'version-probe');
+    const probeTemp = path.join(probeHome, 'tmp');
+    for (const directory of [
+      probeHome,
+      probeTemp,
+      path.join(probeHome, '.claude'),
+      path.join(probeHome, '.config'),
+      path.join(probeHome, '.cache'),
+      path.join(probeHome, '.local', 'share'),
+    ]) {
+      fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    }
+    const probeEnvironment = credentialFreeEnvironment(process.env, {
+      HOME: probeHome,
+      CLAUDE_CONFIG_DIR: path.join(probeHome, '.claude'),
+      XDG_CONFIG_HOME: path.join(probeHome, '.config'),
+      XDG_CACHE_HOME: path.join(probeHome, '.cache'),
+      XDG_DATA_HOME: path.join(probeHome, '.local', 'share'),
+      TMPDIR: probeTemp,
+      TEMP: probeTemp,
+      TMP: probeTemp,
+      CLAUDE_CODE_TMPDIR: probeTemp,
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1',
+      CLAUDE_CODE_SKIP_PROMPT_HISTORY: '1',
+    });
+    if (testMode) {
+      probeEnvironment.ZENSU_UPGRADE_SELFTEST_FAULT =
+        process.env.ZENSU_UPGRADE_SELFTEST_FAULT || '';
+    }
+    probeCli(
+      cli.command,
+      cli.prefix,
+      probeEnvironment,
+      expectedCliVersion,
+    );
     if (existingLogin) {
-      probeExistingLogin(cli.command, cli.prefix, env, projectRoot);
+      const preflightEnv = childEnvironment(
+        home,
+        temporary,
+        config,
+        traceBoundary,
+        { apiKey: 'zensu-upgrade-test-dummy-key', baseUrl: 'http://127.0.0.1:9' },
+      );
+      probeExistingLogin(cli.command, cli.prefix, preflightEnv, projectRoot);
       if (existingLoginCanary(hostHome) !== hostCanaryBefore) {
         fail('existing-login auth preflight changed the host config/cache canary');
       }
+    } else {
+      await runAuthenticatedCliCanary(
+        cli.command,
+        cli.prefix,
+        explicitCredential || {
+          name: 'ANTHROPIC_API_KEY',
+          value: 'zensu-upgrade-selftest-auth-canary',
+        },
+        temporary,
+      );
     }
+    if (!testMode) mockBackend = await startUpgradeAnthropicMock();
+    const candidateBackend = mockBackend
+      ? { apiKey: mockBackend.apiKey, baseUrl: mockBackend.url }
+      : {
+        apiKey: 'zensu-upgrade-test-dummy-key',
+        baseUrl: 'http://127.0.0.1:9',
+      };
+    const env = childEnvironment(
+      home,
+      temporary,
+      config,
+      traceBoundary,
+      candidateBackend,
+    );
     writeRegistry(home, oldRoot, OLD_VERSION, oldRevision);
 
     const allowedReadFiles = [
@@ -1140,43 +1830,68 @@ async function main() {
     ].map((file) => fs.realpathSync.native(file));
 
     const oldSessionId = crypto.randomUUID();
-    const oldProcess = new StreamSession(cli.command, [
-      ...cli.prefix, ...claudeArgs(
+    const oldInvocation = lifecycleInvocation(
+      cli,
+      claudeArgs(
         oldSessionId,
         allowedReadFiles,
         cliSettings,
         existingLogin ? oldRoot : null,
       ),
-    ], {
-      cwd: projectRoot, env,
+      env,
+      temporary,
+      projectRoot,
+      testMode,
+    );
+    const oldProcess = new StreamSession(oldInvocation.command, oldInvocation.args, {
+      cwd: projectRoot,
+      env: oldInvocation.env,
+      label: 'contained old Claude lifecycle',
     });
     activeProcesses.add(oldProcess);
     let eventStart = 0;
     let traceStart = 0;
     const oldTurn1Token = OLD_TURN_TOKENS[0];
     const oldTurn1File = fs.realpathSync.native(path.join(projectRoot, 'old-turn-1.txt'));
-    oldProcess.send(promptFor(oldTurn1File));
+    await oldProcess.send(promptFor(oldTurn1File));
     await oldProcess.waitForResult(1);
     let resultIndex = oldProcess.events.findIndex((event) => event === oldProcess.results[0]);
     validateTurn(oldProcess.events, eventStart, resultIndex, oldTurn1File, oldTurn1Token, 'old turn one');
     requireTurnInitEvents(oldProcess.events, oldSessionId, 1, 'old process');
     let trace = traceEntries(traceBoundary.trace);
     let delta = trace.slice(traceStart);
-    requireTraceScope(delta, oldRoot, candidateDestination, 'old turn one');
+    requireTraceScope(delta, oldRoot, 'old turn one');
     requireTrace(delta, oldRoot, 'stop-chain-enforcer.sh', 1, 'old turn one');
     for (const hook of [
       'session-start-pulse.sh', 'session-start-banner.sh',
       'session-start-primer.sh', 'session-start-autopilot-resume.sh',
     ]) requireTrace(delta, oldRoot, hook, 1, 'old turn one');
-    requireInUseMarker(oldRoot, oldProcess.child.pid, true, 'old process');
+    requireInUseMarker(
+      oldRoot,
+      testMode ? oldProcess.child.pid : null,
+      true,
+      'old process',
+    );
     requireOrphanMarker(
       oldRoot, false, null, 'old runtime after old-process activation',
     );
     traceStart = trace.length;
     eventStart = resultIndex + 1;
 
-    const candidateRoot = install(sourceRoot, candidateDestination, candidateVersion.version);
-    const candidateRuntimeDigest = runtimeDigest(core, candidateRoot);
+    const candidateRoot = install(
+      sourceRoot,
+      cacheBase,
+      candidateVersion.version,
+      sourceRevision,
+    );
+    if (candidateRoot === oldRoot) fail('old and candidate runtime roots alias');
+    injectCandidateHookContractFaultForTest(
+      candidateRoot,
+      process.env.ZENSU_UPGRADE_SELFTEST_FAULT || '',
+    );
+    const capturedCandidateHooks = candidateHookContract(candidateRoot);
+    verifyCandidateHookContract(candidateRoot, capturedCandidateHooks);
+    const candidateRuntimeDigest = runtimeDigest(candidateRoot);
     if (candidateRuntimeDigest === oldRuntimeDigest) fail('candidate runtime digest does not differ from v0.16.1');
     const candidateInventoryBefore = new Map();
     const candidateBytesBefore = snapshotTree(candidateRoot, candidateInventoryBefore);
@@ -1190,7 +1905,7 @@ async function main() {
 
     const oldTurn2Token = OLD_TURN_TOKENS[1];
     const oldTurn2File = fs.realpathSync.native(path.join(projectRoot, 'old-turn-2.txt'));
-    oldProcess.send(promptFor(oldTurn2File));
+    await oldProcess.send(promptFor(oldTurn2File));
     await oldProcess.waitForResult(2);
     resultIndex = oldProcess.events.findIndex((event) => event === oldProcess.results[1]);
     validateTurn(oldProcess.events, eventStart, resultIndex, oldTurn2File, oldTurn2Token, 'old turn two');
@@ -1200,32 +1915,51 @@ async function main() {
     }
     trace = traceEntries(traceBoundary.trace);
     delta = trace.slice(traceStart);
-    requireTraceScope(delta, oldRoot, candidateRoot, 'old turn two');
+    requireTraceScope(delta, oldRoot, 'old turn two');
     requireTrace(delta, oldRoot, 'stop-chain-enforcer.sh', 1, 'old turn two');
     traceStart = trace.length;
     eventStart = resultIndex + 1;
     if (oldProcess.closed) fail('old process closed before the fresh candidate session started');
 
     const candidateSessionId = crypto.randomUUID();
-    const candidateProcess = new StreamSession(cli.command, [
-      ...cli.prefix, ...claudeArgs(
+    verifyCandidateHookContract(candidateRoot, capturedCandidateHooks);
+    const candidateInvocation = lifecycleInvocation(
+      cli,
+      claudeArgs(
         candidateSessionId,
         allowedReadFiles,
         cliSettings,
         existingLogin ? candidateRoot : null,
       ),
-    ], {
-      cwd: projectRoot, env,
-    });
+      env,
+      temporary,
+      projectRoot,
+      testMode,
+    );
+    const candidateProcess = new StreamSession(
+      candidateInvocation.command,
+      candidateInvocation.args,
+      {
+        cwd: projectRoot,
+        env: candidateInvocation.env,
+        label: 'contained candidate Claude lifecycle',
+      },
+    );
     activeProcesses.add(candidateProcess);
     const candidateToken = CANDIDATE_TOKEN;
     const candidateFile = fs.realpathSync.native(path.join(projectRoot, 'candidate-turn.txt'));
-    candidateProcess.send(candidatePromptFor(candidateFile));
+    await candidateProcess.send(candidatePromptFor(candidateFile));
     await candidateProcess.waitForResult(1);
+    verifyCandidateHookContract(candidateRoot, capturedCandidateHooks);
     candidateActivationWindow.endedAtMs = Date.now();
     const candidateResultIndex = candidateProcess.events.findIndex((event) => event === candidateProcess.results[0]);
     validateCandidateTurn(candidateProcess.events, candidateResultIndex, candidateFile, candidateToken);
-    requireInUseMarker(candidateRoot, candidateProcess.child.pid, true, 'fresh candidate process');
+    requireInUseMarker(
+      candidateRoot,
+      testMode ? candidateProcess.child.pid : null,
+      true,
+      'fresh candidate process',
+    );
     const candidateInit = initEvents(candidateProcess.events);
     if (candidateInit.length !== 1 || candidateInit[0].session_id !== candidateSessionId) {
       fail('fresh candidate process did not expose exactly one matching init event');
@@ -1239,18 +1973,18 @@ async function main() {
       'candidate runtime after candidate activation',
     );
     requireInUseMarker(
-      oldRoot, oldProcess.child.pid, true,
+      oldRoot, testMode ? oldProcess.child.pid : null, true,
       'old process during candidate activation',
     );
     trace = traceEntries(traceBoundary.trace);
     delta = trace.slice(traceStart);
-    requireTraceScope(delta, candidateRoot, oldRoot, 'fresh candidate');
-    requireTrace(delta, candidateRoot, 'session-start-session-control.sh', 1, 'fresh candidate');
-    requireTrace(delta, candidateRoot, 'stop-chain-enforcer.sh', 1, 'fresh candidate');
+    requireTraceScope(delta, candidateRoot, 'fresh candidate');
     const expectedHookCounts = new Map();
     for (const name of [
-      ...expectedPreToolHooks(candidateRoot, 'Read'),
-      ...expectedPreToolHooks(candidateRoot, 'Bash'),
+      ...capturedCandidateHooks.observedExpectedHooks.SessionStart,
+      ...capturedCandidateHooks.observedExpectedHooks.Stop,
+      ...capturedCandidateHooks.observedExpectedHooks.PreToolUse.Read,
+      ...capturedCandidateHooks.observedExpectedHooks.PreToolUse.Bash,
     ]) expectedHookCounts.set(name, (expectedHookCounts.get(name) || 0) + 1);
     for (const [name, count] of expectedHookCounts) {
       requireTrace(delta, candidateRoot, name, count, 'fresh candidate Read/Bash PreToolUse');
@@ -1258,7 +1992,8 @@ async function main() {
     requireBashGuardTrace(bashGuard.trace);
     await candidateProcess.close();
     activeProcesses.delete(candidateProcess);
-    requireInUseMarker(candidateRoot, candidateProcess.child.pid, false, 'fresh candidate process');
+    verifyCandidateHookContract(candidateRoot, capturedCandidateHooks);
+    requireInUseMarker(candidateRoot, null, false, 'fresh candidate process');
     validateFreshState(
       candidateRoot,
       projectRoot,
@@ -1266,13 +2001,14 @@ async function main() {
       temporary,
       existingLogin ? null : pluginDataPath(env.CLAUDE_CODE_PLUGIN_CACHE_DIR),
       existingLogin ? path.join(env.CLAUDE_CODE_PLUGIN_CACHE_DIR, 'data') : null,
+      candidateRuntimeDigest,
     );
     traceStart = trace.length;
     if (oldProcess.closed) fail('old process did not remain open through the fresh candidate session');
 
     const oldTurn3Token = OLD_TURN_TOKENS[2];
     const oldTurn3File = fs.realpathSync.native(path.join(projectRoot, 'old-turn-3.txt'));
-    oldProcess.send(promptFor(oldTurn3File));
+    await oldProcess.send(promptFor(oldTurn3File));
     await oldProcess.waitForResult(3);
     resultIndex = oldProcess.events.findIndex((event) => event === oldProcess.results[2]);
     validateTurn(oldProcess.events, eventStart, resultIndex, oldTurn3File, oldTurn3Token, 'old turn three after candidate');
@@ -1282,11 +2018,11 @@ async function main() {
     }
     trace = traceEntries(traceBoundary.trace);
     delta = trace.slice(traceStart);
-    requireTraceScope(delta, oldRoot, candidateRoot, 'old turn three after candidate');
+    requireTraceScope(delta, oldRoot, 'old turn three after candidate');
     requireTrace(delta, oldRoot, 'stop-chain-enforcer.sh', 1, 'old turn three after candidate');
     await oldProcess.close();
     activeProcesses.delete(oldProcess);
-    requireInUseMarker(oldRoot, oldProcess.child.pid, false, 'old process');
+    requireInUseMarker(oldRoot, null, false, 'old process');
 
     const oldOrphanMarkerFinal = requireOrphanMarker(
       oldRoot, true, null, 'old runtime final',
@@ -1295,6 +2031,7 @@ async function main() {
       fail('old runtime .orphaned_at marker changed after candidate activation');
     }
     requireOrphanMarker(candidateRoot, false, null, 'candidate runtime final');
+    verifyCandidateHookContract(candidateRoot, capturedCandidateHooks);
 
     const oldInventoryFinal = new Map();
     if (snapshotTree(oldRoot, oldInventoryFinal) !== oldBytesBefore) {
@@ -1312,15 +2049,25 @@ async function main() {
       .every((entry) => inside(temporary, fs.realpathSync.native(entry)))) {
       fail('upgrade evaluation escaped its isolated filesystem root');
     }
+    if (mockBackend) mockBackend.assertHealthy();
     const evidence = {
       schema: 'zensu.session-control-upgrade-evidence',
-      schema_version: 1,
+      schema_version: 2,
       host: 'claude',
       gate: 'passed',
       execution_mode: executionMode,
-      host_config_cache_canary_status: testMode
-        ? 'not-applicable-test-mode'
-        : existingLogin ? 'unchanged-local-diagnostic' : 'not-applicable-isolated-home',
+      authenticated_canary_status: existingLogin
+        ? 'not-applicable-hermetic-existing-login-test'
+        : testMode ? 'passed-deterministic-fake' : 'passed-plugin-free-live',
+      candidate_model_backend: testMode
+        ? 'deterministic-fake-cli'
+        : 'deterministic-loopback-anthropic-mock',
+      candidate_containment: testMode
+        ? 'deterministic-fake-process-tree'
+        : 'linux-bwrap-pid-mount-with-nested-hook-net-v1',
+      host_config_cache_canary_status: existingLogin
+        ? 'unchanged-local-diagnostic'
+        : testMode ? 'not-applicable-test-mode' : 'not-applicable-isolated-home',
       claude_code_version: expectedCliVersion,
       source_git_revision: sourceRevision,
       old_release_ref: OLD_REF,
@@ -1331,47 +2078,97 @@ async function main() {
       candidate_version_synthetic: candidateVersion.synthetic,
       old_runtime_digest: oldRuntimeDigest,
       candidate_runtime_digest: candidateRuntimeDigest,
-      old_session_id_hash: core.sessionIdHash(oldSessionId),
-      candidate_session_id_hash: core.sessionIdHash(candidateSessionId),
+      old_session_id_hash: verifiedSessionIdHash(oldSessionId),
+      candidate_session_id_hash: verifiedSessionIdHash(candidateSessionId),
       old_process_result_count: 3,
       fresh_process_result_count: 1,
       hook_sequence: [...REQUIRED_SEQUENCE],
     };
-    process.stdout.write(`${line(evidence)}\n`);
+    pendingAttestationLine = line(evidence);
   } catch (error) {
     primaryError = error;
     throw error;
   } finally {
+    const cleanupResults = await Promise.allSettled(
+      [...activeProcesses].map((session) => session.terminate()),
+    );
+    const cleanupFailureCount = cleanupResults.filter(
+      (result) => result.status === 'rejected',
+    ).length;
+    let mockCleanupError = null;
+    if (mockBackend) {
+      try { await mockBackend.close(); }
+      catch (error) { mockCleanupError = error; }
+    }
+    let canaryChanged = false;
+    let canaryInspectionError = null;
     try {
-      await Promise.all([...activeProcesses].map((session) => session.terminate()));
-    } finally {
-      try {
-        if (existingLogin && existingLoginCanary(hostHome) !== hostCanaryBefore) {
-          if (primaryError) {
-            primaryError.message += '; existing-login host config/cache canary also changed';
-          } else {
-            fail('existing-login host config/cache canary changed during the local diagnostic');
-          }
-        }
-      } finally {
-        fs.rmSync(temporary, { recursive: true, force: true });
+      canaryChanged = existingLogin && existingLoginCanary(hostHome) !== hostCanaryBefore;
+    } catch (error) {
+      canaryInspectionError = error;
+    }
+    let removalFailed = false;
+    try {
+      quarantineAndRemoveOwnedDirectory(
+        temporaryIdentity,
+        temporaryParentIdentity,
+        'isolated upgrade temporary root',
+      );
+    } catch (_error) {
+      removalFailed = true;
+    }
+    if (testMode
+        && process.env.ZENSU_UPGRADE_SELFTEST_FAULT === 'post-cleanup-attestation-failure') {
+      removalFailed = true;
+    }
+    if (primaryError) {
+      if (cleanupFailureCount > 0) {
+        primaryError.message += `; process_cleanup_failures=${cleanupFailureCount}`;
       }
+      if (canaryChanged) {
+        primaryError.message += '; existing-login host config/cache canary also changed';
+      }
+      if (canaryInspectionError) {
+        primaryError.message += '; existing-login canary inspection also failed';
+      }
+      if (mockCleanupError) primaryError.message += '; deterministic model backend cleanup also failed';
+      if (removalFailed) primaryError.message += '; temporary cleanup also failed';
+    } else if (cleanupFailureCount > 0) {
+      fail(`Claude process cleanup failed; failure_count=${cleanupFailureCount}`);
+    } else if (mockCleanupError) {
+      fail('deterministic model backend cleanup failed');
+    } else if (canaryInspectionError) {
+      throw canaryInspectionError;
+    } else if (canaryChanged) {
+      fail('existing-login host config/cache canary changed during the local diagnostic');
+    } else if (removalFailed) {
+      fail('isolated upgrade temporary directory cleanup failed');
     }
   }
+  if (typeof pendingAttestationLine !== 'string' || !pendingAttestationLine) {
+    fail('upgrade attestation commit point was not reached');
+  }
+  process.stdout.write(`${pendingAttestationLine}\n`);
 }
 
-main().catch((error) => {
-  const message = typeof error?.message === 'string' ? error.message : '';
-  if (safeErrorHas(SAFE_DIAGNOSTIC_ERRORS, error) && !/[\0\r\n]/.test(message)) {
-    process.stderr.write(`${message}\n`);
-  } else {
-    const diagnostic = redactedTextDiagnostic(message);
-    process.stderr.write(`${[
-      'session-control upgrade provider: unexpected failure',
-      `error_category=${diagnostic.category}`,
-      `error_bytes=${diagnostic.bytes}`,
-      `error_sha256=${diagnostic.sha256}`,
-    ].join('; ')}\n`);
-  }
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((error) => {
+    const message = typeof error?.message === 'string' ? error.message : '';
+    if (safeErrorHas(SAFE_DIAGNOSTIC_ERRORS, error) && !/[\0\r\n]/.test(message)) {
+      process.stderr.write(`${message}\n`);
+    } else {
+      const diagnostic = redactedTextDiagnostic(message);
+      process.stderr.write(`${[
+        'session-control upgrade provider: unexpected failure',
+        `error_category=${diagnostic.category}`,
+        `error_bytes=${diagnostic.bytes}`,
+        `error_sha256=${diagnostic.sha256}`,
+      ].join('; ')}\n`);
+    }
+    process.exit(1);
+  });
+}
+
+module.exports = {
+  createTraceBoundary,
+};

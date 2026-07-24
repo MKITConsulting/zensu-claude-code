@@ -66,8 +66,8 @@ check "workflow YAML parses for credential audit" PASS
 
 CHECKOUT_COUNT="$(printf '%s' "$OUT" | jq -r .checkout_count)"
 SAFE_COUNT="$(printf '%s' "$OUT" | jq -r .safe_checkout_count)"
-if [ "$CHECKOUT_COUNT" -eq 5 ] && [ "$SAFE_COUNT" -eq "$CHECKOUT_COUNT" ]; then
-  check "all five checkout steps disable persisted credentials" PASS
+if [ "$CHECKOUT_COUNT" -eq 6 ] && [ "$SAFE_COUNT" -eq "$CHECKOUT_COUNT" ]; then
+  check "all six checkout steps disable persisted credentials" PASS
 else
   check "all checkout steps disable persisted credentials (checkouts=$CHECKOUT_COUNT safe=$SAFE_COUNT)" FAIL
 fi

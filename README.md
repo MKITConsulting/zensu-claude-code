@@ -248,7 +248,25 @@ immutable context. The production marketplace remains pinned to the release
 tag throughout this checkout-specific validation. Paid Linux gates pin Ubuntu
 24.04, verify Claude's required `bubblewrap`/`socat` sandbox dependencies, and
 fail closed if AppArmor user-namespace preparation or a functional sandbox
-probe fails.
+probe fails. The side-by-side upgrade gate itself is Linux-only: it first proves
+the explicit API/OAuth credential with a plugin-free, tool-free Claude canary
+inside outer `bubblewrap` containment. Bubblewrap receives that canary
+environment through its `--args` file descriptor 3, never through the process
+argument vector; custom Anthropic base URLs, proxies, and TLS trust overrides
+are rejected. The gate then runs the old and candidate lifecycles with only a
+random dummy credential against its own deterministic loopback
+Anthropic-compatible backend. Both lifecycle processes use `bubblewrap`
+PID/mount containment, and every plugin hook runs in a nested
+network/PID/mount namespace that cannot see evaluator control or trace state.
+That nested boundary receives only the evaluator-bound `CLAUDE_PLUGIN_DATA`
+and `CLAUDE_PROJECT_DIR` values needed by the hook contract. The old and
+candidate fixtures are immutable, unpredictable direct children of an
+isolated cache parent; the isolated plugin registry, not a predictable SemVer
+path, selects which completed root Claude loads. PR CI exercises this real
+nested-hook integration on pinned Ubuntu without making a paid model request.
+Windows only proves the pre-launch zero-process denial. Real existing-login
+candidate execution is unsupported; its hermetic fake remains solely for
+non-authoritative deterministic coverage.
 See [Session Control release gate](docs/session-control-release-gate.md).
 
 **Getting a guaranteed review for a Workflow-triggered run.** Because the worker `Stop`
@@ -280,9 +298,10 @@ per-implementation over the aggregate diff — **never per spawned worker**.
 ## Installation
 
 The minimum supported Claude Code version is **2.1.211**. Session Control's
-live, nightly, and release evaluations deliberately pin **exactly 2.1.211** so
-host behavior is reproducible; newer Claude Code releases remain supported but
-are revalidated before the evaluation pin advances.
+live and release evaluations, plus the nightly full-suite lane, deliberately
+pin **exactly 2.1.211** so host behavior is reproducible. A second nightly lane
+runs the paid side-by-side upgrade only on **2.1.217**, providing recurring
+forward-compatibility evidence without changing the release baseline.
 
 ```bash
 claude plugin marketplace add MKITConsulting/zensu-claude-code

@@ -7,18 +7,21 @@ const VERSION_RE = /^\d+\.\d+\.\d+$/;
 const OLD_RELEASE_REVISION = '3e4f4ab4c1ea5c075effb743ae00af6f915ddb82';
 
 const EXECUTION_MODES = Object.freeze({
-  authoritative: 'authoritative-explicit-credential-isolated-home',
-  diagnostic: 'local-diagnostic-existing-login',
+  authoritative: 'authoritative-split-auth-canary-contained-candidate',
+  diagnostic: 'deterministic-hermetic-existing-login-test',
   fake: 'deterministic-fake',
 });
 
 const REQUIRED_SEQUENCE = Object.freeze([
   `OldRuntime:git-tag:v0.16.1@${OLD_RELEASE_REVISION}`,
+  'AuthCanary:plugin-free-live-or-deterministic-test',
+  'CandidateBackend:no-live-credential',
+  'Containment:process-tree-and-hidden-evidence',
   'PermissionBoundary:dontAsk-four-read-one-bash',
   'OldTurn1:SessionStart:old-root',
   'OldTurn1:Read:success',
   'OldTurn1:Stop:old-root:exit-0',
-  'CandidateInstall:side-by-side-create-once',
+  'CandidateInstall:side-by-side-registry-selected-root',
   'OldTurn2:Read:success',
   'OldTurn2:Stop:old-root:exit-0',
   'OldProcess:open-during-fresh-candidate',
@@ -47,6 +50,9 @@ const KEYS = Object.freeze([
   'host',
   'gate',
   'execution_mode',
+  'authenticated_canary_status',
+  'candidate_model_backend',
+  'candidate_containment',
   'host_config_cache_canary_status',
   'claude_code_version',
   'source_git_revision',
@@ -89,7 +95,7 @@ function validate(value) {
     fail('shape is invalid');
   }
   if (value.schema !== 'zensu.session-control-upgrade-evidence'
-      || value.schema_version !== 1 || value.host !== 'claude' || value.gate !== 'passed') {
+      || value.schema_version !== 2 || value.host !== 'claude' || value.gate !== 'passed') {
     fail('identity is invalid');
   }
   const canaryStatus = {
@@ -99,6 +105,28 @@ function validate(value) {
   }[value.execution_mode];
   if (!canaryStatus || value.host_config_cache_canary_status !== canaryStatus) {
     fail('execution mode or host canary status is invalid');
+  }
+  const splitBoundary = {
+    [EXECUTION_MODES.authoritative]: {
+      authenticated_canary_status: 'passed-plugin-free-live',
+      candidate_model_backend: 'deterministic-loopback-anthropic-mock',
+      candidate_containment: 'linux-bwrap-pid-mount-with-nested-hook-net-v1',
+    },
+    [EXECUTION_MODES.diagnostic]: {
+      authenticated_canary_status: 'not-applicable-hermetic-existing-login-test',
+      candidate_model_backend: 'deterministic-fake-cli',
+      candidate_containment: 'deterministic-fake-process-tree',
+    },
+    [EXECUTION_MODES.fake]: {
+      authenticated_canary_status: 'passed-deterministic-fake',
+      candidate_model_backend: 'deterministic-fake-cli',
+      candidate_containment: 'deterministic-fake-process-tree',
+    },
+  }[value.execution_mode];
+  if (!splitBoundary || Object.entries(splitBoundary).some(
+    ([key, expected]) => value[key] !== expected,
+  )) {
+    fail('authenticated canary, model backend, or containment evidence is invalid');
   }
   if (!VERSION_RE.test(value.claude_code_version)) fail('Claude Code version evidence is invalid');
   if (!REVISION_RE.test(value.source_git_revision)

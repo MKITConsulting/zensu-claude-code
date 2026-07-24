@@ -60,6 +60,21 @@ jobs:
             echo 'No full-suite report was produced; inspect the failed preflight step above.'
           fi
 
+  session-control-sandbox:
+    name: Session Control sandbox prerequisites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare verified Claude Bash sandbox
+        run: bash .github/scripts/prepare-claude-sandbox-linux.sh
+      - name: Contained Session Control hook integration
+        run: bash tests/structure/test-session-control-sandbox-hook-integration.sh
+        env:
+          ZENSU_RUN_LINUX_SANDBOX_HOOK_INTEGRATION: '1'
+
   session-control-contract:
     name: Session Control contract (Promptfoo 0.121.18)
     runs-on: ubuntu-latest

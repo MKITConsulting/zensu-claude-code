@@ -23,13 +23,95 @@ TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
 TMP="$(cd -P -- "$TMP_RAW" && pwd -P)" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot canonicalize temp directory' >&2; exit 1; }
 trap 'rm -rf "$TMP"' EXIT
+ROOT_REVISION="$(git -C "$ROOT" rev-parse HEAD)"
+
+PROVENANCE_SOURCE="$TMP/provenance-source"
+PROVENANCE_CACHE_PARENT="$TMP/provenance-cache"
+mkdir -p "$PROVENANCE_SOURCE/.claude-plugin" "$PROVENANCE_SOURCE/hooks"
+git -C "$PROVENANCE_SOURCE" init -q
+git -C "$PROVENANCE_SOURCE" config user.name 'Versioned Upgrade Test'
+git -C "$PROVENANCE_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+git -C "$PROVENANCE_SOURCE" config core.hooksPath \
+  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
+  > "$PROVENANCE_SOURCE/.claude-plugin/plugin.json"
+printf '%s\n' '{"name":"zensu","plugins":[{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}]}' \
+  > "$PROVENANCE_SOURCE/.claude-plugin/marketplace.json"
+printf '%s\n' '#!/bin/bash' 'exit 0' > "$PROVENANCE_SOURCE/hooks/example.sh"
+printf '%s\n' '*.key' > "$PROVENANCE_SOURCE/.gitignore"
+git -C "$PROVENANCE_SOURCE" add .
+git -C "$PROVENANCE_SOURCE" -c commit.gpgsign=false commit -qm 'test: seed provenance source'
+PROVENANCE_REVISION="$(git -C "$PROVENANCE_SOURCE" rev-parse HEAD)"
+PROVENANCE_COMMITTED_HOOK="$TMP/provenance-committed-example.sh"
+git -C "$PROVENANCE_SOURCE" show "$PROVENANCE_REVISION:hooks/example.sh" \
+  > "$PROVENANCE_COMMITTED_HOOK"
+PROVENANCE_ORIGINAL_BLOB="$(
+  git -C "$PROVENANCE_SOURCE" rev-parse "$PROVENANCE_REVISION:hooks/example.sh"
+)"
+PROVENANCE_REPLACEMENT_BLOB="$(
+  printf '%s\n' '#!/bin/bash' 'printf "replacement refs must not affect installation\n"' \
+    | git -C "$PROVENANCE_SOURCE" hash-object -w --stdin
+)"
+git -C "$PROVENANCE_SOURCE" replace \
+  "$PROVENANCE_ORIGINAL_BLOB" "$PROVENANCE_REPLACEMENT_BLOB"
+printf '%s\n' '#!/bin/bash' 'printf "dirty worktree bytes must not be installed\n"' \
+  > "$PROVENANCE_SOURCE/hooks/example.sh"
+printf '%s\n' 'ignored worktree bytes must never enter an attested runtime' \
+  > "$PROVENANCE_SOURCE/hooks/local-secret.key"
+
+if PROVENANCE_RUNTIME="$(
+    node "$INSTALL_FIXTURE" "$PROVENANCE_SOURCE" "$PROVENANCE_CACHE_PARENT" 0.17.0 \
+      "$PROVENANCE_REVISION" 2>/dev/null
+  )" \
+    && git -C "$PROVENANCE_SOURCE" cat-file blob "$PROVENANCE_ORIGINAL_BLOB" \
+      | grep -Fq 'replacement refs must not affect installation' \
+    && [ ! -e "$PROVENANCE_RUNTIME/hooks/local-secret.key" ] \
+    && cmp -s "$PROVENANCE_COMMITTED_HOOK" "$PROVENANCE_RUNTIME/hooks/example.sh" \
+    && ! cmp -s "$PROVENANCE_SOURCE/hooks/example.sh" "$PROVENANCE_RUNTIME/hooks/example.sh"; then
+  check "fixture installer ignores replacement refs and excludes dirty worktree data" PASS
+else
+  check "fixture installer ignores replacement refs and excludes dirty worktree data" FAIL
+fi
+
+SYMLINK_SOURCE="$TMP/symlink-source"
+SYMLINK_CACHE_PARENT="$TMP/symlink-cache"
+SYMLINK_VICTIM="$TMP/symlink-victim.json"
+SYMLINK_ERR="$TMP/symlink-installer.err"
+mkdir -p "$SYMLINK_SOURCE/.claude-plugin" "$SYMLINK_SOURCE/hooks"
+git -C "$SYMLINK_SOURCE" init -q
+git -C "$SYMLINK_SOURCE" config user.name 'Versioned Upgrade Test'
+git -C "$SYMLINK_SOURCE" config user.email 'versioned-upgrade@zensu.invalid'
+git -C "$SYMLINK_SOURCE" config core.hooksPath \
+  "$(if [ "$(uname -s)" = MINGW* ] || [ "$(uname -s)" = MSYS* ]; then printf NUL; else printf /dev/null; fi)"
+printf '%s\n' '{"name":"zensu","version":"0.16.1"}' \
+  > "$SYMLINK_SOURCE/.claude-plugin/plugin.json"
+printf '%s\n' '#!/bin/bash' 'exit 0' > "$SYMLINK_SOURCE/hooks/example.sh"
+printf '%s\n' '{"name":"zensu","plugins":[{"name":"zensu","source":{"source":"github","repo":"MKITConsulting/zensu-claude-code","ref":"v0.16.1"},"version":"0.16.1"}]}' \
+  > "$SYMLINK_VICTIM"
+SYMLINK_BLOB="$(printf '%s' "$SYMLINK_VICTIM" | git -C "$SYMLINK_SOURCE" hash-object -w --stdin)"
+git -C "$SYMLINK_SOURCE" add .
+git -C "$SYMLINK_SOURCE" update-index --add --cacheinfo \
+  "120000,$SYMLINK_BLOB,.claude-plugin/marketplace.json"
+git -C "$SYMLINK_SOURCE" -c commit.gpgsign=false commit -qm 'test: seed tracked symlink source'
+SYMLINK_REVISION="$(git -C "$SYMLINK_SOURCE" rev-parse HEAD)"
+if ln -s "$SYMLINK_VICTIM" "$SYMLINK_SOURCE/.claude-plugin/marketplace.json" 2>/dev/null; then
+  :
+fi
+SYMLINK_VICTIM_CONTENT="$(cat "$SYMLINK_VICTIM")"
+if ! node "$INSTALL_FIXTURE" "$SYMLINK_SOURCE" "$SYMLINK_CACHE_PARENT" 0.17.0 \
+    "$SYMLINK_REVISION" >/dev/null 2>"$SYMLINK_ERR" \
+    && grep -Fq 'tracked symlink is forbidden' "$SYMLINK_ERR" \
+    && [ "$(cat "$SYMLINK_VICTIM")" = "$SYMLINK_VICTIM_CONTENT" ]; then
+  check "fixture installer rejects tracked symlinks before any external write" PASS
+else
+  check "fixture installer rejects tracked symlinks before any external write" FAIL
+fi
 
 # This offline structure test intentionally materializes both roots from the
 # current checkout. It proves create-once, root-binding, and fail-closed
 # invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
-SYNTHETIC_EXISTING_ROOT="$TMP/cache/zensu/zensu/0.16.1"
-SYNTHETIC_CANDIDATE_ROOT="$TMP/cache/zensu/zensu/0.17.0"
+SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
 SHARED_DATA="$TMP/data/zensu-zensu"
 PROJECT="$TMP/project"
 mkdir -p "$SHARED_DATA" "$PROJECT"
@@ -58,27 +140,38 @@ tree_digest() {
   '
 }
 
-node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_EXISTING_ROOT" 0.16.1 >/dev/null
+SYNTHETIC_EXISTING_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.16.1 "$ROOT_REVISION"
+)"
 EXISTING_BEFORE="$(tree_digest "$SYNTHETIC_EXISTING_ROOT")"
-node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CANDIDATE_ROOT" 0.17.0 >/dev/null
+SYNTHETIC_CANDIDATE_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.0 "$ROOT_REVISION"
+)"
 EXISTING_AFTER="$(tree_digest "$SYNTHETIC_EXISTING_ROOT")"
 
 if [ "$SYNTHETIC_EXISTING_ROOT" != "$SYNTHETIC_CANDIDATE_ROOT" ] \
+    && [ "$(dirname "$SYNTHETIC_EXISTING_ROOT")" = "$SYNTHETIC_CACHE_PARENT" ] \
+    && [ "$(dirname "$SYNTHETIC_CANDIDATE_ROOT")" = "$SYNTHETIC_CACHE_PARENT" ] \
+    && [ "$(basename "$SYNTHETIC_EXISTING_ROOT")" != 0.16.1 ] \
+    && [ "$(basename "$SYNTHETIC_CANDIDATE_ROOT")" != 0.17.0 ] \
     && [ "$EXISTING_BEFORE" = "$EXISTING_AFTER" ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_EXISTING_ROOT/.claude-plugin/plugin.json")" = 0.16.1 ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/plugin.json")" = 0.17.0 ] \
     && [ "$(node -p 'require(process.argv[1]).plugins[0].source.ref' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/marketplace.json")" = v0.17.0 ]; then
-  check "synthetic existing and candidate runtimes occupy distinct immutable SemVer roots" PASS
+  check "synthetic runtimes occupy distinct unpredictable immutable roots" PASS
 else
-  check "synthetic existing and candidate runtimes occupy distinct immutable SemVer roots" FAIL
+  check "synthetic runtimes occupy distinct unpredictable immutable roots" FAIL
 fi
 
-if node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_EXISTING_ROOT" 0.17.0 >/dev/null 2>&1; then
-  check "fixture installer rejects same-path replacement" FAIL
-elif [ "$EXISTING_BEFORE" = "$(tree_digest "$SYNTHETIC_EXISTING_ROOT")" ]; then
-  check "fixture installer rejects same-path replacement" PASS
+SECOND_EXISTING_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.16.1 "$ROOT_REVISION"
+)"
+if [ "$SECOND_EXISTING_ROOT" != "$SYNTHETIC_EXISTING_ROOT" ] \
+    && [ "$EXISTING_BEFORE" = "$(tree_digest "$SYNTHETIC_EXISTING_ROOT")" ] \
+    && [ "$(node -p 'require(process.argv[1]).version' "$SECOND_EXISTING_ROOT/.claude-plugin/plugin.json")" = 0.16.1 ]; then
+  check "repeated installs allocate a new root without replacing an existing runtime" PASS
 else
-  check "fixture installer rejects same-path replacement" FAIL
+  check "repeated installs allocate a new root without replacing an existing runtime" FAIL
 fi
 
 ALIAS_ROOT="$TMP/existing-runtime-alias"
@@ -89,11 +182,12 @@ if SOURCE_INPUT="$SYNTHETIC_EXISTING_ROOT" ALIAS_INPUT="$ALIAS_ROOT" node -e '
     process.env.ALIAS_INPUT,
     process.platform === "win32" ? "junction" : "dir",
   );
-' && ! node "$INSTALL_FIXTURE" "$SYNTHETIC_EXISTING_ROOT" "$ALIAS_ROOT/nested-runtime" 0.17.0 \
-  >/dev/null 2>&1 && [ ! -e "$SYNTHETIC_EXISTING_ROOT/nested-runtime" ]; then
-  check "fixture installer rejects a destination hidden beneath a symlinked parent" PASS
+' && ! node "$INSTALL_FIXTURE" "$SYNTHETIC_EXISTING_ROOT" "$ALIAS_ROOT/nested-cache" 0.17.0 \
+  "$ROOT_REVISION" \
+  >/dev/null 2>&1 && [ ! -e "$SYNTHETIC_EXISTING_ROOT/nested-cache" ]; then
+  check "fixture installer rejects a cache parent hidden inside the source by a symlink" PASS
 else
-  check "fixture installer rejects a destination hidden beneath a symlinked parent" FAIL
+  check "fixture installer rejects a cache parent hidden inside the source by a symlink" FAIL
 fi
 
 SESSION='versioned-upgrade-fresh-session'

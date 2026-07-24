@@ -106,13 +106,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   candidate SHA, and prepare every paid Ubuntu 24.04 gate with verified
   `bubblewrap`/`socat`, documented AppArmor handling, and functional sandbox
   namespace probes before Claude starts.
-- **existing-login upgrade diagnostics**: Reuse macOS Claude.ai authentication
-  only through its default host config/Keychain identity, preflight it before any model
-  request, forward only its non-secret `USER`/`LOGNAME` selectors, disable
-  filesystem setting sources and persistence, and load the
-  immutable old/candidate roots per process with `--plugin-dir`. Plugin
-  cache/data/temp remain disposable, host config/cache metadata is canaried on
-  success and failure, and this convenience path remains non-authoritative.
+- **contained upgrade authority**: Make real upgrade evidence Linux-only and
+  split authentication from candidate execution. A plugin-free, tool-free
+  Claude canary receives the one explicit API/OAuth credential inside an outer
+  `bubblewrap`; its environment arguments cross Bubblewrap's `--args` file
+  descriptor 3 instead of the process argument vector. Operator-supplied
+  Anthropic base URLs, proxies, and TLS trust overrides are rejected. The old
+  and candidate lifecycles receive only a random dummy credential and the
+  evaluator-created loopback model URL, while their hooks run in a nested
+  namespace with evaluator-bound `CLAUDE_PLUGIN_DATA` and
+  `CLAUDE_PROJECT_DIR`. The former macOS Keychain/`--plugin-dir`
+  existing-login procedure is removed; only a hermetic fake existing-login
+  profile remains for non-authoritative deterministic tests.
 - **active plugin-root evidence**: Treat Claude's bounded `.in_use/<pid>` file
   as a host-owned lifecycle marker rather than plugin payload drift, while
   requiring the exact live process marker and its cleanup. Every other runtime

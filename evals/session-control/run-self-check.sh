@@ -43,9 +43,13 @@ if grep -q -- '--plugin-dir' "$ROOT/scripts/session-control-claude-wrapper.sh"; 
   echo 'Session Control wrapper must load only from the isolated installed-plugin registry' >&2
   exit 1
 fi
-for workflow in "$ROOT/.github/workflows/session-control-nightly.yml" "$ROOT/.github/workflows/release.yml"; do
-  grep -q '@anthropic-ai/claude-code@2.1.211' "$workflow"
-done
+grep -q '@anthropic-ai/claude-code@2.1.211' "$ROOT/.github/workflows/release.yml"
+grep -Fq "claude_version: '2.1.211'" "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq "claude_version: '2.1.217'" "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq '@anthropic-ai/claude-code@${{ matrix.claude_version }}' \
+  "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq 'ZENSU_EXPECTED_CLAUDE_VERSION: ${{ matrix.claude_version }}' \
+  "$ROOT/.github/workflows/session-control-nightly.yml"
 
 node "$EVAL_DIR/tests/attestation.test.js"
 node "$EVAL_DIR/tests/contract-provider.test.js"
@@ -55,7 +59,7 @@ node "$EVAL_DIR/tests/live-evidence-negative.test.js"
 bash "$EVAL_DIR/tests/preflight-selftest.sh"
 bash "$EVAL_DIR/tests/marketplace-fixture-selftest.sh"
 bash "$EVAL_DIR/tests/installed-plugin-provisioner-selftest.sh"
-node "$EVAL_DIR/tests/upgrade-provider-selftest.js"
+node "$EVAL_DIR/tests/enforce-upgrade-coverage.js"
 node "$EVAL_DIR/tests/upgrade-results.test.js"
 bash "$EVAL_DIR/tests/wrapper-selftest.sh"
 printf 'session-control self-check: PASS\n'

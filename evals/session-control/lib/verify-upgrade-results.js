@@ -62,15 +62,18 @@ if (attestation.source_git_revision !== revision) fail('upgrade evidence is boun
 
 if (evidenceFile) {
   if (attestation.execution_mode !== EXECUTION_MODES.authoritative) {
-    fail('only explicit-credential isolated-HOME runs may publish upgrade evidence');
+    fail('only split authenticated-canary and contained-candidate runs may publish upgrade evidence');
   }
   const receipt = {
     schema: 'zensu.session-control-upgrade-suite-evidence',
-    schema_version: 1,
+    schema_version: 2,
     host: 'claude',
     mode: 'upgrade',
     gate: 'passed',
     execution_mode: attestation.execution_mode,
+    authenticated_canary_status: attestation.authenticated_canary_status,
+    candidate_model_backend: attestation.candidate_model_backend,
+    candidate_containment: attestation.candidate_containment,
     source_git_revision: revision,
     old_release_ref: attestation.old_release_ref,
     old_release_revision: attestation.old_release_revision,

@@ -103,10 +103,14 @@ attestation is emitted.
   content-only context provenance, structured normal/reviewer subagent context,
   reviewer spawn/attack/denial evidence, root targeting,
   state/plugin-data/runtime snapshot rejection, dedicated-worker lease/result
-  spoof protection, and credential failure behavior without API use.
+  spoof protection, and credential failure behavior without API use. Its
+  deterministic upgrade tests run under Node's process-wide V8 coverage and
+  fail unless every explicitly listed changed production or harness file,
+  including the provider and installer subprocesses, reaches 90% line
+  coverage.
 - `npm run session-control:contract` runs 67 offline contract/tamper scenarios through Promptfoo. The original 40 retain real `SessionStart --agent` classification for plugin-scoped and exact bare reviewers, unknown agents, and PLM; scoped and bare PLM read-only boundaries with safe-subtree traversal positives plus root/implicit-cwd ancestor denials; native per-call main-helper binding without exported private selectors or `CLAUDE_ENV_FILE` mutation and with foreign/derived session rejection; a generic review-worker contract that denies every command-tool alias plus environment-enumeration, obfuscated workflow/helper strings, selectors, direct binders, and protected traversal ancestors while preserving ordinary non-command tools in safe subtrees; missing/tampered private-record denial; and deleted post-activation project CAS state denial at the first PreToolUse call. The additional 27 execute the dedicated evidence-worker contract against the real adapter, hooks, capability gate, and lease helper: exact `Read`/`Grep`/`Glob`, all other tools denied, path containment and alias attacks, lease sealing/expiry/revocation/binding, prompt injection, concurrent workers, strict `SubagentStop`, idempotent replay, collect-before-finalize denial, full-snapshot finalization, deterministic finalize/collect/close, manifest drift, sensitive/special files, and PR name-status plus changed-production coverage-set edge cases.
 - `npm run session-control:upgrade` runs the real supported side-by-side
-  lifecycle on macOS or Linux. It requires `v0.16.1` to resolve to exact commit
+  lifecycle on Linux. It requires `v0.16.1` to resolve to exact commit
   `3e4f4ab4c1ea5c075effb743ae00af6f915ddb82` and proves that commit is an
   ancestor of the candidate SHA. It keeps one old-runtime stream
   alive for three turns around a concurrent fresh candidate process, and
@@ -121,17 +125,39 @@ attestation is emitted.
   `Bash(printf ...)` preapproval. Because Claude also auto-approves built-in
   read-only shell commands, a harness-owned `PreToolUse(Bash)` guard rejects
   every non-canonical Bash input before execution; the Bash sandbox is mandatory
-  and cannot be disabled per call. The provider never bypasses permissions. The
-  offline selfcheck runs a 19-row fake-provider Promptfoo matrix: one full
-  positive lifecycle plus 18 fail-closed cases covering wrong roots, hook
-  failures, missing/extra records, a missing guard, crashes, runtime mutation,
-  wrong sessions, malformed lifecycle markers, marker races, and adversarial
-  diagnostic values. Failure output contains only allowlisted categories,
+  and cannot be disabled per call. The provider never bypasses permissions.
+  Before either lifecycle process starts, a plugin-free Claude invocation
+  proves the explicit API/OAuth credential in an isolated HOME with safe mode,
+  no tools, no MCP servers, no settings sources, and no session persistence.
+  The canary itself runs in outer `bubblewrap`; its environment is encoded on
+  Bubblewrap `--args` file descriptor 3 so the explicit credential never
+  appears in the process argument vector. Caller-supplied Anthropic base URLs,
+  proxies, and TLS trust overrides are rejected rather than forwarded.
+  That live credential is never passed to the old or candidate lifecycle.
+  Those processes use an unpredictable dummy API key and a deterministic local
+  Anthropic-compatible loopback server selected only by the evaluator instead.
+  Each nested hook namespace receives the evaluator-bound
+  `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` values, while evaluator control
+  and trace state remain hidden. The two immutable runtime
+  fixtures are created directly at unpredictable random children of the
+  isolated cache parent; no known SemVer destination is staged or renamed into
+  place. Only the isolated registry publishes a completed root to the next
+  Claude process.
+  The offline selfcheck runs 46 deterministic Promptfoo cases across two matrices:
+  a 43-row POSIX synthetic-version lifecycle/tamper matrix and a three-row
+  non-synthetic `0.17.0` hermetic existing-login matrix. They cover wrong
+  roots, evaluator-owned hook-contract removal/reordering/duplication, hook
+  failures, missing/extra records, missing or errored causal tool results,
+  crashes and cleanup failures, context/baseline corruption, old/candidate
+  runtime mutation, wrong sessions, malformed lifecycle markers, marker races,
+  hermetic existing-login canary changes, and adversarial diagnostic values.
+  Failure output contains only allowlisted categories,
   counts, byte lengths, and hashes; child-controlled structural strings and
   runtime entry names are never printed. The error allowlist is process-local
   and cannot be forged by attaching a public property to a thrown Error.
-  Windows runs this deterministic matrix but is not claimed as real-host
-  lifecycle coverage.
+  On Windows the provider fails before starting any helper or Claude process
+  because the required candidate containment is unavailable; the selfcheck
+  proves that zero-launch behavior.
 - `npm run session-control:live` creates six fresh Claude sessions: main,
   structurally proven `zensu:review-aspect`, and structurally proven normal
   `zensu:zensu-plm`, plus `general-purpose` reading a marker from an external
@@ -157,54 +183,72 @@ attestation is emitted.
   plus a real structured denial/tool-error result from the host.
 - `npm run session-control:release` executes every profile and is intended only for the exact release SHA.
 
-Live profiles require a disposable host acknowledged with `ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, Claude Code CLI **2.1.211**, and valid `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` credentials. They require explicit source root and expected Git SHA; the installed root is resolved only from the isolated Claude registry. Release checks for a completely clean worktree at that exact HEAD before provisioning and after the suite, including untracked runtime files. Missing credentials, a wrong/ambiguous registry root, a different SHA, a dirty checkout, runtime drift, or a mismatched `system/init` session id fails rather than skipping.
+Release and full-live profiles require a disposable host acknowledged with
+`ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, Claude Code CLI **2.1.211**, and valid
+`ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` credentials. The upgrade
+profile instead requires the exact Claude CLI version selected by
+`ZENSU_EXPECTED_CLAUDE_VERSION`. All live profiles require an explicit source
+root and expected Git SHA; the installed root is resolved only from the
+isolated Claude registry. Release checks for a completely clean worktree at
+that exact HEAD before provisioning and after the suite, including untracked
+runtime files. Missing credentials, a wrong/ambiguous registry root, a
+different SHA, a dirty checkout, runtime drift, or a mismatched `system/init`
+session id fails rather than skipping.
 
 Authoritative Linux upgrade evidence runs on Ubuntu 24.04. Before Claude starts,
-the nightly and both release gates install and verify `bubblewrap` plus `socat`,
-apply Claude's documented `bwrap` AppArmor profile when unprivileged user
-namespaces are restricted, and execute basic and network-namespace sandbox
-probes. Any missing dependency, unexpected AppArmor state, or failed probe
-stops the paid gate.
+PR CI, the nightly matrix, and both release gates install and verify
+`bubblewrap` plus `socat`, apply Claude's documented `bwrap` AppArmor profile
+when unprivileged user namespaces are restricted, and execute basic and
+network-namespace sandbox probes. PR CI additionally starts the real contained
+fixture hook with evaluator-bound `CLAUDE_PLUGIN_DATA` and
+`CLAUDE_PROJECT_DIR`; it validates the nested Hook boundary without making a
+paid model request. Any missing dependency, unexpected AppArmor state, or
+failed probe stops the applicable check before a model request.
+Release and full-live validation use Claude Code `2.1.211` as their supported
+baseline. The nightly matrix retains that baseline lane and adds an
+upgrade-only compatibility lane on `2.1.217`; the additional full live suite
+does not run in the compatibility lane.
 
 The upgrade profile additionally requires
-`ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211`,
+`ZENSU_EXPECTED_CLAUDE_VERSION=<exact-evaluated-cli-version>`,
 `ZENSU_EXPECTED_SOURCE_ROOT=<clean-checkout>`, and
-`ZENSU_EXPECTED_SOURCE_REVISION=<exact-HEAD>`. Its authoritative mode forwards
-only an explicit API/OAuth token to Claude and uses an isolated `HOME`, config,
-plugin cache/data, and both conventional and Claude-internal temporary
-directories. `ZENSU_UPGRADE_EXISTING_LOGIN=1` is a macOS-only,
-non-authoritative local diagnostic. macOS Claude.ai credentials live in the
-Keychain identity selected by the default host config lookup, so this mode
-leaves `CLAUDE_CONFIG_DIR` unset for authentication only. It disables user,
-project, and local setting sources; pins each old/candidate process with its
-exact session-local `--plugin-dir`; redirects plugin cache/data/temp; disables
-session and prompt-history persistence; forwards only the non-secret `USER`
-and `LOGNAME` Keychain account selectors; and denies Bash reads from the host
-home through a mandatory fail-closed sandbox. Metadata-only canaries cover the
-host settings, installed registry, and plugin cache before and after every
-outcome. Claude may still update volatile startup/UI metadata in
-`~/.claude.json`; that file is outside this non-authoritative invariant. This
-diagnostic proves the real hooks and concurrent
-process lifetime, but not the marketplace-registry transition, publishes no
-evidence, and can never satisfy nightly or release gates. Linux and CI use the
-authoritative explicit-credential mode.
-The local `--plugin-dir` host may choose a different plugin-data identifier than
-the installed marketplace id. Diagnostic validation discovers the single
-Session Control record, requires its plugin-data directory to be one direct
-child of the isolated plugin-data parent, and then verifies the signed context
-against that exact directory. Authoritative installed-plugin evidence still
-requires the canonical `zensu-zensu` marketplace id.
+`ZENSU_EXPECTED_SOURCE_REVISION=<exact-HEAD>`. Its authoritative Linux mode
+gives the explicit API/OAuth token only to the plugin-free authentication
+canary. The canary is itself contained by outer `bubblewrap`, and its
+environment crosses the `--args` FD 3 boundary rather than argv. Operator
+customizations of the Anthropic base URL, proxy environment, or TLS trust roots
+are forbidden. Plugin installation/version probes and both lifecycle processes
+receive no live credential; the lifecycles receive only the harness-generated
+dummy key and evaluator-created URL for the deterministic loopback model
+backend. Both old and candidate Claude
+processes run in outer `bubblewrap` PID/mount namespaces with a bounded writable
+test root. Every old/candidate plugin hook command then runs inside a nested
+`bubblewrap` user/PID/network/mount namespace; the evaluator control directory
+and trace evidence are hidden from that hook. Its environment receives the
+evaluator-bound `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` values required
+by the production hook contract, while the evaluator-owned wrapper records
+paired start/end observations outside it. Process-tree cleanup and
+temporary-root removal must complete before the attestation is emitted.
+
+Real existing-login candidate execution is deliberately unsupported and fails
+closed. `ZENSU_UPGRADE_EXISTING_LOGIN=1` exists only inside the deterministic
+selftest with an exact hermetic test HOME. Its three Promptfoo rows validate a
+non-synthetic candidate and host-canary failure behavior, but run the fake CLI,
+publish no evidence, and cannot satisfy nightly or release gates.
 
 Claude's own direct-root `.in_use/<pid>` and `.orphaned_at` entries are the only
 cache lifecycle metadata excluded from payload byte snapshots. The provider
-requires a real `.in_use` directory, bounded numeric regular files, exactly the
-owning process PID while that process is alive, and complete active-marker
-removal after exit. It separately validates `.orphaned_at` as one regular,
+requires a real `.in_use` directory, bounded numeric regular files, exactly one
+active marker while each contained process is alive, and complete marker
+removal after exit. The deterministic fake additionally matches the marker to
+the directly observable host PID; the Linux PID namespace intentionally gives
+the real Claude process a different inner PID. The provider separately
+validates `.orphaned_at` as one regular,
 non-symlink 13-digit epoch-millisecond file whose payload and `mtime` fall in
 the bounded activation window, then requires an unchanged fingerprint. In the
-authoritative installed-plugin path and the macOS existing-login diagnostic,
-only the retired old root receives it while the active candidate remains
-marker-free. Every other old/candidate runtime entry remains byte-immutable.
+authoritative installed-plugin path only the retired old root receives it while
+the active candidate remains marker-free. Every other old/candidate runtime
+entry remains byte-immutable.
 Claude 2.1.217 emits one `system/init` record per streamed user turn. The
 provider therefore requires three matching init records for the three-turn old
 session while also proving one unchanged OS process PID/session ID throughout;
@@ -220,18 +264,6 @@ ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211 \
 ZENSU_EXPECTED_SOURCE_ROOT="$PWD" \
 ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)" \
 ANTHROPIC_API_KEY='...' \
-npm run session-control:upgrade
-```
-
-On macOS, to exercise only the current machine's existing Claude login, omit every
-evidence-directory variable and run the explicitly non-authoritative diagnostic:
-
-```bash
-ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 \
-ZENSU_UPGRADE_EXISTING_LOGIN=1 \
-ZENSU_EXPECTED_CLAUDE_VERSION="$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" \
-ZENSU_EXPECTED_SOURCE_ROOT="$PWD" \
-ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)" \
 npm run session-control:upgrade
 ```
 

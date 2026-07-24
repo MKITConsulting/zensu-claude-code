@@ -49,20 +49,22 @@ contains "Prepare paid gate has a bounded job timeout" "$PREPARE" 'timeout-minut
 contains "Publish paid gate has a bounded job timeout" "$PUBLISH" 'timeout-minutes: 120'
 
 CREATE_LINE="$(line_of "$WORKFLOW" '- name: Create release commit')"
+SANDBOX_LINE="$(line_of "$WORKFLOW" '- name: Prepare verified Claude Bash sandbox for release gate')"
 INSTALL_LINE="$(line_of "$WORKFLOW" '- name: Install pinned Claude Code CLI for release gate')"
 GATE_LINE="$(line_of "$WORKFLOW" '- name: Session Control release gate (created commit SHA)')"
 EVIDENCE_LINE="$(line_of "$WORKFLOW" '- name: Upload created-commit release evidence')"
 PUSH_LINE="$(line_of "$WORKFLOW" '- name: Push release branch + print PR link')"
 
-if [ -n "$CREATE_LINE" ] && [ -n "$INSTALL_LINE" ] && [ -n "$GATE_LINE" ] \
+if [ -n "$CREATE_LINE" ] && [ -n "$SANDBOX_LINE" ] && [ -n "$INSTALL_LINE" ] && [ -n "$GATE_LINE" ] \
   && [ -n "$EVIDENCE_LINE" ] && [ -n "$PUSH_LINE" ] \
-  && [ "$CREATE_LINE" -lt "$INSTALL_LINE" ] \
+  && [ "$CREATE_LINE" -lt "$SANDBOX_LINE" ] \
+  && [ "$SANDBOX_LINE" -lt "$INSTALL_LINE" ] \
   && [ "$INSTALL_LINE" -lt "$GATE_LINE" ] \
   && [ "$GATE_LINE" -lt "$EVIDENCE_LINE" ] \
   && [ "$EVIDENCE_LINE" -lt "$PUSH_LINE" ]; then
-  check "Prepare orders commit, pinned CLI, full gate, evidence, then push" PASS
+  check "Prepare orders commit, sandbox, pinned CLI, full gate, evidence, then push" PASS
 else
-  check "Prepare orders commit, pinned CLI, full gate, evidence, then push" FAIL
+  check "Prepare orders commit, sandbox, pinned CLI, full gate, evidence, then push" FAIL
 fi
 
 contains "Release commit exposes a stable step id" "$PREPARE" 'id: release_commit'
@@ -70,6 +72,7 @@ contains "Release commit exports its exact SHA" "$PREPARE" 'echo "sha=$RELEASE_S
 contains "Release commit must be clean" "$PREPARE" 'test -z "$(git status --porcelain=v1 --untracked-files=all)"'
 contains "Prepare installs the exact Claude Code CLI" "$PREPARE" 'npm install --global @anthropic-ai/claude-code@2.1.211'
 contains "Prepare verifies the exact Claude Code CLI" "$PREPARE" '= 2.1.211'
+contains "Prepare executes the verified Claude Bash sandbox helper" "$PREPARE" 'bash .github/scripts/prepare-claude-sandbox-linux.sh'
 contains "Prepare gate targets the created commit output" "$PREPARE" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ steps.release_commit.outputs.sha }}'
 contains "Prepare gate writes sanitized suite receipts into its SHA-bound artifact" "$PREPARE" 'ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-release-evidence/suites'
 not_contains "Prepare gate never substitutes the dispatch SHA" "$PREPARE" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}'
@@ -102,6 +105,7 @@ else
 fi
 
 contains "Publish installs the exact Claude Code CLI" "$PUBLISH" 'npm install --global @anthropic-ai/claude-code@2.1.211'
+contains "Publish executes the verified Claude Bash sandbox helper" "$PUBLISH" 'bash .github/scripts/prepare-claude-sandbox-linux.sh'
 contains "Publish gate targets the exact main SHA" "$PUBLISH" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}'
 contains "Publish gate writes sanitized suite receipts into its SHA-bound artifact" "$PUBLISH" 'ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-publish-evidence/suites'
 contains "Publish gate requires an explicit credential" "$PUBLISH" 'if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then'
@@ -124,6 +128,23 @@ contains "Draft metadata binds exact title" "$PUBLISH" 'and .name == $title'
 contains "Draft metadata binds exact generated notes body" "$PUBLISH" 'and .body == $body'
 contains "Draft metadata is normalized then re-read immediately before publish" "$PUBLISH" 'verify_metadata "$RELEASE" true false'
 not_contains "Release does not rely on a mutable third-party release action" "$PUBLISH" 'softprops/action-gh-release'
+
+PUBLISH_SANDBOX_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Prepare verified Claude Bash sandbox' | head -1 | cut -d: -f1)"
+PUBLISH_INSTALL_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Install pinned Claude Code CLI' | head -1 | cut -d: -f1)"
+PUBLISH_GATE_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Session Control publish gate (exact main SHA)' | head -1 | cut -d: -f1)"
+PUBLISH_EVIDENCE_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Upload exact-main-SHA publish evidence' | head -1 | cut -d: -f1)"
+PUBLISH_MUTATION_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Draft, attach, publish, and verify immutable release' | head -1 | cut -d: -f1)"
+if [ -n "$PUBLISH_SANDBOX_LINE" ] && [ -n "$PUBLISH_INSTALL_LINE" ] \
+  && [ -n "$PUBLISH_GATE_LINE" ] && [ -n "$PUBLISH_EVIDENCE_LINE" ] \
+  && [ -n "$PUBLISH_MUTATION_LINE" ] \
+  && [ "$PUBLISH_SANDBOX_LINE" -lt "$PUBLISH_INSTALL_LINE" ] \
+  && [ "$PUBLISH_INSTALL_LINE" -lt "$PUBLISH_GATE_LINE" ] \
+  && [ "$PUBLISH_GATE_LINE" -lt "$PUBLISH_EVIDENCE_LINE" ] \
+  && [ "$PUBLISH_EVIDENCE_LINE" -lt "$PUBLISH_MUTATION_LINE" ]; then
+  check "Publish orders sandbox, pinned CLI, full gate, evidence, then publication" PASS
+else
+  check "Publish orders sandbox, pinned CLI, full gate, evidence, then publication" FAIL
+fi
 
 UPLOAD_PIN='actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4'
 if [ "$(grep -Fc -- "$UPLOAD_PIN" "$WORKFLOW")" -eq 2 ]; then

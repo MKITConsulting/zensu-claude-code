@@ -38,7 +38,7 @@ test "$(git -C "$ROOT" rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION" \
 
 if [ "$MODE" = release ]; then
   test "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" != 1 \
-    || { echo 'session-control eval: release evidence forbids non-authoritative existing-login mode' >&2; exit 1; }
+    || { echo 'session-control eval: release evidence forbids existing-login candidate execution' >&2; exit 1; }
   bash "$EVAL_DIR/lib/release-preflight.sh" "$ROOT" "$ZENSU_EXPECTED_SOURCE_REVISION"
   bash "$EVAL_DIR/run-self-check.sh"
   bash "$EVAL_DIR/run-eval.sh" contract "$@"
@@ -58,9 +58,8 @@ if [ "$MODE" = upgrade ]; then
     *) echo 'session-control eval: expected Claude version is malformed' >&2; exit 1 ;;
   esac
   export ZENSU_EXPECTED_CLAUDE_VERSION
-  if [ "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" = 1 ] \
-    && [ -n "${ZENSU_SESSION_CONTROL_EVIDENCE_DIR:-}" ]; then
-    echo 'session-control eval: existing-login upgrade mode is a local diagnostic and cannot publish evidence' >&2
+  if [ "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" = 1 ]; then
+    echo 'session-control eval: existing-login candidate execution is unsupported; provide one explicit credential for the plugin-free auth canary' >&2
     exit 1
   fi
 fi
@@ -69,10 +68,8 @@ if [ "$MODE" != contract ]; then
   command -v claude >/dev/null 2>&1 || { echo 'session-control eval: claude CLI unavailable' >&2; exit 127; }
   test "${ZENSU_E2E_DISPOSABLE_ENVIRONMENT:-0}" = 1 \
     || { echo 'session-control eval: set ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 only on a disposable live-eval host' >&2; exit 64; }
-  if [ "$MODE" != upgrade ] || [ "${ZENSU_UPGRADE_EXISTING_LOGIN:-0}" != 1 ]; then
-    test -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" \
-      || { echo 'session-control eval: explicit Claude credentials unavailable' >&2; exit 1; }
-  fi
+  test -n "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" \
+    || { echo 'session-control eval: explicit Claude credentials unavailable' >&2; exit 1; }
 fi
 
 STATE="$(mktemp -d -t zensu-session-promptfoo-XXXXXX)"
