@@ -88,6 +88,7 @@ ESCAPE_SECRET="zensu-bwrap-fd3-canary-${RANDOM}-${RANDOM}-$$"
   --die-with-parent \
   --new-session \
   --ro-bind / / \
+  --dev /dev \
   --bind "$ESCAPE_PROBE_ROOT" "$ESCAPE_PROBE_ROOT" \
   --args 3 \
   -- /bin/sh -c \
@@ -168,6 +169,8 @@ test ! -e "$ESCAPE_SENTINEL"
   --die-with-parent \
   --new-session \
   --ro-bind / / \
+  --proc /proc \
+  --dev /dev \
   /usr/bin/bwrap \
     --unshare-user \
     --unshare-pid \
@@ -175,4 +178,6 @@ test ! -e "$ESCAPE_SENTINEL"
     --die-with-parent \
     --new-session \
     --ro-bind / / \
+    --proc /proc \
+    --dev /dev \
     /bin/true

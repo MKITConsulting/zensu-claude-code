@@ -494,6 +494,14 @@ if grep -Fq -- '--clearenv' <<<"$FD_PAYLOAD" \
 else
   check 'Linux sandbox helper limits FD3 to sensitive environment options' FAIL
 fi
+ESCAPE_HOST="$(
+  sed -n '/^\/usr\/bin\/bwrap \\/,/3< <(/p' "$SANDBOX_PREP"
+)"
+if grep -Fxq '  --dev /dev \' <<<"$ESCAPE_HOST"; then
+  check 'Linux sandbox escape probe provides a writable private dev mount' PASS
+else
+  check 'Linux sandbox escape probe provides a writable private dev mount' FAIL
+fi
 contains 'Linux sandbox helper audits the host Bubblewrap command line' \
   "$SANDBOX_PREP" \
   '"/proc/$ESCAPE_BWRAP_PID/cmdline"'
@@ -510,6 +518,14 @@ fi
 contains 'Linux sandbox helper executes a nested Bubblewrap probe' \
   "$SANDBOX_PREP" \
   '  /usr/bin/bwrap \'
+NESTED_PROBE="$(
+  sed -n '/^# Nested namespaces/,/    \/bin\/true/p' "$SANDBOX_PREP"
+)"
+if grep -Fxq '  --proc /proc \' <<<"$NESTED_PROBE"; then
+  check 'Nested Bubblewrap probe gives the inner namespace a writable proc control mount' PASS
+else
+  check 'Nested Bubblewrap probe gives the inner namespace a writable proc control mount' FAIL
+fi
 contains 'Nested Bubblewrap probe removes network access' \
   "$SANDBOX_PREP" \
   '    --unshare-net \'
