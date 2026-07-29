@@ -17,7 +17,10 @@ function parseCoverageRows(report) {
     hierarchy.length = indentation;
     hierarchy[indentation] = name;
     if (!/^[0-9]+(?:\.[0-9]+)?$/.test(lineCoverage)) continue;
-    const fullPath = hierarchy.slice(0, indentation + 1).join('/');
+    const fullPath = hierarchy
+      .slice(0, indentation + 1)
+      .join('/')
+      .replaceAll('\\', '/');
     if (!rows.has(fullPath)) rows.set(fullPath, []);
     rows.get(fullPath).push(Number(lineCoverage));
   }

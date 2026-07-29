@@ -46,3 +46,35 @@ test('keeps same-named coverage rows separated by their complete paths', () => {
     [95],
   );
 });
+
+test('normalizes Windows coverage paths to repository separators', () => {
+  const rows = parseCoverageRows([
+    '# evals\\session-control\\lib\\safe-file-read.js |  90.43 |    84.00 |  100.00 |',
+    'ℹ evals\\session-control\\lib\\upgrade-process.js |  90.80 |    88.00 |  100.00 |',
+  ].join('\n'));
+
+  assert.deepEqual(
+    rows.get('evals/session-control/lib/safe-file-read.js'),
+    [90.43],
+  );
+  assert.deepEqual(
+    rows.get('evals/session-control/lib/upgrade-process.js'),
+    [90.8],
+  );
+});
+
+test('keeps mixed-separator duplicate rows fail closed after normalization', () => {
+  const rows = parseCoverageRows([
+    '# evals\\session-control\\lib\\safe-file-read.js |  90.43 |    84.00 |  100.00 |',
+    '# evals/session-control/lib/safe-file-read.js  |  91.25 |    85.00 |  100.00 |',
+  ].join('\n'));
+
+  assert.deepEqual(
+    rows.get('evals/session-control/lib/safe-file-read.js'),
+    [90.43, 91.25],
+  );
+  assert.equal(
+    rows.has('evals\\session-control\\lib\\safe-file-read.js'),
+    false,
+  );
+});
