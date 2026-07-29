@@ -248,15 +248,14 @@ function captureHookIntegrity(root, basename) {
     const stable = readStableRegularFile(target, {
       minBytes: 1,
       maxBytes: 8 * 1024 * 1024,
+      bigint: true,
     });
     const after = fs.lstatSync(target, { bigint: true });
     const physicalAfter = fs.realpathSync.native(target);
     if (!after.isFile() || after.isSymbolicLink()
         || physicalAfter !== physical
         || !sameBigIntFileIdentity(before, after)
-        || BigInt(stable.stat.dev) !== after.dev
-        || BigInt(stable.stat.ino) !== after.ino
-        || BigInt(stable.stat.size) !== after.size) {
+        || !sameBigIntFileIdentity(stable.stat, after)) {
       throw new Error('hook target changed');
     }
     return {

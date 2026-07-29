@@ -8,6 +8,17 @@ const path = require('node:path');
 const test = require('node:test');
 const { readStableRegularFile } = require('../lib/safe-file-read.js');
 
+function withInode(stat, exactInode) {
+  const inode = typeof stat.ino === 'bigint' ? exactInode : Number(exactInode);
+  return new Proxy(stat, {
+    get(target, property) {
+      if (property === 'ino') return inode;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 test('reads a bounded regular file through one validated descriptor', () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-safe-read-'));
   try {
@@ -16,6 +27,34 @@ test('reads a bounded regular file through one validated descriptor', () => {
     const value = readStableRegularFile(file, { maxBytes: 13 });
     assert.equal(value.buffer.toString('utf8'), '1234567890123');
     assert.equal(value.stat.size, 13);
+    const exact = readStableRegularFile(file, { maxBytes: 13, bigint: true });
+    assert.equal(exact.buffer.toString('utf8'), '1234567890123');
+    assert.equal(exact.stat.size, 13n);
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test('rejects descriptor identity changes hidden by Number inode rounding', (context) => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-safe-read-bigint-'));
+  const file = path.join(temporary, 'payload');
+  fs.writeFileSync(file, 'x', { mode: 0o600 });
+  const originalLstatSync = fs.lstatSync.bind(fs);
+  const originalFstatSync = fs.fstatSync.bind(fs);
+  const pathnameInode = 9007199254740992n;
+  const descriptorInode = 9007199254740993n;
+  context.mock.method(fs, 'lstatSync', (target, options) => (
+    withInode(originalLstatSync(target, options), pathnameInode)
+  ));
+  context.mock.method(fs, 'fstatSync', (descriptor, options) => (
+    withInode(originalFstatSync(descriptor, options), descriptorInode)
+  ));
+  try {
+    assert.equal(Number(pathnameInode), Number(descriptorInode));
+    assert.throws(
+      () => readStableRegularFile(file, { maxBytes: 1 }),
+      /changed during inspection/,
+    );
   } finally {
     fs.rmSync(temporary, { recursive: true, force: true });
   }

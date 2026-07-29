@@ -514,6 +514,16 @@ test('rejects unsafe paths, environments, and working-directory escapes', () => 
     runtime: fakeFs(),
   }), /invocation contract is invalid/);
   assert.throws(() => buildBubblewrapInvocation({
+    command: 'C:\\usr\\bin\\node',
+    args: [],
+    cwd: '/tmp/eval/project',
+    disposableRoot: '/tmp/eval',
+    writableRoots: ['/tmp/eval'],
+    environment: {},
+    platform: 'linux',
+    runtime: fakeFs(),
+  }), /invocation contract is invalid/);
+  assert.throws(() => buildBubblewrapInvocation({
     command: '/usr/bin/node',
     args: [],
     cwd: '/tmp/eval/project',
@@ -677,6 +687,12 @@ test('mounts opt only for a real command or resolved native runtime under opt', 
       '/opt/node/bin/node': ELF_HEADER,
     },
   });
+  const inspectedPaths = [];
+  const shebangLstatSync = shebangRuntime.lstatSync;
+  shebangRuntime.lstatSync = (file) => {
+    inspectedPaths.push(file);
+    return shebangLstatSync(file);
+  };
   const interpreted = buildBubblewrapInvocation({
     command: '/usr/local/lib/claude.js',
     args: [],
@@ -688,6 +704,8 @@ test('mounts opt only for a real command or resolved native runtime under opt', 
     runtime: shebangRuntime,
   });
   assert.equal(interpreted.args.includes('/opt'), true);
+  assert.equal(inspectedPaths.includes('/opt/node/bin/node'), true);
+  assert.equal(inspectedPaths.some((file) => file.includes('\\')), false);
 });
 
 test('fails closed for unresolved, indirect, or non-native command runtimes', () => {

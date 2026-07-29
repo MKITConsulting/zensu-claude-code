@@ -118,6 +118,40 @@ test('kills the complete POSIX group after a trusted synchronous helper timeout'
   assert.deepEqual(signals, [{ pid: -424242, signal: 'SIGKILL' }]);
 });
 
+test('rejects a trusted synchronous helper reported as signalled on every host', () => {
+  const signalled = runtime(
+    'win32',
+    () => {},
+    () => ({ status: null, signal: 'SIGTERM' }),
+  );
+  assert.throws(() => runSyncBounded(
+    'trusted-helper',
+    [],
+    {},
+    {
+      label: 'signalled fixture',
+      timeoutMs: 1000,
+      trustedEvaluatorCommand: true,
+      runtime: signalled,
+    },
+  ), /signalled fixture ended by signal/);
+});
+
+test('propagates a real signal through the default POSIX synchronous runtime', {
+  skip: process.platform === 'win32',
+}, () => {
+  assert.throws(() => runSyncBounded(
+    process.execPath,
+    ['-e', "process.kill(process.pid, 'SIGTERM')"],
+    {},
+    {
+      label: 'POSIX signalled fixture',
+      timeoutMs: 1000,
+      trustedEvaluatorCommand: true,
+    },
+  ), /POSIX signalled fixture ended by signal/);
+});
+
 test('rejects invalid synchronous and process-tree invocations', async () => {
   assert.throws(() => runSyncBounded(
     '',
@@ -139,16 +173,6 @@ test('rejects invalid synchronous and process-tree invocations', async () => {
       trustedEvaluatorCommand: true,
     },
   ), /missing fixture could not start or complete/);
-  assert.throws(() => runSyncBounded(
-    process.execPath,
-    ['-e', "process.kill(process.pid, 'SIGTERM')"],
-    {},
-    {
-      label: 'signalled fixture',
-      timeoutMs: 1000,
-      trustedEvaluatorCommand: true,
-    },
-  ), /signalled fixture ended by signal/);
   assert.throws(
     () => spawnProcessTree('', [], {}, { label: 'invalid fixture' }),
     /process-tree invocation is invalid/,

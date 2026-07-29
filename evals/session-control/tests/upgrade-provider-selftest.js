@@ -16,6 +16,15 @@ const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-upgrade-provider-
 const source = path.join(temporary, 'source');
 const fakeClaude = path.join(temporary, 'fake-claude.js');
 const verifier = path.join(root, 'evals', 'session-control', 'lib', 'verify-upgrade-results.js');
+const PROVIDER_CASE_TIMEOUT_MS = 60000;
+const PROMPTFOO_PROCESS_OVERHEAD_MS = 60000;
+
+function promptfooMatrixTimeout(caseCount) {
+  assert.equal(Number.isSafeInteger(caseCount) && caseCount > 0, true);
+  const timeout = (caseCount * PROVIDER_CASE_TIMEOUT_MS) + PROMPTFOO_PROCESS_OVERHEAD_MS;
+  assert.equal(Number.isSafeInteger(timeout), true);
+  return timeout;
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: 'utf8', ...options });
@@ -700,7 +709,7 @@ const result=spawnSync(process.execPath,[${JSON.stringify(provider)},...process.
     ZENSU_UPGRADE_EXISTING_LOGIN:existingLogin?'1':'0',
     ZENSU_UPGRADE_TEST_EXISTING_LOGIN_HOME:existingLogin?existingLoginHome:'',
     HOME:existingLogin?existingLoginHome:process.env.HOME,
-  },timeout:60000,
+  },timeout:${PROVIDER_CASE_TIMEOUT_MS},
 });
 if(!fault){process.stdout.write(result.stdout||'');process.stderr.write(result.stderr||'');process.exit(result.status??1);}
 if(result.status===0||(result.stdout||'').includes('[control-upgrade-attestation]')){
@@ -747,7 +756,7 @@ process.stdout.write('EXPECTED_FAIL_CLOSED:'+fault+'\\n');
   ], {
     encoding: 'utf8',
     env: { ...providerEnvironment(), PROMPTFOO_CONFIG_DIR: promptfooConfigHome },
-    timeout: 180000,
+    timeout: promptfooMatrixTimeout(faults.length + 1),
     shell: process.platform === 'win32',
   });
   assert.equal(promptfooRun.status, 0, `${promptfooRun.stderr || ''}\n${promptfooRun.stdout || ''}`);
@@ -843,7 +852,7 @@ process.stdout.write('EXPECTED_FAIL_CLOSED:'+fault+'\\n');
   ], {
     encoding: 'utf8',
     env: { ...providerEnvironment(), PROMPTFOO_CONFIG_DIR: promptfooConfigHome },
-    timeout: 180000,
+    timeout: promptfooMatrixTimeout(existingLoginFaults.length + 1),
     shell: process.platform === 'win32',
   });
   assert.equal(

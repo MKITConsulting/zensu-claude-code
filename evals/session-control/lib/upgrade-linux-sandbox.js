@@ -2,7 +2,7 @@
 'use strict';
 
 const fs = require('node:fs');
-const path = require('node:path');
+const { posix: linuxPath } = require('node:path');
 const { CLAUDE_CREDENTIAL_NAMES, credentialFreeEnvironment } = require('./upgrade-environment.js');
 
 class UpgradeLinuxSandboxError extends Error {}
@@ -45,7 +45,7 @@ function sameExecutableIdentity(left, right) {
 }
 
 function captureCanonicalDirectory(input, label, runtime = fs) {
-  if (typeof input !== 'string' || !path.isAbsolute(input) || /[\0\r\n]/.test(input)) {
+  if (typeof input !== 'string' || !linuxPath.isAbsolute(input) || /[\0\r\n]/.test(input)) {
     throw sandboxError(`${label} is invalid`);
   }
   let before;
@@ -96,7 +96,7 @@ function revalidateDirectoryIdentity(identity, label, runtime, owned = false) {
 }
 
 function captureCanonicalExecutable(input, label, runtime = fs) {
-  if (typeof input !== 'string' || !path.isAbsolute(input) || /[\0\r\n]/.test(input)) {
+  if (typeof input !== 'string' || !linuxPath.isAbsolute(input) || /[\0\r\n]/.test(input)) {
     throw sandboxError(`${label} is invalid`);
   }
   let before;
@@ -268,9 +268,9 @@ function readExecutableHeader(identity, label, runtime) {
 }
 
 function inside(parent, child) {
-  const relative = path.relative(parent, child);
-  return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`)
-    && !path.isAbsolute(relative));
+  const relative = linuxPath.relative(parent, child);
+  return relative === '' || (relative !== '..' && !relative.startsWith(`..${linuxPath.sep}`)
+    && !linuxPath.isAbsolute(relative));
 }
 
 function requireExecutableRoot(identity, label) {
@@ -286,10 +286,10 @@ function resolvePathExecutable(name, environment, runtime) {
     throw sandboxError('command runtime cannot be resolved');
   }
   for (const directory of environment.PATH.split(':')) {
-    if (!directory || !path.isAbsolute(directory) || /[\0\r\n]/.test(directory)) {
+    if (!directory || !linuxPath.isAbsolute(directory) || /[\0\r\n]/.test(directory)) {
       throw sandboxError('command runtime PATH is unsafe');
     }
-    const candidate = path.join(directory, name);
+    const candidate = linuxPath.join(directory, name);
     try {
       runtime.lstatSync(candidate);
     } catch (error) {
@@ -323,7 +323,7 @@ function resolveCommandRuntime(command, environment, runtime) {
     }
     runtimeExecutable = resolvePathExecutable(tokens[1], environment, runtime);
   } else {
-    if (!path.isAbsolute(tokens[0]) || tokens.length !== 1) {
+    if (!linuxPath.isAbsolute(tokens[0]) || tokens.length !== 1) {
       throw sandboxError('command shebang is unsupported');
     }
     runtimeExecutable = captureCanonicalExecutable(
@@ -418,7 +418,7 @@ function buildBubblewrapInvocation({
   runtime = fs,
 } = {}) {
   const executable = requireBubblewrap({ platform, runtime });
-  if (typeof command !== 'string' || !path.isAbsolute(command) || /[\0\r\n]/.test(command)
+  if (typeof command !== 'string' || !linuxPath.isAbsolute(command) || /[\0\r\n]/.test(command)
       || !Array.isArray(args) || args.some((entry) => typeof entry !== 'string' || /[\0]/.test(entry))
       || typeof disposableRoot !== 'string'
       || !Array.isArray(writableRoots) || writableRoots.length === 0

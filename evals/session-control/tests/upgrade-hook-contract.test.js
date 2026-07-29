@@ -36,6 +36,17 @@ function hook(name) {
   return { type: 'command', command: command(name) };
 }
 
+function withInode(stat, exactInode) {
+  const inode = typeof stat.ino === 'bigint' ? exactInode : Number(exactInode);
+  return new Proxy(stat, {
+    get(target, property) {
+      if (property === 'ino') return inode;
+      const value = Reflect.get(target, property, target);
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+}
+
 function fixture(preToolCommand = command('pre-reviewer-capability-gate.sh')) {
   const cacheParent = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-hook-contract-'));
   const root = path.join(cacheParent, '0.17.0');
@@ -300,6 +311,34 @@ test('attests every observed hook identity and rejects replace-and-restore tampe
     assert.throws(
       () => verifyCapturedHookContract(root, contract),
       /hook target changed after capture/,
+    );
+  } finally {
+    removeFixture(root);
+  }
+});
+
+test('attests exact hook identities beyond Number inode precision', (context) => {
+  const root = fixture();
+  const hooksRoot = `${path.join(fs.realpathSync.native(root), 'hooks')}${path.sep}`;
+  const exactInode = 9007199254740993n;
+  const originalLstatSync = fs.lstatSync.bind(fs);
+  const originalFstatSync = fs.fstatSync.bind(fs);
+  context.mock.method(fs, 'lstatSync', (target, options) => {
+    const stat = originalLstatSync(target, options);
+    return stat.isFile() && String(target).startsWith(hooksRoot)
+      ? withInode(stat, exactInode)
+      : stat;
+  });
+  context.mock.method(fs, 'fstatSync', (descriptor, options) => {
+    const stat = originalFstatSync(descriptor, options);
+    return stat.isFile() ? withInode(stat, exactInode) : stat;
+  });
+  try {
+    const contract = captureEvaluatorOwnedHookContract(root);
+    assert.equal(verifyCapturedHookContract(root, contract), true);
+    assert.equal(
+      contract.hookIntegrity.every(({ ino }) => ino === String(exactInode)),
+      true,
     );
   } finally {
     removeFixture(root);

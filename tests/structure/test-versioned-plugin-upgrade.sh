@@ -140,6 +140,55 @@ tree_digest() {
   '
 }
 
+runtime_roots_are_safe() {
+  node -e '
+    const fs = require("node:fs");
+    const path = require("node:path");
+    const [parentInput, ...rootPairs] = process.argv.slice(1);
+    const normalize = (value) => {
+      const normalized = path.normalize(value);
+      return process.platform === "win32" ? normalized.toLowerCase() : normalized;
+    };
+    const captureDirectory = (input) => {
+      const absolute = path.resolve(input);
+      const before = fs.lstatSync(absolute, { bigint: true });
+      const canonical = fs.realpathSync.native(absolute);
+      const after = fs.lstatSync(absolute, { bigint: true });
+      if (!before.isDirectory() || before.isSymbolicLink()
+          || !after.isDirectory() || after.isSymbolicLink()
+          || before.dev !== after.dev || before.ino !== after.ino
+          || normalize(canonical) !== normalize(absolute)) {
+        throw new Error("unsafe runtime directory identity");
+      }
+      return canonical;
+    };
+    try {
+      if (!parentInput || rootPairs.length === 0 || rootPairs.length % 2 !== 0) {
+        throw new Error("invalid runtime-root arguments");
+      }
+      const parent = captureDirectory(parentInput);
+      const roots = [];
+      for (let index = 0; index < rootPairs.length; index += 2) {
+        const root = captureDirectory(rootPairs[index]);
+        const version = rootPairs[index + 1];
+        const relative = path.relative(parent, root);
+        const basename = path.basename(root);
+        const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        if (!relative || relative !== basename || path.isAbsolute(relative)
+            || !new RegExp(`^\\.zensu-runtime-v${escapedVersion}-[a-f0-9]{48}$`).test(basename)) {
+          throw new Error("runtime root is not one unpredictable direct child");
+        }
+        roots.push(normalize(root));
+      }
+      if (new Set(roots).size !== roots.length) {
+        throw new Error("runtime roots are not distinct");
+      }
+    } catch (_error) {
+      process.exitCode = 1;
+    }
+  ' "$@"
+}
+
 SYNTHETIC_EXISTING_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.16.1 "$ROOT_REVISION"
 )"
@@ -149,11 +198,10 @@ SYNTHETIC_CANDIDATE_ROOT="$(
 )"
 EXISTING_AFTER="$(tree_digest "$SYNTHETIC_EXISTING_ROOT")"
 
-if [ "$SYNTHETIC_EXISTING_ROOT" != "$SYNTHETIC_CANDIDATE_ROOT" ] \
-    && [ "$(dirname "$SYNTHETIC_EXISTING_ROOT")" = "$SYNTHETIC_CACHE_PARENT" ] \
-    && [ "$(dirname "$SYNTHETIC_CANDIDATE_ROOT")" = "$SYNTHETIC_CACHE_PARENT" ] \
-    && [ "$(basename "$SYNTHETIC_EXISTING_ROOT")" != 0.16.1 ] \
-    && [ "$(basename "$SYNTHETIC_CANDIDATE_ROOT")" != 0.17.0 ] \
+if runtime_roots_are_safe \
+      "$SYNTHETIC_CACHE_PARENT" \
+      "$SYNTHETIC_EXISTING_ROOT" 0.16.1 \
+      "$SYNTHETIC_CANDIDATE_ROOT" 0.17.0 \
     && [ "$EXISTING_BEFORE" = "$EXISTING_AFTER" ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_EXISTING_ROOT/.claude-plugin/plugin.json")" = 0.16.1 ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SYNTHETIC_CANDIDATE_ROOT/.claude-plugin/plugin.json")" = 0.17.0 ] \
@@ -166,7 +214,10 @@ fi
 SECOND_EXISTING_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.16.1 "$ROOT_REVISION"
 )"
-if [ "$SECOND_EXISTING_ROOT" != "$SYNTHETIC_EXISTING_ROOT" ] \
+if runtime_roots_are_safe \
+      "$SYNTHETIC_CACHE_PARENT" \
+      "$SYNTHETIC_EXISTING_ROOT" 0.16.1 \
+      "$SECOND_EXISTING_ROOT" 0.16.1 \
     && [ "$EXISTING_BEFORE" = "$(tree_digest "$SYNTHETIC_EXISTING_ROOT")" ] \
     && [ "$(node -p 'require(process.argv[1]).version' "$SECOND_EXISTING_ROOT/.claude-plugin/plugin.json")" = 0.16.1 ]; then
   check "repeated installs allocate a new root without replacing an existing runtime" PASS
