@@ -4,9 +4,13 @@
 #   implComplete && codeReviewDone && !chainDone -> block, force Skill zensu:self-review (NEW)
 #   chainDone                                 -> allow (self-review owns the terminus)
 #   selfReview later disabled + codeReviewDone -> still force the frozen self-review handoff
-#   codeReviewDone + unbindable consumed ticket -> block on the repair branch, never a terminus
+#   codeReviewDone + unbindable consumed ticket -> block on the repair branch, never a terminus,
+#                                                and a recovery that can actually bind (/zensu:tdd,
+#                                                not /zensu:reset-review-limit)
 # Every inner-chain block reason also carries the mode-aware state legend
-# (`Session state: mode=vanilla|strict, implComplete=..., chainDone=...`).
+# (`Session state: mode=vanilla|strict, implComplete=..., chainDone=...`). The
+# standalone code-reviewer branch teaches its zero-change escape as
+# worktree-verified; the bound branch as an audited Autopilot outcome.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -69,6 +73,14 @@ if printf '%s' "$OUT1" | reason | grep -qF "$PLUGIN_DIR/hooks/lib/zensu-log.sh" 
   check "T2a code-review reason embeds the concrete session plugin root" PASS
 else
   check "T2a code-review reason embeds the concrete session plugin root" FAIL
+fi
+REASON1="$(printf '%s' "$OUT1" | reason)"
+if printf '%s' "$REASON1" | grep -qF 'That terminus verifies the claim before it closes anything' \
+  && printf '%s' "$REASON1" | grep -qF 'untracked non-ignored file still reports a changed file' \
+  && ! printf '%s' "$REASON1" | grep -qF 'audited Autopilot outcome'; then
+  check "T2b standalone zero-change escape is taught as worktree-verified, not audited" PASS
+else
+  check "T2b standalone zero-change escape is taught as worktree-verified, not audited" FAIL
 fi
 
 # --- Scenario 2: codeReviewDone=true -> force self-review (NEW) ---
@@ -265,12 +277,19 @@ OUT6="$(stop_run '{"session_id":"'"$SID6_RAW"'"}')"
 REASON6="$(printf '%s' "$OUT6" | reason)"
 if [ "$(printf '%s' "$OUT6" | decision)" = "block" ] \
   && printf '%s' "$REASON6" | grep -qF 'no valid consumed review ticket can bind' \
-  && printf '%s' "$REASON6" | grep -qF '/zensu:reset-review-limit' \
   && ! printf '%s' "$REASON6" | grep -q "skill='zensu:self-review'" \
   && ! printf '%s' "$REASON6" | grep -qF -- '--chain-done'; then
   check "T10 unbindable consumed ticket -> repair branch, no self-review handoff, no runnable terminus" PASS
 else
   check "T10 unbindable consumed ticket -> repair branch, no self-review handoff, no runnable terminus" FAIL
+fi
+if printf '%s' "$REASON6" | grep -qF '/zensu:reset-review-limit cannot repair this state' \
+  && printf '%s' "$REASON6" | grep -qF 'rebinds a RETAINED consumed ticket' \
+  && printf '%s' "$REASON6" | grep -qF 'Re-enter /zensu:tdd for the current task' \
+  && printf '%s' "$REASON6" | grep -qF "resets this session's review ticket, round counter, and chain flags"; then
+  check "T12 repair branch names a recovery that can actually bind (not reset-review-limit)" PASS
+else
+  check "T12 repair branch names a recovery that can actually bind (not reset-review-limit)" FAIL
 fi
 if printf '%s' "$REASON6" | grep -qF 'Session state: mode=vanilla, implComplete=true, chainDone=false.' \
   && printf '%s' "$REASON6" | grep -qF 'the RED/GREEN FSM is not driven' \

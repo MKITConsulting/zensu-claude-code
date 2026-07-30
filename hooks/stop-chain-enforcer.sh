@@ -664,6 +664,7 @@ PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
 INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
+INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file, so it can never stand in for a review of real changes."
 INNER_SELF_REVIEW_ENVELOPE=" "
 INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
 INNER_REVIEW_SUFFIX=", followed by"
@@ -673,6 +674,7 @@ if [ -n "$INNER_BOUND_RUN" ]; then
   INNER_BOUND_CHAIN_Q="$(printf '%q' "$INNER_BOUND_CHAIN")"
   INNER_BOUND_ARGS=" --autopilot-run ${INNER_BOUND_RUN_Q} --autopilot-attempt ${INNER_BOUND_ATTEMPT_Q} --chain-id ${INNER_BOUND_CHAIN_Q}"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
+  INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines:\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_SUFFIX="followed by"
@@ -683,11 +685,11 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
     REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
   else
-    REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. Run /zensu:reset-review-limit for this current session, then resume the reviewer chain with a fresh ticket."
+    REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. /zensu:reset-review-limit cannot repair this state either — it rebinds a RETAINED consumed ticket, which is exactly what is missing here. Re-enter /zensu:tdd for the current task instead: its fresh --tdd-begin resets this session's review ticket, round counter, and chain flags in one transition, so the reviewer chain can run again and its terminus can bind."
   fi
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 fi
 

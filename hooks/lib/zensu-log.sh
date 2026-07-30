@@ -546,6 +546,19 @@ case "${1:-}" in
             if [ "$claimed_ticket_seen" = "true" ]; then
               tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || exit $?
             else
+              chain_change_count="unknown"
+              if command -v git >/dev/null 2>&1 \
+                && [ "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] \
+                && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+                chain_change_count="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
+                  git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null
+                } | awk 'NF{n++} END{print n+0}')"
+                case "$chain_change_count" in ''|*[!0-9]*) chain_change_count="unknown" ;; esac
+              fi
+              if [ "$chain_change_count" != "unknown" ] && [ "$chain_change_count" != "0" ]; then
+                echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. No review ticket was ever consumed in this chain, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain." >&2
+                exit 1
+              fi
               tdd_mark_unclaimed_review "$session_val" chainDone || exit $?
             fi
           fi
