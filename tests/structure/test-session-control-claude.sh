@@ -517,15 +517,28 @@ else
   check "zensu-log reports every missing precondition, in the binder's order" FAIL
 fi
 
-mkdir -p "$TMP/nodeless"
-for NODELESS_BIN in dirname uname; do
-  NODELESS_PATH="$(command -v "$NODELESS_BIN")"
-  [ -n "$NODELESS_PATH" ] && ln -sf "$NODELESS_PATH" "$TMP/nodeless/$NODELESS_BIN"
+NODELESS_PATH=""
+NODELESS_OLD_IFS="$IFS"
+IFS=:
+for NODELESS_DIR in $PATH; do
+  [ -n "$NODELESS_DIR" ] || continue
+  if [ -x "$NODELESS_DIR/node" ] || [ -x "$NODELESS_DIR/node.exe" ] \
+    || [ -x "$NODELESS_DIR/node.cmd" ] || [ -x "$NODELESS_DIR/node.bat" ]; then
+    continue
+  fi
+  NODELESS_PATH="${NODELESS_PATH:+$NODELESS_PATH:}$NODELESS_DIR"
 done
-env PATH="$TMP/nodeless" CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
-  CLAUDE_CODE_SESSION_ID="$SID_A" /bin/bash "$ROOT/hooks/lib/zensu-log.sh" --session-key \
+IFS="$NODELESS_OLD_IFS"
+NODELESS_BASH="$(command -v bash)"
+env PATH="$NODELESS_PATH" CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_CODE_SESSION_ID="$SID_A" "$NODELESS_BASH" "$ROOT/hooks/lib/zensu-log.sh" --session-key \
     >"$TMP/no-node.out" 2>"$TMP/no-node.err"
 NO_NODE_RC=$?
+if env PATH="$NODELESS_PATH" "$NODELESS_BASH" -c 'command -v node' >/dev/null 2>&1; then
+  check "nodeless PATH fixture actually removes node" FAIL
+else
+  check "nodeless PATH fixture actually removes node" PASS
+fi
 if [ "$NO_NODE_RC" -eq 2 ] \
   && grep -qF 'rendered Session Control binding unavailable' "$TMP/no-node.err" \
   && grep -qF 'node is not on PATH' "$TMP/no-node.err" \

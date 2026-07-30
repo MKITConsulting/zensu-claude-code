@@ -5,9 +5,9 @@
 #   B0 healthy bound session                   -> still blocks (control)
 #   B1 recorded project root deleted           -> binding fails: cause on stderr, remedies named,
 #                                                 and ZENSU_CHAIN=off actually releases it
-#   B2 root replaced, ZENSU_CHAIN=off          -> release
-#   B3 root replaced, chainEnforcer=false      -> release
-#   B4 root replaced, no opt-out               -> block, cause named, no bypass in the reason
+#   B3 same session, chainEnforcer=false       -> release
+#   B4 root replaced by a symlink, no opt-out  -> block, cause named, no bypass in the reason
+#                                                 (skipped where directory symlinks are unavailable)
 #   B5 block reasons stay field-free           -> no interpolation in any emit payload
 # The release switches used to be unreachable here: they are read ~300 lines
 # below these blocks, so a session whose worktree was deleted could never end a
@@ -112,7 +112,26 @@ else
   check "B1c deleted-root release (out=$OUT1B err='$(cat "$ERR1B" 2>/dev/null)')" FAIL
 fi
 
-# --- root replaced by a symlink: resolvable path, unusable record ---
+# --- B3 the config switch reaches the same unbindable state ---
+CFG_OFF="$STATE_DIR/enforcer-off.json"
+printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
+ERR3="$STATE_DIR/b3.err"
+OUT3="$(stop_run stop-bind-deleted "$ERR3" "ZENSU_CONFIG=$CFG_OFF")"
+if [ "$(printf '%s' "$OUT3" | decision)" = "allow" ] \
+  && grep -qF "hooks.chainEnforcer=false is configured" "$ERR3"; then
+  check "B3 hooks.chainEnforcer=false releases the same deleted-root session" PASS
+else
+  check "B3 chainEnforcer=false (out=$OUT3 err='$(cat "$ERR3" 2>/dev/null)')" FAIL
+fi
+
+# --- root replaced by a symlink: a resolvable path with an unusable record.
+# Windows without developer mode cannot create one, so probe before relying on it.
+SYMLINK_OK=true
+if ! ln -s "$STATE_DIR" "$STATE_DIR/symlink-probe" 2>/dev/null || [ ! -L "$STATE_DIR/symlink-probe" ]; then
+  SYMLINK_OK=false
+fi
+rm -f "$STATE_DIR/symlink-probe" 2>/dev/null
+
 replace_root_with_symlink() {
   local root="$1"
   mv "$root" "${root}.real" || return 1
@@ -120,35 +139,10 @@ replace_root_with_symlink() {
   [ -L "$root" ] && [ -d "$root" ]
 }
 
-# --- B2 ZENSU_CHAIN=off is reachable in the unbindable state ---
-arm stop-bind-chain-off || { echo "B2 fixture failed" >&2; exit 1; }
-ROOT2="$ARMED_ROOT"
-replace_root_with_symlink "$ROOT2" || { echo "B2 fixture: symlink swap failed" >&2; exit 1; }
-ERR2="$STATE_DIR/b2.err"
-OUT2="$(stop_run stop-bind-chain-off "$ERR2" ZENSU_CHAIN=off)"
-if [ "$(printf '%s' "$OUT2" | decision)" = "allow" ] \
-  && grep -qF "ZENSU_CHAIN=off is set explicitly" "$ERR2"; then
-  check "B2 ZENSU_CHAIN=off releases an unresolvable binding" PASS
-else
-  check "B2 ZENSU_CHAIN=off (out=$OUT2 err='$(cat "$ERR2" 2>/dev/null)')" FAIL
-fi
-
-# --- B3 hooks.chainEnforcer=false is reachable in the unbindable state ---
-arm stop-bind-cfg-off || { echo "B3 fixture failed" >&2; exit 1; }
-ROOT3="$ARMED_ROOT"
-replace_root_with_symlink "$ROOT3" || { echo "B3 fixture: symlink swap failed" >&2; exit 1; }
-CFG_OFF="$STATE_DIR/enforcer-off.json"
-printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
-ERR3="$STATE_DIR/b3.err"
-OUT3="$(stop_run stop-bind-cfg-off "$ERR3" "ZENSU_CONFIG=$CFG_OFF")"
-if [ "$(printf '%s' "$OUT3" | decision)" = "allow" ] \
-  && grep -qF "hooks.chainEnforcer=false is configured" "$ERR3"; then
-  check "B3 hooks.chainEnforcer=false releases an unresolvable binding" PASS
-else
-  check "B3 chainEnforcer=false (out=$OUT3 err='$(cat "$ERR3" 2>/dev/null)')" FAIL
-fi
-
 # --- B4 without an opt-out it still blocks, but says which cause and how to fix ---
+if [ "$SYMLINK_OK" != true ]; then
+  check "B4 unusable-record branch skipped: this platform cannot create directory symlinks" PASS
+else
 arm stop-bind-record || { echo "B4 fixture failed" >&2; exit 1; }
 ROOT4="$ARMED_ROOT"
 replace_root_with_symlink "$ROOT4" || { echo "B4 fixture: symlink swap failed" >&2; exit 1; }
@@ -175,6 +169,7 @@ if printf '%s' "$REASON4" | grep -qF 'Zensu Stop denied: the immutable Session C
   check "B4b the single all-causes reason was replaced by a specific one" PASS
 else
   check "B4b cause-specific reason (reason='$REASON4')" FAIL
+fi
 fi
 
 # --- B5 every binding block payload stays field-free ---
