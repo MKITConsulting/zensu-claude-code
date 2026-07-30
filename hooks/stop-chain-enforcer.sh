@@ -34,8 +34,33 @@ emit_inner_runtime_unavailable_block() {
   printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: project-local inner state exists but the required runtime is unavailable."}'
 }
 
-emit_session_binding_unavailable_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable main-session binding is unavailable, so review-chain and Autopilot completion cannot be proven."}'
+emit_session_runtime_missing_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the Session Control library is missing from this plugin installation, so review-chain and Autopilot completion cannot be proven. Repair the Zensu plugin installation, then retry; /zensu:doctor reports plugin integrity."}'
+}
+
+emit_session_bind_failed_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. The Session Control binder printed the one exact cause on stderr, where the user can read it — a recorded project root that no longer exists (a deleted or moved worktree) is the common one. Do not guess at the state and do not treat this as completion: report the block, and ask the user to run /zensu:doctor and to read that stderr line."}'
+}
+
+emit_session_record_unusable_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable Session Control record of this session no longer resolves against its recorded project root, which still exists, so review-chain and Autopilot completion cannot be proven. Restore that path to exactly what was recorded (a symlinked, moved, or re-created root does not match), then retry."}'
+}
+
+zensu_stop_guard_opted_out() {
+  local config_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+  if [ "${ZENSU_CHAIN:-}" = "off" ]; then
+    echo "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+    return 0
+  fi
+  if [ -r "$config_lib" ]; then
+    # shellcheck disable=SC1090
+    source "$config_lib"
+    if ! zensu_hook_enabled chainEnforcer; then
+      echo "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+      return 0
+    fi
+  fi
+  return 1
 }
 
 AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
@@ -50,20 +75,33 @@ zensu_hook_is_main_principal "$INPUT" Stop || exit 0
 
 SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if [ ! -r "$SESSION_LIB" ]; then
-  emit_session_binding_unavailable_block
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: ${SESSION_LIB} is missing or unreadable, so this session cannot be bound. Repair the plugin installation; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_runtime_missing_block
+  fi
   exit 0
 fi
 # shellcheck disable=SC1090
 source "$SESSION_LIB"
 if ! zensu_bind_hook_session "$INPUT"; then
-  emit_session_binding_unavailable_block
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session — the session-control-v1 line above states the exact cause. If it reports a project root that does not exist, the recorded worktree was deleted or moved: re-create exactly that directory to resume this session, or start a new session for further work, because the record is immutable and no Stop can ever prove completion from it. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_bind_failed_block
+  fi
   exit 0
 fi
 
-PROJECT_ROOT="$(zensu_resolve_project_dir)" || {
-  emit_session_binding_unavailable_block
+if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
+  if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ ! -d "${ZENSU_PROJECT_ROOT}" ]; then
+    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${ZENSU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    exit 0
+  fi
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: the recorded project root ${ZENSU_PROJECT_ROOT:-(unset)} exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_record_unusable_block
+  fi
   exit 0
-}
+fi
 ACTIVE_POINTER_HINT="$PROJECT_ROOT/.zensu/state/autopilot-active.json"
 ACTIVE_POINTER_EXISTS=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
