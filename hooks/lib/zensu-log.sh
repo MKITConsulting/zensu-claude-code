@@ -25,6 +25,15 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     if ! zensu_bind_model_session; then
       echo "zensu-log.sh: rendered Session Control binding unavailable" >&2
+      if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+        echo "zensu-log.sh: CLAUDE_CODE_SESSION_ID is not set — this helper must run from Claude Code's own Bash tool, which supplies the host session id." >&2
+      fi
+      if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+        echo "zensu-log.sh: CLAUDE_PLUGIN_DATA is not set — run this helper exactly as the Zensu hook or skill renders it, including its leading 'CLAUDE_PLUGIN_DATA=...' assignment; never hand-build the command." >&2
+      fi
+      if ! command -v node >/dev/null 2>&1; then
+        echo "zensu-log.sh: node is not on PATH — Session Control cannot bind without it." >&2
+      fi
       exit 2
     fi
     if ! _zensu_pd="$(zensu_resolve_project_dir)" || [ -z "$_zensu_pd" ]; then

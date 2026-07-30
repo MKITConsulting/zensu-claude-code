@@ -4,6 +4,9 @@
 #   implComplete && codeReviewDone && !chainDone -> block, force Skill zensu:self-review (NEW)
 #   chainDone                                 -> allow (self-review owns the terminus)
 #   selfReview later disabled + codeReviewDone -> still force the frozen self-review handoff
+#   codeReviewDone + unbindable consumed ticket -> block on the repair branch, never a terminus
+# Every inner-chain block reason also carries the mode-aware state legend
+# (`Session state: mode=vanilla|strict, implComplete=..., chainDone=...`).
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -240,6 +243,44 @@ if [ "$(printf '%s' "$OUT5" | decision)" = "block" ] \
 else
   check "T9 ticket-bound true-to-false flip preserves the frozen self-review terminus" FAIL
 fi
+
+# --- Scenario 6: unbindable consumed ticket -> repair branch, never a terminus ---
+SID6_RAW="stop-ticket-unbindable"
+start_session "$SID6_RAW"
+SID6="$STARTED_SESSION_KEY"
+bash "$LOG" --tdd-begin --session "$SID6" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID6" >/dev/null
+bash "$LOG" --code-review-done --session "$SID6" >/dev/null
+SID6_STATE="$STARTED_PROJECT_ROOT/.zensu/state/tdd-phase-$SID6.json"
+[ -f "$SID6_STATE" ] || { echo "scenario 6 fixture: state file missing at $SID6_STATE" >&2; exit 1; }
+node -e '
+  const fs = require("fs");
+  const s = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  s.reviewTicket = "not a valid ticket!";
+  s.reviewTicketConsumed = true;
+  s.reviewRound = 1;
+  fs.writeFileSync(process.argv[1], JSON.stringify(s, null, 2));
+' "$SID6_STATE" || { echo "scenario 6 fixture: state rewrite failed" >&2; exit 1; }
+OUT6="$(stop_run '{"session_id":"'"$SID6_RAW"'"}')"
+REASON6="$(printf '%s' "$OUT6" | reason)"
+if [ "$(printf '%s' "$OUT6" | decision)" = "block" ] \
+  && printf '%s' "$REASON6" | grep -qF 'no valid consumed review ticket can bind' \
+  && printf '%s' "$REASON6" | grep -qF '/zensu:reset-review-limit' \
+  && ! printf '%s' "$REASON6" | grep -q "skill='zensu:self-review'" \
+  && ! printf '%s' "$REASON6" | grep -qF -- '--chain-done'; then
+  check "T10 unbindable consumed ticket -> repair branch, no self-review handoff, no runnable terminus" PASS
+else
+  check "T10 unbindable consumed ticket -> repair branch, no self-review handoff, no runnable terminus" FAIL
+fi
+if printf '%s' "$REASON6" | grep -qF 'Session state: mode=vanilla, implComplete=true, chainDone=false.' \
+  && printf '%s' "$REASON6" | grep -qF 'the RED/GREEN FSM is not driven' \
+  && ! printf '%s' "$REASON6" | grep -qF 'exception it explicitly states' \
+  && [ "$(printf '%s' "$REASON6" | grep -oF 'Session state: mode=' | wc -l | tr -d ' ')" -eq 1 ]; then
+  check "T11 repair branch carries the vanilla state legend exactly once, without the exception clause" PASS
+else
+  check "T11 repair branch carries the vanilla state legend exactly once, without the exception clause" FAIL
+fi
+start_session "stop-routing-restore"
 
 echo "----"
 echo "test-stop-enforcer-self-review-routing: $PASS PASS / $FAIL FAIL"

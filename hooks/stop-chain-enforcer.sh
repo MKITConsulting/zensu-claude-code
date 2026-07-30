@@ -616,7 +616,7 @@ else
   fi
   exit 0
 fi
-if FRESH_CODE_REVIEW_DONE="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$INNER_BOUND_RUN" \
+if FRESH_PROMPT_FIELDS="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$INNER_BOUND_RUN" \
     EXPECTED_ATTEMPT="$INNER_BOUND_ATTEMPT" EXPECTED_RETURN_STAGE="$INNER_BOUND_RETURN_STAGE" \
     EXPECTED_CHAIN="$INNER_BOUND_CHAIN" \
     EXPECTED_COUNT="$BLOCKS" node -e '
@@ -629,10 +629,11 @@ if FRESH_CODE_REVIEW_DONE="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$
         &&s.autopilot.chainId===process.env.EXPECTED_CHAIN
       : s.autopilot===null;
     const exact=s.active===true&&s.implComplete===true&&s.chainDone===false
-      &&typeof s.codeReviewDone==="boolean"
+      &&typeof s.codeReviewDone==="boolean"&&typeof s.vanilla==="boolean"
       &&s.stopBlockCount===Number(process.env.EXPECTED_COUNT)&&linked;
     if(!exact)process.exit(1);
-    process.stdout.write(String(s.codeReviewDone));
+    process.stdout.write([String(s.vanilla),String(s.implComplete),
+      String(s.chainDone),String(s.codeReviewDone)].join("\t"));
   } catch (_) { process.exit(2); }
   ' 2>/dev/null)"; then
   :
@@ -650,7 +651,14 @@ else
   exit 0
 fi
 
-CODE_REVIEW_DONE="$FRESH_CODE_REVIEW_DONE"
+IFS=$'\t' read -r SESSION_VANILLA SESSION_IMPL SESSION_CHAIN CODE_REVIEW_DONE \
+  <<<"$FRESH_PROMPT_FIELDS"
+STATE_LEGEND="Session state: mode=strict, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}."
+if [ "$SESSION_VANILLA" = "true" ]; then
+  STATE_LEGEND="Session state: mode=vanilla, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}. In vanilla mode the RED/GREEN FSM is not driven, so the 'phase' and 'history' fields carry no signal here and are never by themselves evidence of a corrupt or never-started session."
+fi
+LEGEND_CLOSER="That observation does not change what must happen next: the instruction above still governs before this turn may end."
+LEGEND_CLOSER_WITH_EXCEPTION="That observation does not change what must happen next: the instruction above — including the single exception it explicitly states — still governs before this turn may end."
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
@@ -677,8 +685,10 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   else
     REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. Run /zensu:reset-review-limit for this current session, then resume the reviewer chain with a fresh ticket."
   fi
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 else
   REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop."
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 fi
 
 if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then

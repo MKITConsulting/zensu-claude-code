@@ -9,8 +9,10 @@
 #   begin: --tdd-begin persists the flag per config (both directions) and echoes
 #        the effective mode; re-begin after reset follows current config
 #   gate: state-flag bypass (frozen — config flips mid-session change nothing)
-#   chain: witness + Stop-hook + post-review routing identical to strict mode
-#   wording: ask-hooks / post-review / banner / primer emit mode-aware text
+#   chain: witness + Stop-hook + post-review routing decisions identical to
+#        strict mode
+#   wording: ask-hooks / post-review / banner / primer / Stop block state legend
+#        emit mode-aware text
 #   pins: SKILL.md vanilla section + config.example.json key
 set -u
 
@@ -42,7 +44,7 @@ for BASELINE_SID in \
   vanilla-lib vanilla-lib-reset vanilla-lib-array vanilla-lib-array-wf vanilla-lib-wf \
   vanilla-begin-default vanilla-begin-strict vanilla-begin-vanilla vanilla-fail \
   vanilla-strtrue vanilla-rebegin vanilla-malformed vanilla-conv vanilla-plan \
-  vanilla-ask-v vanilla-ask-s vanilla-ask-d; do
+  vanilla-ask-v vanilla-ask-s vanilla-ask-d vanilla-strict-stop; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
 done
@@ -320,16 +322,42 @@ activate_session "$SID_B"
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "allow" ] && check "D0 mid-implementation: Stop allows" PASS || check "D0 mid-impl allow" FAIL
 bash "$LOG" --tdd-complete --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "block" ] && check "D1 implComplete in vanilla: Stop BLOCKS" PASS || check "D1 vanilla terminus block" FAIL
-case "$(stop_reason "$SID_B" "$CFG_VANILLA")" in *"zensu:code-reviewer"*) check "D2 block reason forces zensu:code-reviewer" PASS ;; *) check "D2 reason code-reviewer" FAIL ;; esac
+D2_REASON="$(stop_reason "$SID_B" "$CFG_VANILLA")"
+case "$D2_REASON" in *"zensu:code-reviewer"*) check "D2 block reason forces zensu:code-reviewer" PASS ;; *) check "D2 reason code-reviewer" FAIL ;; esac
+{ printf '%s' "$D2_REASON" | grep -qF 'mode=vanilla' \
+  && printf '%s' "$D2_REASON" | grep -qF 'implComplete=true, chainDone=false' \
+  && printf '%s' "$D2_REASON" | grep -qF 'the RED/GREEN FSM is not driven' \
+  && [ "$(printf '%s' "$D2_REASON" | grep -oF 'Session state: mode=' | wc -l | tr -d ' ')" -eq 1 ]; } \
+  && check "D2b code-reviewer branch carries the vanilla state legend exactly once" PASS || check "D2b vanilla legend on code-reviewer branch" FAIL
+D2C_REASON="$(stop_reason "$SID_B" "$CFG_STRICT")"
+printf '%s' "$D2C_REASON" | grep -qF 'mode=vanilla' \
+  && check "D2c vanilla state, strict LIVE config: legend says mode=vanilla — state wins (frozen)" PASS || check "D2c legend freeze cross-pin" FAIL
 postreview_ctx "$SID_B" "$CFG_VANILLA" >/dev/null
 VANILLA_REVIEW_TICKET="$(bash "$LOG" --current-review-ticket --session "$SID_B" 2>/dev/null)"
 bash "$LOG" --code-review-done --claimed-review-ticket "$VANILLA_REVIEW_TICKET" \
   --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "block" ] && check "D3 codeReviewDone in vanilla: Stop still BLOCKS" PASS || check "D3 pre-self-review block" FAIL
-case "$(stop_reason "$SID_B" "$CFG_VANILLA")" in *"zensu:self-review"*) check "D4 block reason forces skill='zensu:self-review'" PASS ;; *) check "D4 reason self-review" FAIL ;; esac
+D4_REASON="$(stop_reason "$SID_B" "$CFG_VANILLA")"
+case "$D4_REASON" in *"zensu:self-review"*) check "D4 block reason forces skill='zensu:self-review'" PASS ;; *) check "D4 reason self-review" FAIL ;; esac
+{ printf '%s' "$D4_REASON" | grep -qF 'mode=vanilla' \
+  && printf '%s' "$D4_REASON" | grep -qF 'the RED/GREEN FSM is not driven'; } \
+  && check "D4b self-review branch carries the vanilla state legend" PASS || check "D4b vanilla legend on self-review branch" FAIL
 bash "$LOG" --chain-done --claimed-review-ticket "$VANILLA_REVIEW_TICKET" \
   --session "$SID_B" >/dev/null 2>&1
 [ "$(stop_dec "$SID_B" "$CFG_VANILLA")" = "allow" ] && check "D5 chainDone in vanilla: Stop ALLOWS" PASS || check "D5 vanilla terminus allow" FAIL
+SID_SS="vanilla-strict-stop"
+activate_session "$SID_SS"
+ZENSU_CONFIG="$CFG_STRICT" bash "$LOG" --tdd-begin --session "$SID_SS" >/dev/null 2>&1
+bash "$LOG" --tdd-complete --session "$SID_SS" >/dev/null 2>&1
+D5B_REASON="$(stop_reason "$SID_SS" "$CFG_STRICT")"
+{ printf '%s' "$D5B_REASON" | grep -qF 'mode=strict' \
+  && ! printf '%s' "$D5B_REASON" | grep -qF 'the RED/GREEN FSM is not driven'; } \
+  && check "D5b strict session: block reason states mode=strict without the vanilla legend" PASS || check "D5b strict mode in block reason" FAIL
+D5C_REASON="$(stop_reason "$SID_SS" "$CFG_VANILLA")"
+printf '%s' "$D5C_REASON" | grep -qF 'mode=strict' \
+  && check "D5c strict state, vanilla LIVE config: legend says mode=strict — state wins (frozen)" PASS || check "D5c legend freeze cross-pin (strict)" FAIL
+bash "$LOG" --chain-done --session "$SID_SS" >/dev/null 2>&1
+activate_session "$SID_B"
 
 echo "== Ask-hooks: mode-aware directives =="
 SID_PLAN="vanilla-plan"
