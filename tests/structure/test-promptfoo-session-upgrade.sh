@@ -541,10 +541,30 @@ if [ "$(grep -Fc 'runs-on: ubuntu-24.04' "$NIGHTLY")" = 1 ] \
 else
   check 'Paid Linux workflows pin Ubuntu 24.04' FAIL
 fi
-if [ "$(grep -Fc 'fetch-depth: 0' "$CI")" = 2 ]; then
-  check 'Both deterministic CI checkouts fetch the pinned historical tag' PASS
+CI_HISTORY_CHECKOUT_AUDIT="$(
+  node - "$CI" <<'NODE'
+const fs = require('node:fs');
+const YAML = require('yaml');
+const ci = YAML.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const expectedJobs = ['test', 'session-control-contract', 'windows-shard-observation'];
+const safe = expectedJobs.every((jobId) => {
+  const steps = ci?.jobs?.[jobId]?.steps || [];
+  const checkouts = steps.filter(
+    (step) => typeof step.uses === 'string' && step.uses.startsWith('actions/checkout@'),
+  );
+  return checkouts.length === 1
+    && checkouts.every((checkout) => (
+      checkout?.with?.['fetch-depth'] === 0
+      && checkout?.with?.['persist-credentials'] === false
+    ));
+});
+process.stdout.write(safe ? 'true' : 'false');
+NODE
+)"
+if [ "$CI_HISTORY_CHECKOUT_AUDIT" = true ]; then
+  check 'Every history-sensitive CI job safely fetches the pinned historical tag' PASS
 else
-  check 'Both deterministic CI checkouts fetch the pinned historical tag' FAIL
+  check 'Every history-sensitive CI job safely fetches the pinned historical tag' FAIL
 fi
 if [ "$(grep -Fc "ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.211'" "$RELEASE")" = 2 ]; then
   check 'Both release gates explicitly pin the evaluated Claude version' PASS

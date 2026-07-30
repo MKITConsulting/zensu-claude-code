@@ -1,0 +1,323 @@
+{
+  "schemaVersion": 1,
+  "profiles": {
+    "windows-reset-session": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "deferred-reset-races",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-claim.sh",
+          "args": [
+            "--cases",
+            "C4r,C4rc,C4ro,C4ri,C4rib,C4ris,C4risb,C4,C5,C6"
+          ],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "post-review-self-review-handoff",
+          "runner": "bash",
+          "path": "tests/structure/test-post-review-self-review-handoff.sh",
+          "args": [],
+          "timeoutMs": 720000
+        },
+        {
+          "id": "deferred-review-fallback",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-fallback.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "vcs-review-marker-reconcile",
+          "runner": "bash",
+          "path": "tests/structure/test-vcs-review-marker-reconcile.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "session-control-claude",
+          "runner": "bash",
+          "path": "tests/structure/test-session-control-claude.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "msys-special-plugin-module-boundaries",
+          "runner": "bash",
+          "path": "tests/structure/test-msys-special-plugin-module-boundaries.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "claude-promptfoo-wrapper",
+          "runner": "bash",
+          "path": "tests/structure/test-claude-promptfoo-wrapper.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "session-safe-file-read",
+          "runner": "node",
+          "path": "evals/session-control/tests/safe-file-read.test.js",
+          "args": [
+            "--test"
+          ],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "upgrade-hook-large-identity",
+          "runner": "node",
+          "path": "evals/session-control/tests/upgrade-hook-contract.test.js",
+          "args": [
+            "--test",
+            "--test-name-pattern=attests exact hook identities beyond Number inode precision"
+          ],
+          "timeoutMs": 180000
+        }
+      ]
+    },
+    "windows-leases-routing": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "deferred-lease-refresh",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-claim.sh",
+          "args": [
+            "--cases",
+            "C6a,C6b,C7,C8"
+          ],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "stop-enforcer-self-review-routing",
+          "runner": "bash",
+          "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
+          "id": "autopilot-plan-delegate",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-plan-delegate.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
+          "id": "bash-source-write-gate",
+          "runner": "bash",
+          "path": "tests/structure/test-bash-source-write-gate.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "installed-plugin-provisioner",
+          "runner": "bash",
+          "path": "evals/session-control/tests/installed-plugin-provisioner-selftest.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "tdd-no-flock-external-lease",
+          "runner": "bash",
+          "path": "tests/structure/test-tdd-no-flock-external-lease.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "session-start-banner",
+          "runner": "bash",
+          "path": "tests/structure/test-session-start-banner.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "promptfoo-session-upgrade-contract",
+          "runner": "bash",
+          "path": "tests/structure/test-promptfoo-session-upgrade.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "upgrade-process-windows-boundaries",
+          "runner": "node",
+          "path": "evals/session-control/tests/upgrade-process.test.js",
+          "args": [
+            "--test",
+            "--test-name-pattern=rejects a trusted synchronous helper reported as signalled on every host|fails closed before spawning any process tree on Windows|records a zero-launch Windows decision before failing closed"
+          ],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "upgrade-provider-zero-launch",
+          "runner": "node",
+          "path": "evals/session-control/tests/upgrade-provider-selftest.js",
+          "args": [],
+          "timeoutMs": 600000
+        }
+      ]
+    },
+    "windows-native-state": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "deferred-claim-adoption",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-claim.sh",
+          "args": [
+            "--cases",
+            "P0,P1,P2,P3,L1,L2,C1,C2,C2f,C2c,C2d,C2e"
+          ],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "autopilot-state-machine",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-state-machine.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "pre-edit-hook-mirror",
+          "runner": "bash",
+          "path": "tests/structure/test-pre-edit-hook-mirror.sh",
+          "args": [],
+          "timeoutMs": 480000
+        },
+        {
+          "id": "reviewer-capability-gate",
+          "runner": "bash",
+          "path": "tests/structure/test-reviewer-capability-gate.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "session-id-v1",
+          "runner": "bash",
+          "path": "tests/structure/test-session-id-v1.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "versioned-plugin-upgrade",
+          "runner": "bash",
+          "path": "tests/structure/test-versioned-plugin-upgrade.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "msys-runtime-boundaries",
+          "runner": "bash",
+          "path": "tests/structure/test-msys-runtime-boundaries.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "marketplace-fixture",
+          "runner": "bash",
+          "path": "evals/session-control/tests/marketplace-fixture-selftest.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "coverage-report-windows-paths",
+          "runner": "node",
+          "path": "evals/session-control/tests/coverage-report.test.js",
+          "args": [
+            "--test"
+          ],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "runtime-fixture-installer-concurrency",
+          "runner": "node",
+          "path": "evals/session-control/tests/runtime-fixture-installer.test.js",
+          "args": [
+            "--test",
+            "--test-name-pattern=parallel successful installers materialize independent unpredictable roots|a parallel failing installer cleans only its root during peer materialization|returns an unpredictable immutable child root and leaves registry publication external"
+          ],
+          "timeoutMs": 600000
+        }
+      ]
+    },
+    "windows-installed-core": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "deferred-transfer-reset",
+          "runner": "bash",
+          "path": "tests/structure/test-deferred-review-claim.sh",
+          "args": [
+            "--cases",
+            "C2b,C3,C4u,C4t,C4d,C4s,C4s-done,C4s-transfer,C4sf,C4sr"
+          ],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "installed-wrapper",
+          "runner": "bash",
+          "path": "evals/session-control/tests/wrapper-selftest.sh",
+          "args": [],
+          "timeoutMs": 1200000
+        },
+        {
+          "id": "review-worker-evidence-lease",
+          "runner": "bash",
+          "path": "tests/structure/test-review-worker-evidence-lease.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "session-control-core",
+          "runner": "bash",
+          "path": "tests/session-control/run.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "reset-review-limit-self-check",
+          "runner": "bash",
+          "path": "evals/reset-review-limit/run-self-check.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "windows-portability-guards",
+          "runner": "bash",
+          "path": "tests/structure/test-windows-portability-guards.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
+          "id": "windows-ci-contract",
+          "runner": "bash",
+          "path": "tests/structure/test-windows-ci-contract.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "workflow-checkout-credentials",
+          "runner": "bash",
+          "path": "tests/structure/test-workflow-checkout-credentials.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "upgrade-linux-sandbox-host-paths",
+          "runner": "node",
+          "path": "evals/session-control/tests/upgrade-linux-sandbox.test.js",
+          "args": [
+            "--test",
+            "--test-name-pattern=rejects unsafe paths, environments, and working-directory escapes|mounts opt only for a real command or resolved native runtime under opt"
+          ],
+          "timeoutMs": 300000
+        }
+      ]
+    }
+  }
+}

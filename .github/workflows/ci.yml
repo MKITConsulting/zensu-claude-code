@@ -59,6 +59,126 @@ jobs:
           else
             echo 'No full-suite report was produced; inspect the failed preflight step above.'
           fi
+      - name: Record legacy Windows outcome
+        if: always() && runner.os == 'Windows'
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          ZENSU_LEGACY_OUTCOME: ${{ job.status }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/windows-legacy"
+          node tests/summarize-windows-observation.js record-legacy \
+            "$RUNNER_TEMP/windows-legacy/windows-legacy.json"
+      - name: Upload legacy Windows outcome
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-legacy-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-legacy/windows-legacy.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-shard-observation:
+    name: Windows shard observation (${{ matrix.profile }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - windows-reset-session
+          - windows-leases-routing
+          - windows-native-state
+          - windows-installed-core
+    runs-on: windows-latest
+    timeout-minutes: 35
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run Windows contract profile
+        id: profile
+        continue-on-error: true
+        env:
+          ZENSU_PROFILE_REPORT_DIR: ${{ runner.temp }}/windows-profile-reports
+          ZENSU_PROFILE_SOURCE_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: node tests/run-profile.js "${{ matrix.profile }}"
+      - name: Record observation outcome
+        if: always()
+        env:
+          PROFILE_OUTCOME: ${{ steps.profile.outcome }}
+        run: |
+          echo "### Windows profile: ${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- outcome: $PROFILE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- source: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Windows profile timing report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-profile-${{ matrix.profile }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-profile-reports/${{ matrix.profile }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-observation-summary:
+    name: Windows observation summary
+    if: always()
+    needs: [test, windows-shard-observation]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: Download four profile reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: windows-profile-*-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-observation/profiles
+          merge-multiple: true
+      - name: Download legacy Windows outcome
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: windows-legacy-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-observation/legacy
+      - name: Validate same-run parity evidence
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          node tests/summarize-windows-observation.js summarize \
+            "$RUNNER_TEMP/windows-observation/profiles" \
+            "$RUNNER_TEMP/windows-observation/legacy/windows-legacy.json" \
+            "$RUNNER_TEMP/windows-observation/windows-observation-summary.json"
+      - name: Upload aggregate observation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-observation-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-observation/windows-observation-summary.json
+          if-no-files-found: error
+          retention-days: 30
 
   session-control-sandbox:
     name: Session Control sandbox prerequisites

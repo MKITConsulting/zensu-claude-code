@@ -18,6 +18,64 @@ bash tests/run-all.sh --live       # deterministic + live claude --print suites 
 
 Exit 0 iff every selected suite passes. A timestamped report lands in `tests/results/`.
 
+## Windows contract profiles
+
+The versioned manifest at `tests/profiles/windows-ci.v1.json` divides the
+Windows-specific deterministic contracts into four bounded profiles:
+
+```bash
+node tests/run-profile.js --validate
+node tests/run-profile.js windows-reset-session
+node tests/run-profile.js windows-leases-routing
+node tests/run-profile.js windows-native-state
+node tests/run-profile.js windows-installed-core
+```
+
+The runner validates the complete manifest and its audited command catalog
+before starting any child process, binds every suite to its validated content
+digest, streams suite output, and enforces both per-suite and 30-minute
+per-profile deadlines. Every suite runs below a supervisor that remains alive
+until the complete process tree has been terminated, including after a normal
+suite exit. Child processes receive a disposable home/temp tree and a strict
+operational environment allowlist; credentials, auth homes, interpreter preload
+variables, and live/API modes are unavailable.
+
+CI writes the atomic report below the private runner temp directory. A manual
+run creates a random private report directory and prints its absolute path at
+the end.
+
+During the observation phase, CI runs all four profiles as non-blocking Windows
+matrix jobs and uploads their provenance-bound timing reports. The existing full
+Windows job continues to run as the parity baseline. A non-blocking summary job
+downloads exactly those four reports plus the same-run legacy outcome, validates
+SHA/run-attempt consistency plus the exact ordered suite inventory and complete
+execution-contract digest, and publishes one aggregate JSON. That digest binds
+the manifest, command catalog, runner, supervisor, Windows Job Object helper,
+summarizer, complete CI workflow configuration, and every referenced suite file.
+The Ubuntu deterministic and Promptfoo contracts are unchanged.
+
+Cutover to blocking Windows shards requires all of the following:
+
+- at least 14 days and 10 representative pull-request or `main` runs;
+- 100% pass/fail parity between every shard run and the legacy Windows job;
+- no missing suite, timeout, or incomplete timing report.
+
+“Representative” means ten distinct Git revisions and run identities spanning
+both pull-request and `main` push events, not reruns of one SHA. Before cutover,
+collect the aggregate JSON artifacts into a schema-v2 ledger and run:
+
+```bash
+node tests/summarize-windows-observation.js audit-ledger /path/to/ledger.json
+```
+
+The command fails closed unless all quantitative criteria above are met.
+
+After that evidence exists, a separate cutover change can make the four shards
+blocking, expose the stable aggregate check name
+`Deterministic suite (windows-latest)`, and move the full Windows suite to a
+separate scheduled, read-only Windows safety workflow. Release and Session
+Control Nightly remain on their existing Linux-only paid gates.
+
 ## Suites
 
 | Path | Kind | Covers |
@@ -58,7 +116,7 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
   negative assert, `# ` = comment. Tolerant by design (LLM output is non-deterministic).
 - Generated fixtures (`*/fixtures/`) and captures (`*/results/`, `tests/results/`) are
   git-ignored; build them with each suite's `setup-fixtures.sh`.
-- No CI yet — suites are local-only and opt-in for the live ones.
+- Deterministic suites run in CI. Live/API suites remain explicitly opt-in.
 
 ## Live-suite notes
 

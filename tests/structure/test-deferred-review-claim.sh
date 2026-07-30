@@ -8,6 +8,9 @@ LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+if [ "$#" -gt 0 ]; then
+  exec node "$PLUGIN_DIR/tests/structure/deferred-review-claim-cases.js" "$@"
+fi
 ROOT="$(mktemp -d -t zensu-deferred-claim-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 
