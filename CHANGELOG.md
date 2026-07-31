@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-22
+
 ### Added
 
 - **review**: Repo-custom reviewer seats for `/zensu:pr-team-review` + `/zensu:plan-review` via `.claude/agents/zensu-review-*.md` — the activation-glob persona convention `/zensu:tdd` already consumes, now discovered per-repo and cast as first-class `(repo-custom)` seats. PR review discovers from the base checkout (`$REPO/.claude/agents`), never the untrusted PR head; both team-review skills inject the JSON output contract at spawn so one persona file serves all three flows. Opt out of PR-review discovery with `--no-custom-roles`.
