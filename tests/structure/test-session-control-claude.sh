@@ -468,6 +468,100 @@ else
   check "zensu-log rejects a discoverable derived record key as CLAUDE_CODE_SESSION_ID" FAIL
 fi
 
+env -u CLAUDE_PLUGIN_DATA CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_CODE_SESSION_ID="$SID_A" \
+  bash "$ROOT/hooks/lib/zensu-log.sh" --session-key \
+    >"$TMP/no-plugin-data.out" 2>"$TMP/no-plugin-data.err"
+NO_PLUGIN_DATA_RC=$?
+if [ "$NO_PLUGIN_DATA_RC" -eq 2 ] \
+  && grep -qF 'rendered Session Control binding unavailable' "$TMP/no-plugin-data.err" \
+  && grep -qF 'CLAUDE_PLUGIN_DATA is not set' "$TMP/no-plugin-data.err" \
+  && ! grep -qF 'CLAUDE_CODE_SESSION_ID is not set' "$TMP/no-plugin-data.err" \
+  && [ ! -s "$TMP/no-plugin-data.out" ]; then
+  check "zensu-log names CLAUDE_PLUGIN_DATA when the rendered prefix is missing" PASS
+else
+  check "zensu-log names CLAUDE_PLUGIN_DATA when the rendered prefix is missing" FAIL
+fi
+
+env -u CLAUDE_CODE_SESSION_ID CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  bash "$ROOT/hooks/lib/zensu-log.sh" --session-key \
+    >"$TMP/no-session-id.out" 2>"$TMP/no-session-id.err"
+NO_SESSION_ID_RC=$?
+if [ "$NO_SESSION_ID_RC" -eq 2 ] \
+  && grep -qF 'rendered Session Control binding unavailable' "$TMP/no-session-id.err" \
+  && grep -qF 'CLAUDE_CODE_SESSION_ID is not set' "$TMP/no-session-id.err" \
+  && ! grep -qF 'CLAUDE_PLUGIN_DATA is not set' "$TMP/no-session-id.err" \
+  && [ ! -s "$TMP/no-session-id.out" ]; then
+  check "zensu-log names CLAUDE_CODE_SESSION_ID when the host session id is missing" PASS
+else
+  check "zensu-log names CLAUDE_CODE_SESSION_ID when the host session id is missing" FAIL
+fi
+
+if [ -s "$TMP/derived-zensu-log.err" ] \
+  && ! grep -qE 'is not set|is not on PATH' "$TMP/derived-zensu-log.err"; then
+  check "zensu-log adds no precondition hint when every precondition is present" PASS
+else
+  check "zensu-log adds no precondition hint when every precondition is present" FAIL
+fi
+
+env -u CLAUDE_PLUGIN_DATA -u CLAUDE_CODE_SESSION_ID CLAUDE_PLUGIN_ROOT="$ROOT" \
+  bash "$ROOT/hooks/lib/zensu-log.sh" --session-key \
+    >"$TMP/no-both.out" 2>"$TMP/no-both.err"
+NO_BOTH_RC=$?
+NO_BOTH_ORDER="$(grep -oE 'CLAUDE_CODE_SESSION_ID is not set|CLAUDE_PLUGIN_DATA is not set' \
+  "$TMP/no-both.err" | tr '\n' ',')"
+if [ "$NO_BOTH_RC" -eq 2 ] \
+  && [ "$NO_BOTH_ORDER" = 'CLAUDE_CODE_SESSION_ID is not set,CLAUDE_PLUGIN_DATA is not set,' ] \
+  && [ ! -s "$TMP/no-both.out" ]; then
+  check "zensu-log reports every missing precondition, in the binder's order" PASS
+else
+  check "zensu-log reports every missing precondition, in the binder's order" FAIL
+fi
+
+NODELESS_PATH=""
+NODELESS_OLD_IFS="$IFS"
+IFS=:
+for NODELESS_DIR in $PATH; do
+  [ -n "$NODELESS_DIR" ] || continue
+  if [ -x "$NODELESS_DIR/node" ] || [ -x "$NODELESS_DIR/node.exe" ] \
+    || [ -x "$NODELESS_DIR/node.cmd" ] || [ -x "$NODELESS_DIR/node.bat" ]; then
+    continue
+  fi
+  NODELESS_PATH="${NODELESS_PATH:+$NODELESS_PATH:}$NODELESS_DIR"
+done
+IFS="$NODELESS_OLD_IFS"
+NODELESS_BASH="$(command -v bash)"
+env PATH="$NODELESS_PATH" CLAUDE_PLUGIN_ROOT="$ROOT" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+  CLAUDE_CODE_SESSION_ID="$SID_A" "$NODELESS_BASH" "$ROOT/hooks/lib/zensu-log.sh" --session-key \
+    >"$TMP/no-node.out" 2>"$TMP/no-node.err"
+NO_NODE_RC=$?
+if env PATH="$NODELESS_PATH" "$NODELESS_BASH" -c 'command -v node' >/dev/null 2>&1; then
+  check "nodeless PATH fixture actually removes node" FAIL
+else
+  check "nodeless PATH fixture actually removes node" PASS
+fi
+if [ "$NO_NODE_RC" -eq 2 ] \
+  && grep -qF 'rendered Session Control binding unavailable' "$TMP/no-node.err" \
+  && grep -qF 'node is not on PATH' "$TMP/no-node.err" \
+  && ! grep -qF 'is not set' "$TMP/no-node.err" \
+  && [ ! -s "$TMP/no-node.out" ]; then
+  check "zensu-log names node when it is not on PATH" PASS
+else
+  check "zensu-log names node when it is not on PATH" FAIL
+fi
+
+BIND_GUARD_ORDER="$(sed -n '/^zensu_bind_model_session()/,/^}/p' "$SESSION" \
+  | grep -E '^  \[ -n "\$\{[A-Z_]+:-\}" \] \|\| return 1|^  command -v [a-z]+ >/dev/null 2>&1 \|\| return 1' \
+  | sed -e 's/^  \[ -n "\${\([A-Z_]*\):-}" \].*/\1/' -e 's/^  command -v \([a-z]*\).*/command -v \1/' \
+  | tr '\n' ',')"
+HINT_ORDER="$(grep -oE 'CLAUDE_CODE_SESSION_ID is not set|CLAUDE_PLUGIN_DATA is not set|node is not on PATH' \
+  "$ROOT/hooks/lib/zensu-log.sh" | sed -e 's/ is not set//' -e 's/node is not on PATH/command -v node/' | tr '\n' ',')"
+if [ "$BIND_GUARD_ORDER" = 'CLAUDE_CODE_SESSION_ID,CLAUDE_PLUGIN_DATA,command -v node,' ] \
+  && [ "$HINT_ORDER" = "$BIND_GUARD_ORDER" ]; then
+  check "zensu-log precondition hints mirror zensu_bind_model_session's guards in order" PASS
+else
+  check "zensu-log precondition hints mirror zensu_bind_model_session's guards in order (guards='$BIND_GUARD_ORDER' hints='$HINT_ORDER')" FAIL
+fi
+
 if ZENSU_PROJECT_ROOT="$PROJECT_B" ZENSU_SESSION_KEY="$KEY_A" ZENSU_SESSION_CONTEXT="$RECORD_A" \
   bash -c "source '$SESSION'; zensu_resolve_project_dir" >"$TMP/project-tamper.out" 2>/dev/null; then
   check "project helper rejects ZENSU_PROJECT_ROOT that disagrees with immutable context" FAIL

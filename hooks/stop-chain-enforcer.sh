@@ -34,8 +34,33 @@ emit_inner_runtime_unavailable_block() {
   printf '%s\n' '{"decision":"block","reason":"Zensu review-chain Stop denied: project-local inner state exists but the required runtime is unavailable."}'
 }
 
-emit_session_binding_unavailable_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable main-session binding is unavailable, so review-chain and Autopilot completion cannot be proven."}'
+emit_session_runtime_missing_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the Session Control library is missing from this plugin installation, so review-chain and Autopilot completion cannot be proven. Repair the Zensu plugin installation, then retry; /zensu:doctor reports plugin integrity."}'
+}
+
+emit_session_bind_failed_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. The Session Control binder printed the one exact cause on stderr, where the user can read it — a recorded project root that no longer exists (a deleted or moved worktree) is the common one. Do not guess at the state and do not treat this as completion: report the block, and ask the user to run /zensu:doctor and to read that stderr line."}'
+}
+
+emit_session_record_unusable_block() {
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: the immutable Session Control record of this session no longer resolves against its recorded project root, which still exists, so review-chain and Autopilot completion cannot be proven. Restore that path to exactly what was recorded (a symlinked, moved, or re-created root does not match), then retry."}'
+}
+
+zensu_stop_guard_opted_out() {
+  local config_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+  if [ "${ZENSU_CHAIN:-}" = "off" ]; then
+    echo "zensu chain-enforcer: releasing Stop because ZENSU_CHAIN=off is set explicitly. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+    return 0
+  fi
+  if [ -r "$config_lib" ]; then
+    # shellcheck disable=SC1090
+    source "$config_lib"
+    if ! zensu_hook_enabled chainEnforcer; then
+      echo "zensu chain-enforcer: releasing Stop because hooks.chainEnforcer=false is configured. With no bindable session the durable Autopilot guarantee could not be evaluated either — no completion was proven, only the guard was waived." >&2
+      return 0
+    fi
+  fi
+  return 1
 }
 
 AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
@@ -50,20 +75,33 @@ zensu_hook_is_main_principal "$INPUT" Stop || exit 0
 
 SESSION_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if [ ! -r "$SESSION_LIB" ]; then
-  emit_session_binding_unavailable_block
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: ${SESSION_LIB} is missing or unreadable, so this session cannot be bound. Repair the plugin installation; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_runtime_missing_block
+  fi
   exit 0
 fi
 # shellcheck disable=SC1090
 source "$SESSION_LIB"
 if ! zensu_bind_hook_session "$INPUT"; then
-  emit_session_binding_unavailable_block
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session — the session-control-v1 line above states the exact cause. If it reports a project root that does not exist, the recorded worktree was deleted or moved: re-create exactly that directory to resume this session, or start a new session for further work, because the record is immutable and no Stop can ever prove completion from it. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_bind_failed_block
+  fi
   exit 0
 fi
 
-PROJECT_ROOT="$(zensu_resolve_project_dir)" || {
-  emit_session_binding_unavailable_block
+if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
+  if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ ! -d "${ZENSU_PROJECT_ROOT}" ]; then
+    echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${ZENSU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    exit 0
+  fi
+  if ! zensu_stop_guard_opted_out; then
+    echo "zensu chain-enforcer: the recorded project root ${ZENSU_PROJECT_ROOT:-(unset)} exists but does not match this immutable Session Control record — a symlinked, moved, or re-created root never matches. Restore the recorded path; ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    emit_session_record_unusable_block
+  fi
   exit 0
-}
+fi
 ACTIVE_POINTER_HINT="$PROJECT_ROOT/.zensu/state/autopilot-active.json"
 ACTIVE_POINTER_EXISTS=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
@@ -616,7 +654,7 @@ else
   fi
   exit 0
 fi
-if FRESH_CODE_REVIEW_DONE="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$INNER_BOUND_RUN" \
+if FRESH_PROMPT_FIELDS="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$INNER_BOUND_RUN" \
     EXPECTED_ATTEMPT="$INNER_BOUND_ATTEMPT" EXPECTED_RETURN_STAGE="$INNER_BOUND_RETURN_STAGE" \
     EXPECTED_CHAIN="$INNER_BOUND_CHAIN" \
     EXPECTED_COUNT="$BLOCKS" node -e '
@@ -629,10 +667,11 @@ if FRESH_CODE_REVIEW_DONE="$(printf '%s' "$FRESH_PROMPT_INNER" | EXPECTED_RUN="$
         &&s.autopilot.chainId===process.env.EXPECTED_CHAIN
       : s.autopilot===null;
     const exact=s.active===true&&s.implComplete===true&&s.chainDone===false
-      &&typeof s.codeReviewDone==="boolean"
+      &&typeof s.codeReviewDone==="boolean"&&typeof s.vanilla==="boolean"
       &&s.stopBlockCount===Number(process.env.EXPECTED_COUNT)&&linked;
     if(!exact)process.exit(1);
-    process.stdout.write(String(s.codeReviewDone));
+    process.stdout.write([String(s.vanilla),String(s.implComplete),
+      String(s.chainDone),String(s.codeReviewDone)].join("\t"));
   } catch (_) { process.exit(2); }
   ' 2>/dev/null)"; then
   :
@@ -650,12 +689,20 @@ else
   exit 0
 fi
 
-CODE_REVIEW_DONE="$FRESH_CODE_REVIEW_DONE"
+IFS=$'\t' read -r SESSION_VANILLA SESSION_IMPL SESSION_CHAIN CODE_REVIEW_DONE \
+  <<<"$FRESH_PROMPT_FIELDS"
+STATE_LEGEND="Session state: mode=strict, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}."
+if [ "$SESSION_VANILLA" = "true" ]; then
+  STATE_LEGEND="Session state: mode=vanilla, implComplete=${SESSION_IMPL}, chainDone=${SESSION_CHAIN}. In vanilla mode the RED/GREEN FSM is not driven, so the 'phase' and 'history' fields carry no signal here and are never by themselves evidence of a corrupt or never-started session."
+fi
+LEGEND_CLOSER="That observation does not change what must happen next: the instruction above still governs before this turn may end."
+LEGEND_CLOSER_WITH_EXCEPTION="That observation does not change what must happen next: the instruction above — including the single exception it explicitly states — still governs before this turn may end."
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
 INNER_BOUND_ARGS=""
 INNER_ZERO_CHANGE_ARGS=""
+INNER_ZERO_CHANGE_NOTE=" That terminus verifies the claim before it closes anything: it refuses while 'git diff --name-only HEAD' or an untracked non-ignored file still reports a changed file, so it can never stand in for a review of real changes."
 INNER_SELF_REVIEW_ENVELOPE=" "
 INNER_REVIEW_HEADERS="whose prompt starts with exactly two header lines — first 'PRE-MERGED FINDINGS (fan-out)', second 'REVIEW-TICKET: <ticket>'"
 INNER_REVIEW_SUFFIX=", followed by"
@@ -665,6 +712,7 @@ if [ -n "$INNER_BOUND_RUN" ]; then
   INNER_BOUND_CHAIN_Q="$(printf '%q' "$INNER_BOUND_CHAIN")"
   INNER_BOUND_ARGS=" --autopilot-run ${INNER_BOUND_RUN_Q} --autopilot-attempt ${INNER_BOUND_ATTEMPT_Q} --chain-id ${INNER_BOUND_CHAIN_Q}"
   INNER_ZERO_CHANGE_ARGS="${INNER_BOUND_ARGS} --outcome no-changes"
+  INNER_ZERO_CHANGE_NOTE=" That terminus records 'no-changes' as this attempt's audited Autopilot outcome, so the durable run keeps a receipt that distinguishes it from a reviewed close."
   INNER_SELF_REVIEW_ENVELOPE=$' Carry this exact official three-line Autopilot envelope into the skill unchanged and exactly once:\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_HEADERS=$'whose prompt starts with exactly these five header lines:\nPRE-MERGED FINDINGS (fan-out)\nREVIEW-TICKET: <ticket>\n'"ZENSU-DELEGATED-CALLER: autopilot"$'\n'"AUTOPILOT-BINDING: run=${INNER_BOUND_RUN} attempt=${INNER_BOUND_ATTEMPT} chain=${INNER_BOUND_CHAIN}"$'\n'"AUTOPILOT-STAGE: ${INNER_BOUND_RETURN_STAGE}"$'\n'
   INNER_REVIEW_SUFFIX="followed by"
@@ -675,10 +723,12 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
     SELF_REVIEW_TICKET_Q="$(printf '%q' "$SELF_REVIEW_TICKET")"
     REASON="STOP intercepted by zensu chain-enforcer. The code-reviewer chain has converged (codeReviewDone) but the terminal self-review stage has not run. Carry this exact generation line into the skill: 'SELF-REVIEW-TICKET: ${SELF_REVIEW_TICKET}'.${INNER_SELF_REVIEW_ENVELOPE}Your VERY NEXT action MUST be the Skill tool with skill='zensu:self-review' — it performs a final critical self-reflection over this session's changes, takes at most one fix round under the still-active TDD phase-gate, and OWNS the generation-bound chain terminus (it runs: ${LOG_COMMAND} --chain-done${INNER_BOUND_ARGS} --claimed-review-ticket ${SELF_REVIEW_TICKET_Q}). Do NOT end your turn, do NOT re-run the reviewer agent, and do NOT run an unqualified --chain-done yourself — let /zensu:self-review finalize only this chain generation."
   else
-    REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. Run /zensu:reset-review-limit for this current session, then resume the reviewer chain with a fresh ticket."
+    REASON="STOP intercepted by zensu chain-enforcer. The state says codeReviewDone=true, but no valid consumed review ticket can bind the terminal self-review generation. Do NOT run self-review or an unqualified terminus. /zensu:reset-review-limit cannot repair this state either — it rebinds a RETAINED consumed ticket, which is exactly what is missing here. Re-enter /zensu:tdd for the current task instead: its fresh --tdd-begin resets this session's review ticket, round counter, and chain flags in one transition, so the reviewer chain can run again and its terminus can bind."
   fi
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 else
-  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop."
+  REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
+  REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 fi
 
 if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/null; then
