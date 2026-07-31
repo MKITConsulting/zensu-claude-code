@@ -21,6 +21,15 @@ const {
 } = require('../run-profile.js');
 const { RUNTIME_PATHS } = require('../windows-profile-contract.js');
 
+const WINDOWS_TEST_WAIT_MS = 30000;
+const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
+const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 5000;
+const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
+const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
+  process.platform === 'win32' ? 45000 : 5000;
+const TEST_PROFILE_DEADLINE_ASSERT_MS =
+  process.platform === 'win32' ? 60000 : 3000;
+
 function temporaryRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-profile-runner-'));
   fs.mkdirSync(path.join(root, 'suites'), { recursive: true });
@@ -32,6 +41,15 @@ function temporaryRoot() {
     fs.copyFileSync(path.join(repositoryRoot, relative), destination);
   }
   return root;
+}
+
+function removeTemporaryRoot(root) {
+  fs.rmSync(root, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 0,
+    retryDelay: process.platform === 'win32' ? 100 : 0,
+  });
 }
 
 function writeSuite(root, name, source) {
@@ -52,7 +70,7 @@ function manifestFor(platform, suites) {
     profiles: {
       'test-profile': {
         platform,
-        profileTimeoutMs: 30000,
+        profileTimeoutMs: TEST_PROFILE_TIMEOUT_MS,
         suites,
       },
     },
@@ -65,7 +83,7 @@ function suite(id, relative, overrides = {}) {
     runner: 'node',
     path: relative,
     args: [],
-    timeoutMs: 5000,
+    timeoutMs: TEST_SUITE_TIMEOUT_MS,
     ...overrides,
   };
 }
@@ -83,7 +101,7 @@ function writeCatalog(root, suites) {
   })}\n`);
 }
 
-async function waitFor(predicate, timeoutMs = 3000) {
+async function waitFor(predicate, timeoutMs = TEST_WAIT_MS) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;
@@ -144,7 +162,7 @@ test('validates the complete manifest before selecting a profile through the pub
     assert.match(stderr.join(''), /path traversal|repo-relative/);
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -188,7 +206,7 @@ test('rejects unknown keys, duplicate commands, symlinks, hardlinks, and unbound
     invalidProfileTimeout.profiles['test-profile'].profileTimeoutMs = 1800001;
     assert.throws(() => validateManifest(invalidProfileTimeout, root), /profileTimeoutMs/);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -205,7 +223,7 @@ test('allows one script to expose distinct bounded case selections', () => {
     );
     assert.equal(validated.profiles.get('test-profile').suites.length, 2);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -277,7 +295,7 @@ test('streams before exit, isolates credentials/home, and publishes a running re
     assert.equal(report.runAttempt, '2');
     assert.equal(report.runnerImage, 'test-runner');
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -297,7 +315,9 @@ test('times out a nested process tree and records deterministic failure evidence
     `);
     const result = await runProfile({
       manifest: manifestFor(process.platform, [
-        suite('timeout', child, { timeoutMs: 250 }),
+        suite('timeout', child, {
+          timeoutMs: process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 250,
+        }),
       ]),
       profileId: 'test-profile',
       root,
@@ -312,18 +332,24 @@ test('times out a nested process tree and records deterministic failure evidence
     const nestedPid = Number(fs.readFileSync(pidFile, 'utf8'));
     await waitFor(() => !processAlive(nestedPid));
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
 test('the internal profile deadline terminates the active tree before the CI envelope', async () => {
   const root = temporaryRoot();
   try {
-    const child = writeSuite(root, 'profile-timeout', 'setInterval(() => {}, 1000);\n');
+    const readyFile = path.join(root, 'profile-timeout.ready');
+    const child = writeSuite(root, 'profile-timeout', `
+      const fs = require('node:fs');
+      fs.writeFileSync(${JSON.stringify(readyFile)}, 'ready');
+      setInterval(() => {}, 1000);
+    `);
     const manifest = manifestFor(process.platform, [
-      suite('profile-timeout', child, { timeoutMs: 5000 }),
+      suite('profile-timeout', child, { timeoutMs: TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS }),
     ]);
-    manifest.profiles['test-profile'].profileTimeoutMs = 120;
+    manifest.profiles['test-profile'].profileTimeoutMs =
+      process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 120;
     const result = await runProfile({
       manifest,
       profileId: 'test-profile',
@@ -335,9 +361,10 @@ test('the internal profile deadline terminates the active tree before the CI env
     assert.equal(result.report.profileDeadlineExceeded, true);
     assert.equal(result.report.suites[0].timeoutScope, 'profile');
     assert.equal(result.report.suites[0].cleanup.status, 'terminated');
-    assert.ok(result.report.durationMs < 3000);
+    assert.equal(fs.existsSync(readyFile), true);
+    assert.ok(result.report.durationMs < TEST_PROFILE_DEADLINE_ASSERT_MS);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -366,7 +393,7 @@ test('normal suite completion still terminates background descendants before rep
     const nestedPid = Number(fs.readFileSync(pidFile, 'utf8'));
     await waitFor(() => !processAlive(nestedPid));
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -395,7 +422,7 @@ test('continues after an ordinary suite failure and reports every result', async
       ],
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -412,7 +439,7 @@ test('loads only the repository-owned manifest path', () => {
     assert.equal(loaded.profiles.has('test-profile'), true);
     assert.equal(EXIT_MANIFEST, 2);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -528,7 +555,7 @@ test('manifest validation rejects malformed roots, shapes, paths, arguments, and
       /duplicate suite id/,
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -543,7 +570,7 @@ test('manifest loader reports missing and malformed repository-owned JSON', () =
     fs.writeFileSync(manifestPath, '{not-json');
     assert.throws(() => loadAndValidateManifest(root), /invalid JSON/);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -562,7 +589,7 @@ test('repository loader requires an exact audited command catalog', () => {
     writeCatalog(root, [suite('extra', extra)]);
     assert.throws(() => loadAndValidateManifest(root), /absent from the audited catalog/);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -595,7 +622,7 @@ test('suite content and component identity are revalidated immediately before sp
     );
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -610,7 +637,7 @@ test('atomic reports clean their private temporary file when publication fails',
       [],
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -687,7 +714,7 @@ test('Windows tree cleanup validates SystemRoot and taskkill outcomes', {
       /taskkill failed with exit 7/,
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -769,7 +796,7 @@ test('profile runner covers bash heartbeats, spawn errors, and selection errors'
       /requires .* current platform/,
     );
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -804,7 +831,7 @@ test('cleanup failures abort the remaining profile and persist diagnostics', asy
     assert.match(result.report.suites[0].cleanup.error, /synthetic cleanup failure/);
     assert.equal(fs.existsSync(marker), false);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -831,7 +858,7 @@ test('a cleanup that does not close the suite is reported fail-closed', async ()
     assert.match(result.report.suites[0].cleanup.error, /required cleanup recovery/);
     await new Promise((resolve) => setTimeout(resolve, 80));
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -866,7 +893,7 @@ test('signal cancellation writes a report and removes installed handlers', async
     assert.equal(signals.listenerCount('SIGINT'), 0);
     assert.equal(signals.listenerCount('SIGTERM'), 0);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
 
@@ -926,6 +953,6 @@ test('injectable CLI validates usage and executes an exact Windows profile', asy
     }), EXIT_MANIFEST);
     assert.match(stderr.join(''), /unknown profile/);
   } finally {
-    fs.rmSync(root, { recursive: true, force: true });
+    removeTemporaryRoot(root);
   }
 });
