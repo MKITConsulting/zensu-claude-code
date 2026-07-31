@@ -33,6 +33,8 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 zensu_bind_hook_session "$INPUT" || exit 0
+PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
+export CLAUDE_PROJECT_DIR="$PROJECT_ROOT"
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 AUTO_FIX_ON=1
 zensu_hook_enabled autoFix || AUTO_FIX_ON=0
@@ -174,7 +176,7 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   # nonterminal generation still owns the project, regardless of session; a
   # corrupt read is authoritative and must fail closed before ticket mutation.
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  if PREFLIGHT_OUTER="$(autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null)"; then
+  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
     PREFLIGHT_OUTER_RC=0
   else
     PREFLIGHT_OUTER_RC=$?
@@ -206,7 +208,7 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       } catch (_) { process.exit(3); }
     ' 2>/dev/null || exit 0
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  PREFLIGHT_OUTER="$(autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}" 2>/dev/null)" || exit 0
+  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)" || exit 0
   OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '
