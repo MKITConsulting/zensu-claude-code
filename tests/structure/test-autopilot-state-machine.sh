@@ -490,7 +490,10 @@ prepare_provider_project() {
   autopilot_apply_event "$RUN" provider-review-request TEAM_REVIEW_REQUESTED \
     "{\"operationKey\":\"$REVIEW_KEY\",\"provider\":\"$provider\"}" \
     "$target" >/dev/null || return 1
-  source="$target/provider-review-source.json"
+  # Keep the caller-owned source in the trusted temp root. The public store
+  # API owns conversion into the target project's native namespace; placing
+  # this fixture beneath target would preselect a Git Bash drive spelling.
+  source="$ROOT/provider-review-source-${provider}.json"
   cp "$REVIEW_PAYLOAD_SNAPSHOT" "$source" || return 1
   chmod 600 "$source" || return 1
   autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
