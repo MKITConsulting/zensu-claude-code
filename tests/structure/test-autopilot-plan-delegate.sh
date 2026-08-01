@@ -228,18 +228,20 @@ done_plan_event done-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:done-plan
 done_plan_event done-pr-open PR_OPENED "{\"operationKey\":\"pr:done-plan\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$DONE_HEAD\"}}"
 DONE_REVIEW_KEY="$(autopilot_team_review_operation_key "$DONE_RUN" "$DONE_HEAD")"
 done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"provider\":\"github\"}"
-# Exercise the documented external-input boundary with the shell spelling of
-# the trusted temp root. The store API performs the shell/native conversion;
-# pre-rendering this as a project descendant would make the fixture depend on
-# Git Bash drive-path spelling before that boundary is reached.
+# P11 verifies terminal pointer routing, not the public payload-store boundary;
+# that boundary has dedicated state-machine coverage below. Seed the exact
+# private snapshot so this fixture cannot fail on unrelated Windows transport.
 DONE_REVIEW_PAYLOAD="$RAW_TMP/done-review.json"
 printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Done fixture review\",\"commit_id\":\"$DONE_HEAD\",\"comments\":[]}" > "$DONE_REVIEW_PAYLOAD"
-DONE_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload "$DONE_RUN" "$DONE_REVIEW_KEY" \
-  "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null)"
-DONE_REVIEW_SNAPSHOT_RC=$?
-if [ -z "$DONE_REVIEW_SNAPSHOT" ]; then
+DONE_REVIEW_SNAPSHOT="$(_autopilot_team_review_payload_target \
+  "$DONE_PROJECT" "$DONE_REVIEW_KEY" "$DONE_HEAD" 2>/dev/null || true)"
+if [ -z "$DONE_REVIEW_SNAPSHOT" ] \
+  || ! cp "$DONE_REVIEW_PAYLOAD" "$DONE_REVIEW_SNAPSHOT" \
+  || ! chmod 600 "$DONE_REVIEW_SNAPSHOT" \
+  || ! _autopilot_team_review_payload_inspect \
+      "$DONE_REVIEW_SNAPSHOT" "$DONE_HEAD" true >/dev/null 2>&1; then
   [ "$DONE_READY" = false ] \
-    || DONE_READY_STAGE="review-snapshot-failed-rc-$DONE_REVIEW_SNAPSHOT_RC"
+    || DONE_READY_STAGE="review-snapshot-seed-failed"
   DONE_READY=false
 fi
 DONE_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \

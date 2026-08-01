@@ -23,7 +23,10 @@ const { RUNTIME_PATHS } = require('../windows-profile-contract.js');
 
 const WINDOWS_TEST_WAIT_MS = 30000;
 const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
-const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 5000;
+// A cold Windows PowerShell Add-Type compilation can exceed 30 seconds while
+// the four observation shards share one hosted runner pool. Keep the fixture
+// bounded, but leave enough room to observe the child process's real exit code.
+const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
 const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
   process.platform === 'win32' ? 45000 : 5000;

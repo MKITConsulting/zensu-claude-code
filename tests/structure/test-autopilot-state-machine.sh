@@ -462,12 +462,11 @@ else
   check "R7aa publication can relabel a GitHub request as GitLab" FAIL
 fi
 
-# Build a complete requested state exclusively through the public state-machine
-# API, including its private durable payload. Copying and rewriting an internal
-# JSON file would bypass canonical project-root handling and would make this
-# provider control depend on host-specific path spellings.
+# Build every requested-state transition through the public state-machine API.
+# The private payload is seeded separately so these controls test provider
+# receipt semantics without repeating the R4-R7 storage transport contract.
 prepare_provider_project() {
-  local target="$1" provider="$2" source
+  local target="$1" provider="$2" snapshot
   mkdir -p "$target" || return 1
   autopilot_begin_run "$RUN" "$OWNER" "$target" >/dev/null || return 1
   autopilot_apply_event "$RUN" provider-plan PLAN_APPROVED \
@@ -490,14 +489,15 @@ prepare_provider_project() {
   autopilot_apply_event "$RUN" provider-review-request TEAM_REVIEW_REQUESTED \
     "{\"operationKey\":\"$REVIEW_KEY\",\"provider\":\"$provider\"}" \
     "$target" >/dev/null || return 1
-  # Keep the caller-owned source in the trusted temp root. The public store
-  # API owns conversion into the target project's native namespace; placing
-  # this fixture beneath target would preselect a Git Bash drive spelling.
-  source="$ROOT/provider-review-source-${provider}.json"
-  cp "$REVIEW_PAYLOAD_SNAPSHOT" "$source" || return 1
-  chmod 600 "$source" || return 1
-  autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
-    "$source" "$provider" "$target" >/dev/null
+  # R4-R7 already exercise the public store/read boundary. These provider
+  # controls isolate receipt binding by seeding the same validated private
+  # snapshot after building every durable state transition through public APIs.
+  snapshot="$(_autopilot_team_review_payload_target \
+    "$target" "$REVIEW_KEY" "$HEAD_SHA")" || return 1
+  cp "$REVIEW_PAYLOAD_SNAPSHOT" "$snapshot" || return 1
+  chmod 600 "$snapshot" || return 1
+  _autopilot_team_review_payload_inspect \
+    "$snapshot" "$HEAD_SHA" true >/dev/null
 }
 
 # A genuinely GitLab-bound request with one inline finding has a valid two-part
