@@ -214,8 +214,10 @@ DONE_READY_STAGE=begin
 autopilot_begin_run "$DONE_RUN" "$DONE_OWNER" "$DONE_PROJECT" >/dev/null 2>&1 \
   || { DONE_READY=false; DONE_READY_STAGE=begin-failed; }
 done_plan_event() {
-  autopilot_apply_event "$DONE_RUN" "$1" "$2" "$3" "$DONE_PROJECT" >/dev/null 2>&1 \
-    || { DONE_READY=false; DONE_READY_STAGE="$1-failed"; }
+  if ! autopilot_apply_event "$DONE_RUN" "$1" "$2" "$3" "$DONE_PROJECT" >/dev/null 2>&1; then
+    [ "$DONE_READY" = false ] || DONE_READY_STAGE="$1-failed"
+    DONE_READY=false
+  fi
 }
 done_plan_event done-plan PLAN_APPROVED '{"approvedPlanSha256":"2222222222222222222222222222222222222222222222222222222222222222"}'
 done_plan_event done-tdd-start TDD_STARTED "{\"attempt\":1,\"chainId\":\"done-plan-chain-01\",\"sessionId\":\"$DONE_OWNER\"}"
@@ -226,13 +228,16 @@ done_plan_event done-pr-request PR_OPEN_REQUESTED '{"operationKey":"pr:done-plan
 done_plan_event done-pr-open PR_OPENED "{\"operationKey\":\"pr:done-plan\",\"pr\":{\"number\":713,\"url\":\"https://github.com/acme/repo/pull/713\",\"headSha\":\"$DONE_HEAD\"}}"
 DONE_REVIEW_KEY="$(autopilot_team_review_operation_key "$DONE_RUN" "$DONE_HEAD")"
 done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$DONE_REVIEW_KEY\",\"provider\":\"github\"}"
-DONE_REVIEW_PAYLOAD="$TMP/done-review-payload.json"
+DONE_REVIEW_PAYLOAD="$DONE_PROJECT/review.json"
 printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Done fixture review\",\"commit_id\":\"$DONE_HEAD\",\"comments\":[]}" > "$DONE_REVIEW_PAYLOAD"
 DONE_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload "$DONE_RUN" "$DONE_REVIEW_KEY" \
   "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null)"
 DONE_REVIEW_SNAPSHOT_RC=$?
-[ -n "$DONE_REVIEW_SNAPSHOT" ] \
-  || { DONE_READY=false; DONE_READY_STAGE="review-snapshot-failed-rc-$DONE_REVIEW_SNAPSHOT_RC"; }
+if [ -z "$DONE_REVIEW_SNAPSHOT" ]; then
+  [ "$DONE_READY" = false ] \
+    || DONE_READY_STAGE="review-snapshot-failed-rc-$DONE_REVIEW_SNAPSHOT_RC"
+  DONE_READY=false
+fi
 DONE_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
   "$DONE_REVIEW_SNAPSHOT" "$DONE_HEAD" true canonical 2>/dev/null || true)"
 DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD" "$DONE_REVIEW_DIGEST")"
