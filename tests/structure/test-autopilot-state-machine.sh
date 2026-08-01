@@ -302,7 +302,8 @@ else
 fi
 
 REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
-  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null || true)"
+  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null)"
+REVIEW_PAYLOAD_STORE_RC=$?
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
@@ -310,7 +311,14 @@ if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
   check "R4 requested review atomically stores one private operation/head-bound payload" PASS
 else
-  check "R4 requested review atomically stores one private operation/head-bound payload" FAIL
+  REVIEW_PAYLOAD_TARGET="$(_autopilot_team_review_payload_target \
+    "$PROJECT" "$REVIEW_KEY" "$HEAD_SHA" 2>/dev/null || true)"
+  REVIEW_PAYLOAD_NATIVE_TARGET="$(
+    bash "$HOST_PATH" "$REVIEW_PAYLOAD_TARGET" 2>/dev/null || true
+  )"
+  check "R4 requested review atomically stores one private operation/head-bound payload (rc=$REVIEW_PAYLOAD_STORE_RC shell_path_length=${#REVIEW_PAYLOAD_TARGET} native_path_length=${#REVIEW_PAYLOAD_NATIVE_TARGET})" FAIL
+  printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"
+  exit 1
 fi
 
 REVIEW_VCS_META="$(_zensu_vcs_review_payload_meta github "$REVIEW_PAYLOAD_SNAPSHOT" "$HEAD_SHA" "$REVIEW_KEY" 2>/dev/null || true)"

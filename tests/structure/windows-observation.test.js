@@ -204,6 +204,34 @@ test('timeouts, cleanup failures, and shard/legacy mismatches are not eligible',
   }
 });
 
+test('matching shard and legacy failures are never eligible parity evidence', () => {
+  const value = fixture();
+  try {
+    for (const name of EXPECTED_PROFILES) {
+      const failed = profile(name, { status: 'failed' });
+      failed.suites[0] = {
+        ...failed.suites[0],
+        status: 'failed',
+        exitCode: 1,
+      };
+      fs.writeFileSync(path.join(value.reports, `${name}.json`), JSON.stringify(failed));
+    }
+    const legacyRecord = JSON.parse(fs.readFileSync(value.legacy, 'utf8'));
+    fs.writeFileSync(value.legacy, JSON.stringify({ ...legacyRecord, outcome: 'failure' }));
+    const result = summarize({
+      reportsDirectory: value.reports,
+      legacyFile: value.legacy,
+      expected: context,
+    });
+    assert.equal(result.complete, true);
+    assert.equal(result.shardOutcome, 'failure');
+    assert.equal(result.legacyOutcome, 'failure');
+    assert.equal(result.parity, false);
+  } finally {
+    fs.rmSync(value.root, { recursive: true, force: true });
+  }
+});
+
 test('legacy recorder and CLI use exact workflow provenance', () => {
   const environment = {
     GITHUB_SHA: context.sourceGitRevision,
@@ -337,6 +365,18 @@ test('ledger audit requires ten distinct revisions across 14 days and both event
         profiles: entry.profiles.map((profileEntry, profileIndex) => (
           profileIndex === 0 ? { ...profileEntry, status: 'failed' } : profileEntry
         )),
+      } : entry
+    )),
+    observations.map((entry, index) => (
+      index === 9 ? {
+        ...entry,
+        legacyOutcome: 'failure',
+        shardOutcome: 'failure',
+        parity: true,
+        profiles: entry.profiles.map((profileEntry) => ({
+          ...profileEntry,
+          status: 'failed',
+        })),
       } : entry
     )),
   ]) {

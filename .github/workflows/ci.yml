@@ -107,7 +107,6 @@ jobs:
       - run: npm ci
       - name: Run Windows contract profile
         id: profile
-        continue-on-error: true
         env:
           ZENSU_PROFILE_REPORT_DIR: ${{ runner.temp }}/windows-profile-reports
           ZENSU_PROFILE_SOURCE_SHA: ${{ github.sha }}

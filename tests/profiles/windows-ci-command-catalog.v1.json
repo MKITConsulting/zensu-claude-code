@@ -36,7 +36,8 @@
     {"runner":"bash","path":"tests/session-control/run.sh","args":[]},
     {"runner":"bash","path":"evals/reset-review-limit/run-self-check.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-windows-portability-guards.sh","args":[]},
-    {"runner":"bash","path":"tests/structure/test-windows-ci-contract.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-windows-ci-contract.sh","args":["metadata"]},
+    {"runner":"bash","path":"tests/structure/test-windows-ci-contract.sh","args":["lifecycle"]},
     {"runner":"bash","path":"tests/structure/test-workflow-checkout-credentials.sh","args":[]},
     {"runner":"node","path":"evals/session-control/tests/upgrade-linux-sandbox.test.js","args":["--test","--test-name-pattern=rejects unsafe paths, environments, and working-directory escapes|mounts opt only for a real command or resolved native runtime under opt"]}
   ]

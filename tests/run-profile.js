@@ -17,6 +17,7 @@ const WINDOWS_JOB_HELPER_RELATIVE_PATH = 'tests/windows-profile-job.ps1';
 const MAX_TIMEOUT_MS = 60 * 60 * 1000;
 const MAX_PROFILE_TIMEOUT_MS = 30 * 60 * 1000;
 const HEARTBEAT_MS = 30 * 1000;
+const PROFILE_SANDBOX_PREFIX = 'zp-';
 const PROFILE_ID = /^[a-z0-9](?:[a-z0-9-]{0,62}[a-z0-9])?$/;
 const SUITE_ID = /^[a-z0-9](?:[a-z0-9-]{0,126}[a-z0-9])?$/;
 const ROOT_KEYS = new Set(['schemaVersion', 'profiles']);
@@ -545,12 +546,40 @@ function commandForSuite(suite, bashExecutable) {
 }
 
 function forwardWithBackpressure(stream, output) {
+  let resolveCompletion;
+  const completion = new Promise((resolve) => {
+    resolveCompletion = resolve;
+  });
+  let completed = false;
+  const complete = () => {
+    if (completed) return;
+    completed = true;
+    resolveCompletion();
+  };
   stream.on('data', (chunk) => {
     const accepted = output.write(chunk);
     if (accepted === false && typeof stream.pause === 'function' && typeof output.once === 'function') {
       stream.pause();
       output.once('drain', () => stream.resume());
     }
+  });
+  stream.once('end', complete);
+  stream.once('close', complete);
+  stream.once('error', complete);
+  return completion;
+}
+
+function readableCompletion(stream) {
+  return new Promise((resolve) => {
+    let completed = false;
+    const complete = () => {
+      if (completed) return;
+      completed = true;
+      resolve();
+    };
+    stream.once('end', complete);
+    stream.once('close', complete);
+    stream.once('error', complete);
   });
 }
 
@@ -626,8 +655,9 @@ async function executeSuite({
     stdio: ['ignore', 'pipe', 'pipe', 'pipe'],
     windowsHide: true,
   });
-  forwardWithBackpressure(child.stdout, output);
-  forwardWithBackpressure(child.stderr, output);
+  const stdoutCompleted = forwardWithBackpressure(child.stdout, output);
+  const stderrCompleted = forwardWithBackpressure(child.stderr, output);
+  const resultChannelCompleted = readableCompletion(child.stdio[3]);
   const supervisorResult = readSupervisorResult(child.stdio[3]);
   const wrapperClosed = new Promise((resolve) => {
     child.once('close', (exitCode, signal) => resolve({ exitCode, signal }));
@@ -736,6 +766,19 @@ async function executeSuite({
     };
     cleanupFailure ||= new Error(message);
   }
+  const streamsCompleted = await raceWithTimeout(
+    Promise.all([stdoutCompleted, stderrCompleted, resultChannelCompleted]),
+    cleanupCloseTimeoutMs,
+  );
+  if (typeof streamsCompleted === 'symbol') {
+    const message = 'suite supervisor streams remained open after process cleanup';
+    cleanup = {
+      status: 'failed',
+      mechanism: cleanup.mechanism || null,
+      error: message,
+    };
+    cleanupFailure ||= new Error(message);
+  }
   onActiveCleanup(null);
   const durationMs = monotonicMilliseconds(started);
   output.write(`=== ${status.toUpperCase()} ${suite.id} (${Math.round(durationMs)}ms) ===\n`);
@@ -831,7 +874,11 @@ async function runProfile({
     reportDirectory || fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-windows-profile-report-')),
   );
   const reportPath = path.join(reports, `${profileId}.json`);
-  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), `zensu-profile-${profileId}-`));
+  // Keep the runner-owned prefix deliberately short. Windows suites create
+  // security-bound filenames containing multiple SHA-256 values below this
+  // root; a descriptive prefix can exhaust Git/Win32 path headroom before the
+  // contract under test is reached.
+  const sandboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), PROFILE_SANDBOX_PREFIX));
   const suiteEnvironment = buildSuiteEnvironment(environment, sandboxRoot, platform);
   const bashExecutable = resolveExecutable('bash', environment, platform);
   const started = process.hrtime.bigint();

@@ -22,8 +22,8 @@ const expectedProfiles = [
   'windows-native-state',
   'windows-installed-core',
 ];
-const expectedCommandCount = 38;
-const expectedCommandDigest = '8a6aece6b37a8028654b5c008ae8e7e2c978a99a6b5486ed8c755c5440f28277';
+const expectedCommandCount = 39;
+const expectedCommandDigest = '6ab18c4b7ffcad7b652d8adcdcad1cf053f08ee008f6ee75ebf348f1b6231265';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -148,6 +148,33 @@ test('previously hidden native Windows contracts are explicit and monoliths are 
   }
 });
 
+test('slow profile lifecycle coverage has an independent measured deadline', () => {
+  const suites = manifest.profiles['windows-installed-core'].suites;
+  const metadata = suites.find((suite) => suite.id === 'windows-ci-metadata-contract');
+  const lifecycle = suites.find((suite) => suite.id === 'windows-profile-lifecycle-contract');
+  assert.deepEqual(metadata, {
+    id: 'windows-ci-metadata-contract',
+    runner: 'bash',
+    path: 'tests/structure/test-windows-ci-contract.sh',
+    args: ['metadata'],
+    timeoutMs: 180000,
+  });
+  assert.deepEqual(lifecycle, {
+    id: 'windows-profile-lifecycle-contract',
+    runner: 'bash',
+    path: 'tests/structure/test-windows-ci-contract.sh',
+    args: ['lifecycle'],
+    timeoutMs: 420000,
+  });
+  const contractRunner = fs.readFileSync(
+    path.join(root, 'tests', 'structure', 'test-windows-ci-contract.sh'),
+    'utf8',
+  );
+  assert.match(contractRunner, /metadata\)[\s\S]*windows-ci-contract\.test\.js/);
+  assert.match(contractRunner, /lifecycle\)[\s\S]*profile-runner\.test\.js/);
+  assert.match(contractRunner, /all\)[\s\S]*profile-runner\.test\.js/);
+});
+
 test('observation matrix has an internal cleanup reserve and provenance-bound artifacts', () => {
   const job = workflow.jobs?.['windows-shard-observation'];
   assert.ok(job);
@@ -169,9 +196,13 @@ test('observation matrix has an internal cleanup reserve and provenance-bound ar
   assert.equal(checkouts[0].with?.['persist-credentials'], false);
   const run = job.steps.find((step) => step.name === 'Run Windows contract profile');
   assert.equal(run?.run, 'node tests/run-profile.js "${{ matrix.profile }}"');
+  assert.equal(run?.['continue-on-error'], undefined);
   assert.equal(run?.env?.ZENSU_PROFILE_REPORT_DIR, '${{ runner.temp }}/windows-profile-reports');
   assert.equal(run?.env?.ZENSU_PROFILE_SOURCE_SHA, '${{ github.sha }}');
   assert.equal(run?.env?.GITHUB_RUN_ATTEMPT, '${{ github.run_attempt }}');
+  const record = job.steps.find((step) => step.name === 'Record observation outcome');
+  assert.equal(record?.if, 'always()');
+  assert.equal(record?.env?.PROFILE_OUTCOME, '${{ steps.profile.outcome }}');
   const upload = job.steps.find(
     (step) => typeof step.uses === 'string' && step.uses.startsWith('actions/upload-artifact@'),
   );
@@ -239,7 +270,7 @@ test('one non-blocking summary validates exact same-run shard and legacy evidenc
 
 test('the documented cutover gate is machine-auditable and keeps paid Linux gates unchanged', () => {
   assert.match(testsReadme, /at least 14 days and 10 representative/);
-  assert.match(testsReadme, /100% pass\/fail parity/);
+  assert.match(testsReadme, /100% successful outcomes from both/);
   assert.match(testsReadme, /no missing suite, timeout, or incomplete timing report/);
   assert.match(testsReadme, /audit-ledger/);
   assert.match(testsReadme, /ten distinct Git revisions/);

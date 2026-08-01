@@ -117,7 +117,10 @@ node "$INSTALL_CONTRACT" verify "$INSTALL_MANIFEST" "$SOURCE_ROOT" "$PLUGIN_ROOT
   "$ISOLATED_HOME" "$SOURCE_REVISION" "$CLI_VERSION" >/dev/null \
   || die 'installed plugin provenance/runtime contract verification failed'
 
-TEMPORARY="$(mktemp -d -t zensu-session-control-claude-XXXXXX)"
+# This wrapper creates digest-bound evidence paths and an external worktree.
+# Keep every wrapper-owned path component short enough for Git for Windows even
+# when the caller already runs below an isolated CI sandbox.
+TEMPORARY="$(mktemp -d -t zsc-XXXXXX)"
 TEMPORARY="$(cd "$TEMPORARY" && pwd -P)"
 MUTATING_CONTROL_CANARY_PID=''
 # Invoked indirectly by the EXIT trap.
@@ -133,9 +136,9 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM HUP
 
-PROJECT_ROOT="$TEMPORARY/project"
-PLUGIN_DATA="$TEMPORARY/plugin-data"
-CONTROL_EVIDENCE="$TEMPORARY/wrapper-control"
+PROJECT_ROOT="$TEMPORARY/p"
+PLUGIN_DATA="$TEMPORARY/d"
+CONTROL_EVIDENCE="$TEMPORARY/c"
 RAW_STREAM="$CONTROL_EVIDENCE/stream.jsonl"
 STDERR_FILE="$CONTROL_EVIDENCE/claude.stderr"
 EVAL_CONFIG="$CONTROL_EVIDENCE/eval-config.json"
@@ -152,6 +155,7 @@ git -C "$PROJECT_ROOT" config user.name 'Zensu Session Eval'
 git -C "$PROJECT_ROOT" config user.email 'session-eval@zensu.invalid'
 git -C "$PROJECT_ROOT" config core.hooksPath /dev/null
 git -C "$PROJECT_ROOT" config core.autocrlf false
+git -C "$PROJECT_ROOT" config core.longpaths true
 git -C "$PROJECT_ROOT" add README.md
 git -C "$PROJECT_ROOT" -c commit.gpgsign=false commit -qm 'test: seed session-control fixture'
 
@@ -344,7 +348,7 @@ fi
 GENERIC_WORKTREE=''
 GENERIC_MARKER=''
 if [ "$SCENARIO" = 'live-generic-review-worker' ]; then
-  GENERIC_WORKTREE="$TEMPORARY/external-review-worktree"
+  GENERIC_WORKTREE="$TEMPORARY/w"
   git -C "$PROJECT_ROOT" worktree add --detach -q "$GENERIC_WORKTREE" HEAD \
     || die 'cannot create wrapper-owned external detached review worktree'
   GENERIC_WORKTREE="$(cd "$GENERIC_WORKTREE" && pwd -P)"

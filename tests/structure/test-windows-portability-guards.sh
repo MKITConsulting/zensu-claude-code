@@ -289,6 +289,31 @@ else
   check "Claude wrapper selftest protects inline context parsing and separates native evidence from MSYS filesystem paths" FAIL
 fi
 
+if grep -qF 'TEMPORARY="$(mktemp -d -t zsc-XXXXXX)"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'PROJECT_ROOT="$TEMPORARY/p"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'PLUGIN_DATA="$TEMPORARY/d"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'CONTROL_EVIDENCE="$TEMPORARY/c"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'GENERIC_WORKTREE="$TEMPORARY/w"' "$CLAUDE_WRAPPER" \
+  && grep -qF 'git -C "$PROJECT_ROOT" config core.longpaths true' "$CLAUDE_WRAPPER" \
+  && ! grep -qF 'zensu-session-control-claude-XXXXXX' "$CLAUDE_WRAPPER" \
+  && ! grep -qF 'external-review-worktree' "$CLAUDE_WRAPPER"; then
+  check "Claude wrapper keeps digest-bound Windows fixture paths short and enables repo-local long paths" PASS
+else
+  check "Claude wrapper keeps digest-bound Windows fixture paths short and enables repo-local long paths" FAIL
+fi
+
+if grep -qF 'TEMPORARY="$(mktemp -d -t zsw-XXXXXX)"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'ISOLATED_HOME="$TEMPORARY/h"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'mkdir -p "$TEMPORARY/b"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && grep -qF 'selftest_control="$(dirname "$CLAUDE_PLUGIN_DATA")/c/stub-control.json"' "$CLAUDE_WRAPPER_SELFTEST" \
+  && ! grep -qF 'zensu-session-wrapper-selftest-XXXXXX' "$CLAUDE_WRAPPER_SELFTEST" \
+  && ! grep -qF '$TEMPORARY/isolated-home' "$CLAUDE_WRAPPER_SELFTEST" \
+  && ! grep -qF '$TEMPORARY/bin' "$CLAUDE_WRAPPER_SELFTEST"; then
+  check "Claude wrapper selftest keeps its installed-cache fixture below the Windows path budget" PASS
+else
+  check "Claude wrapper selftest keeps its installed-cache fixture below the Windows path budget" FAIL
+fi
+
 LOCKED_RUN_BODY="$(sed -n '/^_tdd_locked_run() {$/,/^}$/p' "$PHASE")"
 LOCK_KEEPER_BODY="$(sed -n '/^_tdd_core_lock_keeper() {$/,/^}$/p' "$PHASE")"
 if printf '%s\n' "$LOCKED_RUN_BODY" | grep -qF 'coproc $coproc_name' \

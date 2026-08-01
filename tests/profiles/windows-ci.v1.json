@@ -294,11 +294,22 @@
           "timeoutMs": 300000
         },
         {
-          "id": "windows-ci-contract",
+          "id": "windows-ci-metadata-contract",
           "runner": "bash",
           "path": "tests/structure/test-windows-ci-contract.sh",
-          "args": [],
+          "args": [
+            "metadata"
+          ],
           "timeoutMs": 180000
+        },
+        {
+          "id": "windows-profile-lifecycle-contract",
+          "runner": "bash",
+          "path": "tests/structure/test-windows-ci-contract.sh",
+          "args": [
+            "lifecycle"
+          ],
+          "timeoutMs": 420000
         },
         {
           "id": "workflow-checkout-credentials",

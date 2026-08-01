@@ -40,6 +40,13 @@ suite exit. Child processes receive a disposable home/temp tree and a strict
 operational environment allowlist; credentials, auth homes, interpreter preload
 variables, and live/API modes are unavailable.
 
+The installed-core profile runs fast Windows metadata contracts and the slower
+profile-runner lifecycle contract as separate suites. The metadata suite keeps
+its three-minute deadline; the lifecycle suite has a seven-minute deadline
+derived from its approximately 3.5-minute native Windows baseline plus cleanup
+reserve. This split preserves the full contract without allowing one slow
+lifecycle test to hide which boundary exceeded its budget.
+
 CI writes the atomic report below the private runner temp directory. A manual
 run creates a random private report directory and prints its absolute path at
 the end.
@@ -57,7 +64,7 @@ The Ubuntu deterministic and Promptfoo contracts are unchanged.
 Cutover to blocking Windows shards requires all of the following:
 
 - at least 14 days and 10 representative pull-request or `main` runs;
-- 100% pass/fail parity between every shard run and the legacy Windows job;
+- 100% successful outcomes from both every shard run and the legacy Windows job;
 - no missing suite, timeout, or incomplete timing report.
 
 “Representative” means ten distinct Git revisions and run identities spanning

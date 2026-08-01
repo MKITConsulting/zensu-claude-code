@@ -228,12 +228,23 @@ test('allows one script to expose distinct bounded case selections', () => {
 });
 
 test('streams before exit, isolates credentials/home, and publishes a running report atomically', async () => {
-  const root = temporaryRoot();
+  let root = temporaryRoot();
   try {
     const output = [];
+    let backpressureApplied = false;
+    const outputSink = new EventEmitter();
+    outputSink.write = (chunk) => {
+      const value = String(chunk);
+      output.push(value);
+      if (backpressureApplied || !value.includes('early-output')) return true;
+      backpressureApplied = true;
+      setImmediate(() => outputSink.emit('drain'));
+      return false;
+    };
     const release = path.join(root, 'release');
     const child = writeSuite(root, 'stream', `
       const fs = require('node:fs');
+      const path = require('node:path');
       const forbidden = Object.entries(process.env).some(([key, value]) =>
         /^(?:anthropic_api_key|claude_code_oauth_token|gh_token|node_options|bash_env)$/i.test(key)
           && value);
@@ -243,6 +254,7 @@ test('streams before exit, isolates credentials/home, and publishes a running re
         clearInterval(timer);
         const isolated = process.env.HOME && process.env.HOME !== ${JSON.stringify(process.env.HOME)};
         process.stderr.write(forbidden || !isolated ? 'credential-leaked\\n' : 'credential-free\\n');
+        process.stderr.write('sandbox-prefix:' + path.basename(path.dirname(process.env.TEMP)) + '\\n');
       }, 10);
     `);
     const reportDirectory = path.join(root, 'reports');
@@ -260,12 +272,7 @@ test('streams before exit, isolates credentials/home, and publishes a running re
         NODE_OPTIONS: '--require=/tmp/hostile.js',
         BASH_ENV: '/tmp/hostile.sh',
       },
-      output: {
-        write(chunk) {
-          output.push(String(chunk));
-          return true;
-        },
-      },
+      output: outputSink,
       sourceGitRevision: 'a'.repeat(40),
       runId: '123',
       runAttempt: '2',
@@ -281,7 +288,9 @@ test('streams before exit, isolates credentials/home, and publishes a running re
     fs.writeFileSync(release, 'go\n');
     const result = await pending;
     assert.equal(result.exitCode, 0);
+    assert.equal(backpressureApplied, true);
     assert.match(output.join(''), /early-output[\s\S]*credential-free/);
+    assert.match(output.join(''), /sandbox-prefix:zp-[A-Za-z0-9_-]+/);
     assert.doesNotMatch(output.join(''), /credential-leaked/);
     const report = JSON.parse(fs.readFileSync(result.reportPath, 'utf8'));
     assert.equal(report.status, 'passed');
@@ -294,8 +303,10 @@ test('streams before exit, isolates credentials/home, and publishes a running re
     assert.equal(report.sourceGitRevision, 'a'.repeat(40));
     assert.equal(report.runAttempt, '2');
     assert.equal(report.runnerImage, 'test-runner');
+    fs.rmSync(root, { recursive: true, force: true });
+    root = null;
   } finally {
-    removeTemporaryRoot(root);
+    if (root) removeTemporaryRoot(root);
   }
 });
 

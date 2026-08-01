@@ -235,7 +235,7 @@ function summarize({ reportsDirectory, legacyFile, expected }) {
     profileContractSha256: profiles[0].profileContractSha256,
     legacyOutcome: legacy.outcome,
     shardOutcome,
-    parity: shardOutcome === legacy.outcome,
+    parity: shardOutcome === 'success' && legacy.outcome === 'success',
     complete,
     profiles: profiles.map((report) => ({
       profile: report.profile,
@@ -271,8 +271,8 @@ function auditLedger(ledger, expectedContract = null) {
         || observation.kind !== 'windows-observation-summary'
         || observation.parity !== true
         || observation.complete !== true
-        || observation.legacyOutcome !== observation.shardOutcome
-        || !['success', 'failure'].includes(observation.shardOutcome)
+        || observation.legacyOutcome !== 'success'
+        || observation.shardOutcome !== 'success'
         || !Array.isArray(observation.profiles)
         || observation.profiles.length !== EXPECTED_PROFILES.length) {
       throw new ObservationError('observation ledger contains an ineligible run');
@@ -282,7 +282,7 @@ function auditLedger(ledger, expectedContract = null) {
       if (!isObject(profile)
           || !hasExactKeys(profile, SUMMARY_PROFILE_KEYS)
           || typeof profile.profile !== 'string'
-          || !['passed', 'failed'].includes(profile.status)
+          || profile.status !== 'passed'
           || !Number.isFinite(profile.durationMs)
           || !Number.isInteger(profile.suiteCount)
           || profile.suiteCount < 1) {

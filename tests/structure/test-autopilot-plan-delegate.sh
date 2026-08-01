@@ -210,9 +210,12 @@ provision_session "$DONE_PROJECT" "$DONE_OWNER_RAW" done-owner || exit 1
 DONE_OWNER="$PROVISIONED_KEY"
 DONE_HEAD="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 DONE_READY=true
-autopilot_begin_run "$DONE_RUN" "$DONE_OWNER" "$DONE_PROJECT" >/dev/null 2>&1 || DONE_READY=false
+DONE_READY_STAGE=begin
+autopilot_begin_run "$DONE_RUN" "$DONE_OWNER" "$DONE_PROJECT" >/dev/null 2>&1 \
+  || { DONE_READY=false; DONE_READY_STAGE=begin-failed; }
 done_plan_event() {
-  autopilot_apply_event "$DONE_RUN" "$1" "$2" "$3" "$DONE_PROJECT" >/dev/null 2>&1 || DONE_READY=false
+  autopilot_apply_event "$DONE_RUN" "$1" "$2" "$3" "$DONE_PROJECT" >/dev/null 2>&1 \
+    || { DONE_READY=false; DONE_READY_STAGE="$1-failed"; }
 }
 done_plan_event done-plan PLAN_APPROVED '{"approvedPlanSha256":"2222222222222222222222222222222222222222222222222222222222222222"}'
 done_plan_event done-tdd-start TDD_STARTED "{\"attempt\":1,\"chainId\":\"done-plan-chain-01\",\"sessionId\":\"$DONE_OWNER\"}"
@@ -226,8 +229,10 @@ done_plan_event done-review-request TEAM_REVIEW_REQUESTED "{\"operationKey\":\"$
 DONE_REVIEW_PAYLOAD="$TMP/done-review-payload.json"
 printf '%s\n' "{\"event\":\"COMMENT\",\"body\":\"Done fixture review\",\"commit_id\":\"$DONE_HEAD\",\"comments\":[]}" > "$DONE_REVIEW_PAYLOAD"
 DONE_REVIEW_SNAPSHOT="$(autopilot_store_team_review_payload "$DONE_RUN" "$DONE_REVIEW_KEY" \
-  "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null || true)"
-[ -n "$DONE_REVIEW_SNAPSHOT" ] || DONE_READY=false
+  "$DONE_HEAD" "$DONE_REVIEW_PAYLOAD" github "$DONE_PROJECT" 2>/dev/null)"
+DONE_REVIEW_SNAPSHOT_RC=$?
+[ -n "$DONE_REVIEW_SNAPSHOT" ] \
+  || { DONE_READY=false; DONE_READY_STAGE="review-snapshot-failed-rc-$DONE_REVIEW_SNAPSHOT_RC"; }
 DONE_REVIEW_DIGEST="$(_autopilot_team_review_payload_inspect \
   "$DONE_REVIEW_SNAPSHOT" "$DONE_HEAD" true canonical 2>/dev/null || true)"
 DONE_REVIEW_MARKER="$(review_marker "$DONE_REVIEW_KEY" "$DONE_HEAD" "$DONE_REVIEW_DIGEST")"
@@ -244,7 +249,9 @@ if [ "$DONE_READY" = true ] && printf '%s' "$DONE_ON" | grep -qF 'AskUserQuestio
   && ! printf '%s' "$DONE_ON" | grep -qF 'PLAN_GATE_BLOCKED' \
   && [ "$(digest "$DONE_FILE")" = "$DONE_BEFORE" ]; then
   check "P11 DONE pointer falls through without mutating terminal history" PASS
-else check "P11 DONE pointer does not own or mutate later plans" FAIL; fi
+else
+  check "P11 DONE pointer does not own or mutate later plans (fixture=$DONE_READY_STAGE snapshot_length=${#DONE_REVIEW_SNAPSHOT})" FAIL
+fi
 
 # PATH is a POSIX colon-separated list under Bash, including Git Bash. Keep
 # the one-shot shim in the shell path namespace: a native `D:/...` component
