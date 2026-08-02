@@ -8,6 +8,9 @@ LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 CORE="$PLUGIN_DIR/hooks/lib/session-control-core-v1.js"
 BASELINE="$PLUGIN_DIR/tests/session-control/initialize-baseline.sh"
+if [ "$#" -gt 0 ]; then
+  exec node "$PLUGIN_DIR/tests/structure/deferred-review-claim-cases.js" "$@"
+fi
 ROOT="$(mktemp -d -t zensu-deferred-claim-XXXXXX)"
 trap 'rm -rf "$ROOT"' EXIT
 
@@ -638,18 +641,21 @@ POST_ASSIGN_RECOVERED="$(stop seed-failure-recovery)"; POST_ASSIGN_RECOVERED_RC=
 POST_ASSIGN_RECOVERY_OWNER="$(CLAIM_FILE="$POST_ASSIGN_CLAIM" node -e '
   try{const j=JSON.parse(require("fs").readFileSync(process.env.CLAIM_FILE,"utf8"));process.stdout.write(j.ownerSessionId||"missing")}catch(_){process.stdout.write("missing")}
 ')"
+POST_ASSIGN_OWNER_ACTIVE="$(state_flag seed-failure-owner active)"
+POST_ASSIGN_RECOVERY_ACTIVE="$(state_flag seed-failure-recovery active)"
+POST_ASSIGN_DECISION="$(printf '%s' "$POST_ASSIGN_RECOVERED" | decision)"
 if [ "$POST_ASSIGN_RC" -eq 1 ] \
   && [ "$POST_ASSIGN_META" = assigned ] \
   && [ ! -e "$CASE_STATE/pending-review.json" ] \
-  && [ "$(state_flag seed-failure-owner active)" = false ] \
+  && [ "$POST_ASSIGN_OWNER_ACTIVE" = false ] \
   && [ "$POST_ASSIGN_CLEANUP_PRESERVED" = true ] \
   && [ "$POST_ASSIGN_RECOVERED_RC" -eq 0 ] \
-  && [ "$(printf '%s' "$POST_ASSIGN_RECOVERED" | decision)" = block ] \
-  && [ "$(state_flag seed-failure-recovery active)" = true ] \
+  && [ "$POST_ASSIGN_DECISION" = block ] \
+  && [ "$POST_ASSIGN_RECOVERY_ACTIVE" = true ] \
   && [ "$POST_ASSIGN_RECOVERY_OWNER" = "$(canonical_session seed-failure-recovery)" ]; then
   check "C2f post-assignment seed failure retains and recovers its durable claim" PASS
 else
-  check "C2f post-assignment recovery (first_rc=$POST_ASSIGN_RC assigned=$POST_ASSIGN_META cleanup=$POST_ASSIGN_CLEANUP_PRESERVED retry_rc=$POST_ASSIGN_RECOVERED_RC decision=$(printf '%s' "$POST_ASSIGN_RECOVERED" | decision) owner=$POST_ASSIGN_RECOVERY_OWNER)" FAIL
+  check "C2f post-assignment recovery (first_rc=$POST_ASSIGN_RC assigned=$POST_ASSIGN_META owner_active=$POST_ASSIGN_OWNER_ACTIVE cleanup=$POST_ASSIGN_CLEANUP_PRESERVED retry_rc=$POST_ASSIGN_RECOVERED_RC decision=$POST_ASSIGN_DECISION recovery_active=$POST_ASSIGN_RECOVERY_ACTIVE owner=$POST_ASSIGN_RECOVERY_OWNER)" FAIL
 fi
 
 # Crash after the foreign-owner CAS but before its receipt acknowledgement.

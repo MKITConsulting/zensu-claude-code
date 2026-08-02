@@ -1,0 +1,56 @@
+name: Windows full safety suite
+
+on:
+  schedule:
+    - cron: '17 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: windows-full-safety-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-full-safety-shards:
+    name: Windows full safety (${{ matrix.kind }} ${{ matrix.shard }}/${{ matrix.total }})
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        include:
+          - { kind: canary, shard: 1, total: 4 }
+          - { kind: canary, shard: 2, total: 4 }
+          - { kind: canary, shard: 3, total: 4 }
+          - { kind: canary, shard: 4, total: 4 }
+          - { kind: structure, shard: 1, total: 8 }
+          - { kind: structure, shard: 2, total: 8 }
+          - { kind: structure, shard: 3, total: 8 }
+          - { kind: structure, shard: 4, total: 8 }
+          - { kind: structure, shard: 5, total: 8 }
+          - { kind: structure, shard: 6, total: 8 }
+          - { kind: structure, shard: 7, total: 8 }
+          - { kind: structure, shard: 8, total: 8 }
+          - { kind: offline, shard: 1, total: 4 }
+          - { kind: offline, shard: 2, total: 4 }
+          - { kind: offline, shard: 3, total: 4 }
+          - { kind: offline, shard: 4, total: 4 }
+    runs-on: windows-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run bounded Windows safety shard
+        run: node tests/run-windows-safety-shard.js "${{ matrix.kind }}" "${{ matrix.shard }}" "${{ matrix.total }}"

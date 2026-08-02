@@ -18,6 +18,61 @@ bash tests/run-all.sh --live       # deterministic + live claude --print suites 
 
 Exit 0 iff every selected suite passes. A timestamped report lands in `tests/results/`.
 
+## Windows contract profiles
+
+The versioned manifest at `tests/profiles/windows-ci.v1.json` divides the
+Windows-specific deterministic contracts into five bounded profiles:
+
+```bash
+node tests/run-profile.js --validate
+node tests/run-profile.js windows-reset-session
+node tests/run-profile.js windows-leases-routing
+node tests/run-profile.js windows-native-state
+node tests/run-profile.js windows-installed-core
+node tests/run-profile.js windows-native-branches
+```
+
+The runner validates the complete manifest and its audited command catalog
+before starting any child process, binds every suite to its validated content
+digest, streams suite output, and enforces both per-suite and 30-minute
+per-profile deadlines. Every suite runs below a supervisor that remains alive
+until the complete process tree has been terminated, including after a normal
+suite exit. Child processes receive a disposable home/temp tree and a strict
+operational environment allowlist; credentials, auth homes, interpreter preload
+variables, and live/API modes are unavailable.
+
+The installed-core profile runs fast Windows metadata contracts and the slower
+profile-runner lifecycle contract as separate suites. The metadata suite keeps
+its three-minute deadline; the lifecycle suite has a seven-minute deadline
+derived from its approximately 3.5-minute native Windows baseline plus cleanup
+reserve. This split preserves the full contract without allowing one slow
+lifecycle test to hide which boundary exceeded its budget.
+
+CI writes the atomic report below the private runner temp directory. A manual
+run creates a random private report directory and prints its absolute path at
+the end.
+
+Pull-request CI runs all five profiles as blocking Windows contract profiles
+and uploads their provenance-bound timing reports. The stable
+`Deterministic suite (windows-latest)` check downloads exactly those five
+reports, validates SHA/run-attempt consistency plus the exact ordered suite
+inventory and complete execution-contract digest, and fails closed on a missing,
+failed, timed-out, or incompletely cleaned profile. That digest binds the
+manifest, command catalog, runner, supervisor, Windows Job Object helper,
+summarizer, complete CI workflow configuration, and every referenced suite file.
+
+The complete deterministic suite remains blocking on Ubuntu. The former
+per-pull-request Windows monolith is preserved in a separate scheduled,
+read-only Windows safety workflow that is weekly and manually dispatchable. Its
+bounded matrix partitions the exact prior Windows canary, every structure test,
+and all four deterministic offline eval runners without duplication or loss.
+Every command runs through the same bounded supervisor and Windows Job Object
+cleanup used by the blocking profiles, with a 30-minute command deadline; no
+individual safety job can consume the six-hour hosted-runner maximum. It no
+longer extends the pull-request critical path. Promptfoo coverage is unchanged.
+Release and Session Control Nightly remain on their existing Linux-only paid
+gates.
+
 ## Suites
 
 | Path | Kind | Covers |
@@ -58,7 +113,7 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
   negative assert, `# ` = comment. Tolerant by design (LLM output is non-deterministic).
 - Generated fixtures (`*/fixtures/`) and captures (`*/results/`, `tests/results/`) are
   git-ignored; build them with each suite's `setup-fixtures.sh`.
-- No CI yet — suites are local-only and opt-in for the live ones.
+- Deterministic suites run in CI. Live/API suites remain explicitly opt-in.
 
 ## Live-suite notes
 
