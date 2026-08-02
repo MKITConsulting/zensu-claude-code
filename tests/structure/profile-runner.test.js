@@ -55,6 +55,17 @@ function removeTemporaryRoot(root) {
   });
 }
 
+async function removeTemporaryRootAfterProcessExit(root) {
+  // Yield between Windows retries so pending process/stream close work can
+  // release the fixture tree instead of being blocked by synchronous cleanup.
+  await fs.promises.rm(root, {
+    recursive: true,
+    force: true,
+    maxRetries: process.platform === 'win32' ? 20 : 0,
+    retryDelay: process.platform === 'win32' ? 100 : 0,
+  });
+}
+
 function writeSuite(root, name, source) {
   const relative = `suites/${name}.js`;
   fs.writeFileSync(path.join(root, relative), source, { mode: 0o700 });
@@ -306,10 +317,10 @@ test('streams before exit, isolates credentials/home, and publishes a running re
     assert.equal(report.sourceGitRevision, 'a'.repeat(40));
     assert.equal(report.runAttempt, '2');
     assert.equal(report.runnerImage, 'test-runner');
-    fs.rmSync(root, { recursive: true, force: true });
+    await removeTemporaryRootAfterProcessExit(root);
     root = null;
   } finally {
-    if (root) removeTemporaryRoot(root);
+    if (root) await removeTemporaryRootAfterProcessExit(root);
   }
 });
 
