@@ -79,7 +79,8 @@ for bucket in "Positive" "Improvements" "Risks"; do
 done
 
 # Terminal-stage mechanics.
-grep -qF 'git diff --name-only' "$SKILL_MD" && check "V7 lists session changes via git diff --name-only" PASS || check "V7 git diff --name-only" FAIL
+grep -qF 'git -C "$TOP" -c core.quotePath=false diff --name-only HEAD' "$SKILL_MD" && grep -qF 'git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard' "$SKILL_MD" \
+  && check "V7 lists session changes via the repo-root-anchored diff + untracked union" PASS || check "V7 anchored changed-file union" FAIL
 grep -qF 'selfReviewFixed' "$SKILL_MD" && check "V8 references selfReviewFixed latch" PASS || check "V8 selfReviewFixed latch" FAIL
 grep -qF -- '--self-review-fixed' "$SKILL_MD" && check "V9 sets latch via --self-review-fixed marker" PASS || check "V9 --self-review-fixed marker" FAIL
 grep -qF -- '--chain-done' "$SKILL_MD" && check "V10 finalizes via --chain-done (owns terminus)" PASS || check "V10 --chain-done finalize" FAIL

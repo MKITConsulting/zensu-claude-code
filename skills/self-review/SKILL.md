@@ -41,7 +41,10 @@ edited, created, or deleted in this session. Use that knowledge directly.
 
 ## What This Skill Does
 
-1. Lists the files you changed this session (conversation context + `git diff --name-only HEAD`).
+1. Lists the files you changed this session (conversation context + the
+   `/zensu:tdd` Phase 6 step 5b b) enumeration run UNCHANGED — a bare
+   `git diff` omits new untracked files, which would leave them unreviewed
+   here too).
 2. Re-reviews each change across seven dimensions against the project conventions.
 3. Emits a Positive / Improvements / Risks reflection.
 4. Takes at most ONE fix round under the still-active TDD phase-gate if a must-fix
@@ -99,8 +102,24 @@ finalizing the current chain.
 ## Phase 1: List Changed Files
 
 List every file you changed or created in this session. You know these from your
-own context — no parsing needed. Cross-check with `git diff --name-only HEAD` to
-catch anything you missed.
+own context — no parsing needed. Cross-check by running the `/zensu:tdd`
+Phase 6 step 5b b) enumeration UNCHANGED — resolve
+`TOP="$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --show-toplevel)"` HERE and
+require `[ -n "$TOP" ] && [ -d "$TOP" ]` before ANY `git -C "$TOP"` (an empty
+`TOP` makes `git -C ""` enumerate whatever repo the cwd happens to be; an
+unresolvable root takes 5b's no-work-tree branch, never an unanchored run) —
+then use `git -C "$TOP" -c core.quotePath=false diff --name-only HEAD` plus
+`git -C "$TOP" -c core.quotePath=false ls-files --others --exclude-standard`
+(without `core.quotePath=false` git C-quotes non-ASCII paths and no fixed-string
+comparison can match them), with 5b's unborn-HEAD
+form where HEAD does not exist yet AND its `[ -n "$BASELINE_SHA" ]`-guarded
+`git -C "$TOP" diff --name-only "$BASELINE_SHA"..HEAD` extension when this
+session committed mid-run — without that branch a mid-run commit empties both
+commands and this stage would skip itself as "no changes". If the union comes
+back empty while your own context names files you changed (the cold-start +
+mid-run-commit case, where no `BASELINE_SHA` survives), do NOT take the
+no-changes branch: review the files from context and say so in the summary.
+This catches files you created but never staged.
 
 If there are NO changes this session, close only the verified generation. For a
 standalone handoff run
@@ -149,7 +168,26 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
-  Then set the latch with
+  Then, because this is the LAST edit round of the chain and no reviewer runs
+  after it, log `{step_id} IMPL completed — files: {list}` for the fixes and
+  invoke the `/zensu:tdd` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
+  when that procedure is not already in your context (this stage is often forced
+  cold), `Read` it from `${CLAUDE_PLUGIN_ROOT}/skills/tdd/SKILL.md` rather than
+  improvising it; re-invoking the `/zensu:tdd` skill is forbidden below —
+  writing its mandatory start marker as `EDIT LANDING AUDIT STARTED — round
+  self-review` (a label disjoint from `phase6` and `fix-{N}`, so its
+  round-scoped window covers exactly this round's claims). Re-derive the inputs here — this stage can be forced cold by the
+  Stop hook, so resolve `TOP` yourself and, when this session committed mid-run
+  but no `BASELINE_SHA` is available, take the audit's documented
+  `PENDING PREDICATE (no session baseline)` branch — clearable by a passing
+  step (d) predicate re-read, NOT the terminal `UNVERIFIED` — rather than
+  widening the enumeration. With no mid-run commit the ordinary union applies
+  and nothing degrades. A mechanical or bulk replacement
+  that matched nothing would otherwise leave the chain unnoticed. This stage
+  gets no second fix round, so the only terminus remedy for an unlanded claim
+  is `CLAIM WITHDRAWN — {step_id}: {file}` plus carrying every
+  `EDIT NOT LANDED` line into the CHAIN-END SUMMARY verbatim; never close the
+  chain as if the claim had landed. Then set the latch with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --self-review-fixed --claimed-review-ticket "<review-ticket>"` and re-run
   `/zensu:self-review` (pass 2 to confirm). The pass-2 invocation MUST carry the
   same captured `SELF-REVIEW-TICKET: <review-ticket>` line again and, for a
@@ -177,7 +215,12 @@ In plain words: the feature, bug, or need this session addressed — why the wor
 ## What I built
 Numbered deliverables. For each: what it does in plain words, its status (done /
 merged / built-tested), and a PR link if one exists. Carry the audit facts: feature
-title, files modified, tests created, build status, coverage status. Cite the plan
+title, files modified, tests created, build status, coverage status, and the
+Edit Landing verdict — the step 5b close marker plus any `EDIT NOT LANDED` line,
+and the `UNVERIFIED (no claims logged)` or unresolved `PENDING PREDICATE` close
+when either applies (those are NOT clean states), each rendered verbatim — a
+claimed edit that never produced a change must not vanish between the Phase 6
+report and this summary. Cite the plan
 + log paths. When the session plan carries a ## Requirements table, also give
 per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).
 

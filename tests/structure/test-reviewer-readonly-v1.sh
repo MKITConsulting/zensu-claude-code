@@ -82,7 +82,7 @@ for spec in 'plan-review-worker.md|plan-review' 'pr-review-worker.md|pr-review';
   fi
 done
 
-for field in changed_files implementation_summary requirements_baseline diff_summary test_evidence build_evidence coverage_evidence; do
+for field in changed_files implementation_summary requirements_baseline diff_summary test_evidence build_evidence coverage_evidence edit_landing_evidence; do
   contains "TDD handoff includes $field" "$TDD" "\`$field\`"
 done
 contains "TDD handoff pins reviewer policy" "$TDD" 'policy: reviewer-readonly-v1'
