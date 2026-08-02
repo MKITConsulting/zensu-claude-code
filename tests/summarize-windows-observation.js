@@ -5,12 +5,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { loadProfileContract } = require('./windows-profile-contract.js');
 
-const EXPECTED_PROFILES = Object.freeze([
-  'windows-reset-session',
-  'windows-leases-routing',
-  'windows-native-state',
-  'windows-installed-core',
-]);
+const EXPECTED_PROFILES = Object.freeze(
+  Object.keys(loadProfileContract(path.resolve(__dirname, '..')).profiles),
+);
 const SHA = /^[a-f0-9]{40}$/;
 const HASH = /^[a-f0-9]{64}$/;
 const ID = /^[0-9]{1,32}$/;
@@ -189,13 +186,14 @@ function validateProfile(report, profile, expected, contract) {
   return report;
 }
 
-function summarize({ reportsDirectory, legacyFile, expected }) {
-  const contract = currentContract();
+function readProfiles(reportsDirectory, expected, contract = currentContract()) {
   const directory = fs.realpathSync.native(reportsDirectory);
   const names = fs.readdirSync(directory).filter((name) => name.endsWith('.json')).sort();
   const expectedNames = EXPECTED_PROFILES.map((profile) => `${profile}.json`).sort();
   if (JSON.stringify(names) !== JSON.stringify(expectedNames)) {
-    throw new ObservationError('profile report inventory must contain exactly four expected files');
+    throw new ObservationError(
+      `profile report inventory must contain exactly ${EXPECTED_PROFILES.length} expected files`,
+    );
   }
   const profiles = EXPECTED_PROFILES.map((profile) => validateProfile(
     readJson(path.join(directory, `${profile}.json`), `${profile} report`),
@@ -203,13 +201,16 @@ function summarize({ reportsDirectory, legacyFile, expected }) {
     expected,
     contract,
   ));
-  const legacy = validateLegacy(readJson(legacyFile, 'legacy outcome'), expected);
   const manifestHashes = new Set(profiles.map((report) => report.manifestSha256));
   const catalogHashes = new Set(profiles.map((report) => report.commandCatalogSha256));
   const contractHashes = new Set(profiles.map((report) => report.profileContractSha256));
   if (manifestHashes.size !== 1 || catalogHashes.size !== 1 || contractHashes.size !== 1) {
     throw new ObservationError('profile reports do not share one complete execution contract');
   }
+  return profiles;
+}
+
+function profileOutcome(profiles) {
   const shardOutcome = profiles.every((report) => report.status === 'passed')
     ? 'success'
     : 'failure';
@@ -222,6 +223,22 @@ function summarize({ reportsDirectory, legacyFile, expected }) {
       && suite.cleanup.status === 'terminated'
     ))
   ));
+  return { shardOutcome, complete };
+}
+
+function summarizedProfiles(profiles) {
+  return profiles.map((report) => ({
+    profile: report.profile,
+    status: report.status,
+    durationMs: report.durationMs,
+    suiteCount: report.suites.length,
+  }));
+}
+
+function summarize({ reportsDirectory, legacyFile, expected }) {
+  const profiles = readProfiles(reportsDirectory, expected);
+  const legacy = validateLegacy(readJson(legacyFile, 'legacy outcome'), expected);
+  const { shardOutcome, complete } = profileOutcome(profiles);
   return {
     schemaVersion: 2,
     kind: 'windows-observation-summary',
@@ -237,12 +254,28 @@ function summarize({ reportsDirectory, legacyFile, expected }) {
     shardOutcome,
     parity: shardOutcome === 'success' && legacy.outcome === 'success',
     complete,
-    profiles: profiles.map((report) => ({
-      profile: report.profile,
-      status: report.status,
-      durationMs: report.durationMs,
-      suiteCount: report.suites.length,
-    })),
+    profiles: summarizedProfiles(profiles),
+  };
+}
+
+function summarizeShards({ reportsDirectory, expected }) {
+  const profiles = readProfiles(reportsDirectory, expected);
+  const { shardOutcome, complete } = profileOutcome(profiles);
+  const cutoverComplete = shardOutcome === 'success' && complete;
+  return {
+    schemaVersion: 1,
+    kind: 'windows-shard-summary',
+    sourceGitRevision: expected.sourceGitRevision,
+    runId: expected.runId,
+    runAttempt: expected.runAttempt,
+    eventName: expected.eventName,
+    observedAt: new Date().toISOString(),
+    manifestSha256: profiles[0].manifestSha256,
+    commandCatalogSha256: profiles[0].commandCatalogSha256,
+    profileContractSha256: profiles[0].profileContractSha256,
+    status: cutoverComplete ? 'passed' : 'failed',
+    complete: cutoverComplete,
+    profiles: summarizedProfiles(profiles),
   };
 }
 
@@ -417,6 +450,15 @@ function main({
       stdout.write(`windows observation: ${value.parity && value.complete ? 'ELIGIBLE-RUN' : 'NOT-ELIGIBLE'}\n`);
       return value.parity && value.complete ? 0 : 1;
     }
+    if (mode === 'summarize-shards' && args.length === 2) {
+      const value = summarizeShards({
+        reportsDirectory: args[0],
+        expected: environmentContext(environment),
+      });
+      writeJson(args[1], value);
+      stdout.write(`windows shards: ${value.status === 'passed' ? 'PASS' : 'FAIL'}\n`);
+      return value.status === 'passed' ? 0 : 1;
+    }
     if (mode === 'audit-ledger' && args.length === 1) {
       const result = auditLedger(
         readJson(args[0], 'observation ledger'),
@@ -426,7 +468,7 @@ function main({
       return 0;
     }
     throw new ObservationError(
-      'usage: summarize-windows-observation.js record-legacy <output> | summarize <reports-dir> <legacy.json> <output> | audit-ledger <ledger.json>',
+      'usage: summarize-windows-observation.js record-legacy <output> | summarize <reports-dir> <legacy.json> <output> | summarize-shards <reports-dir> <output> | audit-ledger <ledger.json>',
     );
   } catch (error) {
     if (!(error instanceof ObservationError)) throw error;
@@ -444,4 +486,5 @@ module.exports = {
   main,
   recordLegacy,
   summarize,
+  summarizeShards,
 };

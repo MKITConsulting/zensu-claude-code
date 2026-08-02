@@ -14,7 +14,9 @@ LIVE_EVIDENCE="$ROOT/evals/session-control/lib/live-evidence.js"
 LIVE_EVIDENCE_NEGATIVE="$ROOT/evals/session-control/tests/live-evidence-negative.test.js"
 CLAUDE_STUB_BLOCK="$(sed -n "/^cat >.*<<'STUB'$/,/^STUB$/p" "$CLAUDE_WRAPPER_SELFTEST")"
 RESET="$ROOT/evals/reset-review-limit/tests/sealed-evidence.test.js"
-WORKFLOW="$ROOT/.github/workflows/ci.yml"
+WORKFLOW="$ROOT/.github/workflows/windows-safety.yml"
+WINDOWS_CANARY="$ROOT/tests/profiles/windows-legacy-canary.v1.json"
+WINDOWS_SAFETY_RUNNER="$ROOT/tests/run-windows-safety-shard.js"
 PHASE="$ROOT/hooks/lib/zensu-tdd-phase.sh"
 SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
@@ -75,14 +77,14 @@ else
   check "security cases remain present behind only their narrow portability guards" FAIL
 fi
 
-WINDOWS_CANARY_BLOCK="$(awk '
-  /^      - name: Windows path and Core lease canary$/ { capture=1 }
-  capture && seen && /^      - / { exit }
-  capture { print; seen=1 }
-' "$WORKFLOW")"
-WINDOWS_CANARY_COMMANDS="$(printf '%s\n' "$WINDOWS_CANARY_BLOCK" \
-  | sed -nE 's/^[[:space:]]+(bash[[:space:]]+[^[:space:]#]+)[[:space:]]*$/\1/p')"
-if printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF "runner.os == 'Windows'" \
+WINDOWS_CANARY_COMMANDS="$(node -e '
+  const fs=require("fs");
+  const value=JSON.parse(fs.readFileSync(process.argv[1],"utf8"));
+  process.stdout.write(value.commands.join("\n"));
+' "$WINDOWS_CANARY")"
+if grep -qF '{ kind: canary, shard: 1, total: 4 }' "$WORKFLOW" \
+  && grep -qF 'node tests/run-windows-safety-shard.js "${{ matrix.kind }}" "${{ matrix.shard }}" "${{ matrix.total }}"' "$WORKFLOW" \
+  && grep -qF "windows-legacy-canary.v1.json" "$WINDOWS_SAFETY_RUNNER" \
   && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash tests/structure/test-msys-runtime-boundaries.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | awk '
     /^bash tests\/structure\/test-msys-runtime-boundaries\.sh$/ { stage=1; next }
@@ -100,9 +102,9 @@ if printf '%s\n' "$WINDOWS_CANARY_BLOCK" | grep -qF "runner.os == 'Windows'" \
   && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/marketplace-fixture-selftest.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/installed-plugin-provisioner-selftest.sh' \
   && printf '%s\n' "$WINDOWS_CANARY_COMMANDS" | grep -qFx 'bash evals/session-control/tests/wrapper-selftest.sh'; then
-  check "Windows CI fails fast on MSYS path transport, plugin provisioning, and the cross-process Core lease" PASS
+  check "Windows safety CI preserves MSYS path transport, plugin provisioning, and Core lease coverage" PASS
 else
-  check "Windows CI fails fast on MSYS path transport, plugin provisioning, and the cross-process Core lease" FAIL
+  check "Windows safety CI preserves MSYS path transport, plugin provisioning, and Core lease coverage" FAIL
 fi
 
 if grep -qF 'MINGW*|MSYS*|CYGWIN*) MARKETPLACE_ROOT="$(cygpath -u "$MARKETPLACE_ROOT")"' "$PROVISIONER" \

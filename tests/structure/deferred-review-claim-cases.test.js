@@ -68,7 +68,13 @@ test('discovers exactly the 36 isolated deferred-review cases in source order', 
 test('the four Windows profiles assign every case exactly once', () => {
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const assigned = [];
-  for (const profile of Object.values(manifest.profiles)) {
+  const deferredProfiles = Object.values(manifest.profiles).filter(
+    (profile) => profile.suites.some(
+      (suite) => suite.path === 'tests/structure/test-deferred-review-claim.sh',
+    ),
+  );
+  assert.equal(deferredProfiles.length, 4);
+  for (const profile of deferredProfiles) {
     const deferred = profile.suites.filter(
       (suite) => suite.path === 'tests/structure/test-deferred-review-claim.sh',
     );
@@ -88,10 +94,13 @@ test('every manifest shard generates valid Bash with exactly its assigned case i
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-cases-shards-'));
   try {
+    let generatedCount = 0;
     for (const [profileId, profile] of Object.entries(manifest.profiles)) {
       const entry = profile.suites.find(
         (suite) => suite.path === 'tests/structure/test-deferred-review-claim.sh',
       );
+      if (!entry) continue;
+      generatedCount += 1;
       const requested = entry.args[1].split(',');
       const generated = buildSelectedScript(source, requested);
       const file = path.join(directory, `${profileId}.sh`);
@@ -103,6 +112,7 @@ test('every manifest shard generates valid Bash with exactly its assigned case i
       );
       assert.deepEqual([...checks].sort(), [...requested].sort(), profileId);
     }
+    assert.equal(generatedCount, 4);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

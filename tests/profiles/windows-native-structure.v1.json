@@ -1,0 +1,56 @@
+{
+  "schemaVersion": 1,
+  "markers": [
+    "\\bcygpath\\b",
+    "process\\.platform\\s*!?={2,3}\\s*[\"']win32[\"']",
+    "\\b(?:MINGW|MSYS|CYGWIN)\\*",
+    "\\bMSYS2_(?:ARG|ENV)_CONV_EXCL\\b",
+    "[\"']junction[\"']"
+  ],
+  "required": [
+    "tests/structure/test-autopilot-adversarial-recovery.sh",
+    "tests/structure/test-autopilot-chain-integration.sh",
+    "tests/structure/test-autopilot-full-cycle.sh",
+    "tests/structure/test-autopilot-plan-delegate.sh",
+    "tests/structure/test-autopilot-state-machine.sh",
+    "tests/structure/test-bash-source-write-gate.sh",
+    "tests/structure/test-claude-promptfoo-wrapper.sh",
+    "tests/structure/test-file-exists-replacement.sh",
+    "tests/structure/test-msys-runtime-boundaries.sh",
+    "tests/structure/test-post-review-self-review-handoff.sh",
+    "tests/structure/test-pre-edit-hook-mirror.sh",
+    "tests/structure/test-promptfoo-context-nudge-reaction.sh",
+    "tests/structure/test-promptfoo-reset-review-limit.sh",
+    "tests/structure/test-review-worker-evidence-lease.sh",
+    "tests/structure/test-reviewer-capability-gate.sh",
+    "tests/structure/test-session-control-claude.sh",
+    "tests/structure/test-session-start-banner.sh",
+    "tests/structure/test-stop-enforcer-self-review-routing.sh",
+    "tests/structure/test-tdd-state-path-safety.sh",
+    "tests/structure/test-vcs-review-marker-reconcile.sh",
+    "tests/structure/test-versioned-plugin-upgrade.sh",
+    "tests/structure/test-windows-portability-guards.sh"
+  ],
+  "excluded": [
+    {
+      "path": "tests/structure/test-doctor.sh",
+      "reason": "The only native-Windows branch skips a POSIX-only missing-npm rendering assertion."
+    },
+    {
+      "path": "tests/structure/test-promptfoo-verify-feature.sh",
+      "reason": "Every native-Windows branch explicitly skips unsupported POSIX process-group fixtures."
+    },
+    {
+      "path": "tests/structure/test-tdd-state-corruption-fail-closed.sh",
+      "reason": "The native-Windows branch explicitly skips the unavailable POSIX symlink fixture."
+    },
+    {
+      "path": "tests/structure/test-verify-feature-skill.sh",
+      "reason": "The native-Windows branch only tolerates absent POSIX signal delivery and asserts no Windows behavior."
+    },
+    {
+      "path": "tests/structure/test-zensu-runtime-controller.sh",
+      "reason": "The complete local-adapter runtime test is explicitly unsupported and skipped on native Windows."
+    }
+  ]
+}

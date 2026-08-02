@@ -546,7 +546,7 @@ CI_HISTORY_CHECKOUT_AUDIT="$(
 const fs = require('node:fs');
 const YAML = require('yaml');
 const ci = YAML.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const expectedJobs = ['test', 'session-control-contract', 'windows-shard-observation'];
+const expectedJobs = ['test', 'session-control-contract', 'windows-shards'];
 const safe = expectedJobs.every((jobId) => {
   const steps = ci?.jobs?.[jobId]?.steps || [];
   const checkouts = steps.filter(

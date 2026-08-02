@@ -329,6 +329,61 @@
           "timeoutMs": 300000
         }
       ]
+    },
+    "windows-native-branches": {
+      "platform": "win32",
+      "profileTimeoutMs": 1800000,
+      "suites": [
+        {
+          "id": "autopilot-adversarial-recovery",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-adversarial-recovery.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "autopilot-chain-integration",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-chain-integration.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
+          "id": "autopilot-full-cycle",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-full-cycle.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
+        {
+          "id": "file-exists-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-file-exists-replacement.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "promptfoo-context-nudge-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-promptfoo-context-nudge-reaction.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "promptfoo-reset-review-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-promptfoo-reset-review-limit.sh",
+          "args": [],
+          "timeoutMs": 180000
+        },
+        {
+          "id": "tdd-state-junction-safety",
+          "runner": "bash",
+          "path": "tests/structure/test-tdd-state-path-safety.sh",
+          "args": [],
+          "timeoutMs": 180000
+        }
+      ]
     }
   }
 }

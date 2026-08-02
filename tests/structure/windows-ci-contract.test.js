@@ -12,8 +12,12 @@ const readJson = (relative) => JSON.parse(fs.readFileSync(path.join(root, relati
 const manifest = readJson('tests/profiles/windows-ci.v1.json');
 const catalog = readJson('tests/profiles/windows-ci-command-catalog.v1.json');
 const legacyCanary = readJson('tests/profiles/windows-legacy-canary.v1.json');
+const nativeStructureInventory = readJson('tests/profiles/windows-native-structure.v1.json');
 const workflow = YAML.parse(
   fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
+);
+const safetyWorkflow = YAML.parse(
+  fs.readFileSync(path.join(root, '.github', 'workflows', 'windows-safety.yml'), 'utf8'),
 );
 const testsReadme = fs.readFileSync(path.join(root, 'tests', 'README.md'), 'utf8');
 const expectedProfiles = [
@@ -21,9 +25,10 @@ const expectedProfiles = [
   'windows-leases-routing',
   'windows-native-state',
   'windows-installed-core',
+  'windows-native-branches',
 ];
-const expectedCommandCount = 39;
-const expectedCommandDigest = '6ab18c4b7ffcad7b652d8adcdcad1cf053f08ee008f6ee75ebf348f1b6231265';
+const expectedCommandCount = 46;
+const expectedCommandDigest = '237ae01191194808ead12a39fa46fd4b2e15223b24109090f0b8086347d16517';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -39,7 +44,7 @@ function checkoutSteps(job) {
   );
 }
 
-test('manifest and audited command catalog expose one exact four-profile inventory', () => {
+test('manifest and audited command catalog expose one exact bounded profile inventory', () => {
   assert.deepEqual(Object.keys(manifest.profiles), expectedProfiles);
   const manifestCommands = allSuites().map(key).sort();
   const catalogCommands = catalog.commands.map(key).sort();
@@ -54,6 +59,37 @@ test('manifest and audited command catalog expose one exact four-profile invento
     assert.equal(profile.platform, 'win32', profileId);
     assert.equal(profile.profileTimeoutMs, 1800000, profileId);
     assert.ok(profile.suites.length > 0, profileId);
+  }
+});
+
+test('every structure test with a native Windows marker is audited and covered or excluded', () => {
+  assert.equal(nativeStructureInventory.schemaVersion, 1);
+  assert.ok(Array.isArray(nativeStructureInventory.markers));
+  assert.ok(nativeStructureInventory.markers.length > 0);
+  assert.ok(Array.isArray(nativeStructureInventory.required));
+  assert.ok(Array.isArray(nativeStructureInventory.excluded));
+
+  const candidates = fs.readdirSync(path.join(root, 'tests', 'structure'))
+    .filter((name) => /^test-.*\.sh$/.test(name))
+    .map((name) => `tests/structure/${name}`)
+    .filter((relative) => {
+      const source = fs.readFileSync(path.join(root, relative), 'utf8');
+      return nativeStructureInventory.markers.some((marker) => new RegExp(marker, 'i').test(source));
+    })
+    .sort();
+  const required = [...nativeStructureInventory.required].sort();
+  const excluded = nativeStructureInventory.excluded.map((entry) => entry.path).sort();
+  assert.deepEqual([...new Set([...required, ...excluded])].sort(), candidates);
+  assert.equal(new Set([...required, ...excluded]).size, required.length + excluded.length);
+
+  const paths = allSuites().map((suite) => suite.path);
+  for (const relative of required) {
+    assert.equal(paths.filter((candidate) => candidate === relative).length, 1, relative);
+  }
+  for (const entry of nativeStructureInventory.excluded) {
+    assert.equal(typeof entry.reason, 'string', entry.path);
+    assert.ok(entry.reason.length >= 20, entry.path);
+    assert.equal(paths.includes(entry.path), false, entry.path);
   }
 });
 
@@ -175,13 +211,13 @@ test('slow profile lifecycle coverage has an independent measured deadline', () 
   assert.match(contractRunner, /all\)[\s\S]*profile-runner\.test\.js/);
 });
 
-test('observation matrix has an internal cleanup reserve and provenance-bound artifacts', () => {
-  const job = workflow.jobs?.['windows-shard-observation'];
+test('blocking Windows shard matrix has an internal cleanup reserve and provenance-bound artifacts', () => {
+  const job = workflow.jobs?.['windows-shards'];
   assert.ok(job);
-  assert.equal(job.name, 'Windows shard observation (${{ matrix.profile }})');
+  assert.equal(job.name, 'Windows contract shard (${{ matrix.profile }})');
   assert.equal(job['runs-on'], 'windows-latest');
   assert.equal(job['timeout-minutes'], 35);
-  assert.equal(job['continue-on-error'], true);
+  assert.equal(job['continue-on-error'], undefined);
   assert.equal(job.strategy?.['fail-fast'], false);
   assert.deepEqual(job.strategy?.matrix?.profile, expectedProfiles);
   assert.equal(job.permissions?.contents, 'read');
@@ -200,7 +236,7 @@ test('observation matrix has an internal cleanup reserve and provenance-bound ar
   assert.equal(run?.env?.ZENSU_PROFILE_REPORT_DIR, '${{ runner.temp }}/windows-profile-reports');
   assert.equal(run?.env?.ZENSU_PROFILE_SOURCE_SHA, '${{ github.sha }}');
   assert.equal(run?.env?.GITHUB_RUN_ATTEMPT, '${{ github.run_attempt }}');
-  const record = job.steps.find((step) => step.name === 'Record observation outcome');
+  const record = job.steps.find((step) => step.name === 'Record shard outcome');
   assert.equal(record?.if, 'always()');
   assert.equal(record?.env?.PROFILE_OUTCOME, '${{ steps.profile.outcome }}');
   const upload = job.steps.find(
@@ -219,35 +255,29 @@ test('observation matrix has an internal cleanup reserve and provenance-bound ar
   assert.equal(JSON.stringify(job).includes('secrets.'), false);
 });
 
-test('the legacy Windows canary body is byte-semantically pinned and emits its outcome', () => {
+test('pull-request deterministic suite remains complete and Ubuntu-only', () => {
   const job = workflow.jobs?.test;
-  assert.equal(job?.name, 'Deterministic suite (${{ matrix.os }})');
-  assert.deepEqual(job?.strategy?.matrix?.os, ['ubuntu-latest', 'windows-latest']);
-  const canary = job.steps.find((step) => step.name === 'Windows path and Core lease canary');
-  assert.deepEqual(
-    canary.run.split(/\r?\n/).map((line) => line.trim()).filter(Boolean),
-    legacyCanary.commands,
-  );
+  assert.equal(job?.name, 'Deterministic suite (ubuntu-latest)');
+  assert.equal(job?.['runs-on'], 'ubuntu-latest');
+  assert.equal(job?.strategy, undefined);
+  assert.equal(job.steps.some((step) => step.name === 'Windows path and Core lease canary'), false);
   assert.equal(job.steps.some((step) => step.run === 'bash tests/run-all.sh'), true);
-  const record = job.steps.find((step) => step.name === 'Record legacy Windows outcome');
-  assert.match(record?.if || '', /always\(\).*runner\.os == 'Windows'/);
-  assert.equal(record?.env?.ZENSU_LEGACY_OUTCOME, '${{ job.status }}');
-  const upload = job.steps.find((step) => step.name === 'Upload legacy Windows outcome');
-  assert.equal(upload?.with?.name, 'windows-legacy-${{ github.sha }}-${{ github.run_attempt }}');
-  assert.equal(upload?.with?.['if-no-files-found'], 'error');
+  assert.equal(JSON.stringify(job).includes('windows-latest'), false);
+  assert.equal(JSON.stringify(job).includes('windows-legacy'), false);
 });
 
-test('one non-blocking summary validates exact same-run shard and legacy evidence', () => {
-  const job = workflow.jobs?.['windows-observation-summary'];
+test('one stable blocking check validates exact same-run shard evidence', () => {
+  const job = workflow.jobs?.['windows-shard-summary'];
   assert.ok(job);
-  assert.deepEqual(job.needs, ['test', 'windows-shard-observation']);
+  assert.equal(job.name, 'Deterministic suite (windows-latest)');
+  assert.deepEqual(job.needs, ['windows-shards']);
   assert.equal(job.if, 'always()');
-  assert.equal(job['continue-on-error'], true);
+  assert.equal(job['continue-on-error'], undefined);
   assert.equal(job.permissions?.actions, 'read');
   const downloads = job.steps.filter(
     (step) => typeof step.uses === 'string' && step.uses.startsWith('actions/download-artifact@'),
   );
-  assert.equal(downloads.length, 2);
+  assert.equal(downloads.length, 1);
   assert.ok(downloads.every(
     (step) => step.uses === 'actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093',
   ));
@@ -256,26 +286,66 @@ test('one non-blocking summary validates exact same-run shard and legacy evidenc
     'windows-profile-*-${{ github.sha }}-${{ github.run_attempt }}',
   );
   assert.equal(downloads[0].with['merge-multiple'], true);
-  assert.equal(
-    downloads[1].with.name,
-    'windows-legacy-${{ github.sha }}-${{ github.run_attempt }}',
-  );
-  const summarize = job.steps.find((step) => step.name === 'Validate same-run parity evidence');
-  assert.match(summarize.run, /summarize-windows-observation\.js summarize/);
+  const summarize = job.steps.find((step) => step.name === 'Validate blocking shard evidence');
+  assert.match(summarize.run, /summarize-windows-observation\.js summarize-shards/);
+  assert.match(summarize.run, /test "\$ZENSU_SHARD_JOB_RESULT" = success/);
+  assert.equal(summarize.env.ZENSU_SHARD_JOB_RESULT, '${{ needs.windows-shards.result }}');
   assert.equal(summarize.env.GITHUB_RUN_ATTEMPT, '${{ github.run_attempt }}');
-  const upload = job.steps.find((step) => step.name === 'Upload aggregate observation evidence');
-  assert.equal(upload.with.name, 'windows-observation-${{ github.sha }}-${{ github.run_attempt }}');
+  const upload = job.steps.find((step) => step.name === 'Upload aggregate shard evidence');
+  assert.equal(upload.with.name, 'windows-shards-${{ github.sha }}-${{ github.run_attempt }}');
   assert.equal(upload.with['if-no-files-found'], 'error');
 });
 
-test('the documented cutover gate is machine-auditable and keeps paid Linux gates unchanged', () => {
-  assert.match(testsReadme, /at least 14 days and 10 representative/);
-  assert.match(testsReadme, /100% successful outcomes from both/);
-  assert.match(testsReadme, /no missing suite, timeout, or incomplete timing report/);
-  assert.match(testsReadme, /audit-ledger/);
-  assert.match(testsReadme, /ten distinct Git revisions/);
+test('scheduled Windows safety workflow partitions the exact former monolith read-only', () => {
+  assert.equal(safetyWorkflow.name, 'Windows full safety suite');
+  assert.deepEqual(Object.keys(safetyWorkflow.on || {}).sort(), ['schedule', 'workflow_dispatch']);
+  assert.deepEqual(safetyWorkflow.on?.schedule, [{ cron: '17 3 * * 0' }]);
+  assert.equal(Object.hasOwn(safetyWorkflow.on || {}, 'workflow_dispatch'), true);
+  assert.deepEqual(safetyWorkflow.permissions, { contents: 'read' });
+  assert.equal(safetyWorkflow.defaults?.run?.shell, 'bash');
+  assert.deepEqual(safetyWorkflow.concurrency, {
+    group: 'windows-full-safety-${{ github.ref }}',
+    'cancel-in-progress': false,
+  });
+  const job = safetyWorkflow.jobs?.['windows-full-safety-shards'];
+  assert.ok(job);
+  assert.equal(
+    job.name,
+    'Windows full safety (${{ matrix.kind }} ${{ matrix.shard }}/${{ matrix.total }})',
+  );
+  assert.equal(job['runs-on'], 'windows-latest');
+  assert.equal(job['timeout-minutes'], 240);
+  assert.equal(job.strategy?.['fail-fast'], false);
+  assert.equal(job.strategy?.['max-parallel'], 8);
+  const include = job.strategy?.matrix?.include;
+  assert.equal(include.length, 16);
+  assert.deepEqual(
+    include.filter((entry) => entry.kind === 'canary'),
+    [1, 2, 3, 4].map((shard) => ({ kind: 'canary', shard, total: 4 })),
+  );
+  assert.deepEqual(
+    include.filter((entry) => entry.kind === 'structure'),
+    [1, 2, 3, 4, 5, 6, 7, 8].map((shard) => ({ kind: 'structure', shard, total: 8 })),
+  );
+  assert.deepEqual(
+    include.filter((entry) => entry.kind === 'offline'),
+    [1, 2, 3, 4].map((shard) => ({ kind: 'offline', shard, total: 4 })),
+  );
+  const run = job.steps.find((step) => step.name === 'Run bounded Windows safety shard');
+  assert.equal(
+    run?.run,
+    'node tests/run-windows-safety-shard.js "${{ matrix.kind }}" "${{ matrix.shard }}" "${{ matrix.total }}"',
+  );
+  assert.equal(checkoutSteps(job)[0].with?.['persist-credentials'], false);
+  assert.equal(JSON.stringify(safetyWorkflow).includes('secrets.'), false);
+});
+
+test('the documented cutover keeps paid Linux gates unchanged', () => {
+  assert.match(testsReadme, /blocking Windows contract profiles/);
+  assert.match(testsReadme, /scheduled,\s+read-only Windows safety workflow/);
+  assert.match(testsReadme, /weekly and manually dispatchable/);
+  assert.match(testsReadme, /complete deterministic suite remains blocking on Ubuntu/);
   assert.match(testsReadme, /`Deterministic suite \(windows-latest\)`/);
-  assert.match(testsReadme, /separate scheduled, read-only Windows safety workflow/);
   assert.match(testsReadme, /Release and Session\s+Control Nightly remain/);
-  assert.doesNotMatch(testsReadme, /move the full Windows suite to\s+nightly\/release coverage/);
+  assert.doesNotMatch(testsReadme, /at least 14 days and 10 representative/);
 });

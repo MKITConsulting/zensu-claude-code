@@ -12,6 +12,7 @@ const RUNTIME_PATHS = Object.freeze([
   '.github/workflows/ci.yml',
   MANIFEST_PATH,
   CATALOG_PATH,
+  'tests/profiles/windows-native-structure.v1.json',
   'tests/run-profile.js',
   'tests/profile-suite-supervisor.js',
   'tests/windows-profile-job.ps1',

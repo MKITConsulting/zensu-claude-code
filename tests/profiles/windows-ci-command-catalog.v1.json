@@ -39,6 +39,13 @@
     {"runner":"bash","path":"tests/structure/test-windows-ci-contract.sh","args":["metadata"]},
     {"runner":"bash","path":"tests/structure/test-windows-ci-contract.sh","args":["lifecycle"]},
     {"runner":"bash","path":"tests/structure/test-workflow-checkout-credentials.sh","args":[]},
-    {"runner":"node","path":"evals/session-control/tests/upgrade-linux-sandbox.test.js","args":["--test","--test-name-pattern=rejects unsafe paths, environments, and working-directory escapes|mounts opt only for a real command or resolved native runtime under opt"]}
+    {"runner":"node","path":"evals/session-control/tests/upgrade-linux-sandbox.test.js","args":["--test","--test-name-pattern=rejects unsafe paths, environments, and working-directory escapes|mounts opt only for a real command or resolved native runtime under opt"]},
+    {"runner":"bash","path":"tests/structure/test-autopilot-adversarial-recovery.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-autopilot-chain-integration.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-autopilot-full-cycle.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-file-exists-replacement.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-promptfoo-context-nudge-reaction.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-promptfoo-reset-review-limit.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-tdd-state-path-safety.sh","args":[]}
   ]
 }

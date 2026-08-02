@@ -24,7 +24,7 @@ const { RUNTIME_PATHS } = require('../windows-profile-contract.js');
 const WINDOWS_TEST_WAIT_MS = 30000;
 const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
 // A cold Windows PowerShell Add-Type compilation can exceed 30 seconds while
-// the four observation shards share one hosted runner pool. Keep the fixture
+// the Windows contract shards share one hosted runner pool. Keep the fixture
 // bounded, but leave enough room to observe the child process's real exit code.
 const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
@@ -38,7 +38,8 @@ function temporaryRoot() {
   fs.mkdirSync(path.join(root, 'suites'), { recursive: true });
   const repositoryRoot = path.resolve(__dirname, '..', '..');
   for (const relative of RUNTIME_PATHS) {
-    if (relative.includes('/profiles/')) continue;
+    if (relative === 'tests/profiles/windows-ci.v1.json'
+        || relative === 'tests/profiles/windows-ci-command-catalog.v1.json') continue;
     const destination = path.join(root, relative);
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(path.join(repositoryRoot, relative), destination);
