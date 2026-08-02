@@ -1380,21 +1380,23 @@ autopilot_team_review_operation_key() {
 # operation key. Keep one private immutable snapshot per operation/head pair in
 # the project-local durable state directory.
 _autopilot_team_review_payload_target() {
-  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}" tuple operation_digest head
+  local root="${1:-}" operation_key="${2:-}" head_sha="${3:-}" operation_digest
   [ "$#" -eq 3 ] || return 3
-  tuple="$(OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
+  operation_digest="$(OPERATION_KEY="$operation_key" HEAD_SHA="$head_sha" node -e '
     const crypto = require("crypto");
     const operationKey = process.env.OPERATION_KEY;
     const head = String(process.env.HEAD_SHA || "").toLowerCase();
     if (!/^team-review:v1:[a-f0-9]{64}$/.test(operationKey)
         || !/^[a-f0-9]{7,64}$/.test(head)) process.exit(3);
-    const operationDigest = crypto.createHash("sha256").update(operationKey).digest("hex");
-    process.stdout.write(`${operationDigest}|${head}`);
+    process.stdout.write(crypto.createHash("sha256").update(operationKey).digest("hex"));
   ' 2>/dev/null)" || return 3
-  IFS='|' read -r operation_digest head <<< "$tuple"
-  [ -n "$root" ] && [ -n "$operation_digest" ] && [ -n "$head" ] || return 3
-  printf '%s/.zensu/state/autopilot-team-review-payload-%s-%s.json\n' \
-    "${root%/}" "$operation_digest" "$head"
+  [ -n "$root" ] && [ "${#operation_digest}" -eq 64 ] || return 3
+  # The operation key already binds the run plus original PR head. Persisting
+  # its full 256-bit digest is therefore collision-resistant without spelling
+  # the head a second time, and keeps security-critical state below Windows'
+  # legacy MAX_PATH boundary for ordinary project roots.
+  printf '%s/.zensu/state/autopilot-team-review-payload-%s.json\n' \
+    "${root%/}" "$operation_digest"
 }
 
 _autopilot_team_review_payload_identity_critical() {
@@ -1543,7 +1545,7 @@ _autopilot_recover_team_review_payload_alias() {
     const target = process.env.TARGET_FILE;
     const directory = path.dirname(target);
     const basename = path.basename(target);
-    const expectedTarget = /^autopilot-team-review-payload-[a-f0-9]{64}-[a-f0-9]{7,64}\.json$/;
+    const expectedTarget = /^autopilot-team-review-payload-[a-f0-9]{64}\.json$/;
     const escape = value => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const expectedTemp = new RegExp(`^${escape(basename)}\\.tmp\\.[A-Za-z0-9]{8}$`);
     const privateMode = stat => process.platform === "win32" || (stat.mode & 0o777) === 0o600;

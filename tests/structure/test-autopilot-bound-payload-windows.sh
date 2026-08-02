@@ -102,6 +102,19 @@ else
 fi
 
 REVIEW_KEY="$(autopilot_team_review_operation_key "$RUN" "$HEAD_SHA")"
+CANONICAL_ROOT="$(_autopilot_project_root "$PROJECT")"
+OPERATION_DIGEST="$(printf '%s' "$REVIEW_KEY" | node -e '
+  const crypto=require("crypto"),fs=require("fs");
+  process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));
+')"
+EXPECTED_TARGET="$CANONICAL_ROOT/.zensu/state/autopilot-team-review-payload-$OPERATION_DIGEST.json"
+if [ "$(_autopilot_team_review_payload_target \
+    "$CANONICAL_ROOT" "$REVIEW_KEY" "$HEAD_SHA")" = "$EXPECTED_TARGET" ]; then
+  check "WBP4 review payload key is compact and still operation-bound" PASS
+else
+  check "WBP4 review payload key is compact and still operation-bound" FAIL
+fi
+
 STORE_ERROR="$ROOT/store-error.log"
 SNAPSHOT="$(autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
   "$SOURCE_FILE" github "$PROJECT" 2>"$STORE_ERROR")"
@@ -109,9 +122,8 @@ STORE_RC=$?
 
 if [ "$STORE_RC" -eq 0 ] && [ -n "$SNAPSHOT" ] && [ -f "$SNAPSHOT" ] \
     && cmp -s "$SOURCE_FILE" "$SNAPSHOT"; then
-  check "WBP4 bound external payload is stored immutably" PASS
+  check "WBP5 bound external payload is stored immutably" PASS
 else
-  CANONICAL_ROOT="$(_autopilot_project_root "$PROJECT" 2>/dev/null || true)"
   TARGET="$(_autopilot_team_review_payload_target \
     "$CANONICAL_ROOT" "$REVIEW_KEY" "$HEAD_SHA" 2>/dev/null || true)"
   _autopilot_team_review_payload_identity_critical \
@@ -154,15 +166,15 @@ else
   if [ -s "$STORE_ERROR" ]; then
     sed 's/^/  DIAG  stderr: /' "$STORE_ERROR"
   fi
-  check "WBP4 bound external payload is stored immutably" FAIL
+  check "WBP5 bound external payload is stored immutably" FAIL
 fi
 
 if [ "$FAIL" -eq 0 ] \
     && [ "$(autopilot_read_team_review_payload \
       "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$SNAPSHOT" ]; then
-  check "WBP5 bound payload is readable through the public API" PASS
+  check "WBP6 bound payload is readable through the public API" PASS
 else
-  check "WBP5 bound payload is readable through the public API" FAIL
+  check "WBP6 bound payload is readable through the public API" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-bound-payload-windows: $PASS PASS / $FAIL FAIL"
