@@ -60,7 +60,7 @@ jobs:
           fi
 
   session-control-contract:
-    name: Session Control contract (Promptfoo 0.121.18)
+    name: Session Control contract (Promptfoo 0.121.20)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4

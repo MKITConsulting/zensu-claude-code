@@ -98,7 +98,7 @@ attestation is emitted.
 ## Profiles
 
 - `npm run session-control:selfcheck` validates all Promptfoo configurations,
-  the exact `0.121.18` dependency/lock, assertion attacks, wrapper spoof
+  the exact `0.121.20` dependency/lock, assertion attacks, wrapper spoof
   protection, host-only SessionStart creation, installed-cache provisioning,
   content-only context provenance, structured normal/reviewer subagent context,
   reviewer spawn/attack/denial evidence, root targeting,

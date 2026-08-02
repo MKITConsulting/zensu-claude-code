@@ -12,7 +12,15 @@
     "reset-review-limit:eval": "bash evals/reset-review-limit/run-eval.sh"
   },
   "devDependencies": {
-    "promptfoo": "0.121.18",
+    "promptfoo": "0.121.20",
     "yaml": "2.9.0"
+  },
+  "overrides": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "@hono/node-server": "^2.0.5",
+    "adm-zip": "^0.6.0",
+    "fast-uri": "^3.1.4",
+    "fast-xml-parser": "^5.10.1",
+    "sharp": "^0.35.0"
   }
 }

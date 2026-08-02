@@ -7,14 +7,14 @@ PROMPTFOO="$ROOT/node_modules/.bin/promptfoo"
 STATE="$(mktemp -d -t zensu-session-selfcheck-XXXXXX)"
 trap 'rm -rf "$STATE"' EXIT
 
-test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.18'
-test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.18'
+test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.20'
+test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.20'
 test -x "$PROMPTFOO"
 PROMPTFOO_VERSION="$(
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
     "$PROMPTFOO" --version 2>/dev/null | awk 'NF { version=$0 } END { print version }'
 )"
-test "$PROMPTFOO_VERSION" = '0.121.18'
+test "$PROMPTFOO_VERSION" = '0.121.20'
 
 for file in "$EVAL_DIR"/promptfooconfig-{contract,live,concurrency,adversarial}.yaml; do
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
