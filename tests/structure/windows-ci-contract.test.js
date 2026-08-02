@@ -27,8 +27,8 @@ const expectedProfiles = [
   'windows-installed-core',
   'windows-native-branches',
 ];
-const expectedCommandCount = 46;
-const expectedCommandDigest = '237ae01191194808ead12a39fa46fd4b2e15223b24109090f0b8086347d16517';
+const expectedCommandCount = 44;
+const expectedCommandDigest = '047519a7244300df4dc0455391689ceacb68f7c00a3a8aed20e78b3b0d35a4c7';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);

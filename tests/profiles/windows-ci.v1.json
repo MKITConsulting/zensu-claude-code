@@ -335,25 +335,11 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "autopilot-adversarial-recovery",
+          "id": "autopilot-bound-payload-windows",
           "runner": "bash",
-          "path": "tests/structure/test-autopilot-adversarial-recovery.sh",
+          "path": "tests/structure/test-autopilot-bound-payload-windows.sh",
           "args": [],
-          "timeoutMs": 900000
-        },
-        {
-          "id": "autopilot-chain-integration",
-          "runner": "bash",
-          "path": "tests/structure/test-autopilot-chain-integration.sh",
-          "args": [],
-          "timeoutMs": 600000
-        },
-        {
-          "id": "autopilot-full-cycle",
-          "runner": "bash",
-          "path": "tests/structure/test-autopilot-full-cycle.sh",
-          "args": [],
-          "timeoutMs": 900000
+          "timeoutMs": 300000
         },
         {
           "id": "file-exists-path-transport",

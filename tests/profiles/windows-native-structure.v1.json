@@ -8,9 +8,7 @@
     "[\"']junction[\"']"
   ],
   "required": [
-    "tests/structure/test-autopilot-adversarial-recovery.sh",
-    "tests/structure/test-autopilot-chain-integration.sh",
-    "tests/structure/test-autopilot-full-cycle.sh",
+    "tests/structure/test-autopilot-bound-payload-windows.sh",
     "tests/structure/test-autopilot-plan-delegate.sh",
     "tests/structure/test-autopilot-state-machine.sh",
     "tests/structure/test-bash-source-write-gate.sh",
@@ -32,6 +30,18 @@
     "tests/structure/test-windows-portability-guards.sh"
   ],
   "excluded": [
+    {
+      "path": "tests/structure/test-autopilot-adversarial-recovery.sh",
+      "reason": "The complete adversarial suite remains in weekly Windows Safety; its blocking Session Control path boundary is extracted into the focused bound-payload contract."
+    },
+    {
+      "path": "tests/structure/test-autopilot-chain-integration.sh",
+      "reason": "The complete lifecycle remains in weekly Windows Safety; the PR gate covers its native Session Control and payload transport boundary through focused contracts."
+    },
+    {
+      "path": "tests/structure/test-autopilot-full-cycle.sh",
+      "reason": "The complete full cycle remains in weekly Windows Safety; its Windows payload-store boundary is extracted into the focused bound-payload contract."
+    },
     {
       "path": "tests/structure/test-doctor.sh",
       "reason": "The only native-Windows branch skips a POSIX-only missing-npm rendering assertion."
