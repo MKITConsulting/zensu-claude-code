@@ -111,23 +111,46 @@ if [ "$STORE_RC" -eq 0 ] && [ -n "$SNAPSHOT" ] && [ -f "$SNAPSHOT" ] \
     && cmp -s "$SOURCE_FILE" "$SNAPSHOT"; then
   check "WBP4 bound external payload is stored immutably" PASS
 else
+  CANONICAL_ROOT="$(_autopilot_project_root "$PROJECT" 2>/dev/null || true)"
   TARGET="$(_autopilot_team_review_payload_target \
-    "$PROJECT" "$REVIEW_KEY" "$HEAD_SHA" 2>/dev/null || true)"
+    "$CANONICAL_ROOT" "$REVIEW_KEY" "$HEAD_SHA" 2>/dev/null || true)"
   _autopilot_team_review_payload_identity_critical \
-    "$PROJECT" "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github >/dev/null 2>&1
+    "$CANONICAL_ROOT" "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github >/dev/null 2>&1
   IDENTITY_RC=$?
-  CLAUDE_PROJECT_DIR="$PROJECT" _tdd_paths_safe \
-    "$PROJECT/.zensu/state" directory "$SOURCE_FILE" regular \
+  IDENTITY_ERROR="$ROOT/identity-error.log"
+  _autopilot_node read-active \
+    "$CANONICAL_ROOT/.zensu/state/autopilot-active.json" \
+    "$CANONICAL_ROOT/.zensu/state" "$CANONICAL_ROOT" \
+    >/dev/null 2>"$IDENTITY_ERROR"
+  ACTIVE_READ_RC=$?
+  CLAUDE_PROJECT_DIR="$CANONICAL_ROOT" _tdd_paths_safe \
+    "$CANONICAL_ROOT/.zensu/state" directory "$SOURCE_FILE" regular \
     "$TARGET" regular-or-absent >/dev/null 2>&1
   PATHS_RC=$?
   _autopilot_team_review_payload_inspect \
     "$SOURCE_FILE" "$HEAD_SHA" false >/dev/null 2>&1
   SOURCE_INSPECT_RC=$?
+  if [ -e "$TARGET" ]; then
+    TARGET_EXISTS=true
+    _autopilot_team_review_payload_inspect \
+      "$TARGET" "$HEAD_SHA" true >/dev/null 2>&1
+    TARGET_INSPECT_RC=$?
+    TARGET_LINKS="$(stat -c %h "$TARGET" 2>/dev/null \
+      || stat -f %l "$TARGET" 2>/dev/null || true)"
+  else
+    TARGET_EXISTS=false
+    TARGET_INSPECT_RC=1
+    TARGET_LINKS=absent
+  fi
   NATIVE_SOURCE="$(_autopilot_native_path "$SOURCE_FILE" 2>/dev/null || true)"
   NATIVE_TARGET="$(_autopilot_native_project_path "$TARGET" 2>/dev/null || true)"
-  printf '  DIAG  store_rc=%s identity_rc=%s paths_rc=%s source_inspect_rc=%s shell_source_length=%s native_source_length=%s shell_target_length=%s native_target_length=%s\n' \
-    "$STORE_RC" "$IDENTITY_RC" "$PATHS_RC" "$SOURCE_INSPECT_RC" \
+  printf '  DIAG  store_rc=%s identity_rc=%s active_read_rc=%s paths_rc=%s source_inspect_rc=%s target_exists=%s target_inspect_rc=%s target_links=%s canonical_root_length=%s shell_source_length=%s native_source_length=%s shell_target_length=%s native_target_length=%s\n' \
+    "$STORE_RC" "$IDENTITY_RC" "$ACTIVE_READ_RC" "$PATHS_RC" "$SOURCE_INSPECT_RC" \
+    "$TARGET_EXISTS" "$TARGET_INSPECT_RC" "$TARGET_LINKS" "${#CANONICAL_ROOT}" \
     "${#SOURCE_FILE}" "${#NATIVE_SOURCE}" "${#TARGET}" "${#NATIVE_TARGET}"
+  if [ -s "$IDENTITY_ERROR" ]; then
+    sed 's/^/  DIAG  identity: /' "$IDENTITY_ERROR"
+  fi
   if [ -s "$STORE_ERROR" ]; then
     sed 's/^/  DIAG  stderr: /' "$STORE_ERROR"
   fi
