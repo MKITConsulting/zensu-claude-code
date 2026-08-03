@@ -25,6 +25,15 @@ case "${1:-}" in
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
     if ! zensu_bind_model_session; then
       echo "zensu-log.sh: rendered Session Control binding unavailable" >&2
+      if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ]; then
+        echo "zensu-log.sh: CLAUDE_CODE_SESSION_ID is not set — this helper must run from Claude Code's own Bash tool, which supplies the host session id." >&2
+      fi
+      if [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+        echo "zensu-log.sh: CLAUDE_PLUGIN_DATA is not set — run this helper exactly as the Zensu hook or skill renders it, including its leading 'CLAUDE_PLUGIN_DATA=...' assignment; never hand-build the command." >&2
+      fi
+      if ! command -v node >/dev/null 2>&1; then
+        echo "zensu-log.sh: node is not on PATH — Session Control cannot bind without it." >&2
+      fi
       exit 2
     fi
     if ! _zensu_pd="$(zensu_resolve_project_dir)" || [ -z "$_zensu_pd" ]; then
@@ -537,6 +546,19 @@ case "${1:-}" in
             if [ "$claimed_ticket_seen" = "true" ]; then
               tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || exit $?
             else
+              chain_change_count="unknown"
+              if command -v git >/dev/null 2>&1 \
+                && [ "$(git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --is-inside-work-tree 2>/dev/null)" = "true" ] \
+                && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+                chain_change_count="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
+                  git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null
+                } | awk 'NF{n++} END{print n+0}')"
+                case "$chain_change_count" in ''|*[!0-9]*) chain_change_count="unknown" ;; esac
+              fi
+              if [ "$chain_change_count" != "unknown" ] && [ "$chain_change_count" != "0" ]; then
+                echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. No review ticket was ever consumed in this chain, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain." >&2
+                exit 1
+              fi
               tdd_mark_unclaimed_review "$session_val" chainDone || exit $?
             fi
           fi

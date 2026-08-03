@@ -9,8 +9,8 @@ INSTALL_CONTRACT="$EVAL_DIR/lib/installed-plugin-contract.js"
 CANARY="$EVAL_DIR/lib/local-mutation-canary.js"
 CANARY_STATUS="$EVAL_DIR/lib/local-mutation-canary-status.js"
 PLUGIN_VERSION="$(jq -r .version "$ROOT/.claude-plugin/plugin.json")"
-TEMPORARY="$(mktemp -d -t zensu-session-wrapper-selftest-XXXXXX)"
-ISOLATED_HOME="$TEMPORARY/isolated-home"
+TEMPORARY="$(mktemp -d -t zsw-XXXXXX)"
+ISOLATED_HOME="$TEMPORARY/h"
 INSTALLED_ROOT="$ISOLATED_HOME/.claude/plugins/cache/zensu/zensu/$PLUGIN_VERSION"
 PLUGIN_MUTATION="$INSTALLED_ROOT/hooks/.session-control-wrapper-selftest-mutation"
 CANARY_PROBE_PID=''
@@ -22,7 +22,7 @@ cleanup() {
   rm -rf "$TEMPORARY"
 }
 trap cleanup EXIT
-mkdir -p "$TEMPORARY/bin" "$INSTALLED_ROOT" "$ISOLATED_HOME/.claude/plugins"
+mkdir -p "$TEMPORARY/b" "$INSTALLED_ROOT" "$ISOLATED_HOME/.claude/plugins"
 
 node_path() {
   case "$(uname -s)" in
@@ -101,7 +101,7 @@ jq -cn --arg path "$INSTALLED_NODE_ROOT" --arg version "$PLUGIN_VERSION" \
 INSTALL_MANIFEST="$TEMPORARY/installed-plugin.json"
 node "$INSTALL_CONTRACT" resolve "$LIST_FILE" "$ROOT" "$ISOLATED_HOME" "$REVISION" 2.1.211 >"$INSTALL_MANIFEST"
 
-cat >"$TEMPORARY/bin/claude" <<'STUB'
+cat >"$TEMPORARY/b/claude" <<'STUB'
 #!/bin/bash
 set -euo pipefail
 if env | grep -Eq '^(STUB_|ZENSU_(CLAUDE_ISOLATED_HOME|CONCURRENCY_CONTROL_DIR|E2E_DISPOSABLE_ENVIRONMENT|EXPECTED_|FORCE_MAIN|HARNESS_|INSTALLATION_MANIFEST|INSTALLED_PLUGIN_ROOT|MUTATING_CONTROL_CANARY_URL|REVIEW_CONTEXT_MARKER|SOURCE_REVISION|SOURCE_REVISION_AUTHORITY|WRAPPER_TEST_MODE))='; then
@@ -135,7 +135,7 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*) plugin="$(cygpath -u "$plugin")" ;;
 esac
 [ -n "$session" ] && [ -d "$plugin" ] || exit 2
-selftest_control="$(dirname "$CLAUDE_PLUGIN_DATA")/wrapper-control/stub-control.json"
+selftest_control="$(dirname "$CLAUDE_PLUGIN_DATA")/c/stub-control.json"
 [ -f "$selftest_control" ] || exit 27
 [ "$(jq -br '.schema' "$selftest_control")" = 'zensu.session-control-wrapper-selftest' ] || exit 28
 while IFS=$'\t' read -r name value; do
@@ -629,11 +629,11 @@ if [ "${STUB_MUTATE_PLUGIN_DATA:-0}" = '1' ]; then printf 'attack\n' >"$CLAUDE_P
 if [ "${STUB_MUTATE_PLUGIN:-0}" = '1' ]; then printf 'attack\n' >"$plugin/hooks/.session-control-wrapper-selftest-mutation"; fi
 exit 0
 STUB
-chmod +x "$TEMPORARY/bin/claude"
+chmod +x "$TEMPORARY/b/claude"
 
 OPTIONS="$(jq -cn --arg root "$ROOT" '{config:{source_dir:$root,mode:"live"},vars:{scenario_id:"live-main-fresh"}}')"
 COMMON_ENV=(
-  env PATH="$TEMPORARY/bin:$PATH" ZENSU_WRAPPER_TEST_MODE=1 ZENSU_HARNESS_SENTINEL=must-not-leak
+  env PATH="$TEMPORARY/b:$PATH" ZENSU_WRAPPER_TEST_MODE=1 ZENSU_HARNESS_SENTINEL=must-not-leak
   ZENSU_EXPECTED_SOURCE_ROOT="$ROOT" ZENSU_EXPECTED_PLUGIN_ROOT="$INSTALLED_ROOT"
   ZENSU_INSTALLED_PLUGIN_ROOT="$INSTALLED_ROOT" ZENSU_CLAUDE_ISOLATED_HOME="$ISOLATED_HOME"
   ZENSU_INSTALLATION_MANIFEST="$INSTALL_MANIFEST" ZENSU_EXPECTED_SOURCE_REVISION="$REVISION"
@@ -915,7 +915,7 @@ if [ "$MUTATING_CONTROL_CANARY_AVAILABLE" = '1' ]; then
   fi
 fi
 
-if env PATH="$TEMPORARY/bin:$PATH" ZENSU_WRAPPER_TEST_MODE=1 \
+if env PATH="$TEMPORARY/b:$PATH" ZENSU_WRAPPER_TEST_MODE=1 \
   ZENSU_EXPECTED_SOURCE_ROOT="$TEMPORARY" ZENSU_EXPECTED_SOURCE_REVISION="$REVISION" \
   "$WRAPPER" x "$OPTIONS" >/dev/null 2>&1; then
   echo 'mistargeted source root was accepted' >&2; exit 1
@@ -979,7 +979,7 @@ if STUB_DUPLICATE_INIT=1 "${COMMON_ENV[@]}" "$WRAPPER" x "$OPTIONS" >/dev/null 2
   echo 'duplicate system/init session ids were accepted' >&2; exit 1
 fi
 
-if env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN PATH="$TEMPORARY/bin:$PATH" STUB_AUTH_FAIL=1 \
+if env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN PATH="$TEMPORARY/b:$PATH" STUB_AUTH_FAIL=1 \
   ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 \
   ZENSU_EXPECTED_SOURCE_ROOT="$ROOT" ZENSU_EXPECTED_PLUGIN_ROOT="$INSTALLED_ROOT" \
   ZENSU_INSTALLED_PLUGIN_ROOT="$INSTALLED_ROOT" ZENSU_CLAUDE_ISOLATED_HOME="$ISOLATED_HOME" \

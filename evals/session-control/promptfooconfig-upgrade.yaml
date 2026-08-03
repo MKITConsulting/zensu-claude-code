@@ -1,0 +1,23 @@
+description: "Claude Code Session Control side-by-side upgrade lifecycle from v0.16.1"
+
+providers:
+  - id: 'exec: node ./lib/upgrade-provider.js'
+    config:
+      source_dir: ../..
+
+prompts:
+  - id: session-control-upgrade
+    raw: |
+      Validate the supported side-by-side Claude plugin upgrade lifecycle for {{scenario_id}}.
+
+defaultTest:
+  assert:
+    - type: javascript
+      value: file://assertions/upgrade-attestation.js
+
+tests:
+  - file://scenarios/upgrade.yaml
+
+evaluateOptions:
+  maxConcurrency: 1
+  repeat: 1

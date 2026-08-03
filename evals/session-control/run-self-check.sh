@@ -7,16 +7,16 @@ PROMPTFOO="$ROOT/node_modules/.bin/promptfoo"
 STATE="$(mktemp -d -t zensu-session-selfcheck-XXXXXX)"
 trap 'rm -rf "$STATE"' EXIT
 
-test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.18'
-test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.18'
+test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.20'
+test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.20'
 test -x "$PROMPTFOO"
 PROMPTFOO_VERSION="$(
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
     "$PROMPTFOO" --version 2>/dev/null | awk 'NF { version=$0 } END { print version }'
 )"
-test "$PROMPTFOO_VERSION" = '0.121.18'
+test "$PROMPTFOO_VERSION" = '0.121.20'
 
-for file in "$EVAL_DIR"/promptfooconfig-{contract,live,concurrency,adversarial}.yaml; do
+for file in "$EVAL_DIR"/promptfooconfig-{contract,upgrade,live,concurrency,adversarial}.yaml; do
   PROMPTFOO_CONFIG_DIR="$STATE" PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1 \
     "$PROMPTFOO" validate config --config "$file" >/dev/null
 done
@@ -24,6 +24,8 @@ done
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/catalog.yaml")" -eq 67
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/adversarial.yaml")" -eq 6
 test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/live.yaml")" -eq 6
+test "$(grep -c '^- description:' "$EVAL_DIR/scenarios/upgrade.yaml")" -eq 1
+grep -q 'maxConcurrency: 1' "$EVAL_DIR/promptfooconfig-upgrade.yaml"
 grep -q 'maxConcurrency: 4' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 3' "$EVAL_DIR/promptfooconfig-concurrency.yaml"
 grep -q 'repeat: 5' "$EVAL_DIR/promptfooconfig-adversarial.yaml"
@@ -41,9 +43,13 @@ if grep -q -- '--plugin-dir' "$ROOT/scripts/session-control-claude-wrapper.sh"; 
   echo 'Session Control wrapper must load only from the isolated installed-plugin registry' >&2
   exit 1
 fi
-for workflow in "$ROOT/.github/workflows/session-control-nightly.yml" "$ROOT/.github/workflows/release.yml"; do
-  grep -q '@anthropic-ai/claude-code@2.1.211' "$workflow"
-done
+grep -q '@anthropic-ai/claude-code@2.1.211' "$ROOT/.github/workflows/release.yml"
+grep -Fq "claude_version: '2.1.211'" "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq "claude_version: '2.1.217'" "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq '@anthropic-ai/claude-code@${{ matrix.claude_version }}' \
+  "$ROOT/.github/workflows/session-control-nightly.yml"
+grep -Fq 'ZENSU_EXPECTED_CLAUDE_VERSION: ${{ matrix.claude_version }}' \
+  "$ROOT/.github/workflows/session-control-nightly.yml"
 
 node "$EVAL_DIR/tests/attestation.test.js"
 node "$EVAL_DIR/tests/contract-provider.test.js"
@@ -53,5 +59,7 @@ node "$EVAL_DIR/tests/live-evidence-negative.test.js"
 bash "$EVAL_DIR/tests/preflight-selftest.sh"
 bash "$EVAL_DIR/tests/marketplace-fixture-selftest.sh"
 bash "$EVAL_DIR/tests/installed-plugin-provisioner-selftest.sh"
+node "$EVAL_DIR/tests/enforce-upgrade-coverage.js"
+node "$EVAL_DIR/tests/upgrade-results.test.js"
 bash "$EVAL_DIR/tests/wrapper-selftest.sh"
 printf 'session-control self-check: PASS\n'

@@ -245,7 +245,28 @@ ephemeral local marketplace backed by a private detached-HEAD clone, using the
 pinned Claude Plugin CLI and an isolated user cache. It launches Claude without
 `--plugin-dir` and proves that normal and reviewer subagents inherit this
 immutable context. The production marketplace remains pinned to the release
-tag throughout this checkout-specific validation.
+tag throughout this checkout-specific validation. Paid Linux gates pin Ubuntu
+24.04, verify Claude's required `bubblewrap`/`socat` sandbox dependencies, and
+fail closed if AppArmor user-namespace preparation or a functional sandbox
+probe fails. The side-by-side upgrade gate itself is Linux-only: it first proves
+the explicit API/OAuth credential with a plugin-free, tool-free Claude canary
+inside outer `bubblewrap` containment. Bubblewrap receives that canary
+environment through its `--args` file descriptor 3, never through the process
+argument vector; custom Anthropic base URLs, proxies, and TLS trust overrides
+are rejected. The gate then runs the old and candidate lifecycles with only a
+random dummy credential against its own deterministic loopback
+Anthropic-compatible backend. Both lifecycle processes use `bubblewrap`
+PID/mount containment, and every plugin hook runs in a nested
+network/PID/mount namespace that cannot see evaluator control or trace state.
+That nested boundary receives only the evaluator-bound `CLAUDE_PLUGIN_DATA`
+and `CLAUDE_PROJECT_DIR` values needed by the hook contract. The old and
+candidate fixtures are immutable, unpredictable direct children of an
+isolated cache parent; the isolated plugin registry, not a predictable SemVer
+path, selects which completed root Claude loads. PR CI exercises this real
+nested-hook integration on pinned Ubuntu without making a paid model request.
+Windows only proves the pre-launch zero-process denial. Real existing-login
+candidate execution is unsupported; its hermetic fake remains solely for
+non-authoritative deterministic coverage.
 See [Session Control release gate](docs/session-control-release-gate.md).
 
 **Getting a guaranteed review for a Workflow-triggered run.** Because the worker `Stop`
@@ -277,9 +298,10 @@ per-implementation over the aggregate diff — **never per spawned worker**.
 ## Installation
 
 The minimum supported Claude Code version is **2.1.211**. Session Control's
-live, nightly, and release evaluations deliberately pin **exactly 2.1.211** so
-host behavior is reproducible; newer Claude Code releases remain supported but
-are revalidated before the evaluation pin advances.
+live and release evaluations, plus the nightly full-suite lane, deliberately
+pin **exactly 2.1.211** so host behavior is reproducible. A second nightly lane
+runs the paid side-by-side upgrade only on **2.1.217**, providing recurring
+forward-compatibility evidence without changing the release baseline.
 
 ```bash
 claude plugin marketplace add MKITConsulting/zensu-claude-code
@@ -302,16 +324,27 @@ claude plugin marketplace update zensu   # refresh the catalog to the latest rel
 claude plugin update zensu@zensu         # pull the new version into the installed plugin
 ```
 
-Restart the session (`/exit` and reopen) so the new hooks, agents, and skills load — the plugin reloads only at SessionStart.
+[Claude Code installs each plugin version into a separate cache directory](https://code.claude.com/docs/en/plugins-reference#plugin-caching-and-file-resolution).
+An already-running session keeps its previous `CLAUDE_PLUGIN_ROOT`; fresh
+sessions load the new version and create that version's immutable Session
+Control binding. Claude retains orphaned previous-version directories for
+about 14 days so concurrent sessions can finish; those roots are ephemeral and
+must never store persistent state. This is the supported zero-downtime upgrade
+path. Claude may add only its own root-level `.in_use/<pid>` and
+`.orphaned_at` lifecycle metadata to those cached copies; Zensu runtime payload
+bytes remain immutable.
 
-Session Control is intentionally fresh-session-only. The former
-`~/.zensu/plugin-root` locator is neither read, migrated, nor rewritten during
-install or update; it is inert to the updated plugin but may contain a stale or
-dangling path. Delete it only once no Claude Code session from an older Zensu
-plugin installation is still running in the same home; the plugin never deletes
-it automatically. Updating installs the new plugin copy, and the next fresh
-session binds that exact installed root in its private immutable context. An
-already-running pre-update session is not rebound to the new copy.
+Never replace bytes under an already-published version/cache directory, and do
+not run `/reload-plugins` in a session that must continue on its old runtime.
+Both operations explicitly migrate the running session to new hook bytes. Zensu
+does not support that transition for Session Control because it cannot rely on
+the original binding lifecycle being replayed at the migration boundary. Every
+release must use a new SemVer version and immutable `v<version>` source tag.
+
+The former `~/.zensu/plugin-root` locator is neither read, migrated, nor
+rewritten during install or update. Delete it only once no Claude Code session
+from an older Zensu plugin installation is still running in the same home; the
+plugin never deletes it automatically.
 
 ## Authentication
 
@@ -493,7 +526,7 @@ The helper never writes and always exits `0` — a red ❌ is a finding in the r
 | `plan-approved-delegate.sh` | PostToolUse ExitPlanMode | `autoTdd` | After the user approves a Plan-mode plan that adds executable code, directs the main agent to ask whether to run `/zensu:tdd` in-thread, with the existing doc-only, explicit-preference, and non-interactive fast paths. A validated `<!-- zensu-autopilot:<run> -->` plan instead advances its owner-bound durable run and delegates directly to the bound TDD attempt; this takes precedence over `autoTdd:false` because Autopilot already used its one planning gate. |
 | `post-review-tdd-delegate.sh` | PostToolUse Agent | `autoFix` (+ `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`) | Auto-fix loop. After `zensu:code-reviewer` completes, atomically increments `reviewRound` in the validated, revisioned `tdd-phase-<scv1-session-key>.json`, routes the configured severities back to the main thread, and re-spawns the reviewer. Concurrent completions serialize through Session Control CAS. Terminal outcomes mark `codeReviewDone` for `/zensu:self-review` or `chainDone` when self-review is disabled; an owning durable Autopilot run is reconciled to its exact recorded return stage. Every chain-end branch appends a `CHAIN-END SUMMARY`; disable it with `combinedSummary:false`. |
 | `post-bash-witness.sh` | PostToolUse Bash | `ZENSU_TEST_WITNESS` (env) | Test-Run Witness. Records every Bash tool invocation (command, exit code, stdout tail) to `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log`. It is active only while that exact Session Control workflow is active; foreign or legacy state is never adopted. The Phase 6 audit cross-checks each CHECKPOINT/AUDIT claim against this independent evidence. Bypass with `ZENSU_TEST_WITNESS=off`. |
-| `stop-chain-enforcer.sh` | Stop | `chainEnforcer` + `autopilotEnforcer` (`ZENSU_CHAIN` / `ZENSU_AUTOPILOT` env) | Hierarchical backstop. The inner TDD review chain routes first; each nudge atomically increments the integrated `stopBlockCount` field and reviewer progress resets it. Once the inner chain permits Stop, an active durable Autopilot run still blocks until `DONE`, `BLOCKED`, or `CANCELLED`; inner completion is reconciled to its exact return stage. `ZENSU_CHAIN=off` disables only the inner chain, while `ZENSU_AUTOPILOT=off` records audited `BLOCKED` for the outer run. Spawned agents always no-op. |
+| `stop-chain-enforcer.sh` | Stop | `chainEnforcer` + `autopilotEnforcer` (`ZENSU_CHAIN` / `ZENSU_AUTOPILOT` env) | Hierarchical backstop. The inner TDD review chain routes first; each nudge atomically increments the integrated `stopBlockCount` field and reviewer progress resets it. Once the inner chain permits Stop, an active durable Autopilot run still blocks until `DONE`, `BLOCKED`, or `CANCELLED`; inner completion is reconciled to its exact return stage. `ZENSU_CHAIN=off` disables only the inner chain, while `ZENSU_AUTOPILOT=off` records audited `BLOCKED` for the outer run. Before any routing the event must bind to its immutable Session Control record; the three states that prevent that (library missing, record unbindable, record no longer matching an existing project root) each block with their own cause and remedy, and honor both release switches so a deleted or moved worktree cannot wedge a session forever. Spawned agents always no-op. |
 | `user-prompt-context-nudge.sh` | UserPromptSubmit | `context.compactionNudge` (+ `context.nudgeThreshold`, `context.windowSize`) | Context-compaction nudge. On each user prompt it tail-reads the session transcript's most recent `usage` block, computes context occupancy (`input_tokens + cache_read_input_tokens + cache_creation_input_tokens` ÷ context size — when `context.windowSize` is unset the nudge stays silent at or below 200k occupancy and treats occupancy past 200k as a proven 1M window) and, once usage reaches `context.nudgeThreshold` (default `50`%), injects a model-facing `additionalContext` reminder so the **main-thread** agent proactively proposes `/compact` to the user. It never triggers compaction itself (only the user can) and never blocks the prompt — missing `node`/transcript, sub-threshold usage, or any error exits 0 silently. A per-session state file (`${CLAUDE_PROJECT_DIR:-.}/.zensu/state/context-nudge-<sid>.txt`) records the last 10%-band that fired, so the reminder repeats once per band climb (50→60→70…) instead of every prompt and re-arms after a compaction shrinks the context. All three settings live under the top-level `context` node of `.zensu/config.json` (not `hooks`); disable with `context.compactionNudge:false`. |
 | `user-prompt-intent-router.sh` | UserPromptSubmit | `intentRouter` | Product-planning intent router. On each user prompt a whole-word, case-insensitive regex (`zensu`, `product`, `feature`, `roadmap`, `milestone`, `bootstrap`, `ghost scan`, `journey`, `tier`, plus inflections) screens for Zensu planning/tracking intent; on a hit it injects a model-facing `additionalContext` directive steering the interactive agent to run the greenfield/brownfield/hybrid triage — ask the three project-context questions, then invoke `/zensu:bootstrap`, `/zensu:ghost-scan`, or the hybrid sequence in the same main thread — instead of running freelance `zensu` CLI commands or delegating mutations to a child. The directive carries an explicit dismiss clause so an ordinary coding/UI/debug task that merely mentions a word like "product"/"feature"/"tier" is answered normally. Advisory steering, not a hard gate; silent on no-keyword prompts, missing `node`, or `intentRouter:false`. |
 | `user-prompt-tdd-reminder.sh` | UserPromptSubmit | `tddReminder` | Per-turn TDD reminder for **direct (non-Plan-mode)** requests. The Plan-mode path (`plan-approved-delegate.sh`) only fires on plan approval, so a direct "implement X" / "fix the bug" prompt otherwise reaches no TDD trigger. On each prompt this hook injects a model-facing `additionalContext` directive — mirroring the plan-approval decision logic + fast-paths — so the agent decides whether the request is a code change and, unless a fast-path applies, **asks** (via `AskUserQuestion`) whether to run `/zensu:tdd` before its first edit. **No prompt regex** — the (multilingual) model classifies intent, so detection is language-independent. Silent when `tddReminder:false`, when the payload has no prompt, or when a TDD session is already active for the session (reusing `pre-edit-tdd-reminder.sh`'s session resolution). Advisory steering — it never blocks an edit. |
@@ -563,7 +596,7 @@ Zensu ships nineteen automatic hooks that fire across the development lifecycle 
 | Flag | Hook Script | Effect when `false` (boolean flags) or value (numeric flags) |
 |------|-------------|---------------------|
 | `autoTdd` | `plan-approved-delegate.sh` | Skips the post-approval TDD prompt entirely — no question is asked and the main agent implements the approved plan directly |
-| `tddImplementation` | `zensu-log.sh --tdd-begin` + `pre-edit-tdd-reminder.sh` + `plan-approved-delegate.sh` + `user-prompt-tdd-reminder.sh` + `post-review-tdd-delegate.sh` + `session-start-banner.sh` / `session-start-primer.sh` + `/zensu:tdd` | When `false` (the default), the `/zensu:tdd` workflow implements in **vanilla mode**: no RED→GREEN ceremony, no FSM phase markers, the PreToolUse edit gate passes through (direct edits to `.zensu/state/` stay denied while a session is active), tests are at the agent's discretion. Everything else stays enforced — plan/log/tasks, Phase 5/6 audits (build, coverage, witness evidence cross-check), the 5-aspect review fan-out → judge second pass (`review-judge`, gated by `hooks.reviewJudge`, default on) → `code-reviewer` → auto-fix loop → `/zensu:self-review`, and the Stop-hook chain guarantee. The mode is frozen per session at `--tdd-begin` (the command echoes `mode: strict` / `mode: vanilla`) into the state file's `vanilla` flag — config flips mid-session change nothing. The ask-hooks still ask before implementation, with wording adjusted to "Zensu workflow (vanilla implementation + review chain)". Note: a project-local `.zensu/config.json` checked into a repository pre-selects the mode for every clone (overlay wins per key) — the session banner and the `mode:` echo at `--tdd-begin` are the per-session signals to watch for an unexpected downgrade. Default `false` — vanilla mode is the out-of-the-box behavior; set `true` to enforce the strict RED→GREEN gate. |
+| `tddImplementation` | `zensu-log.sh --tdd-begin` + `pre-edit-tdd-reminder.sh` + `plan-approved-delegate.sh` + `user-prompt-tdd-reminder.sh` + `post-review-tdd-delegate.sh` + `stop-chain-enforcer.sh` + `session-start-banner.sh` / `session-start-primer.sh` + `/zensu:tdd` | When `false` (the default), the `/zensu:tdd` workflow implements in **vanilla mode**: no RED→GREEN ceremony, no FSM phase markers, the PreToolUse edit gate passes through (direct edits to `.zensu/state/` stay denied while a session is active), tests are at the agent's discretion. Everything else stays enforced — plan/log/tasks, Phase 5/6 audits (build, coverage, witness evidence cross-check), the 5-aspect review fan-out → judge second pass (`review-judge`, gated by `hooks.reviewJudge`, default on) → `code-reviewer` → auto-fix loop → `/zensu:self-review`, and the Stop-hook chain guarantee. The mode is frozen per session at `--tdd-begin` (the command echoes `mode: strict` / `mode: vanilla`) into the state file's `vanilla` flag — config flips mid-session change nothing. The ask-hooks still ask before implementation, with wording adjusted to "Zensu workflow (vanilla implementation + review chain)". The Stop-hook block reason appends a mode-aware state legend (`mode=vanilla` / `mode=strict`) so the inert `phase`/`history` fields of a vanilla session are not misread as a corrupt or never-started chain — wording only; the routing decision is identical in both modes. Note: a project-local `.zensu/config.json` checked into a repository pre-selects the mode for every clone (overlay wins per key) — the session banner and the `mode:` echo at `--tdd-begin` are the per-session signals to watch for an unexpected downgrade. Default `false` — vanilla mode is the out-of-the-box behavior; set `true` to enforce the strict RED→GREEN gate. |
 | `chainEnforcer` | `stop-chain-enforcer.sh` | Disables the Stop-hook review-chain backstop. When `false`, the main agent may end its turn without completing the `zensu:code-reviewer` chain (the skill still spawns the reviewer once at Phase 6; only the hard guarantee is dropped). Replaces the retired `autoReview` flag. |
 | `autopilotEnforcer` | `stop-chain-enforcer.sh` | When `false` during an active durable Autopilot run, records an audited `BLOCKED` transition and permits Stop; it never writes `DONE`. This is independent of `chainEnforcer`: disabling only the inner review backstop cannot release the outer run. Default `true`. |
 | `autoFix` | `post-review-tdd-delegate.sh` | Skips auto-routing of Critical/Important findings into the main-thread fix loop |
@@ -665,7 +698,7 @@ Invalid values, missing keys, malformed JSON, or a missing `node` binary all fal
 | `ZENSU_API_URL` | `https://api.zensu.dev` | Points the `zensu` CLI at a self-hosted Zensu backend (overridden per-invocation by the `--api-url` global flag). See [Self-hosting](#self-hosting). |
 | `ZENSU_TDD_GATE` | — | Set to `off` to disable the TDD Phase Gate for legitimate non-TDD edits during a main-thread `/zensu:tdd` session. Any other value (or unset) leaves the gate active while the session's chain-state `active` flag is set. |
 | `ZENSU_TEST_WITNESS` | — | Set to `off` to disable the test-run witness hook (`post-bash-witness.sh`) for the current session. Any other value (or unset) leaves the witness active while the exact Session Control key's chain-state `active` flag is set. Per-Bash-call recording lives at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log`. |
-| `ZENSU_CHAIN` | — | Set to `off` to disable only the inner TDD review-chain backstop. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell; it does not release an active outer Autopilot run. |
+| `ZENSU_CHAIN` | — | Set to `off` to disable only the inner TDD review-chain backstop. Equivalent to `hooks.chainEnforcer:false` but scoped to the shell; it does not release an active outer Autopilot run. Exception: in the three session-binding blocks that precede routing (most often a deleted or moved worktree, whose immutable record can never resolve again) no outer run can be read or advanced either, so both switches release there — the stderr line states that no completion was proven, only that the guard was waived. |
 | `ZENSU_AUTOPILOT` | — | Set to `off` to stop an active durable Autopilot run through an audited `BLOCKED` transition. Equivalent to `hooks.autopilotEnforcer:false`; it never records `DONE`, merge, release, or deployment success. |
 | `CLAUDE_AGENT_TYPE` | — | Legacy introspection variable only. Security decisions use the trusted top-level `agent_type` from each hook payload, never this environment variable. |
 | `CLAUDE_PLUGIN_ROOT` | — | Claude-native plugin placeholder in top-level Skill/Agent content and plugin-root environment value in hook subprocesses. Stateful Skill commands use the rendered absolute value; every hook also verifies the executing plugin root. No user setup required. |
@@ -732,7 +765,7 @@ Windows users need WSL or Git Bash. Native `cmd.exe` and PowerShell are not supp
 | Planning agent cannot mutate Zensu state | Expected: `zensu:zensu-plm` receives neutral `host-profile-v1` context but its agent definition and enforcement gate expose only `Read`/`Grep`/`Glob`. Return to the top-level interactive thread and invoke the matching `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, or `/zensu:security-review` skill there. If even the interactive thread is neutral, run `/zensu:doctor` and compare the installed Claude Code version with the pinned supported version; a host/runtime mismatch requires updating or restoring the supported host, then starting a fresh session. |
 | OAuth login not opening | Check your default browser settings |
 | TDD phase gate blocking a legitimate edit | Set `ZENSU_TDD_GATE=off` for that edit only, or let the top-level `/zensu:tdd` Skill declare the correct phase via `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --phase <PHASE> --step <step_id>` first |
-| Stateful helper reports that its rendered Session Control binding is unavailable | Confirm Claude Code `2.1.211` or newer and restart every still-running Claude Code session once so top-level Skill content is rendered with the installed plugin root/data and SessionStart can create the matching private record. Do not source an internal binder or search for another plugin root. The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin. Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home; the plugin never deletes it automatically. |
+| Stateful helper reports that its rendered Session Control binding is unavailable | Confirm Claude Code `2.1.211` or newer. If the plugin was updated normally, keep already-running sessions on their previous version and start a fresh session for the new version. Do not run `/reload-plugins` or overwrite a loaded cache directory during this migration; restore that session's previous cache bytes if either occurred. Do not source an internal binder or search for another plugin root. The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin. Delete it only once no Claude Code session from an older installation is still running; the plugin never deletes it automatically. |
 
 ## Contributing
 

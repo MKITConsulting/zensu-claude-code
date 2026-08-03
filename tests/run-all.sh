@@ -5,6 +5,8 @@
 #                   - every tests/structure/test-*.sh
 #                   - evals/config-gate/run-eval.sh --self-check (~60 offline gate evals)
 #                   - evals/session-control/run-self-check.sh (Promptfoo contract/wrapper checks)
+#                   - evals/tdd-review-chain/run-self-check.sh
+#                   - evals/reset-review-limit/run-self-check.sh
 #   --self-check  deterministic suites + each live suite's --self-check skeleton (no API)
 #   --live        deterministic suites + LIVE claude --print suites (COSTS API CREDITS):
 #                   - tests/e2e          (code-reviewer guardrails)
