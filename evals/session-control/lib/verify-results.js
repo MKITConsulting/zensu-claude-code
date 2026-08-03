@@ -259,7 +259,7 @@ function writeSanitizedEvidence(outputFile) {
     gate: 'passed',
     source_git_revision: revision,
     runtime_digest: runtimeDigests[0] || null,
-    promptfoo_version: '0.121.18',
+    promptfoo_version: '0.121.20',
     claude_code_version: '2.1.211',
     row_count: results.length,
     valid_attestation_count: validAttestations.length,

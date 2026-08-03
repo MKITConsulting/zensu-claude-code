@@ -12,10 +12,10 @@ case "$MODE" in contract|live|concurrency|adversarial|release) ;; *)
 esac
 
 test -x "$PROMPTFOO" || { echo 'session-control eval: run npm ci first' >&2; exit 127; }
-test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.18' \
-  || { echo 'session-control eval: package pin must be exactly promptfoo 0.121.18' >&2; exit 1; }
-test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.18' \
-  || { echo 'session-control eval: lockfile does not resolve exact promptfoo 0.121.18' >&2; exit 1; }
+test "$(node -p 'require(process.argv[1]).devDependencies.promptfoo' "$ROOT/package.json")" = '0.121.20' \
+  || { echo 'session-control eval: package pin must be exactly promptfoo 0.121.20' >&2; exit 1; }
+test "$(node -p 'require(process.argv[1]).packages["node_modules/promptfoo"].version' "$ROOT/package-lock.json")" = '0.121.20' \
+  || { echo 'session-control eval: lockfile does not resolve exact promptfoo 0.121.20' >&2; exit 1; }
 
 if [ "$MODE" = contract ]; then
   export ZENSU_EXPECTED_PLUGIN_ROOT="${ZENSU_EXPECTED_PLUGIN_ROOT:-$ROOT}"
