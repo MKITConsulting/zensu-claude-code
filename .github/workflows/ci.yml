@@ -11,42 +11,18 @@ defaults:
 
 jobs:
   test:
-    name: Deterministic suite (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    name: Deterministic suite (ubuntu-latest)
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - name: Windows path and Core lease canary
-        if: runner.os == 'Windows'
-        run: |
-          bash tests/structure/test-msys-runtime-boundaries.sh
-          bash evals/session-control/tests/marketplace-fixture-selftest.sh
-          bash evals/session-control/tests/installed-plugin-provisioner-selftest.sh
-          bash evals/session-control/tests/wrapper-selftest.sh
-          bash tests/structure/test-pre-edit-hook-mirror.sh
-          bash tests/structure/test-session-control-claude.sh
-          bash tests/structure/test-session-start-banner.sh
-          bash tests/structure/test-session-id-v1.sh
-          bash tests/structure/test-deferred-review-claim.sh
-          bash tests/structure/test-deferred-review-fallback.sh
-          bash tests/structure/test-review-worker-evidence-lease.sh
-          bash tests/structure/test-reviewer-capability-gate.sh
-          bash tests/structure/test-autopilot-plan-delegate.sh
-          bash tests/structure/test-post-review-self-review-handoff.sh
-          bash tests/structure/test-stop-enforcer-self-review-routing.sh
-          bash tests/structure/test-bash-source-write-gate.sh
-          bash tests/structure/test-tdd-no-flock-external-lease.sh
-          bash tests/session-control/run.sh
       - run: bash tests/run-all.sh
       - name: Show suite report on failure
         if: failure()
@@ -59,12 +35,122 @@ jobs:
             echo 'No full-suite report was produced; inspect the failed preflight step above.'
           fi
 
+  windows-shards:
+    name: Windows contract shard (${{ matrix.profile }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        profile:
+          - windows-reset-session
+          - windows-leases-routing
+          - windows-native-state
+          - windows-installed-core
+          - windows-native-branches
+    runs-on: windows-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - name: Run Windows contract profile
+        id: profile
+        env:
+          ZENSU_PROFILE_REPORT_DIR: ${{ runner.temp }}/windows-profile-reports
+          ZENSU_PROFILE_SOURCE_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: node tests/run-profile.js "${{ matrix.profile }}"
+      - name: Record shard outcome
+        if: always()
+        env:
+          PROFILE_OUTCOME: ${{ steps.profile.outcome }}
+        run: |
+          echo "### Windows profile: ${{ matrix.profile }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- outcome: $PROFILE_OUTCOME" >> "$GITHUB_STEP_SUMMARY"
+          echo "- source: ${{ github.sha }}" >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload Windows profile timing report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-profile-${{ matrix.profile }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-profile-reports/${{ matrix.profile }}.json
+          if-no-files-found: error
+          retention-days: 30
+
+  windows-shard-summary:
+    name: Deterministic suite (windows-latest)
+    if: always()
+    needs: [windows-shards]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+      - name: Download all profile reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: windows-profile-*-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-shards/profiles
+          merge-multiple: true
+      - name: Validate blocking shard evidence
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          ZENSU_SHARD_JOB_RESULT: ${{ needs.windows-shards.result }}
+        run: |
+          test "$ZENSU_SHARD_JOB_RESULT" = success
+          node tests/summarize-windows-observation.js summarize-shards \
+            "$RUNNER_TEMP/windows-shards/profiles" \
+            "$RUNNER_TEMP/windows-shards/windows-shard-summary.json"
+      - name: Upload aggregate shard evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-shards-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/windows-shards/windows-shard-summary.json
+          if-no-files-found: error
+          retention-days: 30
+
+  session-control-sandbox:
+    name: Session Control sandbox prerequisites
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          persist-credentials: false
+      - name: Prepare verified Claude Bash sandbox
+        run: bash .github/scripts/prepare-claude-sandbox-linux.sh
+      - name: Contained Session Control hook integration
+        run: bash tests/structure/test-session-control-sandbox-hook-integration.sh
+        env:
+          ZENSU_RUN_LINUX_SANDBOX_HOOK_INTEGRATION: '1'
+
   session-control-contract:
     name: Session Control contract (Promptfoo 0.121.20)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -78,6 +164,7 @@ jobs:
           mkdir -p "$PROMPTFOO_CONFIG_DIR"
           npx --no-install promptfoo validate config -c \
             evals/session-control/promptfooconfig-contract.yaml \
+            evals/session-control/promptfooconfig-upgrade.yaml \
             evals/session-control/promptfooconfig-live.yaml \
             evals/session-control/promptfooconfig-concurrency.yaml \
             evals/session-control/promptfooconfig-adversarial.yaml \

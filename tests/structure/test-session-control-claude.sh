@@ -27,9 +27,10 @@ UNRELEASED_CHANGELOG="$(awk '
 ' "$CHANGELOG")"
 UNRELEASED_CHANGELOG_ONELINE="$(printf '%s\n' "$UNRELEASED_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
-  'After upgrading, restart every running Claude Code session once' \
+  'every published plugin change to use a new SemVer version and distinct immutable tag/cache path' \
+  'already-running Claude Code sessions keep using their previous plugin root' \
+  'Do not overwrite an existing cache version or run `/reload-plugins`' \
   '`~/.zensu/plugin-root` locator is no longer consulted or updated' \
-  'may be deleted manually once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
   'the plugin never deletes it automatically'
 do
   if printf '%s\n' "$UNRELEASED_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
@@ -46,8 +47,11 @@ README_UPDATING="$(awk '
 ' "$README")"
 README_UPDATING_ONELINE="$(printf '%s\n' "$README_UPDATING" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
+  'already-running session keeps its previous `CLAUDE_PLUGIN_ROOT`' \
+  'fresh sessions load the new version' \
+  'Never replace bytes under an already-published version/cache directory' \
+  'do not run `/reload-plugins`' \
   '`~/.zensu/plugin-root` locator is neither read, migrated, nor rewritten' \
-  'is inert to the updated plugin' \
   'Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
   'the plugin never deletes it automatically'
 do
@@ -65,8 +69,10 @@ README_TROUBLESHOOTING="$(awk '
 ' "$README")"
 README_TROUBLESHOOTING_ONELINE="$(printf '%s\n' "$README_TROUBLESHOOTING" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
+  'keep already-running sessions on their previous version' \
+  'Do not run `/reload-plugins` or overwrite a loaded cache directory' \
   'The retired `~/.zensu/plugin-root` locator is never consulted by the updated plugin' \
-  'Delete it only once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
+  'Delete it only once no Claude Code session from an older installation is still running' \
   'the plugin never deletes it automatically'
 do
   if printf '%s\n' "$README_TROUBLESHOOTING_ONELINE" | grep -qF -- "$requirement"; then

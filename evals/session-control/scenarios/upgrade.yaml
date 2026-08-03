@@ -1,0 +1,3 @@
+- description: "U01 pinned v0.16.1 stays immutable across three active-process turns while a concurrent fresh candidate passes Read and Bash lifecycle gates"
+  vars:
+    scenario_id: upgrade-v0161-side-by-side

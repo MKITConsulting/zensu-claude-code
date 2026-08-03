@@ -302,7 +302,8 @@ else
 fi
 
 REVIEW_PAYLOAD_SNAPSHOT="$(autopilot_store_team_review_payload \
-  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null || true)"
+  "$RUN" "$REVIEW_KEY" "$HEAD_SHA" "$REVIEW_PAYLOAD_SOURCE" github "$PROJECT" 2>/dev/null)"
+REVIEW_PAYLOAD_STORE_RC=$?
 if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(autopilot_read_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" github "$PROJECT" 2>/dev/null)" = "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && cmp -s "$REVIEW_PAYLOAD_SOURCE" "$REVIEW_PAYLOAD_SNAPSHOT" \
@@ -310,7 +311,14 @@ if [ -n "$REVIEW_PAYLOAD_SNAPSHOT" ] \
   && [ "$(stat -c %h "$REVIEW_PAYLOAD_SNAPSHOT" 2>/dev/null || stat -f %l "$REVIEW_PAYLOAD_SNAPSHOT")" = 1 ]; then
   check "R4 requested review atomically stores one private operation/head-bound payload" PASS
 else
-  check "R4 requested review atomically stores one private operation/head-bound payload" FAIL
+  REVIEW_PAYLOAD_TARGET="$(_autopilot_team_review_payload_target \
+    "$PROJECT" "$REVIEW_KEY" "$HEAD_SHA" 2>/dev/null || true)"
+  REVIEW_PAYLOAD_NATIVE_TARGET="$(
+    bash "$HOST_PATH" "$REVIEW_PAYLOAD_TARGET" 2>/dev/null || true
+  )"
+  check "R4 requested review atomically stores one private operation/head-bound payload (rc=$REVIEW_PAYLOAD_STORE_RC shell_path_length=${#REVIEW_PAYLOAD_TARGET} native_path_length=${#REVIEW_PAYLOAD_NATIVE_TARGET})" FAIL
+  printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"
+  exit 1
 fi
 
 REVIEW_VCS_META="$(_zensu_vcs_review_payload_meta github "$REVIEW_PAYLOAD_SNAPSHOT" "$HEAD_SHA" "$REVIEW_KEY" 2>/dev/null || true)"
@@ -454,33 +462,42 @@ else
   check "R7aa publication can relabel a GitHub request as GitLab" FAIL
 fi
 
-# Build a complete requested-state clone, including its private durable
-# payload, so provider tests cannot pass merely because attestation later finds
-# a missing snapshot.
+# Build every requested-state transition through the public state-machine API.
+# The private payload is seeded separately so these controls test provider
+# receipt semantics without repeating the R4-R7 storage transport contract.
 prepare_provider_project() {
-  local target="$1" provider="$2" state_dir="$1/.zensu/state" run_file source physical
-  run_file="$state_dir/autopilot-run-${RUN}.json"
-  mkdir -p "$state_dir" || return 1
-  cp "$ACTIVE_FILE" "$state_dir/autopilot-active.json" || return 1
-  cp "$RUN_FILE" "$run_file" || return 1
-  physical="$(native_directory "$target")" || return 1
-  PROJECT_PHYSICAL="$physical" REQUEST_PROVIDER="$provider" node -e '
-  const fs=require("fs"),crypto=require("crypto"),file=process.argv[1],state=JSON.parse(fs.readFileSync(file,"utf8"));
-  const canonical=value=>Array.isArray(value)?`[${value.map(canonical).join(",")}]`:
-    value&&typeof value==="object"?`{${Object.keys(value).sort().map(key=>`${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`:
-    JSON.stringify(value);
-  state.projectRoot=process.env.PROJECT_PHYSICAL;
-  state.effects.teamReview.provider=process.env.REQUEST_PROVIDER;
-  const event=state.events.find(item=>item.eventType==="TEAM_REVIEW_REQUESTED");
-  event.payload.provider=process.env.REQUEST_PROVIDER;
-  event.payloadDigest=crypto.createHash("sha256").update(canonical(event.payload)).digest("hex");
-  fs.writeFileSync(file,JSON.stringify(state,null,2)+"\n");
-' "$run_file" || return 1
-  source="$target/provider-review-source.json"
-  cp "$REVIEW_PAYLOAD_SNAPSHOT" "$source" || return 1
-  chmod 600 "$source" || return 1
-  autopilot_store_team_review_payload "$RUN" "$REVIEW_KEY" "$HEAD_SHA" \
-    "$source" "$provider" "$target" >/dev/null
+  local target="$1" provider="$2" snapshot
+  mkdir -p "$target" || return 1
+  autopilot_begin_run "$RUN" "$OWNER" "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-plan PLAN_APPROVED \
+    "{\"approvedPlanSha256\":\"$PLAN_SHA\"}" "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-tdd-start TDD_STARTED \
+    '{"attempt":1,"chainId":"provider-chain-001","sessionId":"provider-session-001"}' \
+    "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-tdd-done TDD_CHAIN_DONE \
+    '{"attempt":1,"chainId":"provider-chain-001","sessionId":"provider-session-001","outcome":"pass"}' \
+    "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-gates GATES_PASSED \
+    "{\"headSha\":\"$HEAD_SHA\"}" "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-converge CONVERGENCE_PASSED \
+    '{}' "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-pr-request PR_OPEN_REQUESTED \
+    "{\"operationKey\":\"pr:$RUN\"}" "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-pr-open PR_OPENED \
+    "{\"operationKey\":\"pr:$RUN\",\"pr\":{\"number\":712,\"url\":\"https://github.com/acme/repo/pull/712\",\"headSha\":\"$HEAD_SHA\"}}" \
+    "$target" >/dev/null || return 1
+  autopilot_apply_event "$RUN" provider-review-request TEAM_REVIEW_REQUESTED \
+    "{\"operationKey\":\"$REVIEW_KEY\",\"provider\":\"$provider\"}" \
+    "$target" >/dev/null || return 1
+  # R4-R7 already exercise the public store/read boundary. These provider
+  # controls isolate receipt binding by seeding the same validated private
+  # snapshot after building every durable state transition through public APIs.
+  snapshot="$(_autopilot_team_review_payload_target \
+    "$target" "$REVIEW_KEY" "$HEAD_SHA")" || return 1
+  cp "$REVIEW_PAYLOAD_SNAPSHOT" "$snapshot" || return 1
+  chmod 600 "$snapshot" || return 1
+  _autopilot_team_review_payload_inspect \
+    "$snapshot" "$HEAD_SHA" true >/dev/null
 }
 
 # A genuinely GitLab-bound request with one inline finding has a valid two-part

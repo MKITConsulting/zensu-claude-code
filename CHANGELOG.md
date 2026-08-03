@@ -94,6 +94,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reuse one session id across projects. Autopilot recovery also resolves
   continuation state exclusively from that record, never from mutable payload
   `cwd`, and remains silent when the binding cannot be authenticated.
+- **safe plugin upgrades**: Require every published plugin change to use a new
+  SemVer version and distinct immutable tag/cache path. Claude Code keeps an
+  already-running session on its previous plugin root while fresh sessions use
+  the new version; Claude retains orphaned previous-version roots for about 14
+  days for concurrent sessions, but those roots remain ephemeral. Overwriting
+  an already-loaded cache directory or invoking
+  `/reload-plugins` is an explicit session migration and is not supported for
+  this Session Control transition.
+- **upgrade evidence**: Prove the pinned previous release is an ancestor of the
+  candidate SHA, and prepare every paid Ubuntu 24.04 gate with verified
+  `bubblewrap`/`socat`, documented AppArmor handling, and functional sandbox
+  namespace probes before Claude starts.
+- **contained upgrade authority**: Make real upgrade evidence Linux-only and
+  split authentication from candidate execution. A plugin-free, tool-free
+  Claude canary receives the one explicit API/OAuth credential inside an outer
+  `bubblewrap`; its environment arguments cross Bubblewrap's `--args` file
+  descriptor 3 instead of the process argument vector. Operator-supplied
+  Anthropic base URLs, proxies, and TLS trust overrides are rejected. The old
+  and candidate lifecycles receive only a random dummy credential and the
+  evaluator-created loopback model URL, while their hooks run in a nested
+  namespace with evaluator-bound `CLAUDE_PLUGIN_DATA` and
+  `CLAUDE_PROJECT_DIR`. The former macOS Keychain/`--plugin-dir`
+  existing-login procedure is removed; only a hermetic fake existing-login
+  profile remains for non-authoritative deterministic tests.
+- **active plugin-root evidence**: Treat Claude's bounded `.in_use/<pid>` file
+  as a host-owned lifecycle marker rather than plugin payload drift, while
+  requiring the exact live process marker and its cleanup. Every other runtime
+  byte remains immutable across the side-by-side upgrade.
+- **Claude stream lifecycle evidence**: Match Claude 2.1.217's one
+  `system/init` record per streamed turn while still requiring a single stable
+  process PID and session ID across all three old-runtime turns.
+- **Claude Bash probe compatibility**: Accept Claude 2.1.217's optional bounded
+  `description` display metadata while keeping the command byte-exact and
+  rejecting every other input key, including background and unsandboxed flags.
+- **local plugin-data evidence**: Discover the one real Session Control record
+  produced by `--plugin-dir`, require its data root to be a direct child of the
+  isolated plugin-data parent, and bind the context to it. Authoritative
+  installed-plugin runs still require the canonical marketplace data id.
 - **subagents**: Recognize plugin-scoped reviewer and PLM identities, keep the
   PLM and exact reviewers on the `Read`/`Grep`/`Glob` profile, preserve
   non-command host-granted tools and external detached-worktree `cwd` changes
@@ -118,11 +156,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   locator, which could be clobbered by another host, plugin version, or
   worktree while a session was still active.
 
-  After upgrading, restart every running Claude Code session once so the new
-  SessionStart contract can bind it. The retired `~/.zensu/plugin-root` locator
-  is no longer consulted or updated. It may be deleted manually once no Claude
-  Code session from an older Zensu plugin installation is still running in the
-  same home; the plugin never deletes it automatically.
+  After a versioned upgrade, already-running Claude Code sessions keep using
+  their previous plugin root; start a fresh session to use the new Session
+  Control runtime. Do not overwrite an existing cache version or run
+  `/reload-plugins` in a session that must keep working on the old runtime. The
+  retired `~/.zensu/plugin-root` locator is no longer consulted or updated. It
+  may be deleted once no older session still needs that path; the plugin never
+  deletes it automatically.
 
 ## [0.16.1] - 2026-07-16
 

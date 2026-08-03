@@ -300,7 +300,7 @@ FAKE_BIN="$TMP/fake-bin"
 mkdir -p "$FAKE_BIN"
 printf '#!/bin/sh\nprintf leaked-output\nprintf "secret child diagnostic\\n" >&2\nexit 127\n' >"$FAKE_BIN/node"
 chmod +x "$FAKE_BIN/node"
-FAIL_CLOSED_STDOUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" bash "$GATE" 2>"$TMP/fail-closed.stderr")"
+FAIL_CLOSED_STDOUT="$(PATH="$FAKE_BIN:/usr/bin:/bin" bash "$GATE" </dev/null 2>"$TMP/fail-closed.stderr")"
 FAIL_CLOSED_STATUS=$?
 FAIL_CLOSED_STDERR="$(cat "$TMP/fail-closed.stderr")"
 [ "$FAIL_CLOSED_STATUS" -eq 2 ] && check "launcher failure exits with Claude blocking status 2" PASS || check "launcher failure exits with Claude blocking status 2 (got $FAIL_CLOSED_STATUS)" FAIL
