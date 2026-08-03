@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.17.0] - 2026-07-22
+## [0.17.0] - 2026-08-03
 
 ### Added
 
@@ -86,6 +86,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **deps**: Clear all open Dependabot alerts via promptfoo 0.121.20 plus
+  `overrides` for `@modelcontextprotocol/sdk`, `@hono/node-server`, `adm-zip`,
+  `fast-uri`, `fast-xml-parser`, and `sharp` (#188).
+- **hooks**: Bind the post-review outer read to the recorded project root
+  (#186).
+- **hooks**: Make the Zensu Stop block legible, verifiable and escapable
+  (#183).
 - **hook context**: Rebind every non-SessionStart hook from the trusted
   `session_id` and private `CLAUDE_PLUGIN_DATA` record, independently of model
   Bash state. The all-tool capability gate now fails closed with Claude's
