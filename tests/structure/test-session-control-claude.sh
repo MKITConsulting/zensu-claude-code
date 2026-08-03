@@ -20,22 +20,22 @@ for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION" "$HOST_PATH"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$ROOT/}" PASS || check "artifact exists: ${artifact#$ROOT/}" FAIL
 done
 
-UNRELEASED_CHANGELOG="$(awk '
-  /^## \[Unreleased\]/ { in_section = 1; next }
+RELEASE_CHANGELOG="$(awk '
+  /^## \[0\.17\.0\]/ { in_section = 1; next }
   in_section && /^## \[/ { exit }
   in_section { print }
 ' "$CHANGELOG")"
-UNRELEASED_CHANGELOG_ONELINE="$(printf '%s\n' "$UNRELEASED_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
+RELEASE_CHANGELOG_ONELINE="$(printf '%s\n' "$RELEASE_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
   'After upgrading, restart every running Claude Code session once' \
   '`~/.zensu/plugin-root` locator is no longer consulted or updated' \
   'may be deleted manually once no Claude Code session from an older Zensu plugin installation is still running in the same home' \
   'the plugin never deletes it automatically'
 do
-  if printf '%s\n' "$UNRELEASED_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
-    check "Unreleased upgrade note: $requirement" PASS
+  if printf '%s\n' "$RELEASE_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
+    check "0.17.0 upgrade note: $requirement" PASS
   else
-    check "Unreleased upgrade note: $requirement" FAIL
+    check "0.17.0 upgrade note: $requirement" FAIL
   fi
 done
 
