@@ -26,6 +26,11 @@ _ZENSU_TDD_NATIVE_PLUGIN_ROOT="$(bash "$_ZENSU_TDD_HOST_PATH" "$CLAUDE_PLUGIN_RO
 _ZENSU_TDD_CONTROL_CORE="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"
 [ -f "$_ZENSU_TDD_CONTROL_CORE" ] && [ ! -L "$_ZENSU_TDD_CONTROL_CORE" ] \
   || { return 2 2>/dev/null || exit 2; }
+_ZENSU_TDD_CHAIN_RECOVERY="${_ZENSU_TDD_NATIVE_PLUGIN_ROOT}/hooks/lib/chain-recovery-v1.js"
+
+_tdd_chain_recovery_module_ok() {
+  [ -f "$_ZENSU_TDD_CHAIN_RECOVERY" ] && [ ! -L "$_ZENSU_TDD_CHAIN_RECOVERY" ]
+}
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 
@@ -448,6 +453,8 @@ _tdd_write_phase_critical() {
   local step_id="$3"
   local phase="$4"
   local reason="$5"
+  [ "$phase" = CHAIN_RECOVERED ] && return 1
+  case "$reason" in "chain-recovered: "*) return 1 ;; esac
   local ts="$6"
 
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" STEP="$step_id" PHASE="$phase" REASON="$reason" TS="$ts" \
@@ -750,6 +757,8 @@ tdd_write_phase() {
   local step_id="${2:-}"
   local phase="${3:-}"
   local reason="${4:-}"
+  [ "$phase" = CHAIN_RECOVERED ] && return 1
+  case "$reason" in "chain-recovered: "*) return 1 ;; esac
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
 
@@ -1522,26 +1531,16 @@ _tdd_issue_review_ticket_critical() {
   native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
   native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
-  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" node -e '
+  if ! STATE_FILE="$native_state_file" SID="$session_id" TICKET="$ticket" \
+    CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" node -e '
     const fs = require("fs");
     let s;
     try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
     catch (_) { process.exit(3); }
-    const markerKeys = [
-      "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
-    ];
-    const marker = s && s.reviewRearm;
-    const markerValid = marker === undefined || (marker && typeof marker === "object"
-      && !Array.isArray(marker)
-      && Object.keys(marker).sort().length === markerKeys.length
-      && Object.keys(marker).sort().every((key, index) => key === markerKeys[index])
-      && marker.schemaVersion === 1 && marker.status === "pending"
-      && typeof marker.runId === "string" && marker.runId === s.autopilotRunId
-      && marker.attempt === s.autopilotAttempt
-      && typeof marker.chainId === "string" && marker.chainId === s.chainId
-      && typeof marker.consumedTicketSha256 === "string"
-      && /^[a-f0-9]{64}$/.test(marker.consumedTicketSha256)
-      && marker.retire === false);
+    let markerValid;
+    try {
+      markerValid = require(process.env.CHAIN_RECOVERY).rearmReceiptVerdict(s) !== "stale";
+    } catch (_) { process.exit(3); }
     const valid = s && typeof s === "object" && !Array.isArray(s)
       && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
       && typeof s.phase === "string"
@@ -1580,6 +1579,7 @@ tdd_issue_review_ticket() {
   command -v node >/dev/null 2>&1 || return 1
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
+  _tdd_chain_recovery_module_ok || return 1
   state_file="$(tdd_state_file "$session_id")"
   state_dir="$(dirname "$state_file")"
   _tdd_state_storage_safe "$state_file" || return 1
@@ -1881,6 +1881,7 @@ _tdd_mark_unclaimed_review_critical() {
     const standalone = s && typeof s === "object" && !Array.isArray(s)
       && linkKeys.every(linkKey => !Object.prototype.hasOwnProperty.call(s, linkKey));
     const valid = validKey && standalone
+      && !Object.prototype.hasOwnProperty.call(s, "reviewRearm")
       && s.session_id_hash === `sha256:${process.env.SID.slice("scv1_".length)}`
       && s.active === true && s.implComplete === true && s.chainDone === false
       && typeof s.codeReviewDone === "boolean" && typeof s.selfReviewFixed === "boolean"
@@ -2117,20 +2118,22 @@ _tdd_rearm_autopilot_review_critical() {
   native_state_file="$(_tdd_native_project_path "$state_file")" || { rm -f "$tmp"; return 1; }
   native_tmp="$(_tdd_native_project_path "$tmp")" || { rm -f "$tmp"; return 1; }
 
+  _tdd_chain_recovery_module_ok || { rm -f "$tmp"; return 1; }
   STATE_FILE="$native_state_file" SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
-    CHAIN_ID="$chain_id" TICKET="$ticket" RETIRE="$retire" node -e '
+    CHAIN_ID="$chain_id" TICKET="$ticket" RETIRE="$retire" \
+    CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" node -e '
       const fs = require("fs");
       const crypto = require("crypto");
       let s;
       try { s = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8")); }
       catch (_) { process.exit(3); }
 
-      const linkId = value => typeof value === "string" && value.length > 0 && value.length <= 128
-        && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
-      const returnStages = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
-      const markerKeys = [
-        "attempt", "chainId", "consumedTicketSha256", "retire", "runId", "schemaVersion", "status"
-      ];
+      let chainShapes;
+      try { chainShapes = require(process.env.CHAIN_RECOVERY); }
+      catch (_) { process.exit(3); }
+      const linkId = chainShapes.isLinkId;
+      const returnStages = new Set(chainShapes.RETURN_STAGES);
+      const markerKeys = chainShapes.REARM_MARKER_KEYS;
       const strictMarker = marker => {
         if (!marker || typeof marker !== "object" || Array.isArray(marker)) return false;
         const keys = Object.keys(marker).sort();
@@ -2254,6 +2257,139 @@ tdd_rearm_autopilot_review() {
   _tdd_locked_run "$state_file" _tdd_rearm_autopilot_review_critical \
     "$state_file" "$session_id" "$run_id" "$attempt" "$chain_id" "$ticket" \
     "$retire" "" ""
+}
+
+_tdd_chain_preflight() {
+  local supplied_session="${1:-}" session_id state_file state_dir
+  unset _TDD_CHAIN_SESSION _TDD_CHAIN_STATE_FILE _TDD_CHAIN_PROJECT_ROOT
+  [ -n "$supplied_session" ] || return 2
+  command -v node >/dev/null 2>&1 || return 2
+  _tdd_chain_recovery_module_ok || return 2
+  source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+  session_id="$(zensu_resolve_session_id "$supplied_session")" || return 2
+  state_file="$(tdd_state_file "$session_id")" || return 2
+  state_dir="$(dirname "$state_file")"
+  [ -e "$state_file" ] || [ -L "$state_file" ] || return 1
+  _tdd_path_safe "$state_file" regular "$state_dir" || return 2
+  _tdd_state_storage_safe "$state_file" || return 2
+  _TDD_CHAIN_SESSION="$session_id"
+  _TDD_CHAIN_STATE_FILE="$state_file"
+  _TDD_CHAIN_PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" || return 2
+  return 0
+}
+
+tdd_chain_diagnostics() {
+  local rc project_root session_id
+  _tdd_chain_preflight "${1:-}"
+  rc=$?
+  project_root="${_TDD_CHAIN_PROJECT_ROOT:-}"
+  session_id="${_TDD_CHAIN_SESSION:-}"
+  unset _TDD_CHAIN_SESSION _TDD_CHAIN_STATE_FILE _TDD_CHAIN_PROJECT_ROOT
+  [ "$rc" -eq 0 ] || return "$rc"
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" \
+    PROJECT_ROOT="$project_root" SID="$session_id" node -e '
+    try {
+      const core = require(process.env.CONTROL_CORE);
+      const chain = require(process.env.CHAIN_RECOVERY);
+      process.stdout.write(JSON.stringify(chain.classifyChain(core.readWorkflowState({
+        projectRoot: process.env.PROJECT_ROOT,
+        sessionId: process.env.SID,
+      }))));
+    } catch (_) { process.exit(2); }
+  ' 2>/dev/null
+}
+
+_tdd_recover_chain_critical() {
+  local project_root="$1" session_id="$2" node_rc
+  CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
+    CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" \
+    PROJECT_ROOT="$project_root" SID="$session_id" node -e '
+    const fs = require("fs");
+    const emit = (text, code) => { fs.writeSync(1, text); process.exit(code); };
+    let core;
+    let chain;
+    try {
+      core = require(process.env.CONTROL_CORE);
+      chain = require(process.env.CHAIN_RECOVERY);
+    } catch (_) { emit("op:module-unreadable", 2); }
+    const binding = {
+      projectRoot: process.env.PROJECT_ROOT,
+      sessionId: process.env.SID,
+    };
+    let before;
+    try {
+      before = chain.classifyChain(core.readWorkflowState(binding));
+    } catch (_) { emit("op:unreadable", 2); }
+    if (!before.recoverable) emit("refused:" + before.nextCommandId, 3);
+    const REFUSED = "zensu-chain-recover-refused";
+    const UNCLASSIFIABLE = "zensu-chain-recover-unclassifiable";
+    const stamp = new Date().toISOString();
+    let mutated = false;
+    try {
+      core.mutateWorkflowState({
+        projectRoot: binding.projectRoot,
+        sessionId: binding.sessionId,
+        workflowState: "chain_recovered",
+        event: "chain-recovered",
+      }, (s) => {
+        let fresh;
+        try { fresh = chain.classifyChain(s); }
+        catch (_) { throw new Error(UNCLASSIFIABLE); }
+        if (!fresh.recoverable) throw new Error(REFUSED);
+        delete s.reviewRearm;
+        if (!Array.isArray(s.history)) s.history = [];
+        const entry = {
+          step: typeof s.step_id === "string" ? s.step_id : "",
+          phase: chain.RECOVERY_HISTORY_PHASE,
+          reason: chain.RECOVERY_HISTORY_REASON_PREFIX
+            + "rearm receipt that disagreed with this document was dropped",
+        };
+        if (stamp) entry.ts = stamp;
+        s.history.push(entry);
+        mutated = true;
+        return s;
+      });
+    } catch (error) {
+      if (error && error.message === REFUSED) emit("refused:stale-generation", 3);
+      if (error && error.message === UNCLASSIFIABLE) emit("refused:unclassifiable-generation", 3);
+      if (!mutated) emit("op:write-failed", 2);
+      let landed = false;
+      try {
+        landed = chain.rearmReceiptVerdict(core.readWorkflowState(binding)) === "none";
+      } catch (_) { landed = false; }
+      emit(landed ? "op:write-landed-unconfirmed" : "op:write-failed", 2);
+    }
+    emit("recovered:" + before.shape, 0);
+  ' 2>/dev/null
+  node_rc=$?
+  return "$node_rc"
+}
+
+tdd_recover_chain() {
+  local verdict rc state_file project_root session_id
+  _tdd_chain_preflight "${1:-}"
+  rc=$?
+  state_file="${_TDD_CHAIN_STATE_FILE:-}"
+  project_root="${_TDD_CHAIN_PROJECT_ROOT:-}"
+  session_id="${_TDD_CHAIN_SESSION:-}"
+  unset _TDD_CHAIN_SESSION _TDD_CHAIN_STATE_FILE _TDD_CHAIN_PROJECT_ROOT
+  [ "$rc" -eq 0 ] || return "$rc"
+  verdict="$(_tdd_locked_run "$state_file" _tdd_recover_chain_critical \
+    "$project_root" "$session_id")"
+  rc=$?
+  case "$rc" in
+    0|2|3) ;;
+    *)
+      case "$verdict" in
+        recovered:*) verdict="op:write-landed-unconfirmed"; rc=2 ;;
+        op:*) rc=2 ;;
+        refused:*) rc=3 ;;
+        *) verdict="op:lock-failed"; rc=2 ;;
+      esac
+      ;;
+  esac
+  printf '%s' "$verdict"
+  return "$rc"
 }
 
 _tdd_write_workflow_begin_critical() {
@@ -2518,6 +2654,10 @@ tdd_has_red_fail() {
 # can never exhaust the ledger) — a crafted value can neither smuggle
 # directive text into the rendered surfaces nor bloat the state file every
 # hook parses. New gates extend ZENSU_BYPASS_GATE_ALLOWLIST in ONE place.
+# This ledger records ONLY gate escapes, so every entry rendered under "Gates
+# bypassed" is true. Operator interventions that are not gate escapes — the
+# --chain-recover repair — record their provenance as a workflow history entry
+# inside their own transaction instead.
 
 ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS"
 
@@ -3398,12 +3538,12 @@ tdd_seed_deferred_review() {
 case "${OSTYPE:-}" in
   msys*|cygwin*|mingw*|win32*) ;;
   *)
-    # Export the two values only after they were derived from, and
+    # Export the module paths only after they were derived from, and
     # identity-checked against, the executing library above. Exported helpers
     # must never fall back to an inherited ZENSU_* module path.
-    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT
+    export _ZENSU_TDD_CONTROL_CORE _ZENSU_TDD_NATIVE_PLUGIN_ROOT _ZENSU_TDD_CHAIN_RECOVERY
     export -f _tdd_core_lock_keeper 2>/dev/null || true
-    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review 2>/dev/null || true
+    export -f _tdd_winpid_from_ps _tdd_is_msys_runtime _tdd_native_path _tdd_native_process_pid _tdd_context_binding tdd_activation_status tdd_state_file _tdd_bound_project_root _tdd_native_project_path _tdd_paths_safe _tdd_path_safe _tdd_state_storage_safe _tdd_prepare_directory _tdd_atomic_replace_regular tdd_is_test_path _tdd_locked_run tdd_write_phase _tdd_write_phase_critical _tdd_read_validated_state tdd_state_status tdd_phase tdd_step tdd_has_red_fail _tdd_write_flag_critical tdd_set_flag _tdd_increment_counter_critical tdd_increment_counter tdd_reset_review_budget _tdd_write_clear_critical tdd_clear_session _tdd_clear_standalone_session_critical tdd_clear_standalone_session _tdd_clear_autopilot_session_critical tdd_clear_autopilot_session _tdd_write_chain_reset_critical tdd_reset_chain_flags _tdd_begin_session_critical tdd_begin_session tdd_autopilot_context tdd_chain_snapshot _tdd_autopilot_link_id_shape_ok _tdd_autopilot_attempt_shape_ok _tdd_mark_impl_complete_bound_critical tdd_mark_impl_complete_bound _tdd_mark_impl_complete_standalone_critical tdd_mark_impl_complete_standalone _tdd_set_chain_outcome_critical tdd_set_chain_outcome _tdd_finish_autopilot_chain_critical tdd_finish_autopilot_chain _tdd_review_ticket_shape_ok _tdd_issue_review_ticket_critical tdd_issue_review_ticket _tdd_consume_review_ticket_critical tdd_consume_review_ticket_context tdd_consume_review_ticket _tdd_mark_autopilot_max_round_handoff_critical tdd_mark_autopilot_max_round_handoff _tdd_mark_review_converged_critical tdd_mark_review_converged _tdd_mark_unclaimed_review_critical tdd_mark_unclaimed_review tdd_claimed_review_ticket tdd_ensure_self_review_ticket tdd_increment_stop_budget tdd_rearm_review _tdd_rearm_autopilot_review_critical tdd_rearm_autopilot_review tdd_get_flag tdd_get_counter tdd_session_active tdd_vanilla_mode tdd_impl_complete tdd_chain_done tdd_code_review_done tdd_self_review_fixed zensu_workflow_active zensu_workflow_allows tdd_workflow_begin _tdd_write_workflow_begin_critical _tdd_bypass_shape_ok _tdd_write_bypass_critical tdd_add_bypass tdd_record_bypass tdd_record_bypass_payload tdd_bypasses _tdd_write_bypass_clear_critical tdd_clear_bypasses zensu_pending_review_file _tdd_write_pending_review_critical tdd_write_pending_review tdd_clear_pending_review tdd_pending_review_owned_by_other tdd_adopt_pending_review tdd_mark_pending_review_handoff tdd_release_pending_review_claim tdd_pending_review_stale tdd_seed_deferred_review _tdd_chain_recovery_module_ok _tdd_chain_preflight tdd_chain_diagnostics _tdd_recover_chain_critical tdd_recover_chain 2>/dev/null || true
     export -f _tdd_cancel_pending_review_claim_core tdd_reset_pending_review_claim 2>/dev/null || true
     ;;
 esac

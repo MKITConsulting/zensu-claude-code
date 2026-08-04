@@ -35,6 +35,7 @@ var BAD = '❌';
 // (test/no-wrapper) invocation and must stay in lockstep with that getter.
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
+var CHAIN_ROW_LIMIT = 8;
 
 var env = process.env;
 var out = [];
@@ -215,6 +216,62 @@ function ttlHours() {
   if (Number.isInteger(n) && n >= 0 && n <= TTL_HOURS_MAX) return n;
   return TTL_HOURS_FALLBACK;
 }
+function chainRows(entries) {
+  if (!entries.length) return;
+  var chain;
+  try {
+    chain = require(path.join(pluginDir(), 'hooks', 'lib', 'chain-recovery-v1.js'));
+  } catch (e) {
+    line(WARN, 'chain: chain-recovery-v1.js is unreadable — chain shapes cannot be classified');
+    return;
+  }
+  var shapes = [];
+  var unclassifiable = 0;
+  var recoverable = [];
+  var blocked = [];
+  var deadEnds = [];
+  entries.forEach(function (entry) {
+    var report;
+    try {
+      report = chain.classifyChain(entry.state);
+    } catch (e) {
+      shapes.push(entry.session + ': unclassifiable');
+      unclassifiable++;
+      return;
+    }
+    shapes.push(entry.session + ': ' + report.shape
+      + (report.recoveries ? ' (repaired ' + report.recoveries + '×)' : ''));
+    if (report.deadEnd) {
+      deadEnds.push(entry.session + ' → ' + report.nextCommand);
+      return;
+    }
+    if (!report.wedged) return;
+    if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
+    else blocked.push(entry.session + ' → ' + report.nextCommand);
+  });
+  line(
+    unclassifiable ? WARN : OK,
+    'chain: ' + shapes.length + ' review chain(s)'
+      + (unclassifiable ? ', ' + unclassifiable + ' unclassifiable' : '')
+      + ' — ' + truncatedList(shapes),
+  );
+  if (recoverable.length) {
+    line(WARN, 'chain: ' + recoverable.length + ' wedged chain(s) that no supported command can advance — run /zensu:recover-chain from the owning session: ' + truncatedList(recoverable));
+  }
+  if (blocked.length) {
+    line(WARN, 'chain: ' + blocked.length + ' chain(s) wedged but not recoverable in place — from the session that owns each chain: ' + truncatedList(blocked));
+  }
+  if (deadEnds.length) {
+    line(WARN, 'chain: ' + deadEnds.length + ' chain(s) at a dead end — a fresh generation is the only exit, from the session that owns each chain: ' + truncatedList(deadEnds));
+  }
+}
+
+function truncatedList(rows) {
+  var listed = rows.slice(0, CHAIN_ROW_LIMIT);
+  var overflow = rows.length - listed.length;
+  return listed.join('; ') + (overflow ? '; +' + overflow + ' more' : '');
+}
+
 function stateBlock(nowMs) {
   block('Session state');
   var projectRoot = path.resolve(env.CLAUDE_PROJECT_DIR || '.');
@@ -244,11 +301,15 @@ function stateBlock(nowMs) {
     } catch (e) {
       invalid = workflowDocs.slice();
     }
+    var states = [];
     if (core) {
       workflowDocs.forEach(function (file) {
         var match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(file);
         try {
-          core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] });
+          states.push({
+            session: match[1].slice(0, 13) + '…',
+            state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] }),
+          });
         } catch (e) {
           invalid.push(file);
         }
@@ -261,6 +322,7 @@ function stateBlock(nowMs) {
     if (invalid.length) {
       line(BAD, 'state: ' + invalid.length + ' invalid CAS workflow document(s) — hooks fail closed; inspect ' + invalid.join(', '));
     }
+    chainRows(states);
   }
   var pr = path.join(dir, 'pending-review.json');
   try {

@@ -8,7 +8,8 @@ description: >
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
-  dir writable, canonical CAS workflow documents valid, expired pending-review
+  dir writable, canonical CAS workflow documents valid, each review chain's
+  shape plus any wedged chain and its recovery command, expired pending-review
   surfaced). The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -113,6 +114,14 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
+  command can advance. Report it and name `/zensu:recover-chain`, which must be
+  run **from the session that owns that chain** (the row prints its truncated
+  session key) — this skill never recovers one on its behalf. When the row reads
+  "wedged but not recoverable in place", repeat the blocker it names verbatim
+  instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
+  a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
+  earlier renders `repaired N×`.
 
 If everything is green, say so in one line and stop — there is nothing to do.
 
