@@ -27,8 +27,8 @@ const expectedProfiles = [
   'windows-installed-core',
   'windows-native-branches',
 ];
-const expectedCommandCount = 44;
-const expectedCommandDigest = '047519a7244300df4dc0455391689ceacb68f7c00a3a8aed20e78b3b0d35a4c7';
+const expectedCommandCount = 39;
+const expectedCommandDigest = '0ae37f8ad1b45e4f6c9bf922eef703b9014d344a50417dbc208e84ccc6d47558';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -161,8 +161,6 @@ test('previously hidden native Windows contracts are explicit and monoliths are 
     'tests/structure/test-versioned-plugin-upgrade.sh',
     'tests/structure/test-autopilot-state-machine.sh',
     'tests/structure/test-vcs-review-marker-reconcile.sh',
-    'tests/structure/test-claude-promptfoo-wrapper.sh',
-    'tests/structure/test-promptfoo-session-upgrade.sh',
     'evals/session-control/tests/coverage-report.test.js',
     'evals/session-control/tests/runtime-fixture-installer.test.js',
     'evals/session-control/tests/upgrade-process.test.js',
@@ -170,7 +168,6 @@ test('previously hidden native Windows contracts are explicit and monoliths are 
     'evals/session-control/tests/safe-file-read.test.js',
     'evals/session-control/tests/upgrade-hook-contract.test.js',
     'evals/session-control/tests/upgrade-linux-sandbox.test.js',
-    'evals/reset-review-limit/run-self-check.sh',
   ]) {
     assert.equal(paths.has(required), true, required);
   }
@@ -261,7 +258,7 @@ test('pull-request deterministic suite remains complete and Ubuntu-only', () => 
   assert.equal(job?.['runs-on'], 'ubuntu-latest');
   assert.equal(job?.strategy, undefined);
   assert.equal(job.steps.some((step) => step.name === 'Windows path and Core lease canary'), false);
-  assert.equal(job.steps.some((step) => step.run === 'bash tests/run-all.sh'), true);
+  assert.equal(job.steps.some((step) => step.run === 'bash tests/run-all.sh --ci'), true);
   assert.equal(JSON.stringify(job).includes('windows-latest'), false);
   assert.equal(JSON.stringify(job).includes('windows-legacy'), false);
 });
@@ -318,7 +315,7 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   assert.equal(job.strategy?.['fail-fast'], false);
   assert.equal(job.strategy?.['max-parallel'], 8);
   const include = job.strategy?.matrix?.include;
-  assert.equal(include.length, 17);
+  assert.equal(include.length, 15);
   assert.deepEqual(
     include.filter((entry) => entry.kind === 'canary'),
     [1, 2, 3, 4].map((shard) => ({ kind: 'canary', shard, total: 4 })),
@@ -329,7 +326,7 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   );
   assert.deepEqual(
     include.filter((entry) => entry.kind === 'offline'),
-    [1, 2, 3, 4, 5].map((shard) => ({ kind: 'offline', shard, total: 5 })),
+    [1, 2, 3].map((shard) => ({ kind: 'offline', shard, total: 3 })),
   );
   const run = job.steps.find((step) => step.name === 'Run bounded Windows safety shard');
   assert.equal(
@@ -340,12 +337,15 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   assert.equal(JSON.stringify(safetyWorkflow).includes('secrets.'), false);
 });
 
-test('the documented cutover keeps paid Linux gates unchanged', () => {
+test('the documented cutover keeps Promptfoo local-only', () => {
   assert.match(testsReadme, /blocking Windows contract profiles/);
   assert.match(testsReadme, /scheduled,\s+read-only Windows safety workflow/);
   assert.match(testsReadme, /weekly and manually dispatchable/);
-  assert.match(testsReadme, /complete deterministic suite remains blocking on Ubuntu/);
+  assert.match(
+    testsReadme,
+    /complete deterministic non-Promptfoo suite remains blocking on Ubuntu/,
+  );
   assert.match(testsReadme, /`Deterministic suite \(windows-latest\)`/);
-  assert.match(testsReadme, /Release and Session\s+Control Nightly remain/);
+  assert.match(testsReadme, /Promptfoo suites are local-only/);
   assert.doesNotMatch(testsReadme, /at least 14 days and 10 representative/);
 });

@@ -1,17 +1,18 @@
-# Session Control installed-plugin release gate
+# Session Control installed-plugin local evaluation
 
-The full Claude Code nightly and release profiles validate what an end user
-actually runs: a plugin installed by the Claude Plugin CLI, not a source
-checkout passed through `--plugin-dir`. Their side-by-side upgrade sub-gate
-uses a dedicated immutable runtime-fixture installer and makes the isolated
-Claude registry select each completed old/candidate root.
+The local Claude Code Promptfoo profiles validate what an end user actually
+runs: a plugin installed by the Claude Plugin CLI, not a source checkout passed
+through `--plugin-dir`. Their side-by-side upgrade profile uses a dedicated
+immutable runtime-fixture installer and makes the isolated Claude registry
+select each completed old/candidate root. These profiles are local-only and
+never run in GitHub Actions.
 
 ## Trust chain
 
 1. The runner requires a clean checkout at the exact
-   `ZENSU_EXPECTED_SOURCE_REVISION` Git SHA. Release and the nightly full-suite
-   lane use Claude Code CLI `2.1.211`; a second nightly lane runs only the
-   side-by-side upgrade on CLI `2.1.217`.
+   `ZENSU_EXPECTED_SOURCE_REVISION` Git SHA. The local release aggregate uses
+   Claude Code CLI `2.1.211`; an operator may select another exact supported
+   version for a side-by-side compatibility run.
 2. The production marketplace entry must use the official GitHub source object
    and pin `MKITConsulting/zensu-claude-code` at the immutable `v<plugin
    version>` ref. A mutable branch source is rejected before provisioning.
@@ -197,7 +198,7 @@ The authoritative upgrade gate runs only on Linux. A real invocation on macOS
 or another non-Linux host fails before lifecycle execution. On Windows the
 provider fails even earlier, before starting any helper or Claude process, and
 the deterministic selfcheck asserts that zero-launch behavior.
-Release/nightly evidence always uses an explicit API/OAuth token for the
+Local live evidence always uses an explicit API/OAuth token for the
 plugin-free canary with an isolated `HOME`, config, plugin cache/data,
 `TMPDIR`/`TEMP`/`TMP`, and Claude's internal `CLAUDE_CODE_TMPDIR`.
 The runtime payload-byte invariant excludes only Claude's direct-root
@@ -211,11 +212,11 @@ value and `mtime` to the relevant activation window, and requires its
 fingerprint to remain stable. In authoritative installed-plugin mode, the
 active candidate remains marker-free while only the retired old root becomes
 orphaned. No other old or candidate root entry may change.
-On the pinned Ubuntu 24.04 runner, every paid gate first installs and verifies
-Claude's required `bubblewrap` and `socat` packages. PR CI executes the same
-preparation and a real nested-hook integration without a model request, so
-runner-image, AppArmor, or hook-environment drift fails before nightly or
-release. That integration passes the evaluator-bound `CLAUDE_PLUGIN_DATA` and
+On a local Ubuntu 24.04 evaluation host, the operator first installs and
+verifies Claude's required `bubblewrap` and `socat` packages. PR CI retains the
+same preparation and a real nested-hook integration without a model request,
+so runner-image, AppArmor, or hook-environment drift fails deterministically.
+That integration passes the evaluator-bound `CLAUDE_PLUGIN_DATA` and
 `CLAUDE_PROJECT_DIR` values through the real hook namespace contract. The
 helper applies
 [Claude's documented Linux `bwrap` AppArmor profile](https://code.claude.com/docs/en/sandboxing#set-up-linux-and-wsl2)
@@ -239,59 +240,40 @@ Real `ZENSU_UPGRADE_EXISTING_LOGIN=1` candidate execution is forbidden and
 fails closed. The only existing-login profile is a deterministic, hermetic
 selftest with an exact test HOME and fake Claude CLI. Its three Promptfoo rows
 cover one non-synthetic positive and two host-canary failures. It publishes no
-evidence and cannot satisfy nightly or release gates. Together with the
+evidence and never runs in GitHub Actions. Together with the
 43-row POSIX synthetic lifecycle/tamper matrix, the selfcheck executes exactly
 46 deterministic Promptfoo cases. Windows executes only the zero-launch
 fail-closed contract.
 
 ## Automated release ordering
 
-The `Release` workflow has two exact-SHA gates:
+GitHub Actions never invokes Promptfoo or a live model. The `Release` workflow
+has two deterministic exact-SHA gates:
 
-1. A non-dry `prepare` run bumps the plugin version and the production
-   marketplace source ref together, then creates the release commit locally
-   before any live validation. The created `git rev-parse HEAD` becomes the sole
-   `ZENSU_EXPECTED_SOURCE_REVISION`; the checkout must be completely clean
-   before and after `npm run session-control:release`. The prospective tag does
-   not need to exist: the gate installs the exact commit through its private
-   local fixture, while preserving the production tag-pinned marketplace.
-2. The prepare job requires `ANTHROPIC_API_KEY` or
-   `CLAUDE_CODE_OAUTH_TOKEN`, sets
-   `ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, and installs Claude Code CLI exactly
-   `2.1.211`. Its pinned Ubuntu 24.04 host must also pass the verified
-   `bubblewrap`/`socat` and AppArmor namespace preparation. Missing credentials,
-   a different HEAD, a dirty checkout, CLI
-   drift, installation mistargeting, or any failed profile stops the workflow
-   before the release branch can be pushed.
-3. Each profile writes a sanitized receipt below the release artifact's
-   `suites/` directory. After the complete gate passes, the workflow also writes
-   a summary receipt containing the exact Git SHA, runtime digest, plugin
-   version, and CLI version. It uploads the complete tree as
-   `session-control-release-<created-commit-sha>` before pushing the branch.
-4. Landing the reviewed release commit on `main` does **not** make the new
-   plugin version live. The catalog now points to an as-yet unavailable tag.
-5. Before any paid validation, the publish job reads the repository's
-   `immutable-releases` setting through the GitHub REST contract dated
-   `2026-03-10`, with the separate
-   `IMMUTABLE_RELEASES_ADMIN_TOKEN` and requires `enabled:true`. It verifies
-   marketplace version and `ref`, rejects a pre-existing tag at another SHA,
-   repeats the complete gate against the exact clean `${{ github.sha }}`, and
-   uploads `session-control-publish-${{ github.sha }}`.
-6. Immediately before publication it rechecks that setting with the same
-   read-only administrative token. Publication itself uses only the job's
-   contents-write token: create or validate an exact-SHA draft, attach exactly
-   one named asset, verify its uploaded state and SHA-256 digest, then publish
-   the draft. Publication polls at most ten times, two seconds apart, until
-   GitHub reports both `immutable:true` and the expected asset digest. A retry
-   accepts a published release only when GitHub reports
-   `immutable:true`, the tag resolves to the exact main SHA, and the sole asset
-   still matches. Mutable published releases fail closed and are never repaired.
-7. Publishing the draft creates `v<plugin version>` at `${{ github.sha }}`.
+1. A non-dry `prepare` run bumps the plugin version and production marketplace
+   source ref together, creates the release commit locally, runs
+   `bash tests/run-all.sh --ci`, verifies the exact clean commit SHA, computes
+   the Session Control runtime digest, and uploads deterministic SHA-bound
+   evidence before pushing the release branch.
+2. Landing the reviewed release commit on `main` does **not** make the new
+   plugin version live. The catalog points to an as-yet unavailable tag.
+3. The `publish` job reads the repository's `immutable-releases` setting with
+   the separate `IMMUTABLE_RELEASES_ADMIN_TOKEN` and requires `enabled:true`.
+   It verifies marketplace version and ref, rejects a pre-existing tag at
+   another SHA, reruns `bash tests/run-all.sh --ci` at the exact clean
+   `${{ github.sha }}`, recomputes the runtime digest, and uploads a second
+   deterministic evidence artifact.
+4. Immediately before publication it rechecks Immutable Releases. Publication
+   uses only the job's contents-write token: create or validate an exact-SHA
+   draft, attach exactly one named asset, verify its uploaded state and SHA-256
+   digest, then publish the draft. A retry accepts a published release only
+   when GitHub reports `immutable:true`, the tag resolves to the exact main SHA,
+   and the sole asset still matches.
+5. Publishing the draft creates `v<plugin version>` at `${{ github.sha }}`.
    Tag creation makes the production marketplace source resolvable and is the
-   go-live event; the final REST verification proves the release is immutable.
+   go-live event.
 
-`dry_run: true` is deliberately offline: deterministic tests, version
+`dry_run: true` remains deliberately offline: deterministic tests, version
 calculation, and release-note rendering still run, but it creates no release
-commit, consumes no Claude credential, runs no paid live profile, uploads no
-release evidence, and pushes nothing. A dry run is a preview, never a release
-authorization.
+commit, uploads no release evidence, and pushes nothing. A dry run is a
+preview, never a release authorization.

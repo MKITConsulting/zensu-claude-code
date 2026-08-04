@@ -23,7 +23,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: bash tests/run-all.sh
+      - run: bash tests/run-all.sh --ci
       - name: Show suite report on failure
         if: failure()
         run: |
@@ -143,36 +143,3 @@ jobs:
         run: bash tests/structure/test-session-control-sandbox-hook-integration.sh
         env:
           ZENSU_RUN_LINUX_SANDBOX_HOOK_INTEGRATION: '1'
-
-  session-control-contract:
-    name: Session Control contract (Promptfoo 0.121.20)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 20
-          cache: npm
-      - run: npm ci
-      - name: Validate every Session Control Promptfoo config
-        run: |
-          set -euo pipefail
-          export PROMPTFOO_CONFIG_DIR="$RUNNER_TEMP/promptfoo-config"
-          mkdir -p "$PROMPTFOO_CONFIG_DIR"
-          npx --no-install promptfoo validate config -c \
-            evals/session-control/promptfooconfig-contract.yaml \
-            evals/session-control/promptfooconfig-upgrade.yaml \
-            evals/session-control/promptfooconfig-live.yaml \
-            evals/session-control/promptfooconfig-concurrency.yaml \
-            evals/session-control/promptfooconfig-adversarial.yaml \
-            evals/reset-review-limit/promptfooconfig.yaml
-      - name: Wrapper and configuration self-checks
-        run: npm run session-control:selfcheck
-      - name: Offline attestation contract
-        env:
-          ZENSU_EXPECTED_PLUGIN_ROOT: ${{ github.workspace }}
-          ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-        run: npm run session-control:contract

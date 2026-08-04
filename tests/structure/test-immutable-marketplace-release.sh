@@ -65,14 +65,14 @@ expect_text "Release bump updates the immutable source ref" "$WORKFLOW" \
   'marketplace source ref -> $TAG'
 expect_text "Release validates source ref equals the release tag" "$WORKFLOW" \
   'test "$(jq -r '\''.plugins[0].source.ref'\'' .claude-plugin/marketplace.json)" = "$TAG"'
-expect_text "Publish verifies the immutable source before its paid gate" "$WORKFLOW" \
+expect_text "Publish verifies the immutable source before deterministic validation" "$WORKFLOW" \
   '- name: Verify immutable marketplace release target'
 expect_text "Publish rejects a malformed plugin version before go-live" "$WORKFLOW" \
   '[[ "$VER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]'
 expect_text "A pre-existing tag at another commit fails closed" "$WORKFLOW" \
   'already exists at $TAG_SHA, not exact main SHA'
-expect_text "Repository Immutable Releases are required before paid validation" "$WORKFLOW" \
-  '- name: Require repository Immutable Releases before paid validation'
+expect_text "Repository Immutable Releases are required before deterministic validation" "$WORKFLOW" \
+  '- name: Require repository Immutable Releases before deterministic validation'
 expect_text "Repository Immutable Releases are rechecked immediately before publish" "$WORKFLOW" \
   '- name: Recheck Immutable Releases immediately before publish'
 expect_text "Settings checks use a separate administrative token" "$WORKFLOW" \
@@ -119,9 +119,9 @@ expect_text "Repository conventions require version and source-ref lockstep" "$C
 reject_text "Repository conventions do not call a main merge go-live" "$CONVENTIONS" \
   'go-live is the merge itself'
 
-GATE_LINE="$(grep -nF -- '- name: Session Control publish gate (exact main SHA)' "$WORKFLOW" | head -1 | cut -d: -f1)"
+GATE_LINE="$(grep -nF -- '- name: Deterministic exact-main-SHA gate' "$WORKFLOW" | head -1 | cut -d: -f1)"
 DRAFT_LINE="$(grep -nF -- '- name: Draft, attach, publish, and verify immutable release' "$WORKFLOW" | head -1 | cut -d: -f1)"
-EARLY_SETTING_LINE="$(grep -nF -- '- name: Require repository Immutable Releases before paid validation' "$WORKFLOW" | head -1 | cut -d: -f1)"
+EARLY_SETTING_LINE="$(grep -nF -- '- name: Require repository Immutable Releases before deterministic validation' "$WORKFLOW" | head -1 | cut -d: -f1)"
 LATE_SETTING_LINE="$(grep -nF -- '- name: Recheck Immutable Releases immediately before publish' "$WORKFLOW" | head -1 | cut -d: -f1)"
 if [ -n "$EARLY_SETTING_LINE" ] && [ -n "$GATE_LINE" ] && [ -n "$LATE_SETTING_LINE" ] && [ -n "$DRAFT_LINE" ] \
   && [ "$EARLY_SETTING_LINE" -lt "$GATE_LINE" ] && [ "$GATE_LINE" -lt "$LATE_SETTING_LINE" ] \

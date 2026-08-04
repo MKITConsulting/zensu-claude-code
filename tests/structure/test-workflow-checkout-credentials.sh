@@ -34,11 +34,11 @@ const release = documents.get('release.yml');
 const prepare = release?.jobs?.prepare?.steps || [];
 const publish = release?.jobs?.publish?.steps || [];
 const push = prepare.find((step) => step.name === 'Push release branch + print PR link');
-const prepareGate = prepare.findIndex((step) => step.name === 'Session Control release gate (created commit SHA)');
-const prepareEvidence = prepare.findIndex((step) => step.name === 'Upload created-commit release evidence');
+const prepareGate = prepare.findIndex((step) => step.name === 'Record deterministic exact-commit runtime evidence');
+const prepareEvidence = prepare.findIndex((step) => step.name === 'Upload deterministic created-commit evidence');
 const pushIndex = prepare.indexOf(push);
-const publishGate = publish.findIndex((step) => step.name === 'Session Control publish gate (exact main SHA)');
-const publishEvidence = publish.findIndex((step) => step.name === 'Upload exact-main-SHA publish evidence');
+const publishGate = publish.findIndex((step) => step.name === 'Deterministic exact-main-SHA gate');
+const publishEvidence = publish.findIndex((step) => step.name === 'Upload deterministic exact-main-SHA evidence');
 const publishMutation = publish.findIndex((step) => step.name === 'Draft, attach, publish, and verify immutable release');
 const githubTokenSteps = [...prepare, ...publish].filter(
   (step) => step.env?.GH_TOKEN === '${{ secrets.GITHUB_TOKEN }}',
@@ -82,8 +82,8 @@ fi
   && check "write-capable GitHub token is mapped only to the two final mutation steps" PASS \
   || check "write-capable GitHub token is mapped only to the two final mutation steps" FAIL
 [ "$(printf '%s' "$OUT" | jq -r .token_ordered)" = true ] \
-  && check "GitHub mutation tokens occur only after paid gates and evidence uploads" PASS \
-  || check "GitHub mutation tokens occur only after paid gates and evidence uploads" FAIL
+  && check "GitHub mutation tokens occur only after deterministic gates and evidence uploads" PASS \
+  || check "GitHub mutation tokens occur only after deterministic gates and evidence uploads" FAIL
 
 printf '%s\n' '----' "test-workflow-checkout-credentials: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

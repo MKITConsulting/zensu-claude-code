@@ -11,16 +11,15 @@ name: Release
 #   1. Dispatch this workflow (Actions -> Release) with a version_type.
 #   2. The `prepare` job computes the next version, bumps the version files,
 #      generates the CHANGELOG section from the commits since the last tag
-#      (git-cliff), creates the release commit, runs the installed-plugin
-#      Session Control gate against that exact clean commit, uploads SHA-bound
-#      evidence, then pushes `release/vX.Y.Z` and prints a Compare link.
+#      (git-cliff), creates the release commit, records deterministic exact-SHA
+#      runtime evidence, then pushes `release/vX.Y.Z` and prints a Compare link.
 #   3. Open the PR from that link, then review + squash-merge it.
 #   4. The `publish` job fires on the release commit landing on main, tags main
 #      HEAD and creates a PUBLISHED GitHub Release whose notes are the new
 #      CHANGELOG section (already reviewed in the bump PR body). The merge only
 #      publishes a catalog entry for an as-yet unavailable immutable ref.
 #      Only successful tag creation makes the new plugin source resolvable;
-#      it runs only after the exact-main-SHA gate and evidence upload.
+#      it runs only after deterministic exact-main-SHA validation.
 
 on:
   workflow_dispatch:
@@ -34,7 +33,7 @@ on:
           - minor
           - major
       dry_run:
-        description: 'Offline dry run: compute version + notes only; no commit, live gate, or branch push'
+        description: 'Offline dry run: compute version + notes only; no commit or branch push'
         required: false
         default: false
         type: boolean
@@ -55,7 +54,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -70,7 +69,7 @@ jobs:
       - run: npm ci
 
       - name: Deterministic test gate
-        run: bash tests/run-all.sh
+        run: bash tests/run-all.sh --ci
 
       - name: Compute next version
         id: ver
@@ -148,7 +147,7 @@ jobs:
           {
             echo "## Dry run — v${{ steps.ver.outputs.version }}"
             echo ""
-            echo "Offline preview only: no release commit was created, no paid Session Control live gate ran, and no branch was pushed."
+            echo "Offline preview only: no release commit was created and no branch was pushed."
             echo ""
             echo '```markdown'
             cat "${{ runner.temp }}/section.md"
@@ -172,57 +171,35 @@ jobs:
           echo "branch=$BR" >> "$GITHUB_OUTPUT"
           echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"
 
-      - name: Prepare verified Claude Bash sandbox for release gate
-        if: ${{ !inputs.dry_run }}
-        run: bash .github/scripts/prepare-claude-sandbox-linux.sh
-
-      - name: Install pinned Claude Code CLI for release gate
+      - name: Record deterministic exact-commit runtime evidence
         if: ${{ !inputs.dry_run }}
         run: |
           set -euo pipefail
-          npm install --global @anthropic-ai/claude-code@2.1.211
-          test "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" = 2.1.211
-
-      - name: Session Control release gate (created commit SHA)
-        if: ${{ !inputs.dry_run }}
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'
-          ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.211'
-          ZENSU_UPGRADE_EXISTING_LOGIN: '0'
-          ZENSU_EXPECTED_SOURCE_ROOT: ${{ github.workspace }}
-          ZENSU_EXPECTED_SOURCE_REVISION: ${{ steps.release_commit.outputs.sha }}
-          ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-release-evidence/suites
-        run: |
-          set -euo pipefail
-          if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::release requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
-            exit 1
-          fi
-          test "$ZENSU_E2E_DISPOSABLE_ENVIRONMENT" = 1
-          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          EXPECTED_SHA="${{ steps.release_commit.outputs.sha }}"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          npm run session-control:release
-          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          bash tests/run-all.sh --ci
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          EVIDENCE_DIR="$RUNNER_TEMP/session-control-release-evidence"
+          EVIDENCE_DIR="$RUNNER_TEMP/deterministic-release-evidence"
           mkdir -p "$EVIDENCE_DIR"
           RUNTIME_DIGEST="$(node hooks/lib/session-control-core-v1.js runtime-digest --plugin-root "$GITHUB_WORKSPACE" --host claude)"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
           jq -n \
-            --arg source_git_revision "$ZENSU_EXPECTED_SOURCE_REVISION" \
-            --arg claude_code_version "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" \
+            --arg source_git_revision "$EXPECTED_SHA" \
             --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
             --arg runtime_digest "$RUNTIME_DIGEST" \
-            '{schema:"zensu-session-control-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, claude_code_version:$claude_code_version, plugin_version:$plugin_version}' \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
             > "$EVIDENCE_DIR/release-gate.json"
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
-      - name: Upload created-commit release evidence
+      - name: Upload deterministic created-commit evidence
         if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: session-control-release-${{ steps.release_commit.outputs.sha }}
-          path: ${{ runner.temp }}/session-control-release-evidence/
+          name: deterministic-release-${{ steps.release_commit.outputs.sha }}
+          path: ${{ runner.temp }}/deterministic-release-evidence/
           if-no-files-found: error
           retention-days: 90
 
@@ -273,7 +250,7 @@ jobs:
 
       - run: npm ci
 
-      - name: Require repository Immutable Releases before paid validation
+      - name: Require repository Immutable Releases before deterministic validation
         env:
           GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}
         run: |
@@ -311,53 +288,32 @@ jobs:
             fi
           fi
 
-      - name: Prepare verified Claude Bash sandbox
-        run: bash .github/scripts/prepare-claude-sandbox-linux.sh
-
-      - name: Install pinned Claude Code CLI
+      - name: Deterministic exact-main-SHA gate
         run: |
           set -euo pipefail
-          npm install --global @anthropic-ai/claude-code@2.1.211
-          test "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" = 2.1.211
-
-      - name: Session Control publish gate (exact main SHA)
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'
-          ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.211'
-          ZENSU_UPGRADE_EXISTING_LOGIN: '0'
-          ZENSU_EXPECTED_SOURCE_ROOT: ${{ github.workspace }}
-          ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}
-          ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-publish-evidence/suites
-        run: |
-          set -euo pipefail
-          if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
-            echo "::error::publishing requires ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN"
-            exit 1
-          fi
-          test "$ZENSU_E2E_DISPOSABLE_ENVIRONMENT" = 1
-          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          npm run session-control:release
-          test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"
+          bash tests/run-all.sh --ci
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          EVIDENCE_DIR="$RUNNER_TEMP/session-control-publish-evidence"
+          EVIDENCE_DIR="$RUNNER_TEMP/deterministic-publish-evidence"
           mkdir -p "$EVIDENCE_DIR"
           RUNTIME_DIGEST="$(node hooks/lib/session-control-core-v1.js runtime-digest --plugin-root "$GITHUB_WORKSPACE" --host claude)"
+          [[ "$RUNTIME_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
           jq -n \
-            --arg source_git_revision "$ZENSU_EXPECTED_SOURCE_REVISION" \
-            --arg claude_code_version "$(claude --version | sed -nE '1s/^([0-9]+\.[0-9]+\.[0-9]+).*/\1/p')" \
+            --arg source_git_revision "${{ github.sha }}" \
             --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
             --arg runtime_digest "$RUNTIME_DIGEST" \
-            '{schema:"zensu-session-control-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, claude_code_version:$claude_code_version, plugin_version:$plugin_version}' \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
             > "$EVIDENCE_DIR/publish-gate.json"
+          test "$(git rev-parse HEAD)" = "${{ github.sha }}"
+          test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
-      - name: Upload exact-main-SHA publish evidence
+      - name: Upload deterministic exact-main-SHA evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: session-control-publish-${{ github.sha }}
-          path: ${{ runner.temp }}/session-control-publish-evidence/
+          name: deterministic-publish-${{ github.sha }}
+          path: ${{ runner.temp }}/deterministic-publish-evidence/
           if-no-files-found: error
           retention-days: 90
 

@@ -7,6 +7,8 @@
 #                   - evals/session-control/run-self-check.sh (Promptfoo contract/wrapper checks)
 #                   - evals/tdd-review-chain/run-self-check.sh
 #                   - evals/reset-review-limit/run-self-check.sh
+#   --ci          deterministic non-Promptfoo suites used by GitHub Actions.
+#                 Promptfoo suites are local-only and are intentionally skipped.
 #   --self-check  deterministic suites + each live suite's --self-check skeleton (no API)
 #   --live        deterministic suites + LIVE claude --print suites (COSTS API CREDITS):
 #                   - tests/e2e          (code-reviewer guardrails)
@@ -20,14 +22,66 @@ set -u
 TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$TESTS_DIR/.." && pwd)"
 MODE="${1:-}"
+LOCAL_ONLY_MANIFEST="$TESTS_DIR/profiles/promptfoo-local-only.v1.json"
 
 case "$MODE" in
-  ""|--self-check|--live) ;;
+  ""|--ci|--self-check|--live) ;;
   *)
-    printf "unknown mode '%s' — accepted: (no arg), --self-check, --live\n" "$MODE" >&2
+    printf "unknown mode '%s' — accepted: (no arg), --ci, --self-check, --live\n" "$MODE" >&2
     exit 2
     ;;
 esac
+
+load_local_only_inventory() {
+  local field="$1"
+  node - "$LOCAL_ONLY_MANIFEST" "$field" <<'NODE'
+const fs = require('node:fs');
+const [file, field] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+if (value.schemaVersion !== 1 || !Array.isArray(value[field])
+    || value[field].some((entry) => typeof entry !== 'string' || entry.length === 0)) {
+  throw new Error(`invalid Promptfoo local-only inventory field: ${field}`);
+}
+process.stdout.write(value[field].join('\n'));
+NODE
+}
+
+CI_STRUCTURE="$(load_local_only_inventory ciStructureTests)" || exit 2
+LOCAL_ONLY_STRUCTURE="$(load_local_only_inventory localStructureTests)" || exit 2
+
+is_local_only() {
+  local inventory="$1" entry="$2"
+  printf '%s\n' "$inventory" | grep -Fxq -- "$entry"
+}
+
+node - "$ROOT" "$LOCAL_ONLY_MANIFEST" <<'NODE' || exit 2
+const fs = require('node:fs');
+const path = require('node:path');
+const [root, file] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+const uniqueSorted = (entries) => [...new Set(entries)].sort();
+const actualStructure = fs.readdirSync(path.join(root, 'tests', 'structure'))
+  .filter((name) => /^test-.*\.sh$/.test(name))
+  .sort();
+const classified = [...value.ciStructureTests, ...value.localStructureTests];
+if (JSON.stringify(uniqueSorted(classified)) !== JSON.stringify(actualStructure)
+    || classified.length !== new Set(classified).size
+    || !Array.isArray(value.ciOfflineSuites)
+    || value.ciOfflineSuites.some((suite) => !suite || typeof suite.label !== 'string'
+      || typeof suite.path !== 'string' || !Array.isArray(suite.args)
+      || !Array.isArray(suite.ciArgs)
+      || typeof suite.needsNodeDeps !== 'boolean'
+      || typeof suite.windowsSafety !== 'boolean'
+      || suite.label.length === 0 || /[\t\r\n]/.test(suite.label)
+      || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(suite.path)
+      || [...suite.args, ...suite.ciArgs].some(
+        (argument) => typeof argument !== 'string' || argument.length === 0
+          || /[\t\r\n ]/.test(argument),
+      )
+      || !fs.existsSync(path.join(root, suite.path)))) {
+  throw new Error('suite classification inventory is incomplete; refusing execution');
+}
+NODE
 
 RESULTS_DIR="$TESTS_DIR/results"
 mkdir -p "$RESULTS_DIR"
@@ -96,11 +150,8 @@ block_suite() {
 
 # Offline eval runners are part of the deterministic contract. A missing file
 # is a failed suite, never an optional skip that can silently erase coverage.
-# Dependency gating lives HERE, not at the call sites: tests/run-windows-safety-shard.js
-# parses this file for `^run_required_suite "label" "$VAR" bash "$VAR" [args]` to
-# build the Windows-safety offline inventory, so every call must stay canonical
-# and unindented. Set NEEDS_NODE_DEPS=1 on the line before a call that needs the
-# npm devDependencies.
+# The canonical manifest also declares dependency requirements so local runs
+# report missing npm devDependencies as BLOCKED rather than code regressions.
 run_required_suite() {
   local label="$1" runner="$2"; shift 2
   local needs_deps="${NEEDS_NODE_DEPS:-0}"
@@ -116,6 +167,26 @@ run_required_suite() {
   fi
 }
 
+offline_inventory() {
+  node - "$LOCAL_ONLY_MANIFEST" "$MODE" <<'NODE'
+const fs = require('node:fs');
+const [file, mode] = process.argv.slice(2);
+const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+for (const suite of value.ciOfflineSuites) {
+  const args = mode === '--ci' ? suite.ciArgs : suite.args;
+  if (suite.label.length === 0 || /[\t\r\n]/.test(suite.label)
+      || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(suite.path)
+      || args.some((argument) => typeof argument !== 'string' || argument.length === 0
+        || /[\t\r\n ]/.test(argument))) {
+    throw new Error('offline suite inventory contains an unsafe field');
+  }
+  process.stdout.write(
+    `${suite.label}\t${suite.path}\t${suite.needsNodeDeps ? '1' : '0'}\t${args.join(' ')}\n`,
+  );
+}
+NODE
+}
+
 log "════════════════════════════════════════════════════════════"
 log "  zensu plugin — run-all  ($TIMESTAMP)  mode=${MODE:-default}"
 log "  plugin v$(node -e 'process.stdout.write(require(process.argv[1]).version)' -- "$ROOT/.claude-plugin/plugin.json" 2>/dev/null || echo '?')"
@@ -123,7 +194,7 @@ log "═════════════════════════
 
 if ! deps_ready; then
   log ""
-  log "  ⚠  node_modules is absent. The promptfoo/yaml-backed suites cannot run."
+  log "  ⚠  node_modules is absent. Dependency-backed deterministic suites cannot run."
   log "     Fix with:  npm ci"
   log "     They are reported below as BLOCK, not as FAIL — a missing dependency"
   log "     is not a code regression."
@@ -135,6 +206,16 @@ log "▸ Structure tests (deterministic)"
 for t in "$TESTS_DIR"/structure/test-*.sh; do
   [ -f "$t" ] || continue
   base="$(basename "$t")"
+  if [ "$MODE" = "--ci" ]; then
+    if is_local_only "$LOCAL_ONLY_STRUCTURE" "$base"; then
+      log "  LOCAL tests/structure/$base (Promptfoo local-only)"
+      continue
+    fi
+    if ! is_local_only "$CI_STRUCTURE" "$base"; then
+      FAIL=$((FAIL+1)); log "  FAIL  unclassified structure suite: $base"
+      continue
+    fi
+  fi
   case "$base" in
     test-workflow-checkout-credentials.sh)
       deps_ready || { block_suite "structure/$base"; continue; }
@@ -146,22 +227,36 @@ done
 # ── Deterministic: config-gate offline evals ─────────────────────────
 log ""
 log "▸ Offline evals"
-CG="$ROOT/evals/config-gate/run-eval.sh"
-run_required_suite "evals/config-gate (--self-check)" "$CG" bash "$CG" --self-check
-SC="$ROOT/evals/session-control/run-self-check.sh"
-NEEDS_NODE_DEPS=1
-run_required_suite "evals/session-control (self-check)" "$SC" bash "$SC"
-TRC="$ROOT/evals/tdd-review-chain/run-self-check.sh"
-run_required_suite "evals/tdd-review-chain (self-check)" "$TRC" bash "$TRC"
-RRL="$ROOT/evals/reset-review-limit/run-self-check.sh"
-NEEDS_NODE_DEPS=1
-run_required_suite "evals/reset-review-limit (self-check)" "$RRL" bash "$RRL"
-# The pretool suite's OFFLINE arm. Wired in so it cannot rot unnoticed the way
-# it did while it lived outside the runner entirely; the live/API arm runs on a
-# schedule (.github/workflows/pretool-eval-nightly.yml), never here.
-PTL="$ROOT/evals/tdd-manager-pretool/run-eval.sh"
 export ZENSU_PRETOOL_SKIP_NESTED=1
-run_required_suite "evals/tdd-manager-pretool (--self-check)" "$PTL" bash "$PTL" --self-check
+OFFLINE_LINES="$(offline_inventory)" || exit 2
+OFFLINE_EXPECTED="$(
+  node -e 'process.stdout.write(String(require(process.argv[1]).ciOfflineSuites.length))' \
+    "$LOCAL_ONLY_MANIFEST"
+)" || exit 2
+OFFLINE_EXECUTED=0
+while IFS=$'\t' read -r label relative needs_deps argument_line; do
+  [ -n "$label" ] || continue
+  runner="$ROOT/$relative"
+  case "$needs_deps" in
+    0|1) ;;
+    *) FAIL=$((FAIL+1)); log "  FAIL  $label — invalid dependency flag"; continue ;;
+  esac
+  suite_args=()
+  if [ -n "$argument_line" ]; then
+    read -r -a suite_args <<< "$argument_line"
+  fi
+  NEEDS_NODE_DEPS="$needs_deps"
+  if [ -n "$argument_line" ]; then
+    run_required_suite "$label" "$runner" bash "$runner" "${suite_args[@]}"
+  else
+    run_required_suite "$label" "$runner" bash "$runner"
+  fi
+  OFFLINE_EXECUTED=$((OFFLINE_EXECUTED + 1))
+done <<< "$OFFLINE_LINES"
+if [ "$OFFLINE_EXECUTED" -ne "$OFFLINE_EXPECTED" ]; then
+  FAIL=$((FAIL+1))
+  log "  FAIL  offline inventory executed $OFFLINE_EXECUTED/$OFFLINE_EXPECTED suites"
+fi
 
 # ── Live suites ──────────────────────────────────────────────────────
 if [ "$MODE" = "--live" ]; then

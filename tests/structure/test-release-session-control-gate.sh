@@ -17,140 +17,113 @@ check() {
 }
 
 contains() {
-  local label="$1" text="$2" literal="$3"
-  printf '%s\n' "$text" | grep -Fq -- "$literal" \
-    && check "$label" PASS || check "$label" FAIL
+  grep -Fq -- "$2" "$WORKFLOW" && check "$1" PASS || check "$1" FAIL
 }
 
-not_contains() {
-  local label="$1" text="$2" literal="$3"
-  if printf '%s\n' "$text" | grep -Fq -- "$literal"; then
-    check "$label" FAIL
-  else
-    check "$label" PASS
-  fi
+rejects() {
+  if grep -Eqi -- "$2" "$WORKFLOW"; then check "$1" FAIL
+  else check "$1" PASS; fi
 }
 
 line_of() {
-  grep -nF -- "$2" "$1" | head -1 | cut -d: -f1
+  grep -nF -- "$1" "$WORKFLOW" | head -1 | cut -d: -f1
 }
 
-if [ ! -f "$WORKFLOW" ]; then
-  check "Release workflow exists" FAIL
-  printf '%s\n' '----' "test-release-session-control-gate: $PASS PASS / $FAIL FAIL"
-  exit 1
-fi
-check "Release workflow exists" PASS
+[ -f "$WORKFLOW" ] && check "Release workflow exists" PASS \
+  || check "Release workflow exists" FAIL
 
-PREPARE="$(awk '/^  prepare:/{active=1} /^  publish:/{active=0} active{print}' "$WORKFLOW")"
-PUBLISH="$(awk '/^  publish:/{active=1} active{print}' "$WORKFLOW")"
-
-contains "Prepare paid gate has a bounded job timeout" "$PREPARE" 'timeout-minutes: 120'
-contains "Publish paid gate has a bounded job timeout" "$PUBLISH" 'timeout-minutes: 120'
-
-CREATE_LINE="$(line_of "$WORKFLOW" '- name: Create release commit')"
-SANDBOX_LINE="$(line_of "$WORKFLOW" '- name: Prepare verified Claude Bash sandbox for release gate')"
-INSTALL_LINE="$(line_of "$WORKFLOW" '- name: Install pinned Claude Code CLI for release gate')"
-GATE_LINE="$(line_of "$WORKFLOW" '- name: Session Control release gate (created commit SHA)')"
-EVIDENCE_LINE="$(line_of "$WORKFLOW" '- name: Upload created-commit release evidence')"
-PUSH_LINE="$(line_of "$WORKFLOW" '- name: Push release branch + print PR link')"
-
-if [ -n "$CREATE_LINE" ] && [ -n "$SANDBOX_LINE" ] && [ -n "$INSTALL_LINE" ] && [ -n "$GATE_LINE" ] \
-  && [ -n "$EVIDENCE_LINE" ] && [ -n "$PUSH_LINE" ] \
-  && [ "$CREATE_LINE" -lt "$SANDBOX_LINE" ] \
-  && [ "$SANDBOX_LINE" -lt "$INSTALL_LINE" ] \
-  && [ "$INSTALL_LINE" -lt "$GATE_LINE" ] \
-  && [ "$GATE_LINE" -lt "$EVIDENCE_LINE" ] \
-  && [ "$EVIDENCE_LINE" -lt "$PUSH_LINE" ]; then
-  check "Prepare orders commit, sandbox, pinned CLI, full gate, evidence, then push" PASS
+contains "Prepare uses the non-Promptfoo CI gate" \
+  'run: bash tests/run-all.sh --ci'
+if [ "$(grep -Fc 'bash tests/run-all.sh --ci' "$WORKFLOW")" -eq 3 ]; then
+  check "Pre-bump, exact release commit, and publish run the non-Promptfoo CI gate" PASS
 else
-  check "Prepare orders commit, sandbox, pinned CLI, full gate, evidence, then push" FAIL
+  check "All three deterministic release boundaries run the non-Promptfoo CI gate" FAIL
 fi
 
-contains "Release commit exposes a stable step id" "$PREPARE" 'id: release_commit'
-contains "Release commit exports its exact SHA" "$PREPARE" 'echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"'
-contains "Release commit must be clean" "$PREPARE" 'test -z "$(git status --porcelain=v1 --untracked-files=all)"'
-contains "Prepare installs the exact Claude Code CLI" "$PREPARE" 'npm install --global @anthropic-ai/claude-code@2.1.211'
-contains "Prepare verifies the exact Claude Code CLI" "$PREPARE" '= 2.1.211'
-contains "Prepare executes the verified Claude Bash sandbox helper" "$PREPARE" 'bash .github/scripts/prepare-claude-sandbox-linux.sh'
-contains "Prepare gate targets the created commit output" "$PREPARE" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ steps.release_commit.outputs.sha }}'
-contains "Prepare gate writes sanitized suite receipts into its SHA-bound artifact" "$PREPARE" 'ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-release-evidence/suites'
-not_contains "Prepare gate never substitutes the dispatch SHA" "$PREPARE" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}'
-contains "Prepare maps the API-key secret explicitly" "$PREPARE" 'ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}'
-contains "Prepare maps the OAuth-token secret explicitly" "$PREPARE" 'CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}'
-contains "Prepare gate requires an explicit credential" "$PREPARE" 'if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then'
-contains "Prepare gate acknowledges a disposable environment" "$PREPARE" "ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'"
-contains "Prepare runs the complete release profile" "$PREPARE" 'npm run session-control:release'
-contains "Prepare revalidates version sync for the computed release" "$PREPARE" 'bash tests/structure/test-version-sync.sh "${{ steps.ver.outputs.version }}"'
-contains "Prepare revalidates immutable release invariants after bump" "$PREPARE" 'bash tests/structure/test-immutable-marketplace-release.sh'
-CHANGELOG_LINE="$(line_of "$WORKFLOW" '- name: Prepend section into CHANGELOG.md')"
-VERSION_SYNC_LINE="$(line_of "$WORKFLOW" '- name: Revalidate generated release and immutable-source invariants')"
-if [ -n "$CHANGELOG_LINE" ] && [ -n "$VERSION_SYNC_LINE" ] \
-  && [ "$CHANGELOG_LINE" -lt "$VERSION_SYNC_LINE" ] && [ "$VERSION_SYNC_LINE" -lt "$CREATE_LINE" ]; then
-  check "Full version and CHANGELOG invariant runs after prepend and before commit" PASS
+rejects "Release workflow contains no Promptfoo or model credentials" \
+  'promptfoo|ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN|session-control:(selfcheck|contract|upgrade|live|concurrency|adversarial|release)'
+rejects "Release workflow installs no Claude Code runtime" \
+  '@anthropic-ai/claude-code|claude --version'
+
+contains "Release commit exposes a stable step id" 'id: release_commit'
+contains "Release commit exports its exact SHA" \
+  'echo "sha=$RELEASE_SHA" >> "$GITHUB_OUTPUT"'
+contains "Prepare evidence targets the created commit" \
+  'EXPECTED_SHA="${{ steps.release_commit.outputs.sha }}"'
+contains "Prepare rechecks the exact release HEAD" \
+  'test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"'
+contains "Prepare requires a clean release commit" \
+  'test -z "$(git status --porcelain=v1 --untracked-files=all)"'
+contains "Prepare records the Claude runtime digest" \
+  'runtime-digest --plugin-root "$GITHUB_WORKSPACE" --host claude'
+contains "Prepare rejects malformed runtime digests" \
+  '[[ "$RUNTIME_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]'
+contains "Deterministic evidence binds exact SHA, runtime, and plugin version" \
+  'zensu-deterministic-release-evidence-v1'
+contains "Prepare artifact is bound to the created commit" \
+  'name: deterministic-release-${{ steps.release_commit.outputs.sha }}'
+contains "Push rechecks the created commit" \
+  'test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"'
+
+CREATE_LINE="$(line_of '- name: Create release commit')"
+GATE_LINE="$(line_of '- name: Record deterministic exact-commit runtime evidence')"
+UPLOAD_LINE="$(line_of '- name: Upload deterministic created-commit evidence')"
+PUSH_LINE="$(line_of '- name: Push release branch + print PR link')"
+if [ -n "$CREATE_LINE" ] && [ -n "$GATE_LINE" ] && [ -n "$UPLOAD_LINE" ] \
+  && [ -n "$PUSH_LINE" ] && [ "$CREATE_LINE" -lt "$GATE_LINE" ] \
+  && [ "$GATE_LINE" -lt "$UPLOAD_LINE" ] && [ "$UPLOAD_LINE" -lt "$PUSH_LINE" ]; then
+  check "Prepare orders commit, deterministic evidence, upload, then push" PASS
 else
-  check "Full version and CHANGELOG invariant runs after prepend and before commit" FAIL
-fi
-contains "Prepare rechecks the exact HEAD" "$PREPARE" 'test "$(git rev-parse HEAD)" = "$ZENSU_EXPECTED_SOURCE_REVISION"'
-contains "Prepare receipt records the runtime digest" "$PREPARE" 'runtime_digest:$runtime_digest'
-contains "Prepare artifact name is bound to the created commit" "$PREPARE" 'name: session-control-release-${{ steps.release_commit.outputs.sha }}'
-contains "Push rechecks the created commit" "$PREPARE" 'test "$(git rev-parse HEAD)" = "${{ steps.release_commit.outputs.sha }}"'
-
-contains "Dry run is documented as offline" "$PREPARE" 'Offline preview only:'
-contains "Dry run reports no paid live gate" "$PREPARE" 'no paid Session Control live gate ran'
-if [ "$(printf '%s\n' "$PREPARE" | grep -Fc 'if: ${{ !inputs.dry_run }}')" -eq 6 ]; then
-  check "Commit, sandbox, CLI, gate, evidence, and push are all disabled for dry runs" PASS
-else
-  check "Commit, sandbox, CLI, gate, evidence, and push are all disabled for dry runs" FAIL
+  check "Prepare orders commit, deterministic evidence, upload, then push" FAIL
 fi
 
-contains "Publish installs the exact Claude Code CLI" "$PUBLISH" 'npm install --global @anthropic-ai/claude-code@2.1.211'
-contains "Publish executes the verified Claude Bash sandbox helper" "$PUBLISH" 'bash .github/scripts/prepare-claude-sandbox-linux.sh'
-contains "Publish gate targets the exact main SHA" "$PUBLISH" 'ZENSU_EXPECTED_SOURCE_REVISION: ${{ github.sha }}'
-contains "Publish gate writes sanitized suite receipts into its SHA-bound artifact" "$PUBLISH" 'ZENSU_SESSION_CONTROL_EVIDENCE_DIR: ${{ runner.temp }}/session-control-publish-evidence/suites'
-contains "Publish gate requires an explicit credential" "$PUBLISH" 'if [ -z "${ANTHROPIC_API_KEY:-}${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then'
-contains "Publish gate acknowledges a disposable environment" "$PUBLISH" "ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'"
-contains "Publish runs the complete release profile" "$PUBLISH" 'npm run session-control:release'
-contains "Publish artifact name is bound to the exact main SHA" "$PUBLISH" 'name: session-control-publish-${{ github.sha }}'
-contains "Publish requires Immutable Releases before paid validation" "$PUBLISH" '- name: Require repository Immutable Releases before paid validation'
-contains "Publish rechecks Immutable Releases immediately before publication" "$PUBLISH" '- name: Recheck Immutable Releases immediately before publish'
-contains "Immutable settings checks use the dedicated admin token" "$PUBLISH" 'GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}'
-contains "Release REST calls pin API version 2026-03-10" "$PUBLISH" 'X-GitHub-Api-Version: 2026-03-10'
-not_contains "Release REST calls reject the old API contract" "$PUBLISH" 'X-GitHub-Api-Version: 2022-11-28'
-contains "Draft publication targets the exact main SHA" "$PUBLISH" '--draft --title "$TAG" --target "${{ github.sha }}"'
-contains "Published release validates the exact tag SHA" "$PUBLISH" '"repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha'
-contains "Published release validates immutable=true through the exact metadata helper" "$PUBLISH" 'verify_metadata "$CANDIDATE" false true'
-contains "Published release validates the expected asset digest" "$PUBLISH" 'and .assets[0].digest == $digest'
-contains "Publish performs a bounded immutable/digest poll" "$PUBLISH" 'for ATTEMPT in $(seq 1 10); do'
-contains "Published release rejects mutable retries" "$PUBLISH" 'existing published release metadata is not the exact immutable contract; refusing repair'
-contains "Draft metadata binds exact tag and target" "$PUBLISH" 'and .target_commitish == $sha'
-contains "Draft metadata binds exact title" "$PUBLISH" 'and .name == $title'
-contains "Draft metadata binds exact generated notes body" "$PUBLISH" 'and .body == $body'
-contains "Draft metadata is normalized then re-read immediately before publish" "$PUBLISH" 'verify_metadata "$RELEASE" true false'
-not_contains "Release does not rely on a mutable third-party release action" "$PUBLISH" 'softprops/action-gh-release'
+contains "Prepare revalidates version sync after the generated bump" \
+  'bash tests/structure/test-version-sync.sh "${{ steps.ver.outputs.version }}"'
+contains "Prepare revalidates immutable marketplace invariants" \
+  'bash tests/structure/test-immutable-marketplace-release.sh'
+contains "Dry run documents that no release commit or branch is created" \
+  'Offline preview only: no release commit was created and no branch was pushed.'
 
-PUBLISH_SANDBOX_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Prepare verified Claude Bash sandbox' | head -1 | cut -d: -f1)"
-PUBLISH_INSTALL_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Install pinned Claude Code CLI' | head -1 | cut -d: -f1)"
-PUBLISH_GATE_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Session Control publish gate (exact main SHA)' | head -1 | cut -d: -f1)"
-PUBLISH_EVIDENCE_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Upload exact-main-SHA publish evidence' | head -1 | cut -d: -f1)"
-PUBLISH_MUTATION_LINE="$(printf '%s\n' "$PUBLISH" | grep -nF -- '- name: Draft, attach, publish, and verify immutable release' | head -1 | cut -d: -f1)"
-if [ -n "$PUBLISH_SANDBOX_LINE" ] && [ -n "$PUBLISH_INSTALL_LINE" ] \
-  && [ -n "$PUBLISH_GATE_LINE" ] && [ -n "$PUBLISH_EVIDENCE_LINE" ] \
+contains "Publish requires Immutable Releases before deterministic validation" \
+  '- name: Require repository Immutable Releases before deterministic validation'
+contains "Publish uses the dedicated settings token" \
+  'GH_TOKEN: ${{ secrets.IMMUTABLE_RELEASES_ADMIN_TOKEN }}'
+contains "Publish deterministic gate targets exact main SHA" \
+  'test "$(git rev-parse HEAD)" = "${{ github.sha }}"'
+contains "Publish artifact is bound to exact main SHA" \
+  'name: deterministic-publish-${{ github.sha }}'
+contains "Publish rechecks Immutable Releases immediately before publication" \
+  '- name: Recheck Immutable Releases immediately before publish'
+contains "Release REST calls pin API version 2026-03-10" \
+  'X-GitHub-Api-Version: 2026-03-10'
+contains "Draft publication targets exact main SHA" \
+  '--draft --title "$TAG" --target "${{ github.sha }}"'
+contains "Published release validates exact tag SHA" \
+  '"repos/$GITHUB_REPOSITORY/commits/$TAG" --jq .sha'
+contains "Published release validates immutable metadata" \
+  'verify_metadata "$CANDIDATE" false true'
+contains "Published release validates asset digest" \
+  'and .assets[0].digest == $digest'
+rejects "Release avoids mutable third-party publication actions" \
+  'softprops/action-gh-release'
+
+PUBLISH_GATE_LINE="$(line_of '- name: Deterministic exact-main-SHA gate')"
+PUBLISH_UPLOAD_LINE="$(line_of '- name: Upload deterministic exact-main-SHA evidence')"
+PUBLISH_MUTATION_LINE="$(line_of '- name: Draft, attach, publish, and verify immutable release')"
+if [ -n "$PUBLISH_GATE_LINE" ] && [ -n "$PUBLISH_UPLOAD_LINE" ] \
   && [ -n "$PUBLISH_MUTATION_LINE" ] \
-  && [ "$PUBLISH_SANDBOX_LINE" -lt "$PUBLISH_INSTALL_LINE" ] \
-  && [ "$PUBLISH_INSTALL_LINE" -lt "$PUBLISH_GATE_LINE" ] \
-  && [ "$PUBLISH_GATE_LINE" -lt "$PUBLISH_EVIDENCE_LINE" ] \
-  && [ "$PUBLISH_EVIDENCE_LINE" -lt "$PUBLISH_MUTATION_LINE" ]; then
-  check "Publish orders sandbox, pinned CLI, full gate, evidence, then publication" PASS
+  && [ "$PUBLISH_GATE_LINE" -lt "$PUBLISH_UPLOAD_LINE" ] \
+  && [ "$PUBLISH_UPLOAD_LINE" -lt "$PUBLISH_MUTATION_LINE" ]; then
+  check "Publish orders deterministic gate and evidence before mutation" PASS
 else
-  check "Publish orders sandbox, pinned CLI, full gate, evidence, then publication" FAIL
+  check "Publish orders deterministic gate and evidence before mutation" FAIL
 fi
 
 UPLOAD_PIN='actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4'
 if [ "$(grep -Fc -- "$UPLOAD_PIN" "$WORKFLOW")" -eq 2 ]; then
-  check "Both exact-SHA evidence uploads use the pinned artifact action" PASS
+  check "Both deterministic evidence uploads use the pinned artifact action" PASS
 else
-  check "Both exact-SHA evidence uploads use the pinned artifact action" FAIL
+  check "Both deterministic evidence uploads use the pinned artifact action" FAIL
 fi
 
 printf '%s\n' '----' "test-release-session-control-gate: $PASS PASS / $FAIL FAIL"

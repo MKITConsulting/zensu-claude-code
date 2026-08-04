@@ -181,9 +181,10 @@ attestation is emitted.
   shell, mutating MCP/control, nested-subagent, and main-impersonation attacks.
   Every category is repeated five times and must contain the actual nested attack
   plus a real structured denial/tool-error result from the host.
-- `npm run session-control:release` executes every profile and is intended only for the exact release SHA.
+- `npm run session-control:release` executes every profile locally against an
+  exact candidate SHA. It is an operator evaluation, not a GitHub Actions gate.
 
-Release and full-live profiles require a disposable host acknowledged with
+Local release and full-live profiles require a disposable host acknowledged with
 `ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, Claude Code CLI **2.1.211**, and valid
 `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` credentials. The upgrade
 profile instead requires the exact Claude CLI version selected by
@@ -195,19 +196,14 @@ runtime files. Missing credentials, a wrong/ambiguous registry root, a
 different SHA, a dirty checkout, runtime drift, or a mismatched `system/init`
 session id fails rather than skipping.
 
-Authoritative Linux upgrade evidence runs on Ubuntu 24.04. Before Claude starts,
-PR CI, the nightly matrix, and both release gates install and verify
-`bubblewrap` plus `socat`, apply Claude's documented `bwrap` AppArmor profile
-when unprivileged user namespaces are restricted, and execute basic and
-network-namespace sandbox probes. PR CI additionally starts the real contained
-fixture hook with evaluator-bound `CLAUDE_PLUGIN_DATA` and
-`CLAUDE_PROJECT_DIR`; it validates the nested Hook boundary without making a
-paid model request. Any missing dependency, unexpected AppArmor state, or
-failed probe stops the applicable check before a model request.
-Release and full-live validation use Claude Code `2.1.211` as their supported
-baseline. The nightly matrix retains that baseline lane and adds an
-upgrade-only compatibility lane on `2.1.217`; the additional full live suite
-does not run in the compatibility lane.
+Authoritative local Linux upgrade evidence uses Ubuntu 24.04 semantics. Before
+Claude starts, the operator installs and verifies `bubblewrap` plus `socat`,
+applies Claude's documented `bwrap` AppArmor profile when unprivileged user
+namespaces are restricted, and executes basic and network-namespace sandbox
+probes. PR CI retains only the deterministic contained-hook boundary and makes
+no model request. Local release and full-live validation use Claude Code
+`2.1.211` as their supported baseline; an operator may select another exact
+version for the upgrade-only compatibility profile.
 
 The upgrade profile additionally requires
 `ZENSU_EXPECTED_CLAUDE_VERSION=<exact-evaluated-cli-version>`,
@@ -234,7 +230,7 @@ Real existing-login candidate execution is deliberately unsupported and fails
 closed. `ZENSU_UPGRADE_EXISTING_LOGIN=1` exists only inside the deterministic
 selftest with an exact hermetic test HOME. Its three Promptfoo rows validate a
 non-synthetic candidate and host-canary failure behavior, but run the fake CLI,
-publish no evidence, and cannot satisfy nightly or release gates.
+publish no release evidence, and never run in GitHub Actions.
 
 Claude's own direct-root `.in_use/<pid>` and `.orphaned_at` entries are the only
 cache lifecycle metadata excluded from payload byte snapshots. The provider
@@ -270,4 +266,12 @@ npm run session-control:upgrade
 The complete trust chain and operator procedure are documented in
 [`docs/session-control-release-gate.md`](../../docs/session-control-release-gate.md).
 
-Pull requests run self-checks and the offline contract. The nightly workflow runs the side-by-side upgrade, live, concurrency, and adversarial profiles. A non-dry release dispatch first updates version plus immutable marketplace ref and creates the version-bump commit, then blocks its branch push until the complete suite passes against that exact clean commit SHA and SHA-bound evidence is uploaded. Merging that commit does not activate the version: publish verifies the version/ref invariant, repeats the complete gate and evidence upload against the exact `${{ github.sha }}`, and only then creates the referenced tag. That successful tag creation is go-live. Dry runs are offline previews and intentionally run neither paid live profiles nor release-evidence upload.
+All Promptfoo profiles in this directory are local-only. GitHub Actions does
+not run the Promptfoo binary, config validation, contract, upgrade, live,
+concurrency, adversarial, or release modes and does not require model
+credentials. `run-self-check.sh --ci` retains only its deterministic,
+credential-free contract and provenance checks. Pull requests and releases use
+deterministic non-Promptfoo gates; release publication
+still verifies the exact clean SHA, runtime digest, version/ref invariant,
+asset digest, and Immutable Releases setting before creating the referenced
+tag.

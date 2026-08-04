@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **CI**: Keep every Promptfoo and live-model evaluation local-only. Pull
+  requests, scheduled Windows safety, and release workflows now run only
+  deterministic non-Promptfoo contracts; release publication remains guarded
+  by exact-SHA, clean-tree, runtime-digest, version/ref, asset-digest, and
+  Immutable Releases checks.
 - **runtime**: Replace transcript/PPID/fallback identity discovery with Session
   Control v1. Fresh sessions bind the exact executed plugin, project, source
   revision, runtime digest, and domain-separated session hash under
@@ -55,9 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   descendants, an omitted path whose effective `cwd` is such an ancestor, and
   escaping path filters all deny for reviewer, PLM, and neutral principals;
   content regexes and concrete safe source/docs/test subtrees remain available.
-- **evals**: Add pinned Promptfoo contract, live, concurrency, and adversarial
-  validation with wrapper-owned control attestations. Nightly/release now use
-  Claude Code 2.1.211 to install `zensu@zensu` into an isolated user cache,
+- **evals**: Add pinned local Promptfoo contract, live, concurrency, and
+  adversarial validation with wrapper-owned control attestations. Local
+  operator runs use Claude Code 2.1.211 to install `zensu@zensu` into an isolated user cache,
   verify source/cache runtime identity, launch without `--plugin-dir`, prove
   inherited normal/reviewer subagent context, and synchronize 12 processes as
   three real four-way barrier generations. Upgrade by starting a new Claude
@@ -78,9 +83,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **release provenance**: Pin the production Claude marketplace source to the
   immutable `v<plugin version>` GitHub ref. Feature and release-PR merges no
   longer activate unvalidated main-branch bytes: publish repeats the complete
-  Session Control gate at the exact main SHA, uploads SHA-bound evidence, and
-  only then creates the tag that makes the new source resolvable. Checkout
-  evals retain real `marketplace add` / `plugin install` registry behavior by
+  deterministic non-Promptfoo gate at the exact clean main SHA, records the
+  source runtime digest, uploads SHA-bound evidence, and only then creates the
+  tag that makes the new source resolvable. Local checkout evals retain real
+  `marketplace add` / `plugin install` registry behavior by
   installing a private clean local clone through an ephemeral `./plugin`
   marketplace fixture, never `--plugin-dir` or the mutable source worktree.
 

@@ -12,6 +12,7 @@ Two flavors:
 
 ```bash
 bash tests/run-all.sh              # deterministic only (no API)
+bash tests/run-all.sh --ci         # deterministic non-Promptfoo CI contract
 bash tests/run-all.sh --self-check # deterministic + live-suite skeletons (no API)
 bash tests/run-all.sh --live       # deterministic + live claude --print suites (API)
 ```
@@ -61,17 +62,22 @@ failed, timed-out, or incompletely cleaned profile. That digest binds the
 manifest, command catalog, runner, supervisor, Windows Job Object helper,
 summarizer, complete CI workflow configuration, and every referenced suite file.
 
-The complete deterministic suite remains blocking on Ubuntu. The former
+The complete deterministic non-Promptfoo suite remains blocking on Ubuntu. The former
 per-pull-request Windows monolith is preserved in a separate scheduled,
 read-only Windows safety workflow that is weekly and manually dispatchable. Its
-bounded matrix partitions the exact prior Windows canary, every structure test,
-and all four deterministic offline eval runners without duplication or loss.
+bounded matrix partitions the exact prior Windows canary, every non-Promptfoo
+structure test, and all three deterministic non-Promptfoo offline eval runners
+without duplication or loss.
 Every command runs through the same bounded supervisor and Windows Job Object
 cleanup used by the blocking profiles, with a 30-minute command deadline; no
 individual safety job can consume the six-hour hosted-runner maximum. It no
-longer extends the pull-request critical path. Promptfoo coverage is unchanged.
-Release and Session Control Nightly remain on their existing Linux-only paid
-gates.
+longer extends the pull-request critical path. Promptfoo suites are local-only:
+GitHub Actions never invokes the Promptfoo binary, live/model wrappers, config
+validation, nightly profiles, or release profiles. The Session Control and
+reset-review self-checks expose a `--ci` mode that skips Promptfoo while
+retaining their credential-free contract, attestation, barrier, provenance,
+and deterministic wrapper selftests. Release workflows use deterministic
+exact-SHA, clean-tree, and runtime-digest evidence.
 
 ## Suites
 
@@ -113,7 +119,8 @@ ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 evals/verify-feature/run-eval.sh
   negative assert, `# ` = comment. Tolerant by design (LLM output is non-deterministic).
 - Generated fixtures (`*/fixtures/`) and captures (`*/results/`, `tests/results/`) are
   git-ignored; build them with each suite's `setup-fixtures.sh`.
-- Deterministic suites run in CI. Live/API suites remain explicitly opt-in.
+- Deterministic non-Promptfoo suites run in CI via `--ci`. Promptfoo and live/API
+  suites remain explicitly local and opt-in.
 
 ## Live-suite notes
 

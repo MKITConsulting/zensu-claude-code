@@ -8,7 +8,8 @@ const { parseCoverageRows } = require('./coverage-report.js');
 
 const root = path.resolve(__dirname, '..', '..', '..');
 const minimumLineCoverage = 90;
-const testFiles = [
+const ciMode = process.argv.slice(2).includes('--ci');
+const allTestFiles = [
   'evals/session-control/tests/coverage-report.test.js',
   'evals/session-control/tests/safe-file-read.test.js',
   'evals/session-control/tests/upgrade-results.test.js',
@@ -23,6 +24,11 @@ const testFiles = [
   'evals/session-control/tests/runtime-fixture-installer.test.js',
   'evals/session-control/tests/upgrade-provider-selftest.js',
 ];
+const testFiles = ciMode
+  ? allTestFiles.filter(
+    (file) => file !== 'evals/session-control/tests/upgrade-provider-selftest.js',
+  )
+  : allTestFiles;
 const upgradeProductionAllowlist = [
   'evals/session-control/lib/safe-file-read.js',
   'evals/session-control/lib/upgrade-attestation.js',
@@ -39,7 +45,7 @@ const upgradeProductionAllowlist = [
   'tests/structure/fixtures/install-claude-runtime-fixture.js',
 ];
 const coveredFiles = [...upgradeProductionAllowlist];
-const enforcedFiles = process.platform === 'win32'
+const enforcedFiles = process.platform === 'win32' || ciMode
   ? coveredFiles.filter(
     (file) => file !== 'evals/session-control/lib/upgrade-provider.js',
   )
@@ -77,7 +83,7 @@ if (JSON.stringify(discoveredProductionFiles) !== JSON.stringify(expectedProduct
     'upgrade production allowlist is incomplete or contains a non-production entry',
   );
 }
-for (const file of [...testFiles, ...upgradeProductionAllowlist]) {
+for (const file of [...allTestFiles, ...upgradeProductionAllowlist]) {
   if (!fs.existsSync(path.join(root, file))) {
     configurationFailures.push(`${file}: coverage input does not exist`);
   }
