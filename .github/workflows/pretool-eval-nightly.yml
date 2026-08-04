@@ -1,0 +1,67 @@
+name: PreToolUse Eval Nightly
+
+# The tdd-manager-pretool promptfoo suite costs API credits per run, so it must
+# not run per-PR. Its OFFLINE arm is a required deterministic suite inside
+# tests/run-all.sh; this workflow is the only place the live arm executes.
+#
+# The suite spent months outside any runner at all, which is how a scenario set
+# can rot without a single red build: nothing that is never executed can fail.
+
+on:
+  schedule:
+    - cron: '41 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pretool-eval-nightly-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-eval:
+    name: tdd-manager-pretool promptfoo suite (live)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      ZENSU_E2E_DISPOSABLE_ENVIRONMENT: '1'
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # The offline arm first: if the deterministic half is already red, a live
+      # run only burns credits to tell us the same thing more slowly.
+      - name: Offline arm (no API)
+        run: bash evals/tdd-manager-pretool/run-eval.sh --self-check
+
+      - name: Fail closed when credentials are absent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: test -n "${ANTHROPIC_API_KEY}${CLAUDE_CODE_OAUTH_TOKEN}"
+
+      - name: Install Claude Code CLI
+        run: npm install --global @anthropic-ai/claude-code
+
+      - name: Live promptfoo arm
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: bash evals/tdd-manager-pretool/run-eval.sh
+
+      - name: Upload eval results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pretool-eval-results
+          path: evals/tdd-manager-pretool/results/
+          retention-days: 14
+          if-no-files-found: warn

@@ -36,10 +36,11 @@ jobs:
           - { kind: structure, shard: 6, total: 8 }
           - { kind: structure, shard: 7, total: 8 }
           - { kind: structure, shard: 8, total: 8 }
-          - { kind: offline, shard: 1, total: 4 }
-          - { kind: offline, shard: 2, total: 4 }
-          - { kind: offline, shard: 3, total: 4 }
-          - { kind: offline, shard: 4, total: 4 }
+          - { kind: offline, shard: 1, total: 5 }
+          - { kind: offline, shard: 2, total: 5 }
+          - { kind: offline, shard: 3, total: 5 }
+          - { kind: offline, shard: 4, total: 5 }
+          - { kind: offline, shard: 5, total: 5 }
     runs-on: windows-latest
     timeout-minutes: 240
     steps:

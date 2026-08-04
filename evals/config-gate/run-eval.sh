@@ -26,19 +26,52 @@ check() {
   fi
 }
 
+# Bounded, file-backed test invocation.
+#
+# This used to be `output="$("$script" 2>&1)"`, which blocks until every writer
+# closes the pipe — so a single sub-test leaving a background child alive hung
+# the whole suite indefinitely, with the last PASS line pointing at the wrong
+# test. Every sub-test passes when run standalone; only the runner stalled.
+# Output goes to a file, and a portable poll bounds the child (GNU `timeout` is
+# absent on macOS).
+# Measured on this suite: test-smoke-main-thread-chain.sh ~71s and
+# test-post-review-combined-summary.sh ~119s standalone, both slower under
+# parallel load. A 120s bound mislabelled them as hangs. The bound exists to
+# catch a test that never returns, not to enforce a speed budget.
+CONFIG_GATE_TEST_TIMEOUT="${CONFIG_GATE_TEST_TIMEOUT:-600}"
 run_test() {
   local script="$1"
   local label="$2"
-  local output
-  if [ -x "$script" ]; then
-    if output="$("$script" 2>&1)"; then
-      check "$label" PASS
-    else
-      printf '%s\n' "$output" | sed 's/^/    /' | tee -a "$REPORT"
-      check "$label" FAIL
-    fi
-  else
+  local out_file pid waited rc
+  if [ ! -x "$script" ]; then
     check "$label (not executable)" FAIL
+    return
+  fi
+  out_file="$(mktemp)" || { check "$label (mktemp failed)" FAIL; return; }
+  "$script" >"$out_file" 2>&1 </dev/null &
+  pid=$!
+  waited=0
+  while [ "$waited" -lt "$CONFIG_GATE_TEST_TIMEOUT" ] && kill -0 "$pid" 2>/dev/null; do
+    sleep 1
+    waited=$((waited + 1))
+  done
+  if kill -0 "$pid" 2>/dev/null; then
+    pkill -P "$pid" 2>/dev/null
+    kill -9 "$pid" 2>/dev/null
+    wait "$pid" 2>/dev/null
+    sed 's/^/    /' "$out_file" | tee -a "$REPORT"
+    rm -f "$out_file"
+    check "$label (HANG: no exit within ${CONFIG_GATE_TEST_TIMEOUT}s)" FAIL
+    return
+  fi
+  wait "$pid"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$out_file"
+    check "$label" PASS
+  else
+    sed 's/^/    /' "$out_file" | tee -a "$REPORT"
+    rm -f "$out_file"
+    check "$label" FAIL
   fi
 }
 

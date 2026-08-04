@@ -45,6 +45,25 @@ case "${1:-}" in
     ;;
 esac
 
+zensu_state_failure_hint() {
+  local verb="${1:-}" session="${2:-}" state_file status
+  [ -n "$verb" ] && [ -n "$session" ] || return 0
+  command -v tdd_state_file >/dev/null 2>&1 || return 0
+  state_file="$(tdd_state_file "$session" 2>/dev/null)" || return 0
+  status="$(tdd_state_status "$state_file" 2>/dev/null)"
+  case "$status" in
+    missing)
+      echo "zensu-log.sh $verb: no chain state exists for this session — it was never armed in this project, or the state file was removed. '.zensu/' is gitignored, so a git clean, a worktree removal, or a branch cleanup deletes it. Re-run --tdd-begin to arm a fresh chain; the previous chain cannot be recovered." >&2
+      ;;
+    invalid)
+      echo "zensu-log.sh $verb: the chain state for this session is unreadable or belongs to another session. Run /zensu:doctor for the exact diagnosis; --tdd-begin arms a fresh chain when the current one is beyond repair." >&2
+      ;;
+    *)
+      echo "zensu-log.sh $verb: the chain state is readable, so this verb's own precondition was not met — an inactive session, the wrong chain phase, or a stale generation." >&2
+      ;;
+  esac
+}
+
 case "${1:-}" in
   --session-key)
     session_val="$(zensu_resolve_session_id)" || {
@@ -460,7 +479,38 @@ case "${1:-}" in
       --tdd-complete)
         if ! complete_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
           echo "zensu-log.sh --tdd-complete: corrupt, inactive, or foreign session state" >&2
+          zensu_state_failure_hint --tdd-complete "$session_val"
           exit 1
+        fi
+        # Edit-landing receipt gate. The Phase 6 step 5b audit is an obligation
+        # the model could simply forget; this makes it a precondition, the same
+        # way --chain-done refuses a terminus it can see is untrue. The receipt
+        # is written by hooks/lib/zensu-edit-landing.sh and lives beside the
+        # session state, keyed the same way.
+        # Scope it exactly like the --chain-done dirty-tree refusal below: the
+        # obligation exists because files changed. A chain that changed nothing
+        # has no claim to verify, and hermetic chain-mechanics tests must not be
+        # forced to fabricate a receipt to exercise the terminus.
+        # Not evaluable means not gated, exactly as the --chain-done zero-change
+        # gate treats a non-git root and a repo with no HEAD commit: without a
+        # baseline there is no honest claim to check against.
+        _el_changes=0
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] \
+           && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+          _el_changes="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
+                            git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null; } \
+                          | sort -u | grep -c . 2>/dev/null || echo 0)"
+        fi
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_el_changes:-0}" -gt 0 ]; then
+          _el_state="$(tdd_state_file "$session_val")"
+          _el_key="$(basename "$_el_state")"; _el_key="${_el_key#tdd-phase-}"; _el_key="${_el_key%.json}"
+          _el_receipt="$(dirname "$_el_state")/edit-landing-${_el_key}.json"
+          if [ ! -f "$_el_receipt" ]; then
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session. A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+            echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
+            exit 1
+          fi
         fi
         if [ "$complete_ctx" = '{}' ]; then
           if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
@@ -622,6 +672,7 @@ case "${1:-}" in
       --chain-done)
         if ! autopilot_ctx="$(tdd_autopilot_context "$(tdd_state_file "$session_val")" "$session_val" 2>/dev/null)"; then
           echo "zensu-log.sh --chain-done: corrupt or incomplete Autopilot linkage" >&2
+          zensu_state_failure_hint --chain-done "$session_val"
           exit 1
         fi
         if [ "$autopilot_ctx" = '{}' ]; then
@@ -635,7 +686,11 @@ case "${1:-}" in
           fi
           if [ "$(tdd_chain_done "$(tdd_state_file "$session_val")")" != "true" ]; then
             if [ "$claimed_ticket_seen" = "true" ]; then
-              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || exit $?
+              tdd_mark_review_converged "$session_val" "$claimed_ticket_val" chainDone || {
+                chain_done_rc=$?
+                zensu_state_failure_hint --chain-done "$session_val"
+                exit "$chain_done_rc"
+              }
             else
               chain_change_count="unknown"
               if command -v git >/dev/null 2>&1 \
@@ -650,7 +705,11 @@ case "${1:-}" in
                 echo "zensu-log.sh --chain-done: refusing the unqualified standalone terminus. No review ticket was ever consumed in this chain, so this form is reserved for the ZERO-file-change exception — but the worktree reports ${chain_change_count} changed file(s). Review those changes through the zensu:code-reviewer chain and close with --claimed-review-ticket, or re-enter /zensu:tdd for a fresh guarded chain." >&2
                 exit 1
               fi
-              tdd_mark_unclaimed_review "$session_val" chainDone || exit $?
+              tdd_mark_unclaimed_review "$session_val" chainDone || {
+                chain_done_rc=$?
+                zensu_state_failure_hint --chain-done "$session_val"
+                exit "$chain_done_rc"
+              }
             fi
           fi
           exit 0
@@ -737,7 +796,9 @@ case "${1:-}" in
         exit "$reset_rc"
         ;;
     esac
-    exit $?
+    state_verb_rc=$?
+    [ "$state_verb_rc" -eq 0 ] || zensu_state_failure_hint "$verb" "$session_val"
+    exit "$state_verb_rc"
     ;;
 esac
 
