@@ -44,6 +44,7 @@ if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.ou
   check "P1 the classifier unit suite passes (node --test chain-recovery-v1.test.js)" PASS
 else
   check "P1 the classifier unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  sed -n '1,40p' "$WORK/unit.out" | sed 's/^/        /' 
 fi
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
@@ -61,6 +62,7 @@ new_chain_in_root() {
   ACTIVE_LOG="$ACTIVE_ROOT/hooks/lib/zensu-log.sh"
   ACTIVE_CORE="$ACTIVE_ROOT/hooks/lib/session-control-core-v1.js"
   SID_KEY=""; TICKET=""; BEFORE=""; RECOVER_RC=0; RECOVER_ERR=""; RECOVER_OUT=""
+  STATE_FILE=""
   export CLAUDE_PLUGIN_ROOT="$ACTIVE_ROOT"
   export CLAUDE_PROJECT_DIR="$WORK/$SID"
   export STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
@@ -159,8 +161,12 @@ digest() {
   ' "$STATE_FILE"
 }
 
-STALE_RECEIPT='s.reviewRearm={schemaVersion:1,status:"pending",runId:"run-stale-1",attempt:2,chainId:"chain-stale-1",consumedTicketSha256:"a".repeat(64),retire:false};'
+RECEIPT_ONLY='s.reviewRearm={schemaVersion:1,status:"pending",runId:"run-stale-1",attempt:2,chainId:"chain-stale-1",consumedTicketSha256:"a".repeat(64),retire:false};'
 BOUND_LINK='s.autopilotRunId="run-bound-1";s.autopilotAttempt=1;s.autopilotReturnStage="GATES";s.chainId="chain-bound-1";s.chainOutcome="";'
+# The only shape a real writer can leave behind is a receipt on a BOUND document
+# whose binding it no longer matches; a standalone document carrying one is
+# corrupt input that recovery refuses (link-shape).
+STALE_RECEIPT="${BOUND_LINK}${RECEIPT_ONLY}"
 
 # ---------------------------------------------------------------- reachable shapes
 new_chain "chain-recover-healthy"
@@ -320,10 +326,10 @@ _tdd_write_phase_critical "$STATE_FILE" "$(zensu_resolve_session_id "$SID")" for
   || check "T12h2 the recovery counter cannot be forged (phase=$FORGE_PHASE_RC reason=$FORGE_REASON_RC direct=$FORGE_DIRECT_RC count=$(status_field recoveries))" FAIL
 CONTROL_TERMINUS_RC=0
 bash "$LOG" --code-review-done --session "$SID" >/dev/null 2>&1 || CONTROL_TERMINUS_RC=$?
-[ "$CONTROL_RECOVER_RC" -eq 0 ] && [ "$CONTROL_TERMINUS_RC" -eq 0 ] \
-  && [ "$(state_field codeReviewDone)" = "true" ] \
-  && check "T12h positive control: with a CONSISTENT slot the same document recovers and the terminus is reachable — so T12g's refusal is attributable to the slot alone" PASS \
-  || check "T12h positive control: consistent slot recovers and reaches the terminus (recover=$CONTROL_RECOVER_RC terminus=$CONTROL_TERMINUS_RC)" FAIL
+[ "$CONTROL_RECOVER_RC" -eq 0 ] && [ "$CONTROL_TERMINUS_RC" -ne 0 ] \
+  && [ "$(state_field codeReviewDone)" = "false" ] \
+  && check "T12h positive control: with a CONSISTENT slot the same document recovers — so T12g's refusal is attributable to the slot alone — while the unqualified no-ticket terminus stays REFUSED on the repaired bound chain" PASS \
+  || check "T12h positive control: consistent slot recovers and the unqualified terminus stays shut (recover=$CONTROL_RECOVER_RC terminus=$CONTROL_TERMINUS_RC flag=$(state_field codeReviewDone))" FAIL
 
 # ---------------------------------------------------------------- lost ticket is NOT a wedge
 new_chain "chain-recover-orphan"
@@ -403,7 +409,7 @@ esac
 
 # ---------------------------------------------------------------- a bound generation is repaired, never unbound
 new_chain "chain-recover-bound"
-seed "${BOUND_LINK}${STALE_RECEIPT}" || true
+seed "$STALE_RECEIPT" || true
 [ "$(status_field linkage)" = "bound" ] && [ "$(status_field recoverable)" = "true" ] \
   && check "T21 a bound generation with a disagreeing receipt is recoverable" PASS \
   || check "T21 a bound generation with a disagreeing receipt is recoverable (linkage=$(status_field linkage) recoverable=$(status_field recoverable))" FAIL
@@ -419,7 +425,7 @@ CHANGED="$(document_diff "$DOC_BEFORE")"
 
 # ---------------------------------------------------------------- blocked recoveries
 new_chain "chain-recover-partial"
-seed "s.chainId=\"chain-partial-1\";$STALE_RECEIPT" || true
+seed "s.chainId=\"chain-partial-1\";$RECEIPT_ONLY" || true
 BEFORE="$(digest)"
 RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
 RECOVER_RC=$?
@@ -630,7 +636,7 @@ esac
 # ---------------------------------------------------------------- doctor surface
 new_chain "chain-recover-doctor"
 seed "$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T35 doctor reports the wedged chain and names the recovery command" PASS ;;
@@ -640,7 +646,7 @@ esac
 
 new_chain "chain-recover-doctor-deadend"
 seed 's.codeReviewDone=true;s.reviewRound=2;' || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
     check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
@@ -650,13 +656,51 @@ esac
 
 new_chain "chain-recover-doctor-blocked"
 seed "s.deferredReviewClaim=\"dc_test2\";$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged but not recoverable in place"*"deferred-review claim"*)
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" PASS ;;
   *)
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" FAIL ;;
 esac
+
+# ---------------------------------------------------------------- writer + core lockstep
+CORE_KEYS="$(CORE_SRC="$CORE" node -e '
+  const fs = require("node:fs");
+  const src = fs.readFileSync(process.env.CORE_SRC, "utf8");
+  const head = src.slice(0, src.indexOf("reviewRearm is invalid"));
+  const block = head.slice(head.lastIndexOf("const exactKeys"));
+  const keys = (block.match(/[a-zA-Z0-9]+(?=.)/g) || []).filter(function (k) {
+    return ["attempt","chainId","consumedTicketSha256","retire","runId","schemaVersion","status"].indexOf(k) >= 0;
+  });
+  process.stdout.write([...new Set(keys)].sort().join(","));
+' 2>/dev/null)"
+MODULE_KEYS="$(node -e '
+  process.stdout.write([...require(process.argv[1]).REARM_MARKER_KEYS].sort().join(","));
+' "$MODULE" 2>/dev/null)"
+[ -n "$CORE_KEYS" ] && [ "$CORE_KEYS" = "$MODULE_KEYS" ] \
+  && check "T43 the core's hand-transcribed receipt key list matches REARM_MARKER_KEYS (a mismatch fails every hook closed)" PASS \
+  || check "T43 the core's receipt key list matches REARM_MARKER_KEYS (core=$CORE_KEYS module=$MODULE_KEYS)" FAIL
+
+new_chain "chain-recover-writer-lockstep"
+SID_KEY="$(zensu_resolve_session_id "$SID")"
+WRITER_TICKET="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+tdd_consume_review_ticket "$SID_KEY" "$WRITER_TICKET" >/dev/null 2>&1
+seed "${BOUND_LINK}s.chainOutcome=\"max-rounds\";s.codeReviewDone=true;" || true
+tdd_rearm_autopilot_review "$SID_KEY" run-bound-1 1 chain-bound-1 "$WRITER_TICKET" false >/dev/null 2>&1
+WRITER_RC=$?
+WRITER_VERDICT="$(CHAIN_RECOVERY="$MODULE" node -e '
+  const fs = require("node:fs");
+  const chain = require(process.env.CHAIN_RECOVERY);
+  process.stdout.write(chain.rearmReceiptVerdict(JSON.parse(fs.readFileSync(process.argv[1], "utf8"))));
+' "$STATE_FILE" 2>/dev/null)"
+if [ "$WRITER_RC" -ne 0 ]; then
+  check "T44 a receipt minted by the real writer classifies as valid (writer refused this fixture: rc=$WRITER_RC)" FAIL
+else
+  [ "$WRITER_VERDICT" = valid ] \
+    && check "T44 a receipt minted by the real rearm writer classifies as valid, so writer and module cannot drift apart" PASS \
+    || check "T44 a receipt minted by the real rearm writer classifies as valid (got: $WRITER_VERDICT)" FAIL
+fi
 
 # ---------------------------------------------------------------- contract pins
 if grep -qE '^ZENSU_BYPASS_GATE_ALLOWLIST=.*ZENSU_CHAIN_RECOVER' "$PHASE_LIB"; then

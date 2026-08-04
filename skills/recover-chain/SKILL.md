@@ -132,8 +132,10 @@ the user verbatim before doing anything else:
 | `wedged-stale-rearm` | A receipt that disagrees with its document blocks every future ticket | `--chain-recover` |
 
 Only the last shape is recoverable, and only when `recoverable` is `true`.
-`recoverable: false` on a wedged shape means one of four blockers, each named by
-`nextCommandId` in the report: `partial-link` (the Autopilot linkage is incomplete —
+`recoverable: false` on a wedged shape means one of five blockers, each named by
+`nextCommandId` in the report: `link-shape` (the document carries a receipt without a
+complete Autopilot binding — a shape no writer in this plugin produces, so recovery
+refuses it rather than repairing corrupt input), `partial-link` (the Autopilot linkage is incomplete —
 not repairable in place), `deferred-claim` (an outstanding deferred-review claim must be
 cancelled first), `ticket-slot` (`reviewTicketConsumed` is `false` — see "Why the ticket
 slot is not repaired" below) or `flag-state` (this generation already latched

@@ -16,6 +16,16 @@ const RECEIPT = {
   retire: false,
 };
 
+const DISAGREEING = Object.freeze({ ...{
+  schemaVersion: 1,
+  status: 'pending',
+  runId: 'run-other',
+  attempt: 2,
+  chainId: 'chain-1',
+  consumedTicketSha256: 'a'.repeat(64),
+  retire: false,
+} });
+
 const BOUND_LINK = {
   autopilotRunId: 'run-1',
   autopilotAttempt: 2,
@@ -47,7 +57,8 @@ function doc(overrides) {
 test('a document missing a safety field is rejected, never defaulted', () => {
   for (const field of [
     'active', 'implComplete', 'chainDone', 'codeReviewDone', 'selfReviewFixed',
-    'reviewTicketConsumed', 'reviewTicket', 'deferredReviewClaim', 'reviewRound',
+    'reviewTicketConsumed', 'reviewTicket', 'reviewRound', 'vanilla', 'phase',
+    'history', 'bypasses',
   ]) {
     const sparse = doc({});
     delete sparse[field];
@@ -61,14 +72,21 @@ test('non-object input is rejected', () => {
   }
 });
 
-test('optional presentation fields are defaulted, not required', () => {
+test('an absent deferred-review claim is readable but never reads as "no claim"', () => {
   const sparse = doc({});
-  delete sparse.vanilla;
   delete sparse.stopBlockCount;
+  delete sparse.deferredReviewClaim;
   const report = chain.classifyChain(sparse);
-  assert.equal(report.vanilla, false);
   assert.equal(report.stopBlockCount, 0);
   assert.equal(report.shape, 'ready-for-review');
+  assert.equal(report.deferredReviewClaim, 'unknown');
+  assert.equal(report.deferredReviewClaimPresent, true);
+
+  const wedged = doc(Object.assign({ reviewRearm: DISAGREEING }, BOUND_LINK));
+  delete wedged.deferredReviewClaim;
+  const blocked = chain.classifyChain(wedged);
+  assert.equal(blocked.recoverable, false);
+  assert.equal(blocked.nextCommandId, 'deferred-claim');
 });
 
 test('the shape lattice ranks live capabilities above the wedge', () => {
@@ -95,7 +113,9 @@ test('the shape lattice ranks live capabilities above the wedge', () => {
 });
 
 test('an inconsistent ticket slot is refused, because normalizing it would satisfy the no-ticket review terminus', () => {
-  const report = chain.classifyChain(doc({ reviewTicketConsumed: false, reviewRearm: RECEIPT }));
+  const report = chain.classifyChain(
+    doc(Object.assign({ reviewTicketConsumed: false, reviewRearm: DISAGREEING }, BOUND_LINK)),
+  );
   assert.equal(report.shape, 'wedged-stale-rearm');
   assert.equal(report.recoverable, false);
   assert.equal(report.nextCommandId, 'ticket-slot');
@@ -165,7 +185,9 @@ test('a retained consumed ticket plus a disagreeing receipt is wedged AND recove
   assert.equal(chain.classifyChain(spent).shape, 'ticket-spent');
   assert.equal(chain.classifyChain(spent).wedged, false);
 
-  const spentWedged = chain.classifyChain(Object.assign({}, spent, { reviewRearm: RECEIPT }));
+  const spentWedged = chain.classifyChain(
+    Object.assign({}, spent, BOUND_LINK, { reviewRearm: DISAGREEING }),
+  );
   assert.equal(spentWedged.shape, 'wedged-stale-rearm');
   assert.equal(spentWedged.recoverable, true);
 });
@@ -228,17 +250,41 @@ test('every receipt deviation is stale, so the issuer fails closed', () => {
   assert.equal(chain.rearmReceiptVerdict(doc({})), 'none');
 });
 
+test('a standalone document carrying a receipt is refused as corrupt input, never repaired', () => {
+  const standalone = chain.classifyChain(doc({ reviewRearm: RECEIPT }));
+  assert.equal(standalone.shape, 'wedged-stale-rearm');
+  assert.equal(standalone.linkage, 'standalone');
+  assert.equal(standalone.wedged, true);
+  assert.equal(standalone.recoverable, false);
+  assert.equal(standalone.nextCommandId, 'link-shape');
+  assert.match(standalone.nextCommand, /no writer in this plugin can produce/);
+});
+
+test('wedged means cannot-advance, so a dead end reports it too and keeps its own remedy', () => {
+  const deadEnd = chain.classifyChain(doc({ codeReviewDone: true, reviewRound: 2 }));
+  assert.equal(deadEnd.shape, 'self-review-unbindable');
+  assert.equal(deadEnd.wedged, true);
+  assert.equal(deadEnd.deadEnd, true);
+  assert.equal(deadEnd.recoverable, false);
+  assert.equal(deadEnd.nextCommandId, 'self-review-unbindable');
+  assert.equal(deadEnd.nextCommand, chain.NEXT_COMMAND['self-review-unbindable']);
+
+  const healthy = chain.classifyChain(doc({}));
+  assert.equal(healthy.wedged, false);
+  assert.equal(healthy.deadEnd, false);
+});
+
 test('recovery is blocked by linkage, claim and flag state, each with its own reason', () => {
   const partial = doc({ chainId: 'chain-1', reviewRearm: RECEIPT });
   assert.equal(chain.classifyChain(partial).linkage, 'partial');
   assert.equal(chain.classifyChain(partial).recoverable, false);
   assert.equal(chain.classifyChain(partial).nextCommandId, 'partial-link');
 
-  const claimed = doc({ deferredReviewClaim: 'dc_1', reviewRearm: RECEIPT });
+  const claimed = doc(Object.assign({ deferredReviewClaim: 'dc_1', reviewRearm: DISAGREEING }, BOUND_LINK));
   assert.equal(chain.classifyChain(claimed).recoverable, false);
   assert.equal(chain.classifyChain(claimed).nextCommandId, 'deferred-claim');
 
-  const latched = doc({ selfReviewFixed: true, reviewRearm: RECEIPT });
+  const latched = doc(Object.assign({ selfReviewFixed: true, reviewRearm: DISAGREEING }, BOUND_LINK));
   assert.equal(chain.classifyChain(latched).recoverable, false);
   assert.equal(chain.classifyChain(latched).nextCommandId, 'flag-state');
 

@@ -2279,12 +2279,15 @@ _tdd_chain_preflight() {
 }
 
 tdd_chain_diagnostics() {
-  local rc
+  local rc project_root session_id
   _tdd_chain_preflight "${1:-}"
   rc=$?
+  project_root="${_TDD_CHAIN_PROJECT_ROOT:-}"
+  session_id="${_TDD_CHAIN_SESSION:-}"
+  unset _TDD_CHAIN_SESSION _TDD_CHAIN_STATE_FILE _TDD_CHAIN_PROJECT_ROOT
   [ "$rc" -eq 0 ] || return "$rc"
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" \
-    PROJECT_ROOT="$_TDD_CHAIN_PROJECT_ROOT" SID="$_TDD_CHAIN_SESSION" node -e '
+    PROJECT_ROOT="$project_root" SID="$session_id" node -e '
     try {
       const core = require(process.env.CONTROL_CORE);
       const chain = require(process.env.CHAIN_RECOVERY);
@@ -2300,7 +2303,6 @@ _tdd_recover_chain_critical() {
   local project_root="$1" session_id="$2" node_rc
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" \
     CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" \
-    RECOVERY_TS="$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" \
     PROJECT_ROOT="$project_root" SID="$session_id" node -e '
     const fs = require("fs");
     const emit = (text, code) => { fs.writeSync(1, text); process.exit(code); };
@@ -2309,7 +2311,7 @@ _tdd_recover_chain_critical() {
     try {
       core = require(process.env.CONTROL_CORE);
       chain = require(process.env.CHAIN_RECOVERY);
-    } catch (_) { emit("module-unreadable", 2); }
+    } catch (_) { emit("op:module-unreadable", 2); }
     const binding = {
       projectRoot: process.env.PROJECT_ROOT,
       sessionId: process.env.SID,
@@ -2317,11 +2319,11 @@ _tdd_recover_chain_critical() {
     let before;
     try {
       before = chain.classifyChain(core.readWorkflowState(binding));
-    } catch (_) { emit("unreadable", 2); }
-    if (!before.recoverable) emit(before.nextCommandId, 3);
+    } catch (_) { emit("op:unreadable", 2); }
+    if (!before.recoverable) emit("refused:" + before.nextCommandId, 3);
     const REFUSED = "zensu-chain-recover-refused";
     const UNCLASSIFIABLE = "zensu-chain-recover-unclassifiable";
-    const stamp = process.env.RECOVERY_TS || "";
+    const stamp = new Date().toISOString();
     let mutated = false;
     try {
       core.mutateWorkflowState({
@@ -2348,14 +2350,14 @@ _tdd_recover_chain_critical() {
         return s;
       });
     } catch (error) {
-      if (error && error.message === REFUSED) emit("stale-generation", 3);
-      if (error && error.message === UNCLASSIFIABLE) emit("unclassifiable-generation", 3);
-      if (!mutated) emit("write-failed", 2);
+      if (error && error.message === REFUSED) emit("refused:stale-generation", 3);
+      if (error && error.message === UNCLASSIFIABLE) emit("refused:unclassifiable-generation", 3);
+      if (!mutated) emit("op:write-failed", 2);
       let landed = false;
       try {
         landed = chain.rearmReceiptVerdict(core.readWorkflowState(binding)) === "none";
       } catch (_) { landed = false; }
-      emit(landed ? "write-landed-unconfirmed" : "write-failed", 2);
+      emit(landed ? "op:write-landed-unconfirmed" : "op:write-failed", 2);
     }
     emit("recovered:" + before.shape, 0);
   ' 2>/dev/null
@@ -2364,21 +2366,25 @@ _tdd_recover_chain_critical() {
 }
 
 tdd_recover_chain() {
-  local verdict rc
+  local verdict rc state_file project_root session_id
   _tdd_chain_preflight "${1:-}"
   rc=$?
+  state_file="${_TDD_CHAIN_STATE_FILE:-}"
+  project_root="${_TDD_CHAIN_PROJECT_ROOT:-}"
+  session_id="${_TDD_CHAIN_SESSION:-}"
+  unset _TDD_CHAIN_SESSION _TDD_CHAIN_STATE_FILE _TDD_CHAIN_PROJECT_ROOT
   [ "$rc" -eq 0 ] || return "$rc"
-  verdict="$(_tdd_locked_run "$_TDD_CHAIN_STATE_FILE" _tdd_recover_chain_critical \
-    "$_TDD_CHAIN_PROJECT_ROOT" "$_TDD_CHAIN_SESSION")"
+  verdict="$(_tdd_locked_run "$state_file" _tdd_recover_chain_critical \
+    "$project_root" "$session_id")"
   rc=$?
   case "$rc" in
     0|2|3) ;;
     *)
       case "$verdict" in
-        recovered:*) verdict="write-landed-unconfirmed"; rc=2 ;;
-        '') verdict="lock-failed"; rc=2 ;;
-        write-failed|write-landed-unconfirmed|module-unreadable|unreadable) rc=2 ;;
-        *) rc=3 ;;
+        recovered:*) verdict="op:write-landed-unconfirmed"; rc=2 ;;
+        op:*) rc=2 ;;
+        refused:*) rc=3 ;;
+        *) verdict="op:lock-failed"; rc=2 ;;
       esac
       ;;
   esac

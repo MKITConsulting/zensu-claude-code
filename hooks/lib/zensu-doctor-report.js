@@ -242,6 +242,7 @@ function chainRows(entries) {
     }
     shapes.push(entry.session + ': ' + report.shape
       + (report.recoveries ? ' (repaired ' + report.recoveries + '×)' : ''));
+    if (!entry.owned) return;
     if (DEAD_END_SHAPES.indexOf(report.shape) >= 0) {
       deadEnds.push(entry.session + ' → ' + report.nextCommand);
       return;
@@ -250,13 +251,11 @@ function chainRows(entries) {
     if (report.recoverable) recoverable.push(entry.session + ' → ' + report.nextCommand);
     else blocked.push(entry.session + ' → ' + report.nextCommand);
   });
-  var listed = shapes.slice(0, CHAIN_ROW_LIMIT);
-  var overflow = shapes.length - listed.length;
   line(
     unclassifiable ? WARN : OK,
     'chain: ' + shapes.length + ' review chain(s)'
       + (unclassifiable ? ', ' + unclassifiable + ' unclassifiable' : '')
-      + ' — ' + listed.join('; ') + (overflow ? '; +' + overflow + ' more' : ''),
+      + ' — ' + truncatedList(shapes),
   );
   if (recoverable.length) {
     line(WARN, 'chain: ' + recoverable.length + ' wedged chain(s) that no supported command can advance — run /zensu:recover-chain from the owning session: ' + truncatedList(recoverable));
@@ -310,6 +309,7 @@ function stateBlock(nowMs) {
         var match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(file);
         try {
           states.push({
+            owned: !!env.ZDOC_SESSION_KEY && match[1] === env.ZDOC_SESSION_KEY,
             session: match[1].slice(0, 13) + '…',
             state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] }),
           });

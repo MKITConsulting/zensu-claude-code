@@ -23,6 +23,8 @@ const RECOVERY_HISTORY_PHASE = 'CHAIN_RECOVERED';
 const RECOVERY_HISTORY_REASON_PREFIX = 'chain-recovered: ';
 const CHAIN_OUTCOMES = ['', 'pass', 'no-changes', 'max-rounds'];
 const RECOVERABLE_SHAPES = ['wedged-stale-rearm'];
+const DEAD_END_SHAPES = ['self-review-unbindable'];
+const STUCK_SHAPES = Object.freeze([...RECOVERABLE_SHAPES, ...DEAD_END_SHAPES]);
 
 const NEXT_COMMAND = {
   'no-session': 'run /zensu:tdd to arm a chain',
@@ -53,10 +55,12 @@ const BLOCKED_RECOVERY_COMMAND = {
     'this document carries an inconsistent review-ticket slot; recovery never rewrites it, because doing so would satisfy the no-ticket review terminus. Start a fresh generation with /zensu:tdd',
   'flag-state':
     'this generation already latched selfReviewFixed, so neither the reviewer chain nor a budget reset applies — start a fresh generation with /zensu:tdd',
+  'link-shape':
+    'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:tdd',
 };
 
 const STALE_RECEIPT_CAVEAT =
-  ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued and a budget reset would leave it wedged — finish this generation with what it already holds, or start a fresh one with /zensu:tdd)';
+  ' (note: this chain also carries a rearm receipt that disagrees with its own document, so no FRESH ticket can be issued — finish this generation with what it already holds, or start a fresh one with /zensu:tdd; on a standalone chain a budget reset drops the receipt as a side effect, on a bound one it does not)';
 
 const REQUIRED_BOOLEANS = [
   'active',
@@ -67,7 +71,8 @@ const REQUIRED_BOOLEANS = [
   'reviewTicketConsumed',
 ];
 
-const REQUIRED_STRINGS = ['reviewTicket', 'deferredReviewClaim'];
+const REQUIRED_STRINGS = ['reviewTicket', 'phase'];
+const REQUIRED_ARRAYS = ['history', 'bypasses'];
 
 const hasOwn = (state, field) => Object.prototype.hasOwnProperty.call(state, field);
 
@@ -79,7 +84,7 @@ function normalizeChainState(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) {
     throw new Error('chain state must be an object');
   }
-  for (const field of REQUIRED_BOOLEANS) {
+  for (const field of REQUIRED_BOOLEANS.concat(['vanilla'])) {
     if (typeof input[field] !== 'boolean') {
       throw new Error(`chain state field ${field} must be a boolean`);
     }
@@ -89,11 +94,19 @@ function normalizeChainState(input) {
       throw new Error(`chain state field ${field} must be a string`);
     }
   }
+  for (const field of REQUIRED_ARRAYS) {
+    if (!Array.isArray(input[field])) {
+      throw new Error(`chain state field ${field} must be an array`);
+    }
+  }
   if (!Number.isSafeInteger(input.reviewRound) || input.reviewRound < 0) {
     throw new Error('chain state field reviewRound must be a natural number');
   }
   const normalized = { ...input };
-  normalized.vanilla = input.vanilla === true;
+  normalized.deferredReviewClaimKnown = typeof input.deferredReviewClaim === 'string';
+  normalized.deferredReviewClaim = normalized.deferredReviewClaimKnown
+    ? input.deferredReviewClaim
+    : '';
   normalized.stopBlockCount = naturalOr(input.stopBlockCount, 0);
   return normalized;
 }
@@ -185,7 +198,7 @@ function chainShape(state, rearmReceipt) {
   return 'ready-for-review';
 }
 
-const STALE_RECEIPT_CAVEAT_SHAPES = ['ticket-unclaimed', 'ticket-spent', 'awaiting-self-review'];
+const STALE_RECEIPT_CAVEAT_SHAPES = ['ticket-unclaimed', 'awaiting-self-review'];
 
 function shapeCommand(shape, linkage, autopilot, rearmReceipt) {
   if (STALE_RECEIPT_CAVEAT_SHAPES.indexOf(shape) >= 0 && rearmReceipt === 'stale') {
@@ -198,7 +211,8 @@ function shapeCommand(shape, linkage, autopilot, rearmReceipt) {
 
 function blockedRecoveryReason(state, linkage) {
   if (linkage === 'partial') return 'partial-link';
-  if (state.deferredReviewClaim !== '') return 'deferred-claim';
+  if (linkage !== 'bound') return 'link-shape';
+  if (!state.deferredReviewClaimKnown || state.deferredReviewClaim !== '') return 'deferred-claim';
   if (state.reviewTicketConsumed !== true) return 'ticket-slot';
   return 'flag-state';
 }
@@ -208,9 +222,10 @@ function classifyChain(input) {
   const { linkage, autopilot } = autopilotLinkage(state);
   const rearmReceipt = rearmReceiptVerdict(state);
   const shape = chainShape(state, rearmReceipt);
-  const wedged = RECOVERABLE_SHAPES.includes(shape);
-  const recoverable = wedged
-    && linkage !== 'partial'
+  const wedged = STUCK_SHAPES.includes(shape);
+  const recoverable = RECOVERABLE_SHAPES.includes(shape)
+    && linkage === 'bound'
+    && state.deferredReviewClaimKnown
     && state.deferredReviewClaim === ''
     && state.active === true
     && state.implComplete === true
@@ -219,15 +234,16 @@ function classifyChain(input) {
     && state.selfReviewFixed === false
     && state.reviewTicketConsumed === true;
 
-  let nextCommandId = shape;
-  if (wedged && !recoverable) nextCommandId = blockedRecoveryReason(state, linkage);
-  const nextCommand = wedged && !recoverable
+  const blocked = RECOVERABLE_SHAPES.includes(shape) && !recoverable;
+  const nextCommandId = blocked ? blockedRecoveryReason(state, linkage) : shape;
+  const nextCommand = blocked
     ? BLOCKED_RECOVERY_COMMAND[nextCommandId]
     : shapeCommand(shape, linkage, autopilot, rearmReceipt);
 
   return {
     shape,
     wedged,
+    deadEnd: DEAD_END_SHAPES.includes(shape),
     recoverable,
     nextCommandId,
     nextCommand,
@@ -240,7 +256,10 @@ function classifyChain(input) {
     chainDone: state.chainDone,
     codeReviewDone: state.codeReviewDone,
     selfReviewFixed: state.selfReviewFixed,
-    deferredReviewClaimPresent: state.deferredReviewClaim !== '',
+    deferredReviewClaim: state.deferredReviewClaimKnown
+      ? (state.deferredReviewClaim === '' ? 'none' : 'present')
+      : 'unknown',
+    deferredReviewClaimPresent: !state.deferredReviewClaimKnown || state.deferredReviewClaim !== '',
     reviewTicketPresent: state.reviewTicket !== '',
     reviewTicketConsumed: state.reviewTicketConsumed,
     claimedReviewTicketPresent: state.reviewTicket !== ''
@@ -267,9 +286,11 @@ function countRecoveries(state) {
 
 module.exports = {
   BLOCKED_RECOVERY_COMMAND,
+  DEAD_END_SHAPES,
   NEXT_COMMAND,
   REARM_MARKER_KEYS,
   RECOVERABLE_SHAPES,
+  STUCK_SHAPES,
   RECOVERY_HISTORY_PHASE,
   RECOVERY_HISTORY_REASON_PREFIX,
   RETURN_STAGES,
