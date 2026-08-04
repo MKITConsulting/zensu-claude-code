@@ -306,6 +306,31 @@ OUT="$(run_report "$PLUGIN_DIR" "$SBOX/good-cfg.json" "$CAS_PROJECT")"
 case "$OUT" in *'1 validated CAS workflow document(s); reviewRound/stopBlockCount are integrated fields'*) check "P1m valid CAS workflow document is reported with integrated counters" PASS ;; *) check "P1m valid CAS workflow state (got: $OUT)" FAIL ;; esac
 case "$OUT" in *'per-session marker'*|*'1 rounds'*|*'1 stopblocks'*) check "P1ma retired sidecars are not counted as session state" FAIL ;; *) check "P1ma retired sidecars are not counted as session state" PASS ;; esac
 
+# the chain block: shape row, truncated session key, no false alarm, exit 0
+case "$OUT" in *'chain: 1 review chain(s) — scv1_'*': implementing'*) check "P1mc chain row names the shape and a truncated session key" PASS ;; *) check "P1mc chain row names the shape and a truncated session key (got: $OUT)" FAIL ;; esac
+case "$OUT" in *"$CAS_KEY"*) check "P1md the full session key is never printed" FAIL ;; *) check "P1md the full session key is never printed" PASS ;; esac
+case "$OUT" in *'wedged'*) check "P1me a healthy chain raises no wedge warning" FAIL ;; *) check "P1me a healthy chain raises no wedge warning" PASS ;; esac
+# missing chain module: a sandbox plugin root that carries the core but not the
+# classifier, so the probe never touches the tracked working tree
+NOCHAIN="$SBOX/nochain"
+mkdir -p "$NOCHAIN/.claude-plugin" "$NOCHAIN/hooks/lib"
+printf '{"name":"zensu","version":"1.2.3"}\n' > "$NOCHAIN/.claude-plugin/plugin.json"
+printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$NOCHAIN/.claude-plugin/marketplace.json"
+printf '{"hooks":{}}\n' > "$NOCHAIN/hooks/hooks.json"
+cp "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$NOCHAIN/hooks/lib/session-control-core-v1.js"
+cp "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" "$NOCHAIN/hooks/lib/zensu-doctor-report.js"
+OUT_NOMOD="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
+  node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1)"
+NOMOD_RC=$?
+case "$OUT_NOMOD" in
+  *'chain-recovery-v1.js is unreadable'*)
+    [ "$NOMOD_RC" -eq 0 ] \
+      && check "P1mf a missing chain module degrades to a warning and still exits 0" PASS \
+      || check "P1mf a missing chain module still exits 0 (rc=$NOMOD_RC)" FAIL ;;
+  *)
+    check "P1mf a missing chain module degrades to a warning (got: $OUT_NOMOD)" FAIL ;;
+esac
+
 node -e '
   const fs=require("fs"), p=process.argv[1], j=JSON.parse(fs.readFileSync(p,"utf8"));
   j.reviewRound="7"; fs.writeFileSync(p, JSON.stringify(j));

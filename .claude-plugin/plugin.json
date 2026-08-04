@@ -32,6 +32,7 @@
     "./skills/pr-fix-findings",
     "./skills/pr-team-review",
     "./skills/pulse",
+    "./skills/recover-chain",
     "./skills/reset-review-limit",
     "./skills/self-review",
     "./skills/security-review",

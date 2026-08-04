@@ -26,7 +26,7 @@ Answer questions about how Zensu (the SaaS Product Lifecycle Manager) and the Ze
 
 ## Do NOT Use For
 
-- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:verify-feature`, `/zensu:cover`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`
+- Executing workflows → use `/zensu:bootstrap`, `/zensu:ghost-scan`, `/zensu:implement`, `/zensu:verify-feature`, `/zensu:cover`, `/zensu:security-review`, `/zensu:pulse`, `/zensu:reset-review-limit`, `/zensu:recover-chain`
 - Modifying Zensu data — this skill is read-only Q&A
 
 ## Prerequisites
@@ -78,6 +78,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Transactionally resetting `reviewRound`/`stopBlockCount` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
+| A review chain that will not advance: `--review-ticket` refuses, no ticket to claim, `/zensu:reset-review-limit` not applicable; chain shapes and the guarded escape hatch | `skills/recover-chain/SKILL.md` (`/zensu:recover-chain` — `zensu-log.sh --chain-status` diagnoses, `--chain-recover` repairs only a receipt that disagrees with its own document) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
 | Live feature/worktree/preview verification, local vs remote mode, browser evidence, Playwright MCP | `skills/verify-feature/SKILL.md` + `skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof) |
 | Durable unit/integration/E2E test authoring for existing code | `skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |

@@ -1,0 +1,716 @@
+#!/bin/bash
+# Functional regression for the read-only chain diagnosis (--chain-status) and
+# the guarded escape hatch (--chain-recover). Pins that recovery reaches exactly
+# ONE shape — a rearm receipt that disagrees with its own document, which makes
+# --review-ticket refuse permanently — refuses every other shape byte-identically,
+# never touches a terminal flag, a budget, an outstanding ticket, an Autopilot
+# binding, or a claimed deferred-review generation, and fails closed on foreign,
+# corrupt, absent, and unsafe state.
+set -u
+
+ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+LOG="$ROOT/hooks/lib/zensu-log.sh"
+CORE="$ROOT/hooks/lib/session-control-core-v1.js"
+MODULE="$ROOT/hooks/lib/chain-recovery-v1.js"
+PHASE_LIB="$ROOT/hooks/lib/zensu-tdd-phase.sh"
+SKILL="$ROOT/skills/recover-chain/SKILL.md"
+PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
+README="$ROOT/README.md"
+PASS=0; FAIL=0
+check() {
+  local label="$1" result="$2"
+  if [ "$result" = PASS ]; then echo "  PASS  $label"; PASS=$((PASS+1));
+  else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
+}
+
+for f in "$LOG" "$CORE" "$MODULE" "$PHASE_LIB" "$SKILL" "$PLUGIN_JSON" "$README"; do
+  if [ ! -f "$f" ]; then
+    check "P0 required file exists: $f" FAIL
+    echo "----"
+    echo "test-chain-recover: $PASS PASS / $FAIL FAIL"
+    exit 1
+  fi
+done
+check "P0 all target files exist" PASS
+
+WORK="$(mktemp -d)"
+restore_repo() {
+  [ -f "$MODULE.bak" ] && mv -f "$MODULE.bak" "$MODULE"
+  rm -rf "$WORK"
+}
+trap restore_repo EXIT INT TERM HUP
+
+if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1; then
+  check "P1 the classifier unit suite passes (node --test chain-recovery-v1.test.js)" PASS
+else
+  check "P1 the classifier unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+fi
+export CLAUDE_PLUGIN_ROOT="$ROOT"
+export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
+export ZENSU_TEST_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA"
+export ZENSU_CONFIG="$WORK/config.json"
+mkdir -p "$CLAUDE_PLUGIN_DATA"
+printf '%s\n' '{"hooks":{"autoFix":true,"autoFixMaxRounds":5}}' > "$ZENSU_CONFIG"
+
+SID=""
+STATE_FILE=""
+
+new_chain_in_root() {
+  SID="$1"
+  ACTIVE_ROOT="$(cd "$2" && pwd -P)"
+  ACTIVE_LOG="$ACTIVE_ROOT/hooks/lib/zensu-log.sh"
+  ACTIVE_CORE="$ACTIVE_ROOT/hooks/lib/session-control-core-v1.js"
+  SID_KEY=""; TICKET=""; BEFORE=""; RECOVER_RC=0; RECOVER_ERR=""; RECOVER_OUT=""
+  export CLAUDE_PLUGIN_ROOT="$ACTIVE_ROOT"
+  export CLAUDE_PROJECT_DIR="$WORK/$SID"
+  export STATE_DIR="$CLAUDE_PROJECT_DIR/.zensu/state"
+  mkdir -p "$CLAUDE_PROJECT_DIR"
+  # shellcheck disable=SC1090
+  source "$ROOT/tests/session-control/initialize-baseline.sh" "$SID" "$ACTIVE_ROOT"
+  # shellcheck disable=SC1090
+  source "$ACTIVE_ROOT/hooks/lib/zensu-tdd-phase.sh"
+  bash "$ACTIVE_LOG" --tdd-begin --session "$SID" >/dev/null 2>&1 \
+    || { check "bootstrap: --tdd-begin failed for $SID" FAIL; return 1; }
+  bash "$ACTIVE_LOG" --tdd-complete --session "$SID" >/dev/null 2>&1 \
+    || { check "bootstrap: --tdd-complete failed for $SID" FAIL; return 1; }
+  STATE_FILE="$(tdd_state_file "$(zensu_resolve_session_id "$SID")")" \
+    || { check "bootstrap: state path unresolved for $SID" FAIL; return 1; }
+  [ -f "$STATE_FILE" ] \
+    || { check "bootstrap: state document missing for $SID" FAIL; return 1; }
+}
+
+new_chain() {
+  new_chain_in_root "$1" "$ROOT"
+}
+
+seed() {
+  local seed_err
+  seed_err="$(CORE_PATH="${ACTIVE_CORE:-$CORE}" PROJECT_ROOT="${ZENSU_PROJECT_ROOT:-$CLAUDE_PROJECT_DIR}" \
+    SID="$SID" BODY="$1" node -e '
+    const core = require(process.env.CORE_PATH);
+    const body = new Function("s", process.env.BODY);
+    core.mutateWorkflowState({
+      projectRoot: process.env.PROJECT_ROOT,
+      sessionId: process.env.SID,
+      workflowState: "test_seed",
+      event: "test-seed",
+    }, (s) => { body(s); return s; });
+  ' 2>&1 >/dev/null)" || { check "seed failed for $SID: $seed_err" FAIL; return 1; }
+}
+
+document_diff() {
+  BEFORE_DOC="$1" node -e '
+    const fs = require("node:fs");
+    const before = JSON.parse(process.env.BEFORE_DOC);
+    const after = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])].sort();
+    const changed = keys.filter((key) => JSON.stringify(before[key]) !== JSON.stringify(after[key]));
+    process.stdout.write(changed.join(","));
+  ' "$STATE_FILE"
+}
+
+read_document() {
+  node -e '
+    const fs = require("node:fs");
+    process.stdout.write(fs.readFileSync(process.argv[1], "utf8"));
+  ' "$STATE_FILE"
+}
+
+status_field() {
+  bash "$LOG" --chain-status --session "$SID" 2>/dev/null | FIELD="$1" node -e '
+    let s = "";
+    process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+      try {
+        const value = JSON.parse(s)[process.env.FIELD];
+        process.stdout.write(value === undefined ? "" : String(value));
+      } catch (_) { process.stdout.write("PARSE_ERROR"); }
+    });
+  '
+}
+
+state_field() {
+  FIELD="$1" node -e '
+    const fs = require("node:fs");
+    try {
+      const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"))[process.env.FIELD];
+      process.stdout.write(value === undefined ? "" : String(value));
+    } catch (_) { process.stdout.write("READ_ERROR"); }
+  ' "$STATE_FILE"
+}
+
+last_history_reason() {
+  node -e '
+    const fs = require("node:fs");
+    try {
+      const history = JSON.parse(fs.readFileSync(process.argv[1], "utf8")).history || [];
+      const last = history[history.length - 1] || {};
+      process.stdout.write(String(last.reason || ""));
+    } catch (_) { process.stdout.write("READ_ERROR"); }
+  ' "$STATE_FILE"
+}
+
+digest() {
+  node -e '
+    const fs = require("node:fs");
+    const c = require("node:crypto");
+    try {
+      process.stdout.write(c.createHash("sha256").update(fs.readFileSync(process.argv[1])).digest("hex"));
+    } catch (_) { process.stdout.write("missing"); }
+  ' "$STATE_FILE"
+}
+
+STALE_RECEIPT='s.reviewRearm={schemaVersion:1,status:"pending",runId:"run-stale-1",attempt:2,chainId:"chain-stale-1",consumedTicketSha256:"a".repeat(64),retire:false};'
+BOUND_LINK='s.autopilotRunId="run-bound-1";s.autopilotAttempt=1;s.autopilotReturnStage="GATES";s.chainId="chain-bound-1";s.chainOutcome="";'
+
+# ---------------------------------------------------------------- reachable shapes
+new_chain "chain-recover-healthy"
+[ "$(status_field shape)" = "ready-for-review" ] \
+  && check "T1 a completed implementation reports ready-for-review" PASS \
+  || check "T1 a completed implementation reports ready-for-review (got: $(status_field shape))" FAIL
+
+BEFORE="$(digest)"
+bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1
+[ "$BEFORE" = "$(digest)" ] \
+  && check "T2 --chain-status is byte-for-byte read-only" PASS \
+  || check "T2 --chain-status is byte-for-byte read-only" FAIL
+
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+RECOVER_RC=$?
+[ "$RECOVER_RC" -eq 3 ] && [ "$BEFORE" = "$(digest)" ] \
+  && check "T3 recover refuses a healthy chain and preserves the state bytes" PASS \
+  || check "T3 recover refuses a healthy chain and preserves the state bytes (rc=$RECOVER_RC)" FAIL
+
+case "$RECOVER_ERR" in
+  *"ready-for-review"*"not wedged"*"--review-ticket"*)
+    check "T4 the refusal names the shape, denies the wedge, and gives the supported command" PASS ;;
+  *)
+    check "T4 the refusal names the shape, denies the wedge, and gives the supported command (got: $RECOVER_ERR)" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- the one real wedge
+new_chain "chain-recover-stale"
+seed "$STALE_RECEIPT"
+
+if bash "$LOG" --review-ticket --session "$SID" >/dev/null 2>&1; then
+  check "T5 a receipt that disagrees with its document blocks --review-ticket" FAIL
+else
+  check "T5 a receipt that disagrees with its document blocks --review-ticket" PASS
+fi
+
+[ "$(status_field shape)" = "wedged-stale-rearm" ] && [ "$(status_field recoverable)" = "true" ] \
+  && [ "$(status_field rearmReceipt)" = "stale" ] \
+  && check "T6 status classifies the blocked chain as a recoverable wedge" PASS \
+  || check "T6 status classifies the blocked chain as a recoverable wedge (got: $(status_field shape))" FAIL
+
+REV_BEFORE="$(state_field revision)"
+RECOVER_OUT="$(bash "$LOG" --chain-recover --session "$SID" 2>/dev/null)"
+RECOVER_RC=$?
+[ "$RECOVER_RC" -eq 0 ] && [ "$RECOVER_OUT" = "recovered: wedged-stale-rearm" ] \
+  && check "T7 recover accepts the stale-receipt wedge" PASS \
+  || check "T7 recover accepts the stale-receipt wedge (rc=$RECOVER_RC out=$RECOVER_OUT)" FAIL
+
+[ "$(status_field shape)" = "ready-for-review" ] && [ "$(status_field rearmReceipt)" = "none" ] \
+  && check "T8 the recovered chain is reviewable again and carries no receipt" PASS \
+  || check "T8 the recovered chain is reviewable again and carries no receipt (got: $(status_field shape))" FAIL
+
+REISSUED="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+case "$REISSUED" in
+  rt_*) check "T9 --review-ticket issues again after recovery" PASS ;;
+  *) check "T9 --review-ticket issues again after recovery (got: $REISSUED)" FAIL ;;
+esac
+
+case "$(last_history_reason)" in
+  *chain-recovered*)
+    check "T10 the recovery records its provenance as a history entry inside the transaction" PASS ;;
+  *)
+    check "T10 the recovery records its provenance as a history entry (got: $(last_history_reason))" FAIL ;;
+esac
+
+case ", $(tdd_bypasses "$STATE_FILE")," in
+  *ZENSU_CHAIN_RECOVER*)
+    check "T10b a repair never appears in the gate-escape ledger (no gate was bypassed)" FAIL ;;
+  *)
+    check "T10b a repair never appears in the gate-escape ledger (no gate was bypassed)" PASS ;;
+esac
+
+# ---------------------------------------------------------------- budgets, flags, revision
+new_chain "chain-recover-budget"
+seed "s.reviewRound=4;s.stopBlockCount=2;s.bypasses=[\"ZENSU_TDD_GATE\"];$STALE_RECEIPT" || true
+REV_BEFORE="$(state_field revision)"
+DOC_BEFORE="$(read_document)"
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1
+BUDGET_RC=$?
+[ "$BUDGET_RC" -eq 0 ] && [ "$(status_field reviewRound)" = "4" ] \
+  && [ "$(status_field stopBlockCount)" = "2" ] \
+  && check "T11 recovery preserves the review and Stop budgets (no free round)" PASS \
+  || check "T11 recovery preserves the review and Stop budgets (rc=$BUDGET_RC round=$(status_field reviewRound) stops=$(status_field stopBlockCount))" FAIL
+
+[ "$(status_field chainDone)" = "false" ] && [ "$(status_field codeReviewDone)" = "false" ] \
+  && [ "$(status_field selfReviewFixed)" = "false" ] \
+  && check "T12 recovery never sets a terminal flag" PASS \
+  || check "T12 recovery never sets a terminal flag" FAIL
+
+REV_AFTER="$(state_field revision)"
+REV_DELTA=$(( REV_AFTER - REV_BEFORE ))
+[ "$REV_DELTA" -eq 1 ] \
+  && check "T12b the repair and its audit record are one single revision" PASS \
+  || check "T12b the repair and its audit record are one single revision (got delta $REV_DELTA)" FAIL
+
+CHANGED="$(document_diff "$DOC_BEFORE")"
+[ "$CHANGED" = "history,last_event,reviewRearm,revision,updated_at,workflow_state" ] \
+  && check "T12c recovery changes ONLY the receipt, its history entry and the bookkeeping" PASS \
+  || check "T12c recovery changes ONLY the expected keys (got: $CHANGED)" FAIL
+
+RAW_LEDGER="$(state_field bypasses)"
+[ "$RAW_LEDGER" = "ZENSU_TDD_GATE" ] \
+  && check "T12d the recovery leaves the gate-escape ledger byte-identical" PASS \
+  || check "T12d the recovery leaves the gate-escape ledger byte-identical (got: $RAW_LEDGER)" FAIL
+
+new_chain "chain-recover-slot"
+seed "s.reviewTicketConsumed=false;$STALE_RECEIPT" || true
+BEFORE="$(digest)"
+SLOT_RC=0
+SLOT_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)" || SLOT_RC=$?
+[ "$SLOT_RC" -eq 3 ] && [ "$BEFORE" = "$(digest)" ] \
+  && [ "$(status_field nextCommandId)" = "ticket-slot" ] \
+  && check "T12e an inconsistent ticket slot is REFUSED — normalizing it would satisfy the no-ticket review terminus" PASS \
+  || check "T12e an inconsistent ticket slot is REFUSED (rc=$SLOT_RC reason=$(status_field nextCommandId))" FAIL
+
+case "$SLOT_ERR" in
+  *"review terminus"*)
+    check "T12f the ticket-slot refusal explains why the repair is withheld" PASS ;;
+  *)
+    check "T12f the ticket-slot refusal explains why the repair is withheld (got: $SLOT_ERR)" FAIL ;;
+esac
+
+UNCLAIMED_TERMINUS_RC=0
+bash "$LOG" --code-review-done --session "$SID" >/dev/null 2>&1 || UNCLAIMED_TERMINUS_RC=$?
+[ "$UNCLAIMED_TERMINUS_RC" -ne 0 ] && [ "$(state_field codeReviewDone)" = "false" ] \
+  && [ "$(state_field reviewTicketConsumed)" = "false" ] \
+  && check "T12g the refused document keeps consumed=false, so the no-ticket terminus stays shut" PASS \
+  || check "T12g the refused document keeps consumed=false (rc=$UNCLAIMED_TERMINUS_RC consumed=$(state_field reviewTicketConsumed))" FAIL
+
+new_chain "chain-recover-slot-control"
+seed "$STALE_RECEIPT" || true
+WEDGED_TERMINUS_RC=0
+bash "$LOG" --code-review-done --session "$SID" >/dev/null 2>&1 || WEDGED_TERMINUS_RC=$?
+[ "$WEDGED_TERMINUS_RC" -ne 0 ] && [ "$(state_field codeReviewDone)" = "false" ] \
+  && check "T12h0 while a disagreeing receipt is present the unqualified no-ticket terminus is refused" PASS \
+  || check "T12h0 while a disagreeing receipt is present the unqualified terminus is refused (rc=$WEDGED_TERMINUS_RC)" FAIL
+
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1
+CONTROL_RECOVER_RC=$?
+[ "$(status_field recoveries)" = "1" ] \
+  && check "T12h1 the repair is counted as one durable recovery in the report" PASS \
+  || check "T12h1 the repair is counted as one durable recovery (got: $(status_field recoveries))" FAIL
+
+RESERVED_PHASE="$(MODULE_PATH="$MODULE" node -e 'process.stdout.write(require(process.env.MODULE_PATH).RECOVERY_HISTORY_PHASE)')"
+RESERVED_PREFIX="$(MODULE_PATH="$MODULE" node -e 'process.stdout.write(require(process.env.MODULE_PATH).RECOVERY_HISTORY_REASON_PREFIX)')"
+FORGE_PHASE_RC=0
+bash "$LOG" --phase "$RESERVED_PHASE" --step forged --session "$SID" >/dev/null 2>&1 || FORGE_PHASE_RC=$?
+FORGE_REASON_RC=0
+bash "$LOG" --phase IMPL --step forged --reason "${RESERVED_PREFIX}forged" --session "$SID" >/dev/null 2>&1 \
+  || FORGE_REASON_RC=$?
+FORGE_DIRECT_RC=0
+_tdd_write_phase_critical "$STATE_FILE" "$(zensu_resolve_session_id "$SID")" forged \
+  "$RESERVED_PHASE" "${RESERVED_PREFIX}forged" >/dev/null 2>&1 || FORGE_DIRECT_RC=$?
+[ "$FORGE_PHASE_RC" -eq 2 ] && [ "$FORGE_REASON_RC" -eq 2 ] && [ "$FORGE_DIRECT_RC" -ne 0 ] \
+  && [ "$(status_field recoveries)" = "1" ] \
+  && check "T12h2 the reserved phase and reason are refused by the verb AND by the exported writer, so the counter cannot be forged" PASS \
+  || check "T12h2 the recovery counter cannot be forged (phase=$FORGE_PHASE_RC reason=$FORGE_REASON_RC direct=$FORGE_DIRECT_RC count=$(status_field recoveries))" FAIL
+CONTROL_TERMINUS_RC=0
+bash "$LOG" --code-review-done --session "$SID" >/dev/null 2>&1 || CONTROL_TERMINUS_RC=$?
+[ "$CONTROL_RECOVER_RC" -eq 0 ] && [ "$CONTROL_TERMINUS_RC" -eq 0 ] \
+  && [ "$(state_field codeReviewDone)" = "true" ] \
+  && check "T12h positive control: with a CONSISTENT slot the same document recovers and the terminus is reachable — so T12g's refusal is attributable to the slot alone" PASS \
+  || check "T12h positive control: consistent slot recovers and reaches the terminus (recover=$CONTROL_RECOVER_RC terminus=$CONTROL_TERMINUS_RC)" FAIL
+
+# ---------------------------------------------------------------- lost ticket is NOT a wedge
+new_chain "chain-recover-orphan"
+seed 's.reviewTicket="";s.reviewTicketConsumed=true;s.reviewRound=2;' || true
+[ "$(status_field shape)" = "ticket-lost" ] && [ "$(status_field wedged)" = "false" ] \
+  && check "T13 a consumed round whose ticket is gone reports ticket-lost, not a wedge" PASS \
+  || check "T13 a consumed round whose ticket is gone reports ticket-lost (got: $(status_field shape))" FAIL
+
+BEFORE="$(digest)"
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+AFTER_REFUSAL="$(digest)"
+LOST_TICKET="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+case "$RECOVER_RC:$LOST_TICKET" in
+  3:rt_*)
+    check "T14 recover refuses it because --review-ticket still advances that chain" PASS ;;
+  *)
+    check "T14 recover refuses it because --review-ticket still advances that chain (rc=$RECOVER_RC ticket=$LOST_TICKET)" FAIL ;;
+esac
+[ "$BEFORE" = "$AFTER_REFUSAL" ] \
+  && check "T14b the refused recovery left the state bytes untouched" PASS \
+  || check "T14b the refused recovery left the state bytes untouched" FAIL
+
+# ---------------------------------------------------------------- an outstanding ticket outranks the receipt
+new_chain "chain-recover-outstanding"
+OUTSTANDING="$(bash "$LOG" --review-ticket --session "$SID" 2>/dev/null)"
+seed "$STALE_RECEIPT" || true
+[ "$(status_field shape)" = "ticket-unclaimed" ] && [ "$(status_field wedged)" = "false" ] \
+  && check "T15 an unconsumed ticket outranks a stale receipt (the spawned reviewer can still claim it)" PASS \
+  || check "T15 an unconsumed ticket outranks a stale receipt (got: $(status_field shape))" FAIL
+
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+SID_KEY="$(zensu_resolve_session_id "$SID")"
+CLAIMED_ROUND="$(tdd_consume_review_ticket "$SID_KEY" "$OUTSTANDING" 2>/dev/null)"
+[ "$RECOVER_RC" -eq 3 ] && [ "$CLAIMED_ROUND" = "1" ] \
+  && check "T16 recovery refuses rather than discarding a live outstanding ticket" PASS \
+  || check "T16 recovery refuses rather than discarding a live outstanding ticket (rc=$RECOVER_RC round=$CLAIMED_ROUND)" FAIL
+
+STATUS_RAW="$(bash "$LOG" --chain-status --session "$SID" 2>/dev/null)"
+case "$STATUS_RAW" in
+  *"$OUTSTANDING"*) TICKET_LEAKED=yes ;;
+  *) TICKET_LEAKED=no ;;
+esac
+[ "$(status_field shape)" = "review-in-flight" ] \
+  && [ "$(status_field claimedReviewTicketPresent)" = "true" ] \
+  && [ "$TICKET_LEAKED" = no ] \
+  && check "T17 status reports a claimed ticket as a boolean and the value appears nowhere in its output" PASS \
+  || check "T17 status reports a claimed ticket as a boolean and the value appears nowhere (shape=$(status_field shape) leaked=$TICKET_LEAKED)" FAIL
+
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+RECOVER_RC=$?
+case "$RECOVER_RC:$RECOVER_ERR" in
+  3:*"--code-review-done --claimed-review-ticket"*)
+    check "T18 an open review round is refused and routed to the ticket-bound terminus" PASS ;;
+  *)
+    check "T18 an open review round is refused and routed to the ticket-bound terminus (rc=$RECOVER_RC got: $RECOVER_ERR)" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- terminal flag
+TICKET="$(state_field reviewTicket)"
+tdd_mark_review_converged "$SID_KEY" "$TICKET" codeReviewDone >/dev/null 2>&1
+BEFORE="$(digest)"
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+RECOVER_RC=$?
+[ "$(status_field shape)" = "awaiting-self-review" ] && [ "$RECOVER_RC" -eq 3 ] \
+  && [ "$BEFORE" = "$(digest)" ] \
+  && check "T19 recover refuses a chain that already reached a terminal flag" PASS \
+  || check "T19 recover refuses a chain that already reached a terminal flag (shape=$(status_field shape) rc=$RECOVER_RC)" FAIL
+
+case "$RECOVER_ERR" in
+  *"self-review"*)
+    check "T20 the terminal-flag refusal routes to the self-review stage" PASS ;;
+  *)
+    check "T20 the terminal-flag refusal routes to the self-review stage (got: $RECOVER_ERR)" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- a bound generation is repaired, never unbound
+new_chain "chain-recover-bound"
+seed "${BOUND_LINK}${STALE_RECEIPT}" || true
+[ "$(status_field linkage)" = "bound" ] && [ "$(status_field recoverable)" = "true" ] \
+  && check "T21 a bound generation with a disagreeing receipt is recoverable" PASS \
+  || check "T21 a bound generation with a disagreeing receipt is recoverable (linkage=$(status_field linkage) recoverable=$(status_field recoverable))" FAIL
+
+DOC_BEFORE="$(read_document)"
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1
+BOUND_RC=$?
+CHANGED="$(document_diff "$DOC_BEFORE")"
+[ "$BOUND_RC" -eq 0 ] && [ "$(status_field linkage)" = "bound" ] \
+  && [ "$CHANGED" = "history,last_event,reviewRearm,revision,updated_at,workflow_state" ] \
+  && check "T22 recovery repairs the bound chain and touches no Autopilot link field" PASS \
+  || check "T22 recovery repairs the bound chain and touches no link field (rc=$BOUND_RC changed=$CHANGED)" FAIL
+
+# ---------------------------------------------------------------- blocked recoveries
+new_chain "chain-recover-partial"
+seed "s.chainId=\"chain-partial-1\";$STALE_RECEIPT" || true
+BEFORE="$(digest)"
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+RECOVER_RC=$?
+[ "$(status_field linkage)" = "partial" ] && [ "$(status_field wedged)" = "true" ] \
+  && [ "$(status_field recoverable)" = "false" ] && [ "$RECOVER_RC" -eq 3 ] \
+  && [ "$BEFORE" = "$(digest)" ] \
+  && check "T23 an incomplete Autopilot linkage is diagnosed and refused, never repaired in place" PASS \
+  || check "T23 an incomplete Autopilot linkage is diagnosed and refused (linkage=$(status_field linkage) rc=$RECOVER_RC)" FAIL
+
+case "$RECOVER_ERR" in
+  *"wedged but not recoverable"*"/zensu:tdd"*)
+    check "T24 the blocked refusal says the chain IS wedged and names a real next step" PASS ;;
+  *)
+    check "T24 the blocked refusal says the chain IS wedged and names a real next step (got: $RECOVER_ERR)" FAIL ;;
+esac
+
+new_chain "chain-recover-deferred"
+seed "s.deferredReviewClaim=\"dc_test1\";$STALE_RECEIPT" || true
+BEFORE="$(digest)"
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+RECOVER_RC=$?
+[ "$(status_field deferredReviewClaimPresent)" = "true" ] \
+  && [ "$(status_field recoverable)" = "false" ] && [ "$RECOVER_RC" -eq 3 ] \
+  && [ "$BEFORE" = "$(digest)" ] \
+  && check "T25 an outstanding deferred-review claim blocks recovery, like every sibling mutator" PASS \
+  || check "T25 an outstanding deferred-review claim blocks recovery (claim=$(status_field deferredReviewClaimPresent) rc=$RECOVER_RC)" FAIL
+
+case "$RECOVER_ERR" in
+  *"deferred-review claim"*)
+    check "T26 the deferred-claim refusal names the claim as the blocker" PASS ;;
+  *)
+    check "T26 the deferred-claim refusal names the claim as the blocker (got: $RECOVER_ERR)" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- fail-closed inputs
+new_chain "chain-recover-corrupt"
+printf '%s' '{"schema":"zensu.workflow-state"' > "$STATE_FILE"
+BEFORE="$(digest)"
+STATUS_RC=0
+bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+[ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] && [ "$BEFORE" = "$(digest)" ] \
+  && check "T27 corrupt state fails closed for both verbs and is never rewritten" PASS \
+  || check "T27 corrupt state fails closed for both verbs (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+
+new_chain "chain-recover-foreign"
+FOREIGN="$(node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const state = JSON.parse(fs.readFileSync(file, "utf8"));
+  state.session_id_hash = "sha256:" + "b".repeat(64);
+  fs.writeFileSync(file, JSON.stringify(state, null, 2));
+  process.stdout.write("ok");
+' "$STATE_FILE" 2>/dev/null)"
+BEFORE="$(digest)"
+STATUS_RC=0
+bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+[ "$FOREIGN" = ok ] && [ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] \
+  && [ "$BEFORE" = "$(digest)" ] \
+  && check "T28 a foreign session hash fails closed and is never rewritten" PASS \
+  || check "T28 a foreign session hash fails closed (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+
+new_chain "chain-recover-absent"
+rm -f "$STATE_FILE"
+STATUS_RC=0
+bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+[ "$STATUS_RC" -eq 1 ] && [ "$RECOVER_RC" -eq 1 ] && [ ! -e "$STATE_FILE" ] \
+  && check "T29 an absent chain reports rc=1 and creates nothing" PASS \
+  || check "T29 an absent chain reports rc=1 and creates nothing (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+
+new_chain "chain-recover-symlink"
+mv "$STATE_FILE" "$STATE_DIR/real-state.json"
+ln -s "$STATE_DIR/real-state.json" "$STATE_FILE"
+STATUS_RC=0
+bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
+RECOVER_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+[ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] && [ -L "$STATE_FILE" ] \
+  && check "T30 a symlinked state document is refused by both verbs" PASS \
+  || check "T30 a symlinked state document is refused by both verbs (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+rm -f "$STATE_FILE"; mv "$STATE_DIR/real-state.json" "$STATE_FILE"
+
+STUB="$WORK/nodeless"
+mkdir -p "$STUB"
+BEFORE="$(digest)"
+STATUS_RC=0
+( PATH="$STUB"; tdd_chain_diagnostics "$SID" >/dev/null 2>&1 ) || STATUS_RC=$?
+RECOVER_RC=0
+( PATH="$STUB"; tdd_recover_chain "$SID" >/dev/null 2>&1 ) || RECOVER_RC=$?
+[ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] && [ "$BEFORE" = "$(digest)" ] \
+  && check "T31 both verbs return rc 2 when node is unavailable, writing nothing" PASS \
+  || check "T31 both verbs return rc 2 when node is unavailable (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+
+# ---------------------------------------------------------------- the transaction fails closed on an unwritable store
+new_chain "chain-recover-readonly"
+seed "$STALE_RECEIPT" || true
+BEFORE="$(digest)"
+chmod a-w "$STATE_DIR" 2>/dev/null
+RECOVER_RC=0
+RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)" || RECOVER_RC=$?
+chmod u+w "$STATE_DIR" 2>/dev/null
+if [ "$RECOVER_RC" -eq 0 ]; then
+  check "T31b an unwritable state directory refuses the recovery (skipped: the write succeeded, likely running as root)" PASS
+else
+  case "$RECOVER_ERR" in
+    *"NOT recovered"*|*"left untouched"*|*"unreadable, foreign, or unsafe"*)
+      [ "$BEFORE" = "$(digest)" ] \
+        && check "T31b an unwritable state directory refuses the recovery without a partial write" PASS \
+        || check "T31b an unwritable state directory refuses the recovery without a partial write" FAIL ;;
+    *)
+      check "T31b an unwritable state directory refuses the recovery (rc=$RECOVER_RC got: $RECOVER_ERR)" FAIL ;;
+  esac
+fi
+
+# ---------------------------------------------------------------- the classifier module is tamper-protected
+new_chain "chain-recover-tamper"
+seed "$STALE_RECEIPT" || true
+cp "$MODULE" "$MODULE.bak"
+printf '%s\n' "module.exports = {};" > "$MODULE"
+TAMPER_RC=0
+TAMPER_OUT="$(bash "$LOG" --chain-status --session "$SID" 2>&1)" || TAMPER_RC=$?
+mv -f "$MODULE.bak" "$MODULE"
+case "$TAMPER_RC:$TAMPER_OUT" in
+  2:*"runtime digest mismatch"*)
+    check "T32 substituting the classifier module is rejected by the runtime digest, so the shared receipt predicate cannot be swapped out" PASS ;;
+  *)
+    check "T32 substituting the classifier module is rejected by the runtime digest (rc=$TAMPER_RC out=$TAMPER_OUT)" FAIL ;;
+esac
+
+cp "$MODULE" "$MODULE.bak"
+rm -f "$MODULE"
+MISSING_RC=0
+MISSING_ERR="$(bash "$LOG" --chain-status --session "$SID" 2>&1 >/dev/null)" || MISSING_RC=$?
+TICKET_FAULT_RC=0
+bash "$LOG" --review-ticket --session "$SID" >/dev/null 2>&1 || TICKET_FAULT_RC=$?
+mv -f "$MODULE.bak" "$MODULE"
+case "$MISSING_RC:$MISSING_ERR" in
+  2:*"runtime digest mismatch"*)
+    check "T32a removing the classifier module is caught by the runtime digest before any verb runs" PASS ;;
+  *)
+    check "T32a removing the classifier module is caught by the runtime digest (rc=$MISSING_RC got: $MISSING_ERR)" FAIL ;;
+esac
+[ "$TICKET_FAULT_RC" -ne 0 ] \
+  && check "T32a1 the ticket issuer also fails closed while the shared module is absent" PASS \
+  || check "T32a1 the ticket issuer also fails closed while the shared module is absent" FAIL
+
+[ "$(status_field shape)" = "wedged-stale-rearm" ] \
+  && check "T32b restoring the module restores the diagnosis" PASS \
+  || check "T32b restoring the module restores the diagnosis (got: $(status_field shape))" FAIL
+
+# ---------------------------------------------------------------- shapes outside the review window
+new_chain "chain-recover-shapes"
+bash "$LOG" --tdd-reset --session "$SID" >/dev/null 2>&1
+[ "$(status_field shape)" = "no-session" ] \
+  && check "T32g a reset session reports no-session" PASS \
+  || check "T32g a reset session reports no-session (got: $(status_field shape))" FAIL
+
+bash "$LOG" --tdd-begin --session "$SID" >/dev/null 2>&1
+[ "$(status_field shape)" = "implementing" ] \
+  && check "T32h an armed but incomplete chain reports implementing" PASS \
+  || check "T32h an armed but incomplete chain reports implementing (got: $(status_field shape))" FAIL
+
+# ---------------------------------------------------------------- argument hygiene for the new verbs
+new_chain "chain-recover-flags"
+FLAG_FAILURES=0
+for probe in "--chain-status --tools Bash" "--chain-status --claimed-review-ticket rt_x" \
+  "--chain-recover --tools Bash" "--chain-recover --claimed-review-ticket rt_x" \
+  "--chain-recover --outcome pass" "--chain-recover --chain-id c1"; do
+  PROBE_RC=0
+  # shellcheck disable=SC2086
+  bash "$LOG" $probe --session "$SID" >/dev/null 2>&1 || PROBE_RC=$?
+  [ "$PROBE_RC" -eq 2 ] || FLAG_FAILURES=$((FLAG_FAILURES+1))
+done
+[ "$FLAG_FAILURES" -eq 0 ] \
+  && check "T32i both verbs reject every flag that belongs to another verb" PASS \
+  || check "T32i both verbs reject every flag that belongs to another verb ($FLAG_FAILURES accepted)" FAIL
+
+AMBIENT_RC=0
+bash "$LOG" --chain-status >/dev/null 2>&1 || AMBIENT_RC=$?
+[ "$AMBIENT_RC" -eq 0 ] \
+  && check "T32j the documented ambient form (no --session) resolves the current session" PASS \
+  || check "T32j the documented ambient form (no --session) resolves the current session (rc=$AMBIENT_RC)" FAIL
+
+# ---------------------------------------------------------------- the gate-escape ledger stays gates-only
+new_chain "chain-recover-ledger"
+NOTE_RC=0
+bash "$LOG" --bypass-note ZENSU_CHAIN_RECOVER --session "$SID" >/dev/null 2>&1 || NOTE_RC=$?
+case "$NOTE_RC:$(state_field bypasses)" in
+  2:|2:none)
+    check "T33 the recovery marker is not a ledger gate name and cannot be recorded as one" PASS ;;
+  *)
+    check "T33 the recovery marker is not a ledger gate name (rc=$NOTE_RC ledger=$(state_field bypasses))" FAIL ;;
+esac
+
+bash "$LOG" --bypass-note ZENSU_CHAIN --session "$SID" >/dev/null 2>&1
+case ", $(tdd_bypasses "$STATE_FILE")," in
+  *", ZENSU_CHAIN,"*)
+    check "T34 a real gate escape is still recordable through --bypass-note" PASS ;;
+  *)
+    check "T34 a real gate escape is still recordable through --bypass-note (got: $(tdd_bypasses "$STATE_FILE"))" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- doctor surface
+new_chain "chain-recover-doctor"
+seed "$STALE_RECEIPT" || true
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+case "$DOCTOR_OUT" in
+  *"wedged-stale-rearm"*"/zensu:recover-chain"*)
+    check "T35 doctor reports the wedged chain and names the recovery command" PASS ;;
+  *)
+    check "T35 doctor reports the wedged chain and names the recovery command" FAIL ;;
+esac
+
+new_chain "chain-recover-doctor-deadend"
+seed 's.codeReviewDone=true;s.reviewRound=2;' || true
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+case "$DOCTOR_OUT" in
+  *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
+    check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
+  *)
+    check "T35b doctor raises a dead-end chain as its own warning row" FAIL ;;
+esac
+
+new_chain "chain-recover-doctor-blocked"
+seed "s.deferredReviewClaim=\"dc_test2\";$STALE_RECEIPT" || true
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+case "$DOCTOR_OUT" in
+  *"wedged but not recoverable in place"*"deferred-review claim"*)
+    check "T36 doctor distinguishes a blocked wedge and prints its real next step" PASS ;;
+  *)
+    check "T36 doctor distinguishes a blocked wedge and prints its real next step" FAIL ;;
+esac
+
+# ---------------------------------------------------------------- contract pins
+if grep -qE '^ZENSU_BYPASS_GATE_ALLOWLIST=.*ZENSU_CHAIN_RECOVER' "$PHASE_LIB"; then
+  check "T37 the gate-escape allowlist stays gates-only (no recovery marker)" FAIL
+else
+  check "T37 the gate-escape allowlist stays gates-only (no recovery marker)" PASS
+fi
+
+if grep -qF '"./skills/recover-chain"' "$PLUGIN_JSON" && grep -qE '^name: recover-chain$' "$SKILL"; then
+  check "T38 the skill is registered and its frontmatter name matches" PASS
+else
+  check "T38 the skill is registered and its frontmatter name matches" FAIL
+fi
+
+SKILLS_BLOCK="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README")"
+SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
+SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:')"
+REGISTERED_N="$(node -e 'process.stdout.write(String(require(process.argv[1]).skills.length))' "$PLUGIN_JSON" 2>/dev/null)"
+README_REGISTERED_N="$(printf '%s\n' "$SKILLS_BLOCK" | grep -oE '\([0-9]+ skills are registered' | grep -oE '[0-9]+' | head -1)"
+if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:recover-chain' \
+  && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ]; then
+  check "T39 README lists the skill; header, table and registered count all agree" PASS
+else
+  check "T39 README lists the skill; header, table and registered count agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N)" FAIL
+fi
+
+SKILL_CODE="$(awk '/^```/{inside=!inside; next} inside{print}' "$SKILL")"
+if printf '%s\n' "$SKILL_CODE" | grep -Eq '(^|[[:space:]])(find|rm|mv|cp)[[:space:]]|git worktree|tdd-phase-'; then
+  check "T40 the recovery recipe has no search, deletion, or cross-worktree step" FAIL
+else
+  check "T40 the recovery recipe has no search, deletion, or cross-worktree step" PASS
+fi
+
+STATUS_LINE="$(printf '%s\n' "$SKILL_CODE" | grep -n -- '--chain-status' | head -1 | cut -d: -f1)"
+RECOVER_LINE="$(printf '%s\n' "$SKILL_CODE" | grep -n -- '--chain-recover' | head -1 | cut -d: -f1)"
+if [ -n "$STATUS_LINE" ] && [ -n "$RECOVER_LINE" ] && [ "$STATUS_LINE" -lt "$RECOVER_LINE" ]; then
+  check "T41 the recipe runs the read-only diagnosis before the repair" PASS
+else
+  check "T41 the recipe runs the read-only diagnosis before the repair (status=$STATUS_LINE recover=$RECOVER_LINE)" FAIL
+fi
+
+SHAPE_ROWS_MISSING=""
+for shape in $(node -e '
+  const chain = require(process.argv[1]);
+  process.stdout.write(
+    Object.keys(chain.NEXT_COMMAND).concat(Object.keys(chain.BLOCKED_RECOVERY_COMMAND)).join(" "),
+  );
+' "$MODULE"); do
+  grep -qF "\`$shape\`" "$SKILL" || SHAPE_ROWS_MISSING="$SHAPE_ROWS_MISSING $shape"
+done
+[ -z "$SHAPE_ROWS_MISSING" ] \
+  && check "T42 every shape and blocked reason the module can emit is documented in the skill" PASS \
+  || check "T42 every shape and blocked reason is documented in the skill (missing:$SHAPE_ROWS_MISSING)" FAIL
+
+echo "----"
+echo "test-chain-recover: $PASS PASS / $FAIL FAIL"
+[ "$FAIL" -eq 0 ]

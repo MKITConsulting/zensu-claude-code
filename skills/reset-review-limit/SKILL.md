@@ -90,7 +90,10 @@ mutates workflow state.
 
 If this command fails or prints an empty value, stop. The current session has no
 ticket-bound exhausted generation to reset. Never fall back to searching for a
-different session.
+different session. If the chain also refuses to advance by any other route — in
+particular if `zensu-log.sh --review-ticket` refuses — read the shape with
+`zensu-log.sh --chain-status` and follow the command it names; `/zensu:recover-chain`
+owns the one shape that no supported command can leave.
 
 Then read the official durable status once:
 

@@ -72,6 +72,16 @@ case "${1:-}" in
       echo "zensu-log.sh --phase requires a phase value" >&2
       exit 2
     fi
+    if [ "$phase_val" = CHAIN_RECOVERED ]; then
+      echo "zensu-log.sh --phase: CHAIN_RECOVERED is written only by --chain-recover; it is the provenance record of a repair and cannot be minted by a caller" >&2
+      exit 2
+    fi
+    case "$reason_val" in
+      "chain-recovered: "*)
+        echo "zensu-log.sh --phase: a 'chain-recovered: ' reason is reserved for --chain-recover" >&2
+        exit 2
+        ;;
+    esac
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --phase $phase_val --step $step_val}"
     fi
@@ -281,7 +291,7 @@ case "${1:-}" in
     autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}"
     exit $?
     ;;
-  --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--workflow-begin|--workflow-end)
+  --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--chain-status|--chain-recover|--workflow-begin|--workflow-end)
     verb="$1"
     session_val=""
     tools_val=""
@@ -344,7 +354,7 @@ case "${1:-}" in
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
           && [ "$seen_outcome" = false ] || invalid_known_flag=true
         ;;
-      --review-ticket|--current-review-ticket|--tdd-reset)
+      --review-ticket|--current-review-ticket|--tdd-reset|--chain-status|--chain-recover)
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
           && [ "$seen_autopilot_run" = false ] && [ "$seen_autopilot_attempt" = false ] \
           && [ "$seen_autopilot_return" = false ] && [ "$seen_chain_id" = false ] \
@@ -485,6 +495,81 @@ case "${1:-}" in
         ;;
       --review-ticket) tdd_issue_review_ticket "$session_val" ;;
       --current-review-ticket) tdd_claimed_review_ticket "$(tdd_state_file "$session_val")" ;;
+      --chain-status)
+        chain_status_out="$(tdd_chain_diagnostics "$session_val")"
+        chain_status_rc=$?
+        case "$chain_status_rc" in
+          0) printf '%s\n' "$chain_status_out"; exit 0 ;;
+          1)
+            echo "zensu-log.sh --chain-status: this session has no chain state" >&2
+            exit 1
+            ;;
+          *)
+            echo "zensu-log.sh --chain-status: chain state is unreadable, foreign, or unsafe" >&2
+            exit 2
+            ;;
+        esac
+        ;;
+      --chain-recover)
+        chain_recover_out="$(tdd_recover_chain "$session_val")"
+        chain_recover_rc=$?
+        case "$chain_recover_rc" in
+          0)
+            printf '%s\n' "${chain_recover_out/recovered:/recovered: }"
+            exit 0
+            ;;
+          1)
+            echo "zensu-log.sh --chain-recover: this session has no chain state" >&2
+            exit 1
+            ;;
+          3)
+            if [ "$chain_recover_out" = unclassifiable-generation ]; then
+              echo "zensu-log.sh --chain-recover: refused — under the lock the document no longer classified (a field changed shape between the diagnosis and the transaction). Nothing was written; re-run --chain-status." >&2
+              exit 3
+            fi
+            chain_recover_report="$(tdd_chain_diagnostics "$session_val" 2>/dev/null)" \
+              || chain_recover_report=""
+            chain_recover_hint="$(CHAIN_REPORT="$chain_recover_report" node -e '
+              try {
+                const report = JSON.parse(process.env.CHAIN_REPORT);
+                let lead = "This chain is not wedged";
+                if (report.wedged && report.recoverable) {
+                  lead = "The chain changed under the refusal and now reads as recoverable — re-run --chain-status first";
+                } else if (report.wedged) {
+                  lead = "This chain is wedged but not recoverable in place";
+                }
+                process.stdout.write(lead + " — supported next step: " + String(report.nextCommand || ""));
+              } catch (_) {}
+            ' 2>/dev/null)"
+            if [ -n "$chain_recover_hint" ]; then
+              echo "zensu-log.sh --chain-recover: refused (${chain_recover_out}). ${chain_recover_hint}" >&2
+            else
+              echo "zensu-log.sh --chain-recover: refused (${chain_recover_out})" >&2
+            fi
+            exit 3
+            ;;
+          *)
+            case "$chain_recover_out" in
+              write-failed)
+                echo "zensu-log.sh --chain-recover: the recovery transaction was rejected before it could be committed (lock or filesystem failure). The chain was left untouched — retry once the cause is resolved." >&2
+                ;;
+              write-landed-unconfirmed)
+                echo "zensu-log.sh --chain-recover: the repair landed but the transaction could not confirm it. Re-run --chain-status to see the current shape; do NOT arm a new chain." >&2
+                ;;
+              lock-failed)
+                echo "zensu-log.sh --chain-recover: the session lease could not be acquired, so the chain was NOT recovered. Re-run --chain-status; do NOT arm a new chain to work around it." >&2
+                ;;
+              module-unreadable)
+                echo "zensu-log.sh --chain-recover: the chain-recovery module is missing or could not be loaded — repair the plugin installation" >&2
+                ;;
+              *)
+                echo "zensu-log.sh --chain-recover: chain state is unreadable, foreign, or unsafe" >&2
+                ;;
+            esac
+            exit 2
+            ;;
+        esac
+        ;;
       --review-rearm)
         [ "$claimed_ticket_seen" = "true" ] || {
           echo "zensu-log.sh --review-rearm requires --claimed-review-ticket <ticket>" >&2
