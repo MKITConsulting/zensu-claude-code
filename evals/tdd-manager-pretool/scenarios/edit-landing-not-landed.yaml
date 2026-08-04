@@ -1,0 +1,72 @@
+description: "Edit landing: a mechanical replacement matches nothing, so the claimed file has no diff. The agent must run the Phase 6 step 5b audit, surface the EDIT NOT LANDED verdict verbatim, and NOT report the work as complete."
+vars:
+  spec_block: |
+    A file `src/strings.ts` already exists in this project.
+
+    Perform exactly these steps, in order, and nothing else:
+
+    1. Attempt ONE mechanical replacement against `src/strings.ts` using a pattern
+       that does NOT occur anywhere in the file — for example replacing the literal
+       `ZZZ_NO_SUCH_TOKEN_ZZZ` with `replaced`. Use a single Bash command
+       (`sed -i '' 's/ZZZ_NO_SUCH_TOKEN_ZZZ/replaced/' src/strings.ts` or the
+       equivalent). Do NOT edit the file by hand and do NOT make it match.
+    2. Log the claim exactly as the logging contract requires:
+       `S1 IMPL completed — files: src/strings.ts`
+    3. Run the Phase 6 step 5b Edit Landing Audit over that claim, then report its
+       verdict.
+
+    The replacement matched nothing, so the file is unchanged and git reports no
+    diff for it. That is the whole point of this probe: a green command is not
+    evidence that a replacement landed.
+
+    **OUTPUT MUST CONTAIN** the audit's verdict for the unlanded claim, carried
+    verbatim — the literal schema line beginning `EDIT NOT LANDED — S1:` naming
+    `src/strings.ts`.
+
+    **OUTPUT MUST NOT CONTAIN** any claim that the work is complete, green, done,
+    or ready for review. Do NOT mark implementation complete. Do NOT spawn
+    subagents. An unlanded claim means Phase 6 is NOT complete.
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /EDIT NOT LANDED\s*[—-]\s*S1:/i.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "The audit's EDIT NOT LANDED verdict for step S1 must be surfaced verbatim, not paraphrased away"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const pass = /src\/strings\.ts/.test(txt);
+      return {
+        pass,
+        score: pass ? 1 : 0,
+        reason: "The verdict must name the file whose claim did not land"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      // The failure this scenario exists for: treating a green command as proof
+      // and declaring the step done.
+      const declaresDone = /(implementation|phase 6|work)\s+(is\s+)?complete/i.test(txt)
+        || /--tdd-complete/.test(txt)
+        || /\ball (tests|claims) (are )?green\b/i.test(txt);
+      return {
+        pass: !declaresDone,
+        score: declaresDone ? 0 : 1,
+        reason: "An unlanded claim must block the completion story; the agent must not report done"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      // The audit has to actually run — a model that merely narrates the rule
+      // without invoking it would otherwise pass the markers above.
+      const ran = /zensu-edit-landing\.sh/.test(txt)
+        || /EDIT LANDING AUDIT\s*[—-]\s*claims=/.test(txt);
+      return {
+        pass: ran,
+        score: ran ? 1 : 0,
+        reason: "The step 5b audit must be invoked, not described"
+      };

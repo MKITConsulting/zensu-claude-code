@@ -31,7 +31,7 @@ The skill is also auto-invoked by the `ExitPlanMode` PostToolUse hook when the u
 | Log | `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log` | Append-only execution trace, phase markers, attempts, audit results |
 | State | `.zensu/state/tdd-phase-<scv1-session-key>.json` | Runtime FSM/review state (per session, ephemeral) |
 | Source | test + implementation files | The actual code |
-| Audit | included in log + final report | Build, coverage, mtime discipline, precondition drift |
+| Audit | included in log + final report | Build, coverage, mtime discipline, edit landing, precondition drift |
 
 The plan and log are local per-run working artifacts. They are gitignored and
 never auto-staged or committed; the tracked source/tests and final user-facing
@@ -83,14 +83,14 @@ flowchart TD
 
 | Phase | Goal | Key outputs |
 |-------|------|-------------|
-| 0. Pre-flight | Capture `SESSION_TS` + `SESSION_EPOCH`, create first task | session timestamps |
+| 0. Pre-flight | Capture `SESSION_TS` + `SESSION_EPOCH` + `BASELINE_SHA`, create first task | session timestamps + baseline commit |
 | 1. Discover Project | Read CLAUDE.md hierarchy, detect tech stack, test runners, coverage tool + threshold | tech-stack context |
 | 1.5. Precondition Discovery | Enumerate every external CLI/secret/endpoint/fixture named by the spec, verify presence, escalate misses | Preconditions table in plan |
 | 2. Plan + Log | Write plan markdown (incl. Requirements table with stable AC-###/FR-### IDs + per-step `Covers` mapping) + initialize log file | plan + log on disk |
 | 3. Create ALL Tasks | 3 tasks per TDD step (test/impl/verify) + 1 per integration step | TaskList populated |
 | 4. Execute TDD Cycles | Per step: RED → IMPL → GREEN (+ REFACTOR if applicable) | source code + tests |
 | 5. Checkpoint | Run full test suite + linter, batch-update plan statuses | checkpoint log entry |
-| 6. Audit & Final Report | Build verification, coverage, mtime discipline, precondition drift audit, requirements coverage cross-check (warning level), summary | audit log + final report |
+| 6. Audit & Final Report | Build verification, coverage, mtime discipline, edit landing audit, precondition drift audit, requirements coverage cross-check (warning level), summary | audit log + final report |
 
 See [skills/tdd/SKILL.md](../skills/tdd/SKILL.md) for the canonical main-thread phase definitions.
 
@@ -361,6 +361,7 @@ These are the guardrails that protect users from common TDD failure modes. Each 
 | **7. Installed-plugin Claude CLI provider** | Wrapper [scripts/session-control-claude-wrapper.sh](../scripts/session-control-claude-wrapper.sh) invokes pinned Claude Code from a fresh isolated user-scope registry, never with `--plugin-dir`, and emits one wrapper-owned `[control-attestation]`. | Contract runs stay deterministic; live runs prove the real installed cache root, content revision, exact source Git SHA, session hash, runtime digest, state revision, normal/reviewer subagent context, hook sequence, reviewer capabilities, and changed-file hashes. See the [release-gate contract](session-control-release-gate.md). |
 | **8. Hook event mirror** | Opt-in via `ZENSU_HOOK_LOG`. Hook writes denial reason lines into the log when the gate fires. | Eval assertions can verify gate behavior without reading hook stderr. |
 | **9. Trusted control attestation** | The wrapper reads trusted runtime artifacts before cleanup, neutralizes reserved prefixes in model output, and produces exactly one schema-versioned attestation line. | Assertions never grade model prose or accept a spoofed success claim. |
+| **10. Phase 6 Edit Landing Audit** | Implemented by `hooks/lib/zensu-edit-landing.sh` and enforced — `--tdd-complete` refuses without its receipt. Cross-checks every file a step CLAIMED to edit (`IMPL completed — files:` / `WIRED — files:`) against the repo-root-anchored union (`TOP` from `git rev-parse --show-toplevel`) of `git -C "$TOP" diff --name-only HEAD` and `git -C "$TOP" ls-files --others --exclude-standard`, and re-runs on every round that changed a file, including the terminal self-review round. Flags `EDIT NOT LANDED — {step_id}: claimed {file}, git shows no change`. Runs in strict AND vanilla mode. | A mechanical or bulk replacement that matched nothing leaves no diff, so no reviewer ever sees it and the green suite reads as confirmation. This is the check that catches it. |
 
 ---
 
@@ -403,7 +404,7 @@ Auto-fix loop runs up to 5 rounds (configurable via `autoFixMaxRounds` in plugin
 
 **When the session binding itself cannot be resolved.** Before any routing, the Stop hook must bind the event to the immutable Session Control record of its session. Three states make that impossible, and each now blocks with its own reason: the Session Control library is missing from the installation, the event cannot be bound to its record at all, or the record no longer resolves against a project root that still exists. The most common real cause is a **deleted or moved worktree**: the recorded `project_root` is immutable, so the binder rejects it with `session-control-v1: context project root does not exist` and no Stop can ever prove completion from that record again. Re-create exactly that directory to resume the recorded session, or start a new session. Because these blocks sit *above* the routing logic, `ZENSU_CHAIN` and `hooks.chainEnforcer` are now evaluated in them too — otherwise a session whose worktree was deleted could never end a turn again. Both switches are named on stderr for the user and deliberately kept out of the model-facing reason; a release logs that no completion was proven, only that the guard was waived.
 
-**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a narrative summary block in this order: `## Problem` (the feature/bug/need this session addressed), `## What I built` (numbered deliverables with status + PR links, carrying the audit facts — feature title, files modified, tests created, build status, mtime audit verdict, coverage status, plan + log paths, and — when the plan carries a `## Requirements` table — per-requirement status keyed by its stable AC-###/FR-### IDs), `## How I built it` (the TDD discipline followed, the final reviewer verdict with findings count by severity and files reviewed, and the per-round auto-fix trace of EVERY review round 1..N — each round's in-thread fixes plus the clean verification round(s) marked `PASS — 0 findings, nothing to fix`, so the reader sees the chain converged with all findings addressed; skipped only when no review round ran), `## Open` (deferred suggestions / max-rounds findings requiring manual fix / next step), and `## TL;DR` (exactly one sentence, last). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. When `hooks.selfReview` is enabled (default), the terminal `/zensu:self-review` stage renders this summary and inserts a `## Self-Review Summary` section before `## Open`. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
+**Chain-end combined summary.** At every chain-end branch — PASS / zero findings, suggestions-only stop, and max-rounds convergence — `hooks/post-review-tdd-delegate.sh` appends a `CHAIN-END SUMMARY` directive to its `additionalContext` output. The main agent then renders a narrative summary block in this order: `## Problem` (the feature/bug/need this session addressed), `## What I built` (numbered deliverables with status + PR links, carrying the audit facts — feature title, files modified, tests created, build status, mtime audit verdict, edit landing verdict, coverage status, plan + log paths, and — when the plan carries a `## Requirements` table — per-requirement status keyed by its stable AC-###/FR-### IDs), `## How I built it` (the TDD discipline followed, the final reviewer verdict with findings count by severity and files reviewed, and the per-round auto-fix trace of EVERY review round 1..N — each round's in-thread fixes plus the clean verification round(s) marked `PASS — 0 findings, nothing to fix`, so the reader sees the chain converged with all findings addressed; skipped only when no review round ran), `## Open` (deferred suggestions / max-rounds findings requiring manual fix / next step), and `## TL;DR` (exactly one sentence, last). This replaces the prior terse-stop behavior so the user retains visibility into the full chain. When `hooks.selfReview` is enabled (default), the terminal `/zensu:self-review` stage renders this summary and inserts a `## Self-Review Summary` section before `## Open`. Controlled by `hooks.combinedSummary` in `~/.zensu/config.json` (default `true`; set `false` to restore terse stop). Contrast `autoFixIncludeSuggestions` which defaults to disabled — `combinedSummary` defaults the other way.
 
 ---
 
@@ -466,6 +467,6 @@ Non-Bash test invocations (rare; e.g. an MCP test runner) use the `via=tool_name
 - [hooks/hooks.json](../hooks/hooks.json) — hook registrations
 - [scripts/claude-promptfoo-wrapper.sh](../scripts/claude-promptfoo-wrapper.sh) — eval provider
 - [evals/tdd-manager-pretool/](../evals/tdd-manager-pretool/) — 13 promptfoo scenarios verifying the discipline
-- [tests/structure/](../tests/structure/) — 127 structure tests pinning the contract
+- [tests/structure/](../tests/structure/) — the structure suites pinning the contract
 - [CLAUDE.md](../CLAUDE.md) — repo conventions (English-only, version bumps, PR workflow)
 - [CHANGELOG.md](../CHANGELOG.md) — release history

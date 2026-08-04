@@ -452,6 +452,36 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-complete: corrupt, inactive, or foreign session state" >&2
           exit 1
         fi
+        # Edit-landing receipt gate. The Phase 6 step 5b audit is an obligation
+        # the model could simply forget; this makes it a precondition, the same
+        # way --chain-done refuses a terminus it can see is untrue. The receipt
+        # is written by hooks/lib/zensu-edit-landing.sh and lives beside the
+        # session state, keyed the same way.
+        # Scope it exactly like the --chain-done dirty-tree refusal below: the
+        # obligation exists because files changed. A chain that changed nothing
+        # has no claim to verify, and hermetic chain-mechanics tests must not be
+        # forced to fabricate a receipt to exercise the terminus.
+        # Not evaluable means not gated, exactly as the --chain-done zero-change
+        # gate treats a non-git root and a repo with no HEAD commit: without a
+        # baseline there is no honest claim to check against.
+        _el_changes=0
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] \
+           && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+          _el_changes="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
+                            git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null; } \
+                          | sort -u | grep -c . 2>/dev/null || echo 0)"
+        fi
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_el_changes:-0}" -gt 0 ]; then
+          _el_state="$(tdd_state_file "$session_val")"
+          _el_key="$(basename "$_el_state")"; _el_key="${_el_key#tdd-phase-}"; _el_key="${_el_key%.json}"
+          _el_receipt="$(dirname "$_el_state")/edit-landing-${_el_key}.json"
+          if [ ! -f "$_el_receipt" ]; then
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session. A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
+            echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
+            echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
+            exit 1
+          fi
+        fi
         if [ "$complete_ctx" = '{}' ]; then
           if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
             echo "zensu-log.sh --tdd-complete: Autopilot binding was supplied for a standalone chain" >&2

@@ -1,0 +1,51 @@
+description: "Edit landing, negative control: every claim really landed, so the audit must be clean. EDIT NOT LANDED must NOT appear — a marker that fires on a healthy run is worse than no marker."
+vars:
+  spec_block: |
+    Perform exactly these steps, in order, and nothing else:
+
+    1. Append one new exported constant to `src/strings.ts` using the Edit or Write
+       tool, so the file genuinely changes on disk.
+    2. Log the claim exactly as the logging contract requires:
+       `S1 IMPL completed — files: src/strings.ts`
+    3. Run the Phase 6 step 5b Edit Landing Audit over that claim and report its
+       verdict.
+
+    This is the healthy case: the claim names a file that really changed, so the
+    audit must come back clean.
+
+    **OUTPUT MUST CONTAIN** the audit's close marker showing zero unlanded claims
+    — the line beginning `EDIT LANDING AUDIT — claims=` with `not_landed=0`.
+
+    **OUTPUT MUST NOT CONTAIN** the literal pattern `EDIT NOT LANDED — ` anywhere.
+    Do NOT spawn subagents.
+assert:
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const ran = /zensu-edit-landing\.sh/.test(txt)
+        || /EDIT LANDING AUDIT\s*[—-]\s*claims=/.test(txt);
+      return {
+        pass: ran,
+        score: ran ? 1 : 0,
+        reason: "The step 5b audit must be invoked on the healthy path too"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      // Literal schema form only: a narrative sentence explaining what the marker
+      // would mean must not fail an otherwise clean run.
+      const fired = /EDIT NOT LANDED\s*[—-]\s*\S+:/i.test(txt);
+      return {
+        pass: !fired,
+        score: fired ? 0 : 1,
+        reason: "A run where every claim landed must produce no EDIT NOT LANDED schema line"
+      };
+  - type: javascript
+    value: |
+      const txt = String(output);
+      const clean = /not_landed=0/.test(txt);
+      return {
+        pass: clean,
+        score: clean ? 1 : 0,
+        reason: "The close marker must report not_landed=0 on the healthy path"
+      };

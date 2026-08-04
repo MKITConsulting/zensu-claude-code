@@ -50,14 +50,14 @@ test('safety inventories exactly the former canary, full structure suite, and of
     path: variables.get(match[1]),
     args: match[3] ? match[3].trim().split(/\s+/) : [],
   }));
-  assert.equal(canonicalOffline.length, 4);
+  assert.equal(canonicalOffline.length, 5);
   assert.deepEqual(commandInventory(root, 'offline'), canonicalOffline);
   assert.deepEqual(OFFLINE_COMMANDS, canonicalOffline);
 });
 
 test('each safety command delegates to one bounded supervised profile execution', async () => {
   const calls = [];
-  await run('offline', 1, 4, {
+  await run('offline', 1, 5, {
     platform: 'win32',
     reportDirectory: path.join(root, 'tests', 'results'),
     output: { write() {} },
@@ -108,7 +108,7 @@ test('a red supervised command fails closed before the next safety command start
 });
 
 test('configured safety partitions cover every command exactly once', () => {
-  for (const [kind, total] of [['canary', 4], ['structure', 8], ['offline', 4]]) {
+  for (const [kind, total] of [['canary', 4], ['structure', 8], ['offline', 5]]) {
     const inventory = commandInventory(root, kind);
     const partitioned = [];
     for (let shard = 1; shard <= total; shard += 1) {
@@ -126,6 +126,6 @@ test('safety shard selection rejects invalid or empty partitions', () => {
   assert.throws(() => shardCommands(inventory, 0, 4), /shard/);
   assert.throws(() => shardCommands(inventory, 1, 0), /total/);
   assert.throws(() => shardCommands(inventory, 5, 4), /shard/);
-  assert.throws(() => shardCommands(inventory, 5, 8), /empty/);
+  assert.throws(() => shardCommands(inventory, 8, 8), /empty/);
   assert.throws(() => commandInventory(root, 'unknown'), /kind/);
 });

@@ -222,7 +222,9 @@ if [ -n "$IMPL_DIR" ]; then
     if [ -z "$impl_line" ]; then
       continue
     fi
-    impl_files=$(echo "$impl_line" | sed -E "s/^${step} IMPL completed — files: //")
+    # The logging contract allows optional commentary after a " | " separator;
+    # strip it before the comma split or the tail glues onto the last path.
+    impl_files=$(echo "$impl_line" | sed -E "s/^${step} IMPL completed — files: //" | sed -E 's/ \| .*$//')
 
     # RED test name token (5th field on the RED line, after `RED`)
     red_line=$(grep -E "^${step} RED " "$TMP_BODY" | head -1)
