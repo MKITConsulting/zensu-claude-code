@@ -13,6 +13,7 @@ LOG="$ROOT/hooks/lib/zensu-log.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 MODULE="$ROOT/hooks/lib/chain-recovery-v1.js"
 PHASE_LIB="$ROOT/hooks/lib/zensu-tdd-phase.sh"
+ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
 SKILL="$ROOT/skills/recover-chain/SKILL.md"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 README="$ROOT/README.md"
@@ -23,7 +24,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$LOG" "$CORE" "$MODULE" "$PHASE_LIB" "$SKILL" "$PLUGIN_JSON" "$README"; do
+for f in "$LOG" "$CORE" "$MODULE" "$PHASE_LIB" "$ENFORCER" "$SKILL" "$PLUGIN_JSON" "$README"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -692,6 +693,18 @@ case "$WRAPPER_OUT" in
     check "T45 the doctor wrapper renders the wedged shape and the recovery command (row missing)" FAIL ;;
 esac
 
+new_chain "chain-recover-doctor-repaired"
+seed "$STALE_RECEIPT" || true
+REPAIRED_RC=0
+bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || REPAIRED_RC=$?
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+case "$REPAIRED_RC:$DOCTOR_OUT" in
+  0:*"(repaired 1×)"*)
+    check "T52 doctor renders the durable repair count once a chain has actually been recovered" PASS ;;
+  *)
+    check "T52 doctor renders the durable repair count on a recovered chain (rc=$REPAIRED_RC)" FAIL ;;
+esac
+
 # ------------------------------------------- a standalone receipt: refused, and it shuts the terminus
 new_chain "chain-recover-standalone-receipt"
 seed "$RECEIPT_ONLY" || true
@@ -836,6 +849,23 @@ done
 [ -z "$SHAPE_ROWS_MISSING" ] \
   && check "T42 every shape and blocked reason the module can emit is documented in the skill" PASS \
   || check "T42 every shape and blocked reason is documented in the skill (missing:$SHAPE_ROWS_MISSING)" FAIL
+
+MODULE_SHAPES=" $(node -e '
+  const chain = require(process.argv[1]);
+  process.stdout.write(Object.keys(chain.NEXT_COMMAND).join(" "));
+' "$MODULE" 2>/dev/null) "
+ENFORCER_SHAPE_N=0
+ENFORCER_SHAPES_UNKNOWN=""
+for shape in $(grep -oE 'shape=[a-z][a-z-]*' "$ENFORCER" | sed 's/^shape=//' | sort -u); do
+  ENFORCER_SHAPE_N=$((ENFORCER_SHAPE_N+1))
+  case "$MODULE_SHAPES" in
+    *" $shape "*) ;;
+    *) ENFORCER_SHAPES_UNKNOWN="$ENFORCER_SHAPES_UNKNOWN $shape" ;;
+  esac
+done
+[ "$ENFORCER_SHAPE_N" -gt 0 ] && [ -z "$ENFORCER_SHAPES_UNKNOWN" ] \
+  && check "T51 every chain shape the Stop enforcer names is one the module can still emit, so its refusal never routes to a renamed shape" PASS \
+  || check "T51 every chain shape the Stop enforcer names is a real module shape (named=$ENFORCER_SHAPE_N unknown:$ENFORCER_SHAPES_UNKNOWN)" FAIL
 
 echo "----"
 echo "test-chain-recover: $PASS PASS / $FAIL FAIL"
