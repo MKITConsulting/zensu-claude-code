@@ -30,6 +30,11 @@ const OFFLINE_COMMANDS = Object.freeze([
     path: 'evals/reset-review-limit/run-self-check.sh',
     args: Object.freeze([]),
   }),
+  Object.freeze({
+    runner: 'bash',
+    path: 'evals/tdd-manager-pretool/run-eval.sh',
+    args: Object.freeze(['--self-check']),
+  }),
 ]);
 
 class SafetyShardError extends Error {}

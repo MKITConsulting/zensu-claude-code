@@ -318,7 +318,7 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   assert.equal(job.strategy?.['fail-fast'], false);
   assert.equal(job.strategy?.['max-parallel'], 8);
   const include = job.strategy?.matrix?.include;
-  assert.equal(include.length, 16);
+  assert.equal(include.length, 17);
   assert.deepEqual(
     include.filter((entry) => entry.kind === 'canary'),
     [1, 2, 3, 4].map((shard) => ({ kind: 'canary', shard, total: 4 })),
@@ -329,7 +329,7 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   );
   assert.deepEqual(
     include.filter((entry) => entry.kind === 'offline'),
-    [1, 2, 3, 4].map((shard) => ({ kind: 'offline', shard, total: 4 })),
+    [1, 2, 3, 4, 5].map((shard) => ({ kind: 'offline', shard, total: 5 })),
   );
   const run = job.steps.find((step) => step.name === 'Run bounded Windows safety shard');
   assert.equal(
