@@ -55,6 +55,8 @@ const BLOCKED_RECOVERY_COMMAND = {
     'this document carries an inconsistent review-ticket slot; recovery never rewrites it, because doing so would satisfy the no-ticket review terminus. Start a fresh generation with /zensu:tdd',
   'flag-state':
     'this generation already latched selfReviewFixed, so neither the reviewer chain nor a budget reset applies — start a fresh generation with /zensu:tdd',
+  'claim-unknown':
+    'this document has no readable deferredReviewClaim field, so recovery cannot prove no deferred-review claim is outstanding; it refuses rather than guess — start a fresh generation with /zensu:tdd',
   'link-shape':
     'this document carries a rearm receipt without a complete Autopilot binding, which no writer in this plugin can produce; recovery only repairs a bound generation, so start a fresh one with /zensu:tdd',
 };
@@ -212,7 +214,8 @@ function shapeCommand(shape, linkage, autopilot, rearmReceipt) {
 function blockedRecoveryReason(state, linkage) {
   if (linkage === 'partial') return 'partial-link';
   if (linkage !== 'bound') return 'link-shape';
-  if (!state.deferredReviewClaimKnown || state.deferredReviewClaim !== '') return 'deferred-claim';
+  if (!state.deferredReviewClaimKnown) return 'claim-unknown';
+  if (state.deferredReviewClaim !== '') return 'deferred-claim';
   if (state.reviewTicketConsumed !== true) return 'ticket-slot';
   return 'flag-state';
 }
@@ -259,7 +262,6 @@ function classifyChain(input) {
     deferredReviewClaim: state.deferredReviewClaimKnown
       ? (state.deferredReviewClaim === '' ? 'none' : 'present')
       : 'unknown',
-    deferredReviewClaimPresent: !state.deferredReviewClaimKnown || state.deferredReviewClaim !== '',
     reviewTicketPresent: state.reviewTicket !== '',
     reviewTicketConsumed: state.reviewTicketConsumed,
     claimedReviewTicketPresent: state.reviewTicket !== ''
@@ -286,11 +288,9 @@ function countRecoveries(state) {
 
 module.exports = {
   BLOCKED_RECOVERY_COMMAND,
-  DEAD_END_SHAPES,
   NEXT_COMMAND,
   REARM_MARKER_KEYS,
   RECOVERABLE_SHAPES,
-  STUCK_SHAPES,
   RECOVERY_HISTORY_PHASE,
   RECOVERY_HISTORY_REASON_PREFIX,
   RETURN_STAGES,

@@ -584,23 +584,30 @@ case "${1:-}" in
                 exit 3
                 ;;
             esac
+            chain_recover_report="$(tdd_chain_diagnostics "$session_val" 2>/dev/null)" \
+              || chain_recover_report=""
             chain_recover_hint="$(CHAIN_REASON="$chain_recover_reason" \
+              CHAIN_REPORT="$chain_recover_report" \
               CHAIN_RECOVERY="$_ZENSU_TDD_CHAIN_RECOVERY" node -e '
               try {
                 const chain = require(process.env.CHAIN_RECOVERY);
-                const reason = process.env.CHAIN_REASON;
-                const blocked = chain.BLOCKED_RECOVERY_COMMAND[reason];
-                if (blocked) {
-                  process.stdout.write("This chain is wedged but not recoverable in place — supported next step: " + blocked);
-                } else if (chain.NEXT_COMMAND[reason]) {
-                  process.stdout.write("This chain is not wedged — supported next step: " + chain.NEXT_COMMAND[reason]);
-                }
+                const blocked = chain.BLOCKED_RECOVERY_COMMAND[process.env.CHAIN_REASON];
+                let report = {};
+                try { report = JSON.parse(process.env.CHAIN_REPORT); } catch (_) {}
+                let lead;
+                if (report.deadEnd) lead = "This chain is at a dead end";
+                else if (report.wedged && !report.recoverable) lead = "This chain is wedged but not recoverable in place";
+                else if (report.wedged) lead = "The chain changed under the refusal and now reads as recoverable — re-run --chain-status first";
+                else if (report.shape) lead = "This chain is not wedged";
+                else lead = "The current chain shape could not be re-read";
+                const command = blocked || report.nextCommand;
+                if (command) process.stdout.write(lead + " — supported next step: " + command);
               } catch (_) {}
             ' 2>/dev/null)"
             if [ -n "$chain_recover_hint" ]; then
               echo "zensu-log.sh --chain-recover: refused (${chain_recover_reason}). ${chain_recover_hint}" >&2
             else
-              echo "zensu-log.sh --chain-recover: refused (${chain_recover_reason}). This chain is not wedged — run --chain-status for the supported next step." >&2
+              echo "zensu-log.sh --chain-recover: refused (${chain_recover_reason}). The supported next step could not be derived — run --chain-status." >&2
             fi
             exit 3
             ;;

@@ -119,9 +119,7 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   run **from the session that owns that chain** (the row prints its truncated
   session key) — this skill never recovers one on its behalf. When the row reads
   "wedged but not recoverable in place", repeat the blocker it names verbatim
-  instead: an incomplete Autopilot linkage, an outstanding deferred-review claim,
-  an inconsistent review-ticket slot, or a latched `selfReviewFixed` each has its
-  own next step. A separate "at a dead end" row means no repair applies at all and
+  instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
   a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
 

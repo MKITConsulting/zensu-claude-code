@@ -34,17 +34,16 @@ done
 check "P0 all target files exist" PASS
 
 WORK="$(mktemp -d)"
-restore_repo() {
-  [ -f "$MODULE.bak" ] && mv -f "$MODULE.bak" "$MODULE"
+cleanup() {
   rm -rf "$WORK"
 }
-trap restore_repo EXIT INT TERM HUP
+trap cleanup EXIT INT TERM HUP
 
 if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1; then
   check "P1 the classifier unit suite passes (node --test chain-recovery-v1.test.js)" PASS
 else
   check "P1 the classifier unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
-  sed -n '1,40p' "$WORK/unit.out" | sed 's/^/        /' 
+  grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
 fi
 export CLAUDE_PLUGIN_ROOT="$ROOT"
 export CLAUDE_PLUGIN_DATA="$WORK/plugin-data"
@@ -436,7 +435,7 @@ RECOVER_RC=$?
   || check "T23 an incomplete Autopilot linkage is diagnosed and refused (linkage=$(status_field linkage) rc=$RECOVER_RC)" FAIL
 
 case "$RECOVER_ERR" in
-  *"wedged but not recoverable"*"/zensu:tdd"*)
+  *"refused (partial-link)."*"wedged but not recoverable"*"/zensu:tdd"*)
     check "T24 the blocked refusal says the chain IS wedged and names a real next step" PASS ;;
   *)
     check "T24 the blocked refusal says the chain IS wedged and names a real next step (got: $RECOVER_ERR)" FAIL ;;
@@ -447,11 +446,11 @@ seed "s.deferredReviewClaim=\"dc_test1\";$STALE_RECEIPT" || true
 BEFORE="$(digest)"
 RECOVER_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
 RECOVER_RC=$?
-[ "$(status_field deferredReviewClaimPresent)" = "true" ] \
+[ "$(status_field deferredReviewClaim)" = "present" ] \
   && [ "$(status_field recoverable)" = "false" ] && [ "$RECOVER_RC" -eq 3 ] \
   && [ "$BEFORE" = "$(digest)" ] \
   && check "T25 an outstanding deferred-review claim blocks recovery, like every sibling mutator" PASS \
-  || check "T25 an outstanding deferred-review claim blocks recovery (claim=$(status_field deferredReviewClaimPresent) rc=$RECOVER_RC)" FAIL
+  || check "T25 an outstanding deferred-review claim blocks recovery (claim=$(status_field deferredReviewClaim) rc=$RECOVER_RC)" FAIL
 
 case "$RECOVER_ERR" in
   *"deferred-review claim"*)
@@ -546,13 +545,24 @@ else
 fi
 
 # ---------------------------------------------------------------- the classifier module is tamper-protected
-new_chain "chain-recover-tamper"
+# Tamper with a COPY of the plugin, never the tracked tree: tests/run-all.sh kills a
+# slow suite with an untrappable SIGKILL, which would leave the real write-gate module
+# stubbed or deleted in the working tree.
+PLUGIN_COPY="$WORK/plugin"
+mkdir -p "$PLUGIN_COPY/.claude-plugin"
+COPY_OK=true
+for item in .claude-plugin .mcp.json hooks agents skills docs templates README.md CHANGELOG.md tests; do
+  [ -e "$ROOT/$item" ] || continue
+  cp -R "$ROOT/$item" "$PLUGIN_COPY/" 2>/dev/null || COPY_OK=false
+done
+[ "$COPY_OK" = true ] || check "T32 plugin copy for the tamper fixtures failed" FAIL
+COPY_MODULE="$PLUGIN_COPY/hooks/lib/chain-recovery-v1.js"
+COPY_LOG="$PLUGIN_COPY/hooks/lib/zensu-log.sh"
+new_chain_in_root "chain-recover-tamper" "$PLUGIN_COPY"
 seed "$STALE_RECEIPT" || true
-cp "$MODULE" "$MODULE.bak"
-printf '%s\n' "module.exports = {};" > "$MODULE"
+printf '%s\n' "module.exports = {};" > "$COPY_MODULE"
 TAMPER_RC=0
-TAMPER_OUT="$(bash "$LOG" --chain-status --session "$SID" 2>&1)" || TAMPER_RC=$?
-mv -f "$MODULE.bak" "$MODULE"
+TAMPER_OUT="$(bash "$COPY_LOG" --chain-status --session "$SID" 2>&1)" || TAMPER_RC=$?
 case "$TAMPER_RC:$TAMPER_OUT" in
   2:*"runtime digest mismatch"*)
     check "T32 substituting the classifier module is rejected by the runtime digest, so the shared receipt predicate cannot be swapped out" PASS ;;
@@ -560,13 +570,11 @@ case "$TAMPER_RC:$TAMPER_OUT" in
     check "T32 substituting the classifier module is rejected by the runtime digest (rc=$TAMPER_RC out=$TAMPER_OUT)" FAIL ;;
 esac
 
-cp "$MODULE" "$MODULE.bak"
-rm -f "$MODULE"
+rm -f "$COPY_MODULE"
 MISSING_RC=0
-MISSING_ERR="$(bash "$LOG" --chain-status --session "$SID" 2>&1 >/dev/null)" || MISSING_RC=$?
+MISSING_ERR="$(bash "$COPY_LOG" --chain-status --session "$SID" 2>&1 >/dev/null)" || MISSING_RC=$?
 TICKET_FAULT_RC=0
-bash "$LOG" --review-ticket --session "$SID" >/dev/null 2>&1 || TICKET_FAULT_RC=$?
-mv -f "$MODULE.bak" "$MODULE"
+bash "$COPY_LOG" --review-ticket --session "$SID" >/dev/null 2>&1 || TICKET_FAULT_RC=$?
 case "$MISSING_RC:$MISSING_ERR" in
   2:*"runtime digest mismatch"*)
     check "T32a removing the classifier module is caught by the runtime digest before any verb runs" PASS ;;
@@ -577,9 +585,16 @@ esac
   && check "T32a1 the ticket issuer also fails closed while the shared module is absent" PASS \
   || check "T32a1 the ticket issuer also fails closed while the shared module is absent" FAIL
 
-[ "$(status_field shape)" = "wedged-stale-rearm" ] \
+cp "$MODULE" "$COPY_MODULE"
+RESTORED_SHAPE="$(bash "$COPY_LOG" --chain-status --session "$SID" 2>/dev/null | node -e '
+  let s = "";
+  process.stdin.on("data", (d) => { s += d; }).on("end", () => {
+    try { process.stdout.write(String(JSON.parse(s).shape)); } catch (_) { process.stdout.write("PARSE_ERROR"); }
+  });
+')"
+[ "$RESTORED_SHAPE" = "wedged-stale-rearm" ] \
   && check "T32b restoring the module restores the diagnosis" PASS \
-  || check "T32b restoring the module restores the diagnosis (got: $(status_field shape))" FAIL
+  || check "T32b restoring the module restores the diagnosis (got: $RESTORED_SHAPE)" FAIL
 
 # ---------------------------------------------------------------- shapes outside the review window
 new_chain "chain-recover-shapes"
@@ -636,7 +651,7 @@ esac
 # ---------------------------------------------------------------- doctor surface
 new_chain "chain-recover-doctor"
 seed "$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T35 doctor reports the wedged chain and names the recovery command" PASS ;;
@@ -646,7 +661,7 @@ esac
 
 new_chain "chain-recover-doctor-deadend"
 seed 's.codeReviewDone=true;s.reviewRound=2;' || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
     check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
@@ -656,7 +671,7 @@ esac
 
 new_chain "chain-recover-doctor-blocked"
 seed "s.deferredReviewClaim=\"dc_test2\";$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_SESSION_KEY="$(zensu_resolve_session_id "$SID")" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged but not recoverable in place"*"deferred-review claim"*)
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" PASS ;;
@@ -664,16 +679,56 @@ case "$DOCTOR_OUT" in
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" FAIL ;;
 esac
 
+# ---------------------------------------------------------------- doctor wrapper resolves ownership itself
+new_chain "chain-recover-doctor-wrapper"
+seed "$STALE_RECEIPT" || true
+WRAPPER_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_ZENSU=absent ZDOC_NODE=vTEST \
+  ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI="" ZDOC_FORGE_STATE=missing \
+  ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 bash "$ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+case "$WRAPPER_OUT" in
+  *"wedged-stale-rearm"*"/zensu:recover-chain"*)
+    check "T45 the doctor WRAPPER renders the wedged shape and the recovery command end to end" PASS ;;
+  *)
+    check "T45 the doctor wrapper renders the wedged shape and the recovery command (row missing)" FAIL ;;
+esac
+
+# ------------------------------------------- a standalone receipt: refused, and it shuts the terminus
+new_chain "chain-recover-standalone-receipt"
+seed "$RECEIPT_ONLY" || true
+STANDALONE_TERMINUS_RC=0
+bash "$LOG" --code-review-done --session "$SID" >/dev/null 2>&1 || STANDALONE_TERMINUS_RC=$?
+[ "$STANDALONE_TERMINUS_RC" -ne 0 ] && [ "$(state_field codeReviewDone)" = "false" ] \
+  && check "T46 the reviewRearm conjunct shuts the unqualified no-ticket terminus while a receipt is present" PASS \
+  || check "T46 the reviewRearm conjunct shuts the unqualified terminus (rc=$STANDALONE_TERMINUS_RC flag=$(state_field codeReviewDone))" FAIL
+
+BEFORE="$(digest)"
+STANDALONE_ERR="$(bash "$LOG" --chain-recover --session "$SID" 2>&1 >/dev/null)"
+STANDALONE_RC=$?
+[ "$(status_field linkage)" = "standalone" ] && [ "$(status_field wedged)" = "true" ] \
+  && [ "$(status_field recoverable)" = "false" ] && [ "$(status_field nextCommandId)" = "link-shape" ] \
+  && [ "$STANDALONE_RC" -eq 3 ] && [ "$BEFORE" = "$(digest)" ] \
+  && check "T47 a standalone document carrying a receipt is refused as link-shape, byte-identically — the repair never opens that terminus" PASS \
+  || check "T47 a standalone receipt is refused as link-shape (linkage=$(status_field linkage) reason=$(status_field nextCommandId) rc=$STANDALONE_RC)" FAIL
+
+case "$STANDALONE_ERR" in
+  *"refused (link-shape)."*"no writer in this plugin can produce"*)
+    check "T48 the link-shape refusal names the reason token and explains that no writer produces this shape" PASS ;;
+  *)
+    check "T48 the link-shape refusal names the reason token (got: $STANDALONE_ERR)" FAIL ;;
+esac
+
 # ---------------------------------------------------------------- writer + core lockstep
 CORE_KEYS="$(CORE_SRC="$CORE" node -e '
   const fs = require("node:fs");
   const src = fs.readFileSync(process.env.CORE_SRC, "utf8");
   const head = src.slice(0, src.indexOf("reviewRearm is invalid"));
-  const block = head.slice(head.lastIndexOf("const exactKeys"));
-  const keys = (block.match(/[a-zA-Z0-9]+(?=.)/g) || []).filter(function (k) {
-    return ["attempt","chainId","consumedTicketSha256","retire","runId","schemaVersion","status"].indexOf(k) >= 0;
-  });
-  process.stdout.write([...new Set(keys)].sort().join(","));
+  const open = head.lastIndexOf("const exactKeys = [");
+  if (open < 0) process.exit(3);
+  const body = head.slice(open + "const exactKeys = [".length);
+  const literal = body.slice(0, body.indexOf("]"));
+  const keys = (literal.match(/[\x27"]([^\x27"]+)[\x27"]/g) || [])
+    .map(function (t) { return t.slice(1, -1); });
+  process.stdout.write(keys.sort().join(","));
 ' 2>/dev/null)"
 MODULE_KEYS="$(node -e '
   process.stdout.write([...require(process.argv[1]).REARM_MARKER_KEYS].sort().join(","));
@@ -701,6 +756,33 @@ else
     && check "T44 a receipt minted by the real rearm writer classifies as valid, so writer and module cannot drift apart" PASS \
     || check "T44 a receipt minted by the real rearm writer classifies as valid (got: $WRITER_VERDICT)" FAIL
 fi
+
+EMIT_UNPREFIXED="$(sed -n '/_tdd_recover_chain_critical()/,/^}/p' "$PHASE_LIB" \
+  | grep -oE 'emit\("[^"]*"' | grep -vcE 'emit\("(op:|refused:|recovered:)')"
+[ "$EMIT_UNPREFIXED" = "0" ] \
+  && check "T49 every emit() literal in the recovery transaction carries an op:/refused:/recovered: namespace" PASS \
+  || check "T49 every emit() literal carries a namespace ($EMIT_UNPREFIXED unprefixed)" FAIL
+
+ISSUER_FIELDS="$(sed -n '/_tdd_issue_review_ticket_critical()/,/^}/p' "$PHASE_LIB" \
+  | grep -oE 's\.(phase|history|bypasses|vanilla|active|implComplete|chainDone|codeReviewDone|selfReviewFixed|reviewTicket|reviewTicketConsumed|reviewRound)\b' \
+  | sed 's/^s\.//' | sort -u | tr '\n' ',')"
+MODULE_FIELDS="$(node -e '
+  const fs = require("node:fs");
+  const src = fs.readFileSync(process.argv[1], "utf8");
+  const grab = (name) => {
+    const i = src.indexOf("const " + name + " = [");
+    if (i < 0) return [];
+    const body = src.slice(i + ("const " + name + " = [").length);
+    return (body.slice(0, body.indexOf("]")).match(/[\x27"]([^\x27"]+)[\x27"]/g) || [])
+      .map((t) => t.slice(1, -1));
+  };
+  const all = [...grab("REQUIRED_BOOLEANS"), ...grab("REQUIRED_STRINGS"),
+    ...grab("REQUIRED_ARRAYS"), "vanilla", "reviewRound"];
+  process.stdout.write([...new Set(all)].sort().join(",") + ",");
+' "$MODULE" 2>/dev/null)"
+[ -n "$ISSUER_FIELDS" ] && [ "$ISSUER_FIELDS" = "$MODULE_FIELDS" ] \
+  && check "T50 the classifier's required field set matches the ticket issuer's, so --chain-status cannot go blind on a document the issuer still serves" PASS \
+  || check "T50 the classifier's required field set matches the issuer's (issuer=$ISSUER_FIELDS module=$MODULE_FIELDS)" FAIL
 
 # ---------------------------------------------------------------- contract pins
 if grep -qE '^ZENSU_BYPASS_GATE_ALLOWLIST=.*ZENSU_CHAIN_RECOVER' "$PHASE_LIB"; then

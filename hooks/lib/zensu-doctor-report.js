@@ -36,7 +36,6 @@ var BAD = '❌';
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 var CHAIN_ROW_LIMIT = 8;
-var DEAD_END_SHAPES = ['self-review-unbindable'];
 
 var env = process.env;
 var out = [];
@@ -242,8 +241,7 @@ function chainRows(entries) {
     }
     shapes.push(entry.session + ': ' + report.shape
       + (report.recoveries ? ' (repaired ' + report.recoveries + '×)' : ''));
-    if (!entry.owned) return;
-    if (DEAD_END_SHAPES.indexOf(report.shape) >= 0) {
+    if (report.deadEnd) {
       deadEnds.push(entry.session + ' → ' + report.nextCommand);
       return;
     }
@@ -309,7 +307,6 @@ function stateBlock(nowMs) {
         var match = /^tdd-phase-(scv1_[a-f0-9]{64})\.json$/.exec(file);
         try {
           states.push({
-            owned: !!env.ZDOC_SESSION_KEY && match[1] === env.ZDOC_SESSION_KEY,
             session: match[1].slice(0, 13) + '…',
             state: core.readWorkflowState({ projectRoot: projectRoot, sessionId: match[1] }),
           });

@@ -80,13 +80,13 @@ test('an absent deferred-review claim is readable but never reads as "no claim"'
   assert.equal(report.stopBlockCount, 0);
   assert.equal(report.shape, 'ready-for-review');
   assert.equal(report.deferredReviewClaim, 'unknown');
-  assert.equal(report.deferredReviewClaimPresent, true);
 
   const wedged = doc(Object.assign({ reviewRearm: DISAGREEING }, BOUND_LINK));
   delete wedged.deferredReviewClaim;
   const blocked = chain.classifyChain(wedged);
   assert.equal(blocked.recoverable, false);
-  assert.equal(blocked.nextCommandId, 'deferred-claim');
+  assert.equal(blocked.nextCommandId, 'claim-unknown');
+  assert.match(blocked.nextCommand, /cannot prove no deferred-review claim/);
 });
 
 test('the shape lattice ranks live capabilities above the wedge', () => {

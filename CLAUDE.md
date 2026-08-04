@@ -77,18 +77,20 @@ cosmetic diagnostics code:
 
 These consumers must move together with it, and `classifyChain`'s returned FIELD NAMES are
 part of that contract: the `--chain-status` verb, the `--chain-recover` transaction (both in
-`hooks/lib/zensu-tdd-phase.sh`), the refusal-hint renderer in `hooks/lib/zensu-log.sh` (it
-reads `wedged` / `recoverable` / `nextCommand`), the `/zensu:doctor` renderer
+`hooks/lib/zensu-tdd-phase.sh`), the refusal-hint renderer in `hooks/lib/zensu-log.sh` (a DIRECT `require`
+consumer since it reads `BLOCKED_RECOVERY_COMMAND`, plus `wedged` / `deadEnd` /
+`recoverable` / `nextCommand` / `shape` off the report), `hooks/stop-chain-enforcer.sh`
+(hardcodes the shape literals `wedged-stale-rearm` and `self-review-unbindable`), the `/zensu:doctor` renderer
 (`hooks/lib/zensu-doctor-report.js`), the ticket issuer, and the rearm writer
 (`_tdd_rearm_autopilot_review_critical`, which takes `isLinkId`, `RETURN_STAGES` and
 `REARM_MARKER_KEYS` from here) — adding a receipt field or a return stage in the writer
 alone would make every receipt it mints classify as stale and wedge the chain permanently.
 
-A seventh place hardcodes the same receipt schema independently: the `reviewRearm` validator
+An eighth place hardcodes the same receipt schema independently: the `reviewRearm` validator
 in `hooks/lib/session-control-core-v1.js` rejects the ENTIRE workflow document when the key
 set does not match, which fails every hook closed — strictly worse than a wedged chain. A
 receipt-key change must therefore land THERE FIRST, in the same commit as the module and the
-writer. An eighth site hardcodes the key NAME only: `_tdd_mark_unclaimed_review_critical`
+writer. A ninth site hardcodes the key NAME only: `_tdd_mark_unclaimed_review_critical`
 refuses the unqualified no-ticket terminus while `reviewRearm` is present. That conjunct
 narrows the terminus only WHILE a chain is wedged — `--chain-recover` drops the receipt and
 the terminus becomes reachable again, by design. Renaming the field without updating the

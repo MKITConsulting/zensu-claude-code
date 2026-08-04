@@ -128,15 +128,6 @@ if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
   fi
 fi
 
-if [ -z "${ZDOC_SESSION_KEY:-}" ] && [ -f "$DIR/zensu-session.sh" ]; then
-  # shellcheck source=/dev/null
-  . "$DIR/zensu-session.sh" 2>/dev/null || true
-  if command -v zensu_resolve_session_id >/dev/null 2>&1; then
-    ZDOC_SESSION_KEY="$(zensu_resolve_session_id 2>/dev/null)" || ZDOC_SESSION_KEY=""
-  fi
-fi
-export ZDOC_SESSION_KEY="${ZDOC_SESSION_KEY:-}"
-
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT
 
 if ! command -v node >/dev/null 2>&1; then
