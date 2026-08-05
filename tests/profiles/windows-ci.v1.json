@@ -51,13 +51,6 @@
           "timeoutMs": 180000
         },
         {
-          "id": "claude-promptfoo-wrapper",
-          "runner": "bash",
-          "path": "tests/structure/test-claude-promptfoo-wrapper.sh",
-          "args": [],
-          "timeoutMs": 180000
-        },
-        {
           "id": "session-safe-file-read",
           "runner": "node",
           "path": "evals/session-control/tests/safe-file-read.test.js",
@@ -131,13 +124,6 @@
           "id": "session-start-banner",
           "runner": "bash",
           "path": "tests/structure/test-session-start-banner.sh",
-          "args": [],
-          "timeoutMs": 180000
-        },
-        {
-          "id": "promptfoo-session-upgrade-contract",
-          "runner": "bash",
-          "path": "tests/structure/test-promptfoo-session-upgrade.sh",
           "args": [],
           "timeoutMs": 180000
         },
@@ -280,13 +266,6 @@
           "timeoutMs": 300000
         },
         {
-          "id": "reset-review-limit-self-check",
-          "runner": "bash",
-          "path": "evals/reset-review-limit/run-self-check.sh",
-          "args": [],
-          "timeoutMs": 300000
-        },
-        {
           "id": "windows-portability-guards",
           "runner": "bash",
           "path": "tests/structure/test-windows-portability-guards.sh",
@@ -345,20 +324,6 @@
           "id": "file-exists-path-transport",
           "runner": "bash",
           "path": "tests/structure/test-file-exists-replacement.sh",
-          "args": [],
-          "timeoutMs": 180000
-        },
-        {
-          "id": "promptfoo-context-nudge-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-promptfoo-context-nudge-reaction.sh",
-          "args": [],
-          "timeoutMs": 180000
-        },
-        {
-          "id": "promptfoo-reset-review-path-transport",
-          "runner": "bash",
-          "path": "tests/structure/test-promptfoo-reset-review-limit.sh",
           "args": [],
           "timeoutMs": 180000
         },

@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const {
+  CI_STRUCTURE_TESTS,
+  LOCAL_ONLY_INVENTORY,
   OFFLINE_COMMANDS,
   SafetyShardError,
   commandInventory,
@@ -18,12 +20,21 @@ const canary = JSON.parse(fs.readFileSync(
   'utf8',
 ));
 const runAllSource = fs.readFileSync(path.join(root, 'tests', 'run-all.sh'), 'utf8');
+const localOnlyManifest = JSON.parse(fs.readFileSync(
+  path.join(root, 'tests', 'profiles', 'promptfoo-local-only.v1.json'),
+  'utf8',
+));
 
 function key(command) {
   return JSON.stringify([command.runner, command.path, command.args]);
 }
 
-test('safety inventories exactly the former canary, full structure suite, and offline evals', () => {
+test('safety inventories the canary and deterministic non-Promptfoo suites', () => {
+  assert.deepEqual(LOCAL_ONLY_INVENTORY, {
+    ciStructureTests: localOnlyManifest.ciStructureTests,
+    localStructureTests: localOnlyManifest.localStructureTests,
+    ciOfflineSuites: localOnlyManifest.ciOfflineSuites,
+  });
   assert.deepEqual(
     commandInventory(root, 'canary').map(({ runner, path: relative, args }) => (
       [runner, relative, ...args].join(' ')
@@ -32,32 +43,23 @@ test('safety inventories exactly the former canary, full structure suite, and of
   );
   assert.deepEqual(
     commandInventory(root, 'structure').map((command) => command.path),
-    fs.readdirSync(path.join(root, 'tests', 'structure'))
-      .filter((name) => /^test-.*\.sh$/.test(name))
+    [...CI_STRUCTURE_TESTS]
       .sort()
       .map((name) => `tests/structure/${name}`),
   );
-  const variables = new Map(
-    [...runAllSource.matchAll(/^([A-Z][A-Z0-9_]*)="\$ROOT\/([^"]+)"$/gm)]
-      .map((match) => [match[1], match[2]]),
-  );
-  const canonicalOffline = [
-    ...runAllSource.matchAll(
-      /^run_required_suite[ \t]+"[^"]+"[ \t]+"\$([A-Z][A-Z0-9_]*)"[ \t]+(bash)[ \t]+"\$\1"(?:[ \t]+([^\r\n]+))?$/gm,
-    ),
-  ].map((match) => ({
-    runner: match[2],
-    path: variables.get(match[1]),
-    args: match[3] ? match[3].trim().split(/\s+/) : [],
-  }));
-  assert.equal(canonicalOffline.length, 5);
+  const canonicalOffline = localOnlyManifest.ciOfflineSuites
+    .filter((suite) => suite.windowsSafety)
+    .map((suite) => ({ runner: 'bash', path: suite.path, args: suite.ciArgs }));
+  assert.equal(canonicalOffline.length, 3);
+  assert.match(runAllSource, /OFFLINE_LINES="\$\(offline_inventory\)" \|\| exit 2/);
   assert.deepEqual(commandInventory(root, 'offline'), canonicalOffline);
   assert.deepEqual(OFFLINE_COMMANDS, canonicalOffline);
+  assert.match(runAllSource, /promptfoo-local-only\.v1\.json/);
 });
 
 test('each safety command delegates to one bounded supervised profile execution', async () => {
   const calls = [];
-  await run('offline', 1, 5, {
+  await run('offline', 1, 3, {
     platform: 'win32',
     reportDirectory: path.join(root, 'tests', 'results'),
     output: { write() {} },
@@ -108,7 +110,7 @@ test('a red supervised command fails closed before the next safety command start
 });
 
 test('configured safety partitions cover every command exactly once', () => {
-  for (const [kind, total] of [['canary', 4], ['structure', 8], ['offline', 5]]) {
+  for (const [kind, total] of [['canary', 4], ['structure', 8], ['offline', 3]]) {
     const inventory = commandInventory(root, kind);
     const partitioned = [];
     for (let shard = 1; shard <= total; shard += 1) {
@@ -123,9 +125,9 @@ test('configured safety partitions cover every command exactly once', () => {
 
 test('safety shard selection rejects invalid or empty partitions', () => {
   const inventory = commandInventory(root, 'offline');
-  assert.throws(() => shardCommands(inventory, 0, 4), /shard/);
+  assert.throws(() => shardCommands(inventory, 0, 2), /shard/);
   assert.throws(() => shardCommands(inventory, 1, 0), /total/);
-  assert.throws(() => shardCommands(inventory, 5, 4), /shard/);
-  assert.throws(() => shardCommands(inventory, 8, 8), /empty/);
+  assert.throws(() => shardCommands(inventory, 3, 2), /shard/);
+  assert.throws(() => shardCommands(inventory, 4, 5), /empty/);
   assert.throws(() => commandInventory(root, 'unknown'), /kind/);
 });

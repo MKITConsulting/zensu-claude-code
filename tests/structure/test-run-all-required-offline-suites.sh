@@ -3,6 +3,7 @@ set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 RUN_ALL="$ROOT/tests/run-all.sh"
+MANIFEST="$ROOT/tests/profiles/promptfoo-local-only.v1.json"
 PASS=0
 FAIL=0
 
@@ -24,15 +25,33 @@ grep -qF 'FAIL=$((FAIL+1)); log "  FAIL  $label — runner missing at $runner"' 
   && check "missing required runner increments the master failure count" PASS \
   || check "missing required runner must increment the master failure count" FAIL
 
-for call in \
-  'run_required_suite "evals/config-gate (--self-check)" "$CG" bash "$CG" --self-check' \
-  'run_required_suite "evals/session-control (self-check)" "$SC" bash "$SC"' \
-  'run_required_suite "evals/tdd-review-chain (self-check)" "$TRC" bash "$TRC"' \
-  'run_required_suite "evals/reset-review-limit (self-check)" "$RRL" bash "$RRL"'; do
-  grep -qF "$call" "$RUN_ALL" \
-    && check "required offline suite is fail-closed: ${call#*\"}" PASS \
-    || check "required offline suite wiring missing: $call" FAIL
-done
+if grep -qF 'OFFLINE_LINES="$(offline_inventory)" || exit 2' "$RUN_ALL" \
+  && grep -qF 'done <<< "$OFFLINE_LINES"' "$RUN_ALL" \
+  && grep -qF 'run_required_suite "$label" "$runner" bash "$runner" "${suite_args[@]}"' "$RUN_ALL"; then
+  check "master runner consumes every classified offline suite fail-closed" PASS
+else
+  check "manifest-driven required offline suite wiring" FAIL
+fi
+
+if node - "$MANIFEST" <<'NODE'
+const value = require(process.argv[2]);
+const expected = [
+  ['evals/config-gate/run-eval.sh', ['--self-check'], ['--self-check'], false],
+  ['evals/session-control/run-self-check.sh', [], ['--ci'], true],
+  ['evals/tdd-review-chain/run-self-check.sh', [], [], false],
+  ['evals/reset-review-limit/run-self-check.sh', [], ['--ci'], true],
+  ['evals/tdd-manager-pretool/run-eval.sh', ['--self-check'], ['--self-check'], false],
+];
+const actual = value.ciOfflineSuites.map(
+  ({ path, args, ciArgs, needsNodeDeps }) => [path, args, ciArgs, needsNodeDeps],
+);
+process.exit(JSON.stringify(actual) === JSON.stringify(expected) ? 0 : 1);
+NODE
+then
+  check "offline suite manifest preserves local and CI arguments" PASS
+else
+  check "offline suite manifest local/CI argument contract" FAIL
+fi
 
 if grep -Eq '^\[ -f "\$(CG|SC|TRC|RRL)" \] && run_suite' "$RUN_ALL"; then
   check "no offline suite is silently skipped when its runner is missing" FAIL

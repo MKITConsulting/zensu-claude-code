@@ -214,7 +214,7 @@ contains 'Windows provider selftest verifies the explicit no-spawn boundary' \
 contains 'Runner forbids real existing-login candidate execution' \
   "$RUNNER" \
   'existing-login candidate execution is unsupported; provide one explicit credential for the plugin-free auth canary'
-contains 'Release operator command pins the Claude CLI version' "$RELEASE_GATE_DOC" 'ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211'
+contains 'Local operator command pins the Claude CLI version' "$RELEASE_GATE_DOC" 'ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211'
 contains 'Provider authenticates with a plugin-free isolated-HOME canary' \
   "$PROVIDER" \
   'async function runAuthenticatedCliCanary('
@@ -393,9 +393,11 @@ contains 'Fake selftest proves diagnostic results cannot publish evidence' \
 contains 'Selfcheck executes the per-file upgrade coverage gate' \
   "$ROOT/evals/session-control/run-self-check.sh" \
   'node "$EVAL_DIR/tests/enforce-upgrade-coverage.js"'
-contains 'PR CI runs the coverage-enforcing Session Control selfcheck' \
-  "$CI" \
-  'run: npm run session-control:selfcheck'
+if grep -Fq 'session-control:selfcheck' "$CI"; then
+  check 'PR CI excludes the local Promptfoo Session Control selfcheck' FAIL
+else
+  check 'PR CI excludes the local Promptfoo Session Control selfcheck' PASS
+fi
 contains 'PR CI names the real contained hook integration step' \
   "$CI" \
   'name: Contained Session Control hook integration'
@@ -460,8 +462,9 @@ contains 'Coverage gate enforces ninety percent per exact file' \
   "$COVERAGE" \
   'const minimumLineCoverage = 90;'
 contains 'Upgrade mode is part of the release aggregate' "$RUNNER" 'bash "$EVAL_DIR/run-eval.sh" upgrade "$@"'
-contains 'Nightly runs the paid side-by-side profile' "$NIGHTLY" 'run: npm run session-control:upgrade'
-contains 'Nightly fetches the historical tag' "$NIGHTLY" 'fetch-depth: 0'
+[ ! -e "$NIGHTLY" ] \
+  && check 'GitHub Actions has no Promptfoo nightly workflow' PASS \
+  || check 'GitHub Actions has no Promptfoo nightly workflow' FAIL
 [ -f "$SANDBOX_PREP" ] && check 'Linux sandbox prerequisite helper exists' PASS \
   || check 'Linux sandbox prerequisite helper exists' FAIL
 contains 'Linux sandbox helper installs both required packages' "$SANDBOX_PREP" 'apt-get install -y --no-install-recommends bubblewrap socat'
@@ -529,24 +532,17 @@ fi
 contains 'Nested Bubblewrap probe removes network access' \
   "$SANDBOX_PREP" \
   '    --unshare-net \'
-if [ "$(grep -Fc 'bash .github/scripts/prepare-claude-sandbox-linux.sh' "$NIGHTLY")" = 1 ] \
-  && [ "$(grep -Fc 'bash .github/scripts/prepare-claude-sandbox-linux.sh' "$RELEASE")" = 2 ]; then
-  check 'Every paid Linux workflow prepares the mandatory sandbox' PASS
+if [ "$(grep -Fc 'bash .github/scripts/prepare-claude-sandbox-linux.sh' "$CI")" = 1 ]; then
+  check 'Deterministic PR CI prepares the mandatory sandbox once' PASS
 else
-  check 'Every paid Linux workflow prepares the mandatory sandbox' FAIL
-fi
-if [ "$(grep -Fc 'runs-on: ubuntu-24.04' "$NIGHTLY")" = 1 ] \
-  && [ "$(grep -Fc 'runs-on: ubuntu-24.04' "$RELEASE")" = 2 ]; then
-  check 'Paid Linux workflows pin Ubuntu 24.04' PASS
-else
-  check 'Paid Linux workflows pin Ubuntu 24.04' FAIL
+  check 'Deterministic PR CI prepares the mandatory sandbox once' FAIL
 fi
 CI_HISTORY_CHECKOUT_AUDIT="$(
   node - "$CI" <<'NODE'
 const fs = require('node:fs');
 const YAML = require('yaml');
 const ci = YAML.parse(fs.readFileSync(process.argv[2], 'utf8'));
-const expectedJobs = ['test', 'session-control-contract', 'windows-shards'];
+const expectedJobs = ['test', 'windows-shards'];
 const safe = expectedJobs.every((jobId) => {
   const steps = ci?.jobs?.[jobId]?.steps || [];
   const checkouts = steps.filter(
@@ -566,48 +562,19 @@ if [ "$CI_HISTORY_CHECKOUT_AUDIT" = true ]; then
 else
   check 'Every history-sensitive CI job safely fetches the pinned historical tag' FAIL
 fi
-if [ "$(grep -Fc "ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.211'" "$RELEASE")" = 2 ]; then
-  check 'Both release gates explicitly pin the evaluated Claude version' PASS
-else
-  check 'Both release gates explicitly pin the evaluated Claude version' FAIL
-fi
-if [ "$(grep -Fc "ZENSU_UPGRADE_EXISTING_LOGIN: '0'" "$RELEASE")" = 2 ] \
-  && grep -Fq "ZENSU_UPGRADE_EXISTING_LOGIN: '0'" "$NIGHTLY"; then
-  check 'Paid upgrade gates explicitly forbid existing-login diagnostics' PASS
-else
-  check 'Paid upgrade gates explicitly forbid existing-login diagnostics' FAIL
-fi
-
-WORKFLOW_AUDIT="$(node - "$CI" "$NIGHTLY" <<'NODE'
+WORKFLOW_AUDIT="$(node - "$CI" "$RELEASE" <<'NODE'
 const fs = require('node:fs');
 const YAML = require('yaml');
-const [ciPath, nightlyPath] = process.argv.slice(2);
+const [ciPath, releasePath] = process.argv.slice(2);
 const ci = YAML.parse(fs.readFileSync(ciPath, 'utf8'));
-const nightly = YAML.parse(fs.readFileSync(nightlyPath, 'utf8'));
+const release = YAML.parse(fs.readFileSync(releasePath, 'utf8'));
 const sandboxJob = ci?.jobs?.['session-control-sandbox'];
 const sandboxSteps = sandboxJob?.steps || [];
 const sandboxStepIndex = (name) => sandboxSteps.findIndex((step) => step.name === name);
-const nightlyJob = nightly?.jobs?.['live-validation'];
-const nightlySteps = nightlyJob?.steps || [];
-const stepIndex = (name) => nightlySteps.findIndex((step) => step.name === name);
-const matrix = nightlyJob?.strategy?.matrix?.include || [];
-const fullSuiteNames = [
-  'Live fresh-session validation',
-  'Four-way session isolation (three repetitions)',
-  'Reviewer boundary attacks (six categories, five repetitions)',
-];
-const sandbox = nightlySteps.find(
-  (step) => step.name === 'Prepare verified Claude Bash sandbox',
-);
 const sandboxPrepareIndex = sandboxStepIndex('Prepare verified Claude Bash sandbox');
 const sandboxIntegrationIndex = sandboxStepIndex('Contained Session Control hook integration');
 const sandboxIntegration = sandboxSteps[sandboxIntegrationIndex];
-const install = nightlySteps.find((step) => step.name === 'Install matrix Claude Code CLI');
-const upgrade = nightlySteps.find((step) => step.name === 'Side-by-side v0.16.1 upgrade validation');
-const upload = nightlySteps.find((step) => step.name === 'Upload sanitized SHA-bound evidence');
-const sandboxIndex = stepIndex('Prepare verified Claude Bash sandbox');
-const installIndex = stepIndex('Install matrix Claude Code CLI');
-const upgradeIndex = stepIndex('Side-by-side v0.16.1 upgrade validation');
+const serialized = JSON.stringify({ ci, release });
 process.stdout.write(JSON.stringify({
   sandbox_runner: sandboxJob?.['runs-on'] || '',
   sandbox_checkout_safe: sandboxSteps.some((step) => (
@@ -627,31 +594,19 @@ process.stdout.write(JSON.stringify({
   sandbox_integration_forced:
     sandboxIntegration?.env?.ZENSU_RUN_LINUX_SANDBOX_HOOK_INTEGRATION === '1',
   sandbox_has_npm: sandboxSteps.some((step) => /npm (?:ci|install)/.test(step.run || '')),
-  matrix,
-  nightly_ordered: [sandboxIndex, installIndex, upgradeIndex].every(
-    (index) => index >= 0,
-  ) && sandboxIndex < installIndex && installIndex < upgradeIndex,
-  nightly_sandbox_helper:
-    sandbox?.run === 'bash .github/scripts/prepare-claude-sandbox-linux.sh',
-  dynamic_install: String(install?.run || '').includes(
-    '@anthropic-ai/claude-code@${{ matrix.claude_version }}',
-  ) && String(install?.run || '').includes('= "${{ matrix.claude_version }}"'),
-  dynamic_upgrade_version:
-    upgrade?.env?.ZENSU_EXPECTED_CLAUDE_VERSION === '${{ matrix.claude_version }}',
-  upgrade_unconditional: upgrade !== undefined && upgrade.if === undefined,
-  full_suite_conditions: fullSuiteNames.map(
-    (name) => nightlySteps.find((step) => step.name === name)?.if || '',
+  promptfoo_absent: !/promptfoo|session-control:(?:selfcheck|contract|upgrade|live|concurrency|adversarial|release)/i.test(serialized),
+  ai_credentials_absent: !/ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN/.test(serialized),
+  deterministic_ci: (ci?.jobs?.test?.steps || []).some(
+    (step) => step.run === 'bash tests/run-all.sh --ci',
   ),
-  versioned_artifact: String(upload?.with?.name || '').includes(
-    'session-control-nightly-claude-${{ matrix.claude_version }}-${{ github.sha }}',
-  ),
+  deterministic_release: serialized.includes('Deterministic exact-main-SHA gate'),
 }));
 NODE
 )"
 if [ "$?" -eq 0 ]; then
-  check 'PR-CI and nightly workflow YAML parses for upgrade audit' PASS
+  check 'PR-CI and release workflow YAML parse for local-only audit' PASS
 else
-  check 'PR-CI and nightly workflow YAML parses for upgrade audit' FAIL
+  check 'PR-CI and release workflow YAML parse for local-only audit' FAIL
   WORKFLOW_AUDIT='{}'
 fi
 [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .sandbox_runner)" = 'ubuntu-24.04' ] \
@@ -664,22 +619,12 @@ fi
   && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .sandbox_has_npm)" = false ] \
   && check 'PR CI prepares then forces bounded contained hooks on pinned Ubuntu without npm setup' PASS \
   || check 'PR CI prepares then forces bounded contained hooks on pinned Ubuntu without npm setup' FAIL
-[ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -c .matrix)" = '[{"claude_version":"2.1.211","full_suite":true},{"claude_version":"2.1.217","full_suite":false}]' ] \
-  && check 'Nightly has the exact baseline and compatibility version matrix' PASS \
-  || check 'Nightly has the exact baseline and compatibility version matrix' FAIL
-[ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .nightly_ordered)" = true ] \
-  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .nightly_sandbox_helper)" = true ] \
-  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .dynamic_install)" = true ] \
-  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .dynamic_upgrade_version)" = true ] \
-  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .upgrade_unconditional)" = true ] \
-  && check 'Every nightly lane orders sandbox, dynamic CLI, then paid upgrade' PASS \
-  || check 'Every nightly lane orders sandbox, dynamic CLI, then paid upgrade' FAIL
-[ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -c .full_suite_conditions)" = '["matrix.full_suite","matrix.full_suite","matrix.full_suite"]' ] \
-  && check 'Only the baseline nightly lane executes the additional full live suite' PASS \
-  || check 'Only the baseline nightly lane executes the additional full live suite' FAIL
-[ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .versioned_artifact)" = true ] \
-  && check 'Nightly matrix artifacts are isolated by Claude version and source SHA' PASS \
-  || check 'Nightly matrix artifacts are isolated by Claude version and source SHA' FAIL
+[ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .promptfoo_absent)" = true ] \
+  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .ai_credentials_absent)" = true ] \
+  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .deterministic_ci)" = true ] \
+  && [ "$(printf '%s' "$WORKFLOW_AUDIT" | jq -r .deterministic_release)" = true ] \
+  && check 'GitHub Actions use only deterministic non-Promptfoo gates' PASS \
+  || check 'GitHub Actions use only deterministic non-Promptfoo gates' FAIL
 
 contains 'Root README documents the Bubblewrap FD3 credential boundary' \
   "$ROOT_README" \

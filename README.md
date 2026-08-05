@@ -240,15 +240,16 @@ outside this host-tool boundary; do not grant them to untrusted agents.
 > Naming note: this is unrelated to the MCP-gate `--workflow-begin` / `workflowActive`
 > markers above — those scope per-skill MCP mutation tools, not Claude Code Workflows.
 
-Nightly and release validation installs the exact clean Git SHA through an
-ephemeral local marketplace backed by a private detached-HEAD clone, using the
-pinned Claude Plugin CLI and an isolated user cache. It launches Claude without
-`--plugin-dir` and proves that normal and reviewer subagents inherit this
-immutable context. The production marketplace remains pinned to the release
-tag throughout this checkout-specific validation. Paid Linux gates pin Ubuntu
-24.04, verify Claude's required `bubblewrap`/`socat` sandbox dependencies, and
-fail closed if AppArmor user-namespace preparation or a functional sandbox
-probe fails. The side-by-side upgrade gate itself is Linux-only: it first proves
+The local Promptfoo installed-plugin evaluation can install an exact clean Git
+SHA through an ephemeral local marketplace backed by a private detached-HEAD
+clone, using the pinned Claude Plugin CLI and an isolated user cache. It
+launches Claude without `--plugin-dir` and proves that normal and reviewer
+subagents inherit this immutable context. These Promptfoo and live-model
+profiles are local-only and never run in GitHub Actions. Their Linux harness
+pins Ubuntu 24.04 semantics, verifies Claude's required `bubblewrap`/`socat`
+sandbox dependencies, and fails closed if AppArmor user-namespace preparation
+or a functional sandbox probe fails. The side-by-side upgrade profile itself
+is Linux-only: it first proves
 the explicit API/OAuth credential with a plugin-free, tool-free Claude canary
 inside outer `bubblewrap` containment. Bubblewrap receives that canary
 environment through its `--args` file descriptor 3, never through the process
@@ -262,11 +263,11 @@ That nested boundary receives only the evaluator-bound `CLAUDE_PLUGIN_DATA`
 and `CLAUDE_PROJECT_DIR` values needed by the hook contract. The old and
 candidate fixtures are immutable, unpredictable direct children of an
 isolated cache parent; the isolated plugin registry, not a predictable SemVer
-path, selects which completed root Claude loads. PR CI exercises this real
-nested-hook integration on pinned Ubuntu without making a paid model request.
-Windows only proves the pre-launch zero-process denial. Real existing-login
-candidate execution is unsupported; its hermetic fake remains solely for
-non-authoritative deterministic coverage.
+path, selects which completed root Claude loads. PR CI exercises only the
+deterministic nested-hook integration on pinned Ubuntu without a model request.
+Windows CI runs deterministic non-Promptfoo contracts only. Real existing-login
+candidate execution is unsupported; its hermetic fake remains solely for local
+deterministic coverage.
 See [Session Control release gate](docs/session-control-release-gate.md).
 
 **Getting a guaranteed review for a Workflow-triggered run.** Because the worker `Stop`
@@ -297,11 +298,9 @@ per-implementation over the aggregate diff — **never per spawned worker**.
 
 ## Installation
 
-The minimum supported Claude Code version is **2.1.211**. Session Control's
-live and release evaluations, plus the nightly full-suite lane, deliberately
-pin **exactly 2.1.211** so host behavior is reproducible. A second nightly lane
-runs the paid side-by-side upgrade only on **2.1.217**, providing recurring
-forward-compatibility evidence without changing the release baseline.
+The minimum supported Claude Code version is **2.1.211**. Local Session Control
+Promptfoo profiles can pin an exact Claude Code version for reproducible host
+behavior; GitHub Actions does not install Claude Code or run those profiles.
 
 ```bash
 claude plugin marketplace add MKITConsulting/zensu-claude-code

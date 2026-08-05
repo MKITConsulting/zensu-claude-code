@@ -20,9 +20,9 @@ Watertight promptfoo test suite for the PreToolUse phase-gate.
 
 ## Gating
 
-Real Claude runs require:
+Real Claude runs are local-only and require:
 
-- `promptfoo` (npm install -g promptfoo) — currently not included in the setup env.
+- `promptfoo` (`npm install -g promptfoo`).
 - `claude` CLI with a valid API key.
 - `node`, `npm`, `go` (>= 1.20) on PATH.
 
@@ -30,6 +30,9 @@ Without these tools, `run-eval.sh --self-check` still runs (structure + hook uni
 
 ## Next steps
 
-1. `npm install -g promptfoo` once on the CI runner.
-2. Run `bash run-eval.sh` fully (~ 10-15 min on Sonnet 4.6).
+1. Install `promptfoo` on the local test host.
+2. Run `bash run-eval.sh` locally (~ 10-15 min on Sonnet 4.6).
 3. Compare result JSONs under `results/` against the `baselines/` expectations.
+
+GitHub Actions runs only `bash run-eval.sh --self-check`; it never invokes the
+Promptfoo binary, a live model, or model credentials.

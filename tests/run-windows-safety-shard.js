@@ -8,34 +8,57 @@ const { runProfile } = require('./run-profile.js');
 
 const ROOT = fs.realpathSync.native(path.resolve(__dirname, '..'));
 const CANARY_FILE = path.join(ROOT, 'tests', 'profiles', 'windows-legacy-canary.v1.json');
+const LOCAL_ONLY_FILE = path.join(ROOT, 'tests', 'profiles', 'promptfoo-local-only.v1.json');
 const COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
-const OFFLINE_COMMANDS = Object.freeze([
-  Object.freeze({
-    runner: 'bash',
-    path: 'evals/config-gate/run-eval.sh',
-    args: Object.freeze(['--self-check']),
-  }),
-  Object.freeze({
-    runner: 'bash',
-    path: 'evals/session-control/run-self-check.sh',
-    args: Object.freeze([]),
-  }),
-  Object.freeze({
-    runner: 'bash',
-    path: 'evals/tdd-review-chain/run-self-check.sh',
-    args: Object.freeze([]),
-  }),
-  Object.freeze({
-    runner: 'bash',
-    path: 'evals/reset-review-limit/run-self-check.sh',
-    args: Object.freeze([]),
-  }),
-  Object.freeze({
-    runner: 'bash',
-    path: 'evals/tdd-manager-pretool/run-eval.sh',
-    args: Object.freeze(['--self-check']),
-  }),
-]);
+function localOnlyInventory() {
+  const value = JSON.parse(fs.readFileSync(LOCAL_ONLY_FILE, 'utf8'));
+  if (!value || value.schemaVersion !== 1
+      || !Array.isArray(value.ciStructureTests)
+      || !Array.isArray(value.localStructureTests)
+      || !Array.isArray(value.ciOfflineSuites)
+      || [...value.ciStructureTests, ...value.localStructureTests].some(
+        (entry) => typeof entry !== 'string' || entry.length === 0,
+      )) {
+    throw new Error('Promptfoo local-only inventory is invalid');
+  }
+  const actualStructure = fs.readdirSync(path.join(ROOT, 'tests', 'structure'))
+    .filter((name) => /^test-.*\.sh$/.test(name))
+    .sort();
+  const uniqueSorted = (entries) => [...new Set(entries)].sort();
+  const classified = [...value.ciStructureTests, ...value.localStructureTests];
+  if (JSON.stringify(uniqueSorted(classified)) !== JSON.stringify(actualStructure)
+      || classified.length !== new Set(classified).size
+      || value.ciOfflineSuites.some((suite) => !suite || typeof suite.label !== 'string'
+        || typeof suite.path !== 'string' || !Array.isArray(suite.args)
+        || !Array.isArray(suite.ciArgs)
+        || typeof suite.needsNodeDeps !== 'boolean'
+        || typeof suite.windowsSafety !== 'boolean'
+        || !fs.existsSync(path.join(ROOT, suite.path)))) {
+    throw new Error('suite classification inventory is incomplete');
+  }
+  return Object.freeze({
+    ciStructureTests: Object.freeze([...value.ciStructureTests]),
+    localStructureTests: Object.freeze([...value.localStructureTests]),
+    ciOfflineSuites: Object.freeze(value.ciOfflineSuites.map((suite) => Object.freeze({
+      ...suite,
+      args: Object.freeze([...suite.args]),
+      ciArgs: Object.freeze([...suite.ciArgs]),
+    }))),
+  });
+}
+
+const LOCAL_ONLY_INVENTORY = localOnlyInventory();
+const CI_STRUCTURE_TESTS = new Set(LOCAL_ONLY_INVENTORY.ciStructureTests);
+const LOCAL_ONLY_STRUCTURE_TESTS = new Set(LOCAL_ONLY_INVENTORY.localStructureTests);
+const OFFLINE_COMMANDS = Object.freeze(
+  LOCAL_ONLY_INVENTORY.ciOfflineSuites
+    .filter((suite) => suite.windowsSafety)
+    .map((suite) => Object.freeze({
+      runner: 'bash',
+      path: suite.path,
+      args: Object.freeze([...suite.ciArgs]),
+    })),
+);
 
 class SafetyShardError extends Error {}
 
@@ -69,8 +92,7 @@ function canaryCommands() {
 }
 
 function structureCommands() {
-  return fs.readdirSync(path.join(ROOT, 'tests', 'structure'))
-    .filter((name) => /^test-.*\.sh$/.test(name))
+  return [...CI_STRUCTURE_TESTS]
     .sort()
     .map((name) => command('bash', `tests/structure/${name}`));
 }
@@ -160,6 +182,9 @@ if (require.main === module) {
 }
 
 module.exports = {
+  CI_STRUCTURE_TESTS,
+  LOCAL_ONLY_INVENTORY,
+  LOCAL_ONLY_STRUCTURE_TESTS,
   OFFLINE_COMMANDS,
   SafetyShardError,
   commandInventory,
