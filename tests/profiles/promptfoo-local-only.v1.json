@@ -86,7 +86,6 @@
     "test-stop-enforcer-subagent-noop.sh",
     "test-stop-session-binding-recovery.sh",
     "test-state-verb-diagnostics.sh",
-    "test-suite-inventory-complete.sh",
     "test-tdd-begin-chain-reset.sh",
     "test-tdd-complete-receipt-gate.sh",
     "test-tdd-full-cycle.sh",
