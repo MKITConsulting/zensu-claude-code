@@ -66,7 +66,7 @@ function evidence(executionMode = EXECUTION_MODES.authoritative) {
       ? 'not-applicable-isolated-home'
       : executionMode === EXECUTION_MODES.diagnostic
         ? 'unchanged-local-diagnostic' : 'not-applicable-test-mode',
-    claude_code_version: '2.1.211',
+    claude_code_version: '2.1.221',
     source_git_revision: revision,
     old_release_ref: 'v0.16.1',
     old_release_revision: OLD_RELEASE_REVISION,
@@ -133,7 +133,7 @@ function verify(value, expectedStatus, publishEvidence = true) {
     assert.equal(receipt.candidate_runtime_digest, digest('candidate'));
     assert.equal(receipt.lifecycle_evidence_count, REQUIRED_SEQUENCE.length);
     assert.equal(receipt.promptfoo_version, '0.121.18');
-    assert.equal(receipt.claude_code_version, '2.1.211');
+    assert.equal(receipt.claude_code_version, '2.1.221');
     assert.match(receipt.evidence_digest, /^sha256:[a-f0-9]{64}$/);
     const canonicalReceipt = Object.fromEntries(
       RECEIPT_KEYS

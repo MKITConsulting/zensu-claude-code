@@ -222,13 +222,13 @@ else
   check "P23 provider seals the full fixture outside the one mutable CAS file" FAIL
 fi
 
-if grep -qF 'reset-review-limit eval requires Claude Code CLI 2.1.211' "$PLUGIN_DIR/scripts/claude-promptfoo-wrapper.sh" \
+if grep -qF 'reset-review-limit eval requires Claude Code CLI 2.1.221' "$PLUGIN_DIR/scripts/claude-promptfoo-wrapper.sh" \
   && grep -qF 'claude_code_version' "$ATTESTOR" \
-  && grep -qF "attestation.claude_code_version !== '2.1.211'" "$ASSERTION" \
+  && grep -qF "attestation.claude_code_version !== '2.1.221'" "$ASSERTION" \
   && grep -qF "'9.9.9'" "$EVAL_DIR/tests/sealed-evidence.test.js"; then
-  check "P24 live spend and sealed evidence are pinned to Claude Code 2.1.211" PASS
+  check "P24 live spend and sealed evidence are pinned to Claude Code 2.1.221" PASS
 else
-  check "P24 live spend and sealed evidence are pinned to Claude Code 2.1.211" FAIL
+  check "P24 live spend and sealed evidence are pinned to Claude Code 2.1.221" FAIL
 fi
 
 if grep -qF "process.platform === 'win32'" "$EVAL_DIR/tests/sealed-evidence.test.js" \

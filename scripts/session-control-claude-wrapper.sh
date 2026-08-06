@@ -11,7 +11,7 @@ COMMON="$EVAL_LIB/attestation-common.js"
 LIVE_ATTEST="$EVAL_LIB/live-attest.js"
 CONCURRENCY_CONTROL="$EVAL_LIB/concurrency-control.js"
 INSTALL_CONTRACT="$EVAL_LIB/installed-plugin-contract.js"
-EXPECTED_CLI_VERSION='2.1.211'
+EXPECTED_CLI_VERSION='2.1.221'
 
 die() {
   printf 'session-control-claude-wrapper: %s\n' "$1" >&2

@@ -63,7 +63,7 @@ const common = capture?.schema === 'zensu.reset-review-limit.stream-evidence'
   && capture?.successful_skill_result_count === 1
   && capture?.forbidden_file_operation_detected === false
   && capture?.split_reset_mutation_detected === false
-  && claudeCliVersion === '2.1.211'
+  && claudeCliVersion === '2.1.221'
   && Number(claudeExitRaw) === 0
   && beforeEnvelope?.snapshot?.file === after?.file
   && canonical(beforeEnvelope?.fixture_manifest) === canonical(afterFixtureManifest)

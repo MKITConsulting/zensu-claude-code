@@ -260,7 +260,7 @@ function writeSanitizedEvidence(outputFile) {
     source_git_revision: revision,
     runtime_digest: runtimeDigests[0] || null,
     promptfoo_version: '0.121.20',
-    claude_code_version: '2.1.211',
+    claude_code_version: '2.1.221',
     row_count: results.length,
     valid_attestation_count: validAttestations.length,
     unique_session_count: sessionHashes.size,

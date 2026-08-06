@@ -39,6 +39,7 @@
     {"runner":"node","path":"evals/session-control/tests/upgrade-linux-sandbox.test.js","args":["--test","--test-name-pattern=rejects unsafe paths, environments, and working-directory escapes|mounts opt only for a real command or resolved native runtime under opt"]},
     {"runner":"bash","path":"tests/structure/test-autopilot-bound-payload-windows.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-file-exists-replacement.sh","args":[]},
-    {"runner":"bash","path":"tests/structure/test-tdd-state-path-safety.sh","args":[]}
+    {"runner":"bash","path":"tests/structure/test-tdd-state-path-safety.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-plan-payload-fallback.sh","args":[]}
   ]
 }

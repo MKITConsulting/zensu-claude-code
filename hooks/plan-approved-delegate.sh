@@ -97,7 +97,26 @@ emit_autopilot_context() {
 emit_autopilot_blocked() {
   CODE="$1" node -e '
     const code=process.env.CODE;
-    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}. Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
+    const causes={
+      CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
+      SESSION_CONTEXT_UNAVAILABLE:" This session could not be resolved to a Session Control identity, so run ownership could not be established.",
+      PLAN_TRANSITION_REJECTED:" The run state refused the PLAN_APPROVED transition; the plan itself was read successfully.",
+      INVALID_PLAN_PAYLOAD:" The ExitPlanMode payload carried neither plan text nor a plan file path, so the approved plan could not be read and the run could not be identified.",
+      PLAN_MARKER_MISSING_OR_AMBIGUOUS:" The approved plan carries no zensu-autopilot run marker, or more than one, so no single run could be named.",
+      PLAN_MARKER_RUN_MISMATCH:" The approved plan names a different run than the active one.",
+      OWNER_SESSION_MISMATCH:" This session does not own the active run; only the owning session may approve its plan.",
+      PLAN_STAGE_MISMATCH:" The active run is not in a stage that accepts a plan approval.",
+      PLAN_FILE_UNREADABLE:" The payload named a plan file path, but opening or reading it failed.",
+      PLAN_PAYLOAD_EVALUATION_FAILED:" Reading the approved plan out of the payload threw before any verdict was reached.",
+      PLAN_FILE_PATH_REJECTED:" The plan file path is not an acceptable absolute local path.",
+      PLAN_FILE_NOT_REGULAR:" The plan file path does not name a regular file.",
+      PLAN_FILE_EMPTY:" The plan file exists but is empty, so there is no plan to approve.",
+      PLAN_FILE_TOO_LARGE:" The plan file exceeds the accepted size limit.",
+      PLAN_FILE_SYMLINK_REJECTED:" The plan file path is a symlink or a multiply-linked file; only a direct regular file is accepted.",
+      PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The payload carries a plan or plan file path field of the wrong type, so neither could be trusted as the approved plan.",
+      PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
+    };
+    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
   '
 }
@@ -148,6 +167,7 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
 
     ACTIVE_META="$(printf '%s' "$ACTIVE_JSON" | node -e '
       let input="";
+      process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>input+=c);
       process.stdin.on("end",()=>{ try {
         const state=JSON.parse(input||"{}");
@@ -165,29 +185,96 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
       ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" node -e '
       const crypto=require("crypto");
+      const fs=require("fs");
+      const nodePath=require("path");
+      const PLAN_FILE_MAX_BYTES=4*1024*1024;
       let raw="";
+      process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
       process.stdin.on("end",()=>{ try {
         const input=JSON.parse(raw||"{}");
-        const plan=input && input.tool_input && input.tool_input.plan;
-        if (typeof plan!=="string" || !plan) process.exit(3);
+        const toolInput=(input && input.tool_input) || {};
+        if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
+        if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
+        let plan="";
+        let planBuffer=null;
+        if (toolInput.plan!==undefined && toolInput.plan!==null) {
+          if (typeof toolInput.plan!=="string") process.exit(15);
+          plan=toolInput.plan;
+        }
+        if (!plan) {
+          if (toolInput.planFilePath!==undefined && toolInput.planFilePath!==null
+            && typeof toolInput.planFilePath!=="string") process.exit(15);
+          const planPath=typeof toolInput.planFilePath==="string" ? toolInput.planFilePath : "";
+          if (!planPath) process.exit(3);
+          if (planPath.indexOf(String.fromCharCode(0)) >= 0) process.exit(10);
+          if (!nodePath.isAbsolute(planPath)) process.exit(10);
+          if (/^[\\\/]{2}/.test(planPath)) process.exit(10);
+          const noFollow=process.platform!=="win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+            ? fs.constants.O_NOFOLLOW : 0;
+          const nonBlock=Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+          let failure=0;
+          let before=null;
+          if (noFollow===0) {
+            try { before=fs.lstatSync(planPath); } catch (_) { process.exit(8); }
+            if (before.isSymbolicLink()) process.exit(14);
+          }
+          let descriptor=null;
+          try {
+            descriptor=fs.openSync(planPath,fs.constants.O_RDONLY|noFollow|nonBlock);
+          } catch (error) {
+            failure=error && (error.code==="ELOOP" || error.code==="EMLINK") ? 14 : 8;
+          }
+          if (descriptor!==null) {
+            try {
+              const stat=fs.fstatSync(descriptor);
+              if (before!==null && (before.dev!==stat.dev || before.ino!==stat.ino)) failure=14;
+              else if (!stat.isFile()) failure=11;
+              else if (stat.nlink!==1) failure=14;
+              else if (stat.size<1) failure=12;
+              else if (stat.size>PLAN_FILE_MAX_BYTES) failure=13;
+              else {
+                const buffer=Buffer.alloc(stat.size);
+                let filled=0;
+                while (filled<stat.size) {
+                  const chunk=fs.readSync(descriptor,buffer,filled,stat.size-filled,filled);
+                  if (chunk<1) break;
+                  filled+=chunk;
+                }
+                if (filled!==stat.size) failure=8;
+                else { planBuffer=buffer; plan=buffer.toString("utf8"); }
+              }
+            } catch (_) { failure=8; }
+            try { fs.closeSync(descriptor); } catch (_) {}
+          }
+          if (failure) process.exit(failure);
+          if (!plan) process.exit(12);
+        }
         const matches=[...plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
         if (matches.length!==1) process.exit(4);
         if (process.env.ACTIVE_RUN!==matches[0][1]) process.exit(5);
-        if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
-        if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
-        const sha=crypto.createHash("sha256").update(plan,"utf8").digest("hex");
+        const sha=crypto.createHash("sha256")
+          .update(planBuffer!==null ? planBuffer : Buffer.from(plan,"utf8")).digest("hex");
         process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
-      } catch (_) { process.exit(3); } });
+      } catch (_) { process.exit(9); } });
     ' 2>/dev/null)"
     META_RC=$?
     if [ "$META_RC" -ne 0 ]; then
       case "$META_RC" in
+        3) BLOCK_CODE=INVALID_PLAN_PAYLOAD ;;
         4) BLOCK_CODE=PLAN_MARKER_MISSING_OR_AMBIGUOUS ;;
         5) BLOCK_CODE=PLAN_MARKER_RUN_MISMATCH ;;
         6) BLOCK_CODE=OWNER_SESSION_MISMATCH ;;
         7) BLOCK_CODE=PLAN_STAGE_MISMATCH ;;
-        *) BLOCK_CODE=INVALID_PLAN_PAYLOAD ;;
+        8) BLOCK_CODE=PLAN_FILE_UNREADABLE ;;
+        9) BLOCK_CODE=PLAN_PAYLOAD_EVALUATION_FAILED ;;
+        10) BLOCK_CODE=PLAN_FILE_PATH_REJECTED ;;
+        11) BLOCK_CODE=PLAN_FILE_NOT_REGULAR ;;
+        12) BLOCK_CODE=PLAN_FILE_EMPTY ;;
+        13) BLOCK_CODE=PLAN_FILE_TOO_LARGE ;;
+        14) BLOCK_CODE=PLAN_FILE_SYMLINK_REJECTED ;;
+        15) BLOCK_CODE=PLAN_PAYLOAD_FIELD_TYPE_REJECTED ;;
+        *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
       emit_autopilot_blocked "$BLOCK_CODE"
       exit 0
@@ -222,7 +309,7 @@ cat <<'JSON'
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "STOP. The plan above was just approved by the user. Do NOT implement anything yet — first determine whether to run the strict TDD flow for this plan, and in most cases ASK the user. Fast-paths that need NO question: (A) the plan only modifies non-executable text — Markdown docs (README, CHANGELOG, *.md), code comments, plain prose, or static config files with no runtime logic — proceed directly without TDD and begin your next message with 'Skipping TDD: docs only'. README/CHANGELOG edits are ALWAYS in this category, even when adding markers, sections, or restructuring. (B) the user's approval message already states an EXPLICIT TDD preference — either a negation matching 'no tdd', 'skip tdd', 'no tdd-manager', \"don't use tdd\", 'direct edit', 'kein tdd', 'ohne tdd-manager' (then skip TDD, implement directly, begin with 'Skipping TDD: user opted out'), or an affirmation matching 'use tdd', 'with tdd', 'tdd please', 'mit tdd', 'tdd bitte' (then run TDD without asking). (C) you are running non-interactively with no human to answer (Auto Mode / headless) — default to running TDD and do NOT ask. In EVERY OTHER case — the plan adds or modifies executable code (functions, classes, methods, types, conditionals, loops, exports, imports, JSX/TSX components, React hooks, styles that affect rendered output, schema/config files that drive runtime behavior) and the user stated no preference — your VERY NEXT TOOL CALL must be the AskUserQuestion tool: ask a single question such as 'Run the strict TDD flow (RED→GREEN + review chain) for this plan?' with options 'Yes — TDD flow' and 'No — implement directly'. Do NOT call Read, Edit, Write, Bash, MultiEdit, NotebookEdit, Glob, or Grep before that AskUserQuestion call. Then act on the answer YOURSELF in THIS main thread (never a subagent): if the user chooses Yes (or fast-path B-affirmation, or fast-path C) → your next tool call is the Skill tool with skill='zensu:tdd', passing the approved plan content (the markdown that appeared in the ExitPlanMode tool_input) as the feature specification — you execute strict RED→IMPL→GREEN TDD under the PreToolUse phase-gate and the auto-review chain — and you begin that message with the status line 'Executing via /zensu:tdd'. If the user chooses No → implement the plan directly in this main thread; the TDD phase-gate stays inactive (never run --tdd-begin) so your edits flow freely; begin that message with 'Skipping TDD: user declined'. Generic action phrases ('go ahead', 'start now', 'implement', 'gleich arbeiten', 'los gehts', 'immediately', 'mach mal', 'jetzt umsetzen', 'go') are NOT a TDD preference — ask anyway. If uncertain whether the plan adds executable code, ask."
+    "additionalContext": "STOP. The plan above was just approved by the user. Do NOT implement anything yet — first determine whether to run the strict TDD flow for this plan, and in most cases ASK the user. Fast-paths that need NO question: (A) the plan only modifies non-executable text — Markdown docs (README, CHANGELOG, *.md), code comments, plain prose, or static config files with no runtime logic — proceed directly without TDD and begin your next message with 'Skipping TDD: docs only'. README/CHANGELOG edits are ALWAYS in this category, even when adding markers, sections, or restructuring. (B) the user's approval message already states an EXPLICIT TDD preference — either a negation matching 'no tdd', 'skip tdd', 'no tdd-manager', \"don't use tdd\", 'direct edit', 'kein tdd', 'ohne tdd-manager' (then skip TDD, implement directly, begin with 'Skipping TDD: user opted out'), or an affirmation matching 'use tdd', 'with tdd', 'tdd please', 'mit tdd', 'tdd bitte' (then run TDD without asking). (C) you are running non-interactively with no human to answer (Auto Mode / headless) — default to running TDD and do NOT ask. In EVERY OTHER case — the plan adds or modifies executable code (functions, classes, methods, types, conditionals, loops, exports, imports, JSX/TSX components, React hooks, styles that affect rendered output, schema/config files that drive runtime behavior) and the user stated no preference — your VERY NEXT TOOL CALL must be the AskUserQuestion tool: ask a single question such as 'Run the strict TDD flow (RED→GREEN + review chain) for this plan?' with options 'Yes — TDD flow' and 'No — implement directly'. Do NOT call Read, Edit, Write, Bash, MultiEdit, NotebookEdit, Glob, or Grep before that AskUserQuestion call. Then act on the answer YOURSELF in THIS main thread (never a subagent): if the user chooses Yes (or fast-path B-affirmation, or fast-path C) → your next tool call is the Skill tool with skill='zensu:tdd', passing the approved plan content as the feature specification — you execute strict RED→IMPL→GREEN TDD under the PreToolUse phase-gate and the auto-review chain — and you begin that message with the status line 'Executing via /zensu:tdd'. If the user chooses No → implement the plan directly in this main thread; the TDD phase-gate stays inactive (never run --tdd-begin) so your edits flow freely; begin that message with 'Skipping TDD: user declined'. Generic action phrases ('go ahead', 'start now', 'implement', 'gleich arbeiten', 'los gehts', 'immediately', 'mach mal', 'jetzt umsetzen', 'go') are NOT a TDD preference — ask anyway. If uncertain whether the plan adds executable code, ask."
   }
 }
 JSON
@@ -231,7 +318,7 @@ cat <<'JSON'
 {
   "hookSpecificOutput": {
     "hookEventName": "PostToolUse",
-    "additionalContext": "STOP. The plan above was just approved by the user. Vanilla implementation mode is configured (hooks.tddImplementation=false): the /zensu:tdd workflow implements WITHOUT the RED→GREEN ceremony (tests at your discretion) but keeps the full evidence discipline and review chain (Phase 5/6 audits, 5-aspect fan-out, code-reviewer, self-review, Stop-hook guarantee). Do NOT implement anything yet — first determine whether to run the Zensu workflow for this plan, and in most cases ASK the user. Fast-paths that need NO question: (A) the plan only modifies non-executable text — Markdown docs (README, CHANGELOG, *.md), code comments, plain prose, or static config files with no runtime logic — proceed directly without the workflow and begin your next message with 'Skipping TDD: docs only'. README/CHANGELOG edits are ALWAYS in this category, even when adding markers, sections, or restructuring. (B) the user's approval message already states an EXPLICIT preference — either a negation matching 'no tdd', 'skip tdd', 'no tdd-manager', \"don't use tdd\", 'direct edit', 'kein tdd', 'ohne tdd-manager' (then skip the workflow, implement directly, begin with 'Skipping TDD: user opted out'), or an affirmation matching 'use tdd', 'with tdd', 'tdd please', 'mit tdd', 'tdd bitte' (then run the workflow without asking). (C) you are running non-interactively with no human to answer (Auto Mode / headless) — default to running the workflow and do NOT ask. In EVERY OTHER case — the plan adds or modifies executable code (functions, classes, methods, types, conditionals, loops, exports, imports, JSX/TSX components, React hooks, styles that affect rendered output, schema/config files that drive runtime behavior) and the user stated no preference — your VERY NEXT TOOL CALL must be the AskUserQuestion tool: ask a single question such as 'Run the Zensu workflow (vanilla implementation + review chain) for this plan?' with options 'Yes — Zensu workflow' and 'No — implement directly'. Do NOT call Read, Edit, Write, Bash, MultiEdit, NotebookEdit, Glob, or Grep before that AskUserQuestion call. Then act on the answer YOURSELF in THIS main thread (never a subagent): if the user chooses Yes (or fast-path B-affirmation, or fast-path C) → your next tool call is the Skill tool with skill='zensu:tdd', passing the approved plan content (the markdown that appeared in the ExitPlanMode tool_input) as the feature specification — the skill detects vanilla mode itself at --tdd-begin and implements directly under the Phase 5/6 evidence discipline and the auto-review chain — and you begin that message with the status line 'Executing via /zensu:tdd (vanilla mode)'. If the user chooses No → implement the plan directly in this main thread; the phase-gate stays inactive (never run --tdd-begin) so your edits flow freely; begin that message with 'Skipping TDD: user declined'. Generic action phrases ('go ahead', 'start now', 'implement', 'gleich arbeiten', 'los gehts', 'immediately', 'mach mal', 'jetzt umsetzen', 'go') are NOT a workflow preference — ask anyway. If uncertain whether the plan adds executable code, ask."
+    "additionalContext": "STOP. The plan above was just approved by the user. Vanilla implementation mode is configured (hooks.tddImplementation=false): the /zensu:tdd workflow implements WITHOUT the RED→GREEN ceremony (tests at your discretion) but keeps the full evidence discipline and review chain (Phase 5/6 audits, 5-aspect fan-out, code-reviewer, self-review, Stop-hook guarantee). Do NOT implement anything yet — first determine whether to run the Zensu workflow for this plan, and in most cases ASK the user. Fast-paths that need NO question: (A) the plan only modifies non-executable text — Markdown docs (README, CHANGELOG, *.md), code comments, plain prose, or static config files with no runtime logic — proceed directly without the workflow and begin your next message with 'Skipping TDD: docs only'. README/CHANGELOG edits are ALWAYS in this category, even when adding markers, sections, or restructuring. (B) the user's approval message already states an EXPLICIT preference — either a negation matching 'no tdd', 'skip tdd', 'no tdd-manager', \"don't use tdd\", 'direct edit', 'kein tdd', 'ohne tdd-manager' (then skip the workflow, implement directly, begin with 'Skipping TDD: user opted out'), or an affirmation matching 'use tdd', 'with tdd', 'tdd please', 'mit tdd', 'tdd bitte' (then run the workflow without asking). (C) you are running non-interactively with no human to answer (Auto Mode / headless) — default to running the workflow and do NOT ask. In EVERY OTHER case — the plan adds or modifies executable code (functions, classes, methods, types, conditionals, loops, exports, imports, JSX/TSX components, React hooks, styles that affect rendered output, schema/config files that drive runtime behavior) and the user stated no preference — your VERY NEXT TOOL CALL must be the AskUserQuestion tool: ask a single question such as 'Run the Zensu workflow (vanilla implementation + review chain) for this plan?' with options 'Yes — Zensu workflow' and 'No — implement directly'. Do NOT call Read, Edit, Write, Bash, MultiEdit, NotebookEdit, Glob, or Grep before that AskUserQuestion call. Then act on the answer YOURSELF in THIS main thread (never a subagent): if the user chooses Yes (or fast-path B-affirmation, or fast-path C) → your next tool call is the Skill tool with skill='zensu:tdd', passing the approved plan content as the feature specification — the skill detects vanilla mode itself at --tdd-begin and implements directly under the Phase 5/6 evidence discipline and the auto-review chain — and you begin that message with the status line 'Executing via /zensu:tdd (vanilla mode)'. If the user chooses No → implement the plan directly in this main thread; the phase-gate stays inactive (never run --tdd-begin) so your edits flow freely; begin that message with 'Skipping TDD: user declined'. Generic action phrases ('go ahead', 'start now', 'implement', 'gleich arbeiten', 'los gehts', 'immediately', 'mach mal', 'jetzt umsetzen', 'go') are NOT a workflow preference — ask anyway. If uncertain whether the plan adds executable code, ask."
   }
 }
 JSON

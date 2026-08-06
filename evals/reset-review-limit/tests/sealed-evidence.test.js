@@ -77,7 +77,7 @@ function runScenario(scenario, afterCapture) {
   capture(scenario, evidence);
   if (afterCapture) afterCapture(projectRoot, sessionId);
   result = spawnSync(process.execPath, [
-    attestor, projectRoot, scenario, before, evidence, coreFile, '0', root, beforeDigest, '2.1.211',
+    attestor, projectRoot, scenario, before, evidence, coreFile, '0', root, beforeDigest, '2.1.221',
   ], {
     encoding: 'utf8', timeout: 30000,
   });
@@ -113,7 +113,7 @@ function runScenario(scenario, afterCapture) {
     fixtureMutations.forEach((mutation) => {
       mutation.apply();
       const dirty = spawnSync(process.execPath, [
-        attestor, projectRoot, scenario, before, evidence, coreFile, '0', root, beforeDigest, '2.1.211',
+        attestor, projectRoot, scenario, before, evidence, coreFile, '0', root, beforeDigest, '2.1.221',
       ], { encoding: 'utf8', timeout: 30000 });
       assert.equal(dirty.status, 0, dirty.stderr);
       assert.equal(assertion(dirty.stdout, { vars: { scenario_id: scenario } }).pass, false,
@@ -125,7 +125,7 @@ function runScenario(scenario, afterCapture) {
     const zeroBashEvidence = path.join(temporary, `${scenario}.zero-bash.evidence.json`);
     capture(scenario, zeroBashEvidence, [], false);
     const zeroBash = spawnSync(process.execPath, [
-      attestor, projectRoot, scenario, before, zeroBashEvidence, coreFile, '0', root, beforeDigest, '2.1.211',
+      attestor, projectRoot, scenario, before, zeroBashEvidence, coreFile, '0', root, beforeDigest, '2.1.221',
     ], { encoding: 'utf8', timeout: 30000 });
     assert.equal(zeroBash.status, 0, zeroBash.stderr);
     assert.equal(assertion(zeroBash.stdout, { vars: { scenario_id: scenario } }).pass, false,

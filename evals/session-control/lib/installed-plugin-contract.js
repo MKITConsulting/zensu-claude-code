@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const core = require('../../../hooks/lib/session-control-core-v1.js');
 
 const PLUGIN_ID = 'zensu@zensu';
-const CLI_VERSION = '2.1.211';
+const CLI_VERSION = '2.1.221';
 const SCHEMA = 'zensu.claude-installed-plugin';
 const KEYS = [
   'schema',

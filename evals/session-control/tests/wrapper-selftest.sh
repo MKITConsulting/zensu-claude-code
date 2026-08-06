@@ -99,7 +99,7 @@ LIST_FILE="$TEMPORARY/plugin-list.json"
 jq -cn --arg path "$INSTALLED_NODE_ROOT" --arg version "$PLUGIN_VERSION" \
   '[{id:"zensu@zensu",version:$version,scope:"user",enabled:true,installPath:$path}]' >"$LIST_FILE"
 INSTALL_MANIFEST="$TEMPORARY/installed-plugin.json"
-node "$INSTALL_CONTRACT" resolve "$LIST_FILE" "$ROOT" "$ISOLATED_HOME" "$REVISION" 2.1.211 >"$INSTALL_MANIFEST"
+node "$INSTALL_CONTRACT" resolve "$LIST_FILE" "$ROOT" "$ISOLATED_HOME" "$REVISION" 2.1.221 >"$INSTALL_MANIFEST"
 
 cat >"$TEMPORARY/b/claude" <<'STUB'
 #!/bin/bash
@@ -113,7 +113,7 @@ if [ "${1:-}" = 'auth' ] && [ "${2:-}" = 'status' ]; then
   exit 0
 fi
 if [ "${1:-}" = '--version' ]; then
-  printf '2.1.211 (Claude Code stub)\n'
+  printf '2.1.221 (Claude Code stub)\n'
   exit 0
 fi
 session=''

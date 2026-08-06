@@ -64,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   content regexes and concrete safe source/docs/test subtrees remain available.
 - **evals**: Add pinned local Promptfoo contract, live, concurrency, and
   adversarial validation with wrapper-owned control attestations. Local
-  operator runs use Claude Code 2.1.211 to install `zensu@zensu` into an isolated user cache,
+  operator runs use Claude Code 2.1.221 to install `zensu@zensu` into an isolated user cache,
   verify source/cache runtime identity, launch without `--plugin-dir`, prove
   inherited normal/reviewer subagent context, and synchronize 12 processes as
   three real four-way barrier generations. Upgrade by starting a new Claude

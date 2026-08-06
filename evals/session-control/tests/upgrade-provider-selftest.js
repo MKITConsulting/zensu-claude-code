@@ -53,7 +53,7 @@ function providerEnvironment(fault = '') {
     ...process.env,
     ZENSU_EXPECTED_SOURCE_ROOT: source,
     ZENSU_EXPECTED_SOURCE_REVISION: revision,
-    ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.211',
+    ZENSU_EXPECTED_CLAUDE_VERSION: '2.1.221',
     ZENSU_UPGRADE_TEST_MODE: '1',
     ZENSU_UPGRADE_TEST_CLAUDE_SCRIPT: fakeClaude,
     ZENSU_UPGRADE_SELFTEST_FAULT: fault,
@@ -199,7 +199,7 @@ const args=process.argv.slice(2);
 const authCanary=args.includes('--safe-mode');
 if(process.argv[2]==='--version'&&(hasApi||hasOauth))process.exit(9);
 if(process.argv[2]==='--version'){
-  const reply=()=>{process.stdout.write((fault==='wrong-cli-version-output'?'2.1.999':'2.1.211')+' (Claude Code selftest)\\n');process.exit(0);};
+  const reply=()=>{process.stdout.write((fault==='wrong-cli-version-output'?'2.1.999':'2.1.221')+' (Claude Code selftest)\\n');process.exit(0);};
   if(fault==='sleep-cli-probe')setTimeout(reply,1000);else reply();
   return;
 }
@@ -545,7 +545,7 @@ function handle(envelope){
     environment: { ZENSU_UPGRADE_SELFTEST_FAULT: 'wrong-cli-version-output' },
   });
   assert.notEqual(wrongCliOutput.status, 0);
-  assert.match(wrongCliOutput.stderr, /Claude CLI must be exactly 2\.1\.211/);
+  assert.match(wrongCliOutput.stderr, /Claude CLI must be exactly 2\.1\.221/);
 
   const rejectedAuthCanary = invokePreflight({
     environment: { ZENSU_UPGRADE_SELFTEST_FAULT: 'auth-canary-wrong-output' },

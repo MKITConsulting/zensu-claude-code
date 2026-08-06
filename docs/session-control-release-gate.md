@@ -11,7 +11,7 @@ never run in GitHub Actions.
 
 1. The runner requires a clean checkout at the exact
    `ZENSU_EXPECTED_SOURCE_REVISION` Git SHA. The local release aggregate uses
-   Claude Code CLI `2.1.211`; an operator may select another exact supported
+   Claude Code CLI `2.1.221`; an operator may select another exact supported
    version for a side-by-side compatibility run.
 2. The production marketplace entry must use the official GitHub source object
    and pin `MKITConsulting/zensu-claude-code` at the immutable `v<plugin
@@ -174,7 +174,7 @@ npm run session-control:selfcheck
 npm run session-control:contract
 
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 \
-ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211 \
+ZENSU_EXPECTED_CLAUDE_VERSION=2.1.221 \
 ZENSU_EXPECTED_SOURCE_ROOT="$PWD" \
 ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)" \
 ANTHROPIC_API_KEY='…' \

@@ -333,6 +333,13 @@
           "path": "tests/structure/test-tdd-state-path-safety.sh",
           "args": [],
           "timeoutMs": 180000
+        },
+        {
+          "id": "plan-payload-path-transport",
+          "runner": "bash",
+          "path": "tests/structure/test-plan-payload-fallback.sh",
+          "args": [],
+          "timeoutMs": 600000
         }
       ]
     }
