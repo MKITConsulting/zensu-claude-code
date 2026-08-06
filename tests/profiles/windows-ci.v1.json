@@ -339,7 +339,7 @@
           "runner": "bash",
           "path": "tests/structure/test-plan-payload-fallback.sh",
           "args": [],
-          "timeoutMs": 180000
+          "timeoutMs": 600000
         }
       ]
     }

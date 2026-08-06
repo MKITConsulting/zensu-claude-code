@@ -298,10 +298,13 @@ refuses_with "F7 an empty plan file reports PLAN_FILE_EMPTY, not a generic failu
   PLAN_FILE_EMPTY \
   "$(invoke "$(payload refuse_session __ABSENT__ "$EMPTY_FILE")" "$REFUSE_PROJECT" "$CFG_OFF" "$REFUSE_DATA")"
 
+# Sparse: the size guard rejects this before any read, so allocating real bytes
+# would only cost Windows CI time.
 OVERSIZE_FILE="$TMP/oversize-plan.md"
 node -e '
   const fs=require("fs");
-  fs.writeFileSync(process.argv[1],Buffer.alloc(4*1024*1024+1,0x61));
+  fs.closeSync(fs.openSync(process.argv[1],"w"));
+  fs.truncateSync(process.argv[1],4*1024*1024+1);
 ' "$OVERSIZE_FILE"
 refuses_with "F13 a file past the 4 MiB limit reports PLAN_FILE_TOO_LARGE" \
   PLAN_FILE_TOO_LARGE \
