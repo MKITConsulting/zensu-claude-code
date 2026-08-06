@@ -57,7 +57,7 @@ module.exports = (output, context = {}) => {
   catch (_error) { return fail('attested plugin root is unavailable'); }
   if (resolvedPluginRoot !== root || attestation.runtime_digest !== expectedRuntimeDigest
       || attestation.plugin_version !== expectedPluginVersion
-      || attestation.claude_code_version !== '2.1.211') {
+      || attestation.claude_code_version !== '2.1.221') {
     return fail('attested runtime does not match this exact checkout');
   }
   if (attestation.claude_exit_code !== 0

@@ -214,7 +214,7 @@ contains 'Windows provider selftest verifies the explicit no-spawn boundary' \
 contains 'Runner forbids real existing-login candidate execution' \
   "$RUNNER" \
   'existing-login candidate execution is unsupported; provide one explicit credential for the plugin-free auth canary'
-contains 'Local operator command pins the Claude CLI version' "$RELEASE_GATE_DOC" 'ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211'
+contains 'Local operator command pins the Claude CLI version' "$RELEASE_GATE_DOC" 'ZENSU_EXPECTED_CLAUDE_VERSION=2.1.221'
 contains 'Provider authenticates with a plugin-free isolated-HOME canary' \
   "$PROVIDER" \
   'async function runAuthenticatedCliCanary('

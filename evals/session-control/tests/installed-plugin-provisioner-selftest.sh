@@ -44,7 +44,7 @@ set -euo pipefail
 [ -z "${ANTHROPIC_API_KEY:-}" ] && [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] \
   || { echo 'credential leaked to plugin CLI' >&2; exit 90; }
 if [ "${1:-}" = '--version' ]; then
-  printf '%s (Claude Code stub)\n' "${STUB_CLI_VERSION:-2.1.211}"
+  printf '%s (Claude Code stub)\n' "${STUB_CLI_VERSION:-2.1.221}"
   exit 0
 fi
 if [ "${1:-}" = plugin ] && [ "${2:-}" = marketplace ] && [ "${3:-}" = add ]; then
@@ -170,7 +170,7 @@ run_success() {
   [ "$(jq -r '.plugins[0].source' "$state/marketplace-fixture/.claude-plugin/marketplace.json")" = './plugin' ]
   [ "$(git -C "$state/marketplace-fixture/plugin" rev-parse HEAD)" = "$REVISION" ]
   [ -z "$(git -C "$state/marketplace-fixture/plugin" status --porcelain=v1 --untracked-files=all)" ]
-  node "$CONTRACT" verify "$manifest" "$SOURCE" "$installed" "$home" "$REVISION" 2.1.211 >/dev/null
+  node "$CONTRACT" verify "$manifest" "$SOURCE" "$installed" "$home" "$REVISION" 2.1.221 >/dev/null
   ! grep -q 'not-a-real' "$out" "$err"
   rm -rf "$state"
   [ ! -e "$home" ]
@@ -237,6 +237,6 @@ if PATH="$TEMPORARY/bin:$PATH" STUB_REAL_NODE="$REAL_NODE" \
   echo 'provisioner accepted an unpinned Claude CLI' >&2; exit 1
 fi
 [ ! -e "$CLI_STATE" ]
-grep -qF 'Claude CLI must be exactly 2.1.211' "$CLI_ERR"
+grep -qF 'Claude CLI must be exactly 2.1.221' "$CLI_ERR"
 
 printf 'installed-plugin-provisioner-selftest.sh: PASS\n'

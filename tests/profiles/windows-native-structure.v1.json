@@ -14,6 +14,7 @@
     "tests/structure/test-bash-source-write-gate.sh",
     "tests/structure/test-file-exists-replacement.sh",
     "tests/structure/test-msys-runtime-boundaries.sh",
+    "tests/structure/test-plan-payload-fallback.sh",
     "tests/structure/test-post-review-self-review-handoff.sh",
     "tests/structure/test-pre-edit-hook-mirror.sh",
     "tests/structure/test-review-worker-evidence-lease.sh",

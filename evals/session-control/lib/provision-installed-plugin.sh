@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-EXPECTED_CLI_VERSION='2.1.211'
+EXPECTED_CLI_VERSION='2.1.221'
 PLUGIN_ID='zensu@zensu'
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd -P)"
 CONTRACT="$SCRIPT_DIR/installed-plugin-contract.js"

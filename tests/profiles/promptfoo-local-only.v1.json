@@ -44,6 +44,7 @@
     "test-pending-review-ttl.sh",
     "test-pilot-skill.sh",
     "test-plan-approved-delegate.sh",
+    "test-plan-payload-fallback.sh",
     "test-plan-requirement-ids.sh",
     "test-plan-review-skill.sh",
     "test-post-bash-witness.sh",

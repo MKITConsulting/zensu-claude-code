@@ -185,7 +185,7 @@ attestation is emitted.
   exact candidate SHA. It is an operator evaluation, not a GitHub Actions gate.
 
 Local release and full-live profiles require a disposable host acknowledged with
-`ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, Claude Code CLI **2.1.211**, and valid
+`ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1`, Claude Code CLI **2.1.221**, and valid
 `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` credentials. The upgrade
 profile instead requires the exact Claude CLI version selected by
 `ZENSU_EXPECTED_CLAUDE_VERSION`. All live profiles require an explicit source
@@ -202,7 +202,7 @@ applies Claude's documented `bwrap` AppArmor profile when unprivileged user
 namespaces are restricted, and executes basic and network-namespace sandbox
 probes. PR CI retains only the deterministic contained-hook boundary and makes
 no model request. Local release and full-live validation use Claude Code
-`2.1.211` as their supported baseline; an operator may select another exact
+`2.1.221` as their supported baseline; an operator may select another exact
 version for the upgrade-only compatibility profile.
 
 The upgrade profile additionally requires
@@ -256,7 +256,7 @@ rejecting every executable/background/unsandboxed extension.
 
 ```bash
 ZENSU_E2E_DISPOSABLE_ENVIRONMENT=1 \
-ZENSU_EXPECTED_CLAUDE_VERSION=2.1.211 \
+ZENSU_EXPECTED_CLAUDE_VERSION=2.1.221 \
 ZENSU_EXPECTED_SOURCE_ROOT="$PWD" \
 ZENSU_EXPECTED_SOURCE_REVISION="$(git rev-parse HEAD)" \
 ANTHROPIC_API_KEY='...' \

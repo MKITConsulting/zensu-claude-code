@@ -222,8 +222,8 @@ if [ "$RESET_ATTEST_MODE" = "1" ]; then
     echo "claude-promptfoo-wrapper: cannot determine Claude Code CLI version" >&2
     exit 127
   }
-  [ "$RESET_CLAUDE_CLI_VERSION" = "2.1.211" ] || {
-    echo "claude-promptfoo-wrapper: reset-review-limit eval requires Claude Code CLI 2.1.211 (got $RESET_CLAUDE_CLI_VERSION)" >&2
+  [ "$RESET_CLAUDE_CLI_VERSION" = "2.1.221" ] || {
+    echo "claude-promptfoo-wrapper: reset-review-limit eval requires Claude Code CLI 2.1.221 (got $RESET_CLAUDE_CLI_VERSION)" >&2
     exit 64
   }
 fi
