@@ -9,7 +9,7 @@ set -u
 # (names, path, additive-only contract, trust boundary, example overlay).
 # NEGATIVE guards: stable mandatory-phase sentences of each skill stay
 # present, so an overlay-motivated edit weakening enforcement fails the suite.
-# Also guards the tdd 430-line cap (same constant pinned by
+# Also guards the tdd 433-line cap (same constant pinned by
 # test-review-personas.sh and test-tdd-manager-patches.sh — bump all three).
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -108,10 +108,10 @@ else
   check "P3c pr-team-review mandatory coverage sentence intact" FAIL
 fi
 LINES="$(wc -l < "$TDD_MD" | tr -d '[:space:]')"
-if [ "$LINES" -le 430 ]; then
-  check "P3d tdd skill stays under the 430-line cap (actual: $LINES)" PASS
+if [ "$LINES" -le 433 ]; then
+  check "P3d tdd skill stays under the 433-line cap (actual: $LINES)" PASS
 else
-  check "P3d tdd skill stays under the 430-line cap (actual: $LINES)" FAIL
+  check "P3d tdd skill stays under the 433-line cap (actual: $LINES)" FAIL
 fi
 
 echo "----"

@@ -34,6 +34,7 @@
     "test-drift-assertion-or-logic.sh",
     "test-drift-audit-regex.sh",
     "test-edit-landing-audit.sh",
+    "test-evidence-discipline.sh",
     "test-file-exists-replacement.sh",
     "test-ghost-scan-test-detection.sh",
     "test-gitignore-zensu.sh",
