@@ -13,6 +13,7 @@
     "sessionBanner": true,
     "intentRouter": true,
     "tddReminder": true,
+    "zenMode": true,
     "mcpGate": true,
     "bashWriteGate": true,
     "secretScan": true,
