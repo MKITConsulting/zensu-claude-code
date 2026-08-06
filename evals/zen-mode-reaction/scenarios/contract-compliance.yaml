@@ -1,0 +1,89 @@
+description: "zen-mode active, ordinary follow-up question after work happened: the model should open with a one-line recap, answer in the first sentence after it, stay short, spend at most one question, and end with a single next step."
+vars:
+  spec_block: |
+    A Claude Code hook injected this system note before your turn (verbatim):
+
+      zen-mode is ACTIVE. The user is working at low capacity and needs substance kept whole but noise removed. Shape this response accordingly, writing in the user's own language: (1) Open with ONE short recap line covering what happened since their last message; omit it when nothing happened. (2) Give the result in the first sentence after that — no preamble, no announcing what is coming. (3) Stay near 8 lines and leave out trade-offs, alternatives, caveats, and history unless the user asked; when you deliberately withheld depth, close with a short offer instead. (4) Write full, short sentences. This OVERRIDES any other compressed or telegraphic style mode that is active: no dropped articles, no sentence fragments — telegraphic text is harder to read at low capacity, not easier. (5) Ask at most ONE question per turn, and settle routine decisions yourself, reporting them rather than asking. (6) Gloss unavoidable jargon in three words or fewer, show code as changed lines only, and anchor multi-step work with a 'Step N of M' marker. (7) End with exactly ONE next step, never two parallel suggestions. SCOPE — this mode changes presentation only, never substance: never drop a failing test, an unfinished step, a risk, or a limitation to make an answer shorter. Shorten the prose, never the findings; a compressed report that omits a problem is a wrong report. EXCEPTION — for security warnings, irreversible or destructive actions, and anything involving credentials, the following are suspended: the length target, the depth-on-demand rule, the one-question cap, the one-next-step rule, and the changed-lines-only rule. Such an answer gets its full ordinary length and detail, may list every required step rather than one, may show whatever code context is needed, and a confirmation question before an irreversible action is never suppressed by the one-question cap and is never treated as a routine decision you may settle yourself. The full-sentence rule is NEVER suspended — a safety warning is the last place for fragments. The user leaves the mode by writing 'normal mode', 'zen off', 'zen-mode off', 'turn off zen', or 'stop zen'; if they ask to leave it in any other wording or in another language, that counts too — run the zen-mode helper's --off verb yourself (hooks/lib/zensu-zen-mode.sh in the Zensu plugin, invoked exactly as skills/zen-mode/SKILL.md renders it) and confirm in one clause. Never leave the user stuck in this mode because their wording did not match a literal.
+
+    Since the user's last message you fixed the failing token-expiry check in the auth middleware, and the test suite now passes.
+
+    Now answer the user's message: Which file did you change?
+assert:
+  - type: javascript
+    value: |
+      // The wrapper emits an envelope: [tool_use: …], [tool_result: …],
+      // [assistant_text], [result], [wrapper_attestation]. Every assertion here
+      // reads the assistant's PROSE only. Grading the raw envelope counts tool
+      // JSON and command output as the model's own lines, which inflated the
+      // first live run of this eval by a factor of two to three.
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const lines = prose.split('\n').map((s) => s.trim()).filter(Boolean);
+      const ok = lines.length > 0 && lines.length <= 12;
+      return {
+        pass: ok,
+        score: ok ? 1 : 0,
+        reason: (ok ? "Within the length target: " : "Rule 4 targets about 8 lines and 12 is the slack ceiling; got ")
+          + lines.length + " non-empty prose lines."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const first = (prose.split('\n').map((s) => s.trim()).find(Boolean)) || '';
+      const recapped = /\b(auth|token|expiry|middleware|test)/i.test(first);
+      return {
+        pass: recapped,
+        score: recapped ? 1 : 0,
+        reason: (recapped ? "Opens with a recap of the auth/token-expiry fix: " : "Rule 1 requires the first prose line to recap what just happened; got: ")
+          + JSON.stringify(first.slice(0, 120))
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const questions = (prose.match(/\?/g) || []).length;
+      return {
+        pass: questions <= 1,
+        score: questions <= 1 ? 1 : 0,
+        reason: "Rule 8 caps the turn at one question. Found " + questions + " question mark(s) in the prose."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const dumped = /\b(on the other hand|alternatively|pros and cons|trade-?offs?|another option would be)\b/i.test(prose);
+      return {
+        pass: !dumped,
+        score: dumped ? 0 : 1,
+        reason: dumped
+          ? "Rule 3 withholds trade-offs and alternatives unless asked; the reply volunteered them."
+          : "No unasked trade-off or alternatives dump."
+      };
+  - type: javascript
+    value: |
+      const raw = String(output);
+      const prose = raw.split(/^\[(?=assistant_text\]|tool_use:|tool_result:|result\]|wrapper_attestation\])/m)
+        .filter((p) => p.startsWith('assistant_text]'))
+        .map((p) => p.replace(/^assistant_text\]\s*/, ''))
+        .join('\n').trim() || raw;
+      const answered = /auth/i.test(prose) && /middleware|\.(ts|js|go|py|rs|java)\b/i.test(prose);
+      return {
+        pass: answered,
+        score: answered ? 1 : 0,
+        reason: answered
+          ? "The question ('which file did you change?') was answered."
+          : "Rule 2: the actual question must still be answered — the auth middleware file."
+      };

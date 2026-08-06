@@ -61,6 +61,10 @@
       "reason": "Promptfoo reset-review contracts are local-only and never run in GitHub Actions."
     },
     {
+      "path": "tests/structure/test-promptfoo-zen-mode.sh",
+      "reason": "Promptfoo zen-mode contracts are local-only and never run in GitHub Actions."
+    },
+    {
       "path": "tests/structure/test-tdd-state-corruption-fail-closed.sh",
       "reason": "The native-Windows branch explicitly skips the unavailable POSIX symlink fixture."
     },

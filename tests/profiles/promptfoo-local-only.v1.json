@@ -127,7 +127,8 @@
     "test-promptfoo-context-nudge-reaction.sh",
     "test-promptfoo-reset-review-limit.sh",
     "test-promptfoo-session-upgrade.sh",
-    "test-promptfoo-verify-feature.sh"
+    "test-promptfoo-verify-feature.sh",
+    "test-promptfoo-zen-mode.sh"
   ],
   "ciOfflineSuites": [
     {
