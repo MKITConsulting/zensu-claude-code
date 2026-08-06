@@ -20,6 +20,7 @@
     "test-bash-source-write-gate.sh",
     "test-bash-zensu-gate.sh",
     "test-bypass-ledger.sh",
+    "test-chain-recover.sh",
     "test-chain-terminus-zero-change-gate.sh",
     "test-changelog-unreleased-resolver-entries.sh",
     "test-context-nudge-hook.sh",
