@@ -1,15 +1,25 @@
 #!/bin/bash
-# UserPromptSubmit hook — zen-mode re-injection. While the current session carries
-# a zen-mode marker (written by hooks/lib/zensu-zen-mode.sh --on, normally through
-# the /zensu:zen-mode skill), this hook injects the mode contract as
-# additionalContext on every prompt. A skill is loaded once and fades after a
-# handful of turns; a low-capacity user is the least likely to notice that drift,
-# so the reminder rides along with each prompt instead.
+# UserPromptSubmit hook — zen-mode re-injection. While zen-mode resolves to active
+# for the current session, this hook injects the mode contract as additionalContext
+# on every prompt. A skill is loaded once and fades after a handful of turns; a
+# low-capacity user is the least likely to notice that drift, so the reminder rides
+# along with each prompt instead.
+#
+# Resolution is three-valued, most specific first:
+#   1. session marker `{"active":true|false}` — the choice this session recorded,
+#      through /zensu:zen-mode, hooks/lib/zensu-zen-mode.sh, or the off-branch below
+#   2. hooks.zenModeDefault — the configured default, itself defaulting to TRUE
+# A symlinked marker or state directory, and a marker that does not spell out an
+# active mode, both resolve to OFF: unreadable state must never impose the mode on
+# a user who may have just left it.
 #
 # Deactivation is handled HERE rather than by the model: a prompt matching the
-# off-phrases removes the marker directly, so "normal mode" still works after the
-# model has drifted. The marker is keyed by the resolved Session Control key, so a
-# fresh session always starts with zen-mode off.
+# off-phrases writes `{"active":false}` directly, so "normal mode" still works
+# after the model has drifted. It WRITES rather than deletes on purpose — under a
+# true default, removing the marker would re-enable the mode the user just left.
+# The marker is keyed by the resolved Session Control key, so a fresh session
+# always starts from the configured default and one session's choice never leaks
+# into another.
 #
 # The marker root comes from zensu_resolve_project_dir, the same accessor the
 # writer uses. It is deliberately NOT $ZENSU_PROJECT_ROOT: Session Control records
@@ -17,7 +27,8 @@
 # spelling shell builtins need, so concatenating the raw root here would have the
 # hook stat a path the helper never wrote.
 #
-# Disable the hook entirely with hooks.zenMode:false in .zensu/config.json,
+# Disable the hook entirely with hooks.zenMode:false in .zensu/config.json, or
+# keep it and flip the default off with hooks.zenModeDefault:false — both are
 # resolved through the usual env -> project-local -> global order. Every path after
 # the plugin-root identity check exits 0 — missing node, unbindable session, absent
 # marker, or a non-main principal are all silent no-ops and never block the prompt.
@@ -60,9 +71,18 @@ read_field() {
 ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0
 [ -n "$ZEN_ROOT" ] || exit 0
 
-MARKER="$ZEN_ROOT/.zensu/state/zen-mode-${ZENSU_SESSION_KEY}.json"
-[ -f "$MARKER" ] || exit 0
-[ -L "$MARKER" ] && exit 0
+ZEN_STATE_DIR="$ZEN_ROOT/.zensu/state"
+MARKER="$ZEN_STATE_DIR/zen-mode-${ZENSU_SESSION_KEY}.json"
+
+# Resolve before the prompt is ever read, so a session whose mode is off keeps
+# paying nothing for prompt extraction.
+if [ -L "$ZEN_STATE_DIR" ] || [ -L "$MARKER" ]; then
+  exit 0
+elif [ -f "$MARKER" ]; then
+  grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || exit 0
+else
+  zensu_zen_mode_default_on || exit 0
+fi
 
 PROMPT="$(read_field prompt)"
 
@@ -79,13 +99,17 @@ if [ -n "$PROMPT" ]; then
 fi
 
 if [ "$ZEN_OFF" -eq 1 ]; then
-  rm -f "$MARKER" 2>/dev/null || true
-  if [ -e "$MARKER" ]; then
+  ZEN_OFF_RECORDED=0
+  if mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null \
+    && { printf '{"active":false}\n' > "$MARKER"; } 2>/dev/null; then
+    grep -q '"active"[[:space:]]*:[[:space:]]*true' "$MARKER" 2>/dev/null || ZEN_OFF_RECORDED=1
+  fi
+  if [ "$ZEN_OFF_RECORDED" -eq 0 ]; then
     cat <<'JSON'
 {
   "hookSpecificOutput": {
     "hookEventName": "UserPromptSubmit",
-    "additionalContext": "zen-mode COULD NOT BE DEACTIVATED: the session marker under .zensu/state/ could not be removed, so the mode is still on and this hook will keep re-injecting it. Tell the user this in one plain sentence, name the .zensu/state/ directory as the place to look, and then answer their request normally. Do not silently ignore this."
+    "additionalContext": "zen-mode COULD NOT BE DEACTIVATED: the session marker under .zensu/state/ could not be written, so the mode is still on and this hook will keep re-injecting it. Tell the user this in one plain sentence, name the .zensu/state/ directory as the place to look, and then answer their request normally. Do not silently ignore this."
   }
 }
 JSON

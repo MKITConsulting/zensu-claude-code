@@ -6,10 +6,11 @@ set -u
 # (hooks/user-prompt-zen-mode.sh), and the skill contract
 # (skills/zen-mode/SKILL.md).
 #
-# The two properties that make the mode trustworthy are pinned behaviorally:
-# the hook is a total no-op unless the current session carries a marker, and
-# deactivation is performed by the HOOK (not the model), so an off-phrase still
-# works after the model has drifted away from the mode.
+# The properties that make the mode trustworthy are pinned behaviorally: the mode
+# resolves marker-first and falls back to hooks.zenModeDefault (default TRUE), an
+# explicit off is RECORDED rather than deleted so the true default cannot silently
+# undo it, and deactivation is performed by the HOOK (not the model), so an
+# off-phrase still works after the model has drifted away from the mode.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/user-prompt-zen-mode.sh"
@@ -19,6 +20,8 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 CONTROL_TMP="$(mktemp -d -t zenmode-control-XXXXXX)"
 NO_CONFIG="$CONTROL_TMP/no-such-config.json"
+CFG_DEFAULT_OFF="$CONTROL_TMP/default-off.json"
+printf '%s' '{"hooks":{"zenModeDefault":false}}' > "$CFG_DEFAULT_OFF"
 export CLAUDE_PLUGIN_DATA="$CONTROL_TMP/plugin-data"
 mkdir -p "$CLAUDE_PLUGIN_DATA"
 trap 'rm -rf "$CONTROL_TMP"' EXIT
@@ -69,12 +72,27 @@ grep -qF 'zensu_hook_enabled zenMode' "$HOOK" \
   && check "Z7 gated by hooks.zenMode (zensu_hook_enabled zenMode)" PASS \
   || check "Z7 gated by hooks.zenMode (zensu_hook_enabled zenMode)" FAIL
 
-# Z8 marker lives under the gitignored ephemeral state dir
-if grep -qF '.zensu/state/zen-mode-' "$HOOK" && grep -qF '.zensu/state' "$HELPER"; then
-  check "Z8 marker path is .zensu/state/zen-mode-<session> (gitignored, ephemeral)" PASS
+# Z7b the session default is read through the dedicated getter, never folded into
+# zensu_hook_enabled — that helper answers "may this hook run at all", which is a
+# different question with a different marker consequence
+if grep -qF 'zensu_zen_mode_default_on' "$HOOK" \
+  && grep -qF 'zensu_zen_mode_default_on' "$PLUGIN_DIR/hooks/lib/zensu-config.sh" \
+  && ! grep -qF 'zensu_hook_enabled zenModeDefault' "$HOOK"; then
+  check "Z7b session default resolved via zensu_zen_mode_default_on (hooks.zenModeDefault)" PASS
 else
-  check "Z8 marker path is .zensu/state/zen-mode-<session>" FAIL
+  check "Z7b session default getter missing or folded into zensu_hook_enabled" FAIL
 fi
+
+# Z8 marker lives under the gitignored ephemeral state dir. The directory and the
+# file stem are matched separately because both files now build the path in two
+# steps — the state dir is needed on its own for the symlink guard and the mkdir.
+Z8_BAD=""
+for F8 in "$HOOK" "$HELPER"; do
+  grep -qF '.zensu/state' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):state-dir"
+  grep -qF '/zen-mode-' "$F8" || Z8_BAD="$Z8_BAD $(basename "$F8"):marker-stem"
+done
+[ -z "$Z8_BAD" ] && check "Z8 marker path is .zensu/state/zen-mode-<session> (gitignored, ephemeral)" PASS \
+  || check "Z8 marker path wrong:$Z8_BAD" FAIL
 
 # ── Behavioral helpers ───────────────────────────────────────────────
 # Creates the Session Control record the helper and hook both bind against.
@@ -88,10 +106,14 @@ new_session() {
       env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
       bash "$PLUGIN_DIR/hooks/session-start-session-control.sh" >/dev/null
 }
-# helper <project> <session_id> <verb>
+# helper <project> <session_id> <verb> [config]
+# ZENSU_CONFIG is always pinned so --status resolves its default against the test's
+# own config, never against whatever ~/.zensu/config.json the developer happens to
+# have.
 helper() {
   CLAUDE_CODE_SESSION_ID="$2" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
     CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$1" \
+    ZENSU_CONFIG="${4:-$NO_CONFIG}" \
     bash "$HELPER" "$3" 2>/dev/null
 }
 # fire <project> <session_id> <prompt> [config] [agent_type]
@@ -122,20 +144,56 @@ classify() {
 }
 marker_count() { find "$1/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' 2>/dev/null | grep -c . || true; }
 
-# Z9 helper round-trip: off -> on -> off, marker appears and disappears
+# Z9 helper round-trip under an explicit zenModeDefault:false: off -> on -> off.
+# --off must RECORD the choice (marker still present, resolving to off), never
+# delete it: under the true default a deleted marker re-enables the mode the user
+# just left.
 P9="$(mktemp -d -t zenmode-XXXXXX)"; S9="z9-$$"
 new_session "$P9" "$S9"
-ST9A="$(helper "$P9" "$S9" --status)"
-helper "$P9" "$S9" --on >/dev/null
-ST9B="$(helper "$P9" "$S9" --status)"; M9B="$(marker_count "$P9")"
-helper "$P9" "$S9" --off >/dev/null
-ST9C="$(helper "$P9" "$S9" --status)"; M9C="$(marker_count "$P9")"
-if [ "$ST9A" = "off" ] && [ "$ST9B" = "on" ] && [ "$M9B" = "1" ] && [ "$ST9C" = "off" ] && [ "$M9C" = "0" ]; then
-  check "Z9 helper --status/--on/--off round-trip writes and removes the marker" PASS
+ST9A="$(helper "$P9" "$S9" --status "$CFG_DEFAULT_OFF")"
+helper "$P9" "$S9" --on "$CFG_DEFAULT_OFF" >/dev/null
+ST9B="$(helper "$P9" "$S9" --status "$CFG_DEFAULT_OFF")"; M9B="$(marker_count "$P9")"
+helper "$P9" "$S9" --off "$CFG_DEFAULT_OFF" >/dev/null
+ST9C="$(helper "$P9" "$S9" --status "$CFG_DEFAULT_OFF")"; M9C="$(marker_count "$P9")"
+if [ "$ST9A" = "off" ] && [ "$ST9B" = "on" ] && [ "$M9B" = "1" ] && [ "$ST9C" = "off" ] && [ "$M9C" = "1" ]; then
+  check "Z9 helper --status/--on/--off round-trip records both choices in the marker" PASS
 else
   check "Z9 helper round-trip (a=$ST9A b=$ST9B/$M9B c=$ST9C/$M9C)" FAIL
 fi
 rm -rf "$P9"
+
+# Z9b the marker outranks the config default in BOTH directions, so neither
+# setting can override a choice the session actually made.
+P9B="$(mktemp -d -t zenmode-XXXXXX)"; S9B="z9b-$$"
+new_session "$P9B" "$S9B"
+ST9B1="$(helper "$P9B" "$S9B" --status)"
+helper "$P9B" "$S9B" --off >/dev/null
+ST9B2="$(helper "$P9B" "$S9B" --status)"
+helper "$P9B" "$S9B" --on "$CFG_DEFAULT_OFF" >/dev/null
+ST9B3="$(helper "$P9B" "$S9B" --status "$CFG_DEFAULT_OFF")"
+if [ "$ST9B1" = "on" ] && [ "$ST9B2" = "off" ] && [ "$ST9B3" = "on" ]; then
+  check "Z9b explicit marker outranks zenModeDefault in both directions" PASS
+else
+  check "Z9b marker precedence (default-on=$ST9B1 off-marker=$ST9B2 on-marker-under-default-off=$ST9B3)" FAIL
+fi
+rm -rf "$P9B"
+
+# Z9c a marker whose content is unreadable resolves to OFF, never on. An
+# unparsable state file must not impose the mode on a user who may have just left
+# it — the same one-directional safety the off-phrase matcher has.
+P9C="$(mktemp -d -t zenmode-XXXXXX)"; S9C="z9c-$$"
+new_session "$P9C" "$S9C"
+helper "$P9C" "$S9C" --on >/dev/null
+MARKER9C="$(find "$P9C/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
+printf '%s' 'not json at all' > "$MARKER9C"
+ST9C1="$(helper "$P9C" "$S9C" --status)"
+OUT9C="$(fire "$P9C" "$S9C" "do a thing" | classify)"
+if [ "$ST9C1" = "off" ] && [ "$OUT9C" = "EMPTY" ]; then
+  check "Z9c unparsable marker resolves to off in helper and hook (never on)" PASS
+else
+  check "Z9c unparsable marker (status=$ST9C1 hook='$OUT9C')" FAIL
+fi
+rm -rf "$P9C"
 
 # Z10 unknown verb is rejected, no marker written
 P10="$(mktemp -d -t zenmode-XXXXXX)"; S10="z10-$$"
@@ -149,13 +207,32 @@ else
 fi
 rm -rf "$P10"
 
-# Z11 no marker -> hook is silent
+# Z11 no marker + no config -> the mode is ON, because zenModeDefault defaults to
+# true. This is the shipped out-of-the-box behavior; a fresh install is low-noise
+# without the user running anything.
 P11="$(mktemp -d -t zenmode-XXXXXX)"; S11="z11-$$"
 new_session "$P11" "$S11"
 OUT11="$(fire "$P11" "$S11" "do a thing" | classify)"
-[ "$OUT11" = "EMPTY" ] && check "Z11 no marker -> hook silent (zero cost when mode is off)" PASS \
-  || check "Z11 no marker silent (got '$OUT11')" FAIL
+ST11="$(helper "$P11" "$S11" --status)"
+if [ "$OUT11" = "UserPromptSubmit|ON" ] && [ "$ST11" = "on" ] && [ "$(marker_count "$P11")" = "0" ]; then
+  check "Z11 no marker -> mode ON by default (zenModeDefault defaults to true, no marker written)" PASS
+else
+  check "Z11 default-on (hook='$OUT11' status=$ST11 markers=$(marker_count "$P11"))" FAIL
+fi
 rm -rf "$P11"
+
+# Z11b hooks.zenModeDefault:false restores the opt-in behavior — no marker means
+# silent, and the hook short-circuits before it ever reads the prompt.
+P11B="$(mktemp -d -t zenmode-XXXXXX)"; S11B="z11b-$$"
+new_session "$P11B" "$S11B"
+OUT11B="$(fire "$P11B" "$S11B" "do a thing" "$CFG_DEFAULT_OFF" | classify)"
+ST11B="$(helper "$P11B" "$S11B" --status "$CFG_DEFAULT_OFF")"
+if [ "$OUT11B" = "EMPTY" ] && [ "$ST11B" = "off" ]; then
+  check "Z11b hooks.zenModeDefault:false -> no marker means silent (opt-in restored)" PASS
+else
+  check "Z11b default-off (hook='$OUT11B' status=$ST11B)" FAIL
+fi
+rm -rf "$P11B"
 
 # Z12 marker present -> hook injects the mode contract
 P12="$(mktemp -d -t zenmode-XXXXXX)"; S12="z12-$$"
@@ -203,18 +280,34 @@ else
 fi
 rm -rf "$P14B"
 
-# Z15 the HOOK performs deactivation itself — marker removed, OFF context emitted
+# Z15 the HOOK performs deactivation itself — the off choice is recorded in the
+# marker (not deleted) and the OFF context is emitted
 P15="$(mktemp -d -t zenmode-XXXXXX)"; S15="z15-$$"
 new_session "$P15" "$S15"; helper "$P15" "$S15" --on >/dev/null
 OUT15="$(fire "$P15" "$S15" "normal mode" | classify)"
 M15="$(marker_count "$P15")"
 ST15="$(helper "$P15" "$S15" --status)"
-if [ "$OUT15" = "UserPromptSubmit|OFF" ] && [ "$M15" = "0" ] && [ "$ST15" = "off" ]; then
-  check "Z15 off-phrase removes the marker in the hook (works after model drift)" PASS
+if [ "$OUT15" = "UserPromptSubmit|OFF" ] && [ "$M15" = "1" ] && [ "$ST15" = "off" ]; then
+  check "Z15 off-phrase records the off choice in the hook (works after model drift)" PASS
 else
   check "Z15 hook-side deactivation (out='$OUT15' markers=$M15 status=$ST15)" FAIL
 fi
 rm -rf "$P15"
+
+# Z15b the regression the true default creates: leaving the mode when NO marker
+# exists yet must stick. A hook that deleted instead of recorded would emit OFF and
+# then re-enable the mode on the very next prompt, trapping the user for good.
+P15B="$(mktemp -d -t zenmode-XXXXXX)"; S15B="z15b-$$"
+new_session "$P15B" "$S15B"
+OUT15B1="$(fire "$P15B" "$S15B" "zen off" | classify)"
+OUT15B2="$(fire "$P15B" "$S15B" "do a thing" | classify)"
+ST15B="$(helper "$P15B" "$S15B" --status)"
+if [ "$OUT15B1" = "UserPromptSubmit|OFF" ] && [ "$OUT15B2" = "EMPTY" ] && [ "$ST15B" = "off" ]; then
+  check "Z15b leaving the mode under the true default sticks across the next prompt" PASS
+else
+  check "Z15b off under default-on (first='$OUT15B1' next='$OUT15B2' status=$ST15B)" FAIL
+fi
+rm -rf "$P15B"
 
 # Z16 every documented off-phrase deactivates
 for PHRASE16 in "normal mode" "zen off" "zen-mode off" "turn off zen" "stop zen"; do
@@ -242,13 +335,22 @@ for PHRASE16B in "add a vim normal mode keybinding" "in normal mode the cursor m
   rm -rf "$P16B"
 done
 
-# Z17 off-phrase with no active marker -> silent (no noise when already off)
+# Z17 off-phrase while the mode is already off -> silent (no noise, idempotent).
+# Covered for both ways of being off: a recorded off marker, and zenModeDefault:false.
 P17="$(mktemp -d -t zenmode-XXXXXX)"; S17="z17-$$"
 new_session "$P17" "$S17"
-OUT17="$(fire "$P17" "$S17" "normal mode" | classify)"
-[ "$OUT17" = "EMPTY" ] && check "Z17 off-phrase while already off -> silent (idempotent)" PASS \
-  || check "Z17 idempotent off (got '$OUT17')" FAIL
-rm -rf "$P17"
+helper "$P17" "$S17" --off >/dev/null
+OUT17A="$(fire "$P17" "$S17" "normal mode" | classify)"
+OUT17B="$(fire "$P17" "$S17" "normal mode" "$CFG_DEFAULT_OFF" | classify)"
+P17D="$(mktemp -d -t zenmode-XXXXXX)"; S17D="z17d-$$"
+new_session "$P17D" "$S17D"
+OUT17C="$(fire "$P17D" "$S17D" "normal mode" "$CFG_DEFAULT_OFF" | classify)"
+if [ "$OUT17A" = "EMPTY" ] && [ "$OUT17B" = "EMPTY" ] && [ "$OUT17C" = "EMPTY" ]; then
+  check "Z17 off-phrase while already off -> silent (idempotent, marker and config paths)" PASS
+else
+  check "Z17 idempotent off (marker='$OUT17A' marker+cfg='$OUT17B' cfg-only='$OUT17C')" FAIL
+fi
+rm -rf "$P17" "$P17D"
 
 # Z17b the helper's session-binding failure paths write no marker and exit non-zero.
 # Without this, a regression falling back to a fixed unkeyed path would stay green.
@@ -283,14 +385,17 @@ else
 fi
 rm -rf "$P17C"
 
-# Z18 marker is per session — a second session in the same project stays off
+# Z18 the recorded choice is per session — one session leaving the mode must not
+# drag a sibling in the same project out of it. Under the true default the sibling
+# is the one that stays ON, which is the direction that actually exercises keying:
+# a shared unkeyed marker would silence both.
 P18="$(mktemp -d -t zenmode-XXXXXX)"; S18A="z18a-$$"; S18B="z18b-$$"
 new_session "$P18" "$S18A"; new_session "$P18" "$S18B"
-helper "$P18" "$S18A" --on >/dev/null
+helper "$P18" "$S18A" --off >/dev/null
 OUT18A="$(fire "$P18" "$S18A" "do a thing" | classify)"
 OUT18B="$(fire "$P18" "$S18B" "do a thing" | classify)"
-if [ "$OUT18A" = "UserPromptSubmit|ON" ] && [ "$OUT18B" = "EMPTY" ]; then
-  check "Z18 marker is session-scoped: sibling session in same project stays off" PASS
+if [ "$OUT18A" = "EMPTY" ] && [ "$OUT18B" = "UserPromptSubmit|ON" ]; then
+  check "Z18 recorded choice is session-scoped: sibling session in same project is unaffected" PASS
 else
   check "Z18 session scoping (a='$OUT18A' b='$OUT18B')" FAIL
 fi
@@ -436,14 +541,16 @@ done
 [ -z "$LANG_BAD" ] && check "Z26 skill/hook/helper are English-only (no umlauts, no German stems)" PASS \
   || check "Z26 English-only violated:$LANG_BAD" FAIL
 
-# Z27 config.example.json documents the hooks.zenMode flag
+# Z27 config.example.json documents both flags, and documents zenModeDefault at
+# its real shipped value — an example showing false would misstate the default.
 if node -e '
   const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
-  process.exit((j.hooks||{}).zenMode===true?0:1);
+  const h=j.hooks||{};
+  process.exit(h.zenMode===true&&h.zenModeDefault===true?0:1);
 ' "$PLUGIN_DIR/config.example.json" 2>/dev/null; then
-  check "Z27 config.example.json documents hooks.zenMode" PASS
+  check "Z27 config.example.json documents hooks.zenMode + hooks.zenModeDefault:true" PASS
 else
-  check "Z27 config.example.json missing hooks.zenMode" FAIL
+  check "Z27 config.example.json missing hooks.zenMode or hooks.zenModeDefault:true" FAIL
 fi
 
 # Z28 no version bump rode along with this feature

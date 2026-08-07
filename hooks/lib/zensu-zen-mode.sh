@@ -1,17 +1,23 @@
 #!/bin/bash
 # zensu-zen-mode.sh — session-scoped on/off switch for the zen-mode response
-# style. `--on` writes a marker into the project's ephemeral state directory,
-# `--off` removes it, `--status` reports it. The UserPromptSubmit hook
-# (user-prompt-zen-mode.sh) reads that marker on every prompt and re-injects the
-# mode contract, so the style survives context drift instead of fading after a
-# handful of turns.
+# style. `--on` and `--off` both WRITE the session marker in the project's
+# ephemeral state directory (`{"active":true}` / `{"active":false}`); `--status`
+# reports the resolved mode. The UserPromptSubmit hook (user-prompt-zen-mode.sh)
+# reads that marker on every prompt and re-injects the mode contract, so the
+# style survives context drift instead of fading after a handful of turns.
+#
+# The marker is a RECORDED CHOICE, not an on-switch: absent it, the mode falls
+# back to hooks.zenModeDefault, which defaults to TRUE. That is why `--off` writes
+# `{"active":false}` instead of removing the file — under a true default, deleting
+# the marker would re-enable the mode the user just left. Deletion is therefore
+# never a valid deactivation; only an explicit false marker is.
 #
 # Session binding follows the model-invocation path zensu-log.sh uses: the helper
 # must run from Claude Code's own Bash tool, which supplies CLAUDE_CODE_SESSION_ID
 # and CLAUDE_PLUGIN_DATA. SessionStart deliberately exports no Zensu selectors, so
 # there is no environment variable to read instead. The marker is keyed by the
-# resolved Session Control key, so a fresh session always starts with zen-mode off
-# and a leftover marker can never leak into another session.
+# resolved Session Control key, so a fresh session always starts from the
+# configured default and one session's choice can never leak into another.
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)" || exit 2
@@ -69,28 +75,40 @@ if [ -L "$ZEN_STATE_DIR" ] || [ -L "$ZEN_MARKER" ]; then
   exit 2
 fi
 
+zen_write_marker() {
+  mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || {
+    echo "zensu-zen-mode.sh: cannot create state directory $ZEN_STATE_DIR" >&2
+    exit 2
+  }
+  printf '{"active":%s}\n' "$1" > "$ZEN_MARKER" || {
+    echo "zensu-zen-mode.sh: cannot write $ZEN_MARKER" >&2
+    exit 2
+  }
+}
+
 case "$ZEN_VERB" in
   --on)
-    mkdir -p -m 700 "$ZEN_STATE_DIR" 2>/dev/null || {
-      echo "zensu-zen-mode.sh: cannot create state directory $ZEN_STATE_DIR" >&2
-      exit 2
-    }
-    printf '{"active":true}\n' > "$ZEN_MARKER" || {
-      echo "zensu-zen-mode.sh: cannot write $ZEN_MARKER" >&2
-      exit 2
-    }
+    zen_write_marker true
     echo "zen-mode: on"
     ;;
   --off)
-    rm -f "$ZEN_MARKER" 2>/dev/null || true
-    if [ -e "$ZEN_MARKER" ]; then
-      echo "zensu-zen-mode.sh: cannot remove $ZEN_MARKER — zen-mode is still active" >&2
-      exit 2
-    fi
+    zen_write_marker false
     echo "zen-mode: off"
     ;;
   --status)
-    if [ -f "$ZEN_MARKER" ]; then echo "on"; else echo "off"; fi
+    if [ -f "$ZEN_MARKER" ]; then
+      # A marker that is unreadable or does not spell out an active mode counts
+      # as off: an unparsable state file must never impose the mode on a user who
+      # may have just left it.
+      if grep -q '"active"[[:space:]]*:[[:space:]]*true' "$ZEN_MARKER" 2>/dev/null; then
+        echo "on"
+      else
+        echo "off"
+      fi
+    else
+      source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+      if zensu_zen_mode_default_on; then echo "on"; else echo "off"; fi
+    fi
     ;;
 esac
 exit 0
