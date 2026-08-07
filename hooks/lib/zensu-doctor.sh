@@ -128,7 +128,27 @@ if [ -z "${ZDOC_PLAYWRIGHT:-}" ]; then
   fi
 fi
 
-export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT
+# The PreToolUse denial that every stateful helper renders when Session Control
+# cannot bind points the user here, so reproduce that exact binding attempt.
+# It needs the two inputs the model-side path needs; without them this stays
+# `unknown` and the renderer prints nothing rather than a guess.
+if [ -z "${ZDOC_BINDING:-}" ]; then
+  if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
+    ZDOC_BINDING=unknown
+  elif [ -L "$DIR/zensu-session.sh" ] || [ ! -f "$DIR/zensu-session.sh" ]; then
+    ZDOC_BINDING=unavailable
+  elif (
+    # shellcheck disable=SC1090
+    source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+      && zensu_bind_model_session >/dev/null 2>&1
+  ); then
+    ZDOC_BINDING=bound
+  else
+    ZDOC_BINDING=unbound
+  fi
+fi
+
+export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

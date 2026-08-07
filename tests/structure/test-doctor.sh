@@ -399,6 +399,36 @@ OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=
   node "$REPORT" 2>/dev/null)"
 case "$OUT" in *'no config file present'*) check "P1y config-absent falls back to defaults ✅" PASS ;; *) check "P1y config-absent (got: $OUT)" FAIL ;; esac
 
+# --- Session Control binding row ------------------------------------------
+# The stateful-tool denial points the user at /zensu:doctor, so a session that
+# cannot bind must say so instead of rendering an otherwise-green table.
+run_report_binding() {
+  ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" ZDOC_BINDING="$1" \
+    node "$REPORT" 2>/dev/null
+}
+OUT="$(run_report_binding bound)"
+case "$OUT" in *'binding: this session has a valid Session Control record'*) check "P1ac bound session renders a ✅ binding row" PASS ;; *) check "P1ac bound session binding row (got: $OUT)" FAIL ;; esac
+OUT="$(run_report_binding unbound)"
+case "$OUT" in *'every stateful Zensu tool fails closed'*) check "P1ad unbound session renders a ❌ binding row" PASS ;; *) check "P1ad unbound session binding row (got: $OUT)" FAIL ;; esac
+OUT="$(run_report_binding unavailable)"
+case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
+OUT="$(run_report_binding unknown)"
+case "$OUT" in *'binding:'*) check "P1af unknown binding stays silent instead of guessing" FAIL ;; *) check "P1af unknown binding stays silent instead of guessing" PASS ;; esac
+OUT="$(run_report "$SBOX/plug" - "$EMPTY_PROJECT")"
+case "$OUT" in *'binding:'*) check "P1ag an unset ZDOC_BINDING renders no binding row" FAIL ;; *) check "P1ag an unset ZDOC_BINDING renders no binding row" PASS ;; esac
+if grep -qF 'zensu_bind_model_session' "$HELPER" && grep -qF 'ZDOC_BINDING=unknown' "$HELPER" \
+  && grep -qF 'ZDOC_BINDING=unbound' "$HELPER"; then
+  check "P1ah helper derives the binding row from the real model-side bind" PASS
+else
+  check "P1ah helper derives the binding row from the real model-side bind" FAIL
+fi
+if [ "$(grep -cF 'CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}"' "$SKILL_MD")" -ge 2 ]; then
+  check "P1ai doctor skill passes CLAUDE_PLUGIN_DATA on every helper branch" PASS
+else
+  check "P1ai doctor skill passes CLAUDE_PLUGIN_DATA on every helper branch" FAIL
+fi
+
 # --- nested quoted boolean + __proto__ guard -------------------------------
 printf '{"hooks":{"nested":{"flag":"true"}},"__proto__":{"x":"true"}}\n' > "$SBOX/nested-cfg.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/nested-cfg.json" "$EMPTY_PROJECT")"

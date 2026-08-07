@@ -85,9 +85,9 @@ if [ -z "$ROOT" ] || [ -L "$ROOT" ] || [ ! -d "$ROOT" ] \
     '  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' \
     '' 'Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.'
 elif [ "$READY" = 1 ]; then
-  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
+  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
 else
-  CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"
+  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"
 fi
 ```
 
@@ -118,6 +118,12 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   detected — add one, or export `ZENSU_VCS_PROVIDER=github|gitlab` for a
   self-hosted host).
 - **⚠️ zensu not authenticated** → `zensu auth login`.
+- **❌ binding: this session has no valid Session Control record** → the cause
+  behind the `Blocked: the immutable Zensu session binding is unavailable or
+  invalid` denial. Nothing in this session can be repaired in place; start a
+  fresh Claude Code session. The binding row is omitted entirely when the helper
+  was invoked without `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_DATA` — that
+  is a missing check, not a healthy session.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

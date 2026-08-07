@@ -8,8 +8,15 @@ const hostPaths = require('./claude-path-v1.js');
 const principals = require('./claude-principal-v1.js');
 
 const MAX_PAYLOAD_BYTES = 1024 * 1024;
-const FRESH_SESSION_SOURCES = new Set(['startup', 'clear']);
-const CONTINUATION_SESSION_SOURCES = new Set(['resume', 'compact']);
+const MAX_SESSION_SOURCE_LENGTH = 64;
+// The host's own SessionStart sources are startup, clear, fork, resume and
+// compact. Only the fresh ones are named: `fork` mints a NEW host session id
+// for a copied conversation, so it can only ever arrive without a record.
+// Everything unnamed — the continuations, plus any source the host adds after
+// this build — registers a fresh record when none exists and reuses the
+// existing one otherwise, because refusing an unknown source leaves the whole
+// session unbindable rather than merely ungated.
+const FRESH_SESSION_SOURCES = new Set(['startup', 'clear', 'fork']);
 
 function fail(message) {
   throw new Error(`claude session-control adapter: ${message}`);
@@ -37,14 +44,17 @@ function readPayload() {
   if (/^(?:scv1_[a-f0-9]{64}|sha256:[a-f0-9]{64})$/.test(payload.session_id)) {
     fail('host session id must be raw, not a derived Session Control identifier');
   }
-  if (
-    payload.hook_event_name === 'SessionStart'
-    && !FRESH_SESSION_SOURCES.has(payload.source)
-    && !CONTINUATION_SESSION_SOURCES.has(payload.source)
-  ) {
+  if (payload.hook_event_name === 'SessionStart' && !isUsableSessionSource(payload.source)) {
     fail('SessionStart source is unavailable or unsupported');
   }
   return payload;
+}
+
+function isUsableSessionSource(source) {
+  return typeof source === 'string'
+    && source.trim() !== ''
+    && source.length <= MAX_SESSION_SOURCE_LENGTH
+    && !/[\0\r\n]/.test(source);
 }
 
 function canonicalDirectory(value, label, rejectAlias = false) {
@@ -143,11 +153,13 @@ function main() {
     const key = core.sessionKey(payload.session_id);
     const recordFile = path.join(recordsDir, `${key}.json`);
     const eventCwd = canonicalDirectory(payload.cwd, 'SessionStart cwd');
-    const isContinuation = CONTINUATION_SESSION_SOURCES.has(payload.source);
+    const isFresh = FRESH_SESSION_SOURCES.has(payload.source);
     if (fs.existsSync(recordFile)) {
       // Resume/compact occurs after CwdChanged and may report a descendant or
       // external detached-worktree cwd. Reuse the immutable record anchor;
       // cwd is host location metadata and must never become a rebind request.
+      // Only a known-fresh source must still land in the recorded project: an
+      // unknown one may well be a continuation the host added after this build.
       context = core.readContext({
         recordsDir,
         sessionId: payload.session_id,
@@ -155,7 +167,7 @@ function main() {
       });
       if (context.plugin_root !== pluginRoot) fail('SessionStart plugin root does not match the existing session');
       if (context.plugin_data !== pluginData) fail('SessionStart plugin data does not match the existing session');
-      if (!isContinuation && eventCwd !== context.project_root) {
+      if (isFresh && eventCwd !== context.project_root) {
         fail('fresh SessionStart cwd does not match the existing session project');
       }
       core.readWorkflowState({
@@ -163,9 +175,14 @@ function main() {
         sessionId: payload.session_id,
       });
     } else {
-      if (isContinuation) {
-        fail('continuation SessionStart requires an existing session record');
-      }
+      // No record for this session id, whatever the source claims: a fork, a
+      // resume whose private record was pruned, or a continuation across a
+      // plugin upgrade. Register it exactly like a cold start instead of
+      // failing — refusing here creates no record, and no record fails every
+      // stateful hook closed for the rest of the session. It grants nothing a
+      // plain `startup` would not: a fresh anchor and a baseline workflow
+      // document. Inherited chain state is deliberately NOT reconstructed —
+      // the host payload carries no parent session id.
       context = core.registerContext({
         recordsDir,
         host: 'claude',

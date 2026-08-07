@@ -69,8 +69,11 @@ read_field() {
   json_field "$1"
 }
 
-# SessionStart supplies exactly one of these four lifecycle sources. Ambiguous
-# or future values stay silent until their security semantics are explicit.
+# SessionStart supplies one of five lifecycle sources. `fork` is deliberately
+# absent: autopilot state is project-scoped, not session-scoped, so resuming a
+# forked copy would let two live sessions drive the same run. Ambiguous or
+# future values stay silent for the same reason — until their security
+# semantics are explicit.
 SOURCE="$(read_field source)"
 case "$SOURCE" in
   startup|resume|compact|clear) ;;

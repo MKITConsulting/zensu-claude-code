@@ -99,7 +99,7 @@ zensu_bind_model_session() {
 }
 
 zensu_emit_hook_session_deny() {
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid. Start a fresh Claude Code session before using stateful tools."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid — this session has no Session Control record, so every stateful Zensu tool fails closed. Run /zensu:doctor to see which check failed, or start a fresh Claude Code session before using stateful tools."}}'
 }
 
 zensu_resolve_session_id() {

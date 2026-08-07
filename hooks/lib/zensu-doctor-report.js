@@ -272,8 +272,22 @@ function truncatedList(rows) {
   return listed.join('; ') + (overflow ? '; +' + overflow + ' more' : '');
 }
 
+function bindingLine() {
+  switch (env.ZDOC_BINDING) {
+    case 'bound':
+      return line(OK, 'binding: this session has a valid Session Control record — stateful tools can run');
+    case 'unbound':
+      return line(BAD, 'binding: this session has no valid Session Control record — every stateful Zensu tool fails closed; start a fresh Claude Code session');
+    case 'unavailable':
+      return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
+    default:
+      return undefined;
+  }
+}
+
 function stateBlock(nowMs) {
   block('Session state');
+  bindingLine();
   var projectRoot = path.resolve(env.CLAUDE_PROJECT_DIR || '.');
   var dir = path.join(projectRoot, '.zensu', 'state');
   var entries;

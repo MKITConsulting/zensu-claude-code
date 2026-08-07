@@ -7,6 +7,67 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **session-control**: A forked Claude Code session could not bind at all, so
+  every stateful Zensu tool failed closed for its whole lifetime. Claude Code
+  emits five SessionStart lifecycle sources — `startup`, `clear`, `fork`,
+  `resume`, `compact` — and the adapter only classified four. A `fork` payload
+  hit `SessionStart source is unavailable or unsupported`, the hook exited
+  non-zero, no private Session Control record was ever written, and from then
+  on every helper and gate rendered `Blocked: the immutable Zensu session
+  binding is unavailable or invalid`. `/zensu:zen-mode`, `/zensu:tdd`, the
+  write-gate and the chain enforcer were all unusable in that session, and the
+  only escape was starting over.
+
+  Three changes, all in `hooks/lib/claude-session-control-v1.js`:
+
+  - `fork` is classified fresh. A fork mints a NEW host session id for a copied
+    conversation, so its record can never already exist; it is registered
+    exactly like a cold start.
+  - A SessionStart whose private record is missing now registers one instead of
+    failing, whatever its source claims. This also covers a `resume` after the
+    plugin data directory was pruned and a continuation across a plugin upgrade
+    (`context runtime digest mismatch` / `context plugin version mismatch`),
+    both of which previously bricked the session permanently. It grants nothing
+    a plain `startup` would not — a fresh project anchor plus a baseline
+    workflow document.
+  - An unknown-but-well-formed source is no longer rejected. Refusing it writes
+    no record, and no record fails every stateful hook closed rather than
+    merely leaving one ungated, so the next lifecycle source Claude Code adds
+    cannot repeat this outage. A missing, blank, over-long or control-character
+    source is still rejected.
+
+  The rebind guard is unchanged in substance: a known-fresh source arriving for
+  an existing record must still match that record's project root
+  (`fresh SessionStart cwd does not match the existing session project`). Only
+  a source this build does not know is exempt, because it may well be a
+  continuation reporting a descendant or detached-worktree cwd.
+
+  Deliberately NOT inherited: a fork starts with its own baseline workflow
+  document — no armed TDD chain, no review round, no zen-mode marker. The
+  SessionStart payload carries no parent session id (`session_id`,
+  `transcript_path`, `cwd`, `prompt_id`, `permission_mode`, `agent_id`,
+  `agent_type`, `effort`, `source`, `model`, `session_title`), so the parent
+  cannot be identified at all. Forking mid-chain therefore leaves the wedged
+  chain behind in the parent session rather than carrying it across.
+
+- **session-control**: The fail-closed PreToolUse denial now names the actual
+  cause (`this session has no Session Control record`) and points at
+  `/zensu:doctor` instead of only telling the user to start over.
+
+### Session Control upgrade note
+
+Session Control binds each session to the exact plugin bytes it started with.
+That still requires every published plugin change to use a new SemVer version
+and distinct immutable tag/cache path. After a versioned upgrade,
+already-running Claude Code sessions keep using their previous plugin root;
+start a fresh session to pick up the new Session Control runtime. Do not
+overwrite an existing cache version or run `/reload-plugins` in a session that
+must keep working on the old runtime. The retired `~/.zensu/plugin-root`
+locator is no longer consulted or updated. It may be deleted once no older
+session still needs that path; the plugin never deletes it automatically.
+
 ## [0.17.0] - 2026-08-07
 
 ### Added
