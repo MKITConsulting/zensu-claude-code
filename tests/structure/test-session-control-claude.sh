@@ -20,12 +20,18 @@ for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION" "$HOST_PATH"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$ROOT/}" PASS || check "artifact exists: ${artifact#$ROOT/}" FAIL
 done
 
-CURRENT_CYCLE_CHANGELOG="$(awk '
-  /^## \[Unreleased\]/ { in_section = 1; next }
-  in_section && /^## \[/ { released += 1; if (released > 1) exit; next }
+UPGRADE_CONTRACT_VERSION='0.17.1'
+UPGRADE_CONTRACT_CHANGELOG="$(awk -v heading="## [$UPGRADE_CONTRACT_VERSION]" '
+  index($0, heading) == 1 { in_section = 1; next }
+  in_section && /^## \[/ { exit }
   in_section { print }
 ' "$CHANGELOG")"
-CURRENT_CYCLE_CHANGELOG_ONELINE="$(printf '%s\n' "$CURRENT_CYCLE_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
+UPGRADE_CONTRACT_CHANGELOG_ONELINE="$(printf '%s\n' "$UPGRADE_CONTRACT_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
+if [ -n "$UPGRADE_CONTRACT_CHANGELOG" ]; then
+  check "CHANGELOG keeps the [$UPGRADE_CONTRACT_VERSION] section that published the upgrade contract" PASS
+else
+  check "CHANGELOG keeps the [$UPGRADE_CONTRACT_VERSION] section that published the upgrade contract" FAIL
+fi
 for requirement in \
   'every published plugin change to use a new SemVer version and distinct immutable tag/cache path' \
   'already-running Claude Code sessions keep using their previous plugin root' \
@@ -33,10 +39,10 @@ for requirement in \
   '`~/.zensu/plugin-root` locator is no longer consulted or updated' \
   'the plugin never deletes it automatically'
 do
-  if printf '%s\n' "$CURRENT_CYCLE_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
-    check "Current-cycle upgrade note: $requirement" PASS
+  if printf '%s\n' "$UPGRADE_CONTRACT_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
+    check "[$UPGRADE_CONTRACT_VERSION] upgrade note: $requirement" PASS
   else
-    check "Current-cycle upgrade note: $requirement" FAIL
+    check "[$UPGRADE_CONTRACT_VERSION] upgrade note: $requirement" FAIL
   fi
 done
 
