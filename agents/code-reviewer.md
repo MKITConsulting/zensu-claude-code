@@ -51,7 +51,7 @@ complete REVIEW PACKET v1. Do not re-run the five perspectives, build, or tests.
 Deduplicate and sort the supplied findings, then render the report below.
 Preserve supplied finding text; do not invent evidence.
 
-Skip Phases 1-4 in consume mode. The supplied merge may include `JUDGE-*` deltas and `[Panel-FP-neutralized — do not fix]` annotations; keep both visible and never restore a neutralized finding to fix routing.
+Skip Phases 1-4 in consume mode. The supplied merge may include `JUDGE-*` deltas, `[Panel-FP-neutralized — do not fix]` annotations, and `[Unverified — do not fix]` annotations from the main thread's Finding Verification Gate; keep all of them visible and never restore a neutralized or unverified finding to fix routing.
 
 ## Standalone review
 

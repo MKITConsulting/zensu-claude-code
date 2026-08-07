@@ -19,6 +19,7 @@
     "bashWriteGate": true,
     "secretScan": true,
     "reviewJudge": true,
+    "findingVerification": true,
     "pendingReviewTtlHours": 6
   },
   "context": {
