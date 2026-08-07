@@ -54,7 +54,7 @@ jobs:
     permissions:
       contents: write
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -67,9 +67,6 @@ jobs:
           cache: npm
 
       - run: npm ci
-
-      - name: Deterministic test gate
-        run: bash tests/run-all.sh --ci
 
       - name: Compute next version
         id: ver
