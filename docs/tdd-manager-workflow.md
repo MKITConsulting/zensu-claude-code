@@ -252,11 +252,17 @@ have no independently writable `rounds-*.json` or `*.stopblocks` sidecars.
 
 `SessionStart` is the only context writer. It binds the canonical project and
 executed plugin roots, plugin-data directory, plugin version, source revision,
-and a digest over all runtime-relevant files. A fresh `startup`/`clear` may
-create the record; an existing fresh event must still name the bound project.
-`resume`/`compact` require the existing record and preserve its exact project
-and workflow-state bytes even when `CwdChanged` reports a descendant or an
-external detached worktree. Missing or unknown lifecycle sources fail closed.
+and a digest over all runtime-relevant files. A fresh `startup`/`clear`/`fork`
+may create the record; an existing fresh event must still name the bound
+project. `resume`/`compact` preserve the existing record's exact project and
+workflow-state bytes even when `CwdChanged` reports a descendant or an external
+detached worktree. Any session id with no record yet is registered like a cold
+start — a `fork` always lands here because its id is new, as does a
+continuation whose record was pruned or invalidated by a plugin upgrade —
+because leaving it unbound would fail every stateful hook closed for the rest
+of the session, which is strictly worse than one ungated gate. A missing or
+malformed lifecycle source still fails closed; an unknown but well-formed one
+does not, so the next source Claude Code adds cannot repeat that outage.
 Only a host payload with neither `agent_id` nor `agent_type` receives `main-v1`.
 Claude also reports `agent_type` on `SessionStart` for top-level `claude --agent`
 sessions; those events use the same exact reviewer/neutral classifier as

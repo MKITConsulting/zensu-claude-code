@@ -279,13 +279,57 @@ else
   check "SessionStart rejects a missing lifecycle source" FAIL
 fi
 
-if payload SessionStart 'claude/unsupported-source' "$PROJECT_A" '' '' future-source \
-  | run_hook >"$TMP/unsupported-source.out" 2>"$TMP/unsupported-source.err"; then
-  check "SessionStart rejects an unsupported lifecycle source" FAIL
-elif grep -qF 'SessionStart source is unavailable or unsupported' "$TMP/unsupported-source.err"; then
-  check "SessionStart rejects an unsupported lifecycle source" PASS
+if printf '%s' "{\"hook_event_name\":\"SessionStart\",\"session_id\":\"claude/blank-source\",\"source\":\"   \",\"cwd\":$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$PROJECT_A")}" \
+  | run_hook >"$TMP/blank-source.out" 2>"$TMP/blank-source.err"; then
+  check "SessionStart rejects a blank lifecycle source" FAIL
+elif grep -qF 'SessionStart source is unavailable or unsupported' "$TMP/blank-source.err"; then
+  check "SessionStart rejects a blank lifecycle source" PASS
 else
-  check "SessionStart rejects an unsupported lifecycle source" FAIL
+  check "SessionStart rejects a blank lifecycle source" FAIL
+fi
+
+UNKNOWN_SOURCE_SID='claude/unsupported-source'
+UNKNOWN_SOURCE_KEY="$(node "$CORE" session-key "$UNKNOWN_SOURCE_SID")"
+if payload SessionStart "$UNKNOWN_SOURCE_SID" "$PROJECT_A" '' '' future-source \
+  | run_hook >"$TMP/unsupported-source.out" 2>"$TMP/unsupported-source.err" \
+  && grep -qF '[zensu-session-context]' "$TMP/unsupported-source.out" \
+  && [ -f "$CONTROL/records/$UNKNOWN_SOURCE_KEY.json" ]; then
+  check "an unknown lifecycle source registers a fresh session instead of bricking it" PASS
+else
+  check "an unknown lifecycle source registers a fresh session instead of bricking it" FAIL
+fi
+
+FORK_SID='claude/forked session child'
+FORK_KEY="$(node "$CORE" session-key "$FORK_SID")"
+if payload SessionStart "$FORK_SID" "$PROJECT_A" '' '' fork \
+  | run_hook >"$TMP/fork.out" 2>"$TMP/fork.err" \
+  && printf '%s' "$(cat "$TMP/fork.out")" | session_context_has_project "$PROJECT_A" \
+  && [ -f "$CONTROL/records/$FORK_KEY.json" ] \
+  && [ -f "$PROJECT_A/.zensu/state/tdd-phase-$FORK_KEY.json" ]; then
+  check "a forked session registers its own record and baseline workflow state" PASS
+else
+  check "a forked session registers its own record and baseline workflow state" FAIL
+fi
+
+SELF_HEAL_SID='claude/resume without a record'
+SELF_HEAL_KEY="$(node "$CORE" session-key "$SELF_HEAL_SID")"
+if payload SessionStart "$SELF_HEAL_SID" "$PROJECT_A" '' '' resume \
+  | run_hook >"$TMP/self-heal.out" 2>"$TMP/self-heal.err" \
+  && printf '%s' "$(cat "$TMP/self-heal.out")" | session_context_has_project "$PROJECT_A" \
+  && [ -f "$CONTROL/records/$SELF_HEAL_KEY.json" ] \
+  && [ -f "$PROJECT_A/.zensu/state/tdd-phase-$SELF_HEAL_KEY.json" ]; then
+  check "a continuation whose record is missing self-heals into a fresh session" PASS
+else
+  check "a continuation whose record is missing self-heals into a fresh session" FAIL
+fi
+
+if payload SessionStart "$SID_A" "$PROJECT_B" '' '' fork \
+  | run_hook >"$TMP/fork-rebind.out" 2>"$TMP/fork-rebind.err"; then
+  check "a fresh source cannot rebind an existing session to another project" FAIL
+elif grep -qF 'fresh SessionStart cwd does not match the existing session project' "$TMP/fork-rebind.err"; then
+  check "a fresh source cannot rebind an existing session to another project" PASS
+else
+  check "a fresh source cannot rebind an existing session to another project" FAIL
 fi
 
 RECORD_A_DIGEST_BEFORE_RESUME="$(node -e '
@@ -945,14 +989,17 @@ MISSING_RECORD_STATE="$PROJECT_A/.zensu/state/tdd-phase-$MISSING_RECORD_KEY.json
 MISSING_RECORD_STATE_BEFORE="$(cksum "$MISSING_RECORD_STATE")"
 rm -f "$MISSING_RECORD_FILE"
 if payload SessionStart "$MISSING_RECORD_SID" "$TMP/external-review-worktree" '' '' resume \
-  | run_hook >"$TMP/missing-record-resume.out" 2>"$TMP/missing-record-resume.err"; then
-  check "resume with a missing immutable record fails without rebinding" FAIL
-elif [ ! -e "$MISSING_RECORD_FILE" ] \
-  && [ "$MISSING_RECORD_STATE_BEFORE" = "$(cksum "$MISSING_RECORD_STATE")" ] \
-  && grep -qF 'continuation SessionStart requires an existing session record' "$TMP/missing-record-resume.err"; then
-  check "resume with a missing immutable record fails without rebinding" PASS
+  | run_hook >"$TMP/missing-record-resume.out" 2>"$TMP/missing-record-resume.err" \
+  && [ -f "$MISSING_RECORD_FILE" ] \
+  && node -e '
+    const fs = require("node:fs");
+    const record = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    process.exit(record.project_root === fs.realpathSync.native(process.argv[2]) ? 0 : 1);
+  ' "$MISSING_RECORD_FILE" "$TMP/external-review-worktree" \
+  && [ "$MISSING_RECORD_STATE_BEFORE" = "$(cksum "$MISSING_RECORD_STATE")" ]; then
+  check "resume with a missing immutable record self-heals and never edits the old project state" PASS
 else
-  check "resume with a missing immutable record fails without rebinding" FAIL
+  check "resume with a missing immutable record self-heals and never edits the old project state" FAIL
 fi
 
 payload SessionStart "$SID_B" "$PROJECT_B" | run_hook >"$TMP/start-b.out" 2>"$TMP/start-b.err"
