@@ -1,0 +1,26 @@
+description: "zen-mode model-reaction eval (contract compliance, precedence over a compression mode, and the never-compress safety carve-out). Grades how the model REACTS to the injected zen-mode contract."
+
+providers:
+  - id: 'exec: ../../scripts/claude-promptfoo-wrapper.sh'
+    config:
+      working_dir: ./test-projects/empty-host
+
+prompts:
+  - id: zen-mode-reaction
+    label: "zen-mode reaction probe (simulated injected contract + task)"
+    raw: |
+      {{spec_block}}
+
+defaultTest:
+  options:
+    transform: |
+      return typeof output === 'string' ? output : JSON.stringify(output);
+
+tests:
+  - file://scenarios/contract-compliance.yaml
+  - file://scenarios/precedence-over-compression.yaml
+  - file://scenarios/safety-carve-out.yaml
+
+evaluateOptions:
+  maxConcurrency: 2
+  repeat: 3

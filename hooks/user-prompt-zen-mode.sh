@@ -1,0 +1,113 @@
+#!/bin/bash
+# UserPromptSubmit hook — zen-mode re-injection. While the current session carries
+# a zen-mode marker (written by hooks/lib/zensu-zen-mode.sh --on, normally through
+# the /zensu:zen-mode skill), this hook injects the mode contract as
+# additionalContext on every prompt. A skill is loaded once and fades after a
+# handful of turns; a low-capacity user is the least likely to notice that drift,
+# so the reminder rides along with each prompt instead.
+#
+# Deactivation is handled HERE rather than by the model: a prompt matching the
+# off-phrases removes the marker directly, so "normal mode" still works after the
+# model has drifted. The marker is keyed by the resolved Session Control key, so a
+# fresh session always starts with zen-mode off.
+#
+# The marker root comes from zensu_resolve_project_dir, the same accessor the
+# writer uses. It is deliberately NOT $ZENSU_PROJECT_ROOT: Session Control records
+# the host-native path, which on Git Bash is a different namespace from the MSYS
+# spelling shell builtins need, so concatenating the raw root here would have the
+# hook stat a path the helper never wrote.
+#
+# Disable the hook entirely with hooks.zenMode:false in .zensu/config.json,
+# resolved through the usual env -> project-local -> global order. Every path after
+# the plugin-root identity check exits 0 — missing node, unbindable session, absent
+# marker, or a non-main principal are all silent no-ops and never block the prompt.
+# The identity check itself exits 2, matching every other hook in this plugin.
+set -u
+
+_ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
+if [ -n "${CLAUDE_PLUGIN_ROOT:-}" ]; then
+  _ZENSU_DECLARED_PLUGIN_ROOT="$(cd -P -- "$CLAUDE_PLUGIN_ROOT" 2>/dev/null && pwd -P)" || {
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  }
+  if [ "$_ZENSU_DECLARED_PLUGIN_ROOT" != "$_ZENSU_EXECUTED_PLUGIN_ROOT" ]; then
+    echo "zensu: inherited CLAUDE_PLUGIN_ROOT does not match the executing plugin" >&2
+    exit 2
+  fi
+fi
+CLAUDE_PLUGIN_ROOT="$_ZENSU_EXECUTED_PLUGIN_ROOT"
+unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
+INPUT="$(cat)"
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+zensu_hook_is_main_principal "$INPUT" UserPromptSubmit || exit 0
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+zensu_bind_hook_session "$INPUT" || exit 0
+source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
+zensu_hook_enabled zenMode || exit 0
+command -v node >/dev/null 2>&1 || exit 0
+
+read_field() {
+  PAYLOAD="$INPUT" FIELD="$1" node -e '
+    try {
+      const j = JSON.parse(process.env.PAYLOAD || "{}");
+      const v = j[process.env.FIELD];
+      process.stdout.write(typeof v === "string" ? v : "");
+    } catch (_) { process.stdout.write(""); }
+  ' 2>/dev/null
+}
+
+[ -n "${ZENSU_SESSION_KEY:-}" ] || exit 0
+ZEN_ROOT="$(zensu_resolve_project_dir)" || exit 0
+[ -n "$ZEN_ROOT" ] || exit 0
+
+MARKER="$ZEN_ROOT/.zensu/state/zen-mode-${ZENSU_SESSION_KEY}.json"
+[ -f "$MARKER" ] || exit 0
+[ -L "$MARKER" ] && exit 0
+
+PROMPT="$(read_field prompt)"
+
+ZEN_OFF=0
+if [ -n "$PROMPT" ]; then
+  if printf '%s' "$PROMPT" \
+    | grep -qiE '(^|[^[:alnum:]])(zen[ -]?(mode )?off|stop zen|turn off zen([ -]?mode)?)([^[:alnum:]]|$)'; then
+    ZEN_OFF=1
+  else
+    case "$(printf '%s' "$PROMPT" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]' | tr -d '[:punct:]')" in
+      normalmode) ZEN_OFF=1 ;;
+    esac
+  fi
+fi
+
+if [ "$ZEN_OFF" -eq 1 ]; then
+  rm -f "$MARKER" 2>/dev/null || true
+  if [ -e "$MARKER" ]; then
+    cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "zen-mode COULD NOT BE DEACTIVATED: the session marker under .zensu/state/ could not be removed, so the mode is still on and this hook will keep re-injecting it. Tell the user this in one plain sentence, name the .zensu/state/ directory as the place to look, and then answer their request normally. Do not silently ignore this."
+  }
+}
+JSON
+    exit 0
+  fi
+  cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "zen-mode is now OFF — the user asked for it. Drop the zen-mode response shape entirely and answer in your ordinary style from this response onward. Mention the switch in one short clause, then answer the request. Do not keep the recap line or the single-next-step ending unless they genuinely help this particular answer."
+  }
+}
+JSON
+  exit 0
+fi
+
+cat <<'JSON'
+{
+  "hookSpecificOutput": {
+    "hookEventName": "UserPromptSubmit",
+    "additionalContext": "zen-mode is ACTIVE. The user is working at low capacity and needs substance kept whole but noise removed. Shape this response accordingly, writing in the user's own language: (1) Open with ONE short recap line covering what happened since their last message; omit it when nothing happened. (2) Give the result in the first sentence after that — no preamble, no announcing what is coming. (3) Stay near 8 lines and leave out trade-offs, alternatives, caveats, and history unless the user asked; when you deliberately withheld depth, close with a short offer instead. (4) Write full, short sentences. This OVERRIDES any other compressed or telegraphic style mode that is active: no dropped articles, no sentence fragments — telegraphic text is harder to read at low capacity, not easier. (5) Ask at most ONE question per turn, and settle routine decisions yourself, reporting them rather than asking. (6) Gloss unavoidable jargon in three words or fewer, show code as changed lines only, and anchor multi-step work with a 'Step N of M' marker. (7) End with exactly ONE next step, never two parallel suggestions. SCOPE — this mode changes presentation only, never substance: never drop a failing test, an unfinished step, a risk, or a limitation to make an answer shorter. Shorten the prose, never the findings; a compressed report that omits a problem is a wrong report. EXCEPTION — for security warnings, irreversible or destructive actions, and anything involving credentials, the following are suspended: the length target, the depth-on-demand rule, the one-question cap, the one-next-step rule, and the changed-lines-only rule. Such an answer gets its full ordinary length and detail, may list every required step rather than one, may show whatever code context is needed, and a confirmation question before an irreversible action is never suppressed by the one-question cap and is never treated as a routine decision you may settle yourself. The full-sentence rule is NEVER suspended — a safety warning is the last place for fragments. The user leaves the mode by writing 'normal mode', 'zen off', 'zen-mode off', 'turn off zen', or 'stop zen'; if they ask to leave it in any other wording or in another language, that counts too — run the zen-mode helper's --off verb yourself (hooks/lib/zensu-zen-mode.sh in the Zensu plugin, invoked exactly as skills/zen-mode/SKILL.md renders it) and confirm in one clause. Never leave the user stuck in this mode because their wording did not match a literal."
+  }
+}
+JSON
+exit 0

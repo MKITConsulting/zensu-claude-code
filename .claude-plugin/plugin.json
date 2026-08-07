@@ -40,6 +40,7 @@
     "./skills/tdd",
     "./skills/verify-feature",
     "./skills/wargame",
+    "./skills/zen-mode",
     "./skills/zensu-help"
   ]
 }

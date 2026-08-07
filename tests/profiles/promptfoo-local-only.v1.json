@@ -116,6 +116,7 @@
     "test-witness-scenario-assertions.sh",
     "test-workflow-checkout-credentials.sh",
     "test-workflow-scope.sh",
+    "test-zen-mode.sh",
     "test-zensu-help-skill.sh",
     "test-zensu-plm-arg-guidance.sh",
     "test-zensu-runtime-controller.sh"
@@ -126,7 +127,8 @@
     "test-promptfoo-context-nudge-reaction.sh",
     "test-promptfoo-reset-review-limit.sh",
     "test-promptfoo-session-upgrade.sh",
-    "test-promptfoo-verify-feature.sh"
+    "test-promptfoo-verify-feature.sh",
+    "test-promptfoo-zen-mode.sh"
   ],
   "ciOfflineSuites": [
     {

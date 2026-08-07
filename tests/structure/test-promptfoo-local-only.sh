@@ -104,6 +104,7 @@ const local = [
   'test-promptfoo-reset-review-limit.sh',
   'test-promptfoo-session-upgrade.sh',
   'test-promptfoo-verify-feature.sh',
+  'test-promptfoo-zen-mode.sh',
 ];
 const classified = [...value.ciStructureTests, ...value.localStructureTests];
 const offline = value.ciOfflineSuites.map(
