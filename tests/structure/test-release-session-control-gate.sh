@@ -32,12 +32,12 @@ line_of() {
 [ -f "$WORKFLOW" ] && check "Release workflow exists" PASS \
   || check "Release workflow exists" FAIL
 
-contains "Prepare uses the non-Promptfoo CI gate" \
-  'run: bash tests/run-all.sh --ci'
-if [ "$(grep -Fc 'bash tests/run-all.sh --ci' "$WORKFLOW")" -eq 3 ]; then
-  check "Pre-bump, exact release commit, and publish run the non-Promptfoo CI gate" PASS
+rejects "Prepare runs no pre-bump gate on a tree that is never released" \
+  '^ +run: bash tests/run-all\.sh --ci$'
+if [ "$(grep -Fc 'bash tests/run-all.sh --ci' "$WORKFLOW")" -eq 2 ]; then
+  check "Exact release commit and publish run the non-Promptfoo CI gate" PASS
 else
-  check "All three deterministic release boundaries run the non-Promptfoo CI gate" FAIL
+  check "Exact release commit and publish run the non-Promptfoo CI gate" FAIL
 fi
 
 rejects "Release workflow contains no Promptfoo or model credentials" \
