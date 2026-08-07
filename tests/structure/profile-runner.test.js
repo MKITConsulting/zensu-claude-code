@@ -28,10 +28,11 @@ const TEST_WAIT_MS = process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 3000;
 // bounded, but leave enough room to observe the child process's real exit code.
 const TEST_SUITE_TIMEOUT_MS = process.platform === 'win32' ? 60000 : 5000;
 const TEST_PROFILE_TIMEOUT_MS = process.platform === 'win32' ? 180000 : 30000;
+const TEST_PROFILE_DEADLINE_MS = process.platform === 'win32' ? 60000 : 120;
 const TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS =
-  process.platform === 'win32' ? 45000 : 5000;
+  process.platform === 'win32' ? 90000 : 5000;
 const TEST_PROFILE_DEADLINE_ASSERT_MS =
-  process.platform === 'win32' ? 60000 : 3000;
+  process.platform === 'win32' ? 120000 : 3000;
 
 function temporaryRoot() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-profile-runner-'));
@@ -374,8 +375,7 @@ test('the internal profile deadline terminates the active tree before the CI env
     const manifest = manifestFor(process.platform, [
       suite('profile-timeout', child, { timeoutMs: TEST_PROFILE_DEADLINE_SUITE_TIMEOUT_MS }),
     ]);
-    manifest.profiles['test-profile'].profileTimeoutMs =
-      process.platform === 'win32' ? WINDOWS_TEST_WAIT_MS : 120;
+    manifest.profiles['test-profile'].profileTimeoutMs = TEST_PROFILE_DEADLINE_MS;
     const result = await runProfile({
       manifest,
       profileId: 'test-profile',
