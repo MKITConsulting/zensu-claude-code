@@ -402,7 +402,17 @@ else
   check "principal classifier resolves from native process cwd without path transport" FAIL
 fi
 
-if [ "$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")" -eq 2 ] \
+# Every native-Node call site in zensu-session.sh must use the cwd-relative
+# `./claude-hook-session-v1.js` spelling reached through `cd -P -- "$lib_dir"`.
+# Assert the SHAPE, not a count: a count pins the wrong thing — it goes red on a
+# correctly written new call site (there are three today: zensu_bind_hook_session,
+# zensu_bind_model_session and the zensu_session_unregistered predicate) and stays
+# green on a wrongly written one spelled `node "$lib_dir/claude-hook-session-v1.js"`,
+# which is the exact MSYS hazard this block exists to prevent.
+_ZENSU_BINDER_CALLS="$(grep -cE 'node .*claude-hook-session-v1\.js' "$SESSION_BINDING")"
+_ZENSU_BINDER_RELATIVE="$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")"
+if [ "$_ZENSU_BINDER_CALLS" -eq "$_ZENSU_BINDER_RELATIVE" ] \
+    && [ "$_ZENSU_BINDER_RELATIVE" -ge 2 ] \
     && ! grep -qF 'node "$binder"' "$SESSION_BINDING" \
     && [ "$(grep -cF 'node ./session-control-core-v1.js session-key' "$SESSION_BINDING")" -eq 2 ] \
     && grep -qF 'require("./session-control-core-v1.js")' "$SESSION_BINDING" \
@@ -413,7 +423,7 @@ if [ "$(grep -cF 'node ./claude-hook-session-v1.js' "$SESSION_BINDING")" -eq 2 ]
     && ! grep -qF 'CONTROL_CORE="${CLAUDE_PLUGIN_ROOT}/hooks/lib/session-control-core-v1.js"' "$PHASE" \
     && grep -qF '_tdd_native_project_path()' "$PHASE" \
     && grep -qF 'native_state_file="$(_tdd_native_project_path "$state_file")"' "$PHASE" \
-    && [ "$(grep -cF 'zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA' "$SESSION_BINDING")" -eq 2 ] \
+    && [ "$(grep -cF 'zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA' "$SESSION_BINDING")" -eq "$_ZENSU_BINDER_RELATIVE" ] \
     && grep -qF 'zensu_msys_env_exclusions PROJECT_CANDIDATE CONTEXT_FILE' "$SESSION_BINDING" \
     && printf '%s' "$STATE_READER_BLOCK" | grep -qF "printf '%s\\0%s\\0%s\\0%s\\0'" \
     && printf '%s' "$STATE_READER_BLOCK" | grep -qF 'readFileSync(0)' \

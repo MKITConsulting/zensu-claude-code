@@ -3,7 +3,7 @@
 End-to-end coverage for the PreToolUse(Bash) source-write gate
 (`hooks/pre-bash-source-write-gate.sh` + `hooks/lib/bash-source-write-parse.js`).
 Complements the exhaustive deterministic unit suite
-(`tests/structure/test-bash-source-write-gate.sh`, 62 cases) by proving the hook
+(`tests/structure/test-bash-source-write-gate.sh`) by proving the hook
 fires and blocks a **real** Bash tool call inside a live `claude --print` session.
 
 ## Layers

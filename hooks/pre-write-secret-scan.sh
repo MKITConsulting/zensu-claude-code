@@ -46,9 +46,38 @@ command -v node >/dev/null 2>&1 || exit 0
 INPUT="$(cat 2>/dev/null || true)"
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
-if ! zensu_bind_hook_session "$INPUT"; then
-  zensu_emit_hook_session_deny
-  exit 0
+ZENSU_SESSION_BOUND=true
+zensu_bind_hook_session "$INPUT" || ZENSU_SESSION_BOUND=false
+if [ "$ZENSU_SESSION_BOUND" != true ]; then
+  # This hook matches Bash as well as Edit/Write, and it denied on the bind
+  # BEFORE inspecting anything — so on a session Session Control never registered
+  # it blocked every Bash call, including /zensu:doctor, and neither
+  # secretScan:false nor ZENSU_SECRET_SCAN=off could reach far enough to release
+  # it. Relax that ONE state and then fall through to the ORDINARY decision
+  # below: secret-scan-decide.js reads only the payload, so it needs no binding
+  # and reaches exactly the verdict a bound session would. Deciding differently
+  # here would either deny ordinary commands (its channel detector deliberately
+  # over-detects, so any `>` in an argument would look like a write) or leave
+  # Edit/Write content unscanned. The only thing skipped is the bypass ledger,
+  # which is keyed by the binding that does not exist.
+  if ! zensu_session_unregistered "$INPUT"; then
+    zensu_emit_hook_session_deny narrowed
+    exit 0
+  fi
+  # The relaxation is for the interactive thread only. The all-tool capability
+  # gate denies every other principal in this state, but this gate must not rely
+  # on that single layer to keep a reviewer or neutral child out of a shell.
+  ZENSU_AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
+  if [ ! -r "$ZENSU_AGENT_CONTEXT_LIB" ]; then
+    zensu_emit_hook_session_deny damaged-runtime
+    exit 0
+  fi
+  # shellcheck disable=SC1090
+  source "$ZENSU_AGENT_CONTEXT_LIB"
+  if ! zensu_hook_is_main_principal "$INPUT" PreToolUse; then
+    zensu_emit_hook_session_deny
+    exit 0
+  fi
 fi
 
 # Config-disabled gate has no decision point — nothing to bypass, nothing to

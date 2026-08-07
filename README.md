@@ -541,6 +541,26 @@ A read-only health check for the install, for when something is not firing and y
 
 The helper never writes and always exits `0` — a red ❌ is a finding in the report, not a failed command. The skill may remove only an expired, non-symlink `pending-review.json` after explicit confirmation; it never deletes CAS workflow documents. Use `/zensu:setup` to edit config, `/zensu:reset-review-limit` for a transactional review-budget reset, and `/zensu:recover-chain` — from the session that owns the chain — for a wedged one.
 
+### Unbindable sessions
+
+Every gate binds the running session to its immutable Session Control record before it decides anything, and a failed bind normally denies. There is **one** relaxed state, and this table is the authoritative account of it.
+
+`SessionStart` registers a record for any source, so the ordinary ways into that state are gone. What remains is a session where no record could be written at all — an unwritable plugin-data store, a `SessionStart` hook that never ran. The predicate is `zensu_session_unregistered` (shell) / `unregisteredSession` (`hooks/lib/claude-hook-session-v1.js`), true **only** on a clean `ENOENT` of the records directory or the record file. A record that **exists** and disagrees — runtime digest drift, a foreign plugin root, plugin data, or project root, tampering — is a security signal and is deliberately **not** covered: it keeps failing every gate closed, main thread included. So does any unreadable, unsafe, or ambiguous state.
+
+| Gate | Matcher | No record at all | Record present but wrong |
+|------|---------|------------------|--------------------------|
+| `pre-reviewer-capability-gate.sh` | `.*` | **main thread only** returns to its pre-Session-Control capabilities (the branch it reaches unrestricted anyway); every reviewer, evidence worker and neutral child stays denied | denies, every principal |
+| `pre-write-secret-scan.sh` | `Bash`, `Edit\|Write\|MultiEdit`, `NotebookEdit` | main thread only, then falls through to the **ordinary** scan decision, which needs no binding — a real secret is still caught on every channel and `Edit`/`Write` content is scanned rather than blanket-denied. Only the bypass ledger is skipped | denies |
+| `pre-bash-source-write-gate.sh` | `Bash` | main thread only; keeps exactly its source-write rules, with `CLAUDE_PROJECT_DIR` pinned explicitly — an absent project root, an unparseable payload, and a parser that fails to run all deny rather than allow unchecked | denies |
+| `pre-edit-tdd-reminder.sh` | `Edit\|Write\|MultiEdit` | denies — the TDD phase gate cannot evaluate a phase without a workflow document | denies |
+| `pre-bash-zensu-gate.sh` | `Bash` | already exits before its bind when the command runs no `zensu` CLI binary, so it never contributed | denies a `zensu` mutation |
+| `plan-approved-delegate.sh` | ExitPlanMode | still emits `PLAN_GATE_BLOCKED code=RUNTIME_UNAVAILABLE`, whose text asserts a durable Autopilot artifact exists — untrue in this state. Advisory `additionalContext`; tracked as a follow-up | same |
+| `stop-chain-enforcer.sh` | Stop | **releases** — with no record there is no workflow document, so no review chain and no Autopilot run exist to enforce and nothing is waived. Blocking would leave the user with tools but no way to end a turn | blocks, naming the states separately; `ZENSU_CHAIN=off` / `hooks.chainEnforcer=false` release the guard explicitly without proving completion. One narrower case releases on its own: a record that binds but whose recorded project root no longer exists |
+
+Consequence worth stating plainly: in the relaxed state the interactive thread keeps working, but **nothing in it is gated or tracked** — no TDD phase gate (edits are denied outright), no review chain, no Autopilot, and no subagents. It is a session you can read a diagnosis in, not one you can work in.
+
+Why it exists: `/zensu:doctor` runs through Bash. The fail-closed denial every stateful helper renders points the user there — and with the three gates that bind before inspecting all denying, that pointer was a dead end, denied by the very defect it names.
+
 ### Hooks (21)
 
 | Hook Script | Event | Config Flag | Description |

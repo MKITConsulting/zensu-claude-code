@@ -6,6 +6,13 @@
 // calls provide CLAUDE_CODE_SESSION_ID. Ambient ZENSU_* values are deliberately
 // ignored: the private, immutable context record is the only authority. The
 // all-tool capability gate imports the same resolver.
+//
+// argv modes: (none) binds from a hook payload on stdin and prints the five
+// exports; `model-bind` does the same from CLAUDE_CODE_SESSION_ID; and
+// `unregistered` answers by EXIT STATUS ONLY — 0 when Session Control has never
+// registered the session, 1 for every other state including a record that
+// exists and disagrees. That third mode prints no bindings; it exists so the
+// gates can tell the one relaxable bind failure apart from all the rest.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -69,6 +76,38 @@ function privateRecordsDirectory(pluginData, allowMissing = false) {
     fail('private Session Control record directory is aliased');
   }
   return current;
+}
+
+// True ONLY when Session Control has no record for this session at all — the
+// records directory or the record file is simply absent. That is the 0.17.0
+// upgrade state: Session Control shipped in that release, and a resume/compact
+// SessionStart requires a record it never mints, so every session predating the
+// update is unbindable forever and cannot be repaired in place.
+//
+// It is deliberately NOT true when a record EXISTS and disagrees with reality —
+// runtime digest drift, a foreign plugin root, plugin data, or project root,
+// tampering. A present-but-wrong record is a security signal and must keep
+// failing every gate closed. Anything other than a clean ENOENT answers false,
+// so an unreadable, unsafe, or ambiguous state also stays closed.
+function unregisteredSession(payload, environment = process.env) {
+  try {
+    validateSessionId(payload.session_id);
+    const executedPluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
+    if (canonicalDirectory(environment.CLAUDE_PLUGIN_ROOT, 'CLAUDE_PLUGIN_ROOT') !== executedPluginRoot) {
+      return false;
+    }
+    const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
+    const recordsDir = privateRecordsDirectory(pluginData, true);
+    if (recordsDir === null) return true;
+    try {
+      fs.lstatSync(path.join(recordsDir, `${core.sessionKey(payload.session_id)}.json`));
+    } catch (error) {
+      return error.code === 'ENOENT';
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 function validateSessionId(sessionId) {
@@ -168,6 +207,14 @@ function resolveFreshHookProject(payload, environment = process.env) {
 
 function main() {
   let payload;
+  if (process.argv[2] === 'unregistered') {
+    // Exit 0 only for a session Session Control has never registered. Shell
+    // gates use it to tell that one recoverable state apart from every other
+    // bind failure, which must stay fail-closed.
+    if (process.argv.length !== 3) fail('unregistered does not accept arguments');
+    process.exitCode = unregisteredSession(readPayload()) ? 0 : 1;
+    return;
+  }
   if (process.argv[2] === 'model-bind') {
     if (process.argv.length !== 3) fail('model-bind does not accept arguments');
     const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
@@ -200,4 +247,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { resolveFreshHookProject, resolveHookSession };
+module.exports = { resolveFreshHookProject, resolveHookSession, unregisteredSession };
