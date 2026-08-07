@@ -56,6 +56,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cause (`this session has no Session Control record`) and points at
   `/zensu:doctor` instead of only telling the user to start over.
 
+- **session-control**: The fail-closed denial above tells the user to run
+  `/zensu:doctor` — and in the one state it describes, that pointer was a dead
+  end. A session with no Session Control record has no binding, and
+  `/zensu:doctor` runs through Bash, so `pre-reviewer-capability-gate.sh`
+  (matcher `.*`, every tool), `pre-write-secret-scan.sh` and
+  `pre-bash-source-write-gate.sh` (both matcher `Bash`) each denied it before
+  inspecting what was being asked, while `stop-chain-enforcer.sh` blocked the
+  Stop on top so the turn could not even end. On the secret-scan hook not even
+  `secretScan:false` or `ZENSU_SECRET_SCAN=off` could reach far enough to
+  release it. Registering a record on any source (above) removes the common way
+  into that state, but not the state itself: when `SessionStart` cannot write a
+  record at all — an unwritable plugin-data store, a hook that never ran — the
+  session still lands there, and the diagnostic was still unreachable.
+
+  One shared predicate now decides that single state. `unregisteredSession`
+  (`hooks/lib/claude-hook-session-v1.js`, with an `unregistered` argv mode and
+  the shell wrapper `zensu_session_unregistered`) is true **only** on a clean
+  `ENOENT` of the records directory or the record file. A record that exists and
+  disagrees — runtime digest drift, a foreign plugin root, plugin data, or
+  project root, tampering — and any unreadable or ambiguous state stay false and
+  keep failing every gate closed.
+
+  In that one state, and for the **interactive thread only** — every reviewer,
+  evidence worker and neutral child stays fail-closed at all three gates, each
+  checking the principal itself rather than relying on the capability gate
+  alone: the capability gate returns the main thread to the capabilities it had
+  before Session Control existed; the secret scan falls through to the
+  **ordinary** scan decision, which reads only the payload and so needs no
+  binding, keeping a real secret caught on every channel and `Edit`/`Write`
+  content scanned rather than blanket-denied; the source-write gate keeps its
+  write rules, pinning `CLAUDE_PROJECT_DIR` explicitly rather than letting a
+  model-influenced payload `cwd` become the project authority, and honoring the
+  parser's exit status so a parser that cannot run denies instead of allowing
+  unchecked; and `stop-chain-enforcer.sh` releases, because a session with no
+  record has no workflow document and therefore no review chain or Autopilot run
+  to enforce — blocking it would leave the user with tools but no way to end a
+  turn. The Stop block and the shared deny message no longer rank a guess: they
+  name the no-record state and the disagreeing-record state separately, and each
+  says which of them `/zensu:doctor` can actually help with.
+
+  What the relaxed session is **not** is a working session: the TDD phase gate
+  still denies every `Edit`/`Write`, there is no review chain, no Autopilot, and
+  no subagents. It is a session you can read a diagnosis in. `README.md` gains an
+  authoritative per-gate table under "Unbindable sessions".
+
 ### Session Control upgrade note
 
 Session Control binds each session to the exact plugin bytes it started with.

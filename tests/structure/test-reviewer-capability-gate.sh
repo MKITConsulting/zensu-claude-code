@@ -393,5 +393,66 @@ WRONG_EVENT="$(SESSION_ID="$SESSION_ID" PROJECT="$PROJECT" node -e '
   && check "wrong hook_event_name fails closed" PASS \
   || check "wrong hook_event_name fails closed" FAIL
 
+# --- unregistered session (the 0.17.0 upgrade state) -----------------------
+# Session Control shipped in 0.17.0 and a resume/compact SessionStart requires a
+# record it never mints, so every session predating the update is unbindable
+# forever. This gate matches every tool, so denying there left the user unable to
+# run even /zensu:doctor and read why. The main thread — which this gate returns
+# unrestricted anyway once revalidation succeeds — keeps the capabilities it had
+# before Session Control existed. Nothing else is relaxed.
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: the main thread keeps Bash so /zensu:doctor stays reachable" \
+  allow - Bash '{"command":"bash hooks/lib/zensu-doctor.sh"}'
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: the main thread keeps Read" \
+  allow - Read '{"file_path":"README.md"}'
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: an exact reviewer still fails closed" \
+  deny zensu:code-reviewer Read '{"file_path":"README.md"}'
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a neutral child still fails closed" \
+  deny general-purpose Read '{"file_path":"README.md"}'
+GATE_TEST_MODE=missing-context assert_case \
+  "unregistered session: a neutral child gets no shell either" \
+  deny general-purpose Bash '{"command":"git status"}'
+
+# The relaxation covers exactly ONE state. A record that EXISTS but was minted
+# against another installation is what a plugin update leaves behind, and it is a
+# security signal: it must keep denying for every principal, main thread included.
+FOREIGN_DATA="$TMP/foreign-plugin-data"
+FOREIGN_PLUG="$TMP/foreign-plugin"
+mkdir -p "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks" \
+  "$FOREIGN_PLUG/.claude-plugin" "$FOREIGN_PLUG/hooks"
+chmod 700 "$FOREIGN_DATA" "$FOREIGN_DATA/session-control" "$FOREIGN_DATA/session-control/v1" \
+  "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks"
+printf '{"name":"zensu","version":"9.9.9"}\n' > "$FOREIGN_PLUG/.claude-plugin/plugin.json"
+printf '{"hooks":{}}\n' > "$FOREIGN_PLUG/hooks/hooks.json"
+if node -e '
+  const path = require("path");
+  const [corePath, data, plug, project, sessionId] = process.argv.slice(1);
+  require(corePath).registerContext({
+    recordsDir: path.join(data, "session-control", "v1", "records"),
+    host: "claude", sessionId, projectRoot: project, pluginRoot: plug, pluginData: data,
+  });
+' "$PLUGIN/hooks/lib/session-control-core-v1.js" "$FOREIGN_DATA" "$FOREIGN_PLUG" "$PROJECT" "$SESSION_ID" 2>/dev/null; then
+  FOREIGN_DECISION="$(payload - Bash '{"command":"git status"}' | env \
+    -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$FOREIGN_DATA" \
+    bash "$GATE" 2>/dev/null | node -e '
+      let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
+        s = s.trim();
+        if (!s) { process.stdout.write("allow"); return; }
+        try { process.stdout.write(JSON.parse(s).hookSpecificOutput?.permissionDecision === "deny" ? "deny" : "other"); }
+        catch (_) { process.stdout.write("invalid"); }
+      });
+    ')"
+  [ "$FOREIGN_DECISION" = deny ] \
+    && check "a record from another installation stays fail-closed even for the main thread" PASS \
+    || check "foreign-installation record (expected deny, got $FOREIGN_DECISION)" FAIL
+else
+  check "foreign-installation fixture could not be minted" FAIL
+fi
+
 printf '%s\n' "----" "test-reviewer-capability-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

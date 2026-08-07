@@ -11,7 +11,9 @@ set -u
 # the config row, the Secret Scan section, and a Hooks (N) header. Unit level:
 # the engine CLI (stdin -> JSON) per rule incl. placeholder suppression and
 # entropy negative; detectChannels per channel incl. fd-dup negative. Hook
-# level: 19 synthetic-payload invocations (20 checks) under a hermetic
+# level: synthetic-payload invocations (including the unregistered-session group
+# F14-F19: a channel-less Bash call and an over-detected redirect pass, a real
+# secret on any channel and a foreign-installation record still deny) under a hermetic
 # ZENSU_CONFIG with ambient ZENSU_SECRET_SCAN/BSWG_MODE neutralized, incl.
 # deny-reason content, the per-alternative path allowlist, a second-tool
 # exemption case, and a node-shim scanner-crash fail-open case. It
@@ -330,6 +332,66 @@ else
   check "F13 scanner crash -> fail-open allow (skipped: FS ignores exec bit)" PASS
 fi
 rm -f "$TMPD/shim/_probe" 2>/dev/null
+
+# --- unregistered session (the 0.17.0 upgrade state) -----------------------
+# This hook matches Bash as well as Edit/Write, and it denied on the session bind
+# BEFORE inspecting anything — so on a session Session Control never registered it
+# blocked every Bash call, including /zensu:doctor, and neither secretScan:false
+# nor ZENSU_SECRET_SCAN=off could reach far enough to release it. Only a Bash
+# payload with no write channel is relaxed.
+UNREG_DATA="$TMPD/unregistered-plugin-data"
+mkdir -p "$UNREG_DATA"
+chmod 700 "$UNREG_DATA"
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"bash hooks/lib/zensu-doctor.sh"}}' CLAUDE_PLUGIN_DATA="$UNREG_DATA")"
+[ -z "$OUT" ] && check "F14 unregistered session: a channel-less Bash call passes (doctor stays reachable)" PASS \
+  || check "F14 unregistered channel-less Bash (got '$OUT')" FAIL
+
+# A command that merely CONTAINS a redirect character must not be mistaken for a
+# write: the channel detector deliberately over-detects, which is harmless when it
+# only widens what gets scanned but would be a false deny if it decided alone.
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"git commit -m \"fix: a > b\""}}' CLAUDE_PLUGIN_DATA="$UNREG_DATA")"
+[ -z "$OUT" ] && check "F15 unregistered session: an over-detected redirect is not a false deny" PASS \
+  || check "F15 unregistered over-detected redirect (got '$OUT')" FAIL
+
+# The relaxed state reaches the ORDINARY scan decision, which needs no binding —
+# so a real secret is still caught on every channel rather than waved through,
+# and Edit/Write content is scanned rather than blanket-denied.
+OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"printf AKIA''IOSFODNN7RGY4Q2B > /x/src/a.ts"}}' CLAUDE_PLUGIN_DATA="$UNREG_DATA")"
+case "$OUT" in *"$DENY"*) check "F16 unregistered session: a real secret on a Bash write channel is still denied" PASS ;;
+  *) check "F16 unregistered Bash secret (got '$OUT')" FAIL ;; esac
+
+OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"AKIA''IOSFODNN7RGY4Q2B"}}' CLAUDE_PLUGIN_DATA="$UNREG_DATA")"
+case "$OUT" in *"$DENY"*) check "F17 unregistered session: a real secret in Write content is still denied" PASS ;;
+  *) check "F17 unregistered Write secret (got '$OUT')" FAIL ;; esac
+
+OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","content":"const x = 1;"}}' CLAUDE_PLUGIN_DATA="$UNREG_DATA")"
+[ -z "$OUT" ] && check "F18 unregistered session: clean Write content passes, never blanket-denied" PASS \
+  || check "F18 unregistered clean Write (got '$OUT')" FAIL
+
+# The relaxation covers ONE state. A record minted against another installation
+# is a security signal and must keep denying at this gate too.
+FOREIGN_DATA="$TMPD/foreign-plugin-data"
+FOREIGN_PLUG="$TMPD/foreign-plugin"
+mkdir -p "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks" \
+  "$FOREIGN_PLUG/.claude-plugin" "$FOREIGN_PLUG/hooks"
+chmod 700 "$FOREIGN_DATA" "$FOREIGN_DATA/session-control" "$FOREIGN_DATA/session-control/v1" \
+  "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks"
+printf '{"name":"zensu","version":"9.9.9"}\n' > "$FOREIGN_PLUG/.claude-plugin/plugin.json"
+printf '{"hooks":{}}\n' > "$FOREIGN_PLUG/hooks/hooks.json"
+if node -e '
+  const path = require("path");
+  const [corePath, data, plug, project, sessionId] = process.argv.slice(1);
+  require(corePath).registerContext({
+    recordsDir: path.join(data, "session-control", "v1", "records"),
+    host: "claude", sessionId, projectRoot: project, pluginRoot: plug, pluginData: data,
+  });
+' "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$FOREIGN_DATA" "$FOREIGN_PLUG" "$TMPD" "secret-scan-test" 2>/dev/null; then
+  OUT="$(run_hook '{"tool_name":"Bash","tool_input":{"command":"bash hooks/lib/zensu-doctor.sh"}}' CLAUDE_PLUGIN_DATA="$FOREIGN_DATA")"
+  case "$OUT" in *"$DENY"*) check "F19 a record from another installation stays fail-closed here too" PASS ;;
+    *) check "F19 foreign-installation record (got '$OUT')" FAIL ;; esac
+else
+  check "F19 foreign-installation fixture could not be minted" FAIL
+fi
 
 echo "----"
 echo "test-secret-scan-gate: $PASS PASS / $FAIL FAIL"

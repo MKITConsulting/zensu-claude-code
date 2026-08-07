@@ -39,7 +39,7 @@ emit_session_runtime_missing_block() {
 }
 
 emit_session_bind_failed_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. The Session Control binder printed the one exact cause on stderr, where the user can read it — a recorded project root that no longer exists (a deleted or moved worktree) is the common one. Do not guess at the state and do not treat this as completion: report the block, and ask the user to run /zensu:doctor and to read that stderr line."}'
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. A session with NO record at all is released earlier, so this is a different state: most often a record exists here and disagrees with reality — a recorded project root that no longer exists (a deleted or moved worktree), or a record minted against a different plugin installation — but the no-record check itself can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. Where a record does disagree, every tool including /zensu:doctor stays denied and only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
@@ -84,8 +84,18 @@ fi
 # shellcheck disable=SC1090
 source "$SESSION_LIB"
 if ! zensu_bind_hook_session "$INPUT"; then
+  # A session Session Control never registered has no workflow document, so
+  # there is no review chain and no Autopilot run to enforce — nothing is being
+  # waived. Blocking it would leave the user with tools (the PreToolUse gates
+  # relax the same state) but no way to ever end a turn, which is worse than the
+  # deadlock this release fixes. Every other bind failure still blocks: a record
+  # that exists and disagrees may well own state whose completion is unproven.
+  if zensu_session_unregistered "$INPUT"; then
+    echo "zensu chain-enforcer: releasing Stop — Session Control has no record for this session, so no review-chain or Autopilot state exists to enforce and none was waived. A session resumed across a plugin update never mints one. This session is readable but not workable: the TDD phase gate denies every Edit/Write and subagents cannot run. Start a fresh Claude Code session without --continue/--resume, and run /zensu:doctor to confirm the cause." >&2
+    exit 0
+  fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session — the session-control-v1 line above states the exact cause. If it reports a project root that does not exist, the recorded worktree was deleted or moved: re-create exactly that directory to resume this session, or start a new session for further work, because the record is immutable and no Stop can ever prove completion from it. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. A session with no record at all is released earlier, so this is a different state: most often a record exists here and disagrees, though the no-record check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause. If it reports a project root that does not exist, the recorded worktree was deleted or moved: re-create exactly that directory to resume this session, or start a new session for further work, because the record is immutable and no Stop can ever prove completion from it. Where a record does disagree, /zensu:doctor is denied too and only a fresh session helps. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_bind_failed_block
   fi
   exit 0
