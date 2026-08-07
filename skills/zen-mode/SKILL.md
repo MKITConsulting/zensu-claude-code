@@ -7,9 +7,10 @@ description: >
   withholds depth until asked, asks at most one question per turn, and ends with
   exactly one next step. Stays active across the whole session through a
   UserPromptSubmit hook rather than fading after a few turns, and overrides any
-  compressed or telegraphic style mode while it is on. Use when the user says
-  "zen mode", "I'm tired", "keep it simple", "low energy", "less detail", "one thing
-  at a time", or invokes /zensu:zen-mode. Leave it with "normal mode", "zen off",
+  compressed or telegraphic style mode while it is on. It is ON by default; set
+  hooks.zenModeDefault:false to make it opt-in. Use when the user says "zen mode",
+  "I'm tired", "keep it simple", "low energy", "less detail", "one thing at a time",
+  or invokes /zensu:zen-mode. Leave it with "normal mode", "zen off",
   "zen-mode off", "turn off zen", or "stop zen".
 ---
 
@@ -28,16 +29,22 @@ technical content whole and removes everything else.
 
 ## Activation
 
-Run the state helper exactly as rendered here — the marker is what keeps the mode
-alive across turns:
+**The mode is already on by default.** A session with no recorded choice resolves
+to active through `hooks.zenModeDefault`, so most of the time this skill is
+confirming a mode that is running, not starting one. Running it is still correct
+and always safe — it is how a user who left the mode comes back to it.
+
+Run the state helper exactly as rendered here — the marker is what records the
+choice for this session:
 
 ```
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-zen-mode.sh" --on
 ```
 
-That writes a session-scoped marker under `.zensu/state/`. From the next prompt
-on, `hooks/user-prompt-zen-mode.sh` re-injects the contract below on every turn,
-so the style cannot quietly fade the way a one-time skill load does.
+That writes a session-scoped marker under `.zensu/state/` holding
+`{"active":true}`. From the next prompt on, `hooks/user-prompt-zen-mode.sh`
+re-injects the contract below on every turn, so the style cannot quietly fade the
+way a one-time skill load does.
 
 Then confirm in one line, in the user's own language, and continue with whatever
 they were doing. Do not explain the mode at length — that would be the first
@@ -49,9 +56,17 @@ Zensu data.
 ## Deactivation
 
 The hook itself watches for `zen off`, `zen-mode off`, `turn off zen`,
-`stop zen`, and `normal mode`, and removes the marker directly. Deactivation
-therefore does not depend on the model still remembering the mode. A fresh
-session always starts with the mode off.
+`stop zen`, and `normal mode`, and records `{"active":false}` in the marker
+directly. Deactivation therefore does not depend on the model still remembering
+the mode.
+
+Leaving the mode **writes** the marker rather than deleting it, and that
+distinction is load-bearing: under a default of `true`, a deleted marker would
+resolve straight back to active and the user could never get out. Never remove
+the marker file to turn the mode off.
+
+The recorded choice is session-scoped, so it never follows the user into their
+next session — a fresh session starts from the configured default again.
 
 The four zen-specific phrases match anywhere in a prompt, since no other sentence
 plausibly contains them. `normal mode` is ordinary editor vocabulary — "add a vim
@@ -129,7 +144,14 @@ omits a problem is a wrong report. Shorten the prose, never the findings.
 
 ## Configuration
 
-Disable the per-prompt reminder entirely with `hooks.zenMode: false` in
-`~/.zensu/config.json` or the project-local `.zensu/config.json`. With the hook
-disabled the skill still runs, but the mode will fade after a few turns like any
-ordinary one-time instruction.
+Two independent flags, both in `~/.zensu/config.json` or the project-local
+`.zensu/config.json`:
+
+| Key | Default | Effect |
+| --- | --- | --- |
+| `hooks.zenModeDefault` | `true` | What a session resolves to before it has recorded a choice. Set `false` to make the mode opt-in, so it only runs after this skill or `--on`. |
+| `hooks.zenMode` | `true` | Whether the per-prompt reminder runs at all. Set `false` and the skill still runs and still writes its marker, but the contract is no longer re-injected, so the mode fades after a few turns like any ordinary one-time instruction. |
+
+A recorded session choice always outranks `zenModeDefault`, in both directions:
+`--on` keeps the mode under `zenModeDefault: false`, and an off-phrase keeps it
+gone under the default of `true`.
