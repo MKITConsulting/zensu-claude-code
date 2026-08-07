@@ -21,9 +21,9 @@
       "source": {
         "source": "github",
         "repo": "MKITConsulting/zensu-claude-code",
-        "ref": "v0.17.0"
+        "ref": "v0.17.1"
       },
-      "version": "0.17.0"
+      "version": "0.17.1"
     }
   ]
 }
