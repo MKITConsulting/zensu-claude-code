@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-07
+
+### Added
+
+- **zen-mode**: Focused low-noise response mode, with a live reaction eval (#197)
+- **rules**: Carry a plugin-wide evidence discipline into every process (#196)
+- **chain**: Diagnose review-chain shapes and add a guarded escape hatch (#191)
+- **tdd**: Add the Phase 6 Edit Landing Audit (#189)
+- **review**: Repo-custom reviewer roles for team reviews (#180)
+
+### Changed
+
+- Keep Promptfoo evaluations local-only (#190)
+- Sync README + marketplace description to the 0.16.0 feature state (#176)
+
+### Fixed
+
+- **autopilot**: Read the approved plan safely and name why a plan gate blocks (#195)
+- **tests**: Classify test-chain-recover to unbreak the suite runner (#194)
+- **deps**: Clear every open Dependabot alert via version-floor overrides (#193)
+- **deps**: Raise undici to 7.29.0 to clear five high-severity advisories (#192)
+- **log**: Name the cause when a state verb fails (#187)
+- **session-control**: Validate versioned Claude upgrades (#182)
+- **deps**: Clear all open Dependabot alerts via promptfoo 0.121.20 + overrides (#188)
+- **hooks**: Bind the post-review outer read to the recorded project root (#186)
+- **hooks**: Make the Zensu Stop block legible, verifiable and escapable (#183)
+- Bind plugin root to Claude sessions (#172)
+- **evals**: Quote OPTIONS_JSON default so a provided argv[2] survives intact
+
 ### Added
 
 - **docs**: A plugin-wide **evidence discipline** — one rule, reaching every process, that an agent may state only what it has actually observed. `docs/evidence-discipline.md` is the single source of truth (no unobserved assertion; cite the observation; mark the unverifiable as unverified; settle assumptions before acting; never invent an identifier; never restate a result this session did not produce) and lives under `docs/` so the Session Control runtime digest covers it. Three deliberately redundant carriers deliver it: the new `hooks/session-start-evidence-discipline.sh`, which injects the canonical block — read from that file at run time, never duplicated — as `additionalContext` on BOTH `SessionStart` (every source, including `resume`/`compact`) and `SubagentStart` (every child), reading no config and honoring no opt-out flag while failing silent on anything it does not understand; plus all six `agents/*.md` and all 22 `skills/*/SKILL.md`, which carry the block verbatim. The block deliberately names no file: a `reviewer-readonly-v1` subagent resolves paths against the project root, so a pointer could only resolve into the repository under review and let a hostile repo substitute its own "rule". `tests/structure/test-evidence-discipline.sh` pins all three carriers and fails when a newly added agent or skill omits the block, with its own anti-vacuity fixtures so the carrier check cannot degrade into a silent pass.
