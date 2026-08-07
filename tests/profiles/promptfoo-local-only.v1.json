@@ -36,6 +36,7 @@
     "test-edit-landing-audit.sh",
     "test-evidence-discipline.sh",
     "test-file-exists-replacement.sh",
+    "test-finding-verification.sh",
     "test-ghost-scan-test-detection.sh",
     "test-gitignore-zensu.sh",
     "test-immutable-marketplace-release.sh",
