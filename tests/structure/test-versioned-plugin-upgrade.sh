@@ -334,13 +334,49 @@ fi
 if [ "$UNKNOWN_RC" -eq 0 ] && [ ! -s "$UNKNOWN_ERR" ] \
     && node -e '
       const fs = require("node:fs");
-      const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-      if (value.hookSpecificOutput?.permissionDecision !== "deny") process.exit(1);
+      const raw = fs.readFileSync(process.argv[1], "utf8").trim();
+      if (raw === "") process.exit(0);
+      const value = JSON.parse(raw);
+      if (value.hookSpecificOutput?.permissionDecision === "deny") process.exit(1);
     ' "$UNKNOWN_OUT"; then
-  check "recordless candidate sessions remain fail-closed" PASS
+  check "a recordless interactive session reaches the diagnostic instead of being denied" PASS
 else
-  check "recordless candidate sessions remain fail-closed" FAIL
+  check "a recordless interactive session reaches the diagnostic instead of being denied" FAIL
 fi
+
+for RECORDLESS_AGENT in zensu:review-aspect zensu:pr-review-worker; do
+  AGENT_PAYLOAD="$(EVENT=PreToolUse SESSION="$UNKNOWN" CWD="$PROJECT" AGENT="$RECORDLESS_AGENT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      agent_type: process.env.AGENT,
+      cwd: process.env.CWD,
+      tool_name: "Read",
+      tool_input: {file_path: "README.md"},
+    }));
+  ')"
+  AGENT_OUT="$TMP/recordless-agent.out"
+  AGENT_ERR="$TMP/recordless-agent.err"
+  if printf '%s' "$AGENT_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/pre-reviewer-capability-gate.sh" \
+        >"$AGENT_OUT" 2>"$AGENT_ERR"; then
+    AGENT_RC=0
+  else
+    AGENT_RC=$?
+  fi
+  if [ "$AGENT_RC" -eq 0 ] && [ ! -s "$AGENT_ERR" ] \
+      && node -e '
+        const fs = require("node:fs");
+        const value = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+        if (value.hookSpecificOutput?.permissionDecision !== "deny") process.exit(1);
+      ' "$AGENT_OUT"; then
+    check "recordless $RECORDLESS_AGENT stays fail-closed" PASS
+  else
+    check "recordless $RECORDLESS_AGENT stays fail-closed" FAIL
+  fi
+done
 
 printf '%s\n' '----' "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

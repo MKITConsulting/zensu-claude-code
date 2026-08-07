@@ -20,12 +20,12 @@ for artifact in "$HOOK" "$ADAPTER" "$CORE" "$SESSION" "$HOST_PATH"; do
   [ -f "$artifact" ] && check "artifact exists: ${artifact#$ROOT/}" PASS || check "artifact exists: ${artifact#$ROOT/}" FAIL
 done
 
-UNRELEASED_CHANGELOG="$(awk '
+CURRENT_CYCLE_CHANGELOG="$(awk '
   /^## \[Unreleased\]/ { in_section = 1; next }
-  in_section && /^## \[/ { exit }
+  in_section && /^## \[/ { released += 1; if (released > 1) exit; next }
   in_section { print }
 ' "$CHANGELOG")"
-UNRELEASED_CHANGELOG_ONELINE="$(printf '%s\n' "$UNRELEASED_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
+CURRENT_CYCLE_CHANGELOG_ONELINE="$(printf '%s\n' "$CURRENT_CYCLE_CHANGELOG" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
   'every published plugin change to use a new SemVer version and distinct immutable tag/cache path' \
   'already-running Claude Code sessions keep using their previous plugin root' \
@@ -33,10 +33,10 @@ for requirement in \
   '`~/.zensu/plugin-root` locator is no longer consulted or updated' \
   'the plugin never deletes it automatically'
 do
-  if printf '%s\n' "$UNRELEASED_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
-    check "Unreleased upgrade note: $requirement" PASS
+  if printf '%s\n' "$CURRENT_CYCLE_CHANGELOG_ONELINE" | grep -qF -- "$requirement"; then
+    check "Current-cycle upgrade note: $requirement" PASS
   else
-    check "Unreleased upgrade note: $requirement" FAIL
+    check "Current-cycle upgrade note: $requirement" FAIL
   fi
 done
 
