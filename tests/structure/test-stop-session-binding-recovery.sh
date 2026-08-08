@@ -1,19 +1,30 @@
 #!/bin/bash
 # Pins the recovery paths of stop-chain-enforcer.sh when the immutable session
-# binding cannot be resolved — the states that used to wedge a session forever
-# because the release switches are only read further down the hook:
+# binding cannot be resolved:
 #   B0 healthy bound session                   -> still blocks (control)
-#   B1 recorded project root deleted           -> binding fails: cause on stderr, remedies named,
-#                                                 and ZENSU_CHAIN=off actually releases it
-#   B3 same session, chainEnforcer=false       -> release
-#   B4 root replaced by a symlink, no opt-out  -> block, cause named, no bypass in the reason
+#   B1 recorded project root deleted           -> RELEASE, cause and both remedies on stderr,
+#                                                 dead path named, no bypass advertised
+#   B4 root replaced by a symlink, no opt-out  -> block, cause named, no bypass in the reason;
+#                                                 B4c pins that chainEnforcer=false releases it
 #                                                 (skipped where directory symlinks are unavailable)
 #   B5 block reasons stay field-free           -> no interpolation in any emit payload
-#   B6 session with no record at all           -> block, missing-record cause routed to a fresh
-#                                                 session and to /zensu:doctor, still releasable
-# The release switches used to be unreachable here: they are read ~300 lines
-# below these blocks, so a session whose worktree was deleted could never end a
-# turn again. B1c is the regression pin for that wedge.
+#   B6 session with no record at all           -> release, missing-record cause routed to a fresh
+#                                                 session and to /zensu:doctor
+#
+# TWO bind failures release, and only two. Both mean the same thing — no
+# workflow state is reachable, so nothing is being waived: B6 has no record at
+# all, and B1 has an intact record whose project root is gone, which took
+# <project_root>/.zensu/state/ with it. Everything else still blocks, because a
+# record that disagrees about anything ELSE may own state whose completion is
+# unproven. B4 is the discrimination pin for that line: a root that still exists
+# but no longer matches is NOT the released state. B1d pins the other half —
+# a second disagreement is never relaxed alongside the first.
+#
+# B1 used to pin the opposite (deleted root -> block, releasable only via
+# ZENSU_CHAIN=off). That left a session whose worktree the harness recycled
+# unable to end a turn at all, with every tool including /zensu:doctor denied,
+# and the operator-facing switch reachable only from a terminal the model
+# cannot see. The release replaces the switch for that state.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -42,6 +53,7 @@ reason()   { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on
 # Arm a blocking standalone chain in a fresh project root (never in a subshell:
 # the baseline exports the plugin-data path the hook binds against).
 ARMED_ROOT=""
+ARMED_RECORD=""
 arm() {
   local label="$1"
   local project="$PROJECTS/$label"
@@ -54,6 +66,7 @@ arm() {
   bash "$LOG" --tdd-begin --session "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
   bash "$LOG" --tdd-complete --session "$ZENSU_SESSION_KEY" >/dev/null 2>&1 || return 1
   ARMED_ROOT="$ZENSU_PROJECT_ROOT"
+  ARMED_RECORD="$CLAUDE_PLUGIN_DATA/session-control/v1/records/$ZENSU_SESSION_KEY.json"
 }
 
 stop_run() {
@@ -75,69 +88,63 @@ else
   check "B0 healthy bound session (out=$OUT0)" FAIL
 fi
 
-# --- B1 recorded project root deleted -> the authoritative cause plus a way out ---
+# --- B1 recorded project root deleted -> released, with the cause and remedies ---
+# The workflow document lived at <project_root>/.zensu/state/, so it is gone
+# with the directory: no review chain and no Autopilot run remain to enforce and
+# none is waived. Binding still FAILS here — the record is immutable and its
+# recorded root really is missing — so the release must come from the hook
+# recognizing that specific bind failure, not from a successful bind.
 arm stop-bind-deleted || { echo "B1 fixture failed" >&2; exit 1; }
 ROOT1="$ARMED_ROOT"
 rm -rf "$ROOT1"
 [ ! -d "$ROOT1" ] || { echo "B1 fixture: project root still present" >&2; exit 1; }
 ERR1="$STATE_DIR/b1.err"
 OUT1="$(stop_run stop-bind-deleted "$ERR1" IGNORE=1)"
-REASON1="$(printf '%s' "$OUT1" | reason)"
-if [ "$(printf '%s' "$OUT1" | decision)" = "block" ] \
+if [ "$(printf '%s' "$OUT1" | decision)" = "allow" ] \
   && grep -qF "context project root does not exist" "$ERR1"; then
-  check "B1 deleted project root fails binding, not resolution (cause on stderr)" PASS
+  check "B1 a deleted project root releases Stop instead of wedging the session forever" PASS
 else
   check "B1 deleted project root (out=$OUT1 err='$(cat "$ERR1" 2>/dev/null)')" FAIL
 fi
-if grep -qF "re-create exactly that directory" "$ERR1" \
+# Naming the dead path is the whole point of the remedy: "re-create exactly that
+# directory" is unusable advice if the user is not told which directory.
+if grep -qF "Re-create exactly that directory" "$ERR1" \
   && grep -qF "start a new session" "$ERR1" \
-  && grep -qF "the record is immutable" "$ERR1" \
-  && grep -qF "a record exists here and disagrees" "$ERR1" \
-  && grep -qF 'ZENSU_CHAIN=off or hooks.chainEnforcer=false' "$ERR1"; then
-  check "B1a stderr names the deleted-worktree remedies, its own scope, and the release switches" PASS
+  && grep -qF "none was waived" "$ERR1" \
+  && grep -qF "$ROOT1" "$ERR1"; then
+  check "B1a the release names the dead path, both remedies, and that nothing was waived" PASS
 else
-  check "B1a bind diagnostic (err='$(cat "$ERR1" 2>/dev/null)')" FAIL
+  check "B1a release diagnostic (err='$(cat "$ERR1" 2>/dev/null)')" FAIL
 fi
-# The reason must name BOTH known causes rather than ranking one as "the common
-# one": it used to assert the deleted-worktree guess, which sent the user hunting
-# a worktree while the real cause was a session resumed across a plugin update —
-# that session simply has no record, because resume never mints one.
-# This block is now reached ONLY for a record that exists and disagrees — a
-# session with no record at all is released before it (B6). The reason must say
-# so, must not rank a guess as "the common one" the way it used to, and must not
-# send the user to /zensu:doctor, which is itself denied in this exact state.
-if printf '%s' "$REASON1" | grep -qF 'cannot be bound to the immutable Session Control record' \
-  && printf '%s' "$REASON1" | grep -qF 'a deleted or moved worktree' \
-  && printf '%s' "$REASON1" | grep -qF 'released earlier' \
-  && printf '%s' "$REASON1" | grep -qF 'most often a record exists here and disagrees' \
-  && printf '%s' "$REASON1" | grep -qF 'can also simply fail to evaluate' \
-  && printf '%s' "$REASON1" | grep -qF 'Where a record does disagree' \
-  && ! printf '%s' "$REASON1" | grep -qF 'the common one' \
-  && ! printf '%s' "$REASON1" | grep -qF 'ZENSU_CHAIN' \
-  && ! printf '%s' "$REASON1" | grep -qF 'chainEnforcer'; then
-  check "B1b reason hedges between a disagreeing record and an unevaluable check, teaches no bypass, and scopes the doctor advice" PASS
+# Same rule as B6c: a release needs no opt-out, so it must not teach one either.
+if [ -z "$(printf '%s' "$OUT1" | reason)" ] \
+  && ! grep -qF 'ZENSU_CHAIN=off' "$ERR1" \
+  && ! grep -qF 'chainEnforcer' "$ERR1"; then
+  check "B1b the release emits no block reason and advertises no bypass" PASS
 else
-  check "B1b bind reason (reason='$REASON1')" FAIL
+  check "B1b release payload (out=$OUT1 err='$(cat "$ERR1" 2>/dev/null)')" FAIL
 fi
-ERR1B="$STATE_DIR/b1b.err"
-OUT1B="$(stop_run stop-bind-deleted "$ERR1B" ZENSU_CHAIN=off)"
-if [ "$(printf '%s' "$OUT1B" | decision)" = "allow" ] \
-  && grep -qF "ZENSU_CHAIN=off is set explicitly" "$ERR1B"; then
-  check "B1c the deleted-root session is releasable, no longer wedged forever" PASS
+# The release is bound to ONE disagreement. Break a second thing about the same
+# record — here the runtime digest — and it must go back to blocking, or the
+# relaxation would launder every other integrity failure that happens to arrive
+# with a missing directory.
+arm stop-bind-deleted-tampered || { echo "B1d fixture failed" >&2; exit 1; }
+ROOT1D="$ARMED_ROOT"
+node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  record.runtime_digest = "sha256:" + "0".repeat(64);
+  record.source_revision = record.runtime_digest;
+  fs.writeFileSync(file, JSON.stringify(record));
+' "$ARMED_RECORD" || { echo "B1d fixture: could not tamper the record" >&2; exit 1; }
+rm -rf "$ROOT1D"
+ERR1D="$STATE_DIR/b1d.err"
+OUT1D="$(stop_run stop-bind-deleted-tampered "$ERR1D" IGNORE=1)"
+if [ "$(printf '%s' "$OUT1D" | decision)" = "block" ]; then
+  check "B1d a deleted root PLUS a second disagreement still blocks — one relaxation, never two" PASS
 else
-  check "B1c deleted-root release (out=$OUT1B err='$(cat "$ERR1B" 2>/dev/null)')" FAIL
-fi
-
-# --- B3 the config switch reaches the same unbindable state ---
-CFG_OFF="$STATE_DIR/enforcer-off.json"
-printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
-ERR3="$STATE_DIR/b3.err"
-OUT3="$(stop_run stop-bind-deleted "$ERR3" "ZENSU_CONFIG=$CFG_OFF")"
-if [ "$(printf '%s' "$OUT3" | decision)" = "allow" ] \
-  && grep -qF "hooks.chainEnforcer=false is configured" "$ERR3"; then
-  check "B3 hooks.chainEnforcer=false releases the same deleted-root session" PASS
-else
-  check "B3 chainEnforcer=false (out=$OUT3 err='$(cat "$ERR3" 2>/dev/null)')" FAIL
+  check "B1d two disagreements (out=$OUT1D err='$(cat "$ERR1D" 2>/dev/null)')" FAIL
 fi
 
 # --- B6 the session has NO record at all -----------------------------------
@@ -166,10 +173,13 @@ if grep -qF "no record for this session" "$ERR6" \
 else
   check "B6a missing-record diagnostic (err='$(cat "$ERR6" 2>/dev/null)')" FAIL
 fi
-# The release is bound to that ONE state: a deleted project root still blocks
-# (B1 above), and the two diagnostics must stay distinguishable.
+# Both states release, but they are different diagnoses with different remedies,
+# so their diagnostics must never collapse into one: B6 must not talk about a
+# project root, and B1 must not talk about a missing record.
 if ! grep -qF "context project root does not exist" "$ERR6" \
-  && ! grep -qF "missing file" "$ERR1"; then
+  && ! grep -qF "missing file" "$ERR1" \
+  && ! grep -qF "no record for this session" "$ERR1" \
+  && ! grep -qF "Re-create exactly that directory" "$ERR6"; then
   check "B6b the no-record and deleted-root diagnostics never collapse into one" PASS
 else
   check "B6b diagnostic distinction (b6='$(cat "$ERR6" 2>/dev/null)' b1='$(cat "$ERR1" 2>/dev/null)')" FAIL
@@ -226,6 +236,23 @@ if printf '%s' "$REASON4" | grep -qF 'Zensu Stop denied: the immutable Session C
   check "B4b the single all-causes reason was replaced by a specific one" PASS
 else
   check "B4b cause-specific reason (reason='$REASON4')" FAIL
+fi
+# The opt-out switches still work, and this is where that has to be proven now:
+# the deleted-root session releases on its own, so it can no longer show that a
+# switch changes anything. A state that genuinely blocks can.
+CFG_OFF="$STATE_DIR/enforcer-off.json"
+printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
+ERR4C="$STATE_DIR/b4c.err"
+OUT4C="$(stop_run stop-bind-record "$ERR4C" "ZENSU_CONFIG=$CFG_OFF")"
+ERR4D="$STATE_DIR/b4d.err"
+OUT4D="$(stop_run stop-bind-record "$ERR4D" ZENSU_CHAIN=off)"
+if [ "$(printf '%s' "$OUT4C" | decision)" = "allow" ] \
+  && grep -qF "hooks.chainEnforcer=false is configured" "$ERR4C" \
+  && [ "$(printf '%s' "$OUT4D" | decision)" = "allow" ] \
+  && grep -qF "ZENSU_CHAIN=off is set explicitly" "$ERR4D"; then
+  check "B4c both opt-out switches still release a session that genuinely blocks" PASS
+else
+  check "B4c opt-out switches (cfg=$OUT4C env=$OUT4D)" FAIL
 fi
 fi
 

@@ -429,7 +429,14 @@ function buildContext(options) {
   };
 }
 
-function validateContext(context, expectedHost) {
+// `options.allowMissingProjectRoot` waives ONE check and nothing else: whether
+// the recorded project root still exists on disk. It defaults to off, so every
+// caller that does not opt in keeps the strict behaviour. The only opt-in
+// caller is readOrphanedProjectRootContext, which separately PROVES the path is
+// absent — waiving the check does not mean the field is unvalidated, because
+// the requireText loop below still rejects a missing, blank, or unsafe value.
+function validateContext(context, expectedHost, options) {
+  const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
     fail('context record must be an object');
   }
@@ -455,7 +462,9 @@ function validateContext(context, expectedHost) {
   for (const field of ['project_root', 'plugin_root', 'plugin_data', 'plugin_version', 'runtime_digest', 'created_at', 'source_revision']) {
     requireText(context[field], `context ${field}`);
   }
-  canonicalDirectory(context.project_root, 'context project root');
+  if (!allowMissingProjectRoot) {
+    canonicalDirectory(context.project_root, 'context project root');
+  }
   canonicalDirectory(context.plugin_root, 'context plugin root');
   canonicalDirectory(context.plugin_data, 'context plugin data');
   if (!HASH_RE.test(context.runtime_digest)) {
@@ -1168,14 +1177,16 @@ function registerContext(options) {
   });
 }
 
-function readContext(options) {
+function readContextInternal(options) {
   const recordsDirInput = requireText(options.recordsDir, 'records directory');
   if (!fs.existsSync(recordsDirInput)) {
     fail('context record directory is missing');
   }
   const recordsDir = canonicalDirectory(recordsDirInput, 'records directory');
   const file = contextRecordFile(recordsDir, options.sessionId);
-  const context = validateContext(readJson(file), options.expectedHost);
+  const context = validateContext(readJson(file), options.expectedHost, {
+    allowMissingProjectRoot: options.allowMissingProjectRoot,
+  });
   if (context.session_id_hash !== sessionIdHash(options.sessionId)) {
     fail('context session hash mismatch');
   }
@@ -1187,6 +1198,41 @@ function readContext(options) {
   if (manifest.version !== context.plugin_version) {
     fail('context plugin version mismatch');
   }
+  return context;
+}
+
+function readContext(options) {
+  return readContextInternal({ ...options, allowMissingProjectRoot: false });
+}
+
+// The ONE bind failure a caller may treat as "nothing left to enforce": every
+// part of the record validates exactly as readContext demands, and its recorded
+// project root is simply gone — the harness recycled or the user deleted that
+// worktree. The workflow document lives at <project_root>/.zensu/state/, so it
+// died with the directory: no review chain and no Autopilot run remain
+// reachable, which is the same argument that already releases a session with no
+// record at all.
+//
+// Deliberately NOT this state, and therefore still fail-closed: a root that
+// EXISTS but no longer matches (a symlinked, moved, or re-created directory), a
+// dangling symlink or a file at that path, and any record that disagrees about
+// anything ELSE — plugin root, plugin data, session hash, runtime digest,
+// plugin version, schema, or principal profiles. Those are integrity signals,
+// not a vanished worktree, and a second disagreement is never relaxed alongside
+// the first. Throws on every one of them; returns the context only for the
+// exact state described above.
+function readOrphanedProjectRootContext(options) {
+  const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // lstat, never realpath: realpath follows a symlink and would report a
+  // dangling link as absent, quietly turning a present-but-wrong root into the
+  // relaxable state.
+  try {
+    fs.lstatSync(context.project_root);
+  } catch (error) {
+    if (error.code === 'ENOENT') return context;
+    fail('context project root is unreadable');
+  }
+  fail('context project root still exists');
   return context;
 }
 
@@ -3367,6 +3413,7 @@ module.exports = {
   buildContext,
   registerContext,
   readContext,
+  readOrphanedProjectRootContext,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,

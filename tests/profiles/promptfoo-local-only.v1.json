@@ -43,6 +43,7 @@
     "test-intent-router-hook.sh",
     "test-msys-runtime-boundaries.sh",
     "test-msys-special-plugin-module-boundaries.sh",
+    "test-orphaned-project-root.sh",
     "test-pending-review-ttl.sh",
     "test-pilot-skill.sh",
     "test-plan-approved-delegate.sh",

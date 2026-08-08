@@ -289,11 +289,17 @@ run_unbound "W86 unbound + new untracked source"     "printf x > src/brandnew.rs
 REASON_UNBOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
   ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+# Two distinct states reach this branch — no record at all, and a record whose
+# recorded project root is gone — so the binding sentence must name both rather
+# than assert the first, which would send a user with a deleted worktree hunting
+# for a record that is right there.
 { printf '%s' "$REASON_UNBOUND" | grep -qF 'tracked' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE=off' \
-  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no Session Control record' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no usable Session Control project root' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no record at all' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no longer exists' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF '/zensu:doctor'; } \
-  && check "W87 unbound rule-A deny keeps its cause, escape hint, binding gap and /zensu:doctor" PASS \
+  && check "W87 unbound rule-A deny keeps its cause, escape hint, both binding gaps and /zensu:doctor" PASS \
   || check "W87 unbound deny reason (got '$REASON_UNBOUND')" FAIL
 REASON_UNBOUND_B="$(payload "printf x >> $SIB/src/lib.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \

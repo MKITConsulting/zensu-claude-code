@@ -278,6 +278,14 @@ function bindingLine() {
       return line(OK, 'binding: this session has a valid Session Control record — stateful tools can run');
     case 'unbound':
       return line(BAD, 'binding: this session has no valid Session Control record — every stateful Zensu tool fails closed; start a fresh Claude Code session');
+    // A record that is valid in every other respect, pointing at a directory
+    // that is gone. Naming the path matters: "re-create exactly that directory"
+    // is only actionable if the user is told which one, and the generic unbound
+    // line above would send them looking for a record that is right there.
+    case 'orphaned-project-root':
+      return line(BAD, 'binding: the project root recorded for this session no longer exists'
+        + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + env.ZDOC_BINDING_PROJECT_ROOT + ')' : '')
+        + ' — a deleted or recycled worktree took the workflow state with it, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:
