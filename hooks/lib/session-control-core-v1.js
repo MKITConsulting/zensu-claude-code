@@ -1205,9 +1205,10 @@ function readContext(options) {
   return readContextInternal({ ...options, allowMissingProjectRoot: false });
 }
 
-// The ONE bind failure a caller may treat as "nothing left to enforce": every
-// part of the record validates exactly as readContext demands, and its recorded
-// project root is simply gone — the harness recycled or the user deleted that
+// One of the two bind failures a caller may treat as "nothing left to enforce"
+// (the other is a session with no record at all, which never reaches this
+// reader): every part of the record validates exactly as readContext demands,
+// and its recorded project root is simply gone — the harness recycled or the user deleted that
 // worktree. The workflow document lives at <project_root>/.zensu/state/, so it
 // died with the directory: no review chain and no Autopilot run remain
 // reachable, which is the same argument that already releases a session with no
@@ -1221,8 +1222,28 @@ function readContext(options) {
 // not a vanished worktree, and a second disagreement is never relaxed alongside
 // the first. Throws on every one of them; returns the context only for the
 // exact state described above.
+// Control characters and DEL. canonicalDirectory rejects a subset of these on
+// the strict path; the orphan reader skips that function for its EXISTENCE
+// check and must not lose its shape check with it.
+const UNSAFE_PATH_CHARACTERS = new RegExp('[\\u0000-\\u001f\\u007f]');
+
 function readOrphanedProjectRootContext(options) {
   const context = readContextInternal({ ...options, allowMissingProjectRoot: true });
+  // Waiving canonicalDirectory waives its EXISTENCE check, which is the point —
+  // but it would also waive that function's shape validation, and this value is
+  // not inert: callers print it to stderr and into the /zensu:doctor report,
+  // which the doctor skill renders verbatim. Without these two guards a record
+  // whose project_root alone was edited to an absent path carrying newlines or
+  // ANSI escapes would classify as the relaxable state and get its bytes echoed
+  // into a terminal and into the model's context — a record the strict
+  // readContext fails closed on. Re-apply the shape half, so EXISTENCE stays
+  // the only waived check.
+  if (UNSAFE_PATH_CHARACTERS.test(context.project_root)) {
+    fail('context project root is unsafe');
+  }
+  if (!path.isAbsolute(context.project_root)) {
+    fail('context project root must be absolute');
+  }
   // lstat, never realpath: realpath follows a symlink and would report a
   // dangling link as absent, quietly turning a present-but-wrong root into the
   // relaxable state.
@@ -1232,8 +1253,10 @@ function readOrphanedProjectRootContext(options) {
     if (error.code === 'ENOENT') return context;
     fail('context project root is unreadable');
   }
+  // Unreachable — fail() always throws. Stated rather than followed by a
+  // `return context`, which would hand back a root that still exists if fail()
+  // ever stopped throwing: the exact value this reader must never return.
   fail('context project root still exists');
-  return context;
 }
 
 function renderMainContext(contextInput) {

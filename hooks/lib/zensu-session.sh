@@ -98,11 +98,13 @@ zensu_bind_model_session() {
     ZENSU_RUNTIME_DIGEST ZENSU_PROJECT_ROOT
 }
 
-# Returns 0 ONLY when Session Control has never registered this session — the
-# one bind failure a gate may safely relax, because it is the 0.17.0 upgrade
-# state (that release introduced the record; a resumed session never mints one)
-# and not a capability or integrity violation. Every other failure, including a
-# record that exists and disagrees, returns non-zero and must stay fail-closed.
+# Returns 0 ONLY when Session Control has never registered this session — one of
+# the two bind failures a gate may safely relax (see
+# zensu_session_orphaned_project_root below for the other), because it is the
+# 0.17.0 upgrade state (that release introduced the record; a resumed session
+# never mints one) and not a capability or integrity violation. Every other
+# failure, including a record that exists and disagrees about anything beyond a
+# missing project root, returns non-zero and must stay fail-closed.
 # The decision lives in claude-hook-session-v1.js so all three Bash gates and
 # the all-tool capability gate share exactly one predicate.
 zensu_session_unregistered() {
@@ -191,27 +193,33 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
-# Two scopes, because the same emitter serves callers with very different
-# knowledge. A caller that already ruled out the unregistered state via
-# zensu_session_unregistered may say so; a caller that denies on any bind failure
-# must NOT, or it tells a user with no record that /zensu:doctor is denied when
-# it is exactly the command that still works for them.
+# Three scopes, because the same emitter serves callers with very different
+# knowledge. A caller that already ruled out the RELAXABLE states may say so; a
+# caller that denies on any bind failure must NOT, or it tells a user in a
+# relaxable state that /zensu:doctor is denied when it is exactly the command
+# that still works for them.
+#
+# The reasons deliberately avoid asserting "no record" as the cause: two states
+# are relaxable — no record at all, and a record whose recorded project root no
+# longer exists — and naming the wrong one sends a user with an intact record
+# hunting for a record that is right there. That is the same misdiagnosis the
+# /zensu:doctor binding rows and the Stop-hook reasons were corrected for.
 #   (default)         any bind failure, cause not narrowed
-#   narrowed          the unregistered state was ruled out by the caller
-#   damaged-runtime   the session IS unregistered, so the diagnostic would
-#                     normally be reachable, but a runtime library the gate
-#                     needs is missing — so the doctor is denied too
+#   narrowed          BOTH relaxable states were ruled out by the caller
+#   damaged-runtime   the session IS in a relaxable state, so the diagnostic
+#                     would normally be reachable, but a runtime library the
+#                     gate needs is missing — so the doctor is denied too
 zensu_emit_hook_session_deny() {
   local scope="${1:-}"
   if [ "$scope" = narrowed ]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is not the no-record state — that one is handled separately — so either a record exists and disagrees with the running plugin installation, or the no-record check could not be evaluated at all. Start a fresh Claude Code session before using stateful tools."}}'
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. Start a fresh Claude Code session before using stateful tools."}}'
     return
   fi
   if [ "$scope" = damaged-runtime ]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no Session Control record, which alone would still leave the interactive thread able to run /zensu:doctor — but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no usable Session Control binding — either no record at all, or a record whose recorded project root no longer exists — which alone would still leave the interactive thread able to run /zensu:doctor, but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
     return
   fi
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid — this session has no Session Control record, so every stateful Zensu tool fails closed. Run /zensu:doctor to see which check failed, or start a fresh Claude Code session before using stateful tools."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor to see which check failed — it names whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason — or start a fresh Claude Code session before using stateful tools."}}'
 }
 
 zensu_resolve_session_id() {

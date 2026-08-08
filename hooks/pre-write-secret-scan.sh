@@ -50,17 +50,25 @@ ZENSU_SESSION_BOUND=true
 zensu_bind_hook_session "$INPUT" || ZENSU_SESSION_BOUND=false
 if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # This hook matches Bash as well as Edit/Write, and it denied on the bind
-  # BEFORE inspecting anything — so on a session Session Control never registered
-  # it blocked every Bash call, including /zensu:doctor, and neither
-  # secretScan:false nor ZENSU_SECRET_SCAN=off could reach far enough to release
-  # it. Relax that ONE state and then fall through to the ORDINARY decision
-  # below: secret-scan-decide.js reads only the payload, so it needs no binding
-  # and reaches exactly the verdict a bound session would. Deciding differently
-  # here would either deny ordinary commands (its channel detector deliberately
+  # BEFORE inspecting anything — so it blocked every Bash call, including
+  # /zensu:doctor, and neither secretScan:false nor ZENSU_SECRET_SCAN=off could
+  # reach far enough to release it. Relax the TWO states that leave no workflow
+  # state to enforce — no record at all, and a record whose recorded project root
+  # is gone — and then fall through to the ORDINARY decision below:
+  # secret-scan-decide.js reads only the payload, so it needs no binding and
+  # reaches exactly the verdict a bound session would. Deciding differently here
+  # would either deny ordinary commands (its channel detector deliberately
   # over-detects, so any `>` in an argument would look like a write) or leave
   # Edit/Write content unscanned. The only thing skipped is the bypass ledger,
   # which is keyed by the binding that does not exist.
-  if ! zensu_session_unregistered "$INPUT"; then
+  #
+  # Both must be relaxed HERE, not only in the sibling Bash gates: hooks.json
+  # registers three PreToolUse hooks on the Bash matcher and a deny from ANY of
+  # them wins, so leaving this one closed silently reinstated the exact deadlock
+  # the relaxation exists to remove. stdout is the JSON decision channel, so the
+  # orphaned probe's printed path is discarded.
+  if ! zensu_session_unregistered "$INPUT" \
+    && ! zensu_session_orphaned_project_root "$INPUT" >/dev/null; then
     zensu_emit_hook_session_deny narrowed
     exit 0
   fi

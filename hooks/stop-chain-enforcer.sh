@@ -97,10 +97,20 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # The second state with nothing left to enforce, reached from the opposite
   # direction: the record is intact and only the directory it recorded is gone
   # (a deleted or harness-recycled worktree). The workflow document lives at
-  # <project_root>/.zensu/state/, so it died with that directory — no review
-  # chain and no Autopilot run are reachable, and none is waived. Blocking here
-  # protected no invariant; it only left the session unable to end a turn, with
-  # every tool including /zensu:doctor denied and no in-session escape.
+  # <project_root>/.zensu/state/, so it is not reachable from this record — and
+  # because the record is immutable, it never will be again. Blocking protected
+  # no invariant; it only left the session unable to end a turn, with every tool
+  # including /zensu:doctor denied and no in-session escape.
+  #
+  # Deliberately says "not reachable", not "gone": a MOVED or renamed root, and
+  # an unmounted volume, produce the same ENOENT while the state survives intact
+  # and restorable. That is why the message below claims no completion was
+  # proven rather than that nothing existed to prove — the honest phrasing the
+  # opt-out releases above already use. It does mean the release can be induced
+  # (rename the root, end the turn, rename it back), which is a real if noisy
+  # escape; the alternative was wedging every legitimately deleted worktree
+  # forever, and a caller who can rename the project root can also set
+  # ZENSU_CHAIN=off.
   #
   # Bound to THIS cause alone. A root that still EXISTS but no longer matches
   # (symlinked, moved, re-created) is a different state and keeps blocking, as
@@ -109,7 +119,7 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # alongside the first. stdout is captured here, never leaked.
   if ORPHANED_PROJECT_ROOT="$(zensu_session_orphaned_project_root "$INPUT")" \
     && [ -n "$ORPHANED_PROJECT_ROOT" ]; then
-    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document went with that directory. No review-chain or Autopilot state is reachable, none was waived, and no completion could ever be proven from this record. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then

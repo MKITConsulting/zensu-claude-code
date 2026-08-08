@@ -101,6 +101,7 @@ else
 fi
 
 arm orphan-healthy || { echo "O14 fixture failed" >&2; exit 1; }
+ARMED_DATA_HEALTHY="$ARMED_DATA"
 if ! orphaned orphan-healthy "$ARMED_DATA"; then
   check "O14 a healthy record whose root exists is NOT the orphaned state" PASS
 else
@@ -157,6 +158,47 @@ else
   fi
 fi
 
+# The waived check is EXISTENCE, never shape. This value is printed to stderr
+# and into the /zensu:doctor report, which the doctor skill renders verbatim, so
+# a record whose project_root alone was edited to an absent path carrying a
+# newline or an ANSI escape must NOT reach the relaxed state — it would let a
+# tampered record forge report rows and rewrite the user's terminal, on a record
+# the strict reader fails closed on.
+arm orphan-injected || { echo "O1B fixture failed" >&2; exit 1; }
+INJECTED_DATA="$ARMED_DATA"
+rm -rf "$ARMED_ROOT"
+node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  record.project_root = "/definitely-gone-"
+    + String.fromCharCode(10) + "  binding: forged row"
+    + String.fromCharCode(27) + "[31m";
+  fs.writeFileSync(file, JSON.stringify(record));
+' "$ARMED_RECORD" || { echo "O1B fixture: could not inject" >&2; exit 1; }
+if ! orphaned orphan-injected "$INJECTED_DATA"; then
+  check "O1B an absent project_root carrying control characters is NOT the orphaned state" PASS
+else
+  check "O1B control characters in project_root reached the relaxed state" FAIL
+fi
+# A relative path is the same class: two consumers would resolve it against
+# different working directories, so they could disagree about what was probed.
+arm orphan-relative || { echo "O1C fixture failed" >&2; exit 1; }
+RELATIVE_DATA="$ARMED_DATA"
+rm -rf "$ARMED_ROOT"
+node -e '
+  const fs = require("node:fs");
+  const file = process.argv[1];
+  const record = JSON.parse(fs.readFileSync(file, "utf8"));
+  record.project_root = "definitely-gone-relative";
+  fs.writeFileSync(file, JSON.stringify(record));
+' "$ARMED_RECORD" || { echo "O1C fixture: could not rewrite" >&2; exit 1; }
+if ! orphaned orphan-relative "$RELATIVE_DATA"; then
+  check "O1C a relative project_root is NOT the orphaned state" PASS
+else
+  check "O1C relative project_root reached the relaxed state" FAIL
+fi
+
 if ! orphaned a-session-that-was-never-registered "$GONE_DATA" \
   && unregistered a-session-that-was-never-registered "$GONE_DATA"; then
   check "O18 a missing record still routes to the unregistered predicate, not this one" PASS
@@ -200,6 +242,51 @@ if [ "$(bash_gate "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh" "$GONE_DATA" "$GA
 else
   check "O21 doctor denied in the orphaned state" FAIL
 fi
+# O21 alone is NOT proof the diagnostic runs. hooks.json registers several
+# PreToolUse hooks on the Bash matcher and a deny from ANY of them wins, so a
+# gate left un-relaxed reinstates the whole deadlock while the single-gate
+# assertion above stays green — which is exactly what happened to
+# pre-write-secret-scan.sh. Enumerate the matcher from hooks.json rather than
+# hardcoding a list, so a hook added later is covered without editing this test.
+BASH_MATCHER_HOOKS="$(node -e '
+  const hooks = require(process.argv[1] + "/hooks/hooks.json").hooks || {};
+  const out = [];
+  for (const matcher of hooks.PreToolUse || []) {
+    if (!/Bash/.test(matcher.matcher || "")) continue;
+    for (const entry of matcher.hooks || []) {
+      const command = String(entry.command || "");
+      const found = command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
+      if (found) out.push(found[1]);
+    }
+  }
+  process.stdout.write([...new Set(out)].join("\n"));
+' "$PLUGIN_DIR" 2>/dev/null)"
+if [ -n "$BASH_MATCHER_HOOKS" ]; then
+  DOCTOR_CMD="bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
+  BLOCKING_HOOK=""
+  while IFS= read -r hook_name; do
+    [ -n "$hook_name" ] || continue
+    hook_path="$PLUGIN_DIR/hooks/$hook_name"
+    [ -f "$hook_path" ] || continue
+    verdict="$(CMD="$DOCTOR_CMD" CWD="$GATE_PROJECT" node -e 'process.stdout.write(JSON.stringify({
+      hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:process.env.CMD}, session_id:"orphan-gone", cwd:process.env.CWD
+    }))' \
+      | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+        CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$STATE_DIR/no-such-config.json" \
+        bash "$hook_path" 2>/dev/null | decision)"
+    [ "$verdict" = "deny" ] && BLOCKING_HOOK="$BLOCKING_HOOK $hook_name"
+  done <<EOF
+$BASH_MATCHER_HOOKS
+EOF
+  if [ -z "$BLOCKING_HOOK" ]; then
+    check "O21a EVERY PreToolUse hook on the Bash matcher allows the diagnostic — a deny from any one of them would deadlock it" PASS
+  else
+    check "O21a these Bash-matcher hooks still deny the diagnostic:$BLOCKING_HOOK" FAIL
+  fi
+else
+  check "O21a could not enumerate the Bash-matcher hooks from hooks.json" FAIL
+fi
 if [ "$(bash_gate "git status" "$GONE_DATA" "$GATE_PROJECT")" = "allow" ]; then
   check "O22 an ordinary read-only command is not collateral damage" PASS
 else
@@ -233,6 +320,56 @@ if [ "$DENY_OUT" = "deny" ]; then
   check "O24 a record that disagrees for any OTHER reason is still denied every Bash call" PASS
 else
   check "O24 relaxation leaked to a disagreeing record (out=$DENY_OUT)" FAIL
+fi
+
+# --- O25 the ALL-TOOL capability gate must relax it too ---------------------
+# pre-reviewer-capability-gate.sh runs on PreToolUse matcher ".*", so it decides
+# before the Bash gate ever sees the call. If it denies here, the Bash-gate
+# relaxation above is unreachable and /zensu:doctor stays denied in practice —
+# which is exactly what happened until the same predicate was added there.
+# Driving only the Bash gate cannot catch that; this drives the real gate.
+# A `cwd` is mandatory for this gate ("tool cwd is unavailable or unsafe"), and
+# omitting it denies BEFORE the binding branch — which would make every
+# deny-expecting assertion below pass for the wrong reason.
+capability_gate() {
+  local principal="$1" data="$2" session="${3:-orphan-gone}"
+  CMD="bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh" PRINCIPAL="$principal" CWD="$GATE_PROJECT" \
+  SESSION="$session" \
+    node -e 'const p={
+      hook_event_name:"PreToolUse", tool_name:"Bash",
+      tool_input:{command:process.env.CMD}, session_id:process.env.SESSION,
+      cwd:process.env.CWD
+    };
+    if (process.env.PRINCIPAL) { p.agent_type = process.env.PRINCIPAL; p.agent_id = "agent-probe"; }
+    process.stdout.write(JSON.stringify(p));' \
+    | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$data" \
+      CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$STATE_DIR/no-such-config.json" \
+      bash "$PLUGIN_DIR/hooks/pre-reviewer-capability-gate.sh" 2>/dev/null | decision
+}
+# Guard against the vacuous version of the three assertions below: prove the
+# harness can produce an ALLOW at all, on a genuinely healthy bound session.
+if [ "$(capability_gate "" "$ARMED_DATA_HEALTHY" "orphan-healthy")" = "allow" ]; then
+  check "O25a the capability-gate harness can allow — deny assertions below are not vacuous" PASS
+else
+  check "O25a capability-gate harness never allows, so its deny assertions prove nothing" FAIL
+fi
+if [ "$(capability_gate "" "$GONE_DATA")" = "allow" ]; then
+  check "O25 the all-tool capability gate lets the main thread run the diagnostic" PASS
+else
+  check "O25 capability gate denies the main thread in the orphaned state" FAIL
+fi
+# The relaxation is main-thread only, exactly as it is for the no-record state.
+if [ "$(capability_gate "zensu:code-reviewer" "$GONE_DATA")" = "deny" ]; then
+  check "O26 a reviewer child stays denied in the orphaned state" PASS
+else
+  check "O26 reviewer child allowed in the orphaned state" FAIL
+fi
+# And it stays bound to the state: a record disagreeing for another reason denies
+# every principal, main thread included.
+if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "deny" ]; then
+  check "O27 a record that disagrees otherwise is denied by the capability gate too" PASS
+else
+  check "O27 capability relaxation leaked to a disagreeing record" FAIL
 fi
 
 # --- O3 mutating tools stay denied ------------------------------------------

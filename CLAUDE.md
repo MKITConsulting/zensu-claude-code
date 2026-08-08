@@ -63,6 +63,74 @@ Consequences of forgetting a new operation:
 
 Invariant: `ZENSU_MUTATION_TOOL_NAMES` must stay a strict superset of every skill's `--workflow-begin --tools` declaration AND of every mutation the CLI map emits. `tests/structure/test-bash-zensu-gate.sh` + `test-skill-workflow-markers.sh` pin the read/mutation classification and the CLI-form detection.
 
+## Relaxable Bind Failures (`hooks/lib/claude-hook-session-v1.js`)
+
+A failed bind to the immutable Session Control record denies, with exactly **two**
+documented exceptions. Both mean no workflow document is reachable, so relaxing waives
+nothing — and they are deliberately **two predicates, never one widened check**, because
+they are different diagnoses with different remedies:
+
+- `unregisteredSession` — no record at all (the 0.17.0 upgrade state). True only on a
+  clean `ENOENT` of the records directory or the record file.
+- `orphanedProjectRootSession` / `resolveOrphanedProjectRoot` — a record valid in every
+  other respect whose recorded `project_root` is gone (a deleted or recycled worktree).
+  It waives ONE check via `readOrphanedProjectRootContext`
+  (`hooks/lib/session-control-core-v1.js`, an internal `allowMissingProjectRoot` option
+  on `validateContext`) and additionally requires that path to be **absent** — `lstat`,
+  never `realpath`, so a dangling symlink stays a present-but-wrong root. It then
+  re-applies the plugin-root and plugin-data identity checks `resolveHookSession`
+  applies, so a second disagreement is never relaxed alongside the first.
+
+**Every gate that relaxes one must consider the other**, and they do NOT all agree by
+design — the split is the contract, so changing a predicate means re-deciding each site.
+The authoritative per-gate roster is the "Unbindable sessions" table in `README.md`, which
+carries one column per state; keep exactly one roster and do not duplicate it here. Two
+properties are easy to get wrong and cost the whole feature:
+
+- **A deny from ANY hook on a matcher wins.** `hooks.json` registers three PreToolUse
+  hooks on the `Bash` matcher (`pre-bash-zensu-gate.sh`, `pre-bash-source-write-gate.sh`,
+  `pre-write-secret-scan.sh`) and one on `.*` (`pre-reviewer-capability-gate.sh` via
+  `reviewer-capability-v1.js`). `/zensu:doctor` runs through Bash, so it is reachable only
+  if EVERY one of them allows. Both the `.*` gate and the secret-scan gate were missed in
+  turn while the single-gate test stayed green and the feature silently did not work.
+  `tests/structure/test-orphaned-project-root.sh` O21a therefore enumerates the Bash
+  matcher from `hooks.json` and asserts every hook on it allows, so a hook added later is
+  covered without editing the test.
+- **Mutating tools stay denied on purpose.** `pre-edit-tdd-reminder.sh` relaxes neither
+  state: nothing in either can anchor a write to a project. The relaxation buys diagnosis,
+  not work.
+
+Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
+`zensu_session_orphaned_project_root`, `..._model`). The orphaned wrapper **prints the
+dead path on stdout**; inside a PreToolUse gate stdout is the JSON decision channel, so a
+caller wanting the predicate alone must discard it explicitly.
+
+`zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
+wrong relaxable state sends a user whose worktree was deleted hunting for a record that is
+sitting intact in plugin data. Same rule for the `/zensu:doctor` binding rows.
+
+**The release claims only what an ENOENT proves.** A moved or renamed root, and an
+unmounted volume, produce the same ENOENT while the workflow state survives intact
+elsewhere — so the Stop release says no completion was proven, never that nothing existed
+to prove. It also means the release can be induced by renaming the project root; that is
+accepted, because the alternative wedges every legitimately deleted worktree forever and
+anyone who can rename the root can also set `ZENSU_CHAIN=off`.
+
+**Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
+`readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host
+`session-control-core-v1.js`; the host half (binder mode, shell predicate, gate
+re-decisions, doctor row) is per host. A port that takes only the core delta keeps the
+worktree-deletion wedge; a port that takes neither drifts from this core.
+
+Operator-facing accounts that must move with the predicates: the "Unbindable sessions"
+table in `README.md`, the Stop-binding section of `docs/tdd-manager-workflow.md`, and the
+binding rows in `skills/doctor/SKILL.md`.
+`tests/structure/test-orphaned-project-root.sh` pins the predicate truth table, the
+capability gate, every Bash-matcher hook, the Edit gate and the doctor rows;
+`tests/structure/test-stop-session-binding-recovery.sh` pins the Stop halves, where B4 is
+the discrimination test that a root which still EXISTS but no longer matches keeps
+blocking, and B1d that a second disagreement is never relaxed alongside the first.
+
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**

@@ -354,7 +354,7 @@ OUT_PARSER_FAIL="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   && check "W87f unbound parser runtime failure denies, never allows unchecked" PASS \
   || check "W87f unbound parser failure (got '$OUT_PARSER_FAIL')" FAIL
 
-# The relaxation covers ONE state. A record that exists but disagrees with the
+# The relaxation covers exactly those two states. A record that exists but disagrees with the
 # executing installation is a security signal and keeps denying every command.
 FOREIGN_DATA="$WORKROOT/foreign-plugin-data"
 FOREIGN_PLUG="$WORKROOT/foreign-plug"
@@ -408,9 +408,14 @@ DENY_NARROWED="$(bash -c 'source "$1"; zensu_emit_hook_session_deny narrowed' _ 
   && ! printf '%s' "$DENY_DEFAULT" | grep -qF 'including the doctor stays denied'; } \
   && check "W95 the un-narrowed deny keeps the doctor pointer for a no-record session" PASS \
   || check "W95 un-narrowed deny (got '$DENY_DEFAULT')" FAIL
+# TWO states are relaxable, so the narrowed deny must say both were ruled out —
+# and must not assert "no record" as the cause, which would send a user whose
+# recorded worktree was deleted hunting for a record that is sitting intact in
+# plugin data. Same misdiagnosis the doctor and Stop reasons were corrected for.
 { printf '%s' "$DENY_NARROWED" | grep -qF 'immutable Zensu session binding is unavailable' \
-  && printf '%s' "$DENY_NARROWED" | grep -qF 'not the no-record state'; } \
-  && check "W96 the narrowed deny says the no-record state was already ruled out" PASS \
+  && printf '%s' "$DENY_NARROWED" | grep -qF 'neither relaxable state' \
+  && printf '%s' "$DENY_NARROWED" | grep -qF 'recorded project root no longer exists'; } \
+  && check "W96 the narrowed deny says BOTH relaxable states were already ruled out" PASS \
   || check "W96 narrowed deny (got '$DENY_NARROWED')" FAIL
 # Only callers that actually pre-filter may claim the narrowed scope.
 NARROWED_CALLERS="$(grep -rlF 'zensu_emit_hook_session_deny narrowed' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"

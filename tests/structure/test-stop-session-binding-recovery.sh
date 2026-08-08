@@ -108,11 +108,19 @@ else
 fi
 # Naming the dead path is the whole point of the remedy: "re-create exactly that
 # directory" is unusable advice if the user is not told which directory.
+#
+# The claim must also stay within what an ENOENT proves. A MOVED or renamed root
+# — and an unmounted volume — produce the same ENOENT while the workflow state
+# survives intact somewhere else, so the message may say no completion was
+# proven, but must NOT claim nothing existed to prove. Pinning the negative here
+# is what stops that overclaim from creeping back in.
 if grep -qF "Re-create exactly that directory" "$ERR1" \
   && grep -qF "start a new session" "$ERR1" \
-  && grep -qF "none was waived" "$ERR1" \
+  && grep -qF "no completion was proven" "$ERR1" \
+  && grep -qF "moved rather than deleted" "$ERR1" \
+  && ! grep -qF "none was waived" "$ERR1" \
   && grep -qF "$ROOT1" "$ERR1"; then
-  check "B1a the release names the dead path, both remedies, and that nothing was waived" PASS
+  check "B1a the release names the dead path, both remedies, and claims only what an ENOENT proves" PASS
 else
   check "B1a release diagnostic (err='$(cat "$ERR1" 2>/dev/null)')" FAIL
 fi
