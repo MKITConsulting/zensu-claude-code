@@ -150,19 +150,30 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # no-record state it may simply be unset — so this branch is the NORMAL
     # case for both relaxed states, not an edge case.
     #
-    # Channel detection needs no project root: it answers "does this command
-    # write at all", and a command with no write channel cannot violate a rule
-    # that only governs writes. A parser that fails to run still denies, so a
-    # crash cannot degrade into a blanket allow.
-    if ! UNBOUND_CHANNELS="$(
+    # Ask for the resolved write OPERAND, not a channel token. `BSWG_MODE=detect`
+    # is a text matcher — it reports "redirect" for `git commit -m "fix: A -> B"`
+    # and "tee" for a commit message containing that word — so denying on it
+    # would refuse a large share of ordinary read-only commands in the very
+    # state this branch exists to make usable. `targets` runs the full default
+    # parse, applies the same source-extension and temp-root filters, and
+    # answers only with operands it actually resolved; it needs no project root
+    # because it skips exactly the two rules that would consult one.
+    #
+    # Because it is the default parse, the inline ZENSU_BASH_WRITE_GATE=off /
+    # ZENSU_MCP_GATE=off escapes still surface as __bypass__ markers here, so
+    # both escape spellings keep working on this path too. A parser that fails
+    # to run still denies, so a crash cannot degrade into a blanket allow.
+    if ! UNBOUND_TARGETS="$(
       cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-      BSWG_MODE=detect PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+      BSWG_MODE=targets PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
     )"; then
-      emit_deny "Blocked: the Bash write-channel check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
       exit 0
     fi
-    [ -z "$UNBOUND_CHANNELS" ] && exit 0
-    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so a Bash write cannot be attributed to any project. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is, or start a fresh Claude Code session."
+    case "$UNBOUND_TARGETS" in
+      ''|__bypass__*) exit 0 ;;
+    esac
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is, or start a fresh Claude Code session. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command

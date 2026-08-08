@@ -91,9 +91,18 @@ function lex(s) {
 // the write channels present in the command (one per line, deduped), with NO
 // git/tracked checks, NO path policy, and NO deny reasons. Heredoc intro lines
 // count as a channel here (their bodies are the secret-scan payload) even
-// though the deny path strips them. Over-detection is safe (it only widens
-// what gets scanned); fd dups (2>&1, >&2, >&-) are NOT channels. Default mode
-// is byte-identical.
+// though the deny path strips them. Over-detection is safe FOR THAT CONSUMER —
+// it only widens what gets scanned; fd dups (2>&1, >&2, >&-) are NOT channels.
+// Default mode is byte-identical.
+//
+// This is a TEXT matcher with no operand resolution and no quote awareness, so
+// it reports `redirect` for `git commit -m "fix: A -> B"` and `tee` for a commit
+// message containing that word. Any consumer that DENIES on a hit would refuse
+// those. pre-bash-source-write-gate.sh needed exactly such a check for its
+// no-project-root branch and therefore uses BSWG_MODE=targets instead, which
+// resolves operands. Keep it that way: widening this detector to catch more
+// secrets must stay safe, and it only is while its sole consumer scans rather
+// than denies.
 function detectChannels(cmd) {
   const found = new Set();
   const collapsed = stripHeredocs(cmd)
@@ -248,8 +257,16 @@ function main() {
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
   if (process.env.BSWG_MODE === "control") return detectControlMutation(cmd);
+  // `targets` runs the FULL default parse and diverges at exactly one point
+  // (see decide()): it reports the resolved write operand rather than judging
+  // it against a project root. The bypass markers still apply, so the inline
+  // ZENSU_BASH_WRITE_GATE=off / ZENSU_MCP_GATE=off escapes keep working for
+  // this caller exactly as they do on the anchored path.
+  const targetsOnly = process.env.BSWG_MODE === "targets";
 
   const HOME = process.env.HOME || "";
+  // No usable root in targets mode by definition; the two rules that would
+  // consult it are the ones decide() skips there.
   const projectRoot = stripSlash(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
   let curdir = cwd0 || projectRoot;
 
@@ -318,6 +335,14 @@ function main() {
     const p = abspath(unquote(raw));
     if (!SRC.has(extOf(p))) return "";
     if (isTemp(p)) return "";
+    // BSWG_MODE=targets — report the RESOLVED write operand instead of judging
+    // it. Same tokenization and the same source-extension and temp-root
+    // filters as the deny path; only the two project-root rules below are
+    // skipped, because this mode exists precisely for the caller that has no
+    // usable project root. Answering "does this command write a source file"
+    // needs an operand, not a channel token: detectChannels matches text, so
+    // it reports `redirect` for `git commit -m "fix: A -> B"`.
+    if (targetsOnly) return "WRITE-TARGET " + p + " (via " + channel + ")";
     if (!within(projectRoot, p)) {
       return (
         "Blocked a Bash write to a source file OUTSIDE this session's worktree/project root (" +

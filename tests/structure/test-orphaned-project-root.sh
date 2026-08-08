@@ -85,9 +85,14 @@ run_gate() {
   local hook_path="$1" payload="$2" data="$3" config="${4:-$STATE_DIR/no-such-config.json}"
   local project="${5:-$GATE_PROJECT}"
   local out status
+  # The fixtures live under mktemp, which the parser exempts as a temp root by
+  # default — that would make every write assertion below vacuously allow.
+  # ZENSU_BSWGATE_TEMP_DIRS is the parser's documented harness seam: point it at
+  # a path that is nobody's ancestor so the fixture paths are judged normally.
   out="$(printf '%s' "$payload" \
     | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$data" \
       CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$config" \
+      ZENSU_BSWGATE_TEMP_DIRS="$STATE_DIR/no-such-temp-root" \
       bash "$hook_path" 2>/dev/null)"
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -519,7 +524,49 @@ for anchor_label in deleted-root unset-anchor; do
   else
     check "O29a ($anchor_label) write allowed with no project anchor" FAIL
   fi
+  # The branch must decide on a resolved write OPERAND, not on a channel token
+  # in the command text. A metacharacter-free ALLOW case cannot measure that:
+  # these commands all carry `>` or the word `tee` inside a quoted argument and
+  # write nothing, and a text-matching check denies every one of them.
+  OVERDENIED=""
+  while IFS= read -r readonly_cmd; do
+    [ -n "$readonly_cmd" ] || continue
+    [ "$(run_gate "$BASH_GATE" "$(bash_payload "$readonly_cmd")" "$GONE_DATA" \
+      "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ] \
+      || OVERDENIED="$OVERDENIED [$readonly_cmd]"
+  done <<'EOF'
+git commit -m "fix: A -> B"
+git log --format="%h > %s"
+git commit -m "add tee wrapper"
+git diff > /tmp/patch.diff
+EOF
+  if [ -z "$OVERDENIED" ]; then
+    check "O29b ($anchor_label) a read-only command carrying a channel token in an argument still runs" PASS
+  else
+    check "O29b ($anchor_label) over-denied:$OVERDENIED" FAIL
+  fi
+  # The inline escape must keep working on this path, exactly as W87b pins it on
+  # the anchored path — otherwise an over-denied command has no in-session exit.
+  if [ "$(run_gate "$BASH_GATE" \
+    "$(bash_payload "ZENSU_BASH_WRITE_GATE=off printf x > $STATE_DIR/somewhere.ts")" \
+    "$GONE_DATA" "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ]; then
+    check "O29c ($anchor_label) the inline ZENSU_BASH_WRITE_GATE=off escape still works" PASS
+  else
+    check "O29c ($anchor_label) inline escape lost on the no-anchor path" FAIL
+  fi
 done
+# A parser that cannot RUN must deny, never degrade into a blanket allow.
+STUB_LIB="$STATE_DIR/stub-lib"
+mkdir -p "$STUB_LIB/hooks/lib"
+cp -R "$PLUGIN_DIR/hooks/." "$STUB_LIB/hooks/" 2>/dev/null || true
+printf '#!/bin/sh\nexit 3\n' > "$STUB_LIB/hooks/lib/bash-source-write-parse.js"
+if [ "$(run_gate "$STUB_LIB/hooks/pre-bash-source-write-gate.sh" \
+  "$(bash_payload "git status")" "$GONE_DATA" "$STATE_DIR/no-such-config.json" \
+  "$STATE_DIR/never-created-anchor")" = "deny" ]; then
+  check "O29d a write-target parser that fails to run denies instead of allowing unchecked" PASS
+else
+  check "O29d parser failure degraded into an allow" FAIL
+fi
 
 # --- O3 mutating tools stay denied ------------------------------------------
 # The relaxation buys diagnosis, not work: nothing in this state can anchor an
