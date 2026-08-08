@@ -171,7 +171,7 @@ R_FAIL=0
 for c in \
   "zensu features list --product p" \
   "zensu roadmap get r1" \
-  "zensu security posture --product p" \
+  "zensu security posture p" \
   "zensu journeys health --product p j1" \
   "zensu ghost candidates s1" \
   "zensu pulse summary s1" \

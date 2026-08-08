@@ -41,7 +41,7 @@ matching skill workflow.
 - **Tiers**: Pricing levels (Free/Pro/Team/Enterprise) with feature gating
 - **Features**: The central entity — tracked with status, security profile, linked tests, docs, coverage, and tier availability
 
-**Feature IDs** follow the `KEY-N` format — product feature key + per-product number (e.g. `ZEN-42`, `AUTH-7`). Reference them in commit messages as `[ZEN-42]`; legacy `[ZEN-<slug>]` refs stay resolvable.
+**Feature IDs** follow the `KEY-N` format — product feature key + per-product number (e.g. `ZEN-42`, `AUTH-7`). Reference them in commit messages as `[ZEN-42]`; legacy `[ZEN-<slug>]` refs stay resolvable. `KEY-N` is the human-facing id only: every CLI `<feature-id>` argument takes the feature **UUID** and rejects a `KEY-N` id or slug with `invalid feature id (status 400)`. Resolve `KEY-N` → UUID via `zensu products list --json` (match `feature_key`) → `zensu features list --product <id> --json` (match `number` or `slug`), falling back to `zensu journeys suggest --product <id>` when the list envelope's `total` exceeds one 20-item page.
 
 **Feature Status Lifecycle**: `planned` → `in-progress` → `testing` → `released`
 
@@ -59,8 +59,8 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 ## Available CLI Commands
 
 ### Feature CRUD
-- `zensu features list` — List features (`--product`, `--compact`)
-- `zensu features get <id>` — Get full feature details
+- `zensu features list` — List features (`--product` **required**, optional `--status` and `--json`). The response is a `{data, total, page, perPage}` envelope paginated at 20 with **no page flag on the CLI** — when `total` exceeds the returned `data` length, read the full catalog from `zensu journeys suggest --product <id>`, whose payload carries every feature.
+- `zensu features get <id>` — Get full feature details. The id must be the feature **UUID**; a slug or KEY-N id is rejected with `invalid feature id (status 400)`. The command has no `--json` flag — it always prints JSON.
 - `zensu features create` — Create a new feature
 - `zensu features update <id>` — Update feature properties (NOT status — use `zensu features status`)
 - `zensu features status <id> <status>` — Transition status (planned|in-progress|testing|released)
@@ -79,7 +79,7 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 
 ### Security
 - `zensu security classify <id>` — Set classification, data sensitivity, auth, encryption, audit settings
-- `zensu security posture --product <id>` — Product-wide security overview
+- `zensu security posture <product-id>` — Product-wide security overview (product id is positional, not `--product`)
 - `zensu security analyze <id>` — Feature security analysis with score and requirements matrix (persists the score server-side, so it is classified a mutation and gated on the main thread — run it inside a skill workflow rather than reaching for `ZENSU_MCP_GATE=off`)
 - `zensu security validate <id>` — Check if feature passes release gate
 - `zensu security add-test <id>` — Link a security test (auth-bypass|injection|access-control|rate-limit|input-validation|data-exposure|header-security|dependency-scan|csrf|xss|ssrf)
@@ -105,8 +105,8 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 ### User Journeys
 - `zensu journeys list --product <id>` — List journeys for a product
 - `zensu journeys get --product <id> <journey-id>` — Get journey details with steps
-- `zensu journeys create --product <id>` — Create a user journey
-- `zensu journeys step <journey-id> --product <id>` — Add a step to a journey
+- `zensu journeys create --product <id>` — Create a user journey (`--title` required; `--type` critical|happy_path|edge_case|error_path|onboarding; `--priority` critical|high|medium|low; `--persona` free text)
+- `zensu journeys step <journey-id> --product <id>` — Add a step to a journey (`--title` and `--step-order` required; `--feature` takes the feature **UUID**; `--interaction-type` action|navigation|input|validation|output|wait)
 - `zensu journeys steps --product <id> <journey-id>` — List steps for a journey
 - `zensu journeys health --product <id> <journey-id>` — Analyze journey health and weak links
 - `zensu journeys suggest --product <id>` — Get context for journey suggestions
@@ -115,11 +115,11 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu products vision-create` — Store a vision document
 - `zensu products vision-get <vision-id>` — Retrieve vision content for analysis
 - `zensu products bootstrap-apply <vision-id>` — Create components and features from a structured decomposition (`--result`)
-- `zensu products bootstrap-step <vision-id>` — Track post-bootstrap progress (`--step`)
+- `zensu products bootstrap-step <vision-id> <step>` — Track post-bootstrap progress (the step number is positional, not `--step`)
 
 ### Product Studio
 - `zensu doc claude-md-context --product <id>` — Get CLAUDE.md context for a product
-- `zensu products import --product <id>` — Import a repository for analysis
+- `zensu products import <product-id> --repo-url <url>` — Import a repository for analysis (optional `--repo-type` github|gitlab|bitbucket|local; product id is positional)
 - `zensu doc claude-md --product <id>` — Generate a CLAUDE.md template (`--variant` full|minimal|ci-only)
 
 ### Source Files & Docs
