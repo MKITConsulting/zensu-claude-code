@@ -98,9 +98,9 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # direction: the record is intact and only the directory it recorded is gone
   # (a deleted or harness-recycled worktree). The workflow document lives at
   # <project_root>/.zensu/state/, so it is not reachable from this record — and
-  # because the record is immutable, it never will be again. Blocking protected
-  # no invariant; it only left the session unable to end a turn, with every tool
-  # including /zensu:doctor denied and no in-session escape.
+  # because the record is immutable, it never will be again. Blocking it
+  # protected no invariant; it only left the session unable to end a turn, with
+  # every tool including /zensu:doctor denied and no in-session escape.
   #
   # Deliberately says "not reachable", not "gone": a MOVED or renamed root, and
   # an unmounted volume, produce the same ENOENT while the state survives intact
