@@ -405,12 +405,36 @@ case "$OUT" in *'no config file present'*) check "P1y config-absent falls back t
 run_report_binding() {
   ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" ZDOC_BINDING="$1" \
+  ZDOC_BINDING_PROJECT_ROOT="${2:-}" \
     node "$REPORT" 2>/dev/null
 }
 OUT="$(run_report_binding bound)"
 case "$OUT" in *'binding: this session has a valid Session Control record'*) check "P1ac bound session renders a ✅ binding row" PASS ;; *) check "P1ac bound session binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unbound)"
 case "$OUT" in *'every stateful Zensu tool fails closed'*) check "P1ad unbound session renders a ❌ binding row" PASS ;; *) check "P1ad unbound session binding row (got: $OUT)" FAIL ;; esac
+# A record whose recorded project root is gone is NOT the no-record state and
+# must not be reported as one. Both sub-branches matter: with a path it renders
+# the parenthesised directory the user has to re-create, and with the path
+# unavailable it must still classify rather than fall back to a generic row.
+OUT="$(run_report_binding orphaned-project-root /gone/worktree)"
+case "$OUT" in
+  *'the project root recorded for this session no longer exists (/gone/worktree)'*)
+    case "$OUT" in
+      *'has no valid Session Control record'*)
+        check "P1ad1 orphaned root binding row (also claims no record: $OUT)" FAIL ;;
+      *) check "P1ad1 an orphaned project root renders its own ❌ row naming the dead path" PASS ;;
+    esac ;;
+  *) check "P1ad1 orphaned root binding row (got: $OUT)" FAIL ;;
+esac
+OUT="$(run_report_binding orphaned-project-root)"
+case "$OUT" in
+  *'the project root recorded for this session no longer exists'*)
+    case "$OUT" in
+      *'no longer exists ('*) check "P1ad2 orphaned row without a path (stray parenthesis: $OUT)" FAIL ;;
+      *) check "P1ad2 the orphaned row still classifies when the path is unavailable" PASS ;;
+    esac ;;
+  *) check "P1ad2 orphaned row without a path (got: $OUT)" FAIL ;;
+esac
 OUT="$(run_report_binding unavailable)"
 case "$OUT" in *'zensu-session.sh is missing or symlinked'*) check "P1ae unavailable binder renders a ❌ binding row" PASS ;; *) check "P1ae unavailable binder binding row (got: $OUT)" FAIL ;; esac
 OUT="$(run_report_binding unknown)"

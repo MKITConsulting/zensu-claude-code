@@ -154,6 +154,25 @@ if [ "$(printf '%s' "$OUT1D" | decision)" = "block" ]; then
 else
   check "B1d two disagreements (out=$OUT1D err='$(cat "$ERR1D" 2>/dev/null)')" FAIL
 fi
+# The opt-out switches must stay proven on a state that blocks — and on EVERY
+# platform. B4c below covers them too, but it sits inside the symlink-gated
+# block, so on a runner without directory symlinks (Git Bash on Windows, where
+# this suite is sharded) the bind-failure opt-out would have zero behavioral
+# coverage. This fixture blocks platform-independently, so it carries the proof.
+ERR1E="$STATE_DIR/b1e.err"
+OUT1E="$(stop_run stop-bind-deleted-tampered "$ERR1E" ZENSU_CHAIN=off)"
+CFG_OFF="$STATE_DIR/enforcer-off.json"
+printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
+ERR1F="$STATE_DIR/b1f.err"
+OUT1F="$(stop_run stop-bind-deleted-tampered "$ERR1F" "ZENSU_CONFIG=$CFG_OFF")"
+if [ "$(printf '%s' "$OUT1E" | decision)" = "allow" ] \
+  && grep -qF "ZENSU_CHAIN=off is set explicitly" "$ERR1E" \
+  && [ "$(printf '%s' "$OUT1F" | decision)" = "allow" ] \
+  && grep -qF "hooks.chainEnforcer=false is configured" "$ERR1F"; then
+  check "B1e both opt-out switches release a blocking bind failure, on every platform" PASS
+else
+  check "B1e opt-out switches (env=$OUT1E cfg=$OUT1F)" FAIL
+fi
 
 # --- B6 the session has NO record at all -----------------------------------
 # The 0.17.0 mass failure: Session Control shipped in that release, and a
@@ -245,11 +264,10 @@ if printf '%s' "$REASON4" | grep -qF 'Zensu Stop denied: the immutable Session C
 else
   check "B4b cause-specific reason (reason='$REASON4')" FAIL
 fi
-# The opt-out switches still work, and this is where that has to be proven now:
-# the deleted-root session releases on its own, so it can no longer show that a
-# switch changes anything. A state that genuinely blocks can.
-CFG_OFF="$STATE_DIR/enforcer-off.json"
-printf '{"hooks":{"chainEnforcer":false}}' > "$CFG_OFF"
+# The symlink-specific extra: B1e already proves the switches release a blocking
+# bind failure on every platform, so this one only adds the unusable-record
+# state, which needs directory symlinks and is therefore skipped where they are
+# unavailable.
 ERR4C="$STATE_DIR/b4c.err"
 OUT4C="$(stop_run stop-bind-record "$ERR4C" "ZENSU_CONFIG=$CFG_OFF")"
 ERR4D="$STATE_DIR/b4d.err"
@@ -271,6 +289,22 @@ if [ "$BLOCK_COUNT" -eq 3 ] && ! printf '%s\n' "$BLOCK_BODIES" | grep -q '\$'; t
   check "B5 all three binding block reasons are static literals" PASS
 else
   check "B5 static block reasons (literals=$BLOCK_COUNT)" FAIL
+fi
+
+# --- B7 the residual TOCTOU release branch -----------------------------------
+# It fires only when the root existed during the bind and was gone by the time
+# resolution asked again, so it is not inducible from a test. Pin it statically
+# the way B5 pins the block payloads: it must release (exit 0, no decision
+# payload) and its message must still name the recorded root, or a future edit
+# could delete it and turn that race back into the wedge this hook no longer has.
+TOCTOU_BRANCH="$(sed -n '/^if ! PROJECT_ROOT=/,/^fi$/p' "$STOP")"
+if printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'ZENSU_PROJECT_ROOT' \
+  && printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'no longer exists' \
+  && printf '%s\n' "$TOCTOU_BRANCH" | grep -qF 'releasing Stop' \
+  && ! printf '%s\n' "$TOCTOU_BRANCH" | grep -q 'emit_session_bind_failed_block'; then
+  check "B7 the residual TOCTOU branch still releases and still names the recorded root" PASS
+else
+  check "B7 TOCTOU branch missing or no longer releasing" FAIL
 fi
 
 echo "----"

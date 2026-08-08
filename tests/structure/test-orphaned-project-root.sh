@@ -82,11 +82,11 @@ decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on
 # contract is that a Bash-matcher hook added later is covered without editing
 # this test: a future hook that blocks via exit 2 must not read as allowing.
 run_gate() {
-  local hook_path="$1" payload="$2" data="$3"
+  local hook_path="$1" payload="$2" data="$3" config="${4:-$STATE_DIR/no-such-config.json}"
   local out status
   out="$(printf '%s' "$payload" \
     | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$data" \
-      CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$STATE_DIR/no-such-config.json" \
+      CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$config" \
       bash "$hook_path" 2>/dev/null)"
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -234,6 +234,47 @@ else
   check "O1C relative project_root reached the relaxed state" FAIL
 fi
 
+# The predicate re-applies the two identity checks resolveHookSession applies,
+# so a record minted against a DIFFERENT installation whose root also happens to
+# be gone has TWO disagreements and must not be relaxed. Without this case those
+# two lines could be deleted and every suite would stay green — the sibling
+# unregistered predicate has exactly this pin three times over.
+FOREIGN_PLUG="$STATE_DIR/foreign-plugin"
+FOREIGN_DATA="$STATE_DIR/foreign-plugin-data"
+FOREIGN_ROOT="$STATE_DIR/foreign-project"
+mkdir -p "$FOREIGN_PLUG/.claude-plugin" "$FOREIGN_PLUG/hooks" \
+  "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks" \
+  "$FOREIGN_ROOT"
+chmod 700 "$FOREIGN_DATA" "$FOREIGN_DATA/session-control" \
+  "$FOREIGN_DATA/session-control/v1" "$FOREIGN_DATA/session-control/v1/records" \
+  "$FOREIGN_DATA/session-control/v1/locks"
+# Minimal manifest, same recipe test-secret-scan-gate.sh F19 uses: the digest is
+# computed over the manifest's own runtime references, so a partial copy of the
+# real plugin cannot be registered.
+printf '{"name":"zensu","version":"9.9.9"}\n' > "$FOREIGN_PLUG/.claude-plugin/plugin.json"
+printf '{"hooks":{}}\n' > "$FOREIGN_PLUG/hooks/hooks.json"
+if node -e '
+  const path = require("node:path");
+  const [corePath, data, plug, project, sessionId] = process.argv.slice(1);
+  require(corePath).registerContext({
+    recordsDir: path.join(data, "session-control", "v1", "records"),
+    host: "claude", sessionId, projectRoot: project, pluginRoot: plug, pluginData: data,
+  });
+' "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" "$FOREIGN_DATA" "$FOREIGN_PLUG" \
+  "$FOREIGN_ROOT" "orphan-foreign" 2>/dev/null; then
+  FOREIGN_MINTED=true
+else
+  FOREIGN_MINTED=false
+fi
+rm -rf "$FOREIGN_ROOT"
+if [ "$FOREIGN_MINTED" != true ]; then
+  check "O1D foreign-installation fixture could not be minted" FAIL
+elif ! orphaned orphan-foreign "$FOREIGN_DATA"; then
+  check "O1D a record minted against ANOTHER installation, whose root is also gone, is NOT relaxed" PASS
+else
+  check "O1D foreign-installation record reached the relaxed state" FAIL
+fi
+
 if ! orphaned a-session-that-was-never-registered "$GONE_DATA" \
   && unregistered a-session-that-was-never-registered "$GONE_DATA"; then
   check "O18 a missing record still routes to the unregistered predicate, not this one" PASS
@@ -254,6 +295,36 @@ if ! printf '{"hook_event_name":"Stop","session_id":"orphan-gone"}' \
   check "O1A the CLI mode rejects extra arguments" PASS
 else
   check "O1A extra arguments accepted" FAIL
+fi
+# The model spelling has its own guards — the argument check and a
+# validateSessionId on CLAUDE_CODE_SESSION_ID that the hook spelling never
+# reaches — and is otherwise exercised only indirectly through the doctor.
+MODEL_EXTRA_ARG_OK=false
+env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  CLAUDE_CODE_SESSION_ID="orphan-gone" \
+  node "$BINDER" model-orphaned-project-root extra-arg >/dev/null 2>&1 \
+  || MODEL_EXTRA_ARG_OK=true
+MODEL_DERIVED_KEY_OK=false
+MODEL_DERIVED_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  CLAUDE_CODE_SESSION_ID="scv1_$(printf '0%.0s' $(seq 1 64))" \
+  node "$BINDER" model-orphaned-project-root 2>/dev/null)" || MODEL_DERIVED_KEY_OK=true
+MODEL_UNSET_OK=false
+env -u CLAUDE_CODE_SESSION_ID CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  node "$BINDER" model-orphaned-project-root >/dev/null 2>&1 || MODEL_UNSET_OK=true
+if [ "$MODEL_EXTRA_ARG_OK" = true ] && [ "$MODEL_DERIVED_KEY_OK" = true ] \
+  && [ -z "$MODEL_DERIVED_OUT" ] && [ "$MODEL_UNSET_OK" = true ]; then
+  check "O1E the model spelling rejects extra arguments, a derived session key, and an unset id" PASS
+else
+  check "O1E model-mode guards (extra=$MODEL_EXTRA_ARG_OK derived=$MODEL_DERIVED_KEY_OK out='$MODEL_DERIVED_OUT' unset=$MODEL_UNSET_OK)" FAIL
+fi
+# The happy path of the model spelling, which the doctor depends on.
+MODEL_PATH_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
+  CLAUDE_CODE_SESSION_ID="orphan-gone" \
+  node "$BINDER" model-orphaned-project-root 2>/dev/null)"
+if [ "$MODEL_PATH_OUT" = "$GONE_ROOT" ]; then
+  check "O1F the model spelling prints the same dead path as the hook spelling" PASS
+else
+  check "O1F model-mode path (got='$MODEL_PATH_OUT' want='$GONE_ROOT')" FAIL
 fi
 
 # --- O2 the Bash gate lets the diagnostic through ---------------------------
@@ -281,7 +352,13 @@ BASH_MATCHER_HOOKS="$(node -e '
   const hooks = require(process.argv[1] + "/hooks/hooks.json").hooks || {};
   const out = [];
   for (const matcher of hooks.PreToolUse || []) {
-    if (!/Bash/.test(matcher.matcher || "")) continue;
+    // A GLOBAL matcher fires on Bash too. Excluding it here would leave the
+    // capability gate — the one that decides before every other gate — out of
+    // the enumeration, so a new global gate added later would be uncovered:
+    // exactly the blind spot that let pre-write-secret-scan.sh stay closed.
+    const pattern = matcher.matcher === undefined ? "" : String(matcher.matcher);
+    const global = pattern === "" || pattern === ".*" || pattern === "*";
+    if (!global && !/Bash/.test(pattern)) continue;
     for (const entry of matcher.hooks || []) {
       const command = String(entry.command || "");
       const found = command.match(/hooks\/([A-Za-z0-9._-]+\.sh)/);
@@ -314,7 +391,8 @@ EOF
 # this assertion green while covering a subset — the same class of blind spot
 # the assertion exists to close.
 ENUMERATION_OK=true
-for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
+for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh \
+  pre-reviewer-capability-gate.sh; do
   case " $COVERED_HOOKS " in *" $required "*) ;; *) ENUMERATION_OK=false ;; esac
 done
 if [ "$ENUMERATION_OK" = true ] && [ -z "$MISSING_HOOK" ]; then
@@ -392,6 +470,25 @@ if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "deny" ]; then
 else
   check "O27 capability relaxation leaked to a disagreeing record" FAIL
 fi
+# The two Bash gates each re-check the principal INSIDE their relaxed branch,
+# deliberately not relying on the capability gate as the only layer keeping a
+# reviewer or neutral child out of a shell. O26 covers the capability gate only,
+# so without these two the re-checks could be deleted and every suite stays
+# green. Both gates, both non-MAIN principal shapes.
+NON_MAIN_LEAK=""
+for gate_path in "$BASH_GATE" "$PLUGIN_DIR/hooks/pre-write-secret-scan.sh"; do
+  for principal in zensu:code-reviewer general-purpose; do
+    verdict="$(run_gate "$gate_path" \
+      "$(bash_payload "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh" "orphan-gone" "$principal")" \
+      "$GONE_DATA")"
+    [ "$verdict" = "deny" ] || NON_MAIN_LEAK="$NON_MAIN_LEAK $(basename "$gate_path"):$principal"
+  done
+done
+if [ -z "$NON_MAIN_LEAK" ]; then
+  check "O28 both Bash gates re-check the principal themselves — no non-MAIN child gets a shell" PASS
+else
+  check "O28 non-MAIN principals reached a shell via:$NON_MAIN_LEAK" FAIL
+fi
 
 # --- O3 mutating tools stay denied ------------------------------------------
 # The relaxation buys diagnosis, not work: nothing in this state can anchor an
@@ -408,8 +505,16 @@ edit_payload() {
 # produce an ALLOW at all. Without it, a payload or env mistake that denies
 # before the binding branch would leave O31 green while testing nothing — which
 # is exactly how two assertions in this file passed for the wrong reason during
-# development. The healthy fixture has no active TDD phase, so its Edit passes.
-if [ "$(run_gate "$EDIT_GATE" "$(edit_payload orphan-healthy)" "$ARMED_DATA_HEALTHY")" = "allow" ]; then
+# development.
+#
+# The healthy fixture DOES have an active TDD session (`arm` runs --tdd-begin).
+# Its Edit passes because vanilla mode makes the phase gate pass through, so the
+# control's precondition is `hooks.tddImplementation=false` — pinned explicitly
+# here rather than inherited from the shipped default, which could flip and turn
+# this control red for a reason unrelated to the orphaned state.
+VANILLA_CFG="$STATE_DIR/vanilla.json"
+printf '{"hooks":{"tddImplementation":false}}' > "$VANILLA_CFG"
+if [ "$(run_gate "$EDIT_GATE" "$(edit_payload orphan-healthy)" "$ARMED_DATA_HEALTHY" "$VANILLA_CFG")" = "allow" ]; then
   check "O31a the Edit-gate harness can allow — O31's deny is attributable to the orphaned state" PASS
 else
   check "O31a Edit-gate harness never allows, so O31 proves nothing" FAIL
@@ -487,15 +592,28 @@ BARE_CALLERS="$(node -e '
     let depth = 0;
     lines.forEach((line, index) => {
       const code = line.replace(/^\s*#.*$/, "");
-      const redirected = /(^|\s)>\s*\/dev\/null/.test(code);
       for (let i = 0; i < code.length; i += 1) {
         if (code.startsWith("$(", i)) { depth += 1; i += 1; continue; }
         if (code[i] === ")" && depth > 0) { depth -= 1; continue; }
-        if (code.startsWith("zensu_session_orphaned_project_root", i) && depth === 0 && !redirected) {
+        if (!code.startsWith("zensu_session_orphaned_project_root", i)) continue;
+        if (depth > 0) continue;
+        // The redirect must belong to THIS call, not merely to the same line.
+        // Both current callers use a two-call `! a && ! b` shape, so a
+        // line-granular check would let a redirect migrate from the first call
+        // to the second and launder a bare one — the single defect O51 exists
+        // to mechanize. Scan only up to the next command separator.
+        const rest = code.slice(i);
+        const end = rest.search(/;|&&|\|\||\|/);
+        const ownSegment = end === -1 ? rest : rest.slice(0, end);
+        if (!/>\s*\/dev\/null/.test(ownSegment)) {
           offenders.push(path.basename(file) + ":" + (index + 1));
         }
       }
     });
+    // A desynchronized parse (a stray "$(" inside a string, or an unbalanced
+    // ")") would pin depth above 0 and silently suppress every later detection
+    // in this file, reporting clean for the wrong reason. Fail loudly instead.
+    if (depth !== 0) offenders.push(path.basename(file) + ":EOF-unbalanced");
   }
   process.stdout.write(offenders.join(" "));
 ' "$PLUGIN_DIR/hooks" 2>/dev/null)"
