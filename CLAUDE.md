@@ -63,6 +63,63 @@ Consequences of forgetting a new operation:
 
 Invariant: `ZENSU_MUTATION_TOOL_NAMES` must stay a strict superset of every skill's `--workflow-begin --tools` declaration AND of every mutation the CLI map emits. `tests/structure/test-bash-zensu-gate.sh` + `test-skill-workflow-markers.sh` pin the read/mutation classification and the CLI-form detection.
 
+## Git Mutation Tables (`hooks/lib/bash-source-write-parse.js`)
+
+Rule (C) of the PreToolUse(Bash) source-write gate denies a working-tree-mutating
+git subcommand whose target repository escapes the session root. Four module-scope
+tables are its single source of truth — `GIT_MUTATIONS`, `GIT_READONLY_FORMS`,
+`GIT_OPTS_WITH_OPERAND`, `LINKED_WORKTREE_GIT_DIR` — plus a fifth constant,
+`UNEXPANDED`, which is NOT exported and therefore cannot be pinned from the unit
+layer at all. The first three are re-encoded outside the module; the admin-dir
+shape is re-encoded only as the W153 probe path.
+
+**Adding or removing a gated verb** must land with all of these in the same commit:
+
+- the verb-count literal in `tests/structure/test-bash-source-write-gate.sh` (W164),
+  which is what catches a REMOVED verb — the probe loop is driven by the set itself
+  and therefore cannot;
+- the hardcoded membership list in `tests/structure/git-repo-escape.test.js`, kept
+  deliberately independent of the set under test for the same reason;
+- a read-only spelling in `GIT_READONLY_FORMS` if the verb has one, plus the pins
+  that every exemption key is a gated verb and that each verb's bare form is still
+  a mutation.
+
+**Adding an operand-consuming global option** requires the membership list in
+`git-repo-escape.test.js`: drop one and its operand parses as the subcommand,
+silently disabling rule (C) for that spelling with the whole suite green.
+
+**Documentation is machine-enforced in two places that pull in opposite directions.**
+The hook header in `hooks/pre-bash-source-write-gate.sh` must NAME `GIT_MUTATIONS`
+and `GIT_READONLY_FORMS` and re-author neither — W165 fails if a gated verb is
+enumerated there. The parser header must NAME every accepted gap — W192 matches each
+gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
+security boundary" framing to survive. README §"Source-Write Gate", the README
+hook-reference row and the `bashWriteGate` config row point at the tables rather than
+listing them, for the same reason; they are not pinned.
+
+The `worktree`/`remove|move` literals appear three times — the `GIT_READONLY_FORMS`
+entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
+`decideGit`. A divergence is caught behaviorally (W144/W145/W172-W175 plus the unit
+`paths` cases), not structurally; keep them in step by hand.
+
+**Three cross-file couplings.** `WRAP` — the transparent-wrapper set rule (C)'s
+`cmd0` anchoring depends on — is hand-duplicated as a JS literal in
+`hooks/pre-bash-zensu-gate.sh`; a wrapper added to one and not the other means the
+same wrapped invocation is gated by one Bash gate and not its sibling.
+`within()` is a hand-copy of `isInside` in
+`hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and the same
+predicate exists in `session-control-core-v1.js` and `review-evidence-lease-v1.js`,
+with an UNANCHORED `startsWith("..")` variant in `finding-verify-v1.js` that has the
+`..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
+against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
+`skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
+it destroys rather than on the addressed repository — narrow that carve-out and the
+skill's documented cleanup starts denying, which is what W181/W185-W187 exist to
+catch. That flow also depends on rule (B)'s temp carve-out, so `ZENSU_BSWGATE_TEMP_DIRS`
+silently governs whether the shipped cleanup passes. Do not "fix" a deny there by
+writing `ZENSU_BASH_WRITE_GATE=off` into a skill: a
+shipped escape prefix teaches the hatch and lands a self-inflicted bypass-ledger entry.
+
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**

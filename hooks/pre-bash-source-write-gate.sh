@@ -17,13 +17,34 @@
 # Relative targets resolve against a cwd that tracks `cd` across the command, so
 # `cd ../main && printf ... >> src/x.rs` is caught by (B).
 #
+# (C) closes the same contamination vector for git itself, which reaches it
+# without naming a write target at all: a working-tree-mutating subcommand whose
+# repository — from `git -C <path>`, `--work-tree`/`--git-dir`, an inline,
+# `env`-wrapper or `export`/`declare -x` `GIT_DIR=`/`GIT_WORK_TREE=` assignment,
+# or the same tracked cwd — resolves
+# outside the session root is DENIED. The gated verbs are `GIT_MUTATIONS` in
+# hooks/lib/bash-source-write-parse.js (the single source of truth; a structure
+# test pins this file against it), read-only spellings such as `stash list` and
+# `clean -n` are exempt via `GIT_READONLY_FORMS`, and `worktree` is gated for
+# `remove`/`move` only. Reads and unknown subcommands pass, as does every
+# mutation inside your own worktree. `worktree remove`/`move` is judged on the
+# tree it destroys, not on the addressed repository. Rule (A)'s tracked-clobber
+# test is never applied to the git subcommand itself — but a redirect or `tee`
+# inside a git command is still a write channel and is still checked, so
+# `git show HEAD:src/x.rs > src/x.rs` remains a rule (A) deny.
+#
 # Deliberately NOT a security boundary — an agent can still bypass via the escape
 # hatch (inline `ZENSU_BASH_WRITE_GATE=off` / `ZENSU_MCP_GATE=off`, the process-env
 # equivalents, or config `hooks.bashWriteGate:false`). It is a discipline nudge:
 # route source edits through the Edit/Write tools (observable, gate-aware) and stay
-# inside your own worktree. Carve-outs never denied: a NEW file inside the project,
-# gitignored/untracked files, non-source extensions, and temp roots ($TMPDIR, /tmp,
-# /private/tmp, /var/folders). mv/cp are out of scope.
+# inside your own worktree.
+#
+# Carve-outs, by rule. (A) and (B) never deny a NEW file inside the project, a
+# gitignored/untracked file, or a non-source extension; rule (C) applies neither
+# filter, because it judges which repository is addressed, not which file is
+# written. Temp roots ($TMPDIR, /tmp, /private/tmp, /var/folders) are exempt from
+# all three. The standalone `mv`/`cp` commands are out of scope entirely
+# (`git mv` is covered by rule (C) when it escapes the session root).
 set -u
 
 _ZENSU_EXECUTED_PLUGIN_ROOT="$(cd "$(dirname "$0")/.." && pwd -P)" || exit 2
@@ -70,7 +91,7 @@ emit_deny() {
 if ! CONTROL_REASON="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
   MSYS2_ENV_CONV_EXCL="$_ZENSU_MSYS2_ENV_CONV_EXCL" \
-    BSWG_MODE=control PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+    BSWG_MODE=control PAYLOAD= node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
 )"; then
   emit_deny "Zensu could not validate protected Session Control bindings; retry in a fresh session."
   exit 0
@@ -139,8 +160,8 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # never degrade into a blanket allow.
   if ! UNBOUND_REASON="$(
     cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-    BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
-      node ./bash-source-write-parse.js 2>/dev/null
+    BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
+      node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
   )"; then
     emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no Session Control record, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
     exit 0
@@ -165,11 +186,25 @@ source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
 
 [ -z "$INPUT" ] && exit 0
 
-REASON="$(
+# An empty recorded project root would let the parser fall back to the payload
+# cwd (`CLAUDE_PROJECT_DIR || cwd0`), which makes a drifted checkout its own
+# project root and inverts rules (B) and (C). The unbound branch above refuses
+# exactly that promotion; match it rather than tolerating it with `:-`.
+if [ -z "${ZENSU_PROJECT_ROOT:-}" ]; then
+  emit_deny "Blocked: this session's recorded project root is empty, so a Bash write cannot be judged against any project and the worktree-escape rules would treat the current directory as the project. Start a fresh Claude Code session."
+  exit 0
+fi
+
+# The other two parser calls in this file honor their exit status; this one used
+# to discard it, so a crashed or killed parser allowed the command unchecked.
+if ! REASON="$(
   cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
-  BSWG_MODE= PAYLOAD="$INPUT" CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
-    node ./bash-source-write-parse.js 2>/dev/null
-)"
+  BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$ZENSU_PROJECT_ROOT" \
+    node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
+)"; then
+  emit_deny "Blocked: the Bash source-write rules could not be evaluated for this session, so the command is refused rather than allowed unchecked. Two remedies are decided BEFORE the parser runs and therefore still work: set hooks.bashWriteGate:false in ~/.zensu/config.json, or export ZENSU_BASH_WRITE_GATE=off into the environment Claude Code was started from. An INLINE ZENSU_BASH_WRITE_GATE=off prefix does not help here — that one is decided inside the parser that is failing."
+  exit 0
+fi
 case "$REASON" in
   __bypass__*)
     for gate in $(printf '%s\n' "$REASON" | awk -F'\t' '$1=="__bypass__"{print $2}'); do
