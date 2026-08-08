@@ -97,12 +97,22 @@ function lex(s) {
 //
 // This is a TEXT matcher with no operand resolution and no quote awareness, so
 // it reports `redirect` for `git commit -m "fix: A -> B"` and `tee` for a commit
-// message containing that word. Any consumer that DENIES on a hit would refuse
-// those. pre-bash-source-write-gate.sh needed exactly such a check for its
-// no-project-root branch and therefore uses BSWG_MODE=targets instead, which
-// resolves operands. Keep it that way: widening this detector to catch more
-// secrets must stay safe, and it only is while its sole consumer scans rather
-// than denies.
+// message containing that word. Any consumer that DENIES on a hit refuses those.
+//
+// TWO consumers, and only one of them scans:
+//   - pre-write-secret-scan.sh SCANS on a hit, so over-detection is safe there.
+//   - detectControlMutation() below DENIES on a hit, in the
+//     `refersToEnvFile && detectChannels(cmd)` conjunct. That deny is emitted
+//     ahead of the config switch and every escape hatch, so it has no opt-out,
+//     and it inherits this detector's false positives: a heredoc BODY that
+//     merely mentions CLAUDE_ENV_FILE trips it, because that test reads the raw
+//     command. Deliberately left over-detecting — for a trust boundary that is
+//     the safer failure direction, and narrowing it is a separate decision.
+// So widening this detector widens a deny, not just a scan. Weigh both.
+//
+// A third consumer wanted a deny and did NOT use this: the no-project-root
+// branch of pre-bash-source-write-gate.sh uses BSWG_MODE=targets, which resolves
+// operands. Keep it that way — it denies ordinary read-only commands otherwise.
 function detectChannels(cmd) {
   const found = new Set();
   const collapsed = stripHeredocs(cmd)
@@ -265,8 +275,12 @@ function main() {
   const targetsOnly = process.env.BSWG_MODE === "targets";
 
   const HOME = process.env.HOME || "";
-  // No usable root in targets mode by definition; the two rules that would
-  // consult it are the ones decide() skips there.
+  // In targets mode the root is never used as a BOUNDARY — that is the pair of
+  // rules decide() skips. It does remain the cwd fallback for operand
+  // resolution, so it still affects the temp-root filter and the path reported
+  // back. The caller does not pin CLAUDE_PROJECT_DIR for this mode (it has none
+  // worth pinning), so the dead path flows in here ambiently; harmless, because
+  // the extension check that gates every operand is basename-only.
   const projectRoot = stripSlash(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
   let curdir = cwd0 || projectRoot;
 
@@ -463,7 +477,17 @@ function main() {
     }
 
     for (let x = 0; x < targets.length; x++) {
-      if (++evaluated > MAX_TARGETS) return bypassMarkers();
+      if (++evaluated > MAX_TARGETS) {
+        // The anchored path fails OPEN here: exhausting the budget yields the
+        // bypass markers, which the gate reads as allow. Keep that, but not for
+        // targets mode — there this cap would be the only rule left standing,
+        // so `printf x > a1.txt … > a200.txt > src/app.ts` would walk a source
+        // write straight through a branch whose contract is "deny writes".
+        // Fail closed instead, the same way that branch treats a parser that
+        // cannot run at all.
+        if (targetsOnly) return "WRITE-TARGET (unevaluated: target budget exceeded)";
+        return bypassMarkers();
+      }
       const r = decide(targets[x][0], targets[x][1]);
       if (r) return r;
     }

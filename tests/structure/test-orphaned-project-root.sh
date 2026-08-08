@@ -547,12 +547,30 @@ EOF
   fi
   # The inline escape must keep working on this path, exactly as W87b pins it on
   # the anchored path — otherwise an over-denied command has no in-session exit.
-  if [ "$(run_gate "$BASH_GATE" \
-    "$(bash_payload "ZENSU_BASH_WRITE_GATE=off printf x > $STATE_DIR/somewhere.ts")" \
-    "$GONE_DATA" "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ]; then
-    check "O29c ($anchor_label) the inline ZENSU_BASH_WRITE_GATE=off escape still works" PASS
+  ESCAPE_LOST=""
+  for escape_var in ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE; do
+    [ "$(run_gate "$BASH_GATE" \
+      "$(bash_payload "$escape_var=off printf x > $STATE_DIR/somewhere.ts")" \
+      "$GONE_DATA" "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ] \
+      || ESCAPE_LOST="$ESCAPE_LOST $escape_var"
+  done
+  if [ -z "$ESCAPE_LOST" ]; then
+    check "O29c ($anchor_label) both inline escape spellings still work" PASS
   else
-    check "O29c ($anchor_label) inline escape lost on the no-anchor path" FAIL
+    check "O29c ($anchor_label) inline escape lost on the no-anchor path:$ESCAPE_LOST" FAIL
+  fi
+  # The target budget must fail CLOSED here. On the anchored path exhausting it
+  # yields the bypass markers (an allow); in this branch that cap would be the
+  # only rule left, so a long enough command would walk a source write through.
+  BUDGET_CMD="printf x"
+  i=0
+  while [ "$i" -lt 210 ]; do BUDGET_CMD="$BUDGET_CMD > pad$i.txt"; i=$((i+1)); done
+  BUDGET_CMD="$BUDGET_CMD > $STATE_DIR/late-source.ts"
+  if [ "$(run_gate "$BASH_GATE" "$(bash_payload "$BUDGET_CMD")" "$GONE_DATA" \
+    "$STATE_DIR/no-such-config.json" "$anchor")" = "deny" ]; then
+    check "O29e ($anchor_label) exhausting the target budget denies rather than waving a write through" PASS
+  else
+    check "O29e ($anchor_label) target-budget exhaustion allowed a write" FAIL
   fi
 done
 # A parser that cannot RUN must deny, never degrade into a blanket allow.
