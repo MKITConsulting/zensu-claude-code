@@ -83,10 +83,11 @@ decision() { node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on
 # this test: a future hook that blocks via exit 2 must not read as allowing.
 run_gate() {
   local hook_path="$1" payload="$2" data="$3" config="${4:-$STATE_DIR/no-such-config.json}"
+  local project="${5:-$GATE_PROJECT}"
   local out status
   out="$(printf '%s' "$payload" \
     | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$data" \
-      CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$config" \
+      CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$config" \
       bash "$hook_path" 2>/dev/null)"
   status=$?
   if [ "$status" -ne 0 ]; then
@@ -489,6 +490,36 @@ if [ -z "$NON_MAIN_LEAK" ]; then
 else
   check "O28 non-MAIN principals reached a shell via:$NON_MAIN_LEAK" FAIL
 fi
+
+# --- O29 the REAL environment: CLAUDE_PROJECT_DIR is the deleted directory ---
+# Every assertion above ran with a live $GATE_PROJECT, which cannot happen in
+# production: the record's project_root is minted from the SessionStart cwd, so
+# when it is gone CLAUDE_PROJECT_DIR is gone with it (or, as on a session that
+# never exported it, simply unset). That empties the gate's project anchor and
+# used to deny EVERY Bash command unconditionally — putting the diagnostic back
+# behind the defect it reports. Pinning the healthy-anchor path alone hid this.
+for anchor_label in deleted-root unset-anchor; do
+  case "$anchor_label" in
+    deleted-root) anchor="$GONE_ROOT" ;;
+    *)            anchor="$STATE_DIR/never-created-anchor" ;;
+  esac
+  if [ "$(run_gate "$BASH_GATE" \
+    "$(bash_payload "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh")" "$GONE_DATA" \
+    "$STATE_DIR/no-such-config.json" "$anchor")" = "allow" ]; then
+    check "O29 ($anchor_label) the diagnostic runs even with no usable project anchor" PASS
+  else
+    check "O29 ($anchor_label) diagnostic denied with no usable project anchor" FAIL
+  fi
+  # Relaxing the anchor must not relax the write rules: with nothing to attribute
+  # a write to, a write must still be refused.
+  if [ "$(run_gate "$BASH_GATE" \
+    "$(bash_payload "printf x > $STATE_DIR/somewhere.ts")" "$GONE_DATA" \
+    "$STATE_DIR/no-such-config.json" "$anchor")" = "deny" ]; then
+    check "O29a ($anchor_label) a write is still denied when no project anchor exists" PASS
+  else
+    check "O29a ($anchor_label) write allowed with no project anchor" FAIL
+  fi
+done
 
 # --- O3 mutating tools stay denied ------------------------------------------
 # The relaxation buys diagnosis, not work: nothing in this state can anchor an

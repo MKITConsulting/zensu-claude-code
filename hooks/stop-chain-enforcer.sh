@@ -107,10 +107,16 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # and restorable. That is why the message below claims no completion was
   # proven rather than that nothing existed to prove — the honest phrasing the
   # opt-out releases above already use. It does mean the release can be induced
-  # (rename the root, end the turn, rename it back), which is a real if noisy
-  # escape; the alternative was wedging every legitimately deleted worktree
-  # forever, and a caller who can rename the project root can also set
-  # ZENSU_CHAIN=off.
+  # — rename the root, end the turn, rename it back — and that IS reachable from
+  # inside a session: `mv` carries no write channel, so the source-write gate
+  # does not stop it, while ZENSU_CHAIN is read from this hook's INHERITED
+  # environment and a per-command prefix cannot reach it. The two are therefore
+  # NOT equivalent capabilities, and the release is unledgerable by design: the
+  # document a bypass entry would live in is the one that became unreachable.
+  # Accepted anyway, because the alternative wedges every legitimately deleted
+  # worktree forever with no in-session escape at all. An induced release is
+  # consequently silent; giving it a detection surface — a sidecar beside the
+  # immutable record, surfaced by /zensu:doctor — is a known open improvement.
   #
   # Bound to THIS cause alone. A root that still EXISTS but no longer matches
   # (symlinked, moved, re-created) is a different state and keeps blocking, as

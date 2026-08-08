@@ -97,8 +97,18 @@ properties are easy to get wrong and cost the whole feature:
   matcher from `hooks.json` and asserts every hook on it allows, so a hook added later is
   covered without editing the test.
 - **Mutating tools stay denied on purpose.** `pre-edit-tdd-reminder.sh` relaxes neither
-  state: nothing in either can anchor a write to a project. The relaxation buys diagnosis,
-  not work.
+  state: nothing in either can anchor a write to a project. Its matcher is
+  `Edit|Write|MultiEdit`, so `NotebookEdit` is NOT phase-gated — in a healthy session
+  either, which is why the relaxation restores the pre-Session-Control capability set
+  rather than widening it. Say "Edit/Write/MultiEdit", never "all mutating tools".
+- **A Bash write without a project anchor denies; a read does not.** In both relaxed
+  states `CLAUDE_PROJECT_DIR` is typically gone or unset — in the orphaned state it is by
+  construction the deleted directory, since the record's `project_root` was minted from
+  the SessionStart cwd. `pre-bash-source-write-gate.sh` therefore runs the parser's
+  `BSWG_MODE=detect` channel check, which needs no anchor, and denies only commands that
+  actually write. Denying unconditionally there once put the diagnostic back behind the
+  defect it reports, and the healthy-anchor test fixtures hid it; `O29`/`O29a` pin both
+  the deleted-root and unset-anchor shapes.
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
 `zensu_session_orphaned_project_root`, `..._model`). The orphaned wrapper **prints the
@@ -112,9 +122,14 @@ sitting intact in plugin data. Same rule for the `/zensu:doctor` binding rows.
 **The release claims only what an ENOENT proves.** A moved or renamed root, and an
 unmounted volume, produce the same ENOENT while the workflow state survives intact
 elsewhere — so the Stop release says no completion was proven, never that nothing existed
-to prove. It also means the release can be induced by renaming the project root; that is
-accepted, because the alternative wedges every legitimately deleted worktree forever and
-anyone who can rename the root can also set `ZENSU_CHAIN=off`.
+to prove. It also means the release can be induced by renaming the project root, and that
+IS reachable from inside a session: `mv` carries no write channel, while `ZENSU_CHAIN` is
+read from the hook's inherited environment and a per-command prefix cannot reach it — the
+two are not equivalent capabilities. Accepted anyway, because the alternative wedges every
+legitimately deleted worktree forever with no in-session escape. **Known open improvement:**
+an induced release is currently silent — it cannot be ledgered, because the document a
+bypass entry would live in is the one that became unreachable — so a detection surface (a
+sidecar beside the immutable record, surfaced by `/zensu:doctor`) is still missing.
 
 **Port-relevant.** The core half (`validateContext`'s `allowMissingProjectRoot`,
 `readContextInternal`/`readOrphanedProjectRootContext`) lives in the cross-host

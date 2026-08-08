@@ -568,7 +568,7 @@ A record that **exists** and disagrees about anything else — runtime digest dr
 
 `/zensu:doctor` distinguishes the two: an orphaned root renders its own binding row naming the dead path, rather than reporting a record as missing while it sits right there.
 
-Consequence worth stating plainly: in the relaxed state the interactive thread keeps working, but **nothing in it is gated or tracked** — no TDD phase gate (edits are denied outright), no review chain, no Autopilot, and no subagents. It is a session you can read a diagnosis in, not one you can work in.
+Consequence worth stating plainly: in either relaxed state the interactive thread keeps working, but **nothing in it is gated or tracked** — no review chain, no Autopilot, and no subagents. `Edit`, `Write` and `MultiEdit` are denied outright by the TDD phase gate, and a Bash write is denied because it cannot be attributed to a project (read-only Bash still runs, which is what keeps `/zensu:doctor` reachable). `NotebookEdit` is the one mutation that still passes — it is not phase-gated in a healthy session either, so the relaxation restores exactly the pre-Session-Control capability set rather than widening it. It is a session you can read a diagnosis in, not one you can work in.
 
 Why it exists: `/zensu:doctor` runs through Bash. The fail-closed denial every stateful helper renders points the user there — and with the three gates that bind before inspecting all denying, that pointer was a dead end, denied by the very defect it names.
 
