@@ -89,6 +89,22 @@ run() {
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 
+# The parser bounds its work at MAX_TARGETS and, on THIS path, fails OPEN when
+# the cap is hit — a deliberate choice, because the anchored path still has its
+# other rules and thousands of synchronous git calls are the worse outcome. The
+# no-project-root branch inverts that (it is the only rule left there, pinned by
+# O29e in test-orphaned-project-root.sh), so the two arms of that one guard must
+# both be held: without this case the anchored `return bypassMarkers()` could be
+# deleted, or the mode check moved, and every suite would stay green.
+BUDGET_CMD="printf x"
+budget_i=0
+while [ "$budget_i" -lt 210 ]; do
+  BUDGET_CMD="$BUDGET_CMD > pad$budget_i.txt"
+  budget_i=$((budget_i + 1))
+done
+run "W5a anchored path fails OPEN when the target budget is exhausted" \
+  "$BUDGET_CMD > src/app.rs" ALLOW
+
 # (A) clobber existing tracked source -> DENY
 run "W6 append >> tracked .rs"              "printf 'x\n' >> src/app.rs"            DENY
 run "W7 clobber > tracked .rs"              "printf 'x\n' > src/app.rs"             DENY

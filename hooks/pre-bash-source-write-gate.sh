@@ -157,7 +157,11 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     # state this branch exists to make usable. `targets` runs the full default
     # parse, applies the same source-extension and temp-root filters, and
     # answers only with operands it actually resolved; it needs no project root
-    # because it skips exactly the two rules that would consult one.
+    # because it skips exactly the two rules that would consult one. The one
+    # non-operand answer is a synthetic `WRITE-TARGET (unevaluated: …)` when the
+    # parser's target budget is exhausted — this branch treats it as a deny, the
+    # same way it treats a parser that cannot run at all, and it reaches the
+    # user verbatim in the message below.
     #
     # Because it is the default parse, the inline ZENSU_BASH_WRITE_GATE=off /
     # ZENSU_MCP_GATE=off escapes still surface as __bypass__ markers here, so

@@ -5,10 +5,17 @@
 // gated channel (redirect / tee / sed -i / dd of= / heredoc) hits a source file
 // that must not be clobbered. Prints the deny reason on stdout, or nothing.
 //
-// Dual mode: with BSWG_MODE=detect it instead emits the write channels present
-// in the command (one per line, no git checks, no path policy) — consumed by
-// pre-write-secret-scan.sh via the module export detectChannels(); the deny
-// caller pins BSWG_MODE= so an ambient value can never flip its behavior.
+// FOUR behaviors, selected by BSWG_MODE. Each judging caller pins the variable
+// explicitly so an ambient value can never flip its behavior:
+//   (unset)  the deny path above — pre-bash-source-write-gate.sh, anchored.
+//   detect   emit the write channels present (one per line, no git checks, no
+//            path policy) — pre-write-secret-scan.sh, via the module export
+//            detectChannels(). A TEXT matcher; see its own contract below.
+//   control  detect a Bash rebind of protected Session Control inputs —
+//            pre-bash-source-write-gate.sh, ahead of everything else.
+//   targets  report the resolved write OPERAND instead of judging it against a
+//            project root — pre-bash-source-write-gate.sh's no-project-root
+//            branch, the one state where no root exists to judge against.
 //
 // Kept in its own file (like hooks/lib/session-control-core-v1.js) so the logic uses
 // normal quoting instead of being escaped inside a bash single-quoted node -e.
@@ -267,11 +274,18 @@ function main() {
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
   if (process.env.BSWG_MODE === "control") return detectControlMutation(cmd);
-  // `targets` runs the FULL default parse and diverges at exactly one point
-  // (see decide()): it reports the resolved write operand rather than judging
-  // it against a project root. The bypass markers still apply, so the inline
-  // ZENSU_BASH_WRITE_GATE=off / ZENSU_MCP_GATE=off escapes keep working for
-  // this caller exactly as they do on the anchored path.
+  // `targets` runs the FULL default parse and diverges at exactly TWO points —
+  // check both when changing either:
+  //   1. decide() reports the resolved write operand instead of judging it
+  //      against a project root (the two rules that need a root are skipped).
+  //   2. the MAX_TARGETS guard fails CLOSED with a synthetic unevaluated
+  //      answer, where the anchored path fails open.
+  // The inline ZENSU_BASH_WRITE_GATE=off / ZENSU_MCP_GATE=off escapes surface
+  // as __bypass__ markers on every path EXCEPT that budget-exhaustion return,
+  // which drops any accumulated markers by design. Reachable shape: an escape
+  // in one segment plus more than MAX_TARGETS operands in a later one — targets
+  // mode denies it, the anchored path allows and ledgers it. Deliberate: this
+  // caller has no project root, so fail-closed is the only safe direction.
   const targetsOnly = process.env.BSWG_MODE === "targets";
 
   const HOME = process.env.HOME || "";
