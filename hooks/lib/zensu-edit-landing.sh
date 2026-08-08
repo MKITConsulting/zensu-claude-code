@@ -265,6 +265,21 @@ else
     [ -n "$_key" ] || _key="$SESSION_ID"
     RECEIPT_PATH="$PROJECT_ABS/.zensu/state/edit-landing-${_key}.json"
   fi
+  # A receipt whose name ends in `-` means the session key resolved empty; a
+  # RELATIVE path means the caller's cwd decides where it lands. Both have put
+  # `edit-landing-.json` in a repository root. Refuse rather than write blind:
+  # the receipt is state, and state belongs under the project's .zensu/state.
+  case "$RECEIPT_PATH" in
+    ""|*/edit-landing-.json|edit-landing-.json)
+      [ -n "$RECEIPT_PATH" ] && emit "RECEIPT REFUSED — the session key resolved empty, so no receipt was written (would have been ${RECEIPT_PATH})"
+      RECEIPT_PATH=""
+      ;;
+    /*) ;;
+    *)
+      emit "RECEIPT REFUSED — a relative --receipt path would land in the caller's cwd, not the project state dir (${RECEIPT_PATH})"
+      RECEIPT_PATH=""
+      ;;
+  esac
   if [ -n "$RECEIPT_PATH" ]; then
     mkdir -p "$(dirname "$RECEIPT_PATH")" 2>/dev/null
     tmp_receipt="${RECEIPT_PATH}.tmp.$$"

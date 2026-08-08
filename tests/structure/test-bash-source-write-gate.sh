@@ -24,13 +24,42 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 { [ -f "$PARSER" ] && node --check "$PARSER" 2>/dev/null; } \
   && check "W3 parser exists + node --check" PASS || check "W3 parser exists + node --check" FAIL
 
+UNIT="$PLUGIN_DIR/tests/structure/git-repo-escape.test.js"
+if [ ! -f "$UNIT" ]; then
+  check "W3a rule-C unit suite is missing from the checkout ($UNIT) — stage it with the change" FAIL
+elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
+  UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+  # Exit 0 alone would also accept a file that registers zero cases.
+  if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 25 ]; then
+    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS cases)" PASS
+  else
+    check "W3a rule-C unit suite reported only '${UNIT_PASS:-no}' passing cases (want >= 25)" FAIL
+  fi
+else
+  check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL
+fi
+
+# `within` is a hand-copy of reviewer-capability-v1.js's isInside. Nothing but this
+# pin notices if one is hardened and the gate keeps the old semantics.
+# Compare the CLAUSES, not the spelling: the risk is one copy losing a guard, and
+# a byte-comparison would instead fail on a harmless reorder or quote style.
+contain_clauses() {
+  printf '%s' "$1" | tr -d ' \n' | tr -d "\`'" | sed -e 's/"//g' -e 's/\${path.sep}/+path.sep/' \
+    | grep -oE '===?\$?\{?\}?$|===""|!==\.\.|startsWith\(\.\.\+path\.sep|path\.isAbsolute' | sort -u
+}
+CONTAIN_A="$(contain_clauses "$(grep -A2 -F 'function within(root, p)' "$PARSER")")"
+CONTAIN_B="$(contain_clauses "$(grep -A2 -F 'function isInside(base, candidate)' "$PLUGIN_DIR/hooks/lib/reviewer-capability-v1.js")")"
+{ [ -n "$CONTAIN_A" ] && [ "$CONTAIN_A" = "$CONTAIN_B" ]; } \
+  && check "W3b within() carries the same containment guards as reviewer-capability isInside()" PASS \
+  || check "W3b containment guards diverged — parser=[$(printf '%s' "$CONTAIN_A" | tr '\n' ',')] capability=[$(printf '%s' "$CONTAIN_B" | tr '\n' ',')]" FAIL
+
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
-  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"")));
+  const ok=pres.some(e=>(e.matcher||"")==="Bash" && (e.hooks||[]).some(z=>/pre-bash-source-write-gate\.sh/.test(z.command||"") && z.timeout===60));
   process.exit(ok?0:1);
 ' "$HOOKS_JSON" 2>/dev/null \
-  && check "W4 registered as PreToolUse Bash matcher" PASS || check "W4 registered as PreToolUse Bash matcher" FAIL
+  && check "W4 registered as PreToolUse Bash matcher with timeout 60" PASS || check "W4 registered as PreToolUse Bash matcher with timeout 60" FAIL
 
 grep -qF 'zensu_hook_enabled bashWriteGate' "$HOOK" \
   && check "W5 config-gated via zensu_hook_enabled bashWriteGate (default-on)" PASS \
@@ -59,7 +88,8 @@ CFG_OFF="$(mktemp -t bswgate-off-XXXXXX)";   printf '%s' '{"hooks":{"bashWriteGa
 export CLAUDE_PROJECT_DIR="$PROJ"
 export ZENSU_TEST_PLUGIN_DATA="$WORKROOT/plugin-data"
 # shellcheck disable=SC1091
-source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test
+source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" bswgate-test \
+  || { check "W0 session-control baseline bootstrap" FAIL; echo "----"; echo "test-bash-source-write-gate: $PASS PASS / $FAIL FAIL"; exit 1; }
 
 payload() {
   CMD="$1" CWD="${2:-$PROJ}" node -e '
@@ -80,11 +110,12 @@ classify() {
 }
 # run <label> <cmd> <expected> [cwd] [cfg] [claude-env-file]
 run() {
-  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}" env_file="${6:-$PROJ/.claude-env}"
+  local label="$1" cmd="$2" exp="$3" cwd="${4:-$PROJ}" cfg="${5:-$CFG_DEF}" env_file="${6:-$PROJ/.claude-env}" home="${7:-${HOME:-}}"
   local out
   out="$(payload "$cmd" "$cwd" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
         -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
         CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_ENV_FILE="$env_file" \
+        HOME="$home" \
         ZENSU_CONFIG="$cfg" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
@@ -258,6 +289,426 @@ printf '%s' "$REASON_ESC" | grep -qiF 'worktree' \
   && check "W54 escaped+tracked target reports rule-B (worktree) reason" PASS \
   || check "W54 escaped+tracked rule precedence" FAIL
 
+# The parser refuses to promote the payload cwd to project authority on its own,
+# not merely because the hook checks first. Both hook branches shield this, so
+# without a direct probe the invariant could be deleted with the suite green.
+PARSER_PAYLOAD='{"tool_input":{"command":"printf x > src/new.rs"},"cwd":"'"$PROJ"'"}'
+if PAYLOAD="$PARSER_PAYLOAD" env -u CLAUDE_PROJECT_DIR node "$PARSER" >/dev/null 2>&1; then
+  PARSER_NOROOT=allowed
+else
+  PARSER_NOROOT=refused
+fi
+if PAYLOAD="$PARSER_PAYLOAD" CLAUDE_PROJECT_DIR="$PROJ" node "$PARSER" >/dev/null 2>&1; then
+  PARSER_ROOT=ok
+else
+  PARSER_ROOT=broken
+fi
+{ [ "$PARSER_NOROOT" = refused ] && [ "$PARSER_ROOT" = ok ]; } \
+  && check "W227 the parser itself refuses an empty CLAUDE_PROJECT_DIR" PASS \
+  || check "W227 parser project-root invariant (no-root=$PARSER_NOROOT with-root=$PARSER_ROOT)" FAIL
+
+# ── Rule (C): git repository escape ──────────────────────────────────
+# git reaches the same cross-checkout contamination as rule (B) without naming a
+# write target at all, so no redirect/tee/sed/dd channel can see it. Gated only
+# on ESCAPE: every mutation inside the session's own root stays ungated.
+run "W98 -C absolute sibling add"              "git -C $SIB add ."                          DENY
+run "W99 -C relative sibling commit"           "git -C ../sibling commit -m x"              DENY
+run "W100 cd sibling then bare git add -A"     "cd ../sibling && git add -A"                DENY
+run "W101 cumulative -C resolves like git"     "git -C .. -C sibling add ."                 DENY
+run "W102 global -c operand does not hide -C"  "git -c user.name=x -C $SIB commit -m y"     DENY
+run "W103 env-wrapped git escape"              "env git -C $SIB commit -m x"                DENY
+run "W104 sudo-wrapped git escape"             "sudo git -C $SIB checkout ."                DENY
+# The WRAP members that actually work — `nice`/`sudo -u` take their own flags and
+# are a documented gap, so these are the ones worth pinning.
+run "W189 command-wrapped git escape"          "command git -C $SIB add ."                  DENY
+run "W190 exec-wrapped git escape"             "exec git -C $SIB add ."                     DENY
+run "W191 nohup-wrapped git escape"            "nohup git -C $SIB add ."                    DENY
+run "W105 git clean escape"                    "git -C $SIB clean -fd"                      DENY
+run "W106 git restore escape"                  "git -C $SIB restore src/lib.rs"             DENY
+run "W107 git reset escape"                    "git -C $SIB reset --hard"                   DENY
+run "W108 in-subshell git escape"              "(cd ../sibling && git add .)"               DENY
+# A pipe before the git verb must not erase an earlier `cd` — bash keeps it.
+run "W228 cd survives a pipeline stage"        "cd ../sibling && git log | head && git add -A" DENY
+run "W229 export survives a pipeline stage"    "export GIT_WORK_TREE=$SIB && true | true && git add -A" DENY
+# ...but a cd made INSIDE the ending stage does not survive it.
+run "W230 cd inside a pipeline stage does not leak" "cd ../sibling | true && git add -A"     ALLOW
+run "W231 a later unexpanded -C invalidates an absolute one" \
+  'git -C '"$SIB"' -C $BACK add -A'                                                          ALLOW
+run "W109 in-project mutation stays ungated"   "git add -A"                                 ALLOW
+run "W110 in-project -C mutation stays ungated" "git -C $PROJ commit -m x"                  ALLOW
+run "W111 read-only status on sibling"         "git -C $SIB status"                         ALLOW
+run "W112 read-only log on sibling"            "git -C $SIB log --oneline"                  ALLOW
+run "W113 read-only rev-parse on sibling"      "git -C $SIB rev-parse HEAD"                 ALLOW
+run "W114 worktree add is not a gated verb"    "git -C $SIB worktree add $WORKROOT/wt"      ALLOW
+run "W115 subshell cd does not leak to git"    "(cd ../sibling) && git add ."               ALLOW
+run "W116 temp-root repo carve-out"            "git -C $FAKETMP add ."                      ALLOW
+
+# The incident this rule exists for: no -C, no cd — the payload cwd itself had
+# drifted to the main checkout and a bare `git add -A` staged it. Only the
+# `repo = curdir` seed can catch this, so without these three the seed is
+# unwitnessed. The trailing-slash spelling is the regression pin for the
+# un-normalized seed: it denied every in-project git verb before the fix.
+run "W131 foreign payload cwd, bare git add"   "git add -A"          DENY  "$SIB"
+run "W132 nested in-project payload cwd"       "git add -A"          ALLOW "$PROJ/src"
+run "W133 trailing-slash payload cwd"          "git add -A"          ALLOW "$PROJ/"
+run "W134 dot-segment payload cwd"             "git add -A"          ALLOW "$PROJ/src/.."
+# W133/W134 are sanity controls, not regression pins — path.relative already
+# returns "" for those spellings without any normalization. The discriminating
+# witness for the canonicalized seed is the symlink pair below.
+#
+# The hook hands over a project root it already canonicalized while the payload
+# cwd arrives as the host spelled it. A symlinked cwd is the real-world form of
+# that split (macOS /var -> /private/var), and lexically the two never overlap,
+# so an uncanonicalized seed denies both a new-file write and every git verb in
+# the user's OWN project. W169 is the paired control: its target is absolute, so
+# it denies with or without the canonicalization. Skipped where symlinks are
+# unavailable — the reported PASS total is therefore platform-dependent, matching
+# the existing W23 convention.
+if ln -s "$PROJ" "$WORKROOT/proj-link" 2>/dev/null; then
+  run "W167 symlinked payload cwd, git mutation" "git add -A"        ALLOW "$WORKROOT/proj-link"
+  run "W168 symlinked payload cwd, new file"     "printf x > src/viasym.rs" ALLOW "$WORKROOT/proj-link"
+  run "W169 symlinked payload cwd still catches an escape" "printf x >> $SIB/src/lib.rs" DENY "$WORKROOT/proj-link"
+else
+  echo "  SKIP  W167-W169 symlinked payload cwd (symlinks unavailable)"
+fi
+# A nested dir whose NAME starts with '..' is inside the project; a bare
+# startsWith("..") containment test calls it an escape.
+mkdir -p "$PROJ/..bak"
+run "W135 nested '..bak' dir is not an escape" "git -C ..bak add ."                         ALLOW
+
+# Read-only spellings of gated verbs: denying these would assert something false.
+run "W136 stash list on sibling"               "git -C $SIB stash list"                     ALLOW
+run "W137 stash show on sibling"               "git -C $SIB stash show"                     ALLOW
+run "W138 clean --dry-run on sibling"          "git -C $SIB clean --dry-run"                ALLOW
+run "W139 clean -nd on sibling"                "git -C $SIB clean -nd"                      ALLOW
+run "W140 apply --check on sibling"            "git -C $SIB apply --check p.patch"          ALLOW
+run "W141 rm --dry-run on sibling"             "git -C $SIB rm --dry-run f"                 ALLOW
+run "W142 stash push on sibling is gated"      "git -C $SIB stash push"                     DENY
+run "W143 clean -fd on sibling is gated"       "git -C $SIB clean -fd"                      DENY
+
+# worktree is gated for remove/move only — add/list/prune stay exempt.
+run "W144 worktree remove on sibling"          "git -C $SIB worktree remove --force $WORKROOT/wt" DENY
+run "W145 worktree move on sibling"            "git -C $SIB worktree move $SIB/a $SIB/b"    DENY
+# A bare worktree NAME resolves against a list this parser never reads, so it is
+# unjudgeable and passes rather than denying on a repository whose own tree the
+# command never touches. Accepted gap, documented in the parser header.
+run "W188 bare worktree name is unjudgeable"   "git -C $SIB worktree remove --force pr-42"  ALLOW
+# An unexpanded token carries no location; path.resolve would splice the literal
+# under the cwd and call it in-project, so the addressing is judged neither way.
+run "W193 unexpanded -C operand is unresolved"  'git -C "$REPO" add -A'                      ALLOW
+run "W194 unexpanded --work-tree is unresolved" 'git --work-tree="$WT" add -A'               ALLOW
+run "W195 unexpanded worktree operand"          'git -C '"$SIB"' worktree remove --force "$WORKTREE"' ALLOW
+# A `$` in a NON-addressing option says nothing about which repo is addressed and
+# must not disarm the literal -C standing beside it.
+run "W205 unexpanded -c value does not disarm a literal -C" \
+  'git -c core.excludesFile=$HOME/.gitignore -C '"$SIB"' add -A'                             DENY
+run "W206 unexpanded --namespace does not disarm a literal -C" \
+  'git --namespace=$NS -C '"$SIB"' commit -m y'                                              DENY
+run "W196 export GIT_WORK_TREE then git add"    "export GIT_WORK_TREE=$SIB && git add -A"    DENY
+run "W197 export GIT_DIR then git commit"       "export GIT_DIR=$SIB/.git && git commit -m x" DENY
+run "W198 export of an in-project work tree"    "export GIT_WORK_TREE=$PROJ && git add -A"   ALLOW
+# rule (C) applies no extension filter — the README says so explicitly.
+run "W199 non-source pathspec still denied"     "git -C $SIB add notes.md"                   DENY
+# git's parse-options auto-negation: a later --no-dry-run cancels an earlier -n.
+run "W200 clean -n --no-dry-run is a mutation"  "git -C $SIB clean -n --no-dry-run -fd"      DENY
+run "W201 apply --stat --apply is a mutation"   "git -C $SIB apply --stat --apply p.patch"   DENY
+run "W212 unexpanded --git-dir does not disarm a literal -C" \
+  'git -C '"$SIB"' --git-dir=$GD add -A'                                                     DENY
+# Control, not a regression pin: this stays ALLOW under the over-broad implementation too.
+run "W213 unexpanded --git-dir beside an in-project -C (control)" \
+  'git -C '"$PROJ"' --git-dir=$GD add -A'                                                    ALLOW
+# Only -C re-bases every later resolution. An unexpanded --work-tree drops just
+# its own candidate, so the literal escaping -C beside it is still judged.
+run "W214 unexpanded --work-tree does not disarm a literal -C" \
+  'git -C '"$SIB"' --work-tree=$WT add -A'                                                   DENY
+run "W223 unexpanded -C suppresses a RELATIVE candidate" \
+  'git -C $REPO --work-tree=../sibling add -A'                                               ALLOW
+# ...but an absolute candidate resolves the same for every expansion of that -C.
+run "W225 unexpanded -C does not hide an ABSOLUTE work tree" \
+  'git -C $REPO --work-tree='"$SIB"' add -A'                                                 DENY
+run "W226 unexpanded -C does not hide an ABSOLUTE worktree operand" \
+  'git -C $REPO worktree remove --force '"$SIB"'/wt'                                         DENY
+# expand(): only production's tilde handling makes these two differ. Without it
+# both resolve to $PROJ/~ and both allow.
+run "W215 tilde -C resolving outside HOME=sibling" "git -C ~ add ."                          DENY  "$PROJ" "$CFG_DEF" "$PROJ/.claude-env" "$SIB"
+run "W216 tilde -C resolving inside HOME=project (control)"  "git -C ~ add ."                          ALLOW "$PROJ" "$CFG_DEF" "$PROJ/.claude-env" "$PROJ"
+run "W207 apply --check --apply is a mutation"  "git -C $SIB apply --check --apply p.patch"  DENY
+# A binding made inside a subshell dies with it; a plain `declare` never exports.
+run "W208 subshell export does not leak"        "(export GIT_WORK_TREE=$SIB) && git add -A"  ALLOW
+run "W209 declare without -x does not reach git" "declare GIT_WORK_TREE=$SIB && git add -A"  ALLOW
+run "W210 declare -x does reach git"            "declare -x GIT_WORK_TREE=$SIB && git add -A" DENY
+# Harvesting an assignment segment must not blind rules (A)/(B) to its redirect.
+run "W211 redirect in an export segment still gated" "export Q=1 > src/app.rs"                DENY
+run "W219 quoted export GIT_WORK_TREE value"   "export GIT_WORK_TREE=\"$SIB\" && git add -A"  DENY
+run "W220 quoted export GIT_DIR value"         "export GIT_DIR='$SIB/.git' && git commit -m x" DENY
+# An unexpanded env designation must not manufacture a bogus in-project work tree
+# that then drops a real foreign git dir from the candidate list.
+run "W221 unexpanded GIT_WORK_TREE suppresses"  'GIT_WORK_TREE=$WT git add -A'                ALLOW
+# An unexpanded env work tree must not manufacture a bogus in-project tree that
+# then drops the real foreign git dir from the candidate list.
+run "W222 unexpanded GIT_WORK_TREE does not hide a foreign git-dir" \
+  'GIT_WORK_TREE=$WT git --git-dir='"$SIB"'/.git/worktrees/w add -A'                          DENY
+# plumbing twins of add/checkout/reset
+run "W202 update-index on a sibling"            "git -C $SIB update-index --add -- f"        DENY
+run "W203 checkout-index on a sibling"          "git -C $SIB checkout-index -a -f"           DENY
+run "W146 worktree prune on sibling"           "git -C $SIB worktree prune"                 ALLOW
+run "W147 worktree list on sibling"            "git -C $SIB worktree list"                  ALLOW
+run "W148 in-project worktree add to outside path" "git worktree add $WORKROOT/wt2"         ALLOW
+
+# Inline and env-wrapper GIT_DIR / GIT_WORK_TREE address the same foreign repo.
+run "W149 inline GIT_WORK_TREE escape"         "GIT_WORK_TREE=$SIB git add ."               DENY
+run "W150 inline GIT_DIR escape"               "GIT_DIR=$SIB/.git git commit -m x"          DENY
+run "W151 env-wrapper GIT_DIR escape"          "env GIT_DIR=$SIB/.git git commit -m x"      DENY
+run "W152 in-project GIT_WORK_TREE stays ungated" "GIT_WORK_TREE=$PROJ git add ."           ALLOW
+# A LINKED worktree's git dir lives under the main checkout by construction, so an
+# in-project --work-tree makes the foreign git dir a false positive, not an escape.
+run "W153 linked-worktree git-dir + in-project work-tree" \
+  "git --git-dir=$SIB/.git/worktrees/w --work-tree=$PROJ add ."                             ALLOW
+run "W154 foreign git-dir without a work-tree"  "git --git-dir=$SIB/.git commit -m x"       DENY
+# The exemption is for a LINKED worktree's admin dir only. A plain foreign .git
+# paired with an in-project work tree still writes that repo's index and refs.
+run "W170 plain foreign git-dir + in-project work-tree" \
+  "git --git-dir=$SIB/.git --work-tree=$PROJ commit -m x"                                   DENY
+run "W171 plain foreign git-dir + work-tree ." "git --git-dir=$SIB/.git --work-tree=. add -A" DENY
+# worktree remove/move is judged on the tree it destroys, not the repo addressed.
+run "W172 worktree remove of a foreign tree"   "git worktree remove --force $SIB/wt"        DENY
+run "W173 worktree move of a foreign tree"     "git worktree move $SIB/wt $SIB/wt2"         DENY
+run "W174 worktree remove of an in-project tree" "git worktree remove --force $PROJ/wt"     ALLOW
+run "W175 worktree remove of a temp-root tree" "git -C $SIB worktree remove --force $FAKETMP/wt" ALLOW
+# The EXPANDED form of the pr-team-review Phase E cleanup (the shipped text keeps
+# "$WORKTREE" unexpanded, which rule (C) cannot judge at all): bookkeeping in the
+# main checkout,
+# tree under mktemp. It must pass WITHOUT the escape hatch, or the plugin would
+# be teaching agents to prefix ZENSU_BASH_WRITE_GATE=off in a shipped skill.
+run "W181 pr-team-review Phase E cleanup (expanded) needs no escape hatch" \
+  "git -C $SIB worktree remove --force $FAKETMP/pr-42-review"                                ALLOW
+run "W184 worktree operand after -- is still judged" "git worktree remove --force -- $SIB/wt" DENY
+
+# The DEFAULT temp list — the one the shipped pr-team-review cleanup actually
+# relies on — is overridden by ZENSU_BSWGATE_TEMP_DIRS in every other case here,
+# so without these two the lazy raw+canonical retry decides no verdict anywhere.
+REAL_TMP="$(mktemp -d)"
+trap 'rm -rf "$WORKROOT" "$REAL_TMP"' EXIT
+REAL_TMP_CANON="$(cd -P -- "$REAL_TMP" && pwd -P)"
+default_temp_run() {
+  local label="$1" cmd="$2" exp="$3" out
+  out="$(payload "$cmd" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY \
+        -u ZENSU_SESSION_CONTEXT -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+        -u ZENSU_BSWGATE_TEMP_DIRS \
+        CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+        CLAUDE_ENV_FILE="$PROJ/.claude-env" ZENSU_CONFIG="$CFG_DEF" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
+}
+default_temp_run "W185 real mktemp worktree removal under the DEFAULT temp list" \
+  "git -C $SIB worktree remove --force $REAL_TMP/pr-42-review" ALLOW
+default_temp_run "W186 the canonical spelling of that same temp root" \
+  "git -C $SIB worktree remove --force $REAL_TMP_CANON/pr-42-review" ALLOW
+default_temp_run "W187 the default list does not exempt a real sibling checkout" \
+  "git -C $SIB worktree remove --force $SIB/wt" DENY
+rmdir "$REAL_TMP" 2>/dev/null || true
+# A file literally named -n must not read as clean's dry-run flag.
+run "W176 pathspec named -n after -- does not disarm clean" "git -C $SIB clean -fd -- -n"   DENY
+run "W177 pathspec named -n after -- does not disarm rm"    "git -C $SIB rm -f -- -n"       DENY
+# wrapEnv coverage: both directions, and the deliberate asymmetry that a wrapper
+# assignment supplies GIT_* but is NOT read as an escape hatch.
+run "W178 env-wrapper GIT_WORK_TREE escape"    "env GIT_WORK_TREE=$SIB git add ."           DENY
+run "W179 env-wrapper GIT_WORK_TREE in project" "env GIT_WORK_TREE=$PROJ git add ."         ALLOW
+run "W180 env-wrapper escape hatch is not honored" "env ZENSU_BASH_WRITE_GATE=off git -C $SIB add ." DENY
+
+# Quoted option values: unquoting the whole token before the '=' split leaves a
+# leading quote, which makes the value non-absolute and lands it back in-project.
+run "W155 --git-dir=\"quoted\" escape"          "git --git-dir=\"$SIB/.git\" commit -m x"    DENY
+run "W156 --work-tree='quoted' escape"          "git --work-tree='$SIB' add ."               DENY
+run "W157 --work-tree separate operand"         "git --work-tree $SIB add ."                 DENY
+
+# rule (A) must not reach git pathspec operands
+run "W158 git add naming tracked source"        "git add src/app.rs"                         ALLOW
+run "W159 git checkout -- tracked source"       "git checkout -- src/app.rs"                 ALLOW
+# ... but a redirect inside a git command is still a write channel (rule A holds)
+run "W160 redirect inside a git command"        "git show HEAD:src/app.rs > src/app.rs"      DENY
+
+# The target budget must bound decide()'s git calls, not silence later segments —
+# and non-source targets must not spend it at all.
+MANY="$(node -e 'let s="";for(let i=0;i<210;i++)s+="echo x > f"+i+".txt\n";process.stdout.write(s)')"
+run "W161 rule C survives 210 non-source targets" "$MANY
+git -C $SIB add -A"                                                                          DENY
+run "W182 rule A survives 210 non-source targets" "$MANY
+printf x >> src/app.rs"                                                                      DENY
+REASON_BUDGET="$(payload "$MANY
+git -C $SIB add -A" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+printf '%s' "$REASON_BUDGET" | grep -qF "$SIB" \
+  && check "W183 the post-budget deny is the rule-(C) verdict, not an unrelated one" PASS \
+  || check "W183 post-budget deny reason (got '$REASON_BUDGET')" FAIL
+
+# Accepted lexical gap: lex() is not quote-aware, so a quoted global-option
+# operand containing & ; or | severs the segment before the subcommand.
+run "W162 quoted '&' in a -c operand severs the segment (accepted gap)" \
+  "git -C $SIB -c user.name=\"A & B\" commit -m x"                                           ALLOW
+run "W117 inline ZENSU_BASH_WRITE_GATE=off"    "ZENSU_BASH_WRITE_GATE=off git -C $SIB add ." ALLOW
+run "W118 inline ZENSU_MCP_GATE=off"           "ZENSU_MCP_GATE=off git -C $SIB add ."        ALLOW
+run "W119 config bashWriteGate:false releases rule C" "git -C $SIB add ." ALLOW "$PROJ" "$CFG_OFF"
+
+# --work-tree / --git-dir designate a repository without -C and without cd, so a
+# rule that read only those two would miss them entirely.
+run "W125 --git-dir= into sibling"             "git --git-dir=$SIB/.git commit -m x"        DENY
+run "W126 --git-dir separate operand"          "git --git-dir $SIB/.git commit -m x"        DENY
+run "W127 --work-tree= into sibling"           "git --work-tree=$SIB add ."                 DENY
+# The post- -C resolution of a RELATIVE --work-tree cannot be witnessed in the
+# deny direction: -C either moves the base deeper (harmless) or outward, and an
+# outward base is already candidates[0], so the deny fires before --work-tree is
+# read. Only an ALLOW discriminates — post- -C this is $PROJ/build (in project),
+# pre- -C it would be $WORKROOT/build (an escape, DENY).
+run "W128 --work-tree resolves after -C"       "git -C src --work-tree=../build add ."      ALLOW
+run "W129 in-project --work-tree stays ungated" "git --work-tree=$PROJ add ."               ALLOW
+run "W130 read-only with --git-dir on sibling" "git --git-dir=$SIB/.git log --oneline"      ALLOW
+
+OUT_GIT_ENV="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_BASH_WRITE_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+[ "$OUT_GIT_ENV" = "ALLOW" ] \
+  && check "W120 process-env ZENSU_BASH_WRITE_GATE=off releases rule C -> ALLOW" PASS \
+  || check "W120 process-env escape rule C (got '$OUT_GIT_ENV')" FAIL
+
+# The process-env arm of ZENSU_MCP_GATE was pinned nowhere, for any rule, on
+# either hook path — only its inline spelling was.
+OUT_MCP_ENV="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+OUT_MCP_ENV_A="$(payload "printf x >> src/app.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" ZENSU_MCP_GATE=off bash "$HOOK" 2>/dev/null | classify)"
+{ [ "$OUT_MCP_ENV" = "ALLOW" ] && [ "$OUT_MCP_ENV_A" = "ALLOW" ]; } \
+  && check "W166 process-env ZENSU_MCP_GATE=off releases rules A and C -> ALLOW" PASS \
+  || check "W166 process-env ZENSU_MCP_GATE (ruleC='$OUT_MCP_ENV' ruleA='$OUT_MCP_ENV_A')" FAIL
+
+# The deny has to be actionable on its own: which repo, which verb, the corrective
+# form, and the opt-out. A reason naming only "a repository" leaves the agent
+# guessing which checkout it just hit.
+REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$REASON_GIT" | grep -qF "$SIB" \
+  && printf '%s' "$REASON_GIT" | grep -qF 'git add' \
+  && printf '%s' "$REASON_GIT" | grep -qF "git -C '$PROJ'" \
+  && printf '%s' "$REASON_GIT" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
+  && check "W121 rule-C deny names repo, subcommand, quoted -C fix and escape hatch" PASS \
+  || check "W121 rule-C deny reason (got '$REASON_GIT')" FAIL
+
+# A designated --work-tree/--git-dir hit is NOT fixed by adding -C: re-running with
+# -C re-resolves the same escaping designation. The remedy sentence must say so.
+REASON_GIT_WT="$(payload "git --work-tree=$SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
+  && check "W163 designated-path deny does not advise a -C that cannot clear it" PASS \
+  || check "W163 designated-path remedy (got '$REASON_GIT_WT')" FAIL
+
+# The third remedy arm. Without it a worktree deny would advise pointing
+# --work-tree/--git-dir inside the root for a command that has neither flag.
+REASON_WT_PATH="$(payload "git worktree remove --force $SIB/wt" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$REASON_WT_PATH" | grep -qF 'does not change which tree is destroyed' \
+  && printf '%s' "$REASON_WT_PATH" | grep -qF "$SIB/wt"; } \
+  && check "W204 worktree deny names the destroyed tree and its own remedy" PASS \
+  || check "W204 worktree remedy (got '$REASON_WT_PATH')" FAIL
+
+# Rule (C) resolves lexically and must never consult git about the foreign repo —
+# otherwise a hung or missing git on another checkout could wedge or invert it.
+GIT_SPY_BIN="$WORKROOT/git-spy-bin"
+GIT_SPY_LOG="$WORKROOT/git-spy.log"
+mkdir -p "$GIT_SPY_BIN"
+printf '%s\n' '#!/bin/bash' 'printf "%s\n" "$*" >> "${ZENSU_TEST_GIT_SPY:?}"' 'exit 0' > "$GIT_SPY_BIN/git"
+chmod +x "$GIT_SPY_BIN/git"
+spy_run() {
+  : > "$GIT_SPY_LOG"
+  payload "$1" | env PATH="$GIT_SPY_BIN:$PATH" ZENSU_TEST_GIT_SPY="$GIT_SPY_LOG" \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+    ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
+}
+# Positive control FIRST — an empty spy log proves nothing unless the shim is
+# demonstrably reachable. A rule-(A) probe DOES consult git (tracked()).
+OUT_SPY_CONTROL="$(spy_run "printf x >> src/app.rs")"
+SPY_CONTROL_LOG="$(tr '\n' ';' < "$GIT_SPY_LOG")"
+OUT_GIT_SPY="$(spy_run "git -C $SIB add .")"
+# The control must show the shim was reached AND used for the tracked() lookup —
+# "the log is non-empty" alone would be satisfied by any incidental git call.
+{ printf '%s' "$SPY_CONTROL_LOG" | grep -qF 'ls-files' && [ "$OUT_SPY_CONTROL" = "DENY" ] \
+  && [ "$OUT_GIT_SPY" = "DENY" ] && [ ! -s "$GIT_SPY_LOG" ]; } \
+  && check "W122 rule-C denies without asking git anything about the foreign repo" PASS \
+  || check "W122 rule-C git independence (control='$OUT_SPY_CONTROL' spy-control='$SPY_CONTROL_LOG' ruleC='$OUT_GIT_SPY')" FAIL
+
+# Every gated verb must actually be gated: a verb dropped from the space-split
+# GIT_MUTATIONS string would otherwise open silently while the suite stays green.
+GIT_VERBS="$(node -e '
+  const m = require(process.argv[1]);
+  process.stdout.write(Array.from(m.GIT_MUTATIONS).join(" "));
+' "$PARSER")"
+GIT_VERB_COUNT="$(printf '%s' "$GIT_VERBS" | wc -w | tr -d ' ')"
+VERB_FAIL=""
+for v in $GIT_VERBS; do
+  case "$v" in
+    # `worktree` is the one verb whose bare form is deliberately read-only, so the
+    # probe must name a gated subverb or the loop would assert the wrong thing.
+    worktree) probe="git -C $SIB worktree remove --force $SIB/wt" ;;
+    # Named subverbs whose bare form is a read-only listing.
+    bisect)   probe="git -C $SIB bisect start" ;;
+    submodule) probe="git -C $SIB submodule update --init" ;;
+    sparse-checkout) probe="git -C $SIB sparse-checkout set src" ;;
+    *)        probe="git -C $SIB $v" ;;
+  esac
+  out="$(payload "$probe" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+        ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+  [ "$out" = "DENY" ] || VERB_FAIL="$VERB_FAIL $v($out)"
+done
+# The loop is driven BY the set, so it cannot notice a verb removed from it — the
+# count assertion is what catches that direction; the membership list lives in
+# git-repo-escape.test.js.
+# An unconditional-deny regression would satisfy all 21+ DENY probes, so the same
+# env shape must also produce an ALLOW.
+VERB_CTRL="$(payload "git -C $SIB status" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+      ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+{ [ -z "$VERB_FAIL" ] && [ "$GIT_VERB_COUNT" -eq 24 ] && [ "$VERB_CTRL" = "ALLOW" ]; } \
+  && check "W164 all $GIT_VERB_COUNT GIT_MUTATIONS verbs deny on a foreign repo, and the set still holds 24" PASS \
+  || check "W164 ungated verbs:$VERB_FAIL count=$GIT_VERB_COUNT (want 24) control=$VERB_CTRL" FAIL
+
+# The hook header must POINT at the tables rather than re-author them; an
+# enumeration there is prose that silently drifts from the code.
+HEADER_BLOCK="$(sed -n '1,60p' "$HOOK")"
+HEADER_ENUM=""
+for v in $GIT_VERBS; do
+  case "$v" in mv|worktree) continue ;; esac
+  printf '%s' "$HEADER_BLOCK" | grep -qF "\`$v\`" && HEADER_ENUM="$HEADER_ENUM $v"
+done
+{ printf '%s' "$HEADER_BLOCK" | grep -qF 'GIT_MUTATIONS' \
+  && printf '%s' "$HEADER_BLOCK" | grep -qF 'GIT_READONLY_FORMS' \
+  && printf '%s' "$HEADER_BLOCK" | grep -qiF 'not a security boundary' \
+  && [ -z "$HEADER_ENUM" ]; } \
+  && check "W165 hook header names both tables as the source of truth and re-authors neither" PASS \
+  || check "W165 header/table drift — re-authored verbs:$HEADER_ENUM" FAIL
+
+# FR-002 asks the PARSER header to name rule (C)'s accepted gaps. Nothing pinned
+# that paragraph, so deleting it left the whole suite green.
+# Bounded to the leading comment block, and matched on each gap's DISTINGUISHING
+# clause — a bare token like "GIT_DIR" is equally satisfied by a sentence asserting
+# the opposite.
+PARSER_HEAD="$(awk '/^\/\// {seen=1; print; next} seen {exit}' "$PARSER")"
+GAP_MISSING=""
+while IFS= read -r gap; do
+  [ -n "$gap" ] || continue
+  printf '%s' "$PARSER_HEAD" | grep -qF -- "$gap" || GAP_MISSING="$GAP_MISSING [$gap]"
+done <<'GAPS'
+slips the (B)/(C) escape rules
+tee >(proc) realfile
+without quote awareness
+exported by the user's shell before Claude
+the whole command is recorded UNRESOLVED
+a shell keyword hides the verb
+ride along on an in-project --work-tree
+move the cwd to
+tokens split on whitespace
+bare worktree NAME
+not a security boundary
+GAPS
+[ -z "$GAP_MISSING" ] \
+  && check "W192 the parser header still names every accepted rule-(C) gap" PASS \
+  || check "W192 undocumented accepted gaps:$GAP_MISSING" FAIL
+
 # ── Unbindable session ───────────────────────────────────────────────
 # A session whose Session Control record cannot be read (resumed across a plugin
 # update, or started before Session Control existed) used to lose EVERY Bash
@@ -282,6 +733,16 @@ run_unbound "W83 unbound + write to tracked source"  "printf x >> src/app.rs"   
 run_unbound "W84 unbound + write escaping project"   "printf x >> $SIB/src/lib.rs"         DENY
 run_unbound "W85 unbound + Session Control rebind"   "export ZENSU_SESSION_KEY=scv1_dead"  DENY
 run_unbound "W86 unbound + new untracked source"     "printf x > src/brandnew.rs"          ALLOW
+run_unbound "W123 unbound + git mutation escaping project" "git -C $SIB add ."             DENY
+run_unbound "W124 unbound + read-only git on sibling"      "git -C $SIB status"            ALLOW
+run_unbound "W217 unbound + in-project git mutation (control)" "git add -A"                    ALLOW
+REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_KEY \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+{ printf '%s' "$REASON_UNBOUND_C" | grep -qF "$SIB" \
+  && printf '%s' "$REASON_UNBOUND_C" | grep -qF "OUTSIDE this session's"; } \
+  && check "W224 unbound rule-C deny keeps its own cause" PASS \
+  || check "W224 unbound rule-C reason (got '$REASON_UNBOUND_C')" FAIL
 
 # The unbound deny must keep the ORIGINAL write-rule cause and its escape hint —
 # not only the appended binding sentence, or dropping the cause would leave every
@@ -347,6 +808,23 @@ OUT_PARSER_FAIL="$(payload "printf x >> src/app.rs" "$PROJ" | env \
 [ "$OUT_PARSER_FAIL" = "DENY" ] \
   && check "W87f unbound parser runtime failure denies, never allows unchecked" PASS \
   || check "W87f unbound parser failure (got '$OUT_PARSER_FAIL')" FAIL
+
+# The BOUND path used to discard the parser's exit status while its two siblings
+# honored theirs. Same shim, no CLAUDE_PLUGIN_DATA override, so the bind succeeds.
+OUT_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
+  PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify)"
+REASON_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
+  PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+# A bare DENY cannot show WHICH branch answered — the unbound arm and a narrowed
+# bind failure both deny too. Only the bound arm emits this sentence.
+{ [ "$OUT_PARSER_FAIL_BOUND" = "DENY" ] \
+  && printf '%s' "$REASON_PARSER_FAIL_BOUND" | grep -qF 'could not be evaluated for this session'; } \
+  && check "W218 bound parser runtime failure denies with the bound-arm reason" PASS \
+  || check "W218 bound parser failure (got '$OUT_PARSER_FAIL_BOUND' / '$REASON_PARSER_FAIL_BOUND')" FAIL
 
 # The relaxation covers ONE state. A record that exists but disagrees with the
 # executing installation is a security signal and keeps denying every command.

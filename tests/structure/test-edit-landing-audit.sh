@@ -227,6 +227,21 @@ V_SKIPPED_ONLY="$(printf '%s' "$V_SKIP" | sed -n 's/.*only the \(.*\) are skippe
 { [ -n "$V_SKIPPED_ONLY" ] && ! printf '%s' "$V_SKIPPED_ONLY" | grep -qF 'Edit Landing'; }
 check "P6 the audit has not leaked into the vanilla skip list" "$(verdict $?)"
 
+
+echo "== Receipt never escapes the project state dir =="
+ESC="$WORK/escape"; mkdir -p "$ESC"
+printf 'S1 IMPL completed — files: a.txt\n' > "$ESC/run.log"
+: > "$ESC/a.txt"
+( cd "$ESC" && run_audit --log "$ESC/run.log" --project "$ESC" --receipt "edit-landing-.json" >/dev/null 2>&1 )
+[ ! -e "$ESC/edit-landing-.json" ]
+check "L90 an empty-key receipt name is refused, not written" "$(verdict $?)"
+( cd "$ESC" && run_audit --log "$ESC/run.log" --project "$ESC" --receipt "relative-receipt.json" >/dev/null 2>&1 )
+[ ! -e "$ESC/relative-receipt.json" ]
+check "L91 a relative receipt path is refused, not written" "$(verdict $?)"
+STRAY="$(find "$PLUGIN_DIR" -maxdepth 1 -name 'edit-landing-*.json' 2>/dev/null | head -1)"
+[ -z "$STRAY" ]
+check "L92 the suite leaves no edit-landing receipt in the repo root" "$(verdict $?)"
+
 echo "----"
 echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"
 [ "$T_FAIL" -eq 0 ]

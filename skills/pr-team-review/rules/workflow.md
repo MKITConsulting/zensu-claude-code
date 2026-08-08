@@ -39,7 +39,7 @@ After `worktree add`:
 
 **Disk-space caveat:** worktree duplicates the working files (not `.git`). For repos > 1 GB warn the user before `worktree add`. `du -sh "$REPO" --exclude=.git` gives a quick estimate.
 
-**Cleanup belongs in Phase E:** `git -C "$REPO" worktree remove --force "$WORKTREE"`. Without this, stale worktrees pile up under `/tmp/`. On crash, the user can run `git -C "$REPO" worktree prune` to clean up the bookkeeping.
+**Cleanup belongs in Phase E:** `git -C "$REPO" worktree remove --force "$WORKTREE"`. Without this, stale worktrees pile up under `/tmp/`. On crash, the user can run `git -C "$REPO" worktree prune` to clean up the bookkeeping. Neither needs the source-write gate's escape hatch. Two independent reasons: rule (C) judges `worktree remove` on the tree it destroys rather than on `$REPO`, and `$WORKTREE` lives under `mktemp -d`, a temp root the gate never denies. Note the operand here is an unexpanded `"$WORKTREE"` token, which the gate cannot resolve at all and therefore judges neither way — so the temp-root reason only applies once the shell has expanded it.
 
 ## Phase A.1 — Scout Pitfalls
 
