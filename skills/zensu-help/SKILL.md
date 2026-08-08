@@ -41,7 +41,7 @@ None. This skill answers from embedded knowledge and the plugin's canonical docs
 
 - **Product** — top-level container; owns Components, Tiers, Features, Journeys.
 - **Component** — architectural module within a Product (e.g. `auth-service`).
-- **Feature** — unit of capability, identified by `KEY-N` — product feature key + number (e.g. `ZEN-42`). Lifecycle: `planned → in-progress → testing → released`.
+- **Feature** — unit of capability, identified by `KEY-N` — product feature key + number (e.g. `ZEN-42`). Lifecycle: `planned → in-progress → testing → released`. `KEY-N` is the human-facing id used in conversation and commit messages; the CLI's `<feature-id>` arguments take the feature **UUID** and reject a `KEY-N` id or slug with `invalid feature id (status 400)`.
 - **Tier** — pricing/availability level (e.g. Free, Pro, Team). Features map to tiers via the tier matrix.
 - **Journey** — user path through one or more Features; contributes to release readiness.
 - **Security Classification** — `public | internal | confidential | restricted`. Drives the 0–10 security score.

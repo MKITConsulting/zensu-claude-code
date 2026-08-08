@@ -52,8 +52,11 @@ source, never a shared README.
 - Authenticated: `zensu auth login` (check with `zensu auth status`). If any
   command fails with an auth error (`invalid_grant`, expired/invalid token, `401`,
   not authenticated), run `zensu auth login` and retry.
-- A target: a feature ID in **KEY-N** form (e.g. `ZEN-42`) or a UUID for a single
-  run, OR a product/component for a batch run.
+- A target: a feature ID for a single run, OR a product/component for a batch
+  run. The user may name a feature as **KEY-N** (e.g. `ZEN-42`) or a slug, but
+  every `<feature-id>` CLI argument takes the feature **UUID** — anything else
+  fails with `invalid feature id (status 400)` — so resolve it against
+  `zensu features list --product <product-id> --json` before the first call.
 - The feature's source files are linked (via `/zensu:ghost-scan` or
   `/zensu:implement`). A doc grounded in code needs code to read — a feature with
   zero linked source can only yield a stub, which this skill refuses to publish.
@@ -147,7 +150,12 @@ thread).
       (add `--status <s>` when `--status` was given). `--component` is filtered
       **client-side** — the list command scopes by product, so select the
       component's features from the JSON yourself; do not pass a `--component`
-      flag the CLI does not have.
+      flag the CLI does not have. The response is a `{data, total, page, perPage}`
+      envelope **paginated at 20, and the CLI exposes no page flag** — when
+      `total` exceeds the returned `data` length, take the full catalog from
+      `zensu journeys suggest --product <product-id>` (its `features` array holds
+      every feature) and filter it yourself. Never let a batch silently cover
+      only the first page; report the batch size against `total`.
    2. **Idempotency — skip what is already done.** For each feature read
       `docs_complete`. Skip every feature already `docs_complete` unless `--force`
       is set. `log` the skipped count and ids: a skipped feature must read
@@ -159,10 +167,12 @@ thread).
 
 For each feature to document:
 
-1. `zensu features get <feature-id> --json` — read `feature_scope`,
-   `estimated_effort` (may live on the latest revision), `slug`, the KEY-N key,
+1. `zensu features get <feature-id>` — read `feature_scope`,
+   `estimated_effort` (may live on the latest revision), `slug`, `number`,
    `product_id`, and `docs_complete`. Derive the required `doc_type`(s) from the
-   table above.
+   table above. `<feature-id>` must be the feature **UUID** (a slug or KEY-N id
+   fails with `invalid feature id (status 400)`), and the command takes no
+   `--json` flag — it always prints JSON.
 2. `zensu doc gen-context <feature-id> --doc-type <type>` — the aggregated
    authoring **context map**: linked source-file paths, symbols, subfeatures,
    security posture, tiers, journeys, existing docs. Per
@@ -252,7 +262,7 @@ that is the false-green the gate rejects.
 
 ### Phase 5 — Verify the gate flipped
 
-Per feature, `zensu features get <feature-id> --json` and confirm
+Per feature, `zensu features get <feature-id>` and confirm
 `docs_complete` is now `true`. If it is still false, the doc did not satisfy a
 required type — diagnose against the contract and fix:
 
@@ -299,8 +309,9 @@ never published green.
 
 | Command | Phase | Purpose |
 |---|---|---|
-| `zensu features list` | 1 | Load the batch feature set (scope by product; filter component/status client-side) |
-| `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped |
+| `zensu features list` | 1 | Load the batch feature set (scope by product; filter component/status client-side; pages at 20) |
+| `zensu journeys suggest` | 1 | Full feature catalog when the list envelope's `total` exceeds one page |
+| `zensu features get` | 2, 5 | Read `feature_scope` / `estimated_effort` / `docs_complete`; verify the gate flipped (UUID only, no `--json` flag) |
 | `zensu doc gen-context` | 2, 3 | Aggregated authoring context map (paths + posture, not source) |
 | `zensu link docs` | 4 | Publish (via `--content`) + link the doc; auto-recomputes the docs score |
 

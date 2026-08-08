@@ -39,7 +39,7 @@ Slash form: `/zensu:pilot [<feature>]`.
 
 | Arg | Required | Default | Notes |
 |---|---|---|---|
-| `<feature>` | no | — | Zensu feature id (`KEY-N`, e.g. `ZEN-42`, or UUID). Without it, Phase 0 lists candidates and asks. |
+| `<feature>` | no | — | Zensu feature id. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but every CLI call needs the **UUID** — Phase 0 resolves it. Without the argument, Phase 0 lists candidates and asks. |
 
 ## Prerequisites
 
@@ -83,10 +83,19 @@ interrupts a chain either way.
 
 ### Phase 0 — Resolve
 
-1. **Resolve the feature.** From `$ARGUMENTS` when given. Otherwise run
-   `zensu features list --json`, show the non-released features (id, title,
-   status), and ask via `AskUserQuestion` which one to conduct (≤4 options; when
-   more exist, offer the most recently active plus "Other").
+1. **Resolve the feature.** From `$ARGUMENTS` when given — and when that argument
+   is not a UUID (a `KEY-N` id or a slug), resolve it to the UUID first, because
+   every feature-id CLI argument rejects anything else with `invalid feature id
+   (status 400)`. Otherwise pick the feature interactively. Both paths go through
+   the product: `zensu features list` requires `--product` (`--product is
+   required` without it), so run `zensu products list --json` first, then
+   `zensu features list --product <product-id> --json` (add `--status` to narrow).
+   Its `{data, total, page, perPage}` envelope pages at 20 and the CLI has no page
+   flag — when `total` exceeds the returned `data` length, fall back to
+   `zensu journeys suggest --product <product-id>`, whose `features` array carries
+   the whole catalog with `id`, `slug`, and `number`. Show the non-released
+   features (id, title, status) and ask via `AskUserQuestion` which one to conduct
+   (≤4 options; when more exist, offer the most recently active plus "Other").
 2. Preflight `zensu auth status` and `command -v gh` once; remember the results
    for the degradation ladder.
 
@@ -94,9 +103,9 @@ interrupts a chain either way.
 
 Gather the real state; run zero mutations:
 
-- `zensu features get <id> --json` — status, component, priority, active
+- `zensu features get <feature-uuid>` — status, component, priority, active
   revision, linked tests/source/docs counts, and the `product_id` the journey
-  probe below needs.
+  probe below needs. The command has no `--json` flag; it always prints JSON.
 - `zensu security validate <id>` — release-gate preview (score, violations).
 - Journeys: resolve the product id from the `features get` JSON, run
   `zensu journeys list --product <product-id> --json`, keep the journeys whose
@@ -207,7 +216,7 @@ and the relevant slice of the status card as the skill's input. Rules:
   offer degrades to commit-only (no `gh pr create`). So the loop can still
   reach `released`: once the diff is committed, offer a degraded secondary
   "Transition `testing` (PR review state unknown — confirm)".
-- Feature id not found → show the `zensu features list` candidates and re-ask.
+- Feature id not found, or rejected with `invalid feature id (status 400)` because it was a `KEY-N` id or slug rather than the UUID → show the `zensu features list --product <product-id>` candidates and re-ask.
 - No PR for the branch → not an error: probe outcome "no PR yet" (two
   decision rows key on it).
 - No journeys on the product (or none referencing the feature) → skip journey
@@ -244,8 +253,10 @@ and the relevant slice of the status card as the skill's input. Rules:
 
 | Command | Phase | Purpose |
 |---|---|---|
-| `zensu features list --json` | 0 | Candidate pick when no feature id given |
-| `zensu features get <id> --json` | 1 | Status, revision, linked artifacts, product id |
+| `zensu products list --json` | 0 | Resolve the product before listing features |
+| `zensu features list --product <pid> --json` | 0 | Candidate pick when no feature id given (`--product` required; pages at 20) |
+| `zensu journeys suggest --product <pid>` | 0 | Full feature catalog when the list envelope's `total` exceeds one page |
+| `zensu features get <feature-uuid>` | 1 | Status, revision, linked artifacts, product id (no `--json` flag) |
 | `zensu security validate <id>` | 1, 4 | Release-gate preview + released preflight |
 | `zensu journeys list --product <pid> --json` | 1 | Discover journeys referencing the feature |
 | `zensu journeys health --product <pid> <jid>` | 1 | Journey coverage on the card |

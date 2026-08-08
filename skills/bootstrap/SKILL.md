@@ -70,31 +70,31 @@ Execute these phases in order. Present results to the user after each phase and 
 Execute each step below, presenting results to the user after each.
 
 **Step 1: Review & Refine Features**
-- Review the bootstrapped features with the user (`zensu features list --product <product-id>`)
+- Review the bootstrapped features with the user (`zensu features list --product <product-id>`). The response is a `{data, total, page, perPage}` envelope paginated at 20 and the CLI exposes no page flag — when `total` exceeds the returned `data` length, read the full catalog from `zensu journeys suggest --product <product-id>` (its payload carries every feature) instead of reviewing only the first page.
 - Remove horizontal/implementation features that shouldn't be tracked
 - Split XL-effort features using `zensu subfeatures add <feature-id>` or `zensu features split <feature-id>`
 - Add missing features with `zensu features create`
 - Fix incorrect priorities or security classifications with `zensu features update <feature-id>`
-- After completion: run `zensu products bootstrap-step <vision-id> --step 1`
+- After completion: run `zensu products bootstrap-step <vision-id> 1` (the step is a positional argument, not a `--step` flag)
 
 **Step 2: Define User Journeys**
 - Run `zensu journeys suggest --product <product-id>` to get product context for journey suggestions
 - Propose 3-5 critical user journeys to the user
-- Create approved journeys with `zensu journeys create --product <product-id>` (include title, slug, journey type, priority, persona)
+- Create approved journeys with `zensu journeys create --product <product-id>`: `--title` (required), `--slug`, `--type` (critical|happy_path|edge_case|error_path|onboarding), `--priority` (critical|high|medium|low), `--persona` (free text). Pick `--type` from that enum only — the server rejects any other value.
 - For each journey, add steps with `zensu journeys step <journey-id> --product <product-id>`:
   - Set step order (1-based sequential) via `--step-order`
-  - Link to features via `--feature`
+  - Link to features via `--feature` (the feature **UUID**, not its slug)
   - Set `--interaction-type` (action|navigation|input|validation|output|wait)
   - Mark critical steps with `--critical`
 - Run `zensu journeys health --product <product-id> <journey-id>` on each journey to identify weak links
-- After completion: run `zensu products bootstrap-step <vision-id> --step 2`
+- After completion: run `zensu products bootstrap-step <vision-id> 2`
 
 **Step 3: Deepen Security Setup**
 - Run `zensu security analyze <feature-id>` on all confidential/restricted features
 - Run `zensu security suggest-tests <feature-id>` on high-risk features to identify needed tests
 - Run `zensu security threat-model <feature-id>` on the most critical feature for STRIDE analysis
 - Present the security posture summary to the user
-- After completion: run `zensu products bootstrap-step <vision-id> --step 3`
+- After completion: run `zensu products bootstrap-step <vision-id> 3`
 
 **Step 4: Set Up Tier Availability (Optional)**
 - Ask the user: "Does this product use pricing tiers (e.g. Free/Pro/Enterprise)?"
@@ -107,12 +107,12 @@ Execute each step below, presenting results to the user after each.
      - Medium/low: highest tier only
   4. Run `zensu tiers matrix --product <product-id>` to show the complete matrix
 - If no: skip directly to Step 5
-- After completion: run `zensu products bootstrap-step <vision-id> --step 4` (or `--step 5` if skipping)
+- After completion: run `zensu products bootstrap-step <vision-id> 4` (or `5` if skipping)
 
 **Step 5: Generate CLAUDE.md**
 - Run `zensu doc claude-md --product <product-id> --variant full`
 - Present the generated CLAUDE.md to the user
-- After completion: run `zensu products bootstrap-step <vision-id> --step 5`
+- After completion: run `zensu products bootstrap-step <vision-id> 5`
 
 ### Phase 4: Summary
 

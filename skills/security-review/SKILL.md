@@ -30,9 +30,9 @@ Run a comprehensive security review for a Zensu feature. Guides through classifi
 
 - Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID (KEY-N format, e.g. ZEN-42, or UUID) to review
+- A feature ID to review. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — anything else fails with `invalid feature id (status 400)`. Resolve it via `zensu products list --json` → `zensu features list --product <product-id> --json` (matching `slug` or `number`); that list pages at 20 with no page flag, so when its `total` exceeds the returned `data` length, resolve against `zensu journeys suggest --product <product-id>` instead.
 
-Every command accepts `--json` for machine-readable output; run `zensu security <verb> --help` for the full flag set.
+Most commands accept `--json`, but not all — `zensu security posture` has no `--json` flag and always prints JSON. Run `zensu security <verb> --help` for the actual flag set rather than assuming one.
 
 ## Workflow
 
@@ -116,7 +116,7 @@ Run `zensu security validate <feature-id>` to check if the feature passes all se
 
 If the validation fails, present the blocking violations and guide the user through resolving them.
 
-Optionally, run `zensu security posture --product <product-id>` to show the product-wide security overview.
+Optionally, run `zensu security posture <product-id>` to show the product-wide security overview (the product id is a positional argument — there is no `--product` flag on this command).
 
 ### Summary
 

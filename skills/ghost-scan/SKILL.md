@@ -49,7 +49,7 @@ Execute these phases in order. Present results to the user after each phase and 
 ### Phase 1: Setup & Context
 
 1. Confirm the product ID via `zensu products list`
-2. Run `zensu features list --product <product-id> --compact` to load existing feature slugs
+2. Run `zensu features list --product <product-id> --json` to load existing feature slugs. There is no `--compact` flag. The response is a `{data, total, page, perPage}` envelope **paginated at 20 with no page flag on the CLI** — when `total` exceeds the returned `data` length, load the complete catalog from `zensu journeys suggest --product <product-id>` instead (its `features` array carries every feature with `id` and `slug`); otherwise the dedup set silently covers only the first 20 features
 3. Show existing features to the user: "These features already exist and will not be suggested again"
 4. Run `zensu journeys list --product <product-id>` to load existing journeys for dedup: "These journeys already exist and will not be re-suggested." This feeds the Phase 2b journey-analyst lens and Phase 5.
 5. **Resume check:** Run `zensu ghost candidates <scan-id>` to check an open scan. If a scan in "review" status exists, ask the user whether to resume or start a new scan
@@ -257,8 +257,14 @@ This mirrors `/zensu:bootstrap` Step 2.
 - **Single-component product**, or you just scanned the **last remaining** component of a multi-component one: run this per-component Phase 5 now — the whole feature set exists, so journeys can span it.
 - **One component of a multi-component product with others still unscanned:** do NOT create journeys here. A per-component pass only saw THIS repo, so it can only build component-local journeys — but the highest-value journeys are **cross-component** (e.g. landing → frontend register → backend auth → wiki hand-off), and their downstream features do not exist yet. Instead: keep the Phase 2b draft journeys as raw material (note where you saved them), `log` that journey creation is deferred, and run **Phase 5b** once every component is scanned. Journey health is not required by the default release gate, so deferring blocks nothing.
 
-1. Run `zensu features list --product <product-id> --compact` and build a
-   slug → ZEN-ID map from the just-applied features.
+1. Build a slug → **feature UUID** map from the just-applied features. Run
+   `zensu features list --product <product-id> --json`; when its `total` exceeds
+   the returned `data` length (the endpoint pages at 20 and the CLI exposes no
+   page flag), build the map from `zensu journeys suggest --product <product-id>`
+   instead, whose `features` array carries the whole catalog. A partial map
+   silently drops journey steps, so verify the map size against `total` before
+   continuing. The steps below need the UUID — `feature_id` is a UUID FK and a
+   slug is rejected.
 2. Take the draft journeys consolidated in Phase 2b. Resolve each draft step's
    candidate slug to a real `feature_id` via the map. Drop any step whose slug was
    rejected or not applied, and `log` what was dropped (no silent omission).
@@ -268,9 +274,12 @@ This mirrors `/zensu:bootstrap` Step 2.
    features). The user edits/approves before creation.
 5. On approval, mirror the bootstrap mechanic:
    - `zensu journeys suggest --product <product-id>` for product context.
-   - `zensu journeys create --product <product-id>` per approved journey (title, slug, journey type,
-     priority, persona).
-   - `zensu journeys step <journey-id> --product <product-id>` per step (`--step-order` 1-based, `--feature`,
+   - `zensu journeys create --product <product-id>` per approved journey
+     (`--title` required, `--slug`, `--type` ∈ critical|happy_path|edge_case|error_path|onboarding,
+     `--priority` ∈ critical|high|medium|low, `--persona` free text). Use only
+     those `--type` values — the server rejects anything else.
+   - `zensu journeys step <journey-id> --product <product-id>` per step (`--step-order` 1-based,
+     `--feature` = the feature **UUID** from the map, never a slug,
      `--interaction-type` ∈ action|navigation|input|validation|output|wait,
      `--critical`).
    - `zensu journeys health --product <product-id> <journey-id>` on each created journey; report weak links to the user.
@@ -300,7 +309,7 @@ Discipline: ground every step in code, prefer ≥2 components per journey, and h
 
 ### Phase 6: Summary & Next Steps
 
-1. List created features via `zensu features list --product <product-id> --compact`.
+1. List created features via `zensu features list --product <product-id> --json` (no `--compact` flag; the response pages at 20, so report the envelope's `total` rather than the length of `data`).
 2. Report counts: features created/enriched, tests linked, docs linked, journeys
    created, and journey-health weak links from Phase 5.
 3. **Doc-gap report.** List the created/enriched features with zero docs (empty
@@ -323,16 +332,16 @@ Discipline: ground every step in code, prefer ≥2 components per journey, and h
 | Command | Phase | Purpose |
 |---------|-------|---------|
 | `zensu products list` | 1 | Validate product |
-| `zensu features list` | 1, 5, 6 | Load existing features (dedup); resolve slug → ZEN-ID after apply |
+| `zensu features list` | 1, 5, 6 | Load existing features (dedup); resolve slug → feature UUID after apply. Pages at 20 — fall back to `journeys suggest` for the full catalog |
 | `zensu journeys list` | 1, 5 | Load existing journeys (dedup) |
 | `Agent` (`subagent_type: Explore`) | 2b | Parallel read-only analysis lenses (fan-out) |
 | `zensu ghost scan` | 3 | Create scan with candidates |
 | `zensu ghost candidates` | 1 (resume), 4 | Load candidates |
 | `zensu ghost batch` | 4 | Batch approve/reject candidates in one call |
 | `zensu ghost apply` | 4 | Apply approved candidates (use `--enrich-existing` if product has features) |
-| `zensu journeys suggest` | 5 | Product context for journey suggestions |
+| `zensu journeys suggest` | 1, 5 | Product context for journey suggestions; also the only CLI path to the unpaginated feature catalog |
 | `zensu journeys create` | 5 | Create a discovered journey |
-| `zensu journeys step` | 5 | Add ordered steps linking real feature IDs |
+| `zensu journeys step` | 5 | Add ordered steps linking real feature UUIDs |
 | `zensu journeys health` | 5 | Report weak links on created journeys |
 | `zensu features create` | 6 | Hybrid: create planned-but-unbuilt features from a forward plan doc |
 | `zensu doc claude-md` | 6 | Update CLAUDE.md (optional) |

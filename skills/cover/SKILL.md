@@ -86,8 +86,10 @@ origin checkout. See Critical Conventions.
 
 **0.B — Resolve `<target>`.** Precedence: explicit `<target>` arg → else the default
 `git diff <base>...HEAD` (the working change). A feature id resolves via
-`zensu features get`; a PR number via `gh pr diff`; a glob selects files; free text is
-matched against the diff. Produce the concrete set of changed behaviors to cover.
+`zensu features get <feature-uuid>` (UUID only — a `KEY-N` id or slug fails with
+`invalid feature id (status 400)`, so map it through
+`zensu features list --product <product-id> --json` first); a PR number via
+`gh pr diff`; a glob selects files; free text is matched against the diff. Produce the concrete set of changed behaviors to cover.
 
 **0.C — Probe (per layer).** Detect stacks, test runners, existing test directories +
 naming conventions, and any E2E harness — per `rules/probe.md`. Read 1–2 nearby existing
