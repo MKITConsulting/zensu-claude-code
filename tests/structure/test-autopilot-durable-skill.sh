@@ -9,6 +9,11 @@ has() { grep -qF -- "$2" "$1"; }
 
 has "$AUTO" '--autopilot-begin --run "$RUN_ID"' && check "D1 Autopilot begins durable state before approval" PASS || check "D1 durable begin" FAIL
 has "$AUTO" '<!-- zensu-autopilot:<RUN_ID> -->' && check "D2 approved plan carries an exact run marker" PASS || check "D2 plan marker" FAIL
+has "$AUTO" 'The marker must live inside the plan' && has "$AUTO" 'never in a tool argument' \
+  && has "$AUTO" 'plan content you submit for approval' \
+  && has "$AUTO" 'the plan content itself' \
+  && check "D2a the marker is bound to the plan content, not to an ExitPlanMode argument" PASS \
+  || check "D2a marker placement guidance" FAIL
 has "$AUTO" 'AUTOPILOT-RUN: <RUN_ID>' && check "D3 delegated TDD carries explicit run context" PASS || check "D3 delegated context" FAIL
 has "$AUTO" '--autopilot-event --run "$RUN_ID"' && has "$AUTO" '--autopilot-status' \
   && check "D4 lifecycle uses the closed state API" PASS || check "D4 closed state API" FAIL

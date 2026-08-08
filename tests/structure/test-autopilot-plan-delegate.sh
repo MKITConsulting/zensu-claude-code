@@ -45,8 +45,18 @@ PLAN="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN} -->"
 autopilot_begin_run "$RUN" "$SID" "$PROJECT" >/dev/null || exit 1
 CFG_OFF="$TMP/off.json"; printf '%s\n' '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
 
+# Built from the committed capture of a real PostToolUse:ExitPlanMode payload,
+# so these gate invocations use the shape the harness actually emits rather
+# than the superseded tool_input-only one.
 payload() {
-  PLAN="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))'
+  FIXTURE="$PLUGIN_DIR/tests/structure/fixtures/exitplanmode-posttooluse-payload.json" \
+    PLAN="$1" SID="$2" node -e '
+    const j=JSON.parse(require("fs").readFileSync(process.env.FIXTURE,"utf8"));
+    delete j._fixture;
+    j.session_id=process.env.SID;
+    j.tool_response.plan=process.env.PLAN;
+    process.stdout.write(JSON.stringify(j));
+  '
 }
 invoke() {
   local input="$1" project="$2" config="${3:-$CFG_OFF}" plugin_data="$4"
@@ -349,6 +359,11 @@ if printf '%s' "$OUT_NO_NODE" | grep -qF 'PLAN_GATE_BLOCKED' \
   && ! printf '%s' "$OUT_NO_NODE" | grep -qF 'AskUserQuestion'; then
   check "P12 active pointer plus missing Node or state library fails closed" PASS
 else check "P12 missing durable runtime is not treated as standalone" FAIL; fi
+# P12 is also the owner of the plan hook's tri-state tool_name verdict: with the
+# node shim consumed, that verdict cannot be computed and comes back empty. An
+# empty verdict must fall THROUGH to this fail-closed receipt. A plain equality
+# compare there would exit 0 silently instead, which is exactly what this case
+# catches — do not "simplify" the verdict without re-running it.
 
 ORPHAN_RUNTIME_PAYLOAD="$(payload 'ordinary plan while orphan runtime is missing' orphan_plan_owner)"
 OUT_NO_NODE_ORPHAN="$(invoke_with_disappearing_node "$ORPHAN_RUNTIME_PAYLOAD" "$ORPHAN_PROJECT" "$ORPHAN_DATA")"
@@ -380,8 +395,14 @@ else
   check "P14 plan hook streams JSON payloads over stdin" PASS
 fi
 
-if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$HOOK" \
-  && grep -qF 'LOG_HELPER_Q' "$HOOK"; then
+# Do not pin one spelling of the exclusion computation: what must hold is that
+# the emitter's own env prefix carries an MSYS2_ENV_CONV_EXCL assignment (the
+# ` RUN_ID=` adjacency keeps this scoped to the emitter, since the plan
+# evaluator elsewhere in the hook carries a second, unrelated assignment) and
+# that LOG_HELPER_Q is the name being excluded.
+if grep -qE 'MSYS2_ENV_CONV_EXCL="\$\{?[A-Za-z_][A-Za-z0-9_]*\}?" RUN_ID=' "$HOOK" \
+  && grep -qE 'zensu_msys_env_exclusions[^)]*LOG_HELPER_Q|msys_env_exclusions="LOG_HELPER_Q"' "$HOOK" \
+  && grep -qF 'LOG_HELPER_Q="$3"' "$HOOK"; then
   check "P15 MSYS preserves the already shell-quoted log-helper token" PASS
 else
   check "P15 MSYS preserves the already shell-quoted log-helper token" FAIL

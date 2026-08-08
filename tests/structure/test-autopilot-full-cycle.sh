@@ -274,13 +274,17 @@ PLAN="# Full-cycle fixture
 Exercise the complete durable lifecycle.
 
 <!-- zensu-autopilot:${RUN} -->"
-PLAN_INPUT="$(PLAN="$PLAN" SESSION="$SESSION" node -e '
-  process.stdout.write(JSON.stringify({
-    hook_event_name:"PostToolUse",
-    session_id:process.env.SESSION,
-    tool_name:"ExitPlanMode",
-    tool_input:{plan:process.env.PLAN}
-  }));
+# Built from the committed capture of a real PostToolUse:ExitPlanMode payload,
+# so the end-to-end lifecycle proof crosses the harness boundary in the shape
+# the harness actually emits. A hand-written tool_input-only payload kept this
+# suite green through the contract change that broke every real run.
+PLAN_INPUT="$(FIXTURE="$PLUGIN_DIR/tests/structure/fixtures/exitplanmode-posttooluse-payload.json" \
+  PLAN="$PLAN" SESSION="$SESSION" node -e '
+  const j=JSON.parse(require("fs").readFileSync(process.env.FIXTURE,"utf8"));
+  delete j._fixture;
+  j.session_id=process.env.SESSION;
+  j.tool_response.plan=process.env.PLAN;
+  process.stdout.write(JSON.stringify(j));
 ')"
 
 READY=true

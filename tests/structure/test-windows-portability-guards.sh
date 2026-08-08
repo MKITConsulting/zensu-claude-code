@@ -22,6 +22,7 @@ SESSION_HOOK="$ROOT/hooks/session-start-session-control.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
+PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -411,6 +412,19 @@ if [ "$(grep -cF 'const noFollow = process.platform !== "win32" && Number.isInte
   check "Autopilot secure opens omit unsupported O_NOFOLLOW on Windows" PASS
 else
   check "Autopilot secure opens omit unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The plan-payload reader is the same hardened-open pattern in a requireable
+# module. It belongs in this inventory because the count pins above are
+# per-file and therefore blind to a NEW file carrying a secure open.
+if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$PLAN_PAYLOAD")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(planPath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$PLAN_PAYLOAD")" -eq 1 ] \
+  && grep -qF 'before.dev !== stat.dev || before.ino !== stat.ino' "$PLAN_PAYLOAD" \
+  && grep -qF 'stat.nlink !== 1' "$PLAN_PAYLOAD" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$PLAN_PAYLOAD"; then
+  check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
+else
+  check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

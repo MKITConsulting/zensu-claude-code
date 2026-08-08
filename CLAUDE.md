@@ -133,6 +133,94 @@ receipt predicate; `tests/structure/test-chain-recover.sh` pins the end-to-end b
    is true. The repair records its provenance as a workflow `history` entry inside its own
    transaction — never as a ledger entry.
 
+## Approved-Plan Payload Reader (`hooks/lib/plan-payload-v1.js`)
+
+`plan-approved-delegate.sh` is the single gate that authorizes a durable Autopilot run to
+start writing code, and `plan-payload-v1.js` is the half of it that decides WHICH bytes are
+the approved plan. It is write-gate code, not a utility:
+
+- `PLAN_SOURCES` is a precedence table, and precedence is an authorization decision — the
+  winning source feeds the run-marker match as well as the `approvedPlanSha256` digest, so it
+  decides which run the gate opens. Order is `tool_response.plan` → `tool_response.filePath`
+  → `tool_input.plan` → `tool_input.planFilePath`; a new source belongs BELOW the response
+  entries, and the two `tool_input` entries are legacy. A present-but-empty response tier
+  still DESCENDS to them (F52), deliberately: refusing there would invent a new way to wedge
+  the one gate the response source exists to unwedge, for a payload shape nobody has measured.
+  State the exposure plainly rather than overclaiming — what was measured is narrower than
+  "a model cannot populate `tool_input`": the committed capture simply carried no plan field
+  there. If a harness version ever forwards a model-supplied `plan` or `planFilePath`, that
+  descent becomes a model-writable source. Re-check when the `ExitPlanMode` schema regains a
+  plan field.
+- `readPlanFile` is the only filesystem access the gate performs on payload-supplied input —
+  the hook's own reads (state libraries, the module preflight, the run record) are not.
+  Relaxing any of its checks (absolute path, no NUL, no UNC, `O_NOFOLLOW` with an `lstat`
+  fallback and a dev/ino recheck, regular file, `nlink === 1`, non-empty, 4 MiB ceiling)
+  widens what a payload can make the hook open. It accepts ANY absolute non-UNC path, so its
+  authorization envelope lives entirely in the caller: a consumer must have established
+  ownership, stage, tool binding and caller origin BEFORE calling `readPlanPayload` or
+  `readPlanFile`. `plan-approved-delegate.sh` is the only consumer today.
+  **This hardening has three un-deduplicated twins.** `hooks/lib/zensu-autopilot-state.sh`
+  carries the same `process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)`
+  derivation and the same `lstat`/`fstat` identity recheck inside its bash-embedded `node -e`
+  scripts, which cannot `require` this module. A change to the read hardening must be applied
+  in all four places until a second requireable consumer justifies splitting the generic
+  reader into its own module.
+
+**Three things move together with it.** The module never calls `process.exit`; it throws a
+`PlanPayloadRefusal` carrying a number. (1) `EXIT_CODES` keys are named after the very
+`BLOCK_CODE` they translate into, and (2) the bash `case` in `plan-approved-delegate.sh` is the
+SINGLE translation site from that number to a `BLOCK_CODE`, each of which needs (3) cause prose
+in the hook's `causes` map. Adding a code without its case arm would silently route to
+`PLAN_EVALUATION_UNAVAILABLE`; `test-plan-payload-fallback.sh` F10a fails the build for either
+omission.
+
+The hook keeps the payload ENVELOPE — ownership (6), stage (7), tool binding (18), caller
+origin (19, 17), the run marker (4, 5) and the untyped-throw fallback (9). Be precise about
+which legs are actually pinned: F11c pins `18 → 16 → {19, 17} → sources` — it never compares
+19 and 17 against each other, so swapping those two leaves it green (harmless, since a boolean
+`true` cannot also be a non-boolean). F20/F32 pin that the ownership refusal precedes any
+source read; F11b and F11d pin only that 18 and 7 keep their own block codes, so a reordering
+of 7 would leave both green. The
+response-shape refusal (16) is raised inside `normalizeToolResponse`, which is why F11c
+requires that call to stay a top-level statement between the binding and origin refusals, and
+F51b/F51c prove behaviorally that 17 and 19 still beat an unreadable plan source.
+
+The module path reaches Node as the `PLAN_PAYLOAD_MODULE` environment value after
+`zensu-host-path.sh` translation, never as an argv token — a plugin root spelled with
+whitespace or an apostrophe cannot be transported that way. That constraint originates in
+`test-msys-special-plugin-module-boundaries.sh`, but that canary does NOT execute this hook —
+the guard that enforces it here is F57 in `test-plan-payload-fallback.sh`. An absent or symlinked module is
+refused by a preflight with the existing `RUNTIME_UNAVAILABLE` receipt (F57/F58/F58a), so a
+broken plugin never reaches the evaluator.
+
+`tests/structure/plan-payload-v1.test.js` (node --test, run from
+`test-plan-payload-fallback.sh` F56) pins the source-table order, the field-typing rules, and
+the path-refusal matrix. Three contracts there are easy to break by accident:
+
+- `CONTAINERS` carries both the container names AND their `strict` drift policy, and
+  `readPlanPayload` derives its map from it. Both tables are validated once at load time — a
+  missing `strict`, an unknown `container`, or a `kind` other than `text`/`file` throws inside
+  `require`, which fails closed as `PLAN_EVALUATION_UNAVAILABLE`. Note that the response tier
+  is normalized TWICE on purpose: the hook must call `normalizeToolResponse` itself so refusal
+  16 precedes 19/17 (F11c pins that), so `CONTAINERS.strict` can never refuse from today's
+  call site. It is the contract for a SECOND consumer, not the effective policy site — do not
+  read it as the latter, and do not delete it as dead.
+- `readPlanFile`'s `noFollow` option is a MODE SELECTOR, never a flag mask: only an explicit
+  `0` forces the `lstat` fallback, and anything else takes the platform default. It exists so
+  that fallback can be exercised on a POSIX runner, where the kernel flag would otherwise make
+  the branch dead code. Widening it back to "any integer" would let a caller skip both the
+  `lstat` pre-check and the dev/ino recheck at once.
+- `readPlanPayload` returns one canonical `bytes` buffer beside the decoded `plan`, and the
+  only consumer digests `bytes` unconditionally (`plan-approved-delegate.sh`), so nothing
+  re-encodes invalid UTF-8 and changes `approvedPlanSha256` — F23/F44 are the regressions.
+  A future consumer that digested `plan` instead would reintroduce them.
+
+One deliberate trade-off, recorded so it is not rediscovered as a defect: the module mints the
+NUMBERS, not just the names, even though the consumer owns the process-exit namespace and the
+sibling `chain-recovery-v1.js` returns domain vocabulary instead. It is the cheaper shape here
+because `EXIT_CODES` keys ARE the `BLOCK_CODE` names, which is what makes F10a checkable in both
+directions; the cost is that F10a's disjointness arm is load-bearing rather than decorative.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

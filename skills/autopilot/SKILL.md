@@ -103,7 +103,9 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "
 ```
 
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
-plan passed to `ExitPlanMode`:
+plan content you submit for approval — the same bytes `ExitPlanMode` delivers, not a
+separate copy. The marker must live inside the plan CONTENT, never in a tool argument, so
+that it survives whichever field the harness uses to deliver the approved plan to the gate:
 
 ```markdown
 <!-- zensu-autopilot:<RUN_ID> -->
@@ -291,7 +293,7 @@ gates / validate commands the probe chose, so the user sees exactly what will ru
 `.zensu/autopilot.yaml`, propose committing it (secret-free, shared) — but **never commit
 without the user's explicit OK**. Immediately before `ExitPlanMode`, create the durable run
 with `--autopilot-begin` and include its exact `<!-- zensu-autopilot:<RUN_ID> -->` marker in
-the plan. Do not proceed if either operation fails.
+the plan content itself. Do not proceed if either operation fails.
 
 ### Phase 1 — Build  (autonomous, ZERO questions) — strictly ordered
 

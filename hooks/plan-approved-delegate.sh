@@ -45,6 +45,26 @@ AGENT_CONTEXT_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-agent-context.sh"
 source "$AGENT_CONTEXT_LIB"
 zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
 
+# The plan sources include the generically named tool_response.filePath, so the
+# tool binding is re-verified inside the payload rather than left to the
+# hooks.json matcher alone — the same reason the principal check above
+# re-verifies the event binding. Only an EMPTY verdict continues: it means the
+# verdict could not be computed at all, which at this point can only be a
+# runtime that vanished after the principal check passed (malformed JSON has
+# already exited there, silently, via zensu_hook_is_main_principal). That case
+# falls through to the runtime-unavailable path below and fails closed with a
+# visible receipt. Any other unexpected token is dismissed rather than trusted.
+TOOL_NAME_VERDICT="$(printf '%s' "$INPUT" | node -e '
+  try {
+    const j=JSON.parse(require("fs").readFileSync(0,"utf8")||"{}");
+    process.stdout.write(j.tool_name==="ExitPlanMode"?"match":"mismatch");
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
+case "$TOOL_NAME_VERDICT" in
+  match|"") ;;
+  *) exit 0 ;;
+esac
+
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_hook_session "$INPUT"; then
   emit_autopilot_runtime_blocked
@@ -66,6 +86,11 @@ if [ -n "$PROJECT_ROOT" ]; then
 fi
 unset _zensu_autopilot_hint
 
+# Defence in depth only: the principal gate above already exits 0 when node is
+# unavailable, so this emit cannot fire today. P13 in
+# tests/structure/test-autopilot-plan-delegate.sh owns that silence; the live
+# fail-closed path for a runtime that vanishes later is zensu_bind_hook_session
+# below, owned by P12.
 if [ "$NODE_AVAILABLE" != "true" ]; then
   [ "$AUTOPILOT_STATE_HINT" = true ] && emit_autopilot_runtime_blocked
   exit 0
@@ -78,10 +103,12 @@ if [ ! -r "$AUTOPILOT_STATE_LIB" ] && [ "$AUTOPILOT_STATE_HINT" = true ]; then
 fi
 
 emit_autopilot_context() {
-  local msys_env_exclusions="LOG_HELPER_Q"
-  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
-    msys_env_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_env_exclusions}"
-  fi
+  # The shared helper, not a hand-rolled prepend: a manual "${ambient};NAME"
+  # turns a standalone '*' ambient policy into '*;LOG_HELPER_Q', which is no
+  # longer the documented convert-nothing wildcard. It also emits the trailing
+  # '=' MSYS2 needs for exact name matching and refuses a CR/LF-bearing value.
+  local msys_env_exclusions
+  msys_env_exclusions="$(zensu_msys_env_exclusions LOG_HELPER_Q)" || return 1
   MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" RUN_ID="$1" SESSION_ID="$2" \
     LOG_HELPER_Q="$3" ATTEMPT="$4" RETURN_STAGE="$5" node -e '
     const run=process.env.RUN_ID;
@@ -101,19 +128,23 @@ emit_autopilot_blocked() {
       CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
       SESSION_CONTEXT_UNAVAILABLE:" This session could not be resolved to a Session Control identity, so run ownership could not be established.",
       PLAN_TRANSITION_REJECTED:" The run state refused the PLAN_APPROVED transition; the plan itself was read successfully.",
-      INVALID_PLAN_PAYLOAD:" The ExitPlanMode payload carried neither plan text nor a plan file path, so the approved plan could not be read and the run could not be identified.",
+      INVALID_PLAN_PAYLOAD:" Neither the ExitPlanMode payload nor its tool response carried plan text or a plan file path, so the approved plan could not be read and the run could not be identified.",
       PLAN_MARKER_MISSING_OR_AMBIGUOUS:" The approved plan carries no zensu-autopilot run marker, or more than one, so no single run could be named.",
       PLAN_MARKER_RUN_MISMATCH:" The approved plan names a different run than the active one.",
       OWNER_SESSION_MISMATCH:" This session does not own the active run; only the owning session may approve its plan.",
       PLAN_STAGE_MISMATCH:" The active run is not in a stage that accepts a plan approval.",
-      PLAN_FILE_UNREADABLE:" The payload named a plan file path, but opening or reading it failed.",
+      PLAN_FILE_UNREADABLE:" The payload or its tool response named a plan file path, but opening or reading it failed.",
       PLAN_PAYLOAD_EVALUATION_FAILED:" Reading the approved plan out of the payload threw before any verdict was reached.",
       PLAN_FILE_PATH_REJECTED:" The plan file path is not an acceptable absolute local path.",
       PLAN_FILE_NOT_REGULAR:" The plan file path does not name a regular file.",
       PLAN_FILE_EMPTY:" The plan file exists but is empty, so there is no plan to approve.",
       PLAN_FILE_TOO_LARGE:" The plan file exceeds the accepted size limit.",
       PLAN_FILE_SYMLINK_REJECTED:" The plan file path is a symlink or a multiply-linked file; only a direct regular file is accepted.",
-      PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The payload carries a plan or plan file path field of the wrong type, so neither could be trusted as the approved plan.",
+      PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The payload or its tool response carries a plan or plan file path field of the wrong type, so neither could be trusted as the approved plan.",
+      PLAN_RESPONSE_SHAPE_REJECTED:" The ExitPlanMode tool response is present but is not an object, so the approved plan could not be located in it; this is a harness contract change, not an empty payload.",
+      PLAN_RESPONSE_AGENT_ORIGIN_REJECTED:" The ExitPlanMode tool response declares an agent origin, and only the top-level interactive session may approve a durable run plan.",
+      PLAN_TOOL_BINDING_MISMATCH:" The payload reaching the plan evaluator does not name ExitPlanMode, so the plan fields could belong to a different tool.",
+      PLAN_RESPONSE_ORIGIN_TYPE_REJECTED:" The ExitPlanMode tool response carries an isAgent field that is not a boolean, so the caller origin it claims cannot be trusted either way.",
       PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
     };
     const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
@@ -158,6 +189,28 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       emit_autopilot_runtime_blocked
       exit 0
     fi
+    # The plan reader is a native Node module, so its path is translated for the
+    # host Node once and handed over as an environment value. It must never
+    # travel as an argv token: a plugin root spelled with whitespace or an
+    # apostrophe cannot be transported that way. That constraint originates in
+    # tests/structure/test-msys-special-plugin-module-boundaries.sh, which does
+    # NOT execute this hook — the guard that enforces it here is F57 in
+    # tests/structure/test-plan-payload-fallback.sh.
+    NATIVE_PLUGIN_ROOT="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$CLAUDE_PLUGIN_ROOT")" || {
+      emit_autopilot_runtime_blocked
+      exit 0
+    }
+    PLAN_PAYLOAD_MODULE="${NATIVE_PLUGIN_ROOT}/hooks/lib/plan-payload-v1.js"
+    if [ ! -f "$PLAN_PAYLOAD_MODULE" ] || [ ! -r "$PLAN_PAYLOAD_MODULE" ] || [ -L "$PLAN_PAYLOAD_MODULE" ]; then
+      emit_autopilot_runtime_blocked
+      exit 0
+    fi
+    # Fail closed on the helper's own refusal rather than silently substituting
+    # an empty exclusion list for the ambient policy it exists to preserve.
+    PLAN_PAYLOAD_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_MODULE)" || {
+      emit_autopilot_runtime_blocked
+      exit 0
+    }
     SESSION_ID="$(read_field session_id)"
     source "$SESSION_LIB"
     SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID")" || {
@@ -183,80 +236,39 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     }
     IFS=$'\t' read -r ACTIVE_RUN ACTIVE_OWNER ACTIVE_STAGE ACTIVE_ATTEMPT ACTIVE_RETURN_STAGE <<<"$ACTIVE_META"
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
-      ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" node -e '
+      ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" \
+      MSYS2_ENV_CONV_EXCL="$PLAN_PAYLOAD_MSYS_EXCL" \
+      PLAN_PAYLOAD_MODULE="$PLAN_PAYLOAD_MODULE" node -e '
       const crypto=require("crypto");
-      const fs=require("fs");
-      const nodePath=require("path");
-      const PLAN_FILE_MAX_BYTES=4*1024*1024;
+      const planPayload=require(process.env.PLAN_PAYLOAD_MODULE);
       let raw="";
       process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
       process.stdin.on("end",()=>{ try {
         const input=JSON.parse(raw||"{}");
-        const toolInput=(input && input.tool_input) || {};
+        const toolInput=input && input.tool_input;
         if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
         if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
-        let plan="";
-        let planBuffer=null;
-        if (toolInput.plan!==undefined && toolInput.plan!==null) {
-          if (typeof toolInput.plan!=="string") process.exit(15);
-          plan=toolInput.plan;
-        }
-        if (!plan) {
-          if (toolInput.planFilePath!==undefined && toolInput.planFilePath!==null
-            && typeof toolInput.planFilePath!=="string") process.exit(15);
-          const planPath=typeof toolInput.planFilePath==="string" ? toolInput.planFilePath : "";
-          if (!planPath) process.exit(3);
-          if (planPath.indexOf(String.fromCharCode(0)) >= 0) process.exit(10);
-          if (!nodePath.isAbsolute(planPath)) process.exit(10);
-          if (/^[\\\/]{2}/.test(planPath)) process.exit(10);
-          const noFollow=process.platform!=="win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
-            ? fs.constants.O_NOFOLLOW : 0;
-          const nonBlock=Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
-          let failure=0;
-          let before=null;
-          if (noFollow===0) {
-            try { before=fs.lstatSync(planPath); } catch (_) { process.exit(8); }
-            if (before.isSymbolicLink()) process.exit(14);
-          }
-          let descriptor=null;
-          try {
-            descriptor=fs.openSync(planPath,fs.constants.O_RDONLY|noFollow|nonBlock);
-          } catch (error) {
-            failure=error && (error.code==="ELOOP" || error.code==="EMLINK") ? 14 : 8;
-          }
-          if (descriptor!==null) {
-            try {
-              const stat=fs.fstatSync(descriptor);
-              if (before!==null && (before.dev!==stat.dev || before.ino!==stat.ino)) failure=14;
-              else if (!stat.isFile()) failure=11;
-              else if (stat.nlink!==1) failure=14;
-              else if (stat.size<1) failure=12;
-              else if (stat.size>PLAN_FILE_MAX_BYTES) failure=13;
-              else {
-                const buffer=Buffer.alloc(stat.size);
-                let filled=0;
-                while (filled<stat.size) {
-                  const chunk=fs.readSync(descriptor,buffer,filled,stat.size-filled,filled);
-                  if (chunk<1) break;
-                  filled+=chunk;
-                }
-                if (filled!==stat.size) failure=8;
-                else { planBuffer=buffer; plan=buffer.toString("utf8"); }
-              }
-            } catch (_) { failure=8; }
-            try { fs.closeSync(descriptor); } catch (_) {}
-          }
-          if (failure) process.exit(failure);
-          if (!plan) process.exit(12);
-        }
+        // The tool binding is verified in a separate process above; re-check it
+        // here so the check is atomic with the read of the very fields whose
+        // names other tools also use. It runs before every shape and origin
+        // check so a foreign payload is never described by a receipt written
+        // for an ExitPlanMode one.
+        if (input.tool_name!=="ExitPlanMode") process.exit(18);
+        const toolResponse=planPayload.normalizeToolResponse(input.tool_response);
+        // An origin field of an unexpected type is drift, not a human caller. It
+        // gets its own code: the response IS an object here, so the shape
+        // receipt would describe a payload this is not.
+        if (toolResponse.isAgent!==undefined && typeof toolResponse.isAgent!=="boolean") process.exit(19);
+        if (toolResponse.isAgent===true) process.exit(17);
+        const approved=planPayload.readPlanPayload({toolInput,toolResponse});
+        const plan=approved.plan;
         const matches=[...plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
         if (matches.length!==1) process.exit(4);
         if (process.env.ACTIVE_RUN!==matches[0][1]) process.exit(5);
-        const sha=crypto.createHash("sha256")
-          .update(planBuffer!==null ? planBuffer : Buffer.from(plan,"utf8")).digest("hex");
+        const sha=crypto.createHash("sha256").update(approved.bytes).digest("hex");
         process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
-      } catch (_) { process.exit(9); } });
+      } catch (error) { process.exit(planPayload.exitCodeOf(error) || 9); } });
     ' 2>/dev/null)"
     META_RC=$?
     if [ "$META_RC" -ne 0 ]; then
@@ -274,6 +286,10 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         13) BLOCK_CODE=PLAN_FILE_TOO_LARGE ;;
         14) BLOCK_CODE=PLAN_FILE_SYMLINK_REJECTED ;;
         15) BLOCK_CODE=PLAN_PAYLOAD_FIELD_TYPE_REJECTED ;;
+        16) BLOCK_CODE=PLAN_RESPONSE_SHAPE_REJECTED ;;
+        17) BLOCK_CODE=PLAN_RESPONSE_AGENT_ORIGIN_REJECTED ;;
+        18) BLOCK_CODE=PLAN_TOOL_BINDING_MISMATCH ;;
+        19) BLOCK_CODE=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED ;;
         *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
       emit_autopilot_blocked "$BLOCK_CODE"
@@ -289,8 +305,13 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
     PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
     LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
-    emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_COMMAND" \
-      "$ACTIVE_ATTEMPT" "$ACTIVE_RETURN_STAGE"
+    # The run has already transitioned, so a failed emit must still say
+    # something: returning silently would leave the caller with an armed run and
+    # no directive at all.
+    if ! emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_COMMAND" \
+        "$ACTIVE_ATTEMPT" "$ACTIVE_RETURN_STAGE"; then
+      emit_autopilot_runtime_blocked
+    fi
     exit 0
         ;;
       *)

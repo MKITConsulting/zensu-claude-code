@@ -1,0 +1,20 @@
+{
+  "_fixture": "Captured PostToolUse:ExitPlanMode hook stdin. Claude Code desktop (entrypoint claude-desktop), 2026-08-08, zensu plugin 0.17.1; the harness build string is NOT part of the hook payload and was not captured, so drift must be re-measured rather than diffed against a version. Session-identifying strings and the plan itself are placeholders; the KEY SET is the measured contract, and it is what justifies the tool_response.plan and tool_response.filePath source entries in hooks/plan-approved-delegate.sh. tool_input carries no plan field at all — the approved plan arrives only as tool_response.plan, byte-identical to the file at tool_response.filePath. Provenance of the related claim that tool_input is not model-writable: in a separate session a model DID emit plan and planFilePath as ExitPlanMode arguments and the hook payload still carried neither, which is why the outage looked like a model error. That observation comes from a conversation transcript, not from a committed capture, so treat it as strong but unpinned; re-measure tool_input for a model-supplied plan key before relying on it. isAgent was observed ONLY as false, on the main thread; its value for a subagent-originated call was never captured. The hook nevertheless refuses a response with isAgent === true (PLAN_RESPONSE_AGENT_ORIGIN_REJECTED) and refuses a non-boolean isAgent as origin-type drift (PLAN_RESPONSE_ORIGIN_TYPE_REJECTED), so a main-thread payload that ever carried isAgent: true would wedge the gate — re-measure this field when checking for harness drift. Pinned by F51 and F0a in tests/structure/test-plan-payload-fallback.sh.",
+  "session_id": "__SESSION_ID__",
+  "transcript_path": "__TRANSCRIPT_PATH__",
+  "cwd": "__CWD__",
+  "prompt_id": "__PROMPT_ID__",
+  "permission_mode": "auto",
+  "effort": { "level": "max" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "ExitPlanMode",
+  "tool_input": { "_targetMode": "auto" },
+  "tool_response": {
+    "plan": "__PLAN_TEXT__",
+    "isAgent": false,
+    "filePath": "__PLAN_FILE_PATH__",
+    "hasTaskTool": true
+  },
+  "tool_use_id": "__TOOL_USE_ID__",
+  "duration_ms": 1
+}
