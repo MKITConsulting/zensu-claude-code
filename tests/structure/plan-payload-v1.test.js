@@ -33,9 +33,10 @@ function refusalOf(run) {
 
 const CAPABILITY_CODES = new Set(['EPERM', 'EACCES', 'ENOSYS', 'EOPNOTSUPP', 'ENOTSUP']);
 
-// Returns null when the platform cannot perform the operation, and re-throws
-// anything that is not a capability refusal so a broken fixture cannot look
-// like a platform limitation and silently delete the assertions behind it.
+// Returns null when the operation SUCCEEDED, and the errno string when the
+// platform cannot perform it. Anything that is not a capability refusal is
+// re-thrown, so a broken fixture cannot look like a platform limitation and
+// silently delete the assertions behind it.
 function attempt(make) {
   try {
     make();
@@ -204,7 +205,10 @@ test('the path-refusal matrix covers every rejected file shape', (t) => {
   // silently broken reporter cannot read as full coverage.
   t.diagnostic('ARM-PROBE ok');
   const readerSource = fs.readFileSync(MODULE_PATH, 'utf8');
-  assert.match(readerSource, /fs\.constants\.O_NONBLOCK/);
+  // Pin the BINDING, not just the identifier: a refactor leaving nonBlock at 0
+  // while the literal survives in a comment would satisfy a loose match and
+  // reinstate the hang.
+  assert.match(readerSource, /^  const nonBlock = Number\.isInteger\(fs\.constants\.O_NONBLOCK\) \? fs\.constants\.O_NONBLOCK : 0;$/m);
   assert.match(readerSource, /fs\.openSync\(planPath, fs\.constants\.O_RDONLY \| noFollow \| nonBlock\)/);
 
   assert.equal(
@@ -295,6 +299,23 @@ test('the noFollow seam selects a mode, it never accepts a caller flag mask', (t
   }
   const source = fs.readFileSync(MODULE_PATH, 'utf8');
   assert.match(source, /^  const noFollow = \w+\.noFollow === 0 \? 0 : defaultNoFollowFlag\(\);$/m);
+});
+
+test('a short read is refused, never digested as a zero-padded buffer', () => {
+  const target = fixture('short-read.md', 'plan bytes for a short read\n');
+  const realReadSync = fs.readSync;
+  try {
+    // Deliver one byte less than asked for. Without the filled !== stat.size
+    // arm the reader would digest a buffer whose tail is zeros — bytes that are
+    // not the file's, which is the integrity class F23/F44 exist to protect.
+    fs.readSync = function shortReadSync(descriptor, buffer, offset, length, position) {
+      return realReadSync.call(fs, descriptor, buffer, offset, Math.max(0, length - 1), position);
+    };
+    assert.equal(refusalOf(() => payload.readPlanFile(target)), CODES.PLAN_FILE_UNREADABLE);
+  } finally {
+    fs.readSync = realReadSync;
+  }
+  assert.ok(payload.readPlanFile(target).equals(Buffer.from('plan bytes for a short read\n', 'utf8')));
 });
 
 test('a multi-byte text source is digested as UTF-8, not as a single-byte encoding', () => {

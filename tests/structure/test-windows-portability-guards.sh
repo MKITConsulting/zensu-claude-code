@@ -419,6 +419,7 @@ fi
 # per-file and therefore blind to a NEW file carrying a secure open.
 if [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$PLAN_PAYLOAD")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(planPath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$PLAN_PAYLOAD")" -eq 1 ] \
+  && [ "$(grep -cF 'const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$PLAN_PAYLOAD")" -eq 1 ] \
   && grep -qF 'before.dev !== stat.dev || before.ino !== stat.ino' "$PLAN_PAYLOAD" \
   && grep -qF 'stat.nlink !== 1' "$PLAN_PAYLOAD" \
   && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$PLAN_PAYLOAD"; then

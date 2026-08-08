@@ -396,16 +396,23 @@ else
 fi
 
 # Do not pin one spelling of the exclusion computation: what must hold is that
-# the emitter's own env prefix carries an MSYS2_ENV_CONV_EXCL assignment (the
-# ` RUN_ID=` adjacency keeps this scoped to the emitter, since the plan
-# evaluator elsewhere in the hook carries a second, unrelated assignment) and
-# that LOG_HELPER_Q is the name being excluded.
-if grep -qE 'MSYS2_ENV_CONV_EXCL="\$\{?[A-Za-z_][A-Za-z0-9_]*\}?" RUN_ID=' "$HOOK" \
-  && grep -qE 'zensu_msys_env_exclusions[^)]*LOG_HELPER_Q|msys_env_exclusions="LOG_HELPER_Q"' "$HOOK" \
-  && grep -qF 'LOG_HELPER_Q="$3"' "$HOOK"; then
+# the emitter's own env prefix carries an MSYS2_ENV_CONV_EXCL assignment and
+# that LOG_HELPER_Q is the name being excluded. The greps run against the
+# emitter's BODY only — whole-file matches would let an unrelated line elsewhere
+# in the hook satisfy them — and the variable interpolated into the prefix must
+# be the same one the exclusion was computed into, so an emptying assignment
+# between the two cannot slip through.
+P15_BODY="$(sed -n '/^emit_autopilot_context() {/,/^}/p' "$HOOK")"
+P15_NAME="$(printf '%s\n' "$P15_BODY" \
+  | sed -n 's/.*MSYS2_ENV_CONV_EXCL="\$[{]\{0,1\}\([A-Za-z_][A-Za-z0-9_]*\)[}]\{0,1\}" RUN_ID=.*/\1/p' \
+  | head -1)"
+if [ -n "$P15_NAME" ] \
+  && printf '%s\n' "$P15_BODY" | grep -qE "^[[:space:]]*(local[[:space:]]+)?${P15_NAME}=(\"\\\$\(zensu_msys_env_exclusions[^)]*LOG_HELPER_Q\)\"|\"LOG_HELPER_Q\")" \
+  && [ "$(printf '%s\n' "$P15_BODY" | grep -cE "^[[:space:]]*(local[[:space:]]+)?${P15_NAME}=")" -eq 1 ] \
+  && printf '%s\n' "$P15_BODY" | grep -qF 'LOG_HELPER_Q="$3"'; then
   check "P15 MSYS preserves the already shell-quoted log-helper token" PASS
 else
-  check "P15 MSYS preserves the already shell-quoted log-helper token" FAIL
+  check "P15 emitter carries no single MSYS2_ENV_CONV_EXCL assignment excluding LOG_HELPER_Q (name='${P15_NAME}')" FAIL
 fi
 
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

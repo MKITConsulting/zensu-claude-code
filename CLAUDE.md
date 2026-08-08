@@ -165,6 +165,14 @@ the approved plan. It is write-gate code, not a utility:
   scripts, which cannot `require` this module. A change to the read hardening must be applied
   in all four places until a second requireable consumer justifies splitting the generic
   reader into its own module.
+  One recorded, currently-inert exposure: `readPlanFile` distinguishes six filesystem
+  conditions by code, and each becomes distinct receipt prose the model sees, so a source that
+  can NAME a path turns this gate into an existence/shape oracle over arbitrary absolute
+  paths. Today only the harness populates the file sources, and the refusal is reached only
+  after ownership, stage, tool binding and origin. If the `ExitPlanMode` schema ever regains a
+  model-writable plan field, collapse the file-shape codes to a single `PLAN_FILE_UNREADABLE`
+  whenever the winning source is a `tool_input` entry — `readPlanPayload` already returns the
+  winner for exactly that decision.
 
 **Three things move together with it.** The module never calls `process.exit`; it throws a
 `PlanPayloadRefusal` carrying a number. (1) `EXIT_CODES` keys are named after the very

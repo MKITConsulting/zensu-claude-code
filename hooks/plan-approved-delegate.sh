@@ -89,8 +89,8 @@ unset _zensu_autopilot_hint
 # Defence in depth only: the principal gate above already exits 0 when node is
 # unavailable, so this emit cannot fire today. P13 in
 # tests/structure/test-autopilot-plan-delegate.sh owns that silence; the live
-# fail-closed path for a runtime that vanishes later is zensu_bind_hook_session
-# below, owned by P12.
+# fail-closed path for a runtime that vanishes later is the
+# zensu_bind_hook_session call above, owned by P12.
 if [ "$NODE_AVAILABLE" != "true" ]; then
   [ "$AUTOPILOT_STATE_HINT" = true ] && emit_autopilot_runtime_blocked
   exit 0
@@ -128,6 +128,7 @@ emit_autopilot_blocked() {
       CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
       SESSION_CONTEXT_UNAVAILABLE:" This session could not be resolved to a Session Control identity, so run ownership could not be established.",
       PLAN_TRANSITION_REJECTED:" The run state refused the PLAN_APPROVED transition; the plan itself was read successfully.",
+      PLAN_DIRECTIVE_UNDELIVERED:" The approval already landed and the run is armed at AWAIT_TDD, but the delegated-TDD directive could not be rendered. The state runtime is intact: do not repair it, do not replace the run, and do not infer the directive. Start a new session and follow the SessionStart resume directive for this run.",
       INVALID_PLAN_PAYLOAD:" Neither the ExitPlanMode payload nor its tool response carried plan text or a plan file path, so the approved plan could not be read and the run could not be identified.",
       PLAN_MARKER_MISSING_OR_AMBIGUOUS:" The approved plan carries no zensu-autopilot run marker, or more than one, so no single run could be named.",
       PLAN_MARKER_RUN_MISMATCH:" The approved plan names a different run than the active one.",
@@ -307,10 +308,12 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
     # The run has already transitioned, so a failed emit must still say
     # something: returning silently would leave the caller with an armed run and
-    # no directive at all.
+    # no directive at all. It gets its OWN code rather than the runtime receipt,
+    # which would claim the state runtime is broken and send an operator toward
+    # a repair that is both unnecessary and destructive here.
     if ! emit_autopilot_context "$RUN_ID" "$SESSION_ID" "$LOG_COMMAND" \
         "$ACTIVE_ATTEMPT" "$ACTIVE_RETURN_STAGE"; then
-      emit_autopilot_runtime_blocked
+      emit_autopilot_blocked PLAN_DIRECTIVE_UNDELIVERED
     fi
     exit 0
         ;;

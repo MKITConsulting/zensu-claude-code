@@ -88,10 +88,12 @@
 # Every refusal is checked to leave the run record byte-identical. The
 # additional "no standalone ask-first directive" assertion belongs to the
 # refuses_with helper; the cases that carry their own oracle (F20, F32, F33,
-# F46, F51, F51a, F51b, F51c) assert the receipt code and the run record only,
-# while F55 and F58 assert the directive explicitly. F20a is narrower still: its
-# whole oracle is byte-equality with F20's receipt, so it inherits F20's code
-# assertion and does not re-check the run record itself.
+# F46, F51, F51a, F51b, F51c) do not assert it — several of them assert MORE
+# than the code and the run record instead (F33 an absence, F51/F51a receipt
+# prose, F51b/F51c the absence of PLAN_FILE_UNREADABLE) — while F55 and F58
+# assert the directive explicitly. F20a is narrower still: its whole oracle is
+# byte-equality with F20's receipt, so it inherits F20's code assertion and does
+# not re-check the run record itself.
 #
 # F24-F51 exist because the harness stopped populating tool_input for
 # ExitPlanMode: the approved plan now arrives as tool_response.plan, with
@@ -1339,7 +1341,7 @@ fi
 # an exit status is not enough: node --test exits 0 for a file with no cases at
 # all. The TAP trailer supplies a case floor, and the floor counts `# tests`
 # rather than `# pass` so a legitimate platform skip does not fail the gate.
-MODULE_TEST_FLOOR=20
+MODULE_TEST_FLOOR=22
 if node --test --test-reporter=tap "$MODULE_TEST" >"$RAW_TMP/module-unit.out" 2>&1; then
   UNIT_TESTS="$(awk '/^# tests /{print $3; exit}' "$RAW_TMP/module-unit.out")"
   UNIT_FAIL="$(awk '/^# fail /{print $3; exit}' "$RAW_TMP/module-unit.out")"
