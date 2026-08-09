@@ -29,9 +29,9 @@ Implement a tracked Zensu feature end-to-end. Loads feature context and security
 
 - Zensu CLI installed (`curl -fsSL https://zensu.dev/install.sh | sh`) and on `PATH`
 - Authenticated: `zensu auth login` (check with `zensu auth status`)
-- A feature ID (KEY-N format, e.g. ZEN-42, or UUID) to implement
+- A feature ID to implement. The user may name it as `KEY-N` (e.g. `ZEN-42`) or a slug, but **every `<feature-id>` CLI argument takes the feature UUID** — a `KEY-N` id or a slug fails with `invalid feature id (status 400)`. Resolve it first (see Step 1).
 
-Every command accepts `--json` for machine-readable output; run `zensu <noun> <verb> --help` for the full flag set.
+Most commands accept `--json`, but not all: `zensu features get` and `zensu security posture` have no `--json` flag and always print JSON. Run `zensu <noun> <verb> --help` for the actual flag set rather than assuming one.
 
 ## Workflow
 
@@ -39,8 +39,8 @@ Every command accepts `--json` for machine-readable output; run `zensu <noun> <v
 
 ### Step 1: Load Feature Context
 
-1. Ask the user for the feature ID
-2. Run `zensu features get <feature-id> --json` to load the full feature details (title, description, status, priority, product, component, security classification). The JSON response includes the `product_id` and `component_id` (when set) that Step 5 needs.
+1. Ask the user for the feature ID. If it is not a UUID, resolve it: `zensu products list --json` → the product whose `feature_key` matches the `KEY` prefix → `zensu features list --product <product-id> --json`, then match `slug` or `number`. That list is paginated at 20 (`{data, total, page, perPage}`) and the CLI has no page flag, so when `total` exceeds the returned `data` length, resolve against `zensu journeys suggest --product <product-id>` instead — its `features` array carries every feature with `id`, `slug`, and `number`.
+2. Run `zensu features get <feature-uuid>` to load the full feature details (title, description, status, priority, product, component, security classification). It always prints JSON and has no `--json` flag. The response includes the `product_id` and `component_id` (when set) that Step 5 needs.
 3. Run `zensu security analyze <feature-id>` to load the security context (classification, data sensitivity, OWASP tags, compliance requirements, score)
 4. Run `zensu mocks list <feature-id>` to discover per-feature UI mocks. For each **HTML** mock, pull its markup with `zensu mocks get <feature-id> <mock-id> --raw` and keep it as the visual/structural target the implementation must match. For **image** mocks, note their titles and that a visual reference exists (the raw bytes are not actionable as text). If no mocks are returned, this feature has none — continue normally; mocks are optional context, never a blocker.
 5. Run `zensu design context <product-id>` to load the product/component design system (Design.md guidance + shared CSS + image-asset references), taking `<product-id>` from the `product_id` in Step 2's JSON output; when that response also carries a `component_id`, add `--component <component-id>`. The implementation must conform to this design system. If the product has no design context, continue normally; the design system is optional context, never a blocker.

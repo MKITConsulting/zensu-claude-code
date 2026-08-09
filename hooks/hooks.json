@@ -42,7 +42,8 @@
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/pre-bash-source-write-gate.sh\"",
+            "timeout": 60
           },
           {
             "type": "command",

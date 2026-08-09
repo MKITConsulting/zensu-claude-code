@@ -81,10 +81,25 @@ payload() {
 classify() {
   node -e 'let s="";process.stdin.on("data",c=>s+=c);process.stdin.on("end",()=>{s=s.trim();if(!s){process.stdout.write("ALLOW");return;}try{const j=JSON.parse(s);const d=j.hookSpecificOutput&&j.hookSpecificOutput.permissionDecision;process.stdout.write(d==="deny"?"DENY":(d||"OTHER"));}catch(_){process.stdout.write("BADJSON");}})'
 }
+# The unbound hook path must be ENFORCED, not inherited. Without the scrub the
+# caller's own ZENSU_* bind a real session (so $PROJ itself reads as an escape and
+# every ALLOW case fails), or an existing plugin-data store makes the session
+# "not unregistered" and the hook denies EVERYTHING — under which D1/D3/D6 would
+# pass with no write rule having run at all.
 gate() {
-  payload "$1" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
+  payload "$1" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_BASH_WRITE_GATE -u ZENSU_MCP_GATE \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$WORK/plugin-data" \
     ZENSU_CONFIG="$WORK/no-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | classify
 }
+gate_reason() {
+  payload "$1" | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT -u ZENSU_BASH_WRITE_GATE -u ZENSU_MCP_GATE \
+    CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$WORK/plugin-data" \
+    ZENSU_CONFIG="$WORK/no-config.json" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null
+}
+mkdir -p "$WORK/plugin-data"
+chmod 700 "$WORK/plugin-data"
 
 log ""
 log "▸ Deterministic hook-contract assertions (real PreToolUse(Bash) payloads)"
@@ -93,6 +108,19 @@ log "▸ Deterministic hook-contract assertions (real PreToolUse(Bash) payloads)
 [ "$(gate 'cd ../sib && printf x >> src/lib.ts')" = "DENY" ] && check "D3 worktree/project escape -> DENY" PASS || check "D3 worktree/project escape -> DENY" FAIL
 [ "$(gate 'ZENSU_BASH_WRITE_GATE=off printf x >> src/app.ts')" = "ALLOW" ] && check "D4 escape-hatch -> ALLOW" PASS || check "D4 escape-hatch -> ALLOW" FAIL
 [ "$(gate 'echo hi > notes.md')" = "ALLOW" ]     && check "D5 non-source target -> ALLOW" PASS || check "D5 non-source target -> ALLOW" FAIL
+# Rule (C), driven from a real temp project against a hook with no test-owned
+# Session Control baseline. The same DENY/ALLOW pair is pinned on the unbound path
+# by W123/W124 in tests/structure/test-bash-source-write-gate.sh; what this adds is
+# the end-to-end shape — a throwaway checkout, a real payload, no fixture scaffolding.
+[ "$(gate "git -C $SIB add .")" = "DENY" ]       && check "D6 git mutation escaping the project -> DENY" PASS || check "D6 git mutation escaping the project -> DENY" FAIL
+[ "$(gate 'git add -A')" = "ALLOW" ]             && check "D7 git mutation inside the project -> ALLOW" PASS || check "D7 git mutation inside the project -> ALLOW" FAIL
+[ "$(gate "git -C $SIB status")" = "ALLOW" ]     && check "D8 git read on a foreign repo -> ALLOW" PASS || check "D8 git read on a foreign repo -> ALLOW" FAIL
+# A bare DENY does not prove rule (C) ran — a binding failure denies too. Assert
+# the reason names the foreign repo and the escape.
+D6_REASON="$(gate_reason "git -C $SIB add .")"
+{ printf '%s' "$D6_REASON" | grep -qF "$SIB" && printf '%s' "$D6_REASON" | grep -qF "OUTSIDE this session's"; } \
+  && check "D9 the D6 deny is the rule-(C) verdict, not a binding failure" PASS \
+  || check "D9 D6 deny reason (got '$D6_REASON')" FAIL
 
 if [ "$MODE" = "--offline" ]; then
   log ""
@@ -137,7 +165,7 @@ log "Running (timeout ${TIMEOUT}s) claude --print: bash append to a tracked sour
 
 if session_unavailable "$CAPTURED"; then
   log "  SKIP  live — claude session unavailable: $(head -c 100 "$CAPTURED" 2>/dev/null | tr '\n' ' ')"
-  log "         deterministic D1-D5 above stand; re-run when the API is available"
+  log "         the deterministic asserts above stand; re-run when the API is available"
 else
   check "L1 claude --print produced a real session reply (plugin loaded, hook active)" PASS
 
