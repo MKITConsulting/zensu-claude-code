@@ -58,12 +58,31 @@
 // Finally, `worktree remove|move` given a bare worktree NAME rather than a path
 // is unjudgeable — git resolves the name against a worktree list this parser
 // deliberately never reads — so that spelling passes.
+// Three more are specific to Windows, where the gate compares a project root MSYS
+// already converted against a payload cwd and command tokens it never touched (see
+// msysToDrive below). It assumes the MSYS mount convention instead of probing
+// MSYSTEM, so on a win32 host whose shell is not Git Bash the shell would read
+// `/d/a/x` against a different drive than this does. The drive prefix is rewritten
+// before `..` resolution, so `/d/../a/x` clamps at the drive root — the same
+// location the pre-fix drive-relative splice produced, so unchanged rather than
+// new. And drive-relative `D:rel` on the project's own drive resolves against the
+// base and reads as in-project, so it is allowed even though the shell may resolve
+// it elsewhere.
 // All accepted rare-idiom gaps: this is a convention-nudge with an env escape
 // hatch, not a security boundary.
 
 const path = require("path");
 const fs = require("fs");
 const { execFileSync } = require("child_process");
+// The ONLY sibling require in this file, and a deliberate one: the MSYS drive
+// rule has to be identical to the one the session-control path boundary applies,
+// and a shared total function is the way to guarantee that instead of a
+// hand-copy held by a lockstep pin. The module is 52 lines, side-effect-free, and
+// already required by four peers in this directory. If it were missing the parser
+// would fail to load and its hook would deny — the fail-closed direction, and the
+// same posture tests/structure/test-msys-runtime-boundaries.sh already pins for
+// the sibling MSYS helper.
+const { msysDrivePrefix } = require("./claude-path-v1.js");
 
 const SRC = new Set(
   "rs ts tsx js jsx mjs cjs py java kt kts go rb c cc cpp cxx h hh hpp cs php swift scala vue svelte".split(" ")
@@ -136,6 +155,114 @@ function stripSlash(p) {
   return p && p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") : p;
 }
 
+// Git Bash and the native Windows Node this hook launches spell the same
+// absolute path in two namespaces, and only ONE side is converted: MSYS rewrites
+// an EXPORTED variable — which is why `CLAUDE_PROJECT_DIR` arrives as
+// `D:\a\proj`, and why the hook has to exclude CLAUDE_ENV_FILE from that
+// conversion by hand — but it never touches the payload cwd or a command token,
+// both of which reach us over stdin still spelled `/d/a/proj`. `path.resolve`
+// does not bridge the two: on win32 a leading `/` is drive-RELATIVE, so the
+// whole POSIX path is spliced under the current drive (`D:\d\a\proj`). The
+// session's own root then compares as an escape, and rule (C) denies every git
+// verb inside it while rule (B) denies every new-file write. Rewriting the MSYS
+// drive prefix before any resolution is what keeps both spellings comparable.
+//
+// `isWindows` is a parameter rather than a `process.platform` read inside the
+// function so the unit layer can drive both branches from any host. On POSIX
+// this is a no-op by construction: there `/d/a/x` is a legitimate path, not a
+// drive. The drive letter is upper-cased to match the spelling MSYS produces,
+// so a deny reason cannot quote one location in two namespaces. Purely lexical,
+// like every other resolution here — no filesystem probe.
+//
+// MSYS_DRIVE is a deliberate HAND-COPY of the MSYS branch in
+// claude-path-v1.js's `msysDrivePrefix`, the SHARED rule — this file deliberately
+// keeps no copy of it. That module's `normalizeHostPathInput` layers a
+// fail-closed-by-THROWING policy on top for the session-control trust boundary it
+// was written for; that policy is wrong here, because this parser RETURNS a deny
+// reason and an exception would exit non-zero, making the hook deny every Bash
+// call in the session rather than the one command. `/var/folders/x` — a DEFAULT
+// entry of the temp list below — is one of the spellings it throws on, so the
+// distinction is not theoretical. Sharing the total function and declining the
+// policy is what lets one rule serve both. W3c pins that every resolution site
+// still routes through this adapter; W3d pins that no private copy reappears.
+//
+// Leaving an unconverted token in its raw spelling changes no verdict: every
+// rooted spelling that module's policy rejects resolves OUTSIDE the session root,
+// so `within()` reports an escape for it. Whether the escape is then DENIED is a
+// separate question this function does not decide — `/tmp/x` and `/var/folders/x`
+// are members of the default temp list, so `isTemp()` allows them by design and
+// always did; only a spelling outside every temp root, such as a complete UNC, is
+// actually denied. The one spelling where the raw pass-through is not fail-closed
+// is drive-relative `D:rel`: on the project's own drive path.resolve models it
+// against the base, so it lands inside and is allowed, and if the shell's real
+// cwd on that drive is elsewhere the write escapes. That behavior is unchanged by
+// this normalizer (`D:rel` has no leading slash, so the rule never sees it) and is
+// pinned in git-repo-escape.test.js so the judgment stays visible.
+//
+// This rule's accepted gaps are stated in the header block at the top of the file,
+// which is the window W192 actually reads — do not restate them here, or one copy
+// will drift unpinned. Two notes that belong with the code instead: narrowing the
+// guard to `process.platform === "win32" && !!process.env.MSYSTEM` is NOT a safe
+// unilateral fix — if MSYSTEM does not reach the native child it would restore the
+// all-deny defect, so it needs a Windows host to settle. And this file still holds
+// two MSYS drive rules of its own: the ungated, lower-casing `controlPathNamespace`
+// pair below, which serve the separate CLAUDE_ENV_FILE comparison namespace and are
+// deliberately NOT unified with the shared one. W3d pins that the count stays two.
+//
+// The boolean parameter is kept rather than the module's platform string so the
+// call sites and the unit suite read unchanged.
+function msysToDrive(value, isWindows) {
+  return msysDrivePrefix(value, isWindows ? "win32" : "posix");
+}
+const IS_WINDOWS = process.platform === "win32";
+
+// A temp entry that must never become a carve-out, for either of two reasons.
+// A whole VOLUME exempts everything on it, and `TEMP_SAFE` cannot catch that on
+// win32: a root on ANOTHER drive does not lexically contain the project, so `C:\`
+// would survive while the project sits on `D:` and carve out that entire drive —
+// user profile and sibling checkouts included — with no bypass-ledger entry. A
+// DRIVE-RELATIVE entry (`C:`, `C:rel`) carries no root at all, so node resolves it
+// against that drive's own current directory, an arbitrary location this parser
+// cannot know; the carve-out would then point somewhere nobody declared.
+// `filter(Boolean)` does not remove those — `Boolean("C:")` is true.
+// The caller applies this predicate at BOTH stages of the TEMP pipeline because
+// neither stage sees every unsafe entry: drive-relative survives only until
+// `path.resolve` fully qualifies it away, so it can be caught only BEFORE, while a
+// RELATIVE entry such as `..` or `.` becomes a root only after resolving against
+// the process cwd, so it can be caught only AFTER. A drive root spelled `/c`
+// becomes `C:/` at the raw stage and is therefore caught at either.
+// Takes the path implementation so the win32 judgment is drivable from POSIX.
+function isUnsafeTempEntry(value, pathImpl) {
+  if (!value) return false;
+  if (pathImpl.sep === "\\" && /^[A-Za-z]:(?![\\/])/.test(value)) return true;
+  return pathImpl.parse(value).root === value;
+}
+
+// ZENSU_BSWGATE_TEMP_DIRS is a LIST, and on Windows both list conventions reach
+// us: MSYS converts an exported POSIX `:` list, while an operator may supply a
+// native one — `;`-separated, entries drive-qualified with either separator.
+// (`hooks/lib/zensu-host-path.sh` renders drive-qualified FORWARD-slash paths and
+// is not wired to this variable; it is the shape to expect, not a producer of it.)
+// A plain `.split(":")` shreds a drive-qualified entry into `["D", "\\a\\tmp"]`,
+// so the intended root never enters TEMP at all and the rule (B) carve-out
+// silently stops applying. A colon separates entries EXCEPT when it is a drive
+// colon, which sits at index 1 of an entry and follows a single letter.
+function splitTempList(value, isWindows) {
+  if (!isWindows) return value.split(":");
+  const out = [];
+  for (const chunk of value.split(";")) {
+    let start = 0;
+    for (let i = 0; i < chunk.length; i++) {
+      if (chunk[i] !== ":") continue;
+      if (i - start === 1 && /[A-Za-z]/.test(chunk[start])) continue;
+      out.push(chunk.slice(start, i));
+      start = i + 1;
+    }
+    out.push(chunk.slice(start));
+  }
+  return out;
+}
+
 function unquote(t) {
   return t.replace(/^['"]+|['"]+$/g, "");
 }
@@ -169,7 +296,8 @@ function dryRun(args, alsoDry) {
 // lattice is unit-testable without spawning this file with a PAYLOAD envelope.
 // `resolve(base, value)` is supplied by the caller so path resolution keeps ONE
 // definition shared with rule (B). Nothing here touches the filesystem.
-function gitTargets(args, base, resolve) {
+function gitTargets(args, base, resolve, isWindows) {
+  const windows = isWindows === undefined ? IS_WINDOWS : isWindows;
   let repo = base;
   let sub = "";
   let subIndex = -1;
@@ -240,8 +368,16 @@ function gitTargets(args, base, resolve) {
   // against a foreign `repo` would deny a command that actually removes a tree
   // elsewhere, teaching the escape hatch for no gain. Nor is a token the shell
   // has yet to expand. Only literal path spellings become candidates.
+  // On Windows a path spelling need not contain a forward slash at all, and the
+  // backslash arm stays win32-only on purpose: a POSIX filename may legally
+  // contain `\`, and treating one as a path would deny a bare worktree NAME. This
+  // matters more since the namespace fix: the deny reason now quotes the correctly
+  // resolved native path, so without this arm re-issuing the command with the very
+  // spelling the gate just printed would pass.
   const isPathish = (t) =>
-    !UNEXPANDED.test(t) && (t.indexOf("/") !== -1 || t === "." || t === ".." || t === "~");
+    !UNEXPANDED.test(t) && (t.indexOf("/") !== -1
+      || (windows && (t.indexOf("\\") !== -1 || /^[A-Za-z]:/.test(t)))
+      || t === "." || t === ".." || t === "~");
   const pathRaw = sub === "worktree" && /^(remove|move)$/.test(firstOperand(flags))
     ? operands.filter((t) => t !== "--" && t.charAt(0) !== "-").slice(1).filter(isPathish)
     : [];
@@ -495,7 +631,7 @@ function main() {
   // The payload cwd is host-supplied metadata, not a model-issued token, so
   // resolving it does not weaken the lexical rule that governs command tokens.
   function canonical(p) {
-    const abs = stripSlash(path.resolve(p));
+    const abs = stripSlash(path.resolve(msysToDrive(p, IS_WINDOWS)));
     try {
       return stripSlash(fs.realpathSync.native(abs));
     } catch (e) {
@@ -518,11 +654,22 @@ function main() {
   // customization seam, also used by the test harness for deterministic paths.
   const tempOverride = process.env.ZENSU_BSWGATE_TEMP_DIRS;
   const TEMP = (tempOverride !== undefined
-    ? tempOverride.split(":")
+    ? splitTempList(tempOverride, IS_WINDOWS)
     : [process.env.TMPDIR || "", "/tmp", "/private/tmp", "/var/folders"]
   )
     .filter(Boolean)
-    .map((p) => stripSlash(path.resolve(p)));
+    // Judge the RAW entry as well as the resolved one: neither stage sees every
+    // unsafe spelling. `path.resolve` fully qualifies its output, so a
+    // drive-relative `C:` would reach the second filter already turned into
+    // whatever that drive's current directory is and pass as an ordinary path —
+    // that arm can fire only here. A RELATIVE entry such as `..` is the opposite:
+    // it becomes a root only after resolving, so it can be caught only below. A
+    // drive root spelled `/c` becomes `C:/` here and is caught at either stage.
+    // Both spellings became reachable once msysToDrive started normalizing them,
+    // so both guards travel with it.
+    .filter((p) => !isUnsafeTempEntry(msysToDrive(p, IS_WINDOWS), path))
+    .map((p) => stripSlash(path.resolve(msysToDrive(p, IS_WINDOWS))))
+    .filter((t) => !isUnsafeTempEntry(t, path));
   // A temp root that CONTAINS the project would exempt the project itself and
   // switch all three rules off — with no bypass-ledger entry, unlike the
   // documented escape hatches. `/` as an entry is the degenerate case.
@@ -540,7 +687,7 @@ function main() {
     return p;
   }
   function resolveFrom(base, p) {
-    return stripSlash(path.resolve(base, expand(p)));
+    return stripSlash(path.resolve(base, msysToDrive(expand(p), IS_WINDOWS)));
   }
   function abspath(p) {
     return resolveFrom(curdir, p);
@@ -562,7 +709,13 @@ function main() {
     const safe = TEMP_SAFE();
     if (safe.some((t) => p === t || within(t, p))) return true;
     if (TEMP_REAL === null) {
-      TEMP_REAL = safe.map(canonical).filter((t, i, a) => t !== safe[i] && a.indexOf(t) === i);
+      // The realpath'd list needs the SAME two guards as the raw one. Without
+      // them an entry that merely POINTS at a root or at an ancestor of the
+      // project — a `/tmp/scratch` symlinked to `/`, say — passes both filters
+      // above in its raw spelling and only widens once canonical() resolves it,
+      // switching rules (B) and (C) off for every path with no ledger entry.
+      TEMP_REAL = safe.map(canonical).filter((t, i, a) =>
+        t !== safe[i] && a.indexOf(t) === i && !isUnsafeTempEntry(t, path) && !within(t, projectRoot));
     }
     return TEMP_REAL.some((t) => p === t || within(t, p));
   }
@@ -870,6 +1023,9 @@ if (require.main === module) {
     detectControlMutation,
     stripHeredocs,
     gitTargets,
+    msysToDrive,
+    isUnsafeTempEntry,
+    splitTempList,
     GIT_MUTATIONS: Object.freeze(Array.from(GIT_MUTATIONS)),
     GIT_OPTS_WITH_OPERAND: Object.freeze(Array.from(GIT_OPTS_WITH_OPERAND)),
     GIT_READONLY_FORMS: Object.freeze(Object.keys(GIT_READONLY_FORMS))

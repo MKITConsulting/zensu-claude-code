@@ -6,13 +6,25 @@
 // paths embedded in JSON or manifest contents, so translate that one spelling
 // explicitly before any node:path or filesystem operation. Other POSIX-rooted
 // spellings have no unambiguous native Windows meaning and fail closed.
+// The MSYS drive rule on its own, as a TOTAL function: anything that is not an
+// MSYS drive spelling comes back unchanged. normalizeHostPathInput applies its
+// own fail-closed policy on top, but a consumer that must NEVER throw can share
+// the rule instead of hand-copying it — hooks/lib/bash-source-write-parse.js is
+// exactly that consumer, because it returns a deny reason rather than raising,
+// and an exception there makes its hook deny every Bash call in the session.
+function msysDrivePrefix(value, platform = process.platform) {
+  if (typeof value !== 'string' || platform !== 'win32') return value;
+  const msysDrive = /^\/([A-Za-z])(?:\/(.*))?$/.exec(value);
+  return msysDrive ? `${msysDrive[1].toUpperCase()}:/${msysDrive[2] || ''}` : value;
+}
+
 function normalizeHostPathInput(value, label = 'path', platform = process.platform) {
   if (typeof value !== 'string') throw new TypeError(`${label} must be a string`);
   if (platform !== 'win32') return value;
 
-  const msysDrive = /^\/([A-Za-z])(?:\/(.*))?$/.exec(value);
-  if (msysDrive) {
-    return `${msysDrive[1].toUpperCase()}:/${msysDrive[2] || ''}`;
+  const msysDrive = msysDrivePrefix(value, platform);
+  if (msysDrive !== value) {
+    return msysDrive;
   }
 
   if (/^[A-Za-z]:(?![\\/])/.test(value)) {
@@ -49,4 +61,4 @@ function normalizeHostPathInput(value, label = 'path', platform = process.platfo
   return value;
 }
 
-module.exports = { normalizeHostPathInput };
+module.exports = { normalizeHostPathInput, msysDrivePrefix };
