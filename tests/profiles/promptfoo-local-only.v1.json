@@ -88,6 +88,7 @@
     "test-stop-enforcer-self-review-routing.sh",
     "test-stop-enforcer-subagent-noop.sh",
     "test-stop-session-binding-recovery.sh",
+    "test-run-all-sharding.sh",
     "test-state-verb-diagnostics.sh",
     "test-tdd-begin-chain-reset.sh",
     "test-tdd-complete-receipt-gate.sh",

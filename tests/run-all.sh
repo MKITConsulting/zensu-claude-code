@@ -23,6 +23,7 @@ TESTS_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$TESTS_DIR/.." && pwd)"
 MODE="${1:-}"
 LOCAL_ONLY_MANIFEST="$TESTS_DIR/profiles/promptfoo-local-only.v1.json"
+SHARD_WEIGHTS="$TESTS_DIR/profiles/ci-shard-weights.v1.json"
 
 case "$MODE" in
   ""|--ci|--self-check|--live) ;;
@@ -31,6 +32,41 @@ case "$MODE" in
     exit 2
     ;;
 esac
+
+# ── Sharding ─────────────────────────────────────────────────────────
+# `--shard I/N` runs only the Ith of N slices. The slice is COMPUTED from the
+# suite inventory the classification gate below already enforces, never assigned
+# by hand: there is therefore no "forgot to assign the new suite" state in which
+# a shard reports green while a suite ran nowhere. Weights steer BALANCE only —
+# an unlisted suite still runs, it is merely costed at defaultSeconds.
+#
+# Balance is not cosmetic here. The expensive suites cluster, so slicing by
+# position (round-robin over the sorted inventory) leaves one shard at 33 min
+# against a 14 min cost-aware split — most of the sequential run, for five times
+# the runners.
+SHARD_SPEC="${2:-}"
+SHARD_INDEX=""; SHARD_TOTAL=""; SHARD_LABELS=""
+if [ -n "$SHARD_SPEC" ]; then
+  if [ "$MODE" != "--ci" ]; then
+    printf "--shard is only supported with --ci\n" >&2
+    exit 2
+  fi
+  case "$SHARD_SPEC" in
+    --shard=*/*) SHARD_SPEC="${SHARD_SPEC#--shard=}" ;;
+    --shard) printf -- "--shard needs an I/N argument, e.g. --shard=2/5\n" >&2; exit 2 ;;
+    */*) ;;
+    *) printf "unknown second argument '%s' — accepted: --shard=I/N\n" "$SHARD_SPEC" >&2; exit 2 ;;
+  esac
+  SHARD_INDEX="${SHARD_SPEC%%/*}"
+  SHARD_TOTAL="${SHARD_SPEC##*/}"
+  case "$SHARD_INDEX$SHARD_TOTAL" in
+    *[!0-9]*|"") printf "shard spec must be I/N with positive integers, got '%s'\n" "$SHARD_SPEC" >&2; exit 2 ;;
+  esac
+  if [ "$SHARD_INDEX" -lt 1 ] || [ "$SHARD_TOTAL" -lt 1 ] || [ "$SHARD_INDEX" -gt "$SHARD_TOTAL" ]; then
+    printf "shard spec out of range: %s\n" "$SHARD_SPEC" >&2
+    exit 2
+  fi
+fi
 
 load_local_only_inventory() {
   local field="$1"
@@ -82,6 +118,63 @@ if (JSON.stringify(uniqueSorted(classified)) !== JSON.stringify(actualStructure)
   throw new Error('suite classification inventory is incomplete; refusing execution');
 }
 NODE
+
+# The partition itself: longest-processing-time first over the inventory the gate
+# above just certified complete. Every shard computes the identical split from the
+# same two checked-in files, so no two shards can disagree about who owns a suite
+# and none can be dropped between them.
+shard_labels() {
+  node - "$LOCAL_ONLY_MANIFEST" "$SHARD_WEIGHTS" "$SHARD_INDEX" "$SHARD_TOTAL" <<'NODE'
+const fs = require('node:fs');
+const [manifestFile, weightsFile, indexRaw, totalRaw] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
+const weights = JSON.parse(fs.readFileSync(weightsFile, 'utf8'));
+if (weights.schemaVersion !== 1 || typeof weights.defaultSeconds !== 'number'
+    || !(weights.defaultSeconds > 0) || !weights.seconds
+    || typeof weights.seconds !== 'object' || Array.isArray(weights.seconds)) {
+  throw new Error('invalid shard weight table');
+}
+const index = Number(indexRaw);
+const total = Number(totalRaw);
+const labels = [
+  ...[...manifest.ciStructureTests].sort().map((name) => `structure/${name}`),
+  ...manifest.ciOfflineSuites.map((suite) => suite.label),
+];
+if (new Set(labels).size !== labels.length) {
+  throw new Error('duplicate suite label in inventory; the partition would be ambiguous');
+}
+const cost = (label) => {
+  const value = weights.seconds[label];
+  return typeof value === 'number' && value > 0 ? value : weights.defaultSeconds;
+};
+// Cost desc, then label asc. The tie-break is what makes the split reproducible
+// across processes instead of dependent on object key order.
+const ordered = [...labels].sort((a, b) => cost(b) - cost(a) || (a < b ? -1 : a > b ? 1 : 0));
+const bins = Array.from({ length: total }, () => ({ load: 0, labels: [] }));
+for (const label of ordered) {
+  let pick = 0;
+  for (let i = 1; i < bins.length; i += 1) if (bins[i].load < bins[pick].load) pick = i;
+  bins[pick].load += cost(label);
+  bins[pick].labels.push(label);
+}
+process.stdout.write(bins[index - 1].labels.sort().join('\n'));
+NODE
+}
+
+if [ -n "$SHARD_SPEC" ]; then
+  SHARD_LABELS="$(shard_labels)" || exit 2
+  if [ -z "$SHARD_LABELS" ]; then
+    printf "shard %s resolved to no suites — more shards than suites\n" "$SHARD_SPEC" >&2
+    exit 2
+  fi
+fi
+
+# Unsharded runs answer true for everything, so every loop below keeps its
+# original behaviour when --shard is absent.
+in_shard() {
+  [ -n "$SHARD_SPEC" ] || return 0
+  printf '%s\n' "$SHARD_LABELS" | grep -Fxq -- "$1"
+}
 
 RESULTS_DIR="$TESTS_DIR/results"
 mkdir -p "$RESULTS_DIR"
@@ -215,6 +308,9 @@ for t in "$TESTS_DIR"/structure/test-*.sh; do
       FAIL=$((FAIL+1)); log "  FAIL  unclassified structure suite: $base"
       continue
     fi
+    # Checked AFTER classification so an unclassified suite still fails on every
+    # shard rather than only on whichever one happens to own it.
+    in_shard "structure/$base" || continue
   fi
   case "$base" in
     test-workflow-checkout-credentials.sh)
@@ -233,9 +329,20 @@ OFFLINE_EXPECTED="$(
   node -e 'process.stdout.write(String(require(process.argv[1]).ciOfflineSuites.length))' \
     "$LOCAL_ONLY_MANIFEST"
 )" || exit 2
+# On a shard the invariant still has to bite, so re-derive it from the labels this
+# shard actually owns. Leaving it at the full count would fail every shard; taking
+# it from the executed count would make it vacuous.
+if [ -n "$SHARD_SPEC" ]; then
+  OFFLINE_EXPECTED=0
+  while IFS=$'\t' read -r label _rest; do
+    [ -n "$label" ] || continue
+    in_shard "$label" && OFFLINE_EXPECTED=$((OFFLINE_EXPECTED + 1))
+  done <<< "$OFFLINE_LINES"
+fi
 OFFLINE_EXECUTED=0
 while IFS=$'\t' read -r label relative needs_deps argument_line; do
   [ -n "$label" ] || continue
+  in_shard "$label" || continue
   runner="$ROOT/$relative"
   case "$needs_deps" in
     0|1) ;;

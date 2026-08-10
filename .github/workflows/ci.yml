@@ -5,14 +5,35 @@ on:
   push:
     branches: [main]
 
+# A superseded head keeps burning a full run otherwise: one ubuntu suite plus five
+# Windows runners for a commit nobody will merge. Pushing a fixup while CI is in
+# flight is the normal case, not the exception. Keyed per ref, so concurrent PRs
+# never cancel each other.
+#
+# main is deliberately NOT cancellable: its runs are the record that a merged
+# commit was green, and `github.run_id` gives each one a unique group so none can
+# supersede another. Cancelling there would leave a merged commit with no verdict.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ github.ref == 'refs/heads/main' && github.run_id || 'pr' }}
+  cancel-in-progress: true
+
 defaults:
   run:
     shell: bash
 
 jobs:
   test:
-    name: Deterministic suite (ubuntu-latest)
+    name: Deterministic suite (ubuntu-latest ${{ strategy.job-index }})
     runs-on: ubuntu-latest
+    # The suite ran sequentially in one job for 72 minutes and was the whole
+    # workflow's critical path — more than twice the Windows shards, which have
+    # been parallel for far longer. The slice is derived from the ENFORCED suite
+    # inventory, so a new suite lands in some shard automatically; the weight
+    # table only decides which.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -23,7 +44,14 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
-      - run: bash tests/run-all.sh --ci
+      # Both halves come from the matrix itself. Writing the total as a literal
+      # beside the shard list is the one edit that could silently drop suites:
+      # bump the list to six and leave `/5` behind and a sixth of the inventory
+      # runs nowhere, with every remaining shard green.
+      - run: bash tests/run-all.sh --ci "--shard=$((JOB_INDEX + 1))/$JOB_TOTAL"
+        env:
+          JOB_INDEX: ${{ strategy.job-index }}
+          JOB_TOTAL: ${{ strategy.job-total }}
       - name: Show suite report on failure
         if: failure()
         run: |
