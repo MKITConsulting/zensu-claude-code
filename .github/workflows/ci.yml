@@ -70,12 +70,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Membership is cost-balanced, not thematic — the previous names promised a
+        # grouping the contents no longer have, and would have invited the next
+        # leases test into "windows-leases-routing" regardless of that shard's load.
+        # Coverage does not rest on this list: run-profile.js requires the manifest
+        # and the audited command catalog to be a bijection, so a suite in no
+        # profile fails rather than silently running nowhere.
         profile:
-          - windows-reset-session
-          - windows-leases-routing
-          - windows-native-state
-          - windows-installed-core
-          - windows-native-branches
+          - windows-shard-1
+          - windows-shard-2
+          - windows-shard-3
+          - windows-shard-4
+          - windows-shard-5
+          - windows-shard-6
+          - windows-shard-7
     runs-on: windows-latest
     timeout-minutes: 35
     steps:
