@@ -102,7 +102,114 @@ entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
 `decideGit`. A divergence is caught behaviorally (W144/W145/W172-W175 plus the unit
 `paths` cases), not structurally; keep them in step by hand.
 
-**Three cross-file couplings.** `WRAP` — the transparent-wrapper set rule (C)'s
+**The Windows comparison namespace.** Every path string enters rule (B)'s and rule
+(C)'s comparison through `msysToDrive(value, isWindows)`. Windows is the only host
+where the gate compares two spellings of one location. **The dividing line is stdin
+against everything else**, not env against everything else: MSYS rewrites exported
+variables AND the argument vector on the way into a native binary, so
+`CLAUDE_PROJECT_DIR` arrives as `D:\a\proj`, while the payload cwd and every command
+token — which travel over stdin, the one channel MSYS never touches — are still
+spelled `/d/a/proj`. `path.resolve` then reads that leading `/` as drive-RELATIVE and
+splices the whole POSIX path under the current drive (`D:\d\a\proj`). The session's
+own root compares as an escape and every in-project git verb denies. **W3h pins the
+stdin half of that premise**, because everything here rests on it: were stdin ever
+converted too, `msysToDrive` would be normalizing an already-native path, every
+assertion would stay green, and the real defect would have moved out of view. The
+argv half is why the gate suite must hand a raw MSYS spelling to `node` over stdin
+rather than as an argument — W121b silently skipped itself on Windows for exactly
+that reason, reporting "spellings coincide" while testing nothing.
+`hooks/pre-bash-source-write-gate.sh` exempts
+`CLAUDE_ENV_FILE` from that same conversion by hand (`MSYS2_ENV_CONV_EXCL`), which is
+why `controlPathNamespace` exists for that one variable and why it cannot be reused
+here: it returns a lowercased forward-slash namespace, not `path.resolve`'s.
+
+Two properties hold the fix, and W3c pins both because a POSIX host cannot observe
+either: **every** `path.resolve` call routes through the normalizer (a new,
+un-normalized resolution site silently reintroduces the split namespace), and the
+normalizer stays platform-gated — on POSIX `/d/a/x` is a legitimate path, and
+rewriting it there would hand both rules a different tree. `git-repo-escape.test.js`
+drives the normalizer's own branches through its explicit `isWindows` parameter and
+re-runs the production composition against `path.win32`. Deliberately absent: an
+env-selectable platform switch. It would let the suite exercise the real hook
+end-to-end on macOS, but an env var that changes path semantics is a bypass channel
+that — unlike `ZENSU_BASH_WRITE_GATE=off` — lands no bypass-ledger entry.
+
+**The MSYS drive rule is SHARED, not copied.** `claude-path-v1.js` exports
+`msysDrivePrefix` as a TOTAL function — anything that is not an MSYS drive spelling comes
+back unchanged — and both consumers apply their own policy on top: its own
+`normalizeHostPathInput` layers a fail-closed-by-THROWING policy for the session-control
+trust boundary, while `msysToDrive` in the parser declines that policy. It has to: the
+parser RETURNS a deny reason, so an exception would exit non-zero and the hook's fail-closed
+branch would deny every Bash call in the session rather than the one command — and
+`/var/folders/x`, a DEFAULT entry of the rule-(B) temp list, is one of the spellings that
+policy throws on. That is the whole reason the split exists; do not "simplify" the parser
+onto `normalizeHostPathInput`. This is the ONE sibling `require` in
+`bash-source-write-parse.js`, taken deliberately so a fourth `within()`↔`isInside()`-style
+hand-copy never has to be maintained; if the module were missing the parser would fail to
+load and its hook would deny, which is the fail-closed direction. W3d pins the delegation,
+pins that no private copy reappears (the parser keeps exactly two `([A-Za-z])` rules of its
+own, `controlPathNamespace`'s ungated lower-casing pair, which serve the separate
+CLAUDE_ENV_FILE namespace), and pins that the shared rule stays throw-free.
+
+Leaving an unconverted token raw changes no verdict: every rooted spelling the throwing
+policy rejects resolves outside the session root, so `within()` reports an escape. Whether
+that escape is DENIED is separate — `/tmp/x` and `/var/folders/x` are default temp members,
+so `isTemp()` allows them by design and always did. Not converting a complete UNC is no gap
+either: `path.resolve` already yields the same spelling.
+
+**The temp list travels with the namespace.** `ZENSU_BSWGATE_TEMP_DIRS` is a LIST, and on
+Windows both conventions arrive: MSYS converts an exported POSIX `:` list, while an
+operator may supply a native `;`-separated one with drive-qualified entries. (The repo's
+own renderer, `zensu-host-path.sh`, emits drive-qualified FORWARD-slash paths — `D:/a/tmp`
+— and is not wired to this variable; it shows the shape to expect, it does not produce
+this list.) `splitTempList` therefore treats a colon as a separator
+except in drive position — a plain `.split(":")` shredded `D:\a\tmp` into `["D",
+"\\a\\tmp"]`, so the intended root never entered `TEMP` and the rule (B) carve-out
+silently stopped applying. The map that follows also drops any entry that resolves to a
+filesystem ROOT: `TEMP_SAFE` rejects only roots that CONTAIN the project, which on win32
+cannot catch `C:\` while the project sits on `D:` — that entry would carve out an entire
+drive with no bypass-ledger entry, and `/c` only became spellable as a drive root once
+`msysToDrive` started normalizing it.
+
+**One accepted gap is NOT fail-closed and is pinned rather than fixed:** drive-relative
+`D:rel` on the project's own drive resolves against the base and lands INSIDE the session
+root, so it is allowed; if the shell's real cwd on that drive is elsewhere the write
+escapes. It predates the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
+sees it) and `git-repo-escape.test.js` pins the judgment so a change to it is deliberate.
+
+**The harness lies on Windows in three ways, and each one fails SILENTLY on POSIX.**
+Every one of these turned a check green — or red — for a reason unrelated to the
+contract it names, and none is observable from a POSIX host:
+
+- **Grep the DECODED deny reason, never the hook's raw stdout.** The hook emits through
+  `JSON.stringify`, which doubles every backslash, so a `D:\a\…` needle can never match a
+  `D:\\a\\…` haystack. This failed W121/W183/W204 on Windows against a message that was
+  already correct, and made W121b — whose whole job is to prove a spelling is ABSENT —
+  pass without testing anything. `reason()` decodes it; **W3g** pins that every
+  `REASON_*` capture is piped through it, and **W3f** makes the encoding itself
+  observable on any host. W87e is the deliberate exception: it greps the JSON envelope.
+- **A PATH shim cannot intercept the parser's `git`.** `tracked()` uses `execFileSync`
+  with no shell, and Windows resolves only a real executable image: an extensionless
+  script named `git` is never reached and a `.cmd` twin is refused outright since
+  CVE-2024-27980, so the real `git.exe` answers and the spy log stays empty. Both halves
+  of W122 then go vacuous — an empty log "proving" an independence nothing tested. It
+  probes reachability first and skips only where the parser could never reach the shim.
+- **`ln -s` exiting 0 is not evidence of a symlink.** Git Bash satisfies it with a copy
+  or a shortcut native Node does not follow; the two directories then genuinely differ
+  and DENY is CORRECT, so W167/W168 failed on a premise that did not hold. They confirm
+  the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
+
+**The Windows timeout for this suite is a coverage boundary, not a formality.** At
+`timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
+after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
+everything after them never executed on Windows at all while the shard still reported.
+It is 600000 now (matching `autopilot-plan-delegate`). Adding checks costs Windows wall
+clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
+unverified regardless of how many checks passed before it.
+
+**Three cross-file couplings.** (The MSYS drive rule is deliberately NOT among them: it is
+shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
+paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 `cmd0` anchoring depends on — is hand-duplicated as a JS literal in
 `hooks/pre-bash-zensu-gate.sh`; a wrapper added to one and not the other means the
 same wrapped invocation is gated by one Bash gate and not its sibling.

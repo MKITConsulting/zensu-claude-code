@@ -104,7 +104,7 @@
           "runner": "bash",
           "path": "tests/structure/test-bash-source-write-gate.sh",
           "args": [],
-          "timeoutMs": 300000
+          "timeoutMs": 600000
         },
         {
           "id": "installed-plugin-provisioner",
