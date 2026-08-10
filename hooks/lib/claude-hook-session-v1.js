@@ -8,11 +8,17 @@
 // all-tool capability gate imports the same resolver.
 //
 // argv modes: (none) binds from a hook payload on stdin and prints the five
-// exports; `model-bind` does the same from CLAUDE_CODE_SESSION_ID; and
+// exports; `model-bind` does the same from CLAUDE_CODE_SESSION_ID;
 // `unregistered` answers by EXIT STATUS ONLY — 0 when Session Control has never
 // registered the session, 1 for every other state including a record that
-// exists and disagrees. That third mode prints no bindings; it exists so the
-// gates can tell the one relaxable bind failure apart from all the rest.
+// exists and disagrees; `orphaned-project-root` answers by exit status — 0 when
+// a record exists, validates in every other respect, and its recorded project
+// root is simply gone — and on a match prints that dead path so callers can
+// name it; `model-orphaned-project-root` is the same question asked from
+// CLAUDE_CODE_SESSION_ID, for the model-side /zensu:doctor. None of the three
+// prints bindings: a session in any of those states must stay unbound. They
+// exist so the gates can tell the two relaxable bind failures apart from each
+// other and from all the rest.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -108,6 +114,48 @@ function unregisteredSession(payload, environment = process.env) {
   } catch {
     return false;
   }
+}
+
+// The SECOND relaxable bind failure, and deliberately a separate predicate from
+// unregisteredSession above: there a record is absent, here a record is present
+// and intact and only the directory it points at is gone. Both mean no workflow
+// state is reachable, but they are different diagnoses with different remedies,
+// so the gates must be able to tell them apart rather than share one widened
+// check.
+//
+// Returns the dead recorded project root, or null when this is not that state.
+// Any additional disagreement, any unreadable or ambiguous state, and any
+// exception answers null, so the caller keeps failing closed.
+function resolveOrphanedProjectRoot(payload, environment = process.env) {
+  try {
+    validateSessionId(payload.session_id);
+    const executedPluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
+    if (canonicalDirectory(environment.CLAUDE_PLUGIN_ROOT, 'CLAUDE_PLUGIN_ROOT') !== executedPluginRoot) {
+      return null;
+    }
+    const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
+    const recordsDir = privateRecordsDirectory(pluginData, true);
+    if (recordsDir === null) return null;
+    const context = core.readOrphanedProjectRootContext({
+      recordsDir,
+      sessionId: payload.session_id,
+      expectedHost: 'claude',
+    });
+    // The same two identity checks resolveHookSession applies, because
+    // readOrphanedProjectRootContext validates the record against itself and
+    // cannot see the running installation. Without them a record minted against
+    // a DIFFERENT plugin installation whose root also happens to be gone would
+    // have two disagreements relaxed instead of one.
+    if (context.plugin_root !== executedPluginRoot) return null;
+    if (context.plugin_data !== pluginData) return null;
+    return context.project_root;
+  } catch {
+    return null;
+  }
+}
+
+function orphanedProjectRootSession(payload, environment = process.env) {
+  return resolveOrphanedProjectRoot(payload, environment) !== null;
 }
 
 function validateSessionId(sessionId) {
@@ -215,6 +263,31 @@ function main() {
     process.exitCode = unregisteredSession(readPayload()) ? 0 : 1;
     return;
   }
+  if (process.argv[2] === 'orphaned-project-root' || process.argv[2] === 'model-orphaned-project-root') {
+    // Exit 0 only when the sole disagreement is a project root that no longer
+    // exists, and on a match print that dead path so the caller can name what
+    // to re-create instead of calling the record merely "invalid". The two
+    // spellings differ only in where the session id comes from: a hook payload
+    // on stdin, or CLAUDE_CODE_SESSION_ID for the model-side /zensu:doctor.
+    // Never any bindings — a session in this state must stay unbound.
+    const mode = process.argv[2];
+    if (process.argv.length !== 3) fail(`${mode} does not accept arguments`);
+    let sessionPayload;
+    if (mode === 'model-orphaned-project-root') {
+      const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
+      validateSessionId(hostSessionId);
+      sessionPayload = { session_id: hostSessionId };
+    } else {
+      sessionPayload = readPayload();
+    }
+    const orphanedRoot = resolveOrphanedProjectRoot(sessionPayload);
+    if (orphanedRoot === null) {
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(`${orphanedRoot}\n`);
+    return;
+  }
   if (process.argv[2] === 'model-bind') {
     if (process.argv.length !== 3) fail('model-bind does not accept arguments');
     const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
@@ -247,4 +320,10 @@ if (require.main === module) {
   }
 }
 
-module.exports = { resolveFreshHookProject, resolveHookSession, unregisteredSession };
+module.exports = {
+  orphanedProjectRootSession,
+  resolveFreshHookProject,
+  resolveHookSession,
+  resolveOrphanedProjectRoot,
+  unregisteredSession,
+};

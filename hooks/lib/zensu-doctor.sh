@@ -132,6 +132,9 @@ fi
 # cannot bind points the user here, so reproduce that exact binding attempt.
 # It needs the two inputs the model-side path needs; without them this stays
 # `unknown` and the renderer prints nothing rather than a guess.
+# Injectable alongside ZDOC_BINDING, and empty for every verdict except
+# orphaned-project-root, which is the only one that has a path to report.
+ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 if [ -z "${ZDOC_BINDING:-}" ]; then
   if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
     ZDOC_BINDING=unknown
@@ -144,11 +147,25 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
   ); then
     ZDOC_BINDING=bound
   else
-    ZDOC_BINDING=unbound
+    # An unbound session is not one state. Ask the one narrow follow-up question
+    # that has its own remedy: is there a valid record whose recorded project
+    # root is simply gone? That session reaches this diagnostic precisely
+    # because the Bash gate relaxes it, so answering "no record" would be the
+    # one wrong thing to tell the user standing in front of it.
+    ZDOC_BINDING_PROJECT_ROOT="$(
+      # shellcheck disable=SC1090
+      source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+        && zensu_session_orphaned_project_root_model
+    )" || ZDOC_BINDING_PROJECT_ROOT=""
+    if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+      ZDOC_BINDING=orphaned-project-root
+    else
+      ZDOC_BINDING=unbound
+    fi
   fi
 fi
 
-export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING
+export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

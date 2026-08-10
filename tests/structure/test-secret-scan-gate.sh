@@ -368,8 +368,13 @@ OUT="$(run_hook '{"tool_name":"Write","tool_input":{"file_path":"/x/src/a.ts","c
 [ -z "$OUT" ] && check "F18 unregistered session: clean Write content passes, never blanket-denied" PASS \
   || check "F18 unregistered clean Write (got '$OUT')" FAIL
 
-# The relaxation covers ONE state. A record minted against another installation
-# is a security signal and must keep denying at this gate too.
+# The relaxation covers TWO states — the one exercised above, and a record whose
+# recorded project root no longer exists (a deleted or recycled worktree), which
+# is pinned against a real minted record in
+# tests/structure/test-orphaned-project-root.sh (O21a drives every hook on the
+# Bash matcher, this gate included). Neither covers the case below: a record
+# minted against another installation is a security signal and must keep denying
+# at this gate too.
 FOREIGN_DATA="$TMPD/foreign-plugin-data"
 FOREIGN_PLUG="$TMPD/foreign-plugin"
 mkdir -p "$FOREIGN_DATA/session-control/v1/records" "$FOREIGN_DATA/session-control/v1/locks" \

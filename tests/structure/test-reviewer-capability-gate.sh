@@ -399,7 +399,13 @@ WRONG_EVENT="$(SESSION_ID="$SESSION_ID" PROJECT="$PROJECT" node -e '
 # forever. This gate matches every tool, so denying there left the user unable to
 # run even /zensu:doctor and read why. The main thread — which this gate returns
 # unrestricted anyway once revalidation succeeds — keeps the capabilities it had
-# before Session Control existed. Nothing else is relaxed.
+# before Session Control existed.
+#
+# This gate relaxes TWO states, both MAIN-only: the one below, and a record whose
+# recorded project root no longer exists (a deleted or recycled worktree). The
+# orphaned half is pinned in tests/structure/test-orphaned-project-root.sh
+# (O25/O25a/O26/O27) against a real minted record, which this suite's synthetic
+# GATE_TEST_MODE fixtures cannot produce. Nothing beyond those two is relaxed.
 GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: the main thread keeps Bash so /zensu:doctor stays reachable" \
   allow - Bash '{"command":"bash hooks/lib/zensu-doctor.sh"}'
@@ -416,7 +422,7 @@ GATE_TEST_MODE=missing-context assert_case \
   "unregistered session: a neutral child gets no shell either" \
   deny general-purpose Bash '{"command":"git status"}'
 
-# The relaxation covers exactly ONE state. A record that EXISTS but was minted
+# Neither relaxable state covers this one. A record that EXISTS but was minted
 # against another installation is what a plugin update leaves behind, and it is a
 # security signal: it must keep denying for every principal, main thread included.
 FOREIGN_DATA="$TMP/foreign-plugin-data"

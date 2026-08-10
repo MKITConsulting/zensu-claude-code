@@ -114,12 +114,23 @@ zensu_bind_hook_session "$INPUT" || ZENSU_SESSION_BOUND=false
 # deadlocked /zensu:doctor behind the very defect it exists to report: the
 # diagnostic runs through Bash, so the one command that names the cause was
 # denied by the cause. Keep the write rules and let every other command through.
-# ONLY that one state is relaxed — zensu_session_unregistered is false for a
-# record that exists and disagrees, which keeps failing closed here as before.
-# The Session Control rebind check above is unaffected: it runs before the bind
-# and remains the real trust boundary.
+#
+# A session whose recorded project root was deleted (a recycled worktree) is the
+# same deadlock with a different cause, so it is relaxed the same way and for
+# the same reason. Both are relaxed for the DIAGNOSTIC, not for work: neither
+# state can anchor a write to a project, so the Edit/Write gates keep denying
+# and the rules below still apply to every Bash write.
+#
+# ONLY those two states are relaxed. Both predicates are false for a record that
+# exists and disagrees about anything else — including a root that still exists
+# but no longer matches — which keeps failing closed here as before, and a
+# second disagreement is never relaxed alongside the first. stdout of the
+# orphaned probe is discarded because stdout here is the hook's JSON decision
+# channel. The Session Control rebind check above is unaffected: it runs before
+# the bind and remains the real trust boundary.
 if [ "$ZENSU_SESSION_BOUND" != true ]; then
-  if ! zensu_session_unregistered "$INPUT"; then
+  if ! zensu_session_unregistered "$INPUT" \
+    && ! zensu_session_orphaned_project_root "$INPUT" >/dev/null; then
     zensu_emit_hook_session_deny narrowed
     exit 0
   fi
@@ -137,20 +148,57 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     zensu_emit_hook_session_deny
     exit 0
   fi
-  # Both escape channels stay reachable while unregistered — a user who
+  # Both escape channels stay reachable in either relaxed state — a user who
   # knowingly opts out must not need a bindable session to do it. Neither can be
   # ledgered here: the bypass ledger is keyed by the session binding that does
   # not exist, and zensu-tdd-phase.sh is not sourced until after this branch.
   [ "${ZENSU_BASH_WRITE_GATE:-}" = "off" ] && exit 0
   [ "${ZENSU_MCP_GATE:-}" = "off" ] && exit 0
-  # No record can supply a project root, so pin Claude's own stable project env
-  # explicitly. The payload cwd must never become that authority — the binder
-  # states the same rule — so an absent CLAUDE_PROJECT_DIR denies rather than
-  # letting the parser fall back to a model-influenced cwd, which would collapse
-  # the escape-the-worktree rule for any file that does not already exist.
+  # Neither relaxed state can supply a project root — one has no record, the
+  # other has a record pointing at a directory that is gone — so pin Claude's
+  # own stable project env explicitly. The payload cwd must never become that
+  # authority — the binder states the same rule — so an absent
+  # CLAUDE_PROJECT_DIR denies rather than letting the parser fall back to a
+  # model-influenced cwd, which would collapse the escape-the-worktree rule for
+  # any file that does not already exist.
   UNBOUND_PROJECT_DIR="$(cd -P -- "${CLAUDE_PROJECT_DIR:-/nonexistent}" 2>/dev/null && pwd -P)" || UNBOUND_PROJECT_DIR=""
   if [ -z "$UNBOUND_PROJECT_DIR" ]; then
-    emit_deny "Blocked: this session has no Session Control record (a session resumed across a plugin update never mints one) AND no usable CLAUDE_PROJECT_DIR, so a Bash write cannot be attributed to any project. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+    # No anchor to judge a write against. Deny WRITES — but only writes: this
+    # branch used to deny every Bash command unconditionally, which put the
+    # diagnostic back behind the defect it reports. In the orphaned state
+    # CLAUDE_PROJECT_DIR is, by construction, the directory that is gone (the
+    # record's project_root was minted from the SessionStart cwd), and in the
+    # no-record state it may simply be unset — so this branch is the NORMAL
+    # case for both relaxed states, not an edge case.
+    #
+    # Ask for the resolved write OPERAND, not a channel token. `BSWG_MODE=detect`
+    # is a text matcher — it reports "redirect" for `git commit -m "fix: A -> B"`
+    # and "tee" for a commit message containing that word — so denying on it
+    # would refuse a large share of ordinary read-only commands in the very
+    # state this branch exists to make usable. `targets` runs the full default
+    # parse, applies the same source-extension and temp-root filters, and
+    # answers only with operands it actually resolved; it needs no project root
+    # because it skips exactly the two rules that would consult one. The one
+    # non-operand answer is a synthetic `WRITE-TARGET (unevaluated: …)` when the
+    # parser's target budget is exhausted — this branch treats it as a deny, the
+    # same way it treats a parser that cannot run at all, and it reaches the
+    # user verbatim in the message below.
+    #
+    # Because it is the default parse, the inline ZENSU_BASH_WRITE_GATE=off /
+    # ZENSU_MCP_GATE=off escapes still surface as __bypass__ markers here, so
+    # both escape spellings keep working on this path too. A parser that fails
+    # to run still denies, so a crash cannot degrade into a blanket allow.
+    if ! UNBOUND_TARGETS="$(
+      cd -P -- "${CLAUDE_PLUGIN_ROOT}/hooks/lib" || exit 1
+      BSWG_MODE=targets PAYLOAD="$INPUT" node ./bash-source-write-parse.js 2>/dev/null
+    )"; then
+      emit_deny "Blocked: the Bash write-target check could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+      exit 0
+    fi
+    case "$UNBOUND_TARGETS" in
+      ''|__bypass__*) exit 0 ;;
+    esac
+    emit_deny "Blocked: this session has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — AND no usable CLAUDE_PROJECT_DIR, so this write cannot be attributed to any project: ${UNBOUND_TARGETS}. Read-only commands still run, /zensu:doctor included: run it to see which of the two states this is, or start a fresh Claude Code session. Deliberate one-off: prefix the command with ZENSU_BASH_WRITE_GATE=off."
     exit 0
   fi
   # An unparseable envelope is a different failure: with no readable command
@@ -163,13 +211,13 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
     BSWG_MODE= PAYLOAD= CLAUDE_PROJECT_DIR="$UNBOUND_PROJECT_DIR" \
       node ./bash-source-write-parse.js 2>/dev/null <<<"$INPUT"
   )"; then
-    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no Session Control record, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
+    emit_deny "Blocked: the Bash source-write rules could not be evaluated for a session with no usable Session Control project root, so this command is refused rather than allowed unchecked. Start a fresh Claude Code session; /zensu:doctor runs without a binding and names the cause."
     exit 0
   fi
   case "$UNBOUND_REASON" in
     ''|__bypass__*) exit 0 ;;
   esac
-  emit_deny "${UNBOUND_REASON} This session additionally has no Session Control record — a session resumed across a plugin update never mints one — so the write cannot be attributed to a recorded project. Run /zensu:doctor: it works without a binding and names the exact cause."
+  emit_deny "${UNBOUND_REASON} This session additionally has no usable Session Control project root — either no record at all (a session resumed across a plugin update never mints one) or a record whose recorded project root no longer exists (a deleted or recycled worktree) — so the write cannot be attributed to a recorded project. Run /zensu:doctor: it works without a binding and names the exact cause."
   exit 0
 fi
 

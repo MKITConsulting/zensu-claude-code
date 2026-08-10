@@ -327,6 +327,26 @@ run() {
   [ "$out" = "$exp" ] && check "$label -> $exp" PASS || check "$label (got '$out' want '$exp')" FAIL
 }
 
+# The parser bounds its work at MAX_TARGETS. This path used to fail OPEN at the
+# cap; #210 closed that, because padding a command with junk operands was a way
+# to buy one free clobber of real tracked source. The budget now lives inside
+# decide(), is spent only by operands that actually EXIST, and treats exhaustion
+# as tracked — so the pads below cost nothing and the real source write is still
+# judged. W161/W182/W183 pin the same posture from the other direction.
+# The no-project-root branch reaches the cap differently: there the loop guard is
+# the only rule left, so it fails closed on its own (pinned by O29e in
+# test-orphaned-project-root.sh). Both arms of that guard must stay held —
+# without this case the `targetsOnly &&` qualifier could be dropped, silently
+# restoring the fail-open, and every suite would stay green.
+BUDGET_CMD="printf x"
+budget_i=0
+while [ "$budget_i" -lt 210 ]; do
+  BUDGET_CMD="$BUDGET_CMD > pad$budget_i.txt"
+  budget_i=$((budget_i + 1))
+done
+run "W5a anchored path still judges the real target past the budget cap" \
+  "$BUDGET_CMD > src/app.rs" DENY
+
 # (A) clobber existing tracked source -> DENY
 run "W6 append >> tracked .rs"              "printf 'x\n' >> src/app.rs"            DENY
 run "W7 clobber > tracked .rs"              "printf 'x\n' > src/app.rs"             DENY
@@ -1042,11 +1062,17 @@ REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_K
 REASON_UNBOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
   ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
+# Two distinct states reach this branch — no record at all, and a record whose
+# recorded project root is gone — so the binding sentence must name both rather
+# than assert the first, which would send a user with a deleted worktree hunting
+# for a record that is right there.
 { printf '%s' "$REASON_UNBOUND" | grep -qF 'tracked' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE=off' \
-  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no Session Control record' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no usable Session Control project root' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no record at all' \
+  && printf '%s' "$REASON_UNBOUND" | grep -qF 'no longer exists' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF '/zensu:doctor'; } \
-  && check "W87 unbound rule-A deny keeps its cause, escape hint, binding gap and /zensu:doctor" PASS \
+  && check "W87 unbound rule-A deny keeps its cause, escape hint, both binding gaps and /zensu:doctor" PASS \
   || check "W87 unbound deny reason (got '$REASON_UNBOUND')" FAIL
 REASON_UNBOUND_B="$(payload "printf x >> $SIB/src/lib.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
@@ -1118,7 +1144,7 @@ REASON_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   && check "W218 bound parser runtime failure denies with the bound-arm reason" PASS \
   || check "W218 bound parser failure (got '$OUT_PARSER_FAIL_BOUND' / '$REASON_PARSER_FAIL_BOUND')" FAIL
 
-# The relaxation covers ONE state. A record that exists but disagrees with the
+# The relaxation covers exactly those two states. A record that exists but disagrees with the
 # executing installation is a security signal and keeps denying every command.
 FOREIGN_DATA="$WORKROOT/foreign-plugin-data"
 FOREIGN_PLUG="$WORKROOT/foreign-plug"
@@ -1172,9 +1198,14 @@ DENY_NARROWED="$(bash -c 'source "$1"; zensu_emit_hook_session_deny narrowed' _ 
   && ! printf '%s' "$DENY_DEFAULT" | grep -qF 'including the doctor stays denied'; } \
   && check "W95 the un-narrowed deny keeps the doctor pointer for a no-record session" PASS \
   || check "W95 un-narrowed deny (got '$DENY_DEFAULT')" FAIL
+# TWO states are relaxable, so the narrowed deny must say both were ruled out —
+# and must not assert "no record" as the cause, which would send a user whose
+# recorded worktree was deleted hunting for a record that is sitting intact in
+# plugin data. Same misdiagnosis the doctor and Stop reasons were corrected for.
 { printf '%s' "$DENY_NARROWED" | grep -qF 'immutable Zensu session binding is unavailable' \
-  && printf '%s' "$DENY_NARROWED" | grep -qF 'not the no-record state'; } \
-  && check "W96 the narrowed deny says the no-record state was already ruled out" PASS \
+  && printf '%s' "$DENY_NARROWED" | grep -qF 'neither relaxable state' \
+  && printf '%s' "$DENY_NARROWED" | grep -qF 'recorded project root no longer exists'; } \
+  && check "W96 the narrowed deny says BOTH relaxable states were already ruled out" PASS \
   || check "W96 narrowed deny (got '$DENY_NARROWED')" FAIL
 # Only callers that actually pre-filter may claim the narrowed scope.
 NARROWED_CALLERS="$(grep -rlF 'zensu_emit_hook_session_deny narrowed' "$PLUGIN_DIR/hooks" 2>/dev/null | sort)"

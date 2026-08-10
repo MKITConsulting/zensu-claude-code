@@ -434,17 +434,27 @@ function main() {
     // digest before any principal-specific capability decision is considered.
     trusted = revalidateSessionContext(payload);
   } catch (error) {
-    // A session Session Control never registered is the 0.17.0 upgrade state,
-    // not a capability violation: that release introduced the record, and a
-    // resume/compact SessionStart requires one it never mints. Denying every
-    // tool there leaves no way to run /zensu:doctor and read why, so the main
-    // thread — which the MAIN branch below returns unrestricted anyway — keeps
-    // exactly the capabilities it had before Session Control existed. Every
-    // other principal stays fail-closed: a reviewer or worker that cannot prove
-    // its lease must not run, and a record that EXISTS but disagrees is a
-    // security signal that keeps denying for everyone, main thread included.
+    // Two states are not capability violations, and this hook runs on matcher
+    // ".*" — so if it denies, it denies EVERY tool, /zensu:doctor included, and
+    // the relaxation the Bash gate grants would never be reached.
+    //
+    // A session Session Control never registered is the 0.17.0 upgrade state:
+    // that release introduced the record, and a resume/compact SessionStart
+    // requires one it never mints. A session whose recorded project root no
+    // longer exists is the deleted-or-recycled-worktree state: the record is
+    // intact, the directory it names is gone, and with it the workflow document
+    // that lived inside it. Neither can prove anything by denying, and denying
+    // leaves no way to run /zensu:doctor and read why, so the main thread —
+    // which the MAIN branch below returns unrestricted anyway — keeps exactly
+    // the capabilities it had before Session Control existed.
+    //
+    // Every other principal stays fail-closed in both states: a reviewer or
+    // worker that cannot prove its lease must not run. So does a record that
+    // EXISTS and disagrees about anything else, which is a security signal that
+    // keeps denying for everyone, main thread included.
     if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
-        && hookSession.unregisteredSession(payload)) {
+        && (hookSession.unregisteredSession(payload)
+          || hookSession.orphanedProjectRootSession(payload))) {
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

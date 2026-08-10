@@ -6,15 +6,22 @@
 // that must not be clobbered, or whether a git command mutates a repository
 // outside the session root. Prints the deny reason on stdout, or nothing.
 //
-// Three modes. `detectChannels()` is consumed IN-PROCESS by
-// hooks/lib/secret-scan-decide.js; the BSWG_MODE=detect CLI form exists so
-// tests/structure/test-secret-scan-gate.sh can drive it standalone. It emits the
-// write channels present in the command (one per line, no git checks, no path policy).
-// BSWG_MODE=control emits a Session Control rebind reason via
-// detectControlMutation(); the hook runs it FIRST, ahead of the config check and
-// every escape hatch, because that is the real trust boundary. Empty BSWG_MODE is
-// the deny path below; the deny caller pins BSWG_MODE= so an ambient value can
-// never flip its behavior.
+// FOUR behaviors, selected by BSWG_MODE. Each judging caller pins the variable
+// explicitly so an ambient value can never flip its behavior:
+//   (unset)  the deny path below — pre-bash-source-write-gate.sh, anchored. The
+//            deny caller pins BSWG_MODE= for exactly that reason.
+//   detect   emit the write channels present in the command (one per line, no
+//            git checks, no path policy). `detectChannels()` is consumed
+//            IN-PROCESS by hooks/lib/secret-scan-decide.js; the BSWG_MODE=detect
+//            CLI form exists so tests/structure/test-secret-scan-gate.sh can
+//            drive it standalone. A TEXT matcher; see its own contract below.
+//   control  emit a Session Control rebind reason via detectControlMutation() —
+//            pre-bash-source-write-gate.sh runs it FIRST, ahead of the config
+//            check and every escape hatch, because that is the real trust
+//            boundary.
+//   targets  report the resolved write OPERAND instead of judging it against a
+//            project root — pre-bash-source-write-gate.sh's no-project-root
+//            branch, the one state where no root exists to judge against.
 //
 // Kept in its own file (like hooks/lib/session-control-core-v1.js) so the logic uses
 // normal quoting instead of being escaped inside a bash single-quoted node -e.
@@ -449,9 +456,28 @@ function lex(s) {
 // the write channels present in the command (one per line, deduped), with NO
 // git/tracked checks, NO path policy, and NO deny reasons. Heredoc intro lines
 // count as a channel here (their bodies are the secret-scan payload) even
-// though the deny path strips them. Over-detection is safe (it only widens
-// what gets scanned); fd dups (2>&1, >&2, >&-) are NOT channels. Default mode
-// is byte-identical.
+// though the deny path strips them. Over-detection is safe FOR THAT CONSUMER —
+// it only widens what gets scanned; fd dups (2>&1, >&2, >&-) are NOT channels.
+// Default mode is byte-identical.
+//
+// This is a TEXT matcher with no operand resolution and no quote awareness, so
+// it reports `redirect` for `git commit -m "fix: A -> B"` and `tee` for a commit
+// message containing that word. Any consumer that DENIES on a hit refuses those.
+//
+// TWO consumers, and only one of them scans:
+//   - pre-write-secret-scan.sh SCANS on a hit, so over-detection is safe there.
+//   - detectControlMutation() below DENIES on a hit, in the
+//     `refersToEnvFile && detectChannels(cmd)` conjunct. That deny is emitted
+//     ahead of the config switch and every escape hatch, so it has no opt-out,
+//     and it inherits this detector's false positives: a heredoc BODY that
+//     merely mentions CLAUDE_ENV_FILE trips it, because that test reads the raw
+//     command. Deliberately left over-detecting — for a trust boundary that is
+//     the safer failure direction, and narrowing it is a separate decision.
+// So widening this detector widens a deny, not just a scan. Weigh both.
+//
+// A third consumer wanted a deny and did NOT use this: the no-project-root
+// branch of pre-bash-source-write-gate.sh uses BSWG_MODE=targets, which resolves
+// operands. Keep it that way — it denies ordinary read-only commands otherwise.
 function detectChannels(cmd) {
   const found = new Set();
   const collapsed = stripHeredocs(cmd)
@@ -618,6 +644,19 @@ function main() {
   if (!cmd) return "";
   if (process.env.BSWG_MODE === "detect") return detectChannels(cmd);
   if (process.env.BSWG_MODE === "control") return detectControlMutation(cmd);
+  // `targets` runs the FULL default parse and diverges at exactly TWO points —
+  // check both when changing either:
+  //   1. decide() reports the resolved write operand instead of judging it
+  //      against a project root (the two rules that need a root are skipped).
+  //   2. the MAX_TARGETS guard fails CLOSED with a synthetic unevaluated
+  //      answer, where the anchored path fails open.
+  // The inline ZENSU_BASH_WRITE_GATE=off / ZENSU_MCP_GATE=off escapes surface
+  // as __bypass__ markers on every path EXCEPT that budget-exhaustion return,
+  // which drops any accumulated markers by design. Reachable shape: an escape
+  // in one segment plus more than MAX_TARGETS operands in a later one — targets
+  // mode denies it, the anchored path allows and ledgers it. Deliberate: this
+  // caller has no project root, so fail-closed is the only safe direction.
+  const targetsOnly = process.env.BSWG_MODE === "targets";
 
   const HOME = process.env.HOME || "";
   // The comparison namespace. The hook hands over a project root it already
@@ -642,11 +681,18 @@ function main() {
   // would then be its own root and rules (B)/(C) would pass everything. The hook
   // refuses this state in both branches; enforce it here too so the invariant
   // holds for every caller, not only by convention.
-  if (!process.env.CLAUDE_PROJECT_DIR) {
+  //
+  // EXCEPT in targets mode, whose entire contract IS the no-project-root branch:
+  // there the root is never used as a BOUNDARY — that is the pair of rules
+  // decide() skips. It does remain the cwd fallback for operand resolution, so
+  // it still affects the temp-root filter and the path reported back, and the
+  // extension check that gates every operand is basename-only. Requiring an
+  // anchor here would put the diagnostic back behind the very defect it reports.
+  if (!targetsOnly && !process.env.CLAUDE_PROJECT_DIR) {
     process.exitCode = 1;
     return "";
   }
-  const projectRoot = canonical(process.env.CLAUDE_PROJECT_DIR);
+  const projectRoot = canonical(process.env.CLAUDE_PROJECT_DIR || cwd0 || process.cwd());
   let curdir = cwd0 ? canonical(cwd0) : projectRoot;
 
   // Temp roots are exempt from the (B) escape rule. ZENSU_BSWGATE_TEMP_DIRS (a
@@ -751,6 +797,14 @@ function main() {
     const p = abspath(unquote(raw));
     if (!SRC.has(extOf(p))) return "";
     if (isTemp(p)) return "";
+    // BSWG_MODE=targets — report the RESOLVED write operand instead of judging
+    // it. Same tokenization and the same source-extension and temp-root
+    // filters as the deny path; only the two project-root rules below are
+    // skipped, because this mode exists precisely for the caller that has no
+    // usable project root. Answering "does this command write a source file"
+    // needs an operand, not a channel token: detectChannels matches text, so
+    // it reports `redirect` for `git commit -m "fix: A -> B"`.
+    if (targetsOnly) return "WRITE-TARGET " + p + " (via " + channel + ")";
     if (!within(projectRoot, p)) {
       return (
         "Blocked a Bash write to a source file OUTSIDE this session's worktree/project root (" +
@@ -960,7 +1014,14 @@ function main() {
       }
     }
 
-    if (cmd0 === "git") {
+    // Rule (C) is one of the two rules that need a project root, so targets mode
+    // skips it — there is no root to judge "escapes the session root" against.
+    // Before canonicalization this arm only passed by coincidence: projectRoot
+    // and curdir were byte-identical strings, so every repo looked in-project. A
+    // root that cannot be realpath'd (it was DELETED — the state this mode exists
+    // for) now stays in the unresolved namespace while the payload cwd resolves,
+    // and every git verb in the user's own tree would read as an escape.
+    if (cmd0 === "git" && !targetsOnly) {
       const pick = (k) => {
         if (wrapEnv[k] !== undefined) return wrapEnv[k];
         if (envp[k] !== undefined) return envp[k];
@@ -1005,6 +1066,19 @@ function main() {
     }
 
     for (let x = 0; x < targets.length; x++) {
+      // The ANCHORED path spends this budget inside decide(), where exhaustion
+      // is treated as tracked and therefore DENIES — otherwise 200 pre-created
+      // untracked source files would buy one free clobber of real tracked
+      // source. targets mode never reaches that branch (decide() reports the
+      // operand and returns first), so without a guard here the cap would be the
+      // only rule left standing, and `printf x > a1.txt … > a200.txt >
+      // src/app.ts` would walk a source write straight through a branch whose
+      // contract is "deny writes". Fail closed, the same way that branch treats
+      // a parser that cannot run at all. Counted only in targets mode so the two
+      // budgets never double-spend the same MAX_TARGETS.
+      if (targetsOnly && ++evaluated > MAX_TARGETS) {
+        return "WRITE-TARGET (unevaluated: target budget exceeded)";
+      }
       const r = decide(targets[x][0], targets[x][1]);
       if (r) return r;
     }

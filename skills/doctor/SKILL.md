@@ -124,6 +124,16 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   fresh Claude Code session. The binding row is omitted entirely when the helper
   was invoked without `CLAUDE_CODE_SESSION_ID` and `CLAUDE_PLUGIN_DATA` — that
   is a missing check, not a healthy session.
+- **❌ binding: the project root recorded for this session no longer exists** →
+  a different diagnosis with a different remedy: the record is intact, and the
+  directory it names is gone (a deleted or recycled worktree), taking the
+  workflow document under `<project_root>/.zensu/state/` with it. The row prints
+  that exact path. Unlike the row above, this one CAN be repaired in place:
+  re-create exactly the printed directory and the recorded session binds again.
+  Otherwise start a fresh session. Meanwhile the session is diagnosable but not
+  workable — this read-only report runs, `Stop` is released rather than wedged,
+  and `Edit`/`Write` stay denied because nothing can anchor a write to a
+  project. Do NOT report this row as a missing record.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

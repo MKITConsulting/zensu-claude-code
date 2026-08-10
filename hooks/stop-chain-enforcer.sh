@@ -39,7 +39,7 @@ emit_session_runtime_missing_block() {
 }
 
 emit_session_bind_failed_block() {
-  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. A session with NO record at all is released earlier, so this is a different state: most often a record exists here and disagrees with reality — a recorded project root that no longer exists (a deleted or moved worktree), or a record minted against a different plugin installation — but the no-record check itself can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. Where a record does disagree, every tool including /zensu:doctor stays denied and only a fresh Claude Code session helps."}'
+  printf '%s\n' '{"decision":"block","reason":"Zensu Stop denied: this Stop event cannot be bound to the immutable Session Control record of its session, so review-chain and Autopilot completion cannot be proven. Two bind failures are released before this point — a session with NO record at all, and a record whose recorded project root no longer exists (a deleted or recycled worktree) — so this is neither of them: most often a record exists here and disagrees about something else, such as a record minted against a different plugin installation, a runtime digest or plugin version that drifted, or a root that still exists but no longer matches. Either release check can also simply fail to evaluate, in which case no record was consulted at all. The Session Control binder usually printed the exact cause on stderr; when it did, that line is authoritative. Do not guess between these states and do not treat this as completion: report the block and ask the user to read the stderr output. Where a record does disagree, every tool including /zensu:doctor stays denied and only a fresh Claude Code session helps."}'
 }
 
 emit_session_record_unusable_block() {
@@ -94,14 +94,55 @@ if ! zensu_bind_hook_session "$INPUT"; then
     echo "zensu chain-enforcer: releasing Stop — Session Control has no record for this session, so no review-chain or Autopilot state exists to enforce and none was waived. A session resumed across a plugin update never mints one. This session is readable but not workable: the TDD phase gate denies every Edit/Write and subagents cannot run. Start a fresh Claude Code session without --continue/--resume, and run /zensu:doctor to confirm the cause." >&2
     exit 0
   fi
+  # The second state with nothing left to enforce, reached from the opposite
+  # direction: the record is intact and only the directory it recorded is gone
+  # (a deleted or harness-recycled worktree). The workflow document lives at
+  # <project_root>/.zensu/state/, so it is not reachable from this record — and
+  # because the record is immutable, it never will be again. Blocking it
+  # protected no invariant; it only left the session unable to end a turn, with
+  # every tool including /zensu:doctor denied and no in-session escape.
+  #
+  # Deliberately says "not reachable", not "gone": a MOVED or renamed root, and
+  # an unmounted volume, produce the same ENOENT while the state survives intact
+  # and restorable. That is why the message below claims no completion was
+  # proven rather than that nothing existed to prove — the honest phrasing the
+  # opt-out releases above already use. It does mean the release can be induced
+  # — rename the root, end the turn, rename it back — and that IS reachable from
+  # inside a session: `mv` carries no write channel, so the source-write gate
+  # does not stop it, while ZENSU_CHAIN is read from this hook's INHERITED
+  # environment and a per-command prefix cannot reach it. The two are therefore
+  # NOT equivalent capabilities, and the release is unledgerable by design: the
+  # document a bypass entry would live in is the one that became unreachable.
+  # Accepted anyway, because the alternative wedges every legitimately deleted
+  # worktree forever with no in-session escape at all. An induced release is
+  # consequently silent; giving it a detection surface — a sidecar beside the
+  # immutable record, surfaced by /zensu:doctor — is a known open improvement.
+  #
+  # Bound to THIS cause alone. A root that still EXISTS but no longer matches
+  # (symlinked, moved, re-created) is a different state and keeps blocking, as
+  # does every other bind failure — the predicate refuses a record that
+  # disagrees about anything else, so a second disagreement is never relaxed
+  # alongside the first. stdout is captured here, never leaked.
+  if ORPHANED_PROJECT_ROOT="$(zensu_session_orphaned_project_root "$INPUT")" \
+    && [ -n "$ORPHANED_PROJECT_ROOT" ]; then
+    echo "zensu chain-enforcer: releasing Stop — the project root recorded for this session (${ORPHANED_PROJECT_ROOT}) no longer exists, so its workflow document is not reachable from this record and no completion could ever be proven from it. No review-chain or Autopilot state was evaluated: no completion was proven, only an unprovable guard released. If that directory was moved rather than deleted, its state still exists there. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
+    exit 0
+  fi
   if ! zensu_stop_guard_opted_out; then
-    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. A session with no record at all is released earlier, so this is a different state: most often a record exists here and disagrees, though the no-record check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause. If it reports a project root that does not exist, the recorded worktree was deleted or moved: re-create exactly that directory to resume this session, or start a new session for further work, because the record is immutable and no Stop can ever prove completion from it. Where a record does disagree, /zensu:doctor is denied too and only a fresh session helps. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
+    echo "zensu chain-enforcer: this Stop cannot be bound to the Session Control record of this session. Two bind failures are released before this point — a session with no record at all, and a record whose recorded project root no longer exists — so this is neither of them: most often a record exists here and disagrees about something else (a foreign plugin installation, a runtime digest or version that drifted, a root that still exists but no longer matches, a tampered or unreadable record), though either release check can also fail to evaluate, in which case no record was consulted. Read the session-control-v1 line above when there is one — it states the exact cause, and it is authoritative over any inference. The record is immutable, so no Stop can ever prove completion from a record that disagrees: start a new session for further work. Where a record does disagree, /zensu:doctor is denied too and only a fresh session helps. ZENSU_CHAIN=off or hooks.chainEnforcer=false releases this guard explicitly." >&2
     emit_session_bind_failed_block
   fi
   exit 0
 fi
 
 if ! PROJECT_ROOT="$(zensu_resolve_project_dir)"; then
+  # Kept deliberately, though it is now only the residual race window: binding
+  # validates that the recorded root exists, so the steady-state deleted-root
+  # session is released above and never reaches here. What survives is the
+  # narrow TOCTOU case — the directory existed while the bind ran and was gone
+  # by the time resolution asked again. It releases for exactly the reason the
+  # bind-time branch does, and removing it would turn that race into the wedge
+  # this hook no longer has.
   if [ -n "${ZENSU_PROJECT_ROOT:-}" ] && [ ! -d "${ZENSU_PROJECT_ROOT}" ]; then
     echo "zensu chain-enforcer: releasing Stop — the immutable project root of this session (${ZENSU_PROJECT_ROOT}) no longer exists, so no review-chain or Autopilot state is reachable and no completion can ever be proven from it. Re-create exactly that directory to resume the recorded session, or start a new session for further work." >&2
     exit 0
