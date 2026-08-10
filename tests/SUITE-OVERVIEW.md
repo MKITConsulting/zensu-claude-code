@@ -1,0 +1,292 @@
+# zensu-claude-code — Full Test Suite Overview
+
+Static inventory of every test suite in this repository: what exists, what each layer
+covers, and how the layers are wired into CI.
+
+Derived by reading `tests/run-all.sh`, `tests/profiles/promptfoo-local-only.v1.json`,
+`tests/profiles/windows-ci.v1.json`, `.github/workflows/*.yml`, and each suite's own
+source — not from an executed run. Assertion counts are approximations derived from
+each suite's `check()` / `run()` / `expect()` call sites.
+
+## 1. Totals
+
+| Layer | Count | Runs where |
+|---|---|---|
+| `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/*.test.js` (`node --test` units) | **14 files / 183 test blocks** | invoked *by* parent `.sh` suites |
+| Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
+| Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
+| Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
+| Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
+
+## 2. Run modes (`tests/run-all.sh`)
+
+| Mode | Selects | API cost |
+|---|---|---|
+| *(no arg)* | all 127 structure suites + 5 offline evals | none |
+| `--ci` | 120 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
+| `--live` | deterministic + 7 live suites with fixture setup | **yes** |
+
+Exit 0 only if `FAIL=0 && HANG=0 && BLOCKED=0`.
+
+Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.sh` and
+`test-run-all-required-offline-suites.sh`):
+
+- **Preflight classification gate** — the manifest's `ciStructureTests` ∪
+  `localStructureTests` must exactly equal the real directory listing, duplicate-free,
+  and every `ciOfflineSuites` path must exist. Otherwise the run refuses to start.
+  A new structure test that nobody classified fails the run rather than being skipped.
+- **Per-suite watchdog** — `ZENSU_SUITE_TIMEOUT` (default 3600 s), portable pid poll
+  (no GNU `timeout` on macOS). A suite that never returns is reported `HANG`, not `FAIL`.
+- **Output to a file, never a command substitution** — so a suite leaving a background
+  child alive cannot silently wedge the whole runner.
+- **`BLOCK` state** — suites needing npm devDependencies (`node_modules` absent) are
+  reported as *blocked, not run*, and still fail the overall result. No silent skip.
+- **Offline inventory count check** — executed suite count must equal the manifest count.
+
+## 3. Deterministic structure suites — grouped by what they cover
+
+### Session Control & workflow state (12)
+`session-control-claude` · `session-control-sandbox-hook-integration` · `session-id-v1` ·
+`session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
+`tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
+`tdd-state-path-safety` · `versioned-plugin-upgrade` · `workflow-scope` ·
+`zensu-runtime-controller`
+
+Covers the canonical CAS workflow document, immutable session binding, the shared
+Bash-3.2-compatible external process lease, symlinked-ancestor / non-regular-leaf
+rejection, fail-closed behavior on an unreadable state file, diagnostics on failed
+state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
+assertions.
+
+### TDD engine & phase gate (14)
+`edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
+`pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
+`tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
+`tdd-protocol-prominence` · `tdd-reminder-hook` · `tdd-skill-review-fanout` ·
+`tdd-skill-self-review-handoff` · `tdd-vanilla-mode`
+
+Covers arming (`--tdd-begin`), the PreToolUse edit phase-gate, the RED→GREEN→IMPL
+lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
+(`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
+retained), the edit-landing receipt required by `--tdd-complete`, and the 5-agent
+review fan-out wiring in `skills/tdd/SKILL.md`.
+
+### Review chain & findings (25)
+`chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
+`deferred-review-fallback` · `finding-verification` · `pending-review-ttl` ·
+`post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
+`post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
+`reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
+`review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
+`reviewer-readonly-v1` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
+`stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
+`stop-enforcer-subagent-noop` · `stop-session-binding-recovery`
+
+The largest group. Covers the Stop-hook chain enforcer and its two-stage routing
+(code-reviewer → self-review), its escape hatches and anti-deadlock budget cap, the
+spawned-agent no-op, the read-only reviewer capability confinement, the finding
+verification gate (findings graded against real source before they route), the
+one-shot review ticket CAS and budget rearm, deferred/pending review markers plus
+their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
+unqualified chain terminus.
+
+### Autopilot (15)
+`autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
+`autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
+`autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·
+`autopilot-inner-termination` · `autopilot-plan-delegate` ·
+`autopilot-post-review-max-rounds` · `autopilot-review-rearm` ·
+`autopilot-session-resume` · `autopilot-skill` · `autopilot-state-machine` ·
+`autopilot-stop-enforcer`
+
+Covers the durable outer state machine (schema, transitions, idempotency, storage —
+~132 assertions), inner-TDD ↔ outer-Autopilot linkage and crash reconciliation,
+generation- and ticket-bound termination, the single planning gate, review-budget
+rearm/retirement, the read-only SessionStart resume hook, and a composed full-lifecycle
+walk.
+
+### Bash gates, witness & secrets (7)
+`bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` · `post-bash-witness` ·
+`secret-scan-gate` · `skill-workflow-markers` · `witness-scenario-assertions`
+
+Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
+(183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
+the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness log
+(anti-hallucination trail), the build-time guard that a skill never runs a zensu
+mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
+
+### Skill contracts (17)
+`converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
+`ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
+`pr-fix-findings-skill` · `pr-team-review-skill` · `setup-skill` · `skill-overlays` ·
+`templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+
+Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
+persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
+consistency. Heaviest: `pr-team-review-skill` (~121), `verify-feature-skill` (~117).
+
+### Prompt routing & payloads (6)
+`agent-context` · `context-nudge-hook` · `intent-router-hook` · `plan-approved-delegate` ·
+`plan-payload-fallback` · `zensu-plm-arg-guidance`
+
+Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
+context-occupancy nudge, the intent router, and how the PostToolUse(ExitPlanMode)
+delegate reads the approved plan (with a distinct receipt for each failure mode).
+
+### VCS / forge integration (7)
+`valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
+`vcs-review-marker-reconcile` · `workflow-checkout-credentials`
+
+GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
+reconciliation (~107), commentable-diff-line validation, credential handling.
+`workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
+
+### Release & repo hygiene (13)
+`changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
+`file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
+`promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
+`release-session-control-gate` · `run-all-preflight-watchdog` ·
+`run-all-required-offline-suites` · `version-sync`
+
+Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
+invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
+only reference existing files, that Promptfoo stays local-only, and the runner's own
+contract.
+
+### Windows & portability (4)
+`msys-runtime-boundaries` · `msys-special-plugin-module-boundaries` ·
+`windows-ci-contract` · `windows-portability-guards`
+
+Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
+root containing whitespace and an apostrophe, and the Windows CI manifest contract.
+
+### Promptfoo local-only (7 — skipped under `--ci`)
+`claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
+`promptfoo-reset-review-limit` · `promptfoo-session-upgrade` (~206) ·
+`promptfoo-verify-feature` · `promptfoo-zen-mode`
+
+Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
+binary; these guard the local harness contract.
+
+## 4. `node --test` unit suites (14 files, 183 blocks)
+
+Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
+that suite's failure.
+
+| Unit file | Blocks | Driven by | Covers |
+|---|---|---|---|
+| `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
+| `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
+| `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
+| `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
+| `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
+| `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
+| `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
+| `windows-observation.test.js` | 11 | Windows safety | observation summarizer |
+| `claude-stream-render.test.js` | 6 | `test-claude-promptfoo-wrapper.sh` | stream renderer |
+| `windows-safety-shard.test.js` | 5 | Windows safety | shard partitioning (no duplication or loss) |
+| `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
+| `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
+| `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
+
+Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
+unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
+Windows profiles / legacy canary, **not** by `run-all.sh`.
+`tests/session-control/initialize-baseline.sh` is a shared fixture helper sourced by
+~8 autopilot / chain structure suites.
+
+## 5. Offline eval suites (deterministic, in `run-all.sh`)
+
+| Label | Path | Args (CI) | npm deps | Covers |
+|---|---|---|---|---|
+| `evals/config-gate (--self-check)` | `evals/config-gate/run-eval.sh` | `--self-check` | no | **54 sub-scripts**: pre-edit TDD gate matrix, auto-fix rounds (increment / convergence / reset / sanitize / session-isolation), suggestions routing on/off, config merge + helper resolution (missing / malformed / env-override / no-node), log-style rendering, plan / session / post-review gates, symlink rejection, path boundaries, README + CHANGELOG coverage |
+| `evals/session-control (self-check)` | `evals/session-control/run-self-check.sh` | `--ci` | **yes** | credential-free contract, attestation, barrier, provenance, deterministic wrapper selftests; `--ci` skips Promptfoo |
+| `evals/tdd-review-chain (self-check)` | `evals/tdd-review-chain/run-self-check.sh` | — | no | agent / config / version / changelog asserts, severity routing, TDD-log compliance, `.exp` expect scripts |
+| `evals/reset-review-limit (self-check)` | `evals/reset-review-limit/run-self-check.sh` | `--ci` | **yes** | sealed-evidence CAS / security scenarios; `--ci` skips Promptfoo |
+| `evals/tdd-manager-pretool (--self-check)` | `evals/tdd-manager-pretool/run-eval.sh` | `--self-check` | no | PreToolUse baselines / regression |
+
+Eval directories **not** wired into `run-all.sh`: `evals/verify-feature` (advisory live
+Promptfoo, needs a disposable host, deliberately excluded from `--live`),
+`evals/context-nudge-reaction`, `evals/zen-mode-reaction`, `evals/plan-approval-hook`.
+
+## 6. Live E2E suites (7 — `--live` costs API credits)
+
+All support `--self-check` (skeleton, no API); most support `--offline` (re-assert the
+last capture without re-spending).
+
+| Suite | Covers | Assertion style |
+|---|---|---|
+| `tests/e2e` | `code-reviewer` anti-loop guardrails | 5 pattern files: `clean-pr`, `build-fails`, `docs-only`, `false-test-claim`, `stale-branch` |
+| `tests/e2e-plm` | `zensu-plm` agent workflow + tool sequencing | 7 prompt/pattern pairs: `bootstrap`, `ghost-scan`, `implement`, `security-review`, `status-transition`, `pulse-session`, `feature-id-guard` |
+| `tests/e2e-skills` | skills + reviewer agents | 6 pattern files: `zensu-help`, `plan-review`, `self-review`, `converge`, `review-aspect`, `review-judge` (last two also as `.agent` prompts) |
+| `tests/e2e-tdd` | **heaviest** — full `/zensu:tdd` cycle | asserts post-run *state*, not stdout: `chainDone=true`, FSM history has `RED_FAIL` + `GREEN_PASS`/`IMPL`, real `node --test` passes in the fixture, witness log recorded the run. Default timeout 1200 s |
+| `tests/e2e-context-nudge` | `user-prompt-context-nudge.sh` against a **real** session transcript | read → occupancy → threshold → `/compact` proposal; fail-open contract |
+| `tests/e2e-intent-router` | `user-prompt-intent-router.sh` on a planning fixture | timeout 180 s |
+| `tests/e2e-source-write-gate` | PreToolUse(Bash) source-write gate, 3 layers | `--self-check` structural / `--offline` real PreToolUse payloads against a throwaway git project / full live block check |
+
+Live-runner hermeticity: the runners prepend a *normal-mode* directive so a personal
+output-style plugin cannot compress the headings the patterns assert (override via
+`ZENSU_E2E_NORMAL_PREAMBLE`). Pattern files are tolerant regex — `!` prefix = negative
+assert, `# ` = comment.
+
+## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
+
+5 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
+`node tests/run-profile.js <profile>`:
+
+| Profile | Suites | Focus |
+|---|---|---|
+| `windows-reset-session` | 8 | deferred-reset races, self-review handoff, review-marker reconcile, session-control-claude, MSYS module boundaries, safe file read, large-identity upgrade hook |
+| `windows-leases-routing` | 9 | lease refresh, stop-enforcer routing, plan delegate, source-write gate, installed-plugin provisioner, external lease, banner, upgrade process boundaries |
+| `windows-native-state` | 10 | claim adoption, autopilot state machine, pre-edit mirror, capability gate, session-id, versioned upgrade, MSYS runtime, marketplace fixture, coverage-report paths, installer concurrency |
+| `windows-installed-core` | 9 | transfer reset, installed wrapper, evidence lease, session-control-core, portability guards, **split** metadata contract (3 min) vs profile-lifecycle contract (7 min), checkout credentials, Linux sandbox host paths |
+| `windows-native-branches` | 4 | bound payload, file-exists path transport, TDD state junction safety, plan-payload path transport |
+
+Runner guarantees: full manifest + audited command catalog validated before any child
+starts; every suite bound to a validated content digest; per-suite **and** 30-minute
+per-profile deadlines; a supervisor alive until the whole process tree is dead;
+disposable home/temp tree; strict env allowlist (no credentials, auth homes,
+interpreter preloads, or live/API modes).
+
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 5
+reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
+and a complete execution-contract digest binding manifest + catalog + runner +
+supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
+file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profiles.
+
+## 8. CI wiring
+
+| Workflow | Invokes |
+|---|---|
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 5 Windows profiles via `run-profile.js` |
+| `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
+| `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
+
+The Promptfoo binary, live/model wrappers, and nightly and release Promptfoo profiles are
+**never** invoked by GitHub Actions — local-only by design, machine-enforced by
+`test-promptfoo-local-only.sh`.
+
+## 9. Known gaps and caveats
+
+- `tests/session-control/run.sh` (Session Control core unit suite) is **not** in
+  `run-all.sh` — only in the Windows profiles and the legacy canary.
+- 4 eval directories are not wired into any `run-all.sh` mode
+  (`verify-feature`, `context-nudge-reaction`, `zen-mode-reaction`, `plan-approval-hook`).
+- 2 offline eval self-checks (`session-control`, `reset-review-limit`) plus
+  `test-workflow-checkout-credentials.sh` need `npm ci`; without `node_modules` they
+  report `BLOCK` and the run is not green.
+- The promptfoo/expect harnesses under `evals/tdd-manager/`, `evals/tdd-manager-pretool/`,
+  and `evals/tdd-review-chain/` still target the pre-0.4.0 `zensu:tdd-manager` subagent
+  that was removed when TDD moved to the main thread. Rewriting them to the main-thread
+  `/zensu:tdd` model is pending (also noted in `tests/README.md`).
+
+## 10. Maintaining this document
+
+A new suite must be classified in `tests/profiles/promptfoo-local-only.v1.json` or the
+preflight gate fails the whole run — that gate, not this file, is the enforcement point.
+This overview is descriptive: update the group lists and totals in §1/§3 when suites are
+added or removed.
