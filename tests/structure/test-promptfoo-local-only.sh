@@ -69,7 +69,12 @@ for (const name of fs.readdirSync(root).filter((entry) => /\.ya?ml$/.test(entry)
   for (const line of fs.readFileSync(path.join(root, name), 'utf8').split(/\r?\n/)) {
     const invokesRunner = /tests\/run-all\.sh/.test(line)
       || /\bnpm\s+(?:test|run-script)\b/.test(line);
-    if (invokesRunner && !/^(?:-\s*)?(?:run:\s*)?bash tests\/run-all\.sh --ci$/.test(line.trim())) {
+    // A trailing `--shard=I/N` is permitted and nothing else is: the point of this
+    // check is that Actions never selects a Promptfoo mode, not that the command
+    // takes no arguments. The shard value is quoted because it expands a shell
+    // arithmetic expression containing spaces.
+    if (invokesRunner
+        && !/^(?:-\s*)?(?:run:\s*)?bash tests\/run-all\.sh --ci(?: "--shard=[^"]+")?$/.test(line.trim())) {
       process.exit(1);
     }
   }

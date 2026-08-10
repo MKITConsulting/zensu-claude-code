@@ -254,13 +254,33 @@ test('blocking Windows shard matrix has an internal cleanup reserve and provenan
 
 test('pull-request deterministic suite remains complete and Ubuntu-only', () => {
   const job = workflow.jobs?.test;
-  assert.equal(job?.name, 'Deterministic suite (ubuntu-latest)');
+  assert.match(job?.name ?? '', /^Deterministic suite \(ubuntu-latest /);
   assert.equal(job?.['runs-on'], 'ubuntu-latest');
-  assert.equal(job?.strategy, undefined);
   assert.equal(job.steps.some((step) => step.name === 'Windows path and Core lease canary'), false);
-  assert.equal(job.steps.some((step) => step.run === 'bash tests/run-all.sh --ci'), true);
   assert.equal(JSON.stringify(job).includes('windows-latest'), false);
   assert.equal(JSON.stringify(job).includes('windows-legacy'), false);
+
+  // "Complete" used to mean "one job runs everything", which is why this asserted
+  // `strategy === undefined`. It now means "complete ACROSS the matrix": the suite
+  // is sharded, and that the shards are an exact partition of the enforced
+  // inventory is proven by tests/structure/test-run-all-sharding.sh S3, not here.
+  // What stays this test's job is that the split is derived and Ubuntu-only.
+  assert.ok(Array.isArray(job?.strategy?.matrix?.shard));
+  assert.ok(job.strategy.matrix.shard.length > 1);
+  // A shard that dies must not cancel its siblings, or one failure hides the rest.
+  assert.equal(job.strategy['fail-fast'], false);
+
+  const runner = job.steps.find(
+    (step) => typeof step.run === 'string' && step.run.includes('tests/run-all.sh'),
+  );
+  assert.ok(runner, 'the deterministic suite job must still invoke run-all.sh');
+  // --ci and nothing but --ci: the Promptfoo modes stay local-only.
+  assert.match(runner.run, /bash tests\/run-all\.sh --ci\b/);
+  // Both halves of the spec come from the matrix. A literal total beside the
+  // shard list is the one edit that drops suites while every shard stays green.
+  assert.equal(runner.env?.JOB_INDEX, '${{ strategy.job-index }}');
+  assert.equal(runner.env?.JOB_TOTAL, '${{ strategy.job-total }}');
+  assert.equal(/--shard=\d+\/\d+/.test(runner.run), false);
 });
 
 test('one stable blocking check validates exact same-run shard evidence', () => {
