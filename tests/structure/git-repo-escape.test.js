@@ -498,6 +498,28 @@ test("path.win32.resolve splices an MSYS-spelled path under the current drive", 
   assert.strictEqual(path.win32.resolve("D:\\a\\repo\\proj", "/d/a/repo/proj"), "D:\\d\\a\\repo\\proj");
 });
 
+// W121b in the gate suite asserts the deny reason quotes ONE namespace, by
+// reconstructing the spliced spelling and proving it ABSENT. That check can only
+// run where the two namespaces differ, so the reconstruction itself is what makes
+// it non-vacuous — and it is unobservable from a POSIX host, where every spelling
+// coincides. Pin it here against path.win32 instead. The spliced form must carry
+// the doubled prefix AND differ from the normalized one; if it ever collapsed to
+// the normalized spelling, W121b would skip itself on Windows too and report the
+// reassuring "no distinct spliced spelling" while testing nothing. That is exactly
+// what MSYS argv rewriting did until the gate suite moved this input to stdin.
+test("the spliced spelling W121b hunts for stays distinct from the normalized one", () => {
+  const nsProj = "D:\\a\\repo\\proj";
+  const msysSib = "/d/a/repo/sibling";
+  const spliced = path.win32.resolve(nsProj, msysSib);
+  const normalized = path.win32.resolve(msysToDrive(msysSib, true));
+  assert.strictEqual(spliced, "D:\\d\\a\\repo\\sibling");
+  assert.strictEqual(normalized, "D:\\a\\repo\\sibling");
+  assert.notStrictEqual(spliced, normalized);
+  // And the pre-conversion form is distinct from both, so W121b's own guard
+  // (`$NS_SIB != $SIB`) does not skip on the value it is handed.
+  assert.notStrictEqual(msysSib, normalized);
+});
+
 test("a temp root spelled the Git Bash way compares equal to its native spelling", () => {
   // The W116/W186 class: ZENSU_BSWGATE_TEMP_DIRS is read from the environment,
   // so its entries and the tokens judged against them can disagree in spelling.

@@ -104,12 +104,21 @@ entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
 
 **The Windows comparison namespace.** Every path string enters rule (B)'s and rule
 (C)'s comparison through `msysToDrive(value, isWindows)`. Windows is the only host
-where the gate compares two spellings of one location: MSYS converts an EXPORTED
-variable, so `CLAUDE_PROJECT_DIR` arrives as `D:\a\proj`, while the payload cwd and
-every command token arrive over stdin still spelled `/d/a/proj` — and `path.resolve`
-reads that leading `/` as drive-RELATIVE, splicing the whole POSIX path under the
-current drive (`D:\d\a\proj`). The session's own root then compares as an escape and
-every in-project git verb denies. `hooks/pre-bash-source-write-gate.sh` exempts
+where the gate compares two spellings of one location. **The dividing line is stdin
+against everything else**, not env against everything else: MSYS rewrites exported
+variables AND the argument vector on the way into a native binary, so
+`CLAUDE_PROJECT_DIR` arrives as `D:\a\proj`, while the payload cwd and every command
+token — which travel over stdin, the one channel MSYS never touches — are still
+spelled `/d/a/proj`. `path.resolve` then reads that leading `/` as drive-RELATIVE and
+splices the whole POSIX path under the current drive (`D:\d\a\proj`). The session's
+own root compares as an escape and every in-project git verb denies. **W3h pins the
+stdin half of that premise**, because everything here rests on it: were stdin ever
+converted too, `msysToDrive` would be normalizing an already-native path, every
+assertion would stay green, and the real defect would have moved out of view. The
+argv half is why the gate suite must hand a raw MSYS spelling to `node` over stdin
+rather than as an argument — W121b silently skipped itself on Windows for exactly
+that reason, reporting "spellings coincide" while testing nothing.
+`hooks/pre-bash-source-write-gate.sh` exempts
 `CLAUDE_ENV_FILE` from that same conversion by hand (`MSYS2_ENV_CONV_EXCL`), which is
 why `controlPathNamespace` exists for that one variable and why it cannot be reused
 here: it returns a lowercased forward-slash namespace, not `path.resolve`'s.

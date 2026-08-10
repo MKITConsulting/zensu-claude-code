@@ -40,10 +40,10 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
     grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
   done
-  if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 44 ] && [ "$UNIT_SYMS" -eq 1 ]; then
+  if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
     check "W3a rule-C option lattice unit suite passes ($UNIT_PASS cases, win32 witnesses present)" PASS
   else
-    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing cases (want >= 44) win32_symbols=$UNIT_SYMS" FAIL
+    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing cases (want >= 45) win32_symbols=$UNIT_SYMS" FAIL
   fi
 else
   check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL
@@ -262,6 +262,23 @@ CAP_DECODED="$(grep -c 'bash "\$HOOK" 2>/dev/null | reason)"$' "$SELF")"
 { [ "$CAP_TOTAL" -gt 0 ] && [ "$CAP_TOTAL" -eq "$CAP_DECODED" ]; } \
   && check "W3g every deny-reason capture is decoded before it is grepped" PASS \
   || check "W3g deny-reason captures bypass the decoder (captures=$CAP_TOTAL decoded=$CAP_DECODED)" FAIL
+
+# The premise the whole fix rests on. MSYS rewrites env and ARGV on the way into a
+# native binary but never touches STDIN — which is precisely why the payload cwd
+# and every command token still arrive spelled `/d/a/…` for path.resolve to splice
+# under the current drive. Pin the stdin half directly: were a toolchain to start
+# converting stdin too, msysToDrive would be normalizing an already-native path,
+# every assertion here would stay green, and the real defect would have moved
+# somewhere this suite does not look. The argv value is captured only to name the
+# contrast in the failure text — it is the channel that IS rewritten.
+STDIN_ECHO="$(printf '%s' "$SIB" | node -e '
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ process.stdout.write(s); });
+')"
+ARGV_ECHO="$(node -e 'process.stdout.write(process.argv[1])' "$SIB")"
+[ "$STDIN_ECHO" = "$SIB" ] \
+  && check "W3h stdin reaches node unconverted — the namespace split rule (B)/(C) must bridge" PASS \
+  || check "W3h stdin was rewritten before node saw it (sent='$SIB' got='$STDIN_ECHO' argv='$ARGV_ECHO')" FAIL
 mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
 (
   cd "$PROJ" && git init -q && git config user.email t@t && git config user.name t \
@@ -820,10 +837,21 @@ REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 # the pre-fix code produced it — resolve WITHOUT msysToDrive — and assert its
 # absence. Only meaningful where the two namespaces differ; elsewhere it is a SKIP
 # rather than a PASS, so the tally never implies coverage that did not run.
-SPLICED="$(node -e '
+#
+# The MSYS spelling reaches node over STDIN, and that is the whole reason this
+# check works. MSYS rewrites ARGV on the way into a native binary, so passing
+# `/d/a/…` as an argument delivers `D:\a\…` — already normalized, no splice left
+# to reconstruct, and the check skipped itself on Windows while reporting the
+# reassuring "spellings coincide". Stdin is the one channel MSYS does not touch,
+# which is exactly why the payload carries the defect in production. W3h pins
+# that premise. $NS_PROJ stays on argv: it is already native, so conversion is a
+# no-op — and keeping the EXPECTATION side off stdin means MSYS's own rewrite
+# acts as an oracle independent of the msysToDrive under test.
+SPLICED="$(printf '%s' "$SIB" | node -e '
   const p = require("path");
-  process.stdout.write(p.resolve(process.argv[1], process.argv[2]));
-' "$NS_PROJ" "$SIB" 2>/dev/null)"
+  let s=""; process.stdin.on("data",c=>s+=c);
+  process.stdin.on("end",()=>{ process.stdout.write(p.resolve(process.argv[1], s)); });
+' "$NS_PROJ" 2>/dev/null)"
 if [ "$NS_SIB" != "$SIB" ] && [ -n "$SPLICED" ] && [ "$SPLICED" != "$NS_SIB" ]; then
   printf '%s' "$REASON_GIT" | grep -qF "$SPLICED" \
     && check "W121b deny reason still quotes the drive-spliced spelling ($SPLICED)" FAIL \
