@@ -336,11 +336,18 @@ else
   check "R16-P1 Phase 6 corroborates result= against witness tail= + corrected exit-code contract (EVIDENCE CONTRADICTION)" FAIL
 fi
 
-# R16-P2 — the marker scan must be field-scoped to the tail= value (no cmd= bleed -> no false EVIDENCE CONTRADICTION)
-if grep -qF 'substring after' "$AGENT" && grep -qF 'not the whole line' "$AGENT"; then
-  check "R16-P2 Phase 6 corroboration extracts only the tail= field value (substring after tail=, not the whole line)" PASS
+# R16-P2 — the marker scan must be field-scoped to the tail= value (no cmd= bleed -> no false EVIDENCE CONTRADICTION).
+# This property used to be prose in the skill; it now lives in the cross-check
+# library, so the pin follows it there. Guarding the property where it is
+# ENFORCED beats guarding a sentence that describes it.
+XCHECK_LIB="$PLUGIN_DIR/hooks/lib/zensu-evidence-crosscheck.js"
+XCHECK_UNIT="$PLUGIN_DIR/tests/structure/evidence-crosscheck-v1.test.js"
+if [ -f "$XCHECK_LIB" ] && [ -f "$XCHECK_UNIT" ] \
+  && grep -qF 'hooks/lib/zensu-evidence-crosscheck.js' "$AGENT" \
+  && grep -qF 'corroboration scans the tail only' "$XCHECK_UNIT"; then
+  check "R16-P2 Phase 6 corroboration is tail-scoped in the cross-check library, pinned by its unit suite" PASS
 else
-  check "R16-P2 Phase 6 corroboration extracts only the tail= field value (substring after tail=, not the whole line)" FAIL
+  check "R16-P2 Phase 6 corroboration is tail-scoped in the cross-check library, pinned by its unit suite" FAIL
 fi
 
 # Plan-doc single-source-of-truth — the Steps-table Status column tracks completion.

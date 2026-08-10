@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **evidence discipline**: The witness cross-check is now a library,
+  `hooks/lib/zensu-evidence-crosscheck.js`, instead of a prose recipe.
+  `/zensu:tdd` Phase 6 used to tell the model to verify each `AUDIT — cmd="X"`
+  claim by running `grep -F -q 'cmd="X"'` against the witness log, then scan the
+  tail by hand. That recipe is not known to be wrong on its own — the witness
+  JSON-encodes each recorded command, and the escaping defeats the obvious
+  attack where the `printf` that wrote a claim corroborates it. What failed, in
+  a real session, was the execution: carried out by hand, every claim came back
+  `verified`, and that verdict reached a human before anyone noticed nothing had
+  been established. A check re-derived from prose each run has no failure mode
+  anyone can test and no exit code any gate can consume.
+
+  The library decodes the witness format properly (JSON-decoded `cmd`/`tail`,
+  optional timestamp prefix), refuses to let a witness entry that is itself a
+  log write corroborate anything, matches on equality rather than containment,
+  scans only the decoded `tail` and `interrupted` flag for contradictions, and
+  fails closed when the witness log is missing. A claimed pass is contradicted
+  only when every matching run failed, so a fix-and-rerun cycle is not a false
+  alarm. Exit 0 only when every claim is verified and none is contradicted.
+  `tests/structure/test-evidence-crosscheck.sh` and its `node --test` unit suite
+  pin each property against fixtures.
+
+- **evidence discipline**: The cross-check now also runs at the chain terminus.
+  `/zensu:self-review` executes the same library before rendering its final
+  report and carries the verdict — every `EVIDENCE GAP` / `EVIDENCE
+  CONTRADICTION` line verbatim — into that report, so a fabricated test result
+  cannot reach the user through the last thing the chain says. A chain that
+  never armed a witness reports `no evidence claims to cross-check`, a clean
+  state rather than a failure.
+
+### Fixed
+
+- **docs**: The README's Evidence Discipline section claimed 28 prompt
+  carriers; there are 29 (6 agents + 23 skills).
+
+### Session Control upgrade note
+
+Session Control binds each session to the exact plugin bytes it started with.
+That still requires every published plugin change to use a new SemVer version
+and distinct immutable tag/cache path. After a versioned upgrade,
+already-running Claude Code sessions keep using their previous plugin root;
+start a fresh session to pick up the new Session Control runtime. Do not
+overwrite an existing cache version or run `/reload-plugins` in a session that
+must keep working on the old runtime. The retired `~/.zensu/plugin-root`
+locator is no longer consulted or updated. It may be deleted once no older
+session still needs that path; the plugin never deletes it automatically.
+
 ## [0.17.1] - 2026-08-07
 
 ### Fixed
