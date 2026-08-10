@@ -294,7 +294,7 @@ test('one stable blocking check validates exact same-run shard evidence', () => 
   assert.ok(job);
   assert.equal(job.name, 'Deterministic suite (windows-latest)');
   assert.deepEqual(job.needs, ['windows-shards']);
-  assert.equal(job.if, 'always()');
+  assert.equal(job.if, "${{ always() && !startsWith(github.head_ref, 'release/') }}");
   assert.equal(job['continue-on-error'], undefined);
   assert.equal(job.permissions?.actions, 'read');
   const downloads = job.steps.filter(
@@ -339,7 +339,7 @@ test('scheduled Windows safety workflow partitions the exact former monolith rea
   assert.equal(job['runs-on'], 'windows-latest');
   assert.equal(job['timeout-minutes'], 240);
   assert.equal(job.strategy?.['fail-fast'], false);
-  assert.equal(job.strategy?.['max-parallel'], 8);
+  assert.equal(job.strategy?.['max-parallel'], 15);
   const include = job.strategy?.matrix?.include;
   assert.equal(include.length, 15);
   assert.deepEqual(

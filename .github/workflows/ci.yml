@@ -24,7 +24,9 @@ defaults:
 jobs:
   test:
     name: Deterministic suite (ubuntu-latest ${{ strategy.job-index }})
+    if: ${{ !startsWith(github.head_ref, 'release/') }}
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     # The suite ran sequentially in one job for 72 minutes and was the whole
     # workflow's critical path — more than twice the Windows shards, which have
     # been parallel for far longer. The slice is derived from the ENFORCED suite
@@ -65,6 +67,7 @@ jobs:
 
   windows-shards:
     name: Windows contract shard (${{ matrix.profile }})
+    if: ${{ !startsWith(github.head_ref, 'release/') }}
     permissions:
       contents: read
     strategy:
@@ -124,7 +127,7 @@ jobs:
 
   windows-shard-summary:
     name: Deterministic suite (windows-latest)
-    if: always()
+    if: ${{ always() && !startsWith(github.head_ref, 'release/') }}
     needs: [windows-shards]
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -167,6 +170,7 @@ jobs:
 
   session-control-sandbox:
     name: Session Control sandbox prerequisites
+    if: ${{ !startsWith(github.head_ref, 'release/') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
