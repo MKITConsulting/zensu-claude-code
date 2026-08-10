@@ -205,7 +205,18 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 
 - **Otherwise** (no must-fix, OR `selfReviewFixed` is already true) — finalize:
   1. Standalone handoffs keep the unqualified terminus: run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`. For a verified Autopilot binding, run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>"`. This is the ticket- and generation-bound chain terminus. If it fails, stop as stale and do not render a successful final report.
-  2. Render the final report (below), then stop.
+  2. **Terminal evidence cross-check.** The chain's last word on test results is this
+     report, so re-verify the session's structured-evidence claims against the witness
+     before writing it: resolve the run log as the newest `"${CLAUDE_PROJECT_DIR:-.}/.zensu/logs"/*_tdd-*.log`
+     and run `node "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-evidence-crosscheck.js" --log <run-log> --witness "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-${SESSION_ID}.log" --allow-missing-log`.
+     The library IS the recipe — do NOT hand-grep the witness log. Hand-executing this
+     check is what once returned `verified` for claims nobody had established.
+     `--allow-missing-log` makes a chain that never armed a witness report
+     `no evidence claims to cross-check`, which is a clean state, not a failure. Every
+     `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line it emits goes verbatim into the
+     final report's `## What I built` audit facts and, when any exists, into `## Open`
+     — a fabricated green must not reach the user through the chain's terminal report.
+  3. Render the final report (below), then stop.
 
 ### Final report
 
@@ -224,7 +235,10 @@ Edit Landing verdict — the step 5b close marker plus any `EDIT NOT LANDED` lin
 and the `UNVERIFIED (no claims logged)` or unresolved `PENDING PREDICATE` close
 when either applies (those are NOT clean states), each rendered verbatim — a
 claimed edit that never produced a change must not vanish between the Phase 6
-report and this summary. Cite the plan
+report and this summary. Carry the Phase-4 step-2 **evidence cross-check verdict**
+the same way — the `EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
+`EVIDENCE CONTRADICTION` line verbatim, or `no evidence claims to cross-check` when
+that is what it reported. Cite the plan
 + log paths. When the session plan carries a ## Requirements table, also give
 per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).
 
