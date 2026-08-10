@@ -168,6 +168,36 @@ root, so it is allowed; if the shell's real cwd on that drive is elsewhere the w
 escapes. It predates the normalizer (`D:rel` has no leading slash, so `msysToDrive` never
 sees it) and `git-repo-escape.test.js` pins the judgment so a change to it is deliberate.
 
+**The harness lies on Windows in three ways, and each one fails SILENTLY on POSIX.**
+Every one of these turned a check green — or red — for a reason unrelated to the
+contract it names, and none is observable from a POSIX host:
+
+- **Grep the DECODED deny reason, never the hook's raw stdout.** The hook emits through
+  `JSON.stringify`, which doubles every backslash, so a `D:\a\…` needle can never match a
+  `D:\\a\\…` haystack. This failed W121/W183/W204 on Windows against a message that was
+  already correct, and made W121b — whose whole job is to prove a spelling is ABSENT —
+  pass without testing anything. `reason()` decodes it; **W3g** pins that every
+  `REASON_*` capture is piped through it, and **W3f** makes the encoding itself
+  observable on any host. W87e is the deliberate exception: it greps the JSON envelope.
+- **A PATH shim cannot intercept the parser's `git`.** `tracked()` uses `execFileSync`
+  with no shell, and Windows resolves only a real executable image: an extensionless
+  script named `git` is never reached and a `.cmd` twin is refused outright since
+  CVE-2024-27980, so the real `git.exe` answers and the spy log stays empty. Both halves
+  of W122 then go vacuous — an empty log "proving" an independence nothing tested. It
+  probes reachability first and skips only where the parser could never reach the shim.
+- **`ln -s` exiting 0 is not evidence of a symlink.** Git Bash satisfies it with a copy
+  or a shortcut native Node does not follow; the two directories then genuinely differ
+  and DENY is CORRECT, so W167/W168 failed on a premise that did not hold. They confirm
+  the link through `fs.realpathSync.native` — the same primitive `canonical()` uses.
+
+**The Windows timeout for this suite is a coverage boundary, not a formality.** At
+`timeoutMs: 300000` in `tests/profiles/windows-ci.v1.json` the shard killed the suite
+after roughly 210 of its checks, always mid-run at W122 — so W224, W233/W234 and
+everything after them never executed on Windows at all while the shard still reported.
+It is 600000 now (matching `autopilot-plan-delegate`). Adding checks costs Windows wall
+clock; if the shard starts reporting `TIMED_OUT` again, the tail of the file has gone
+unverified regardless of how many checks passed before it.
+
 **Three cross-file couplings.** (The MSYS drive rule is deliberately NOT among them: it is
 shared through `claude-path-v1.js`'s `msysDrivePrefix` rather than hand-copied — see the
 paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s

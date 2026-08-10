@@ -151,6 +151,57 @@ gate_ns() {
 # The NS_* variables are assigned after $PROJ/$SIB exist — see below the workroot
 # setup. W3e proves they are non-empty before any assertion consumes them.
 
+# Resolved once, because two probes below run node with a REWRITTEN PATH and the
+# effect of a `PATH=… cmd` prefix on the lookup of `cmd` itself is unspecified.
+NODE_BIN="$(command -v node)"
+
+# Whether two spellings name the same real directory AS THE GATE SEES IT — the
+# same fs.realpathSync.native the parser's canonical() uses, reached through the
+# same msysToDrive composition. Git Bash `ln -s` exits 0 while producing a copy
+# or a shortcut that native Node does not follow, so `ln -s` succeeding is not
+# evidence that a symlink exists; without this the symlink pair asserts ALLOW for
+# two directories that genuinely differ, and the resulting DENY is correct.
+same_realpath() {
+  "$NODE_BIN" -e '
+    const fs = require("fs");
+    const p = require("path");
+    const { msysToDrive } = require(process.argv[1]);
+    const n = (v) => p.resolve(msysToDrive(v, process.platform === "win32"));
+    try {
+      process.exit(fs.realpathSync.native(n(process.argv[2])) === fs.realpathSync.native(n(process.argv[3])) ? 0 : 1);
+    } catch (e) {
+      process.exit(1);
+    }
+  ' "$PARSER" "$1" "$2"
+}
+
+# The hook emits its verdict through JSON.stringify, which DOUBLES every
+# backslash. A needle spelled `D:\a\…` can therefore never match a haystack
+# spelling it `D:\\a\\…`, so grepping the raw stdout failed three deny-reason
+# checks on Windows for a message that was already correct — and, worse, made
+# W121b (whose job is to prove a spelling is ABSENT) pass without testing
+# anything. On POSIX the encoding is identity, which is why it stayed invisible.
+# Not valid JSON -> pass the bytes through, so a non-JSON deny is still checked.
+# Valid JSON with no reason -> empty, so every consumer's grep fails loudly
+# rather than falling back to the escaped haystack this exists to avoid.
+# Defined here, ahead of W3f/W3g: calling it earlier is a command-not-found whose
+# only trace is stderr, and the command substitution flattens that to "" with no
+# `set -e` to stop on it — the same silent-empty failure mode W3e already guards
+# for gate_ns.
+reason() {
+  node -e '
+    let s=""; process.stdin.on("data",c=>s+=c);
+    process.stdin.on("end",()=>{
+      const t=s.trim();
+      if(!t){return;}
+      let j;
+      try{j=JSON.parse(t);}catch(_){process.stdout.write(s);return;}
+      const o=j&&j.hookSpecificOutput;
+      process.stdout.write((o&&o.permissionDecisionReason)||"");
+    });
+  '
+}
+
 node -e '
   const h=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
   const pres=(h.hooks&&h.hooks.PreToolUse)||[];
@@ -181,6 +232,36 @@ NS_SIB_WT="$(gate_ns "$SIB/wt")"
 { [ -n "$NS_SIB" ] && [ -n "$NS_PROJ" ] && [ -n "$NS_SIB_WT" ]; } \
   && check "W3e the deny-reason namespace helper resolves every expected path" PASS \
   || check "W3e gate_ns produced an empty spelling — deny-reason checks would match anything (sib=[$NS_SIB] proj=[$NS_PROJ] wt=[$NS_SIB_WT])" FAIL
+
+# The escaping defect itself, pinned where every host can see it. The hook writes
+# its reason through JSON.stringify, so a native path arrives with every
+# backslash DOUBLED and a `D:\a\…` needle cannot match. On POSIX no path carries
+# a backslash, which is exactly why grepping raw stdout stayed green here for as
+# long as it did while three Windows checks failed on a message that was already
+# correct. Feeding a synthetic reason makes the mechanism observable everywhere:
+# absent from the raw envelope, present once decoded.
+BS_PATH='D:\a\proj\sibling'
+BS_JSON="$(node -e '
+  process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PreToolUse",
+    permissionDecision:"deny",permissionDecisionReason:"Blocked (D:\\a\\proj\\sibling)."}}));
+')"
+BS_DECODED="$(printf '%s' "$BS_JSON" | reason)"
+if printf '%s' "$BS_JSON" | grep -qF "$BS_PATH"; then
+  check "W3f raw hook stdout was expected to escape the backslash path but did not (got '$BS_JSON')" FAIL
+elif printf '%s' "$BS_DECODED" | grep -qF "$BS_PATH"; then
+  check "W3f reason() decodes the JSON escaping that hides a native path from grep -F" PASS
+else
+  check "W3f reason() lost the decoded path (got '$BS_DECODED')" FAIL
+fi
+
+# And every deny-reason capture must actually go through it. One capture left on
+# raw stdout is invisible on POSIX and silently re-opens the same Windows hole.
+SELF="$PLUGIN_DIR/tests/structure/test-bash-source-write-gate.sh"
+CAP_TOTAL="$(grep -c 'REASON_[A-Z_]*="\$(payload' "$SELF")"
+CAP_DECODED="$(grep -c 'bash "\$HOOK" 2>/dev/null | reason)"$' "$SELF")"
+{ [ "$CAP_TOTAL" -gt 0 ] && [ "$CAP_TOTAL" -eq "$CAP_DECODED" ]; } \
+  && check "W3g every deny-reason capture is decoded before it is grepped" PASS \
+  || check "W3g deny-reason captures bypass the decoder (captures=$CAP_TOTAL decoded=$CAP_DECODED)" FAIL
 mkdir -p "$PROJ/src" "$PROJ/build" "$SIB/src" "$FAKETMP"
 (
   cd "$PROJ" && git init -q && git config user.email t@t && git config user.name t \
@@ -284,13 +365,13 @@ OUT2="$(printf '%s' 'not json' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" ZENSU_CONF
 
 # Deny-reason content
 REASON_A="$(payload 'printf x >> src/app.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_A" | grep -qF 'tracked' && printf '%s' "$REASON_A" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
   && check "W32 clobber deny-reason: 'tracked' + escape-hatch hint" PASS \
   || check "W32 clobber deny-reason content" FAIL
 
 REASON_B="$(payload 'printf x >> ../sibling/src/lib.rs' | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_B" | grep -qiF 'worktree' && printf '%s' "$REASON_B" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
   && check "W33 escape deny-reason: 'worktree' + escape-hatch hint" PASS \
   || check "W33 escape deny-reason content" FAIL
@@ -394,7 +475,7 @@ OUT_CONTROL_FAIL="$(payload 'git status' | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZE
 
 # rule precedence: an escaped AND tracked target reports the worktree (B) reason
 REASON_ESC="$(payload "printf x >> $SIB/src/lib.rs" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-            ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+            ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_ESC" | grep -qiF 'worktree' \
   && check "W54 escaped+tracked target reports rule-B (worktree) reason" PASS \
   || check "W54 escaped+tracked rule precedence" FAIL
@@ -474,12 +555,19 @@ run "W134 dot-segment payload cwd"             "git add -A"          ALLOW "$PRO
 # it denies with or without the canonicalization. Skipped where symlinks are
 # unavailable — the reported PASS total is therefore platform-dependent, matching
 # the existing W23 convention.
-if ln -s "$PROJ" "$WORKROOT/proj-link" 2>/dev/null; then
+# `ln -s` exiting 0 is NOT evidence that a symlink exists: Git Bash satisfies it
+# with a directory copy or a shortcut that native Node never follows. The two
+# directories are then genuinely different, DENY is the correct verdict, and the
+# ALLOW pair below would fail for a premise that does not hold rather than for
+# the contract under test. Confirm the link through the very primitive the gate
+# canonicalizes with, so this runs wherever real symlinks exist and skips only
+# where the harness could not build one.
+if ln -s "$PROJ" "$WORKROOT/proj-link" 2>/dev/null && same_realpath "$WORKROOT/proj-link" "$PROJ"; then
   run "W167 symlinked payload cwd, git mutation" "git add -A"        ALLOW "$WORKROOT/proj-link"
   run "W168 symlinked payload cwd, new file"     "printf x > src/viasym.rs" ALLOW "$WORKROOT/proj-link"
   run "W169 symlinked payload cwd still catches an escape" "printf x >> $SIB/src/lib.rs" DENY "$WORKROOT/proj-link"
 else
-  echo "  SKIP  W167-W169 symlinked payload cwd (symlinks unavailable)"
+  echo "  SKIP  W167-W169 symlinked payload cwd (no symlink the gate's realpath follows)"
 fi
 
 # TEMP_REAL is the realpath'd copy of the temp list, and it needs the SAME guards
@@ -669,10 +757,10 @@ run "W182 rule A survives 210 non-source targets" "$MANY
 printf x >> src/app.rs"                                                                      DENY
 REASON_BUDGET="$(payload "$MANY
 git -C $SIB add -A" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_BUDGET" | grep -qF "$NS_SIB" \
   && check "W183 the post-budget deny is the rule-(C) verdict, not an unrelated one" PASS \
-  || check "W183 post-budget deny reason (got '$REASON_BUDGET')" FAIL
+  || check "W183 post-budget deny reason (want '$NS_SIB' got '$REASON_BUDGET')" FAIL
 
 # Accepted lexical gap: lex() is not quote-aware, so a quoted global-option
 # operand containing & ; or | severs the segment before the subcommand.
@@ -716,13 +804,13 @@ OUT_MCP_ENV_A="$(payload "printf x >> src/app.rs" | env CLAUDE_PLUGIN_ROOT="$PLU
 # form, and the opt-out. A reason naming only "a repository" leaves the agent
 # guessing which checkout it just hit.
 REASON_GIT="$(payload "git -C $SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_GIT" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_GIT" | grep -qF 'git add' \
   && printf '%s' "$REASON_GIT" | grep -qF "git -C '$NS_PROJ'" \
   && printf '%s' "$REASON_GIT" | grep -qF 'ZENSU_BASH_WRITE_GATE=off'; } \
   && check "W121 rule-C deny names repo, subcommand, quoted -C fix and escape hatch" PASS \
-  || check "W121 rule-C deny reason (got '$REASON_GIT')" FAIL
+  || check "W121 rule-C deny reason (want repo '$NS_SIB' and -C '$NS_PROJ'; got '$REASON_GIT')" FAIL
 
 # AC-003: the reason must quote ONE namespace. The pre-fix message named the
 # addressed repo as `D:\d\a\…` — path.resolve splicing the MSYS spelling under the
@@ -741,13 +829,13 @@ if [ "$NS_SIB" != "$SIB" ] && [ -n "$SPLICED" ] && [ "$SPLICED" != "$NS_SIB" ]; 
     && check "W121b deny reason still quotes the drive-spliced spelling ($SPLICED)" FAIL \
     || check "W121b deny reason quotes exactly one path namespace" PASS
 else
-  echo "  SKIP  W121b one-namespace check (raw and normalized spellings coincide on this host)"
+  echo "  SKIP  W121b one-namespace check — no distinct spliced spelling to look for (raw='$SIB' ns='$NS_SIB' spliced='$SPLICED')"
 fi
 
 # A designated --work-tree/--git-dir hit is NOT fixed by adding -C: re-running with
 # -C re-resolves the same escaping designation. The remedy sentence must say so.
 REASON_GIT_WT="$(payload "git --work-tree=$SIB add ." | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
   && check "W163 designated-path deny does not advise a -C that cannot clear it" PASS \
   || check "W163 designated-path remedy (got '$REASON_GIT_WT')" FAIL
@@ -755,11 +843,11 @@ printf '%s' "$REASON_GIT_WT" | grep -qF 'denies again' \
 # The third remedy arm. Without it a worktree deny would advise pointing
 # --work-tree/--git-dir inside the root for a command that has neither flag.
 REASON_WT_PATH="$(payload "git worktree remove --force $SIB/wt" | env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+          ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_WT_PATH" | grep -qF 'does not change which tree is destroyed' \
   && printf '%s' "$REASON_WT_PATH" | grep -qF "$NS_SIB_WT"; } \
   && check "W204 worktree deny names the destroyed tree and its own remedy" PASS \
-  || check "W204 worktree remedy (got '$REASON_WT_PATH')" FAIL
+  || check "W204 worktree remedy (want '$NS_SIB_WT' got '$REASON_WT_PATH')" FAIL
 
 # Rule (C) resolves lexically and must never consult git about the foreign repo —
 # otherwise a hung or missing git on another checkout could wedge or invert it.
@@ -768,6 +856,22 @@ GIT_SPY_LOG="$WORKROOT/git-spy.log"
 mkdir -p "$GIT_SPY_BIN"
 printf '%s\n' '#!/bin/bash' 'printf "%s\n" "$*" >> "${ZENSU_TEST_GIT_SPY:?}"' 'exit 0' > "$GIT_SPY_BIN/git"
 chmod +x "$GIT_SPY_BIN/git"
+# The shim only intercepts where the PARSER's spawn mechanism honours it. The
+# parser calls execFileSync WITHOUT a shell, and Windows resolves only a real
+# executable image from PATH: an extensionless script named `git` is never
+# reached, and a `.cmd` twin is refused outright since CVE-2024-27980. There the
+# real git.exe answers instead, the log stays empty for a reason that has nothing
+# to do with rule (C), and BOTH halves of the assertion below go vacuous — the
+# empty log would "prove" an independence nothing tested. So probe the mechanism
+# itself rather than the platform: wherever the shim is genuinely reachable the
+# full assertion runs, and only where the parser could never reach it do we skip.
+# Probed BEFORE the runs below, because the assertion reads the log they leave.
+: > "$GIT_SPY_LOG"
+env PATH="$GIT_SPY_BIN:$PATH" ZENSU_TEST_GIT_SPY="$GIT_SPY_LOG" "$NODE_BIN" -e '
+  try { require("child_process").execFileSync("git", ["ls-files", "--spy-reachability-probe"],
+        { stdio: "ignore", timeout: 2000 }); } catch (e) {}
+' >/dev/null 2>&1
+SPY_REACHABLE=0; [ -s "$GIT_SPY_LOG" ] && SPY_REACHABLE=1
 spy_run() {
   : > "$GIT_SPY_LOG"
   payload "$1" | env PATH="$GIT_SPY_BIN:$PATH" ZENSU_TEST_GIT_SPY="$GIT_SPY_LOG" \
@@ -779,12 +883,16 @@ spy_run() {
 OUT_SPY_CONTROL="$(spy_run "printf x >> src/app.rs")"
 SPY_CONTROL_LOG="$(tr '\n' ';' < "$GIT_SPY_LOG")"
 OUT_GIT_SPY="$(spy_run "git -C $SIB add .")"
-# The control must show the shim was reached AND used for the tracked() lookup —
-# "the log is non-empty" alone would be satisfied by any incidental git call.
-{ printf '%s' "$SPY_CONTROL_LOG" | grep -qF 'ls-files' && [ "$OUT_SPY_CONTROL" = "DENY" ] \
-  && [ "$OUT_GIT_SPY" = "DENY" ] && [ ! -s "$GIT_SPY_LOG" ]; } \
-  && check "W122 rule-C denies without asking git anything about the foreign repo" PASS \
-  || check "W122 rule-C git independence (control='$OUT_SPY_CONTROL' spy-control='$SPY_CONTROL_LOG' ruleC='$OUT_GIT_SPY')" FAIL
+if [ "$SPY_REACHABLE" = 1 ]; then
+  # The control must show the shim was reached AND used for the tracked() lookup —
+  # "the log is non-empty" alone would be satisfied by any incidental git call.
+  { printf '%s' "$SPY_CONTROL_LOG" | grep -qF 'ls-files' && [ "$OUT_SPY_CONTROL" = "DENY" ] \
+    && [ "$OUT_GIT_SPY" = "DENY" ] && [ ! -s "$GIT_SPY_LOG" ]; } \
+    && check "W122 rule-C denies without asking git anything about the foreign repo" PASS \
+    || check "W122 rule-C git independence (control='$OUT_SPY_CONTROL' spy-control='$SPY_CONTROL_LOG' ruleC='$OUT_GIT_SPY')" FAIL
+else
+  echo "  SKIP  W122 rule-C git independence (a PATH shim cannot intercept the parser's shell-less execFileSync on this host)"
+fi
 
 # Every gated verb must actually be gated: a verb dropped from the space-split
 # GIT_MUTATIONS string would otherwise open silently while the suite stays green.
@@ -894,7 +1002,7 @@ run_unbound "W124 unbound + read-only git on sibling"      "git -C $SIB status" 
 run_unbound "W217 unbound + in-project git mutation (control)" "git add -A"                    ALLOW
 REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_UNBOUND_C" | grep -qF "$NS_SIB" \
   && printf '%s' "$REASON_UNBOUND_C" | grep -qF "OUTSIDE this session's"; } \
   && check "W224 unbound rule-C deny keeps its own cause" PASS \
@@ -905,7 +1013,7 @@ REASON_UNBOUND_C="$(payload "git -C $SIB add ." "$PROJ" | env -u ZENSU_SESSION_K
 # assertion green while the user loses the reason the write was refused.
 REASON_UNBOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 { printf '%s' "$REASON_UNBOUND" | grep -qF 'tracked' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'ZENSU_BASH_WRITE_GATE=off' \
   && printf '%s' "$REASON_UNBOUND" | grep -qF 'no Session Control record' \
@@ -914,7 +1022,7 @@ REASON_UNBOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env -u ZENSU_SESSIO
   || check "W87 unbound deny reason (got '$REASON_UNBOUND')" FAIL
 REASON_UNBOUND_B="$(payload "printf x >> $SIB/src/lib.rs" "$PROJ" | env -u ZENSU_SESSION_KEY \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" CLAUDE_PLUGIN_DATA="$UNBOUND_DATA" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 printf '%s' "$REASON_UNBOUND_B" | grep -qF 'worktree' \
   && check "W87a unbound rule-B deny still reports the worktree-escape cause" PASS \
   || check "W87a unbound rule-B reason (got '$REASON_UNBOUND_B')" FAIL
@@ -974,7 +1082,7 @@ OUT_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
 REASON_PARSER_FAIL_BOUND="$(payload "printf x >> src/app.rs" "$PROJ" | env \
   PATH="$PARSER_FAIL_BIN:$PATH" ZENSU_TEST_REAL_NODE="$(command -v node)" \
   CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" \
-  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null)"
+  ZENSU_CONFIG="$CFG_DEF" ZENSU_BSWGATE_TEMP_DIRS="$FAKETMP" bash "$HOOK" 2>/dev/null | reason)"
 # A bare DENY cannot show WHICH branch answered — the unbound arm and a narrowed
 # bind failure both deny too. Only the bound arm emits this sentence.
 { [ "$OUT_PARSER_FAIL_BOUND" = "DENY" ] \
