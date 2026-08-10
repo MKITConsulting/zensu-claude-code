@@ -31,6 +31,12 @@ function mutateJson(root, relative, mutate) {
   fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
 }
 
+// These tests corrupt "some profile" to prove the contract fails closed; WHICH
+// one was never part of the contract, and profile membership is balanced by
+// measured runtime now, so any name written here would break on the next
+// rebalance for a reason unrelated to what is being asserted.
+const anyProfile = (contract) => Object.keys(contract.profiles).sort()[0];
+
 test('complete profile contract binds every runtime and referenced suite byte', () => {
   assert.equal(current.schemaVersion, 1);
   assert.match(current.profileContractSha256, /^[a-f0-9]{64}$/);
@@ -44,7 +50,7 @@ test('complete profile contract binds every runtime and referenced suite byte', 
   const root = copyContractRoot();
   try {
     const before = loadProfileContract(root);
-    const suite = before.profiles['windows-reset-session'].suites[0];
+    const suite = before.profiles[anyProfile(before)].suites[0];
     fs.appendFileSync(path.join(root, suite.path), '\n# contract drift\n');
     const after = loadProfileContract(root);
     assert.notEqual(after.profileContractSha256, before.profileContractSha256);
@@ -63,13 +69,13 @@ test('profile contract fails closed on malformed schema, profiles, suites, and p
       manifest.schemaVersion = 2;
     }),
     (root) => mutateJson(root, 'tests/profiles/windows-ci.v1.json', (manifest) => {
-      manifest.profiles['windows-reset-session'].suites = [];
+      manifest.profiles[anyProfile(manifest)].suites = [];
     }),
     (root) => mutateJson(root, 'tests/profiles/windows-ci.v1.json', (manifest) => {
-      manifest.profiles['windows-reset-session'].suites[0].args = [null];
+      manifest.profiles[anyProfile(manifest)].suites[0].args = [null];
     }),
     (root) => mutateJson(root, 'tests/profiles/windows-ci.v1.json', (manifest) => {
-      manifest.profiles['windows-reset-session'].suites[0].path = '../escape.sh';
+      manifest.profiles[anyProfile(manifest)].suites[0].path = '../escape.sh';
     }),
   ];
   for (const mutate of mutations) {
@@ -87,7 +93,7 @@ test('profile contract rejects symlink and hardlink substitutions', () => {
   for (const linkType of ['symlink', 'hardlink']) {
     const root = copyContractRoot();
     try {
-      const relative = current.profiles['windows-reset-session'].suites[0].path;
+      const relative = current.profiles[anyProfile(current)].suites[0].path;
       const target = path.join(root, relative);
       const replacement = path.join(root, 'replacement.sh');
       fs.writeFileSync(replacement, '#!/bin/bash\nexit 0\n');

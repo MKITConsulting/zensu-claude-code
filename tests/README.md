@@ -22,16 +22,25 @@ Exit 0 iff every selected suite passes. A timestamped report lands in `tests/res
 ## Windows contract profiles
 
 The versioned manifest at `tests/profiles/windows-ci.v1.json` divides the
-Windows-specific deterministic contracts into five bounded profiles:
+Windows-specific deterministic contracts into seven bounded profiles. Membership
+is balanced by measured runtime rather than by theme, so a profile name says
+which shard a suite runs in and nothing about what it covers:
 
 ```bash
 node tests/run-profile.js --validate
-node tests/run-profile.js windows-reset-session
-node tests/run-profile.js windows-leases-routing
-node tests/run-profile.js windows-native-state
-node tests/run-profile.js windows-installed-core
-node tests/run-profile.js windows-native-branches
+node tests/run-profile.js windows-shard-1
+node tests/run-profile.js windows-shard-2
+node tests/run-profile.js windows-shard-3
+node tests/run-profile.js windows-shard-4
+node tests/run-profile.js windows-shard-5
+node tests/run-profile.js windows-shard-6
+node tests/run-profile.js windows-shard-7
 ```
+
+Moving a suite between profiles is a rebalancing decision, not a semantic one.
+Coverage does not depend on getting it right: the runner requires the manifest
+and the audited command catalog to be a bijection, so a suite assigned to no
+profile fails validation rather than silently running nowhere.
 
 The runner validates the complete manifest and its audited command catalog
 before starting any child process, binds every suite to its validated content

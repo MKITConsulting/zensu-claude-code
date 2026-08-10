@@ -21,11 +21,13 @@ const safetyWorkflow = YAML.parse(
 );
 const testsReadme = fs.readFileSync(path.join(root, 'tests', 'README.md'), 'utf8');
 const expectedProfiles = [
-  'windows-reset-session',
-  'windows-leases-routing',
-  'windows-native-state',
-  'windows-installed-core',
-  'windows-native-branches',
+  'windows-shard-1',
+  'windows-shard-2',
+  'windows-shard-3',
+  'windows-shard-4',
+  'windows-shard-5',
+  'windows-shard-6',
+  'windows-shard-7',
 ];
 const expectedCommandCount = 40;
 const expectedCommandDigest = 'f139ab999158dca7bc322303480564ea9c6cf9aad9e07dea9ebe5b27082c5f94';
@@ -182,7 +184,11 @@ test('previously hidden native Windows contracts are explicit and monoliths are 
 });
 
 test('slow profile lifecycle coverage has an independent measured deadline', () => {
-  const suites = manifest.profiles['windows-installed-core'].suites;
+  // Looked up across the whole manifest on purpose. What this test is about is
+  // that these two carry their OWN measured deadlines, which has nothing to do
+  // with which shard they land in — and profile membership is now balanced by
+  // runtime, so naming one here would break on the next rebalance.
+  const suites = allSuites();
   const metadata = suites.find((suite) => suite.id === 'windows-ci-metadata-contract');
   const lifecycle = suites.find((suite) => suite.id === 'windows-profile-lifecycle-contract');
   assert.deepEqual(metadata, {
