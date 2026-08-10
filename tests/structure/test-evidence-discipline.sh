@@ -388,6 +388,56 @@ else
   check "C3 could not create a fixture dir" FAIL
 fi
 
+# ── D: spawned repo-custom persona carriers ─────────────────────────────────
+# A repo-custom review persona (.claude/agents/zensu-review-*.md) is authored by
+# the REPO, so no amount of plugin-side carriers puts the block in its prompt.
+# /zensu:pr-team-review and /zensu:plan-review are safe by construction: they
+# spawn custom seats AS the confined plugin workers, which C1 already pins.
+# /zensu:tdd is the one path that spawns a custom persona under its own
+# subagent_type, so the block has to be injected into the spawn prompt there.
+TDD_SKILL="$PLUGIN_DIR/skills/tdd/SKILL.md"
+PRTR_SKILL="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
+PLANREV_SKILL="$PLUGIN_DIR/skills/plan-review/SKILL.md"
+
+if [ -f "$TDD_SKILL" ] \
+  && grep -qF 'docs/evidence-discipline.md' "$TDD_SKILL" \
+  && grep -qF 'custom persona spawn prompt' "$TDD_SKILL"; then
+  check "D1 tdd injects the canonical block into repo-custom persona spawn prompts" PASS
+else
+  check "D1 tdd injects the canonical block into repo-custom persona spawn prompts" FAIL
+fi
+
+# Read-at-runtime, not a duplicated copy: the skill carries the block exactly
+# once (its own carrier). A second literal copy is how a reworded canonical
+# rule silently keeps shipping stale.
+if [ -f "$TDD_SKILL" ] && [ "$(grep -cxF "$OPEN_MARKER" "$TDD_SKILL")" = "1" ] \
+  && grep -qF 'at run time' "$TDD_SKILL" \
+  && grep -qF 'never a copy pasted into this skill' "$TDD_SKILL"; then
+  check "D2 tdd reads the block at run time instead of duplicating it" PASS
+else
+  check "D2 tdd reads the block at run time instead of duplicating it" FAIL
+fi
+
+if [ -f "$TDD_SKILL" ] && grep -qF 'PERSONA CARRIER UNAVAILABLE' "$TDD_SKILL"; then
+  check "D3 an unreadable canonical file degrades loudly, not by dropping the persona" PASS
+else
+  check "D3 an unreadable canonical file degrades loudly, not by dropping the persona" FAIL
+fi
+
+# D4 pins the premise D1's scoping rests on. If either skill ever starts
+# spawning custom seats under their own subagent_type, that path loses its
+# carrier exactly the way tdd's did — silently.
+D4_OK=1
+for f in "$PRTR_SKILL" "$PLANREV_SKILL"; do
+  [ -f "$f" ] || { D4_OK=0; continue; }
+  grep -qF 'NOT spawned as its own `subagent_type`' "$f" || D4_OK=0
+done
+carries_block "$PLUGIN_DIR/agents/pr-review-worker.md" || D4_OK=0
+carries_block "$PLUGIN_DIR/agents/plan-review-worker.md" || D4_OK=0
+[ "$D4_OK" = "1" ] \
+  && check "D4 pr-team-review/plan-review custom seats stay confined workers that carry the block" PASS \
+  || check "D4 pr-team-review/plan-review custom seats stay confined workers that carry the block" FAIL
+
 # ── M: runner registration ──────────────────────────────────────────────────
 REGISTERED="$(node -e '
   const m = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));

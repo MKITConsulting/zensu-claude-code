@@ -39,6 +39,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   never armed a witness reports `no evidence claims to cross-check`, a clean
   state rather than a failure.
 
+- **evidence discipline**: Repo-custom review personas
+  (`.claude/agents/zensu-review-*.md`) now carry the rule in their spawn prompt.
+  Those files are repo-authored, so no plugin-side carrier reaches them.
+  `/zensu:pr-team-review` and `/zensu:plan-review` were already covered — they
+  spawn custom seats as confined plugin workers — but `/zensu:tdd` spawns them
+  under their own `subagent_type`, leaving the `SubagentStart` hook as the only
+  carrier. Its fan-out now prepends the canonical block, read from
+  `docs/evidence-discipline.md` at run time rather than duplicated, and
+  `tests/structure/test-evidence-discipline.sh` pins that path plus the premise
+  that keeps the other two skills safe.
+
 ### Fixed
 
 - **docs**: The README's Evidence Discipline section claimed 28 prompt
