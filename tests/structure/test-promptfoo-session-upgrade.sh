@@ -596,8 +596,20 @@ process.stdout.write(JSON.stringify({
   sandbox_has_npm: sandboxSteps.some((step) => /npm (?:ci|install)/.test(step.run || '')),
   promptfoo_absent: !/promptfoo|session-control:(?:selfcheck|contract|upgrade|live|concurrency|adversarial|release)/i.test(serialized),
   ai_credentials_absent: !/ANTHROPIC_API_KEY|CLAUDE_CODE_OAUTH_TOKEN/.test(serialized),
+  // The intent is that the CI test job runs the deterministic non-Promptfoo
+  // gate, not that it runs it as one unsharded process. Exact equality here
+  // silently went false when the job was sharded, and nothing caught it: this
+  // suite is promptfoo-local-only, so the --ci gate never runs it. Anchor the
+  // invocation and allow only a --shard argument after it, so a future change
+  // to the shard spec cannot break the assertion again while an unrelated
+  // trailing command still fails it.
+  // The shard argument is double-quoted in the workflow, but this node script
+  // lives in a heredoc inside a double-quoted $(...) substitution, so a literal
+  // double quote here unbalances the enclosing parse and the whole file stops
+  // being valid bash. Match the quote as \x22 instead; backticks are barred for
+  // the same reason.
   deterministic_ci: (ci?.jobs?.test?.steps || []).some(
-    (step) => step.run === 'bash tests/run-all.sh --ci',
+    (step) => /^bash tests\/run-all\.sh --ci(?: \x22--shard=[^\x22]+\x22)?$/.test((step.run || '').trim()),
   ),
   deterministic_release: serialized.includes('Deterministic exact-main-SHA gate'),
 }));
