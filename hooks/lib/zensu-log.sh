@@ -497,9 +497,13 @@ case "${1:-}" in
         _el_changes=0
         if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] \
            && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+          # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
+          # fallback would append a SECOND line and turn the count into "0\n0" — which
+          # makes the -gt comparison below abort with "integer expression expected" and
+          # silently skips the gate on exactly the empty change set it is scoping for.
           _el_changes="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
                             git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null; } \
-                          | sort -u | grep -c . 2>/dev/null || echo 0)"
+                          | sort -u | grep -c . 2>/dev/null || true)"
         fi
         if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_el_changes:-0}" -gt 0 ]; then
           _el_state="$(tdd_state_file "$session_val")"

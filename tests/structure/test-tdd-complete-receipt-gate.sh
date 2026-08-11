@@ -87,6 +87,13 @@ rm -rf "$CLEAN_FIX"
 check "W1 the scoping predicate reports zero changes for a clean project (gate out of scope)" "$(verdict $?)"
 awk '/--tdd-complete\)/,/;;/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
 check "W2 the gate scopes itself on the same change set the terminus uses" "$(verdict $?)"
+# W1 above replicates the predicate WITHOUT a fallback, so it cannot see the shape that
+# actually broke: `grep -c .` prints 0 and then exits 1 on no match, so pairing it with an
+# `|| echo 0` fallback appends a SECOND line. The count becomes "0\n0", the -gt comparison
+# aborts with "integer expression expected", and the gate is skipped on exactly the empty
+# change set it was scoping for. Pin the source shape, not a re-typed copy of it.
+! awk '/--tdd-complete\)/,/;;/' "$LOG" | grep -A3 -F '_el_changes="$(' | grep -qE '\|\|[[:space:]]*echo'
+check "W3 the change-count expression cannot emit a second line on an empty change set" "$(verdict $?)"
 
 # From here on the project really changed, so the gate is in scope.
 printf 'v2\n' > "$PROJ/tracked.txt"
