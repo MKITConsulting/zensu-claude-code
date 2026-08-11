@@ -501,16 +501,35 @@ bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
   && check "T29 an absent chain reports rc=1 and creates nothing" PASS \
   || check "T29 an absent chain reports rc=1 and creates nothing (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
 
+# `ln -s` exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy
+# unless MSYS is set to winsymlinks:nativestrict. The state document would then be a
+# regular file, both verbs would rightly accept it, and this check would fail on a
+# correct implementation. Create the link through Node and confirm it with lstat.
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
 new_chain "chain-recover-symlink"
 mv "$STATE_FILE" "$STATE_DIR/real-state.json"
-ln -s "$STATE_DIR/real-state.json" "$STATE_FILE"
-STATUS_RC=0
-bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
-RECOVER_RC=0
-bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
-[ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] && [ -L "$STATE_FILE" ] \
-  && check "T30 a symlinked state document is refused by both verbs" PASS \
-  || check "T30 a symlinked state document is refused by both verbs (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+if make_file_symlink "$STATE_DIR/real-state.json" "$STATE_FILE"; then
+  STATUS_RC=0
+  bash "$LOG" --chain-status --session "$SID" >/dev/null 2>&1 || STATUS_RC=$?
+  RECOVER_RC=0
+  bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || RECOVER_RC=$?
+  [ "$STATUS_RC" -eq 2 ] && [ "$RECOVER_RC" -eq 2 ] && [ -L "$STATE_FILE" ] \
+    && check "T30 a symlinked state document is refused by both verbs" PASS \
+    || check "T30 a symlinked state document is refused by both verbs (status=$STATUS_RC recover=$RECOVER_RC)" FAIL
+elif [ "$IS_WINDOWS" = true ]; then
+  check "T30 symlinked state document refusal (native file symlinks unavailable)" PASS
+else
+  check "T30 symlink fixture creation failed" FAIL
+fi
 rm -f "$STATE_FILE"; mv "$STATE_DIR/real-state.json" "$STATE_FILE"
 
 STUB="$WORK/nodeless"

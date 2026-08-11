@@ -91,17 +91,37 @@ else
 fi
 
 # A phantom verdict must never depend on reading anything outside the root.
+#
+# `ln -s` exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy
+# unless MSYS is set to winsymlinks:nativestrict. link.txt would then be an ordinary
+# in-root file, the grader would rightly call it off-changeset, and this check would
+# fail on a correct implementation. Create the link through Node and confirm it.
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
 printf 'secret\n' > "$WORK/outside.txt"
-ln -s "$WORK/outside.txt" "$WORK/repo/link.txt"
-OUT="$(node "$LIB" --root "$WORK/repo" <<'ZENSU_VERIFY'
+if make_file_symlink "$WORK/outside.txt" "$WORK/repo/link.txt"; then
+  OUT="$(node "$LIB" --root "$WORK/repo" <<'ZENSU_VERIFY'
 FINDINGS
 - link.txt:1 — symlink escaping the root.
 ZENSU_VERIFY
 )"
-case "$OUT" in
-  '1 out-of-root link.txt:1'*) check "P1c a symlink escaping the root is rejected, never read" PASS ;;
-  *) check "P1c a symlink escaping the root is rejected (got: $OUT)" FAIL ;;
-esac
+  case "$OUT" in
+    '1 out-of-root link.txt:1'*) check "P1c a symlink escaping the root is rejected, never read" PASS ;;
+    *) check "P1c a symlink escaping the root is rejected (got: $OUT)" FAIL ;;
+  esac
+elif [ "$IS_WINDOWS" = true ]; then
+  check "P1c escaping-symlink rejection (native file symlinks unavailable)" PASS
+else
+  check "P1c symlink fixture creation failed" FAIL
+fi
 
 OUT="$(node "$LIB" --root "$WORK/repo" </dev/null)"
 case "$OUT" in
