@@ -2,9 +2,21 @@
 # Integration canary for native-Node module loading from a plugin root whose
 # shell spelling contains both whitespace and an apostrophe.  Git Bash cannot
 # safely be trusted to heuristically translate those absolute module paths, so
-# each production launcher resolves its module from a validated working
-# directory instead.  This test deliberately executes those launchers rather
-# than pinning their source text.
+# a production launcher must use one of exactly TWO accepted mechanisms, and
+# this test executes them rather than pinning their source text:
+#
+#   1. resolve the module from a validated working directory (cd -P into
+#      hooks/lib, then a cwd-relative require).  Most launchers do this, and the
+#      node shim below enforces it by rejecting the root in any argv token.
+#   2. render the module DIRECTORY through hooks/lib/zensu-host-path.sh, append
+#      the file name, and transport the result in an environment variable
+#      (hooks/lib/zensu-tdd-phase.sh and hooks/plan-approved-delegate.sh).
+#
+# The shim cannot police mechanism 2 by scanning argv, and widening it to reject
+# the root in ANY environment value would reject every invocation, because
+# CLAUDE_PLUGIN_ROOT legitimately carries it.  Mechanism 2 is probed directly at
+# the end of this file instead: the conversion plus the load must work from this
+# special root.
 set -u
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
@@ -301,6 +313,23 @@ if [ "$BASH_RC" -eq 0 ] \
 else
   check "Bash source gate loads both parser passes from the special plugin root" FAIL
 fi
+
+# The plan gate uses the second accepted mechanism (see the header): the module
+# path never enters argv, so the shim above cannot see it. What has to hold is
+# that the DIRECTORY conversion survives a root carrying whitespace and an
+# apostrophe and that the resulting spelling is loadable by native Node.
+PLAN_LIB_DIR="$(bash "$PLUGIN/hooks/lib/zensu-host-path.sh" "$PLUGIN/hooks/lib" 2>/dev/null)"
+PLAN_LIB="${PLAN_LIB_DIR:+$PLAN_LIB_DIR/plan-payload-v1.js}"
+if [ -n "$PLAN_LIB" ] && [ -f "$PLAN_LIB" ] && [ -r "$PLAN_LIB" ] && [ ! -L "$PLAN_LIB" ] \
+  && PLAN_PAYLOAD_LIB="$PLAN_LIB" node -e '
+    const m=require(process.env.PLAN_PAYLOAD_LIB);
+    process.exit(typeof m.resolveApprovedPlan==="function" && Array.isArray(m.SOURCES) ? 0 : 1);
+  ' 2>/dev/null; then
+  check "plan-gate module converts and loads from the special plugin root" PASS
+else
+  check "plan-gate module converts and loads from the special plugin root" FAIL
+fi
+
 
 if [ "$FAIL" -ne 0 ]; then
   for diagnostic in "$RAW_TMP"/*.err; do
