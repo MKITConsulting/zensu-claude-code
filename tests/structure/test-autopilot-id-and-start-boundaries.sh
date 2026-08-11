@@ -48,12 +48,21 @@ ID129="${ID128}r"
 
 P1="$ROOT/run-128"; mkdir -p "$P1"
 activate_session "$P1" boundary_run_session || exit 1
-if CLAUDE_PROJECT_DIR="$P1" bash "$LOG" --autopilot-begin \
-    --run "$ID128" --session boundary_run_session >/dev/null \
-  && field_ok "$(autopilot_run_file "$ID128" "$P1")" \
-    'value.runId.length===128&&value.stage==="PLANNING"'; then
+B1_BEGIN="$(CLAUDE_PROJECT_DIR="$P1" bash "$LOG" --autopilot-begin \
+  --run "$ID128" --session boundary_run_session 2>&1 >/dev/null)"; B1_RC=$?
+B1_FILE="$(autopilot_run_file "$ID128" "$P1")"
+if [ "$B1_RC" -eq 0 ] \
+  && field_ok "$B1_FILE" 'value.runId.length===128&&value.stage==="PLANNING"'; then
   check "B1 a 128-character durable run id is accepted" PASS
-else check "B1 a 128-character durable run id is accepted" FAIL; fi
+else
+  check "B1 a 128-character durable run id is accepted" FAIL
+  # A 128-character id pushes the state path toward the 260-character Windows
+  # MAX_PATH, and the begin verb's own words were previously discarded, so a
+  # refusal and a path-length ceiling were indistinguishable.
+  printf '        begin rc=%s: %s\n' "$B1_RC" "$B1_BEGIN"
+  printf '        run file (%s chars): %s\n' "${#B1_FILE}" "$B1_FILE"
+  printf '        exists=%s\n' "$([ -f "$B1_FILE" ] && echo yes || echo no)"
+fi
 
 P2="$ROOT/run-129"; mkdir -p "$P2"
 activate_session "$P2" boundary_run_reject || exit 1

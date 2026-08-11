@@ -69,10 +69,16 @@ printf 'v1\n' > "$R/src/nested/deep.txt"
 printf 'v1\n' > "$R/untouched.txt"
 printf 'v1\n' > "$R/tracked.txt"
 printf 'ignored.txt\n' > "$R/.gitignore"
-G "$R" add -A >/dev/null 2>&1
-G "$R" commit -qm base >/dev/null 2>&1
+# Both git invocations are captured rather than discarded: this fixture failed on
+# the scheduled Windows run and every word of the reason went to /dev/null, so the
+# suite could report only that HEAD was absent.
+F0_ADD="$(G "$R" add -A 2>&1)"; F0_ADD_RC=$?
+F0_COMMIT="$(G "$R" commit -qm base 2>&1)"; F0_COMMIT_RC=$?
 if ! G "$R" rev-parse HEAD >/dev/null 2>&1; then
   check "F0 hermetic git fixture committed a baseline" FAIL
+  printf '        add rc=%s: %s\n' "$F0_ADD_RC" "$F0_ADD"
+  printf '        commit rc=%s: %s\n' "$F0_COMMIT_RC" "$F0_COMMIT"
+  printf '        git version: %s\n' "$(git --version 2>&1)"
   echo "----"; echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"; exit 1
 fi
 check "F0 hermetic git fixture committed a baseline" PASS
