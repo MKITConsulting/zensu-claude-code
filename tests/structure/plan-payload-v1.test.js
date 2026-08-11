@@ -18,7 +18,10 @@ const nodePath = require("node:path");
 // that has it set would silently grade a different file.
 const modulePath = process.env.ZENSU_PLAN_PAYLOAD_UNIT_TARGET
   || nodePath.join(__dirname, "..", "..", "hooks", "lib", "plan-payload-v1.js");
-const { resolveApprovedPlan, readPlanFile, PLAN_FILE_MAX_BYTES, REASONS, SOURCES } = require(modulePath);
+const {
+  resolveApprovedPlan, readPlanFile, platformNoFollow,
+  LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
+} = require(modulePath);
 
 const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zensu-plan-payload-"));
 process.on("exit", () => { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) {} });
@@ -179,6 +182,89 @@ test("readPlanFile returns the file's raw bytes, and enforces the size limit at 
   assert.strictEqual(
     readPlanFile(writeFile("over-limit.md", Buffer.alloc(PLAN_FILE_MAX_BYTES + 1, 0x61))).failure,
     REASONS.TOO_LARGE,
+  );
+});
+
+test("platformNoFollow states the real per-platform contract", () => {
+  const flag = platformNoFollow();
+  assert.ok(Number.isInteger(flag), "the flag is always an integer, never undefined");
+  if (process.platform === "win32") {
+    assert.strictEqual(flag, 0, "Windows has no O_NOFOLLOW and must not OR one in");
+  } else if (Number.isInteger(fs.constants.O_NOFOLLOW)) {
+    assert.strictEqual(flag, fs.constants.O_NOFOLLOW, "a POSIX host that defines it must use it");
+    assert.notStrictEqual(flag, 0, "the flag this host defines is not the fallback sentinel");
+  } else {
+    assert.strictEqual(flag, 0, "a host without the constant falls back to the lstat precheck");
+  }
+});
+
+// The noFollow === 0 branch is what a host WITHOUT O_NOFOLLOW runs: lstat first,
+// then re-check dev/ino against the opened descriptor. Every POSIX host this
+// ships to defines the flag, so in production that branch never executes and
+// would be dead, untested code. The seam is the only way to reach it.
+//
+// Measured, not assumed: deleting EITHER of the branch's two guards on its own
+// leaves this green, because the other still catches the link — that redundancy
+// is the point of the branch. Deleting BOTH fails here and nowhere else in the
+// suite, so this is the only pin standing between a host without the flag and a
+// followed symlink. Both modes agreeing on the verdict is the contract; do not
+// rewrite this into a discrimination test, there is nothing to discriminate.
+test("the O_NOFOLLOW-unavailable fallback refuses a symlink, it is not merely declared", (t) => {
+  const target = writeFile("precheck-target.md", "# target\n");
+  const link = nodePath.join(tmpRoot, "precheck-link.md");
+  let linked = false;
+  try {
+    fs.symlinkSync(target, link);
+    linked = fs.lstatSync(link).isSymbolicLink();
+  } catch (_) { linked = false; }
+  if (!linked) return t.skip("this platform cannot create a symlink");
+
+  assert.strictEqual(
+    readPlanFile(link, LSTAT_PRECHECK_MODE).failure, REASONS.SYMLINK,
+    "the lstat precheck catches what O_NOFOLLOW would have caught",
+  );
+  // Same mode, ordinary file: the branch must not refuse everything, or the
+  // assertion above would pass for the wrong reason.
+  assert.ok(
+    readPlanFile(target, LSTAT_PRECHECK_MODE).bytes.equals(Buffer.from("# target\n")),
+    "the fallback mode still reads a regular file",
+  );
+});
+
+test("the noFollow seam selects a mode and never accepts a caller flag mask", () => {
+  const target = writeFile("seam.md", "# seam\n");
+  // Anything that is not the mode string takes the platform default. A caller
+  // handing in a numeric mask must NOT have it OR-ed into the open flags, so
+  // these all behave like the production one-argument call.
+  for (const attempt of [undefined, null, 0, 1, "", "lstat", fs.constants.O_CREAT, { noFollow: 0 }]) {
+    assert.ok(
+      readPlanFile(target, attempt).bytes.equals(Buffer.from("# seam\n")),
+      `a non-mode second argument (${String(attempt)}) must not change the open`,
+    );
+  }
+  // O_CREAT is the discriminator: were the argument OR-ed into the flags, this
+  // would CREATE the missing file and report EMPTY instead of UNREADABLE.
+  const missing = nodePath.join(tmpRoot, "seam-absent.md");
+  assert.strictEqual(readPlanFile(missing, fs.constants.O_CREAT).failure, REASONS.UNREADABLE);
+  assert.strictEqual(fs.existsSync(missing), false, "the reader must never create a path it was handed");
+
+  assert.strictEqual(typeof LSTAT_PRECHECK_MODE, "string", "the seam is selected by name, not by a mask");
+});
+
+test("resolveApprovedPlan never hands the seam through to the reader", () => {
+  // Production must always take the platform default. A source entry carrying a
+  // stray mode-like field must not reach readPlanFile's second parameter.
+  const target = writeFile("no-seam.md", "# no seam\n");
+  const calls = [];
+  const probe = new Proxy({ filePath: target }, {
+    get(base, key) { calls.push(key); return base[key]; },
+  });
+  const resolved = resolveApprovedPlan({ tool_response: probe });
+  assert.strictEqual(resolved.ok, true);
+  assert.strictEqual(readPlanFile.length, 2, "the reader declares the seam as its second parameter");
+  assert.strictEqual(
+    resolveApprovedPlan.toString().includes("readPlanFile(value)"), true,
+    "the resolver calls the reader with the path alone, so production keeps the platform default",
   );
 });
 

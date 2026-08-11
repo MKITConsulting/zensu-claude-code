@@ -438,6 +438,47 @@ reader's refusal codes, and the branches the shell layer cannot reach — a NUL-
 bare-string carrier, a hard link. F11d pins that every module reason maps to an exit code and
 back to the identically named BLOCK_CODE, which no behavioral case can observe.
 
+**The response also declares WHO called, and that is judged before any source is read.**
+`tool_response.isAgent === true` refuses as `PLAN_RESPONSE_AGENT_ORIGIN_REJECTED`, and a
+present non-boolean refuses as `PLAN_RESPONSE_ORIGIN_TYPE_REJECTED` rather than being read as
+falsy — `"false"` and `0` are both truthy-adjacent spellings that would otherwise approve an
+agent-originated plan by coercion. This is a POSITIVE assertion layered on Session Control's
+absence-based principal check, which grants `main-v1` only to the top-level thread; it is free
+to make because the harness supplies the field. Two orderings are load-bearing and pinned:
+it runs AFTER the owner and stage checks, so an unauthorized caller still learns nothing about
+the response shape (F45c), and BEFORE the source walk, so no payload-named path is opened for
+a caller who may not approve. F45/F45a are the bites — measured against the pre-change hook,
+which APPROVES both shapes — and F45b is the positive control that the same builder with
+`isAgent: false` still approves. Each of the four owns a separate armed run: sharing one let an
+approval in an earlier case push the run past `PLANNING`, and every later case then failed on
+the transition instead of on what it was about.
+
+**Three checks pin behavior this gate already had and never exercised**, so they pass in both
+trees and are coverage, not bites: F47/F47a (a plugin missing the reader module refuses as
+`RUNTIME_UNAVAILABLE` — asserted to NOT be `PLAN_EVALUATION_UNAVAILABLE`, which would claim the
+payload was judged — with a restored-module positive control), F48 (the module path reaches
+node through the environment, never argv, matched against a closed allowlist of line forms
+because the evaluator spans ~90 lines and a line-scoped grep would miss an argv token appended
+below it), and F49/F49a (a hard link refused through both carriers).
+
+**`PLAN_STAGE_MISMATCH` (exit 7) is unreachable and deliberately left so.** The shell `case`
+already filters the active document to `PLANNING|AWAIT_TDD`, and the evaluator re-reads
+`state.stage` from that SAME document — there is no second source to disagree with it. The
+re-check is defense in depth for a future where the two diverge; do not write a behavioral
+fixture for it, there is none.
+
+**The `openMode` seam exists to reach dead code, and must stay a MODE.** The `noFollow === 0`
+branch in `readPlanFile` is what a host without `O_NOFOLLOW` runs; every POSIX host this ships
+to defines the flag, so in production it never executes. `readPlanFile(path, openMode)` compares
+its second argument against the string `LSTAT_PRECHECK_MODE` and never ORs it into the open
+flags — a caller can only take the STRICTER path, never widen the open. The unit suite pins that
+with `O_CREAT` as the discriminator: were the argument a mask, the reader would create a missing
+path instead of reporting it unreadable. Measured property worth keeping: deleting EITHER of the
+branch's two guards leaves the suite green, because the other still catches the link; deleting
+both fails only in `plan-payload-v1.test.js`. `test-windows-portability-guards.sh` carries the
+reader in its secure-open inventory — every other pin there is per-file and therefore blind to a
+NEW file carrying a hardened open.
+
 **The digest binds the bytes that TRAVELLED.** When source 3 wins, `approvedPlanSha256` is over
 the response string, not the file at source 4's path. The two agreed byte-for-byte in the
 capture and F44 pins that agreement, but they are not contracted to; `approvedPlanSha256` is

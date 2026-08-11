@@ -72,12 +72,26 @@ const carrierOf = (payload, name) => {
   return raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {};
 };
 
-const readPlanFile = (planPath) => {
+// Windows has no O_NOFOLLOW, and a host that does not define it at all reports
+// undefined rather than 0. Both land on the lstat-precheck mode below.
+const platformNoFollow = () =>
+  process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+    ? fs.constants.O_NOFOLLOW : 0;
+
+// The mode a host without O_NOFOLLOW takes: lstat first, then re-check dev/ino
+// against the opened descriptor. On every POSIX host this ships to the flag IS
+// defined, so that branch is unreachable in production and would be dead,
+// untested code — `openMode` exists so the unit suite can drive it.
+const LSTAT_PRECHECK_MODE = "lstat-precheck";
+
+// openMode SELECTS one of the two modes this reader already has. It is compared
+// against a string, never OR-ed into the open flags, so no caller can hand in a
+// mask and widen the open — the only thing it can do is take the STRICTER path.
+const readPlanFile = (planPath, openMode) => {
   if (planPath.indexOf(String.fromCharCode(0)) >= 0) return { failure: REASONS.PATH_REJECTED };
   if (!nodePath.isAbsolute(planPath)) return { failure: REASONS.PATH_REJECTED };
   if (/^[\\/]{2}/.test(planPath)) return { failure: REASONS.PATH_REJECTED };
-  const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
-    ? fs.constants.O_NOFOLLOW : 0;
+  const noFollow = openMode === LSTAT_PRECHECK_MODE ? 0 : platformNoFollow();
   const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
   let failure = "";
   let before = null;
@@ -155,4 +169,7 @@ const resolveApprovedPlan = (payload, sources) => {
   return refuse(REASONS.MISSING, "");
 };
 
-module.exports = { resolveApprovedPlan, readPlanFile, PLAN_FILE_MAX_BYTES, REASONS, SOURCES };
+module.exports = {
+  resolveApprovedPlan, readPlanFile, platformNoFollow,
+  LSTAT_PRECHECK_MODE, PLAN_FILE_MAX_BYTES, REASONS, SOURCES,
+};

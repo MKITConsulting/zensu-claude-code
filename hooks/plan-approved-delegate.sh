@@ -117,6 +117,8 @@ emit_autopilot_blocked() {
       PLAN_FILE_SYMLINK_REJECTED:" The plan file path is a symlink or a multiply-linked file; only a direct regular file is accepted.",
       PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The highest-precedence plan or plan file path field the payload carries is of the wrong type, so the payload was refused rather than falling through to a lower-precedence source.",
       PLAN_PAYLOAD_TOOL_MISMATCH:" The payload did not come from ExitPlanMode, so its fields were never read as an approved plan.",
+      PLAN_RESPONSE_AGENT_ORIGIN_REJECTED:" The ExitPlanMode tool response declares an agent origin; only the top-level interactive session may approve a durable run plan.",
+      PLAN_RESPONSE_ORIGIN_TYPE_REJECTED:" The ExitPlanMode tool response carries an isAgent field that is not a boolean, so the caller origin it claims cannot be trusted either way.",
       PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
     };
     const from=source ? ` The payload field carrying the plan was ${source}.` : "";
@@ -252,6 +254,21 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         if (!input || input.tool_name!=="ExitPlanMode") process.exit(16);
         if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
         if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
+        // Caller origin, decided BEFORE any source is read and AFTER ownership,
+        // so an unauthorized caller still learns nothing about the response
+        // shape. Only the top-level interactive session may approve a durable
+        // run: Session Control grants main-v1 there and reviewer/neutral
+        // profiles to every child, but that is an ABSENCE-based check, and this
+        // is the positive assertion the harness itself supplies. The test is
+        // strict ===, so a renamed or dropped field changes nothing here.
+        const origin=input.tool_response;
+        if (origin && typeof origin==="object" && !Array.isArray(origin)) {
+          // Wrong type is refused rather than read as falsy: an isAgent of "false"
+          // or 0 would otherwise approve an agent-originated plan by coercion.
+          if (origin.isAgent!==undefined && origin.isAgent!==null
+            && typeof origin.isAgent!=="boolean") process.exit(19);
+          if (origin.isAgent===true) process.exit(18);
+        }
         const resolved=resolveApprovedPlan(input,SOURCES);
         // The source travels with every refusal: a bad tool_input.planFilePath is
         // a path the tool call named, a bad tool_response.filePath is one the
@@ -300,6 +317,8 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         14) BLOCK_CODE=PLAN_FILE_SYMLINK_REJECTED ;;
         15) BLOCK_CODE=PLAN_PAYLOAD_FIELD_TYPE_REJECTED ;;
         16) BLOCK_CODE=PLAN_PAYLOAD_TOOL_MISMATCH ;;
+        18) BLOCK_CODE=PLAN_RESPONSE_AGENT_ORIGIN_REJECTED ;;
+        19) BLOCK_CODE=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED ;;
         *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
       # The producer validated the label against the module's SOURCES table, so

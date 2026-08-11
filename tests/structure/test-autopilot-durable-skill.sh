@@ -9,6 +9,19 @@ has() { grep -qF -- "$2" "$1"; }
 
 has "$AUTO" '--autopilot-begin --run "$RUN_ID"' && check "D1 Autopilot begins durable state before approval" PASS || check "D1 durable begin" FAIL
 has "$AUTO" '<!-- zensu-autopilot:<RUN_ID> -->' && check "D2 approved plan carries an exact run marker" PASS || check "D2 plan marker" FAIL
+# D2a the marker is bound to the plan CONTENT, not to a tool argument. The gate
+# matches it in the bytes the harness hands back, so a marker written anywhere
+# else — a side file, an ExitPlanMode argument the schema strips — never reaches
+# it and every run dies at its single planning gate. This is the operator-facing
+# half of the source table in CLAUDE.md; it must move with it.
+# Every literal below is line-local on purpose: the surrounding sentence wraps,
+# and a phrase that crosses the break can never match a line-oriented grep.
+has "$AUTO" 'plan CONTENT you pass to `ExitPlanMode`' \
+  && has "$AUTO" 'file it was not given' \
+  && has "$AUTO" 'the marker has to travel inside the plan itself' \
+  && has "$AUTO" 'the plan content you pass to `ExitPlanMode`' \
+  && check "D2a the marker is bound to the plan content, not to a tool argument" PASS \
+  || check "D2a marker placement guidance" FAIL
 has "$AUTO" 'AUTOPILOT-RUN: <RUN_ID>' && check "D3 delegated TDD carries explicit run context" PASS || check "D3 delegated context" FAIL
 has "$AUTO" '--autopilot-event --run "$RUN_ID"' && has "$AUTO" '--autopilot-status' \
   && check "D4 lifecycle uses the closed state API" PASS || check "D4 closed state API" FAIL
