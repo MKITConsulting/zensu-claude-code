@@ -43,11 +43,20 @@ new_repo() {
   mkdir -p "$d" || return 1
   git init -q --template= "$d" >/dev/null 2>&1
 }
+# Hermetic through real empty paths, not /dev/null. Git for Windows maps
+# /dev/null to `nul` and then rejects it outright -- `fatal: cannot use nul as an
+# exclude file` -- which failed the fixture on the scheduled Windows run. An empty
+# file and an empty directory express "no global excludes" and "no hooks" on every
+# platform.
+ZENSU_GIT_NOWHERE_DIR="$WORK/git-nowhere"
+ZENSU_GIT_NOWHERE_FILE="$WORK/git-nowhere/empty"
+mkdir -p "$ZENSU_GIT_NOWHERE_DIR" && : > "$ZENSU_GIT_NOWHERE_FILE"
 G() {
   local d="$1"; shift
   [ -n "$d" ] && [ -d "$d" ] || return 1
   git -C "$d" -c user.email=t@example.invalid -c user.name=zensu-test \
-    -c commit.gpgsign=false -c core.hooksPath=/dev/null -c core.excludesFile=/dev/null "$@"
+    -c commit.gpgsign=false -c "core.hooksPath=$ZENSU_GIT_NOWHERE_DIR" \
+    -c "core.excludesFile=$ZENSU_GIT_NOWHERE_FILE" "$@"
 }
 run_audit() { bash "$LIB" "$@" 2>&1; }
 
