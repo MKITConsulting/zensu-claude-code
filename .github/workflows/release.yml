@@ -24,9 +24,18 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: 'prepare = cut the release branch; publish = retry publication for the version already on main'
+        required: false
+        default: prepare
+        type: choice
+        options:
+          - prepare
+          - publish
       version_type:
-        description: 'Version bump type'
-        required: true
+        description: 'Version bump type (prepare mode only)'
+        required: false
+        default: patch
         type: choice
         options:
           - patch
@@ -50,7 +59,7 @@ concurrency:
 jobs:
   prepare:
     name: Prepare release branch
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.mode == 'prepare'
     permissions:
       contents: write
     runs-on: ubuntu-24.04
@@ -227,14 +236,29 @@ jobs:
 
   publish:
     name: Publish release
+    # The push trigger is the normal path: the release commit lands on main and
+    # publication follows. The dispatch disjunct is the retry path — a publish
+    # that failed after the bump commit already merged has no second push to ride
+    # on, and re-running the failed run would replay the workflow file from that
+    # commit rather than the fixed one.
     if: >-
-      github.event_name == 'push' &&
-      startsWith(github.event.head_commit.message, 'chore(release): bump version to')
+      (github.event_name == 'push' &&
+       startsWith(github.event.head_commit.message, 'chore(release): bump version to')) ||
+      (github.event_name == 'workflow_dispatch' && inputs.mode == 'publish')
     runs-on: ubuntu-24.04
     permissions:
       contents: write
     timeout-minutes: 120
     steps:
+      - name: Reject a publish dispatch outside main
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          set -euo pipefail
+          test "${{ github.ref }}" = refs/heads/main || {
+            echo "::error::publish mode may only be dispatched on main"
+            exit 1
+          }
+
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
           fetch-depth: 0
@@ -356,13 +380,34 @@ jobs:
           TAG="${{ steps.v.outputs.tag }}"
           ASSET="zensu-claude-code-v${VER}.zip"
           EXPECTED_DIGEST="sha256:$(sha256sum "$ASSET" | awk '{print $1}')"
-          RELEASE_API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"
+          RELEASE_ID=""
           NOTES_FILE="${{ runner.temp }}/notes.md"
           METADATA_FILE="${{ runner.temp }}/release-metadata.json"
 
+          # /releases/tags/{tag} resolves PUBLISHED releases only: a draft carries
+          # no git tag and 404s there. That single fact breaks the read-back after
+          # `gh release create --draft` AND hides an existing draft from the retry
+          # branch below, so a rerun would create a second draft instead of
+          # adopting the first. The list endpoint returns drafts to a token with
+          # push access, so resolve the id there and address the release by id.
+          resolve_release_id() {
+            gh api --paginate -H 'Accept: application/vnd.github+json' \
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/releases" \
+              --jq "map(select(.tag_name == \"$TAG\")) | .[0].id // empty"
+          }
           release_json() {
+            local id
+            id="$RELEASE_ID"
+            if [ -z "$id" ]; then
+              id="$(resolve_release_id)"
+              id="${id%%$'\n'*}"
+            fi
+            [ -n "$id" ] || return 1
+            RELEASE_ID="$id"
             gh api -H 'Accept: application/vnd.github+json' \
-              -H 'X-GitHub-Api-Version: 2026-03-10' "$RELEASE_API"
+              -H 'X-GitHub-Api-Version: 2026-03-10' \
+              "repos/$GITHUB_REPOSITORY/releases/$id"
           }
           verify_asset() {
             printf '%s' "$1" | jq -e --arg name "$ASSET" --arg digest "$EXPECTED_DIGEST" '
