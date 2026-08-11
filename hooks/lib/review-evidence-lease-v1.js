@@ -1492,7 +1492,11 @@ function parseWorkerResult(raw, expectedKind, allowedPrPaths, changedProductionP
     fail('last_assistant_message is missing or too large');
   }
   const trimmed = raw.trim();
-  if (!trimmed.startsWith('{') || !trimmed.endsWith('}') || trimmed.includes('```')) {
+  // A wrapping fence or surrounding prose cannot satisfy both structural checks: a fenced
+  // payload opens and closes on a backtick. Scanning the whole payload for a fence instead
+  // would reject a fence inside a JSON string value — which the pr-team-review personas are
+  // explicitly told to emit in an inline finding's `body`.
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) {
     fail('last_assistant_message must be one pure JSON object without fences or prose');
   }
   if (hasDuplicateJsonObjectKeys(trimmed)) {

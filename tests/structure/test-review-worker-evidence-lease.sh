@@ -500,6 +500,50 @@ PR_COLLECT="$(helper "$DATA" "$SESSION" collect --kind pr-review --agent-id pr-a
   || check "corrected PR result validates and collects" FAIL
 helper "$DATA" "$SESSION" close --lease-id "$PR_ID" >/dev/null
 
+# A code fence inside a finding body is content, not a wrapper. The pr-team-review personas
+# are instructed to emit fenced snippets in an inline finding's `body`, so a guard that
+# scanned the whole payload for a fence rejected every review carrying a concrete
+# suggestion. Only a payload that is itself fenced may fail.
+FENCE_OUT="$(helper "$DATA" "$SESSION" create --kind pr-review \
+  --files-manifest "$PRSPACE/FILES.txt" --safe-subtrees-manifest "$PRSPACE/ROOTS.txt" \
+  --name-status-file "$PRSPACE/NAME_STATUS.txt" \
+  --changed-production-files-file "$PRSPACE/CHANGED_PRODUCTION.txt" \
+  --max-workers 1 2>/dev/null)"
+FENCE_ID="${FENCE_OUT#lease_id=}"
+bind_worker "$DATA" "$SESSION" fence-agent zensu:pr-review-worker >/dev/null 2>&1
+FENCED_JSON="$(node -e 'process.stdout.write(JSON.stringify({
+  kind: "pr-review", role: "bug-hunter", verdict_hint: "minor-changes",
+  summary: "A fenced snippet belongs in the body.", inline_findings: [{
+    path: "src/app.js", line: 1, side: "RIGHT", severity: "P2", category: "correctness",
+    body: "Guard the empty case:\n\n```js\nif (!x) return;\n```\n"
+  }], overall_notes: [], positives: ["Focused change."]
+}))')"
+stop_worker "$DATA" "$SESSION" fence-agent zensu:pr-review-worker "$FENCED_JSON" >/dev/null 2>&1
+helper "$DATA" "$SESSION" finalize --lease-id "$FENCE_ID" >/dev/null
+FENCE_COLLECT="$(helper "$DATA" "$SESSION" collect --kind pr-review --agent-id fence-agent \
+  --expected-role bug-hunter 2>/dev/null)"
+[ "$FENCE_COLLECT" = "$FENCED_JSON" ] \
+  && check "code fence inside a finding body collects" PASS \
+  || check "code fence inside a finding body collects" FAIL
+helper "$DATA" "$SESSION" close --lease-id "$FENCE_ID" >/dev/null
+
+WRAPPED_OUT="$(helper "$DATA" "$SESSION" create --kind pr-review \
+  --files-manifest "$PRSPACE/FILES.txt" --safe-subtrees-manifest "$PRSPACE/ROOTS.txt" \
+  --name-status-file "$PRSPACE/NAME_STATUS.txt" \
+  --changed-production-files-file "$PRSPACE/CHANGED_PRODUCTION.txt" \
+  --max-workers 1 2>/dev/null)"
+WRAPPED_ID="${WRAPPED_OUT#lease_id=}"
+bind_worker "$DATA" "$SESSION" wrapped-agent zensu:pr-review-worker >/dev/null 2>&1
+WRAPPED_JSON="$(printf '```json\n%s\n```' "$FENCED_JSON")"
+WRAPPED_BLOCK="$(stop_worker "$DATA" "$SESSION" wrapped-agent zensu:pr-review-worker \
+  "$WRAPPED_JSON" 2>/dev/null)"
+if printf '%s' "$WRAPPED_BLOCK" | grep -qF 'without fences or prose'; then
+  check "fence-wrapped payload is still rejected" PASS
+else
+  check "fence-wrapped payload is still rejected" FAIL
+fi
+helper "$DATA" "$SESSION" close --lease-id "$WRAPPED_ID" >/dev/null
+
 COVERAGE_OUT="$(helper "$DATA" "$SESSION" create --kind pr-review \
   --files-manifest "$PRSPACE/FILES.txt" --safe-subtrees-manifest "$PRSPACE/ROOTS.txt" \
   --name-status-file "$PRSPACE/NAME_STATUS.txt" \
