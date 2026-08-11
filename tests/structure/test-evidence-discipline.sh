@@ -278,6 +278,11 @@ done
 NODE_DIR="$(mktemp -d -t zensu-evidence-nonode-XXXXXX)" || NODE_DIR=""
 if [ -n "$NODE_DIR" ]; then
   mkdir -p "$NODE_DIR/bin"
+  # Symlinked deliberately, and NOT copied: a copy of a signed system binary is
+  # killed outright by macOS (SIGKILL, rc 137) once it leaves /usr/bin. The links
+  # are correct here and degenerate only on Git Bash, where `ln -s` falls back to
+  # a copy of dirname.exe under a name Windows will not load — which the guard
+  # below detects rather than this loop trying to outsmart both platforms.
   for helper in dirname cat; do
     src="$(command -v "$helper" 2>/dev/null)"
     [ -n "$src" ] && ln -s "$src" "$NODE_DIR/bin/$helper" 2>/dev/null
@@ -289,6 +294,15 @@ if [ -n "$NODE_DIR" ]; then
     check "H10 could not build a node-free PATH" FAIL
   elif [ -z "$ABS_BASH" ]; then
     check "H10 could not resolve an absolute bash path" FAIL
+  elif ! PATH="$NODE_DIR/bin" dirname -- /a/b >/dev/null 2>&1; then
+    # Without dirname the hook cannot resolve its own root and refuses with exit 2
+    # long before the node guard is reached — that would score a fail-closed
+    # refusal as a fail-silent defect. Only win32 may reach this branch.
+    if [ "$(node -p 'process.platform === "win32" ? "true" : "false"')" = true ]; then
+      check "H10 missing-node fail-silent (no runnable dirname on a stripped PATH)" PASS
+    else
+      check "H10 could not keep dirname runnable on the node-free PATH" FAIL
+    fi
   else
     NODE_OUT="$(printf '%s' '{"hook_event_name":"SessionStart","source":"startup"}' | PATH="$NODE_DIR/bin" "$ABS_BASH" "$HOOK" 2>/dev/null)"; NODE_RC=$?
     [ "$NODE_RC" = "0" ] && [ -z "$NODE_OUT" ] \

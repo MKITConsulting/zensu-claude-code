@@ -49,6 +49,10 @@
       "reason": "The only native-Windows branch skips a POSIX-only missing-npm rendering assertion."
     },
     {
+      "path": "tests/structure/test-evidence-discipline.sh",
+      "reason": "The only native-Windows branch passes H10 when no runnable dirname survives a stripped PATH, so it asserts nothing there; the weekly Windows Safety run covers the suite."
+    },
+    {
       "path": "tests/structure/test-finding-verification.sh",
       "reason": "The only native-Windows branch passes P1c when Git Bash cannot create a real file symlink, so it asserts nothing there; the weekly Windows Safety run covers the suite."
     },
