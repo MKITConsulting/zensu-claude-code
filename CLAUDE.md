@@ -380,6 +380,86 @@ receipt predicate; `tests/structure/test-chain-recover.sh` pins the end-to-end b
    is true. The repair records its provenance as a workflow `history` entry inside its own
    transaction — never as a ledger entry.
 
+## Plan-Gate Payload Sources (`hooks/lib/plan-payload-v1.js`)
+
+The Autopilot plan-approval gate reads the approved plan from FOUR payload sources, in
+precedence order, and `plan-payload-v1.js` is the single source of truth for which:
+
+| # | Source | Live on the current Claude Code build |
+|---|--------|----------------------------------------|
+| 1 | `tool_input.plan` | no |
+| 2 | `tool_input.planFilePath` | no |
+| 3 | `tool_response.plan` | **yes** |
+| 4 | `tool_response.filePath` | **yes** |
+
+Sources 1-2 are dead on this host and still ranked first on purpose: a host that DOES declare
+those ExitPlanMode fields keeps its meaning, and an explicit caller-supplied plan must not be
+overridden by the harness copy. `tests/structure/test-autopilot-plan-delegate.sh` P16 pins that
+the legacy carrier still delegates identically, so keeping them costs no behavior.
+
+**Retiring them is not a four-check edit.** In `test-plan-payload-fallback.sh` the `tool_input`
+carriers are driven by every case built by `payload()`, `payload_nonstring_plan()`,
+`payload_input_and_response()` and the inline F21a/F43 builders — roughly twenty checks — plus
+P16. Most have a source-4 mirror already (F5→F35, F6→F36, F7→F37, F13→F40, F15→F38, F16→F39,
+F17→F41); the rest would have to be re-pointed at the response carrier. The trigger is a
+RE-CAPTURE, not a hunch: only a fresh capture from every supported host can show that none of
+them populates `tool_input` for ExitPlanMode any more.
+
+**Why the dead sources are dead.** The harness strips ExitPlanMode fields its schema does not
+declare — a captured payload carries `tool_input == {"_targetMode":"auto"}` — and delivers the
+approved plan in `tool_response`, a structured object (`plan`, `filePath`, `isAgent`,
+`hasTaskTool`). Before this was understood every Autopilot run died at its single planning gate
+with `INVALID_PLAN_PAYLOAD`, unfixable from the model side.
+
+**Fields are read BY NAME, never by scanning text.** The rendered response a model sees carries
+a `Your plan has been saved to: <path>` preamble, but the plan body is model-authored: mining
+that text would let plan prose inject its own preamble and name the path the gate opens.
+`test-plan-payload-fallback.sh` F31b (a rendered string response is never mined) and F34 (a
+`saved to:` line inside the plan body never names the approved bytes) are the pins; both
+discriminate through the persisted digest, because an absent decoy proves nothing.
+
+**Everything that re-encodes this shape must move together:** the module's `SOURCES` table;
+every `payload*` builder in `tests/structure/test-plan-payload-fallback.sh` — `payload`,
+`payload_nonstring_plan`, `payload_response`, `payload_response_nonstring`,
+`payload_response_shape`, `payload_input_and_response`, plus the inline F21a, F31c, F43 and
+F11b-tool builders; the fixture-shape assertion F33a; and the whole-flow builders in
+`test-autopilot-full-cycle.sh` and `test-autopilot-plan-delegate.sh` (which also keeps
+`payload_input_dialect` for the legacy carrier). The committed capture
+`tests/structure/fixtures/exitplanmode-posttooluse-payload.v1.json` pins the shape the gate was
+BUILT AGAINST; it cannot observe live harness drift — only a fresh capture can.
+
+**Operator-facing account that must move with the sources:** `skills/autopilot/SKILL.md`, which
+names `tool_response.plan` and `tool_response.filePath` when it tells the skill where the run
+marker has to travel.
+
+`tests/structure/plan-payload-v1.test.js` (node --test, driven from
+`test-plan-payload-fallback.sh` F11b) pins the table's order, liveness and label shape, the
+reader's refusal codes, and the branches the shell layer cannot reach — a NUL-byte path, a
+bare-string carrier, a hard link. F11d pins that every module reason maps to an exit code and
+back to the identically named BLOCK_CODE, which no behavioral case can observe.
+
+**The digest binds the bytes that TRAVELLED.** When source 3 wins, `approvedPlanSha256` is over
+the response string, not the file at source 4's path. The two agreed byte-for-byte in the
+capture and F44 pins that agreement, but they are not contracted to; `approvedPlanSha256` is
+only written and shape-validated, never re-derived, so a host whose response string and saved
+file disagree would silently bind the transported copy.
+
+**Port-relevant.** The module OWNS `SOURCES`; a port edits that table in its own copy of the
+file rather than calling in with a different one. `resolveApprovedPlan(payload, sources)` takes
+a table argument so the unit suite can drive the walk with a synthetic one, and it REFUSES an
+empty or malformed supplied table instead of substituting this host's carriers — two of which
+open a payload-named file. A port also carries two host-half obligations the module cannot:
+render the lib DIRECTORY through `zensu-host-path.sh` (that script rejects files) before
+appending the file name, and guard the loaded spelling with `-f` / `! -L` / `! -r` plus an
+export-shape check, routing any load fault to the RUNTIME receipt — never to
+`PLAN_EVALUATION_UNAVAILABLE`, which claims the payload was judged. The host half — WHICH carrier a host populates — must be re-decided per port;
+`zensu-codex`, `zensu-kiro` and `zensu-antigravity` carry the same gate against different
+harnesses and were deliberately left out of the change that introduced sources 3-4. The
+host-neutral half is everything below the resolution: the single `<!-- zensu-autopilot:RUN_ID -->`
+marker, run-id equality, the owner and stage checks that precede every read, and the digest.
+A port that takes only the module gets the field decision; it still owns its own emission and
+its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

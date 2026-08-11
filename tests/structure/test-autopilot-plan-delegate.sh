@@ -45,7 +45,14 @@ PLAN="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN} -->"
 autopilot_begin_run "$RUN" "$SID" "$PROJECT" >/dev/null || exit 1
 CFG_OFF="$TMP/off.json"; printf '%s\n' '{"hooks":{"autoTdd":false}}' > "$CFG_OFF"
 
+# The delegation contract is asserted on the shape the CURRENT harness delivers:
+# it strips the ExitPlanMode input fields its schema does not declare, so the
+# approved plan travels in the tool response. `payload_input_dialect` keeps the
+# legacy carrier covered for hosts that do declare those fields.
 payload() {
+  PLAN="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{_targetMode:"auto"},tool_response:{plan:process.env.PLAN,isAgent:false,hasTaskTool:true}}))'
+}
+payload_input_dialect() {
   PLAN="$1" SID="$2" node -e 'process.stdout.write(JSON.stringify({hook_event_name:"PostToolUse",session_id:process.env.SID,tool_name:"ExitPlanMode",tool_input:{plan:process.env.PLAN}}))'
 }
 invoke() {
@@ -385,6 +392,29 @@ if grep -qF 'MSYS2_ENV_CONV_EXCL=' "$HOOK" \
   check "P15 MSYS preserves the already shell-quoted log-helper token" PASS
 else
   check "P15 MSYS preserves the already shell-quoted log-helper token" FAIL
+fi
+
+# P16 the legacy carrier still delegates identically on a host that declares the
+# ExitPlanMode fields, so keeping sources 1-2 ranked first costs no behavior.
+# A project carries exactly one active run pointer, so the legacy carrier needs
+# its own project rather than a second run beside the one above.
+RUN_LEGACY="plan_run_legacy"; SID_LEGACY_RAW="plan_session_legacy"
+PROJECT_LEGACY="$TMP/project-legacy"; mkdir -p "$PROJECT_LEGACY"
+provision_session "$PROJECT_LEGACY" "$SID_LEGACY_RAW" legacy || exit 1
+SID_LEGACY="$PROVISIONED_KEY"; LEGACY_DATA="$PROVISIONED_DATA"
+PLAN_LEGACY="# Approved feature\n\nImplement it.\n\n<!-- zensu-autopilot:${RUN_LEGACY} -->"
+if autopilot_begin_run "$RUN_LEGACY" "$SID_LEGACY" "$PROJECT_LEGACY" >/dev/null 2>&1; then
+  OUT_LEGACY="$(invoke "$(payload_input_dialect "$PLAN_LEGACY" "$SID_LEGACY_RAW")" "$PROJECT_LEGACY" "$CFG_OFF" "$LEGACY_DATA")"
+  LEGACY_RUN_FILE="$(autopilot_run_file "$RUN_LEGACY" "$PROJECT_LEGACY")"
+  LEGACY_SHA="$(printf '%s' "$PLAN_LEGACY" | node -e 'const fs=require("fs"),crypto=require("crypto");process.stdout.write(crypto.createHash("sha256").update(fs.readFileSync(0)).digest("hex"));')"
+  if printf '%s' "$OUT_LEGACY" | grep -qF 'PLAN_APPROVED' \
+    && RUN_FILE="$LEGACY_RUN_FILE" SHA="$LEGACY_SHA" node -e 'const j=require(process.env.RUN_FILE);process.exit(j.stage==="AWAIT_TDD"&&j.approvedPlanSha256===process.env.SHA?0:1)'; then
+    check "P16 a tool_input.plan payload still delegates and digests identically" PASS
+  else
+    check "P16 legacy carrier delegation (out='$(printf '%s' "$OUT_LEGACY" | head -c 140)')" FAIL
+  fi
+else
+  check "P16 legacy carrier fixture could not be armed" FAIL
 fi
 
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

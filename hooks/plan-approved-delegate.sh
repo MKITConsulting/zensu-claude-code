@@ -78,10 +78,11 @@ if [ ! -r "$AUTOPILOT_STATE_LIB" ] && [ "$AUTOPILOT_STATE_HINT" = true ]; then
 fi
 
 emit_autopilot_context() {
-  local msys_env_exclusions="LOG_HELPER_Q"
-  if [ -n "${MSYS2_ENV_CONV_EXCL:-}" ]; then
-    msys_env_exclusions="${MSYS2_ENV_CONV_EXCL};${msys_env_exclusions}"
-  fi
+  # The shipped single source: it appends the exact-name selector and keeps a
+  # dominant standalone '*' intact, neither of which a hand-rolled append does.
+  local msys_env_exclusions
+  msys_env_exclusions="$(zensu_msys_env_exclusions LOG_HELPER_Q)" \
+    || msys_env_exclusions="${MSYS2_ENV_CONV_EXCL:-}"
   MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" RUN_ID="$1" SESSION_ID="$2" \
     LOG_HELPER_Q="$3" ATTEMPT="$4" RETURN_STAGE="$5" node -e '
     const run=process.env.RUN_ID;
@@ -95,13 +96,14 @@ emit_autopilot_context() {
 }
 
 emit_autopilot_blocked() {
-  CODE="$1" node -e '
+  CODE="$1" PLAN_SOURCE="${2:-}" node -e '
     const code=process.env.CODE;
+    const source=process.env.PLAN_SOURCE||"";
     const causes={
       CORRUPT_ACTIVE_STATE:" The durable run pointer or run record could not be parsed into a usable stage.",
       SESSION_CONTEXT_UNAVAILABLE:" This session could not be resolved to a Session Control identity, so run ownership could not be established.",
       PLAN_TRANSITION_REJECTED:" The run state refused the PLAN_APPROVED transition; the plan itself was read successfully.",
-      INVALID_PLAN_PAYLOAD:" The ExitPlanMode payload carried neither plan text nor a plan file path, so the approved plan could not be read and the run could not be identified.",
+      INVALID_PLAN_PAYLOAD:" Neither the ExitPlanMode input nor its tool response carried plan text or a plan file path, so the approved plan could not be read and the run could not be identified.",
       PLAN_MARKER_MISSING_OR_AMBIGUOUS:" The approved plan carries no zensu-autopilot run marker, or more than one, so no single run could be named.",
       PLAN_MARKER_RUN_MISMATCH:" The approved plan names a different run than the active one.",
       OWNER_SESSION_MISMATCH:" This session does not own the active run; only the owning session may approve its plan.",
@@ -113,10 +115,12 @@ emit_autopilot_blocked() {
       PLAN_FILE_EMPTY:" The plan file exists but is empty, so there is no plan to approve.",
       PLAN_FILE_TOO_LARGE:" The plan file exceeds the accepted size limit.",
       PLAN_FILE_SYMLINK_REJECTED:" The plan file path is a symlink or a multiply-linked file; only a direct regular file is accepted.",
-      PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The payload carries a plan or plan file path field of the wrong type, so neither could be trusted as the approved plan.",
+      PLAN_PAYLOAD_FIELD_TYPE_REJECTED:" The highest-precedence plan or plan file path field the payload carries is of the wrong type, so the payload was refused rather than falling through to a lower-precedence source.",
+      PLAN_PAYLOAD_TOOL_MISMATCH:" The payload did not come from ExitPlanMode, so its fields were never read as an approved plan.",
       PLAN_EVALUATION_UNAVAILABLE:" The plan evaluation produced no verdict at all, so the payload itself was never judged."
     };
-    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
+    const from=source ? ` The payload field carrying the plan was ${source}.` : "";
+    const msg=`ZENSU_AUTOPILOT PLAN_GATE_BLOCKED code=${code}.${causes[code]||""}${from} Do not implement, create a replacement run, or infer plan approval. Preserve the durable state and use its explicit repair/resume/cancel path.`;
     process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:"PostToolUse",additionalContext:msg}}));
   '
 }
@@ -182,83 +186,104 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       exit 0
     }
     IFS=$'\t' read -r ACTIVE_RUN ACTIVE_OWNER ACTIVE_STAGE ACTIVE_ATTEMPT ACTIVE_RETURN_STAGE <<<"$ACTIVE_META"
+    # A missing plan-payload module is a RUNTIME fault, not a payload one. Without
+    # this guard the require throws, node exits on a code no arm claims, and the
+    # operator is handed PLAN_EVALUATION_UNAVAILABLE — "the payload itself was
+    # never judged" — pointing at a payload that was never the problem. Same shape
+    # as the AUTOPILOT_STATE_LIB and SESSION_LIB guards above.
+    # zensu-host-path.sh renders a DIRECTORY in the native spelling; the file
+    # name is appended after conversion, the same shape zensu-tdd-phase.sh uses
+    # for its node code-load path. Guard the spelling that is actually loaded,
+    # and include readability: a module that is present but unreadable would
+    # otherwise throw inside node and surface as a payload fault.
+    PLAN_PAYLOAD_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+      "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+    PLAN_PAYLOAD_LIB="${PLAN_PAYLOAD_DIR:+${PLAN_PAYLOAD_DIR}/plan-payload-v1.js}"
+    if [ -z "$PLAN_PAYLOAD_LIB" ] \
+      || [ ! -f "$PLAN_PAYLOAD_LIB" ] || [ -L "$PLAN_PAYLOAD_LIB" ] || [ ! -r "$PLAN_PAYLOAD_LIB" ]; then
+      emit_autopilot_runtime_blocked
+      exit 0
+    fi
+    # zensu_msys_env_exclusions is the shipped single source for this list; it
+    # appends the exact-name selector and preserves a dominant standalone '*'.
+    # Resolve it into a variable first: a failing command substitution inside a
+    # command's assignment prefix takes the whole invocation down, and the plan
+    # gate would report that as a payload fault.
+    PLAN_MSYS_EXCL="$(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB)" || PLAN_MSYS_EXCL="${MSYS2_ENV_CONV_EXCL:-}"
     PLAN_META="$(printf '%s' "$INPUT" | ACTIVE_RUN="$ACTIVE_RUN" ACTIVE_OWNER="$ACTIVE_OWNER" \
-      ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" node -e '
+      ACTIVE_STAGE="$ACTIVE_STAGE" SESSION_ID="$SESSION_ID" \
+      MSYS2_ENV_CONV_EXCL="$PLAN_MSYS_EXCL" \
+      PLAN_PAYLOAD_LIB="$PLAN_PAYLOAD_LIB" node -e '
       const crypto=require("crypto");
-      const fs=require("fs");
-      const nodePath=require("path");
-      const PLAN_FILE_MAX_BYTES=4*1024*1024;
+      // hooks/lib/plan-payload-v1.js owns the precedence walk, the field-type
+      // refusal and the hardened file read; this hook supplies the carrier table
+      // and owns the exit ladder and the emission. The module owns the carrier
+      // table; a port edits SOURCES in its own copy of the module rather than
+      // calling in with a different one.
+      // 17 is the module-load fault. It is deliberately NOT a BLOCK_CODE: the
+      // shell routes it to emit_autopilot_runtime_blocked, so a broken install
+      // never reports "the payload itself was never judged".
+      let resolveApprovedPlan,REASONS,SOURCES;
+      try {
+        ({resolveApprovedPlan,REASONS,SOURCES}=require(process.env.PLAN_PAYLOAD_LIB));
+      } catch (_) { process.exit(17); }
+      // Destructuring a module with the wrong exports does not throw — it yields
+      // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
+      // and land on the very receipt 17 exists to avoid. Validate the shape here.
+      if (typeof resolveApprovedPlan!=="function" || typeof REASONS!=="object" || !REASONS
+        || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
+      const EXITS={};
+      EXITS[REASONS.MISSING]=3;
+      EXITS[REASONS.UNREADABLE]=8;
+      EXITS[REASONS.PATH_REJECTED]=10;
+      EXITS[REASONS.NOT_REGULAR]=11;
+      EXITS[REASONS.EMPTY]=12;
+      EXITS[REASONS.TOO_LARGE]=13;
+      EXITS[REASONS.SYMLINK]=14;
+      EXITS[REASONS.FIELD_TYPE]=15;
       let raw="";
       process.stdin.setEncoding("utf8");
       process.stdin.on("data",c=>raw+=c);
       process.stdin.on("end",()=>{ try {
         const input=JSON.parse(raw||"{}");
-        const toolInput=(input && input.tool_input) || {};
+        // The hooks.json matcher is the only thing scoping this reader, and the
+        // fields it now consumes (plan, filePath) are generic enough that another
+        // tool response could carry them. Do not rely on registration alone.
+        if (!input || input.tool_name!=="ExitPlanMode") process.exit(16);
         if (process.env.ACTIVE_OWNER!==process.env.SESSION_ID) process.exit(6);
         if (process.env.ACTIVE_STAGE!=="PLANNING" && process.env.ACTIVE_STAGE!=="AWAIT_TDD") process.exit(7);
-        let plan="";
-        let planBuffer=null;
-        if (toolInput.plan!==undefined && toolInput.plan!==null) {
-          if (typeof toolInput.plan!=="string") process.exit(15);
-          plan=toolInput.plan;
-        }
-        if (!plan) {
-          if (toolInput.planFilePath!==undefined && toolInput.planFilePath!==null
-            && typeof toolInput.planFilePath!=="string") process.exit(15);
-          const planPath=typeof toolInput.planFilePath==="string" ? toolInput.planFilePath : "";
-          if (!planPath) process.exit(3);
-          if (planPath.indexOf(String.fromCharCode(0)) >= 0) process.exit(10);
-          if (!nodePath.isAbsolute(planPath)) process.exit(10);
-          if (/^[\\\/]{2}/.test(planPath)) process.exit(10);
-          const noFollow=process.platform!=="win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
-            ? fs.constants.O_NOFOLLOW : 0;
-          const nonBlock=Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
-          let failure=0;
-          let before=null;
-          if (noFollow===0) {
-            try { before=fs.lstatSync(planPath); } catch (_) { process.exit(8); }
-            if (before.isSymbolicLink()) process.exit(14);
-          }
-          let descriptor=null;
-          try {
-            descriptor=fs.openSync(planPath,fs.constants.O_RDONLY|noFollow|nonBlock);
-          } catch (error) {
-            failure=error && (error.code==="ELOOP" || error.code==="EMLINK") ? 14 : 8;
-          }
-          if (descriptor!==null) {
-            try {
-              const stat=fs.fstatSync(descriptor);
-              if (before!==null && (before.dev!==stat.dev || before.ino!==stat.ino)) failure=14;
-              else if (!stat.isFile()) failure=11;
-              else if (stat.nlink!==1) failure=14;
-              else if (stat.size<1) failure=12;
-              else if (stat.size>PLAN_FILE_MAX_BYTES) failure=13;
-              else {
-                const buffer=Buffer.alloc(stat.size);
-                let filled=0;
-                while (filled<stat.size) {
-                  const chunk=fs.readSync(descriptor,buffer,filled,stat.size-filled,filled);
-                  if (chunk<1) break;
-                  filled+=chunk;
-                }
-                if (filled!==stat.size) failure=8;
-                else { planBuffer=buffer; plan=buffer.toString("utf8"); }
-              }
-            } catch (_) { failure=8; }
-            try { fs.closeSync(descriptor); } catch (_) {}
-          }
-          if (failure) process.exit(failure);
-          if (!plan) process.exit(12);
-        }
-        const matches=[...plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
-        if (matches.length!==1) process.exit(4);
-        if (process.env.ACTIVE_RUN!==matches[0][1]) process.exit(5);
+        const resolved=resolveApprovedPlan(input,SOURCES);
+        // The source travels with every refusal: a bad tool_input.planFilePath is
+        // a path the tool call named, a bad tool_response.filePath is one the
+        // harness owns, and the two have different repairs.
+        const LABELS=new Set(SOURCES.map(s=>s.label));
+        const refuse=(code)=>{
+          // Only a label declared by the SOURCES table may travel. A future
+          // diagnostic that put the offending PATH here would be dropped rather
+          // than echoed into the model-facing receipt. NOTE: this program is a
+          // single-quoted shell string — an apostrophe here ends it and the rest
+          // of the JS is parsed as shell.
+          const label=LABELS.has(resolved.source) ? resolved.source : "";
+          process.stdout.write(["SOURCE",label].join("\t"));
+          // NOT process.exit(): a write to a pipe may still be queued, and
+          // exit() discards it — which would silently drop this record while
+          // the exit code still arrived. Set the code and let node drain.
+          process.exitCode=code;
+        };
+        if (!resolved.ok) return refuse(EXITS[resolved.reason]||9);
+        const matches=[...resolved.plan.matchAll(/<!-- zensu-autopilot:([A-Za-z0-9][A-Za-z0-9_.:-]{2,127}) -->/g)];
+        if (matches.length!==1) return refuse(4);
+        if (process.env.ACTIVE_RUN!==matches[0][1]) return refuse(5);
         const sha=crypto.createHash("sha256")
-          .update(planBuffer!==null ? planBuffer : Buffer.from(plan,"utf8")).digest("hex");
+          .update(resolved.buffer!==null ? resolved.buffer : Buffer.from(resolved.plan,"utf8")).digest("hex");
         process.stdout.write([process.env.ACTIVE_RUN,sha].join("\t"));
       } catch (_) { process.exit(9); } });
     ' 2>/dev/null)"
     META_RC=$?
+    if [ "$META_RC" -eq 17 ]; then
+      emit_autopilot_runtime_blocked
+      exit 0
+    fi
     if [ "$META_RC" -ne 0 ]; then
       case "$META_RC" in
         3) BLOCK_CODE=INVALID_PLAN_PAYLOAD ;;
@@ -274,9 +299,22 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
         13) BLOCK_CODE=PLAN_FILE_TOO_LARGE ;;
         14) BLOCK_CODE=PLAN_FILE_SYMLINK_REJECTED ;;
         15) BLOCK_CODE=PLAN_PAYLOAD_FIELD_TYPE_REJECTED ;;
+        16) BLOCK_CODE=PLAN_PAYLOAD_TOOL_MISMATCH ;;
         *) BLOCK_CODE=PLAN_EVALUATION_UNAVAILABLE ;;
       esac
-      emit_autopilot_blocked "$BLOCK_CODE"
+      # The producer validated the label against the module's SOURCES table, so
+      # the shell only has to recognize the record and reject a label carrying
+      # anything a field name cannot: whitespace, a slash, or a path separator.
+      PLAN_SOURCE=""
+      PLAN_TAB="$(printf '\t')"
+      case "$PLAN_META" in
+        "SOURCE${PLAN_TAB}"*)
+          PLAN_SOURCE="${PLAN_META#*"$PLAN_TAB"}"
+          case "$PLAN_SOURCE" in
+            *[!A-Za-z0-9._]*) PLAN_SOURCE="" ;;
+          esac ;;
+      esac
+      emit_autopilot_blocked "$BLOCK_CODE" "$PLAN_SOURCE"
       exit 0
     fi
     IFS=$'\t' read -r RUN_ID PLAN_SHA <<<"$PLAN_META"
