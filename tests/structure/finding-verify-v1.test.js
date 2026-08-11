@@ -109,6 +109,27 @@ test('an absolute path inside the root is graded normally', () => {
   assert.deepEqual(verdicts(root, ['- ' + abs + ':2 — issue.'], [abs]), ['anchor-ok']);
 });
 
+// The anchor is asserted directly rather than through a verdict: a drive-qualified
+// path only RESOLVES inside the root on win32, but it must PARSE on every host, or
+// this regression is invisible to the Linux gate and only the weekly Windows run
+// can see it -- which is how it shipped. Both slash conventions occur: MSYS hands
+// back backslashes, zensu-host-path.sh renders forward slashes.
+test('a drive-qualified path parses on every platform', () => {
+  assert.deepEqual(
+    verify.extractAnchor('- C:\\proj\\src\\a.js:2 — issue.'),
+    { path: 'C:\\proj\\src\\a.js', line: 2 },
+  );
+  assert.deepEqual(
+    verify.extractAnchor('- D:/proj/src/a.js:2 — issue.'),
+    { path: 'D:/proj/src/a.js', line: 2 },
+  );
+});
+
+test('widening for drive letters did not turn a URL into an anchor', () => {
+  assert.equal(verify.extractAnchor('- http://example.com/x:80 — issue.'), null);
+  assert.equal(verify.extractAnchor('- Panel-FP: a meta verdict.'), null);
+});
+
 test('a symlink escaping the root is rejected after realpath, not read', () => {
   const root = sandbox();
   const outside = tempDir('finding-verify-out-');

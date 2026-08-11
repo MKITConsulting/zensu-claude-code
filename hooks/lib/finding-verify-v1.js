@@ -63,7 +63,7 @@ const MAX_FINDINGS = 2000;
 const DENIED_SEGMENTS = new Set([".git", ".zensu"]);
 const CHANGED_MARKER = "CHANGED-FILES";
 const FINDINGS_MARKER = "FINDINGS";
-const ANCHOR = /(?:^|[\s(\[<"'`])((?:\.{0,2}\/)?[A-Za-z0-9_.@+~-][^\s:"'<>|`]*):(\d+)(?![0-9])/;
+const ANCHOR = /(?:^|[\s(\[<"'`])((?:[A-Za-z]:[\\/]|(?:\.{0,2}\/))?[A-Za-z0-9_.@+~-][^\s:"'<>|`]*):(\d+)(?![0-9])/;
 
 function parseInput(text) {
   const lines = String(text == null ? "" : text).split("\n");
