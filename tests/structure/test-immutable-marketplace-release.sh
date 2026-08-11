@@ -110,6 +110,23 @@ expect_text "Draft metadata compares the exact generated body" "$WORKFLOW" \
   'and .body == $body'
 expect_text "Draft metadata is re-read immediately before publication" "$WORKFLOW" \
   'verify_metadata "$RELEASE" true false'
+# A draft carries no git tag, so /releases/tags/{tag} 404s on it. Addressing the
+# release by tag broke the read-back after creation and made the existing-draft
+# retry branch unreachable; the id lookup below is what keeps both working.
+reject_text "Drafts are not addressed through the published-only tag endpoint" "$WORKFLOW" \
+  'RELEASE_API="repos/$GITHUB_REPOSITORY/releases/tags/$TAG"'
+expect_text "Draft lookup matches the release list by tag name" "$WORKFLOW" \
+  'map(select(.tag_name == \"$TAG\")) | .[0].id // empty'
+expect_text "The release is addressed by id once resolved" "$WORKFLOW" \
+  '"repos/$GITHUB_REPOSITORY/releases/$id"'
+expect_text "A missing release makes the lookup fail instead of returning empty" "$WORKFLOW" \
+  '[ -n "$id" ] || return 1'
+expect_text "Publication can be retried through a dispatch" "$WORKFLOW" \
+  "(github.event_name == 'workflow_dispatch' && inputs.mode == 'publish')"
+expect_text "Branch preparation stays bound to prepare mode" "$WORKFLOW" \
+  "github.event_name == 'workflow_dispatch' && inputs.mode == 'prepare'"
+expect_text "A publish dispatch outside main is rejected" "$WORKFLOW" \
+  'publish mode may only be dispatched on main'
 reject_text "Mutable action wrapper is not used for publication" "$WORKFLOW" \
   'softprops/action-gh-release'
 expect_text "Release documentation identifies tag creation as go-live" "$WORKFLOW" \
