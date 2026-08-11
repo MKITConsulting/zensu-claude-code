@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-08-10
+
+### Added
+
+- **evidence**: Enforce the witness cross-check in code and close the persona carrier gap (#215)
+- **gate**: Deny working-tree-mutating git commands aimed outside the session root (#210)
+- **review**: Verify fan-out findings before they route (#204)
+- **zen-mode**: Turn the focused response mode on by default (#206)
+
+### Changed
+
+- **ci**: Rebalance the Windows contract profiles by measured runtime (#218)
+- **ci**: Shard the deterministic suite and cancel superseded PR runs (#216)
+- **tests**: Add static full test suite overview (#214)
+- **skills**: Align CLI command forms with zensu 0.5.3 (#209)
+
+### Fixed
+
+- **session-control**: Release a session whose recorded project root is gone (#211)
+- **gate**: Normalize the MSYS path namespace so Windows stops denying its own worktree (#213)
+- **tests**: Unbind two suites from state they cannot control (#207)
+- **tests**: Realign two stale assertions with the contracts they guard (#205)
+
 ### Added
 
 - **evidence discipline**: The witness cross-check is now a library,
