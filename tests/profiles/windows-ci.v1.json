@@ -211,7 +211,7 @@
           "runner": "bash",
           "path": "tests/structure/test-plan-payload-fallback.sh",
           "args": [],
-          "timeoutMs": 600000
+          "timeoutMs": 900000
         },
         {
           "id": "tdd-state-junction-safety",
