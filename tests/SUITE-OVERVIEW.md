@@ -179,10 +179,12 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
+| `evidence-crosscheck-v1.test.js` | 27 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
+| `plan-payload-v1.test.js` | 16 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
@@ -192,8 +194,6 @@ that suite's failure.
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
-| plan-payload-v1.test.js | 16 | test-plan-payload-fallback.sh (F11b) | plan-source precedence table, hardened plan-file reader refusals |
-| evidence-crosscheck-v1.test.js | — | test-witness-scenario-assertions.sh | witness cross-check of claimed test evidence |
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the

@@ -544,8 +544,11 @@ OUT44="$(invoke "$(payload_response bothagree_session "$AGREE_PLAN" "$AGREE_FILE
   "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
 AGREE_VIA_TEXT="$(run_field "$ARMED_RUN_FILE" approvedPlanSha256)"
 # Source 3 answered above and never opened the file. Re-deliver the SAME bytes
-# through source 4 alone so the file is actually read, and require both routes to
-# land the same digest — that is the claim, and it needs both invocations.
+# through source 4 alone so the file is actually read. With agreeing bytes the
+# second delivery mints the SAME event id, which the run record dedupes, so it
+# re-reads the digest source 3 persisted rather than landing a second one. What
+# it still discriminates: a divergent source-4 digest would change the event id
+# and the second delivery would not report PLAN_APPROVED at all.
 OUT44B="$(invoke "$(payload_response bothagree_session __ABSENT__ "$AGREE_FILE")" \
   "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
 AGREE_VIA_FILE="$(run_field "$ARMED_RUN_FILE" approvedPlanSha256)"
@@ -927,14 +930,28 @@ fi
 # passes, so F0 cannot catch it — the whole suite went to 12 PASS / 48 FAIL once
 # for exactly this, from one word in a comment. Fail at the site instead.
 APOSTROPHE_REPORT="$(HOOK="$HOOK" node -e '
+  const vm=require("vm");
   const src=require("fs").readFileSync(process.env.HOOK,"utf8");
   const opened=(src.match(/node -e \x27/g)||[]).length;
-  // Two terminator layouts: the closing quote on its own line, or on the same
-  // line as the last statement. Both must be recognized — a body the extractor
-  // silently misses would make an apostrophe count of 0 mean nothing.
-  const bodies=[...src.matchAll(/node -e \x27([\s\S]*?)\x27[^\x27\n]*$/gm)].map(m=>m[1]);
-  const bad=bodies.filter(b=>b.includes(String.fromCharCode(39))).length;
-  process.stdout.write(opened+" "+bodies.length+" "+bad);
+  // Bound to SHELL semantics, not to a guess about layout: a single-quoted word
+  // ends at the FIRST apostrophe, with no escape, so this capture is exactly the
+  // text node receives — including when a stray apostrophe cuts it short.
+  const matches=[...src.matchAll(/node -e \x27([^\x27]*)\x27/g)];
+  // Two independent signals, because either alone is defeatable:
+  //   (a) the body must compile. Catches a cut that lands mid-string/brace.
+  //   (b) what FOLLOWS the terminator must be shell, not prose. Catches the cut
+  //       that lands inside a line comment, where the truncated body is still
+  //       valid JS and (a) sees nothing wrong. Every real terminator in this
+  //       hook is followed by a redirect, a closing paren, a quote or a newline.
+  let bad=0;
+  for (const m of matches) {
+    let broken=false;
+    try { vm.compileFunction(m[1]); } catch (_) { broken=true; }
+    const after=src.slice(m.index+m[0].length);
+    if (!/^[\s)"};|&]|^2>/.test(after)) broken=true;
+    if (broken) bad++;
+  }
+  process.stdout.write(opened+" "+matches.length+" "+bad);
 ' 2>/dev/null)"
 read -r APOS_OPENED APOS_FOUND APOS_BAD <<<"$APOSTROPHE_REPORT"
 if [ -n "${APOS_BAD:-}" ] && [ "$APOS_OPENED" = "$APOS_FOUND" ] && [ "$APOS_BAD" = 0 ]; then

@@ -231,7 +231,7 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
       // undefined, and the next statement would throw OUTSIDE this guard, exit 1,
       // and land on the very receipt 17 exists to avoid. Validate the shape here.
       if (typeof resolveApprovedPlan!=="function" || typeof REASONS!=="object" || !REASONS
-        || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
+        || Array.isArray(REASONS) || !Array.isArray(SOURCES) || !SOURCES.length) process.exit(17);
       const EXITS={};
       EXITS[REASONS.MISSING]=3;
       EXITS[REASONS.UNREADABLE]=8;
