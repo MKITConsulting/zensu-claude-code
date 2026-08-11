@@ -219,7 +219,7 @@ test('rejects unknown keys, duplicate commands, symlinks, hardlinks, and unbound
       /timeoutMs/,
     );
     const invalidProfileTimeout = manifestFor(process.platform, [suite('one', good)]);
-    invalidProfileTimeout.profiles['test-profile'].profileTimeoutMs = 1800001;
+    invalidProfileTimeout.profiles['test-profile'].profileTimeoutMs = 3600001;
     assert.throws(() => validateManifest(invalidProfileTimeout, root), /profileTimeoutMs/);
   } finally {
     removeTemporaryRoot(root);

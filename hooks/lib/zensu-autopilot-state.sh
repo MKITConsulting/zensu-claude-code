@@ -170,6 +170,22 @@ autopilot_run_file() {
   printf '%s\n' "$root/.zensu/state/autopilot-run-${run_id}.json"
 }
 
+# A run id may be 128 characters, so autopilot-run-<id>.json already reaches ~256
+# characters under a deep project root. Appending .XXXXXX to THAT name crosses the
+# 260-character Windows MAX_PATH, mktemp fails, and the caller returns a bare
+# rc=5 that reads like a refusal rather than a path-length ceiling. The temp keeps
+# its own short name and stays in the target's directory, so it is still on the
+# same filesystem and the atomic replace is unaffected. Callers whose target name
+# is bounded (tdd-phase-<session key>.json) do not need this, and the review
+# payload writer must keep its own ${target}.tmp.XXXXXXXX shape because its
+# crash-recovery reasons about that alias.
+_autopilot_mktemp_beside() {
+  local target="${1:-}" dir
+  [ -n "$target" ] || return 1
+  dir="$(dirname -- "$target")" || return 1
+  mktemp "${dir}/.apt-XXXXXX" 2>/dev/null
+}
+
 _autopilot_prepare_storage() {
   local root="$1" zensu_dir="$1/.zensu" state_dir="$1/.zensu/state"
   # Validate the fixed project-local ancestor as its own leaf before mkdir -p.
@@ -1206,8 +1222,8 @@ _autopilot_begin_critical() {
   local run_file="$state_dir/autopilot-run-${run_id}.json"
   local active_file="$state_dir/autopilot-active.json"
   local run_tmp active_tmp rc
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
-  active_tmp="$(mktemp "${active_file}.XXXXXX" 2>/dev/null)" || { rm -f "$run_tmp"; return 5; }
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
+  active_tmp="$(_autopilot_mktemp_beside "$active_file")" || { rm -f "$run_tmp"; return 5; }
   _autopilot_node begin "$active_file" "$run_file" "$run_tmp" "$active_tmp" \
     "$run_id" "$owner_session_id" "$root" "$cover" "$validate"
   rc=$?
@@ -1269,7 +1285,7 @@ _autopilot_apply_critical() {
   local run_file="$state_dir/autopilot-run-${run_id}.json"
   local active_file="$state_dir/autopilot-active.json"
   local run_tmp rc
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" "$event_type" "$payload_json" "$root" "$caller_session_id"
   rc=$?
   if [ "$rc" -eq 10 ]; then
@@ -1980,7 +1996,7 @@ _autopilot_increment_budget_critical() {
   local run_file="$state_dir/autopilot-run-${run_id}.json"
   local active_file="$state_dir/autopilot-active.json"
   local run_tmp result rc
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   result="$(_autopilot_node increment-budget "$active_file" "$run_file" "$run_tmp" "$run_id" "$expected_stage" "$root" "$caller_session_id")"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2008,7 +2024,7 @@ _autopilot_increment_budget_capped_critical() {
   local cap="$5" block_code="$6" state_dir="$1/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
   local active_file="$state_dir/autopilot-active.json" run_tmp result rc
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   result="$(_autopilot_node increment-budget-capped "$active_file" "$run_file" "$run_tmp" \
     "$run_id" "$expected_stage" "$root" "$caller_session_id" "$cap" "$block_code")"
   rc=$?
@@ -2292,7 +2308,7 @@ _autopilot_begin_tdd_critical() {
   local native_run_tmp env_exclusions
   run_file="$state_dir/autopilot-run-${run_id}.json"
   active_file="$state_dir/autopilot-active.json"
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" node -e '
     process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID}));
   ')" || { rm -f "$run_tmp"; return 5; }
@@ -2363,7 +2379,7 @@ _autopilot_finish_tdd_critical() {
   local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
   run_file="$state_dir/autopilot-run-${run_id}.json"
   active_file="$state_dir/autopilot-active.json"
-  run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 5
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" OUTCOME="$outcome" node -e '
     process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
   ')" || { rm -f "$run_tmp"; return 5; }

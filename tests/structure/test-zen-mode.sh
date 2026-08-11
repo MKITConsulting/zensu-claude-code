@@ -370,18 +370,39 @@ rm -rf "$P17B"
 
 # Z17c a symlinked marker is refused by the writer and ignored by the hook, so a
 # pre-planted link cannot be truncated through --on.
+#
+# `ln -s` exiting 0 is not evidence of a symlink: Git Bash satisfies it with a
+# copy unless MSYS is set to winsymlinks:nativestrict. The marker would then be a
+# regular file, the writer would rightly accept it, and this check would fail on a
+# correct implementation. Create the link through Node and confirm it with lstat.
+IS_WINDOWS="$(node -p 'process.platform === "win32" ? "true" : "false"')"
+make_file_symlink() {
+  node -e '
+    const fs=require("fs"),target=process.argv[1],link=process.argv[2];
+    try {
+      fs.symlinkSync(target,link,process.platform==="win32"?"file":undefined);
+      process.exit(fs.lstatSync(link).isSymbolicLink()?0:1);
+    } catch (_) { process.exit(1); }
+  ' "$1" "$2"
+}
 P17C="$(mktemp -d -t zenmode-XXXXXX)"; S17C="z17c-$$"
 new_session "$P17C" "$S17C"
 helper "$P17C" "$S17C" --on >/dev/null
 MARKER17C="$(find "$P17C/.zensu/state" -maxdepth 1 -name 'zen-mode-*.json' | head -1)"
 VICTIM17C="$P17C/victim.txt"; printf 'untouched\n' > "$VICTIM17C"
-rm -f "$MARKER17C"; ln -s "$VICTIM17C" "$MARKER17C"
-helper "$P17C" "$S17C" --on >/dev/null 2>&1; RC17C=$?
-OUT17C="$(fire "$P17C" "$S17C" "do a thing" | classify)"
-if [ "$RC17C" != "0" ] && [ "$(cat "$VICTIM17C")" = "untouched" ] && [ "$OUT17C" = "EMPTY" ]; then
-  check "Z17c symlinked marker refused by writer, ignored by hook, target untouched" PASS
+rm -f "$MARKER17C"
+if make_file_symlink "$VICTIM17C" "$MARKER17C"; then
+  helper "$P17C" "$S17C" --on >/dev/null 2>&1; RC17C=$?
+  OUT17C="$(fire "$P17C" "$S17C" "do a thing" | classify)"
+  if [ "$RC17C" != "0" ] && [ "$(cat "$VICTIM17C")" = "untouched" ] && [ "$OUT17C" = "EMPTY" ]; then
+    check "Z17c symlinked marker refused by writer, ignored by hook, target untouched" PASS
+  else
+    check "Z17c symlink guard (rc=$RC17C victim='$(cat "$VICTIM17C")' hook='$OUT17C')" FAIL
+  fi
+elif [ "$IS_WINDOWS" = true ]; then
+  check "Z17c symlinked marker refusal (native file symlinks unavailable)" PASS
 else
-  check "Z17c symlink guard (rc=$RC17C victim='$(cat "$VICTIM17C")' hook='$OUT17C')" FAIL
+  check "Z17c symlink fixture creation failed" FAIL
 fi
 rm -rf "$P17C"
 

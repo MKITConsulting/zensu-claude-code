@@ -43,11 +43,20 @@ new_repo() {
   mkdir -p "$d" || return 1
   git init -q --template= "$d" >/dev/null 2>&1
 }
+# Hermetic through real empty paths, not /dev/null. Git for Windows maps
+# /dev/null to `nul` and then rejects it outright -- `fatal: cannot use nul as an
+# exclude file` -- which failed the fixture on the scheduled Windows run. An empty
+# file and an empty directory express "no global excludes" and "no hooks" on every
+# platform.
+ZENSU_GIT_NOWHERE_DIR="$WORK/git-nowhere"
+ZENSU_GIT_NOWHERE_FILE="$WORK/git-nowhere/empty"
+mkdir -p "$ZENSU_GIT_NOWHERE_DIR" && : > "$ZENSU_GIT_NOWHERE_FILE"
 G() {
   local d="$1"; shift
   [ -n "$d" ] && [ -d "$d" ] || return 1
   git -C "$d" -c user.email=t@example.invalid -c user.name=zensu-test \
-    -c commit.gpgsign=false -c core.hooksPath=/dev/null -c core.excludesFile=/dev/null "$@"
+    -c commit.gpgsign=false -c "core.hooksPath=$ZENSU_GIT_NOWHERE_DIR" \
+    -c "core.excludesFile=$ZENSU_GIT_NOWHERE_FILE" "$@"
 }
 run_audit() { bash "$LIB" "$@" 2>&1; }
 
@@ -69,10 +78,16 @@ printf 'v1\n' > "$R/src/nested/deep.txt"
 printf 'v1\n' > "$R/untouched.txt"
 printf 'v1\n' > "$R/tracked.txt"
 printf 'ignored.txt\n' > "$R/.gitignore"
-G "$R" add -A >/dev/null 2>&1
-G "$R" commit -qm base >/dev/null 2>&1
+# Both git invocations are captured rather than discarded: this fixture failed on
+# the scheduled Windows run and every word of the reason went to /dev/null, so the
+# suite could report only that HEAD was absent.
+F0_ADD="$(G "$R" add -A 2>&1)"; F0_ADD_RC=$?
+F0_COMMIT="$(G "$R" commit -qm base 2>&1)"; F0_COMMIT_RC=$?
 if ! G "$R" rev-parse HEAD >/dev/null 2>&1; then
   check "F0 hermetic git fixture committed a baseline" FAIL
+  printf '        add rc=%s: %s\n' "$F0_ADD_RC" "$F0_ADD"
+  printf '        commit rc=%s: %s\n' "$F0_COMMIT_RC" "$F0_COMMIT"
+  printf '        git version: %s\n' "$(git --version 2>&1)"
   echo "----"; echo "test-edit-landing-audit: $T_PASS PASS / $T_FAIL FAIL"; exit 1
 fi
 check "F0 hermetic git fixture committed a baseline" PASS

@@ -77,15 +77,23 @@ if [ "${ZENSU_PRETOOL_SKIP_NESTED:-0}" = "1" ]; then
   check "evals/tdd-review-chain/run-eval.sh --self-check (already run by the caller)" PASS
 else
 SUBSCRIPT_TIMEOUT=3600 run_subscript "$PLUGIN_DIR/evals/config-gate/run-eval.sh"        "evals/config-gate/run-eval.sh --self-check"           --self-check
-TRC_OUT=$(bounded 3600 bash "$PLUGIN_DIR/evals/tdd-review-chain/run-eval.sh" --self-check 2>&1)
-TRC_PASS=$(echo "$TRC_OUT" | grep -E '^  SELF-CHECK: [0-9]+/[0-9]+ PASS' | sed -E 's/.*SELF-CHECK: ([0-9]+)\/.*/\1/')
-TRC_TOTAL=$(echo "$TRC_OUT" | grep -E '^  SELF-CHECK: [0-9]+/[0-9]+ PASS' | sed -E 's/.*SELF-CHECK: [0-9]+\/([0-9]+).*/\1/')
-TRC_FAIL=$(echo "$TRC_OUT" | grep -E '^  SELF-CHECK: [0-9]+/[0-9]+ PASS \([0-9]+ FAIL\)' | sed -E 's/.*\(([0-9]+) FAIL\).*/\1/')
-# tdd-review-chain has a single pre-existing FAIL in assert-version.sh, otherwise must be green
-if [ "${TRC_FAIL:-99}" -le 1 ] && [ "${TRC_PASS:-0}" -ge 30 ]; then
-  check "evals/tdd-review-chain/run-eval.sh --self-check (PASS=$TRC_PASS/$TRC_TOTAL FAIL=$TRC_FAIL, <=1 pre-existing)" PASS
+TRC_OUT=$(bounded 3600 bash "$PLUGIN_DIR/evals/tdd-review-chain/run-eval.sh" --self-check 2>&1); TRC_RC=$?
+# The child's own exit code is the verdict; the counts are diagnostics only. The
+# previous shape parsed a "  SELF-CHECK: n/n PASS (n FAIL)" line the child does
+# not print -- it prints "tdd-review-chain self-check: n PASS / n FAIL" -- so all
+# three extractions came back empty and the guard fell to its fail-closed
+# defaults. The threshold beside it required >= 30 passes while the child today
+# has 7 checks in total, so it could not have been met even with correct parsing.
+# Both were invisible to the blocking gate: tests/run-all.sh exports
+# ZENSU_PRETOOL_SKIP_NESTED=1 and never reaches this branch, while the Windows
+# safety shard invokes this runner directly and does.
+TRC_LINE=$(printf '%s\n' "$TRC_OUT" | grep -E 'self-check: [0-9]+ PASS / [0-9]+ FAIL' | tail -1)
+TRC_PASS=$(printf '%s' "$TRC_LINE" | sed -nE 's/.*self-check: ([0-9]+) PASS.*/\1/p')
+TRC_FAIL=$(printf '%s' "$TRC_LINE" | sed -nE 's/.*PASS \/ ([0-9]+) FAIL.*/\1/p')
+if [ "$TRC_RC" -eq 0 ] && [ "${TRC_FAIL:-99}" -eq 0 ] && [ "${TRC_PASS:-0}" -ge 1 ]; then
+  check "evals/tdd-review-chain/run-eval.sh --self-check (rc=0 PASS=$TRC_PASS FAIL=$TRC_FAIL)" PASS
 else
-  check "evals/tdd-review-chain/run-eval.sh --self-check (PASS=$TRC_PASS/$TRC_TOTAL FAIL=$TRC_FAIL)" FAIL
+  check "evals/tdd-review-chain/run-eval.sh --self-check (rc=$TRC_RC PASS=${TRC_PASS:-?} FAIL=${TRC_FAIL:-?})" FAIL
 fi
 fi
 
@@ -93,7 +101,19 @@ echo "" | tee -a "$REPORT"
 echo "▸ Phase 2 — PreToolUse hook unit tests" | tee -a "$REPORT"
 for t in "$PLUGIN_DIR/evals/config-gate"/test-pre-edit-*.sh; do
   [ -f "$t" ] || continue
-  run_subscript "$t" "$(basename "$t")" ""
+  # Every sibling here finishes in a few seconds. greenpass-tight drives five
+  # session baselines and eight complete pre-edit hook invocations -- about 900
+  # node process starts, 68s on macOS -- and at the ~2.8x Windows factor measured
+  # on this same suite set it cannot fit the 120s default. The runner reports that
+  # kill as "HANG", which scored a merely slow suite as a deadlock on the
+  # scheduled Windows run. Widened for this one entry only, so 120s stays a real
+  # hang detector for everything else.
+  case "$(basename "$t")" in
+    test-pre-edit-greenpass-tight.sh)
+      SUBSCRIPT_TIMEOUT=300 run_subscript "$t" "$(basename "$t")" "" ;;
+    *)
+      run_subscript "$t" "$(basename "$t")" "" ;;
+  esac
 done
 
 echo "" | tee -a "$REPORT"

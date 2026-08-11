@@ -9,7 +9,7 @@ const { runProfile } = require('./run-profile.js');
 const ROOT = fs.realpathSync.native(path.resolve(__dirname, '..'));
 const CANARY_FILE = path.join(ROOT, 'tests', 'profiles', 'windows-legacy-canary.v1.json');
 const LOCAL_ONLY_FILE = path.join(ROOT, 'tests', 'profiles', 'promptfoo-local-only.v1.json');
-const COMMAND_TIMEOUT_MS = 30 * 60 * 1000;
+const COMMAND_TIMEOUT_MS = 60 * 60 * 1000;
 function localOnlyInventory() {
   const value = JSON.parse(fs.readFileSync(LOCAL_ONLY_FILE, 'utf8'));
   if (!value || value.schemaVersion !== 1

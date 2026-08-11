@@ -78,13 +78,13 @@ test('each safety command delegates to one bounded supervised profile execution'
     profiles: {
       'safety-offline-1-1': {
         platform: 'win32',
-        profileTimeoutMs: 1800000,
+        profileTimeoutMs: 3600000,
         suites: [{
           id: 'safety-offline-1-1-command',
           runner: 'bash',
           path: 'evals/config-gate/run-eval.sh',
           args: ['--self-check'],
-          timeoutMs: 1800000,
+          timeoutMs: 3600000,
         }],
       },
     },
