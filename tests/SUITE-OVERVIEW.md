@@ -13,7 +13,7 @@ each suite's `check()` / `run()` / `expect()` call sites.
 | Layer | Count | Runs where |
 |---|---|---|
 | `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| `tests/structure/*.test.js` (`node --test` units) | **14 files / 183 test blocks** | invoked *by* parent `.sh` suites |
+| `tests/structure/*.test.js` (`node --test` units) | **16 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -171,7 +171,7 @@ root containing whitespace and an apostrophe, and the Windows CI manifest contra
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (14 files, 183 blocks)
+## 4. `node --test` unit suites (16 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -192,6 +192,8 @@ that suite's failure.
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
+| plan-payload-v1.test.js | 16 | test-plan-payload-fallback.sh (F11b) | plan-source precedence table, hardened plan-file reader refusals |
+| evidence-crosscheck-v1.test.js | — | test-witness-scenario-assertions.sh | witness cross-check of claimed test evidence |
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
@@ -290,3 +292,4 @@ A new suite must be classified in `tests/profiles/promptfoo-local-only.v1.json` 
 preflight gate fails the whole run — that gate, not this file, is the enforcement point.
 This overview is descriptive: update the group lists and totals in §1/§3 when suites are
 added or removed.
+

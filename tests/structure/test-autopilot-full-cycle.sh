@@ -274,12 +274,17 @@ PLAN="# Full-cycle fixture
 Exercise the complete durable lifecycle.
 
 <!-- zensu-autopilot:${RUN} -->"
+# The shape the CURRENT harness delivers: it strips the ExitPlanMode fields its
+# schema does not declare, so the approved plan arrives in the tool response.
+# Driving the whole cycle through it is what proves the stage transition and the
+# delegation envelope on the payload production actually produces.
 PLAN_INPUT="$(PLAN="$PLAN" SESSION="$SESSION" node -e '
   process.stdout.write(JSON.stringify({
     hook_event_name:"PostToolUse",
     session_id:process.env.SESSION,
     tool_name:"ExitPlanMode",
-    tool_input:{plan:process.env.PLAN}
+    tool_input:{_targetMode:"auto"},
+    tool_response:{plan:process.env.PLAN,isAgent:false,hasTaskTool:true}
   }));
 ')"
 

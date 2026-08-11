@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "__provenance": "Shape of a real PostToolUse(ExitPlanMode) hook payload captured from Claude Code on 2026-08-11. Key set, nesting and field types are verbatim; machine-specific values (ids, paths, plan body) are neutralized. The replay in tests/structure/test-plan-payload-fallback.sh rewrites session_id and tool_response.plan only — tool_response.filePath is deliberately left at a nonexistent path, so the replay additionally pins that tool_response.plan outranks an unreadable filePath. The two fields that matter: tool_input carries NO plan/planFilePath because the harness strips undeclared ExitPlanMode fields, and tool_response is a structured object rather than the rendered string the model sees. This file cannot observe harness drift; detecting that needs a fresh capture.",
+  "session_id": "fixture_session",
+  "transcript_path": "/fixture/transcripts/session.jsonl",
+  "cwd": "/fixture/project",
+  "prompt_id": "fixture-prompt-id",
+  "permission_mode": "auto",
+  "effort": { "level": "max" },
+  "hook_event_name": "PostToolUse",
+  "tool_name": "ExitPlanMode",
+  "tool_input": { "_targetMode": "auto" },
+  "tool_response": {
+    "plan": "# Fixture plan body\n",
+    "isAgent": false,
+    "filePath": "/fixture/plans/fixture-plan.md",
+    "hasTaskTool": true
+  },
+  "tool_use_id": "toolu_fixture",
+  "duration_ms": 1
+}
