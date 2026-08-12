@@ -437,13 +437,38 @@ gate_decision() {
   '
 }
 
+# The allowance is POSIX-only, and that is pinned per platform rather than
+# skipped. On win32 the command token arrives in MSYS spelling while the module's
+# __dirname is native; a Git Bash mount path like /tmp/... carries no drive letter
+# to map and this repository does not probe the MSYS mount table, so the
+# recognizer refuses there by design. Asserting DENY on Windows keeps that gap a
+# verified contract instead of an unverified claim — and keeps THIS suite honest
+# about the fact that Windows users see no change.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    DOCTOR_EXPECTED=deny
+    DOCTOR_LABEL="refuses the diagnostic on win32 (documented MSYS spelling gap)"
+    ;;
+  *)
+    DOCTOR_EXPECTED=allow
+    DOCTOR_LABEL="lets the diagnostic through a disagreeing record"
+    ;;
+esac
 DOCTOR_PAYLOAD="$(bash_payload "$SESSION" "$DOCTOR_CMD")"
 for BASH_GATE in pre-reviewer-capability-gate.sh pre-bash-zensu-gate.sh \
   pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
-  if [ "$(gate_decision "$BASH_GATE" "$DOCTOR_PAYLOAD")" = allow ]; then
-    check "$BASH_GATE lets the diagnostic through a disagreeing record" PASS
+  GATE_SEEN="$(gate_decision "$BASH_GATE" "$DOCTOR_PAYLOAD")"
+  # pre-bash-zensu-gate.sh exits before its bind when the command runs no zensu
+  # CLI binary, so it allows on every platform and cannot show the gap.
+  if [ "$BASH_GATE" = pre-bash-zensu-gate.sh ]; then
+    GATE_EXPECTED=allow
   else
-    check "$BASH_GATE lets the diagnostic through a disagreeing record" FAIL
+    GATE_EXPECTED="$DOCTOR_EXPECTED"
+  fi
+  if [ "$GATE_SEEN" = "$GATE_EXPECTED" ]; then
+    check "$BASH_GATE $DOCTOR_LABEL" PASS
+  else
+    check "$BASH_GATE $DOCTOR_LABEL (got $GATE_SEEN, wanted $GATE_EXPECTED)" FAIL
   fi
 done
 

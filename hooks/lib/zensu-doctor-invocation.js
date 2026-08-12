@@ -63,7 +63,26 @@ const ASSIGNMENTS = {
   ZDOC_PLAYWRIGHT_TOOLS: new Set(["ready"]),
 };
 
+// WINDOWS IS OUT OF SCOPE, DELIBERATELY AND VISIBLY.
+//
+// The command token reaches this module over stdin, the one channel MSYS never
+// converts, so on a win32 host the doctor path arrives in MSYS spelling while
+// __dirname is already native. msysDrivePrefix maps `/d/...` to `D:/...`, but a
+// Git Bash temp or mount path — `/tmp/...` — has no drive letter to map, and
+// resolving it splices it onto the current drive (`\tmp\...`). Mapping it
+// correctly needs the MSYS mount table, which this repository deliberately does
+// not probe (see the parser header in bash-source-write-parse.js).
+//
+// Guessing would be worse than refusing: a wrong mapping either admits a path
+// that is not the diagnostic, or silently denies while claiming to allow. So
+// win32 refuses outright and the diagnostic stays denied there in a bind failure
+// — exactly the behavior every host had before this module existed. It is a gap,
+// not a regression, and test-versioned-plugin-upgrade.sh pins it per platform so
+// it cannot quietly become an unverified claim.
+const PLATFORM_SUPPORTED = process.platform !== "win32";
+
 const REASONS = {
+  PLATFORM: "PLATFORM_UNSUPPORTED",
   NOT_BASH: "NOT_A_BASH_CALL",
   COMMAND_TYPE: "COMMAND_NOT_A_STRING",
   COMMAND_SIZE: "COMMAND_TOO_LARGE",
@@ -189,7 +208,8 @@ function recognize(payload, pluginRoot) {
 
 const executingPluginRoot = () => nodePath.resolve(__dirname, "..", "..");
 
-const isDoctorInvocation = (payload) => recognize(payload, executingPluginRoot()).ok;
+const isDoctorInvocation = (payload) =>
+  PLATFORM_SUPPORTED && recognize(payload, executingPluginRoot()).ok;
 
 if (require.main === module) {
   let raw = "";
@@ -201,6 +221,7 @@ if (require.main === module) {
     }
   });
   process.stdin.on("end", () => {
+    if (!PLATFORM_SUPPORTED) process.exit(1);
     let payload;
     try {
       payload = JSON.parse(raw);
@@ -212,6 +233,6 @@ if (require.main === module) {
 } else {
   module.exports = {
     recognize, isDoctorInvocation, executingPluginRoot,
-    ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS,
+    ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, PLATFORM_SUPPORTED,
   };
 }
