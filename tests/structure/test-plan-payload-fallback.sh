@@ -142,6 +142,20 @@ payload_response() {
   '
 }
 
+# The response also declares WHO called ExitPlanMode. isAgent is passed as a raw
+# JSON literal so a non-boolean shape ('"false"') is expressible; every other
+# builder hardcodes the human-caller value.
+# $1 raw session id, $2 isAgent as JSON, $3 response plan text
+payload_response_origin() {
+  SID="$1" ORIGIN="$2" RPLAN="$3" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name:"PostToolUse", session_id:process.env.SID,
+      tool_name:"ExitPlanMode", tool_input:{_targetMode:"auto"},
+      tool_response:{plan:process.env.RPLAN,isAgent:JSON.parse(process.env.ORIGIN),hasTaskTool:true}
+    }));
+  '
+}
+
 # $1 raw session id, $2 tool_input.plan, $3 tool_response.plan
 payload_input_and_response() {
   SID="$1" IPLAN="$2" RPLAN="$3" node -e '
@@ -970,6 +984,150 @@ else
   check "F11a a plans directory is scanned" FAIL
 fi
 
+# --- F45 the response declares who called ExitPlanMode, and only the top-level
+# interactive session may approve a durable run. Session Control already denies
+# a child main-v1, but that is an ABSENCE-based check; this is the positive
+# assertion the harness itself supplies, and it is free to make. ---
+arm_run agentorigin agentorigin_session agentorigin_run || { echo "F45 fixture failed" >&2; exit 1; }
+AGENT_ORIGIN_BEFORE="$(digest "$ARMED_RUN_FILE")"
+OUT45="$(invoke "$(payload_response_origin agentorigin_session true \
+  '# Agent-authored
+
+<!-- zensu-autopilot:agentorigin_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
+if printf '%s' "$OUT45" | grep -qF 'code=PLAN_RESPONSE_AGENT_ORIGIN_REJECTED' \
+  && ! printf '%s' "$OUT45" | grep -qF 'PLAN_APPROVED' \
+  && [ "$(digest "$ARMED_RUN_FILE")" = "$AGENT_ORIGIN_BEFORE" ]; then
+  check "F45 a tool_response declaring an agent origin cannot approve a run" PASS
+else
+  check "F45 agent-origin response (out='$(printf '%s' "$OUT45" | head -c 200)')" FAIL
+fi
+
+# A non-boolean isAgent is drift, not a human caller: read as falsy, the string
+# "false" and the number 0 would both approve an agent-originated plan.
+# Its OWN run, not F45's: a gate that approved here would leave a shared run past
+# PLANNING, and every later case would then fail on the transition instead of on
+# what it is about — which is what the negative control against the pre-change
+# hook showed when they did share one.
+arm_run origintype origintype_session origintype_run || { echo "F45a fixture failed" >&2; exit 1; }
+ORIGIN_TYPE_BEFORE="$(digest "$ARMED_RUN_FILE")"
+OUT45A="$(invoke "$(payload_response_origin origintype_session '"false"' \
+  '# Coerced origin
+
+<!-- zensu-autopilot:origintype_run -->')" "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
+if printf '%s' "$OUT45A" | grep -qF 'code=PLAN_RESPONSE_ORIGIN_TYPE_REJECTED' \
+  && ! printf '%s' "$OUT45A" | grep -qF 'PLAN_APPROVED' \
+  && [ "$(digest "$ARMED_RUN_FILE")" = "$ORIGIN_TYPE_BEFORE" ]; then
+  check "F45a a non-boolean isAgent is refused, never coerced to a human caller" PASS
+else
+  check "F45a origin type drift (out='$(printf '%s' "$OUT45A" | head -c 200)')" FAIL
+fi
+
+# Positive control: the SAME builder with isAgent false approves. Without it F45
+# and F45a would both pass if the builder produced a payload the gate refused
+# for an unrelated reason.
+OUT45B_PLAN='# Human-authored
+
+<!-- zensu-autopilot:origincontrol_run -->'
+arm_run origincontrol origincontrol_session origincontrol_run || { echo "F45b fixture failed" >&2; exit 1; }
+OUT45B="$(invoke "$(payload_response_origin origincontrol_session false "$OUT45B_PLAN")" \
+  "$ARMED_PROJECT" "$CFG_OFF" "$ARMED_DATA")"
+if printf '%s' "$OUT45B" | grep -qF 'PLAN_APPROVED runId=origincontrol_run' \
+  && [ "$(run_field "$ARMED_RUN_FILE" approvedPlanSha256)" = "$(text_sha "$OUT45B_PLAN")" ]; then
+  check "F45b the same response shape with isAgent false still approves" PASS
+else
+  check "F45b origin positive control (out='$(printf '%s' "$OUT45B" | head -c 200)')" FAIL
+fi
+
+# Ownership is decided FIRST, so an unauthorized caller learns nothing about the
+# response shape either — the origin refusal must not become that oracle. The
+# foreign session is provisioned HERE rather than reused from F20: arm_run above
+# has since overwritten PROVISIONED_DATA, and pairing a session id with another
+# session's plugin data fails to bind and refuses as RUNTIME_UNAVAILABLE, which
+# would grade this case against a fault it is not about.
+arm_run originowner originowner_session originowner_run || { echo "F45c fixture failed" >&2; exit 1; }
+ORIGIN_OWNER_PROJECT="$ARMED_PROJECT"
+provision_session "$ORIGIN_OWNER_PROJECT" origin_foreign_session originforeign \
+  || { echo "F45c fixture failed" >&2; exit 1; }
+OUT45C="$(invoke "$(payload_response_origin origin_foreign_session true \
+  '# Foreign and agent-authored
+
+<!-- zensu-autopilot:originowner_run -->')" "$ORIGIN_OWNER_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
+if printf '%s' "$OUT45C" | grep -qF 'code=OWNER_SESSION_MISMATCH' \
+  && ! printf '%s' "$OUT45C" | grep -qF 'PLAN_RESPONSE_AGENT_ORIGIN_REJECTED'; then
+  check "F45c ownership is still refused before the caller origin is judged" PASS
+else
+  check "F45c origin refusal preempted ownership (out='$(printf '%s' "$OUT45C" | head -c 200)')" FAIL
+fi
+
+# --- F49 a hard link is refused like a symlink. O_NOFOLLOW does not see one, so
+# only the nlink check in the module stands between a plan file and a second
+# name for it that a later write could redirect. The unit suite covers the same
+# condition, but skips itself wherever the platform cannot make a link; this is
+# the end-to-end half. ---
+HARDLINK_TARGET="$TMP/hardlink-target-plan.md"
+printf '# Hard-linked plan\n\n<!-- zensu-autopilot:refuse_run -->\n' > "$HARDLINK_TARGET"
+HARDLINK_PATH="$TMP/hardlinked-plan.md"
+HARDLINK_READY=false
+if ln "$HARDLINK_TARGET" "$HARDLINK_PATH" 2>/dev/null \
+  && HARDLINK_PATH="$HARDLINK_PATH" node -e 'process.exit(require("fs").lstatSync(process.env.HARDLINK_PATH).nlink>1?0:1)' 2>/dev/null; then
+  HARDLINK_READY=true
+fi
+if [ "$HARDLINK_READY" = true ]; then
+  refuses_with "F49 a hard-linked planFilePath is refused like a symlink" \
+    PLAN_FILE_SYMLINK_REJECTED \
+    "$(invoke "$(payload refuse_session __ABSENT__ "$HARDLINK_PATH")" "$REFUSE_PROJECT" "$CFG_OFF" "$REFUSE_DATA")"
+  refuses_with "F49a a hard-linked tool_response.filePath is refused the same way" \
+    PLAN_FILE_SYMLINK_REJECTED \
+    "$(invoke "$(payload_response refuse_session __ABSENT__ "$HARDLINK_PATH")" "$REFUSE_PROJECT" "$CFG_OFF" "$REFUSE_DATA")" \
+    tool_response.filePath
+else
+  skipped "F49 hard-link refusal: this platform cannot create a hard link"
+  skipped "F49a hard-link refusal via the response: this platform cannot create a hard link"
+fi
+
+# --- F48 the module path reaches node through the ENVIRONMENT, never argv. A
+# plugin root spelled with whitespace or an apostrophe cannot survive argv here,
+# and test-msys-special-plugin-module-boundaries.sh does not execute this hook,
+# so this is the plan gate's own enforcer. A line-scoped negative grep is not
+# enough: the evaluator invocation spans ~90 lines, so an argv token appended to
+# a line carrying no `node` would evade one. Every line naming the module is
+# matched against a closed allowlist of forms instead. ---
+TRANSPORT_VERDICT="$(HOOK="$HOOK" node -e '
+  const verdict=(()=>{
+    try {
+      const lines=require("fs").readFileSync(process.env.HOOK,"utf8").split("\n");
+      const allowed=[
+        /^    PLAN_PAYLOAD_DIR="\$\(bash "\$\{CLAUDE_PLUGIN_ROOT\}\/hooks\/lib\/zensu-host-path\.sh" \\$/,
+        /^    PLAN_PAYLOAD_LIB="\$\{PLAN_PAYLOAD_DIR:\+\$\{PLAN_PAYLOAD_DIR\}\/plan-payload-v1\.js\}"$/,
+        /^    if \[ -z "\$PLAN_PAYLOAD_LIB" \] \\$/,
+        /^      \|\| \[ ! -f "\$PLAN_PAYLOAD_LIB" \] \|\| \[ -L "\$PLAN_PAYLOAD_LIB" \] \|\| \[ ! -r "\$PLAN_PAYLOAD_LIB" \]; then$/,
+        /^    PLAN_MSYS_EXCL="\$\(zensu_msys_env_exclusions PLAN_PAYLOAD_LIB\)" \|\| PLAN_MSYS_EXCL="\$\{MSYS2_ENV_CONV_EXCL:-\}"$/,
+        /^      PLAN_PAYLOAD_LIB="\$PLAN_PAYLOAD_LIB" node -e .$/,
+        /^        \(\{resolveApprovedPlan,REASONS,SOURCES\}=require\(process\.env\.PLAN_PAYLOAD_LIB\)\);$/
+      ];
+      const offenders=[];
+      lines.forEach((line,index)=>{
+        if (!/PLAN_PAYLOAD_LIB|PLAN_PAYLOAD_DIR|plan-payload-v1\.js/.test(line)) return;
+        // Shell comments AND the JS line comments inside the evaluator: both name
+        // the module in prose, and the header there is required by F11c.
+        if (/^\s*(#|\/\/)/.test(line)) return;
+        if (!allowed.some((pattern)=>pattern.test(line))) offenders.push(String(index+1));
+      });
+      if (offenders.length) return "unexpected-module-line:"+offenders.join(",");
+      const matched=allowed.filter((pattern)=>lines.some((line)=>pattern.test(line))).length;
+      return matched===allowed.length ? "ok" : "missing-forms:"+(allowed.length-matched);
+    } catch (error) {
+      return "probe-failed:"+((error && error.message) || "unknown");
+    }
+  })();
+  process.stdout.write(verdict);
+')"
+if [ "$TRANSPORT_VERDICT" = ok ]; then
+  check "F48 the reader module is preflighted and transported through the environment" PASS
+else
+  check "F48 reader module transport or preflight is not wired ($TRANSPORT_VERDICT)" FAIL
+fi
+
 # --- F12 outside Autopilot the payload shape must not change the routing ---
 STANDALONE_PROJECT="$TMP/standalone"
 mkdir -p "$STANDALONE_PROJECT"
@@ -985,6 +1143,95 @@ if printf '%s' "$OUT12_PATH" | grep -qF 'AskUserQuestion' \
   check "F12 outside Autopilot the routing is identical regardless of payload shape" PASS
 else
   check "F12 standalone fall-through changed" FAIL
+fi
+
+# --- F47 a plugin missing the reader module fails closed and never approves.
+# F48 pins the wiring; this pins the consequence. The module is removed BEFORE
+# the session is provisioned, so the Session Control runtime digest is computed
+# over the incomplete copy and the refusal proves the hook's own preflight
+# rather than a digest mismatch. Runs last: provisioning exports
+# CLAUDE_PROJECT_DIR and CLAUDE_PLUGIN_DATA for the rest of this shell. ---
+NO_MODULE_PLUGIN="$RAW_TMP/plugin-without-reader"
+mkdir -p "$NO_MODULE_PLUGIN"
+NO_MODULE_READY=false
+if cp -R "$PLUGIN_DIR/.claude-plugin" "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/agents" \
+    "$PLUGIN_DIR/skills" "$PLUGIN_DIR/scripts" "$PLUGIN_DIR/mcp-runtime" "$NO_MODULE_PLUGIN/" 2>/dev/null \
+    && cp "$PLUGIN_DIR/.mcp.json" "$NO_MODULE_PLUGIN/.mcp.json" \
+    && rm -f "$NO_MODULE_PLUGIN/hooks/lib/plan-payload-v1.js"; then
+  NO_MODULE_PROJECT="$TMP/nomodule"
+  mkdir -p "$NO_MODULE_PROJECT"
+  export CLAUDE_PROJECT_DIR="$NO_MODULE_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/nomodule"
+  # shellcheck disable=SC1090
+  if source "$BASELINE" nomodule_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run nomodule_run "$ZENSU_SESSION_KEY" "$NO_MODULE_PROJECT" >/dev/null 2>&1; then
+    NO_MODULE_READY=true
+    NO_MODULE_DATA="$CLAUDE_PLUGIN_DATA"
+    NO_MODULE_RUN_FILE="$(autopilot_run_file nomodule_run "$NO_MODULE_PROJECT")"
+  fi
+fi
+if [ "$NO_MODULE_READY" = true ] && [ -f "$NO_MODULE_RUN_FILE" ]; then
+  NO_MODULE_BEFORE="$(digest "$NO_MODULE_RUN_FILE")"
+  OUT47="$(payload_response nomodule_session '# Plan
+
+<!-- zensu-autopilot:nomodule_run -->' __ABSENT__ \
+    | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+      -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+      CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$NO_MODULE_DATA" \
+      CLAUDE_PROJECT_DIR="$NO_MODULE_PROJECT" ZENSU_CONFIG="$CFG_OFF" \
+      bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+  # The receipt must name a RUNTIME fault. PLAN_EVALUATION_UNAVAILABLE would
+  # claim the payload was judged and found wanting, sending the operator after a
+  # plan that was never the problem — that is the misattribution the guard exists
+  # to prevent, so it is asserted absent rather than merely not-approved.
+  if printf '%s' "$OUT47" | grep -qF 'code=RUNTIME_UNAVAILABLE' \
+    && ! printf '%s' "$OUT47" | grep -qF 'PLAN_EVALUATION_UNAVAILABLE' \
+    && ! printf '%s' "$OUT47" | grep -qF 'PLAN_APPROVED' \
+    && ! printf '%s' "$OUT47" | grep -qF 'AskUserQuestion' \
+    && [ "$(digest "$NO_MODULE_RUN_FILE")" = "$NO_MODULE_BEFORE" ]; then
+    check "F47 a plugin without the reader module refuses the gate instead of approving" PASS
+  else
+    check "F47 missing reader module (out='$(printf '%s' "$OUT47" | head -c 200)')" FAIL
+  fi
+else
+  check "F47 reader-less plugin fixture could not be provisioned" FAIL
+fi
+
+# --- F47a positive control. Without it F47 would also pass if the copied plugin
+# refused for a reason having nothing to do with the missing module. The module
+# is restored and a FRESH session provisioned, so the runtime digest is
+# recomputed over the now-complete copy. ---
+if [ "$NO_MODULE_READY" = true ] \
+    && cp "$PLAN_LIB" "$NO_MODULE_PLUGIN/hooks/lib/plan-payload-v1.js"; then
+  RESTORED_PROJECT="$TMP/restoredmodule"
+  mkdir -p "$RESTORED_PROJECT"
+  export CLAUDE_PROJECT_DIR="$RESTORED_PROJECT"
+  export ZENSU_TEST_PLUGIN_DATA="$TMP/plugin-data/restoredmodule"
+  # shellcheck disable=SC1090
+  if source "$BASELINE" restored_session "$NO_MODULE_PLUGIN" >/dev/null 2>&1 \
+      && autopilot_begin_run restored_run "$ZENSU_SESSION_KEY" "$RESTORED_PROJECT" >/dev/null 2>&1; then
+    RESTORED_PLAN='# Plan
+
+<!-- zensu-autopilot:restored_run -->'
+    OUT47A="$(payload_response restored_session "$RESTORED_PLAN" __ABSENT__ \
+      | env -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
+        -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
+        CLAUDE_PLUGIN_ROOT="$NO_MODULE_PLUGIN" CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" \
+        CLAUDE_PROJECT_DIR="$RESTORED_PROJECT" ZENSU_CONFIG="$CFG_OFF" \
+        bash "$NO_MODULE_PLUGIN/hooks/plan-approved-delegate.sh" 2>/dev/null)"
+    RESTORED_SHA="$(run_field "$(autopilot_run_file restored_run "$RESTORED_PROJECT")" approvedPlanSha256)"
+    if printf '%s' "$OUT47A" | grep -qF 'PLAN_APPROVED runId=restored_run' \
+      && ! printf '%s' "$OUT47A" | grep -qF 'RUNTIME_UNAVAILABLE' \
+      && [ "$RESTORED_SHA" = "$(text_sha "$RESTORED_PLAN")" ]; then
+      check "F47a the same copied plugin approves once the reader module is restored" PASS
+    else
+      check "F47a restored reader module (out='$(printf '%s' "$OUT47A" | head -c 200)')" FAIL
+    fi
+  else
+    check "F47a restored-module fixture could not be provisioned" FAIL
+  fi
+else
+  check "F47a restored-module fixture could not be prepared" FAIL
 fi
 
 echo "----"
