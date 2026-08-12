@@ -19,6 +19,15 @@ const {
 } = require('../lib/upgrade-process.js');
 
 function alive(pid) {
+  // A non-positive pid is never a process. process.kill(0, sig) signals the
+  // CALLER'S OWN process group and process.kill(-1, sig) every process the user
+  // may signal, so either would report "alive" forever and no assertion here
+  // could ever fail. Number('') is 0, which is exactly what reading a pid file
+  // in the window between its creation and its first write produces — so this
+  // guard is what turns that race into a loud failure instead of a silent one.
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`refusing to probe a non-process pid: ${JSON.stringify(pid)}`);
+  }
   try {
     process.kill(pid, 0);
     return true;
@@ -36,13 +45,26 @@ function runtime(platform, kill, spawnSync = () => ({ status: 0 }), spawn = () =
   return { platform, kill, spawnSync, spawn };
 }
 
-async function waitForFile(file, timeoutMs = 5000) {
+// Wait for a USABLE pid, not for the inode. fs.existsSync goes true the instant
+// writeFileSync creates the file — O_CREAT|O_TRUNC happens before the write — so
+// an existence check hands the reader an empty file, Number('') is 0, and the
+// fixture then probes this process's own group instead of the grandchild.
+async function waitForPid(file, timeoutMs = 5000) {
   const deadline = Date.now() + timeoutMs;
+  let last = '';
   while (Date.now() < deadline) {
-    if (fs.existsSync(file)) return;
+    try {
+      last = fs.readFileSync(file, 'utf8').trim();
+      const pid = Number(last);
+      if (last !== '' && Number.isSafeInteger(pid) && pid > 0) return pid;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error('timed out waiting for process-tree fixture');
+  throw new Error(
+    `timed out waiting for a usable pid in the process-tree fixture (last read: ${JSON.stringify(last)})`,
+  );
 }
 
 test('bounds synchronous probes without hiding ordinary nonzero status', () => {
@@ -363,6 +385,55 @@ test('reports forced-survival and missing-close termination failures', async () 
   );
 });
 
+// Both pins below reproduce, deterministically, a race that was measured at
+// roughly 1-in-100 and 1-in-22 of a full run of this file.
+test('a pid file that is created before it is written never resolves to a probe of our own group', async () => {
+  const temporary = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-pid-window-'));
+  const pidFile = path.join(temporary, 'grandchild.pid');
+  try {
+    // Exactly the state fs.writeFileSync passes through: created, still empty.
+    fs.writeFileSync(pidFile, '');
+    await assert.rejects(
+      waitForPid(pidFile, 150),
+      /timed out waiting for a usable pid/,
+      'an empty pid file must time out, never read as pid 0',
+    );
+    // The guard that makes the same mistake loud everywhere else in this file.
+    assert.throws(() => alive(Number('')), /refusing to probe a non-process pid/);
+    assert.throws(() => alive(0), /refusing to probe a non-process pid/);
+    assert.throws(() => alive(-1), /refusing to probe a non-process pid/);
+
+    setTimeout(() => fs.writeFileSync(pidFile, String(process.pid)), 40);
+    assert.equal(await waitForPid(pidFile, 5000), process.pid, 'a late write is still picked up');
+  } finally {
+    fs.rmSync(temporary, { recursive: true, force: true });
+  }
+});
+
+test('a process group whose last member is a zombie is terminated, not reported as a failure', {
+  skip: process.platform === 'win32',
+}, async () => {
+  // macOS/BSD answer kill(-pgid, sig) with EPERM once the only member left is
+  // defunct. posixGroupAlive reads that as "not yet confirmed gone" and waits;
+  // signalProcessTree must not read the same code as a termination fault.
+  const tree = spawnProcessTree(process.execPath, ['-e', 'setInterval(()=>{},1000)'], {
+    stdio: ['ignore', 'ignore', 'ignore'],
+  }, { label: 'zombie group fixture' });
+  const denied = { platform: process.platform, spawnSync: () => ({ status: 0 }), spawn: () => {},
+    kill: (pid, signal) => {
+      if (pid < 0) throw processError('EPERM');
+      return process.kill(pid, signal);
+    } };
+  try {
+    assert.doesNotThrow(
+      () => signalProcessTree(tree, 'SIGTERM', denied),
+      'EPERM on our own group id means nothing is left to signal',
+    );
+  } finally {
+    await terminateProcessTree(tree, { graceMs: 100, forceMs: 5000 });
+  }
+});
+
 test('terminates the complete spawned POSIX process group', {
   skip: process.platform === 'win32',
 }, async () => {
@@ -372,15 +443,20 @@ test('terminates the complete spawned POSIX process group', {
     "const fs=require('node:fs');",
     "const {spawn}=require('node:child_process');",
     "const child=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{stdio:'ignore'});",
-    "fs.writeFileSync(process.argv[1],String(child.pid));",
+    // Publish the pid atomically: rename within a directory is atomic on POSIX,
+    // so the reader can never observe the file half-written. waitForPid would
+    // survive a torn write on its own; writing it this way means the window
+    // does not exist at all.
+    "fs.writeFileSync(process.argv[1]+'.tmp',String(child.pid));",
+    "fs.renameSync(process.argv[1]+'.tmp',process.argv[1]);",
     "setInterval(()=>{},1000);",
   ].join('');
   const tree = spawnProcessTree(process.execPath, ['-e', childScript, pidFile], {
     stdio: ['ignore', 'ignore', 'ignore'],
   }, { label: 'complete POSIX group fixture' });
   try {
-    await waitForFile(pidFile);
-    const grandchildPid = Number(fs.readFileSync(pidFile, 'utf8'));
+    const grandchildPid = await waitForPid(pidFile);
+    assert.notEqual(grandchildPid, tree.child.pid, 'the fixture must publish the grandchild, not the child');
     assert.equal(alive(tree.child.pid), true);
     assert.equal(alive(grandchildPid), true);
     await terminateProcessTree(tree, {
@@ -824,6 +900,54 @@ test('fails closed and terminates the tree when FD 3 delivery breaks', {
       return true;
     },
   );
+});
+
+test('a termination fault never replaces the reason the run was abandoned', {
+  skip: process.platform === 'win32',
+}, async () => {
+  // This is what made the FD-3 flake present as the WRONG error rather than as a
+  // cleanup warning: the teardown ran before the diagnosis was thrown, so its
+  // own failure surfaced in place of it. Driven here with a kill that refuses
+  // for a reason the lib does not tolerate, so the fault is deterministic.
+  const { spawn } = require('node:child_process');
+  const secret = 'opaque-argument-value-must-not-enter-diagnostics';
+  let treePid = null;
+  const refusing = {
+    platform: process.platform,
+    spawnSync: () => ({ status: 0 }),
+    spawn: (...args) => { const child = spawn(...args); treePid = child.pid; return child; },
+    kill: (pid, signal) => {
+      if (pid < 0) throw processError('EACCES');
+      return process.kill(pid, signal);
+    },
+  };
+  try {
+    await assert.rejects(
+      runProcessTreeBounded(
+        process.execPath,
+        ['-e', ["const fs=require('node:fs');", 'fs.closeSync(3);', 'setInterval(()=>{},1000);'].join('')],
+        { encoding: 'utf8' },
+        {
+          label: 'masking fixture',
+          timeoutMs: 5000,
+          graceMs: 0,
+          forceMs: 100,
+          trustedEvaluatorCommand: true,
+          argumentInput: { fd: 3, payload: Buffer.from(secret.repeat(15000)) },
+        },
+        refusing,
+      ),
+      (error) => {
+        assert.match(error.message, /masking fixture argument payload delivery failed/);
+        assert.doesNotMatch(error.message, new RegExp(secret));
+        assert.equal(error.cause?.code, 'EACCES', 'the cleanup fault travels as the cause, it is not discarded');
+        return true;
+      },
+    );
+  } finally {
+    // The lib never got to kill the tree, because this runtime refused.
+    if (treePid) { try { process.kill(-treePid, 'SIGKILL'); } catch (_error) { /* already gone */ } }
+  }
 });
 
 test('rejects invalid argument-input policies before any spawn attempt', async () => {
