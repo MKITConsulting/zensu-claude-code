@@ -378,5 +378,99 @@ for RECORDLESS_AGENT in zensu:review-aspect zensu:pr-review-worker; do
   fi
 done
 
+# Doctor reachability in the "record present but wrong" state.
+#
+# $SESSION is bound to the 0.17.0 candidate root above; running a gate from the
+# 0.16.1 existing root reproduces exactly what a mid-session plugin update does
+# to a live session. That state is NOT relaxable and must keep denying — the
+# check above pins that — but the read-only diagnostic has to stay reachable, or
+# /zensu:doctor is denied by the very defect it reports.
+#
+# Every hook on the Bash matcher is exercised, not just one: a deny from any of
+# them wins, so a single-gate check would report a working feature that does not
+# work. The reviewer and rider cases are the bites that keep the allowance from
+# being a general escape.
+DOCTOR_CMD="CLAUDE_PLUGIN_DATA=\"$SHARED_DATA\" CLAUDE_PROJECT_DIR=\"$PROJECT\" bash \"$SYNTHETIC_EXISTING_ROOT/hooks/lib/zensu-doctor.sh\""
+
+bash_payload() {
+  EVENT=PreToolUse SESSION="$1" CWD="$PROJECT" CMD="$2" AGENT="${3:-}" node -e '
+    const payload = {
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Bash",
+      tool_input: {command: process.env.CMD},
+    };
+    if (process.env.AGENT) payload.agent_type = process.env.AGENT;
+    process.stdout.write(JSON.stringify(payload));
+  '
+}
+
+# Prints the gate's permission decision, or "allow" when it emitted none.
+gate_decision() {
+  local hook="$1" payload="$2" out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
+  if printf '%s' "$payload" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_EXISTING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$SYNTHETIC_EXISTING_ROOT/hooks/$hook" >"$out" 2>"$err"; then
+    :
+  else
+    printf 'hook-exit-nonzero\n'
+    return
+  fi
+  if [ -s "$err" ]; then
+    printf 'hook-stderr\n'
+    return
+  fi
+  OUT_FILE="$out" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") { process.stdout.write("allow\n"); process.exit(0); }
+    try {
+      process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision || "allow"}\n`);
+    } catch (_error) { process.stdout.write("unparseable\n"); }
+  '
+}
+
+DOCTOR_PAYLOAD="$(bash_payload "$SESSION" "$DOCTOR_CMD")"
+for BASH_GATE in pre-reviewer-capability-gate.sh pre-bash-zensu-gate.sh \
+  pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
+  if [ "$(gate_decision "$BASH_GATE" "$DOCTOR_PAYLOAD")" = allow ]; then
+    check "$BASH_GATE lets the diagnostic through a disagreeing record" PASS
+  else
+    check "$BASH_GATE lets the diagnostic through a disagreeing record" FAIL
+  fi
+done
+
+OTHER_PAYLOAD="$(bash_payload "$SESSION" 'ls -la')"
+if [ "$(gate_decision pre-reviewer-capability-gate.sh "$OTHER_PAYLOAD")" = deny ]; then
+  check "an ordinary Bash command still denies on a disagreeing record" PASS
+else
+  check "an ordinary Bash command still denies on a disagreeing record" FAIL
+fi
+
+RIDER_PAYLOAD="$(bash_payload "$SESSION" "$DOCTOR_CMD; whoami")"
+if [ "$(gate_decision pre-reviewer-capability-gate.sh "$RIDER_PAYLOAD")" = deny ]; then
+  check "a second command riding on the diagnostic is refused" PASS
+else
+  check "a second command riding on the diagnostic is refused" FAIL
+fi
+
+FOREIGN_PAYLOAD="$(bash_payload "$SESSION" "bash \"$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/zensu-doctor.sh\"")"
+if [ "$(gate_decision pre-reviewer-capability-gate.sh "$FOREIGN_PAYLOAD")" = deny ]; then
+  check "a doctor script outside the executing root is refused" PASS
+else
+  check "a doctor script outside the executing root is refused" FAIL
+fi
+
+for DOCTOR_AGENT in zensu:review-aspect zensu:pr-review-worker; do
+  AGENT_DOCTOR_PAYLOAD="$(bash_payload "$SESSION" "$DOCTOR_CMD" "$DOCTOR_AGENT")"
+  if [ "$(gate_decision pre-reviewer-capability-gate.sh "$AGENT_DOCTOR_PAYLOAD")" = deny ]; then
+    check "$DOCTOR_AGENT never receives the diagnostic allowance" PASS
+  else
+    check "$DOCTOR_AGENT never receives the diagnostic allowance" FAIL
+  fi
+done
+
 printf '%s\n' '----' "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

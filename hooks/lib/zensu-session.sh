@@ -193,6 +193,65 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
+# Returns 0 ONLY when this PreToolUse payload is the one read-only /zensu:doctor
+# Bash call. This is NOT a relaxable-state predicate and does not belong beside
+# the two above: those answer "is there anything left to enforce", this one
+# answers "is this the diagnostic itself". It applies in EVERY bind failure,
+# including a record that exists and disagrees — the state where the diagnostic
+# was previously denied by the very defect it reports.
+#
+# The decision lives in zensu-doctor-invocation.js so all three Bash gates and
+# the all-tool capability gate share exactly one recognizer, and it derives the
+# executing plugin root itself rather than trusting a caller. Every caller must
+# still conjoin its own main-principal check: a reviewer or neutral child has no
+# diagnostic to run.
+#
+# Prints nothing on purpose. Inside a PreToolUse gate stdout is the JSON decision
+# channel, so a stray byte here would corrupt the verdict.
+#
+# Deliberately carries NONE of the CLAUDE_PLUGIN_ROOT / CLAUDE_PLUGIN_DATA
+# rendering the predicates above need. The recognizer reads only stdin and its
+# own __dirname, so passing them would add nothing — while making the diagnostic
+# unreachable in exactly the degraded sessions it exists for: zensu-host-path.sh
+# exits non-zero on an empty argument, so an unset CLAUDE_PLUGIN_DATA would
+# silently refuse the doctor. Every precondition here must be one the recognizer
+# actually depends on.
+zensu_doctor_invocation() {
+  local payload="${1:-}"
+  local lib_dir recognizer
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  recognizer="$lib_dir/zensu-doctor-invocation.js"
+  [ -f "$recognizer" ] && [ ! -L "$recognizer" ] || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" | node ./zensu-doctor-invocation.js
+  ) >/dev/null 2>&1
+}
+
+# The one decision "may this call run the diagnostic despite a failed bind".
+# Both conjuncts are required at every gate: the command must BE the diagnostic,
+# and the caller must be the interactive thread. A reviewer, evidence worker or
+# neutral child has no diagnostic to run, and the all-tool capability gate's own
+# principal check is not a substitute here — a deny from ANY hook on the Bash
+# matcher wins, so each gate has to reach this verdict itself or the allowance
+# silently collapses back into a deny.
+#
+# Fails closed on a missing or unsafe agent-context lib: an unresolved principal
+# is not the main thread.
+zensu_doctor_allowed() {
+  local payload="${1:-}"
+  local lib_dir context_lib
+  zensu_doctor_invocation "$payload" || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  context_lib="$lib_dir/zensu-agent-context.sh"
+  [ -r "$context_lib" ] && [ ! -L "$context_lib" ] || return 1
+  # shellcheck disable=SC1090
+  source "$context_lib" || return 1
+  zensu_hook_is_main_principal "$payload" PreToolUse
+}
+
 # Three scopes, because the same emitter serves callers with very different
 # knowledge. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
@@ -212,14 +271,14 @@ zensu_session_orphaned_project_root_model() {
 zensu_emit_hook_session_deny() {
   local scope="${1:-}"
   if [ "$scope" = narrowed ]; then
-    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. Start a fresh Claude Code session before using stateful tools."}}'
+    printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. The most common cause is a Zensu plugin update that landed while this session was running: the record stays bound to the installation the session started on, and no session can be re-bound in place. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'
     return
   fi
   if [ "$scope" = damaged-runtime ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session has no usable Session Control binding — either no record at all, or a record whose recorded project root no longer exists — which alone would still leave the interactive thread able to run /zensu:doctor, but a required Zensu runtime library is missing or unreadable, so that diagnostic is denied too. Repair the Zensu plugin installation; a fresh Claude Code session will not help until the installation itself is intact."}}'
     return
   fi
-  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor to see which check failed — it names whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason — or start a fresh Claude Code session before using stateful tools."}}'
+  printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so every stateful Zensu tool fails closed. Run /zensu:doctor — it stays reachable in every bind failure and names which check failed: whether this session has no record at all, a record whose recorded project root no longer exists, or a record that disagrees for another reason, most often a Zensu plugin update that landed mid-session. Then start a fresh Claude Code session before using stateful tools."}}'
 }
 
 zensu_resolve_session_id() {
