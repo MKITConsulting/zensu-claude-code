@@ -18,7 +18,8 @@ AGENT_MD="$PLUGIN_DIR/agents/review-judge.md"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 CONFIG_EX="$PLUGIN_DIR/config.example.json"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
-README="$PLUGIN_DIR/README.md"
+REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
+CONFIG_DOC="$PLUGIN_DIR/docs/configuration.md"
 WORKFLOW_DOC="$PLUGIN_DIR/docs/tdd-manager-workflow.md"
 
 PASS=0; FAIL=0
@@ -28,7 +29,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$AGENT_MD" "$TDD_MD" "$CONFIG_EX" "$PLUGIN_JSON" "$README" "$WORKFLOW_DOC"; do
+for f in "$AGENT_MD" "$TDD_MD" "$CONFIG_EX" "$PLUGIN_JSON" "$REVIEW_DOC" "$CONFIG_DOC" "$WORKFLOW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -136,19 +137,19 @@ else
   check "P4b plugin.json agents[] registers ./agents/review-judge.md" FAIL
 fi
 
-# P5 — README + workflow doc
-if grep -qxF '### Agents (6)' "$README" \
-   && grep -qF '| **review-judge** |' "$README" \
-   && grep -qF '| **plan-review-worker** |' "$README" \
-   && grep -qF '| **pr-review-worker** |' "$README"; then
-  check "P5a README agents table is (6) with judge and dedicated review workers" PASS
+# P5 — reference docs + workflow doc
+if grep -qxF '### Agents (6)' "$REVIEW_DOC" \
+   && grep -qF '| **review-judge** |' "$REVIEW_DOC" \
+   && grep -qF '| **plan-review-worker** |' "$REVIEW_DOC" \
+   && grep -qF '| **pr-review-worker** |' "$REVIEW_DOC"; then
+  check "P5a docs/review-chain.md agents table is (6) with judge and dedicated review workers" PASS
 else
-  check "P5a README agents table is (6) with judge and dedicated review workers" FAIL
+  check "P5a docs/review-chain.md agents table is (6) with judge and dedicated review workers" FAIL
 fi
-if grep -qF '| `reviewJudge` |' "$README"; then
-  check "P5b README config table carries the reviewJudge row" PASS
+if grep -qF '| `reviewJudge` |' "$CONFIG_DOC"; then
+  check "P5b docs/configuration.md config table carries the reviewJudge row" PASS
 else
-  check "P5b README config table carries the reviewJudge row" FAIL
+  check "P5b docs/configuration.md config table carries the reviewJudge row" FAIL
 fi
 if grep -qF 'judge second pass' "$WORKFLOW_DOC" && grep -qF 'hooks.reviewJudge' "$WORKFLOW_DOC"; then
   check "P5c workflow doc names the judge stage + gate" PASS

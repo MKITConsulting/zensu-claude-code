@@ -19,7 +19,7 @@ DELEGATE="$ROOT/hooks/post-review-tdd-delegate.sh"
 ENFORCER="$ROOT/hooks/stop-chain-enforcer.sh"
 REVIEWER="$ROOT/agents/code-reviewer.md"
 CONFIG_EX="$ROOT/config.example.json"
-README="$ROOT/README.md"
+CONFIG_DOC="$ROOT/docs/configuration.md"
 WORKFLOW_DOC="$ROOT/docs/tdd-manager-workflow.md"
 INVENTORY="$ROOT/tests/profiles/promptfoo-local-only.v1.json"
 MARKER='[Unverified — do not fix]'
@@ -31,7 +31,7 @@ check() {
 }
 
 for f in "$LIB" "$UNIT" "$TDD_MD" "$PR_MD" "$PR_RULES" "$PLAN_MD" "$DELEGATE" \
-         "$ENFORCER" "$REVIEWER" "$CONFIG_EX" "$README" "$WORKFLOW_DOC" "$INVENTORY"; do
+         "$ENFORCER" "$REVIEWER" "$CONFIG_EX" "$CONFIG_DOC" "$WORKFLOW_DOC" "$INVENTORY"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -276,15 +276,15 @@ if node -e 'const c=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"
 else
   check "P5a config.example.json ships hooks.findingVerification:true" FAIL
 fi
-if grep -qF '| `findingVerification` |' "$README"; then
-  check "P5b README config table carries the findingVerification row" PASS
+if grep -qF '| `findingVerification` |' "$CONFIG_DOC"; then
+  check "P5b docs/configuration.md config table carries the findingVerification row" PASS
 else
-  check "P5b README config table carries the findingVerification row" FAIL
+  check "P5b docs/configuration.md config table carries the findingVerification row" FAIL
 fi
-if grep -qF 'Finding Verification Gate (gated by `hooks.findingVerification`, default on)' "$README"; then
-  check "P5c README chain description places the gate in the chain" PASS
+if grep -qF 'Finding Verification Gate (gated by `hooks.findingVerification`, default on)' "$CONFIG_DOC"; then
+  check "P5c docs/configuration.md chain description places the gate in the chain" PASS
 else
-  check "P5c README chain description places the gate in the chain" FAIL
+  check "P5c docs/configuration.md chain description places the gate in the chain" FAIL
 fi
 if grep -qF 'Finding Verification Gate (step 4c, gated by `hooks.findingVerification`' "$WORKFLOW_DOC"; then
   check "P5d the workflow doc places the gate in the chain" PASS

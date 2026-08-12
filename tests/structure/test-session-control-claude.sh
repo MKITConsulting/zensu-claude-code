@@ -8,6 +8,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 SESSION="$ROOT/hooks/lib/zensu-session.sh"
 HOST_PATH="$ROOT/hooks/lib/zensu-host-path.sh"
 README="$ROOT/README.md"
+OPS_DOC="$ROOT/docs/operations.md"
 CHANGELOG="$ROOT/CHANGELOG.md"
 PASS=0
 FAIL=0
@@ -39,7 +40,7 @@ README_UPDATING="$(awk '
   /^## Updating$/ { in_section = 1; next }
   in_section && /^## / { exit }
   in_section { print }
-' "$README")"
+' "$OPS_DOC")"
 README_UPDATING_ONELINE="$(printf '%s\n' "$README_UPDATING" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
   'already-running session keeps its previous `CLAUDE_PLUGIN_ROOT`' \
@@ -51,9 +52,9 @@ for requirement in \
   'the plugin never deletes it automatically'
 do
   if printf '%s\n' "$README_UPDATING_ONELINE" | grep -qF -- "$requirement"; then
-    check "README upgrade note: $requirement" PASS
+    check "docs/operations.md upgrade note: $requirement" PASS
   else
-    check "README upgrade note: $requirement" FAIL
+    check "docs/operations.md upgrade note: $requirement" FAIL
   fi
 done
 
@@ -61,7 +62,7 @@ README_TROUBLESHOOTING="$(awk '
   /^## Troubleshooting$/ { in_section = 1; next }
   in_section && /^## / { exit }
   in_section { print }
-' "$README")"
+' "$OPS_DOC")"
 README_TROUBLESHOOTING_ONELINE="$(printf '%s\n' "$README_TROUBLESHOOTING" | tr '\n' ' ' | tr -s ' ')"
 for requirement in \
   'keep already-running sessions on their previous version' \
@@ -71,23 +72,29 @@ for requirement in \
   'the plugin never deletes it automatically'
 do
   if printf '%s\n' "$README_TROUBLESHOOTING_ONELINE" | grep -qF -- "$requirement"; then
-    check "README troubleshooting note: $requirement" PASS
+    check "docs/operations.md troubleshooting note: $requirement" PASS
   else
-    check "README troubleshooting note: $requirement" FAIL
+    check "docs/operations.md troubleshooting note: $requirement" FAIL
   fi
 done
-if ! grep -qF 'may be deleted' "$README"; then
-  check "README has no unqualified legacy-locator deletion advice" PASS
+if ! grep -qF 'may be deleted' "$OPS_DOC" && ! grep -qF 'may be deleted' "$README"; then
+  check "user-facing docs carry no unqualified legacy-locator deletion advice" PASS
 else
-  check "README has no unqualified legacy-locator deletion advice" FAIL
+  check "user-facing docs carry no unqualified legacy-locator deletion advice" FAIL
 fi
 
+# The helper directive travels with the prose it documents, so this scans the
+# whole user-facing doc set rather than one file — a section that moves between
+# README.md and docs/ must not silently drop out of coverage.
 SAFE_LOG_COMMAND='CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh"'
-if [ "$(grep -cF "$SAFE_LOG_COMMAND" "$README" 2>/dev/null || true)" -ge 2 ] \
-  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$README"; then
-  check "every README helper directive uses native plugin/session substitutions" PASS
+DOC_SET="$README"
+for d in "$ROOT"/docs/*.md; do [ -f "$d" ] && DOC_SET="$DOC_SET $d"; done
+# shellcheck disable=SC2086
+if [ "$(grep -hcF "$SAFE_LOG_COMMAND" $DOC_SET 2>/dev/null | awk '{s+=$1} END {print s+0}')" -ge 2 ] \
+  && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' $DOC_SET; then
+  check "every helper directive in README.md + docs/ uses native plugin/session substitutions" PASS
 else
-  check "every README helper directive uses native plugin/session substitutions" FAIL
+  check "every helper directive in README.md + docs/ uses native plugin/session substitutions" FAIL
 fi
 if [ "$FAIL" -ne 0 ]; then
   printf '%s\n' "----" "test-session-control-claude: $PASS PASS / $FAIL FAIL"

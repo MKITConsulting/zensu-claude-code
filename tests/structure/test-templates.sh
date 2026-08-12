@@ -9,7 +9,7 @@ set -u
 # + resolved recipe; autopilot-pr-body: per-AC table with deprecated note +
 # the Gates-bypassed audit line); the resolution contract (override path
 # .zensu/templates/<name>.md before the plugin default) is pinned in BOTH
-# consumer skills and the README documents the wholesale-replace +
+# consumer skills and the docs/review-chain.md documents the wholesale-replace +
 # mandatory-section contract. The inline plan block must be GONE from the tdd
 # skill (the extraction is the point of this feature).
 
@@ -19,7 +19,7 @@ TPL_SPEC="$PLUGIN_DIR/templates/autopilot-spec.md"
 TPL_PR="$PLUGIN_DIR/templates/autopilot-pr-body.md"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
-README="$PLUGIN_DIR/README.md"
+REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
 PASS=0; FAIL=0
 check() {
@@ -28,7 +28,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$TPL_PLAN" "$TPL_SPEC" "$TPL_PR" "$TDD_MD" "$AUTOPILOT_MD" "$README"; do
+for f in "$TPL_PLAN" "$TPL_SPEC" "$TPL_PR" "$TDD_MD" "$AUTOPILOT_MD" "$REVIEW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -121,15 +121,15 @@ else
 fi
 
 # P4 — README contract
-if grep -qF '#### Templates (repo-overridable)' "$README" && grep -qF '.zensu/templates/<name>.md' "$README"; then
-  check "P4a README documents names + resolution order" PASS
+if grep -qF '#### Templates (repo-overridable)' "$REVIEW_DOC" && grep -qF '.zensu/templates/<name>.md' "$REVIEW_DOC"; then
+  check "P4a docs/review-chain.md documents names + resolution order" PASS
 else
-  check "P4a README documents names + resolution order" FAIL
+  check "P4a docs/review-chain.md documents names + resolution order" FAIL
 fi
-if grep -qiF 'REPLACES the default wholesale' "$README" && grep -qF 'tdd-plan.md' "$README" && grep -qF 'autopilot-spec.md' "$README" && grep -qF 'autopilot-pr-body.md' "$README"; then
-  check "P4b README documents the override contract for all three" PASS
+if grep -qiF 'REPLACES the default wholesale' "$REVIEW_DOC" && grep -qF 'tdd-plan.md' "$REVIEW_DOC" && grep -qF 'autopilot-spec.md' "$REVIEW_DOC" && grep -qF 'autopilot-pr-body.md' "$REVIEW_DOC"; then
+  check "P4b docs/review-chain.md documents the override contract for all three" PASS
 else
-  check "P4b README documents the override contract for all three" FAIL
+  check "P4b docs/review-chain.md documents the override contract for all three" FAIL
 fi
 
 echo "----"

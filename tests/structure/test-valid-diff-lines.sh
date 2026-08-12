@@ -22,7 +22,7 @@ LIB="$PLUGIN_DIR/hooks/lib/valid-diff-lines.js"
 PUBLISH_MD="$PLUGIN_DIR/skills/pr-team-review/rules/github-publish.md"
 WORKFLOW_MD="$PLUGIN_DIR/skills/pr-team-review/rules/workflow.md"
 SKILL_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
-README="$PLUGIN_DIR/README.md"
+REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
 PASS=0; FAIL=0
 check() {
@@ -31,7 +31,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$LIB" "$PUBLISH_MD" "$WORKFLOW_MD" "$SKILL_MD" "$README"; do
+for f in "$LIB" "$PUBLISH_MD" "$WORKFLOW_MD" "$SKILL_MD" "$REVIEW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -113,11 +113,11 @@ else
   check "P3l fallback posting builds JSON via jq (no raw interpolation)" FAIL
 fi
 
-# P4 — README row clause (scoped to the pr-team-review row)
-if grep -F '/zensu:pr-team-review' "$README" | grep -qF 'valid-diff-lines.js'; then
-  check "P4 README pr-team-review row mentions anchor pre-validation" PASS
+# P4 — reference-doc clause (scoped to a line naming the pr-team-review skill)
+if grep -F '/zensu:pr-team-review' "$REVIEW_DOC" | grep -qF 'valid-diff-lines.js'; then
+  check "P4 docs/review-chain.md mentions anchor pre-validation for pr-team-review" PASS
 else
-  check "P4 README pr-team-review row mentions anchor pre-validation" FAIL
+  check "P4 docs/review-chain.md mentions anchor pre-validation for pr-team-review" FAIL
 fi
 
 if ! command -v node >/dev/null 2>&1; then
