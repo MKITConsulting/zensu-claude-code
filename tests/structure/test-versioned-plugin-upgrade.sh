@@ -418,7 +418,12 @@ gate_decision() {
     printf 'hook-exit-nonzero\n'
     return
   fi
-  if [ -s "$err" ]; then
+  # stdout is the decision channel; stderr is NOT empty here by design. A failed
+  # bind makes the binder print "context plugin root does not match the executing
+  # plugin" before any gate decides, so requiring an empty stderr would grade
+  # every allow as a failure. Anything OTHER than that diagnostic — a crash, a
+  # node stack — still fails, so a real regression stays visible.
+  if [ -s "$err" ] && grep -qv '^claude hook session binder: ' "$err"; then
     printf 'hook-stderr\n'
     return
   fi

@@ -53,14 +53,51 @@ if grep -qE '^name: doctor$' "$SKILL_MD"; then
 else
   check "P2c skill frontmatter name is doctor" FAIL
 fi
-if grep -qF 'ROOT="${CLAUDE_PLUGIN_ROOT}"' "$SKILL_MD" \
-  && grep -qF 'bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
-  && grep -qF 'CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+# The root preflight moved OUT of the skill and INTO the helper, so the skill can
+# emit one command that zensu-doctor-invocation.js recognizes. Both halves are
+# pinned: the skill still names the standardized failure (as the fallback for a
+# root so broken the helper cannot start), and the helper now carries it too.
+if grep -qF 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
+  && grep -qF 'CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" \
   && grep -qF 'Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' "$SKILL_MD" \
+  && grep -qF 'Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' "$HELPER" \
   && ! grep -qF 'ZENSU_CLAUDE_PLUGIN_ROOT' "$SKILL_MD"; then
   check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" PASS
 else
   check "P2d skill validates root and renders the standardized doctor failure instead of shell-aborting" FAIL
+fi
+# The coupling that breaks SILENTLY: the skill's command is only useful on a
+# failed bind if the recognizer accepts it. Feed every fenced command the skill
+# documents through the real recognizer, with the tokens Claude renders natively
+# substituted, so an edit to either side that parts them fails here.
+DOCTOR_RECOGNIZER="$PLUGIN_DIR/hooks/lib/zensu-doctor-invocation.js"
+SKILL_CMDS="$(grep -F 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD" | grep -v '^#')"
+RECOGNIZED=0
+UNRECOGNIZED=0
+while IFS= read -r RAW_CMD; do
+  [ -n "$RAW_CMD" ] || continue
+  RENDERED="${RAW_CMD//\$\{CLAUDE_PLUGIN_ROOT\}/$PLUGIN_DIR}"
+  RENDERED="${RENDERED//\$\{CLAUDE_PLUGIN_DATA\}//tmp/zensu-doctor-probe-data}"
+  RENDERED="${RENDERED//\$\{CLAUDE_PROJECT_DIR\}//tmp/zensu-doctor-probe-project}"
+  if CMD="$RENDERED" node -e '
+      process.stdout.write(JSON.stringify({
+        hook_event_name: "PreToolUse",
+        session_id: "doctor-skill-probe",
+        tool_name: "Bash",
+        tool_input: {command: process.env.CMD},
+      }));
+    ' | node "$DOCTOR_RECOGNIZER" >/dev/null 2>&1; then
+    RECOGNIZED=$((RECOGNIZED + 1))
+  else
+    UNRECOGNIZED=$((UNRECOGNIZED + 1))
+  fi
+done <<EOF
+$SKILL_CMDS
+EOF
+if [ "$RECOGNIZED" -ge 2 ] && [ "$UNRECOGNIZED" -eq 0 ]; then
+  check "P2d1 every doctor command the skill documents is accepted by the recognizer ($RECOGNIZED forms)" PASS
+else
+  check "P2d1 skill documents a doctor command the recognizer refuses ($RECOGNIZED ok, $UNRECOGNIZED refused)" FAIL
 fi
 if grep -qF 'AskUserQuestion' "$SKILL_MD" && grep -qiF 'report-only' "$SKILL_MD"; then
   check "P2e skill gates cleanup (AskUserQuestion + report-only non-interactive)" PASS
@@ -127,7 +164,7 @@ case "$REAL_MANIFEST" in
   *) check "P2o real hook manifest count does not match $EXPECTED_HOOKS hook scripts on disk" FAIL ;;
 esac
 if grep -qF 'mcp__playwright__*' "$SKILL_MD" && grep -qF 'mcp__plugin_zensu_playwright__*' "$SKILL_MD" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$SKILL_MD"; then
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" PASS
 else
   check "P2l doctor skill propagates loaded MCP-tool readiness into the helper" FAIL
