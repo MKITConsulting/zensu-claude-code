@@ -40,6 +40,16 @@
 
 const fs = require("fs");
 const nodePath = require("path");
+// The MSYS drive rule is SHARED, never re-derived. On Windows a command token
+// reaches this module over stdin, the one channel MSYS does not convert, so the
+// doctor path can arrive spelled `/c/Users/...` while __dirname is already
+// native `C:\Users\...`. Without the rewrite path.resolve reads that leading `/`
+// as drive-relative, the two spellings never compare equal, and the diagnostic
+// is refused on every Windows host — the exact failure this file exists to
+// prevent. msysDrivePrefix is TOTAL: anything that is not an MSYS drive spelling
+// comes back unchanged, and it never throws, so it cannot turn a refusal into a
+// crashed hook.
+const { msysDrivePrefix } = require("./claude-path-v1.js");
 
 const COMMAND_MAX_BYTES = 4096;
 const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
@@ -112,11 +122,14 @@ const tokenize = (command) => {
   return tokens;
 };
 
-const isRootedLiteralPath = (value) =>
-  value !== ""
-  && nodePath.posix.isAbsolute(value)
-  && !value.split("/").includes("..")
-  && !value.includes("\0");
+// Platform-aware on purpose. posix.isAbsolute rejects every native Windows
+// spelling (`C:\x` and `C:/x` alike), which would refuse the diagnostic on the
+// one host family that cannot spell a path any other way.
+const isRootedLiteralPath = (value) => {
+  if (typeof value !== "string" || value === "" || value.includes("\0")) return false;
+  const rooted = msysDrivePrefix(value);
+  return nodePath.isAbsolute(rooted) && !rooted.split(/[\\/]/).includes("..");
+};
 
 const assignmentViolation = (token, seen) => {
   const separator = token.indexOf("=");
@@ -136,10 +149,13 @@ const assignmentViolation = (token, seen) => {
 // the right file is still a second name an attacker controls.
 const doctorPathViolation = (token, pluginRoot) => {
   if (!isRootedLiteralPath(token)) return REASONS.PATH;
-  if (nodePath.resolve(token) !== nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS)) return REASONS.PATH;
+  const rooted = msysDrivePrefix(token);
+  if (nodePath.resolve(rooted) !== nodePath.resolve(nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS))) {
+    return REASONS.PATH;
+  }
   let stat;
   try {
-    stat = fs.lstatSync(token);
+    stat = fs.lstatSync(rooted);
   } catch {
     return REASONS.NOT_REGULAR;
   }

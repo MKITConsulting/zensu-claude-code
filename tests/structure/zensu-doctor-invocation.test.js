@@ -182,6 +182,29 @@ test("an oversized command is refused before it is parsed", () => {
   assert.strictEqual(verdict(padded).reason, REASONS.COMMAND_SIZE);
 });
 
+// A POSIX host cannot observe the Windows branch, so this pins the DELEGATION
+// instead: the MSYS drive rule is shared through claude-path-v1.js and must never
+// be hand-copied here. A private copy would drift from the one the source-write
+// gate and the session-control trust boundary already share.
+test("the MSYS drive rule is delegated, never re-derived in this file", () => {
+  const source = fs.readFileSync(modulePath, "utf8");
+  assert.match(source, /require\(["']\.\/claude-path-v1\.js["']\)/);
+  assert.match(source, /msysDrivePrefix/);
+  const privateDriveRules = source.match(/\(\[A-Za-z\]\)/g) || [];
+  assert.deepStrictEqual(privateDriveRules, [], "no private drive-prefix regex may reappear here");
+  // Matches the CALL, not the word: the rationale comment names posix.isAbsolute
+  // to explain why it is wrong here, and a bare-phrase match would fail on it.
+  assert.ok(!/nodePath\.posix\./.test(source), "posix path helpers refuse every native Windows spelling");
+});
+
+test("on this POSIX host an MSYS-looking path stays an ordinary path", () => {
+  const msysLooking = nodePath.join(tmpRoot, "d");
+  const root = nodePath.join(msysLooking, "plugin");
+  fs.mkdirSync(nodePath.join(root, "hooks", "lib"), { recursive: true });
+  fs.writeFileSync(nodePath.join(root, ...DOCTOR_SEGMENTS), "#!/bin/bash\nexit 0\n");
+  assert.strictEqual(recognize(payload(`bash "${nodePath.join(root, ...DOCTOR_SEGMENTS)}"`), root).ok, true);
+});
+
 test("isDoctorInvocation binds the REAL executing root, which the unit tree is not", () => {
   assert.strictEqual(executingPluginRoot(), nodePath.resolve(__dirname, "..", ".."));
   assert.strictEqual(isDoctorInvocation(payload(`bash "${doctorPath}"`)), false);
