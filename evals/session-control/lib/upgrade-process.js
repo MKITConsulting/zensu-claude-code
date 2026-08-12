@@ -334,10 +334,22 @@ async function runProcessTreeBounded(
       await Promise.race(waits);
     }
     if (timedOut || outputFailure || argumentFailure) {
-      await terminateProcessTree(tree, { graceMs, forceMs, runtime });
-      if (outputFailure) throw outputFailure;
-      if (argumentFailure) throw argumentFailure;
-      throw processError(`${label} exceeded its time bound`);
+      // Cleanup must never REPLACE the diagnosis. The reason the run was
+      // abandoned is the only thing that tells the caller what went wrong; a
+      // fault while tearing the tree down would otherwise surface in its place
+      // and send them after the wrong defect. It is not discarded either — it
+      // travels as the cause, so a tree that genuinely survived is still
+      // recoverable from the thrown error.
+      let terminationFailure = null;
+      try {
+        await terminateProcessTree(tree, { graceMs, forceMs, runtime });
+      } catch (error) {
+        terminationFailure = error;
+      }
+      const primary = outputFailure || argumentFailure
+        || processError(`${label} exceeded its time bound`);
+      if (terminationFailure && primary.cause === undefined) primary.cause = terminationFailure;
+      throw primary;
     }
     await argumentDelivery;
     await tree.exit;
@@ -379,7 +391,20 @@ function signalProcessTree(tree, signal, runtime = DEFAULT_PROCESS_RUNTIME) {
   if (!processTreeAlive(tree, runtime)) return;
   try { runtime.kill(-tree.child.pid, signal); }
   catch (error) {
-    if (error?.code !== 'ESRCH') throw processError('POSIX process-group termination failed');
+    // ESRCH: the group is already gone. EPERM: on macOS/BSD a group whose only
+    // remaining member is a zombie refuses the signal — there is no live process
+    // left to receive it. Measured, not assumed: at the moment of denial the pid
+    // is still ours (same uid, our own ppid) and `ps` reports it <defunct>, so
+    // this is not a recycled foreign group. It cannot be one either, because
+    // POSIX keeps a process-group id reserved while any process — zombie
+    // included — still has it, and every member of our tree shares our uid.
+    // Neither code is a failure to terminate; both mean nothing is left to
+    // signal. posixGroupAlive deliberately still reports EPERM as alive: it
+    // means "not yet confirmed gone", and terminateProcessTree waits for the
+    // reap. The two must not disagree about whether that state is fatal.
+    if (error?.code !== 'ESRCH' && error?.code !== 'EPERM') {
+      throw processError('POSIX process-group termination failed');
+    }
   }
 }
 

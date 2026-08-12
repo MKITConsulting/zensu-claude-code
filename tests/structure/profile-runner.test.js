@@ -127,6 +127,14 @@ async function waitFor(predicate, timeoutMs = TEST_WAIT_MS) {
 }
 
 function processAlive(pid) {
+  // Number('') is 0, and process.kill(0, sig) signals the CALLER'S OWN process
+  // group — always alive — so an empty pid file would turn every wait here into
+  // a silent timeout against this very process. Both readers below take the pid
+  // only after the profile has completed, so that window is not reachable today;
+  // this refuses the shape outright rather than depending on it staying so.
+  if (!Number.isSafeInteger(pid) || pid <= 0) {
+    throw new Error(`refusing to probe a non-process pid: ${JSON.stringify(pid)}`);
+  }
   try {
     process.kill(pid, 0);
     return true;
