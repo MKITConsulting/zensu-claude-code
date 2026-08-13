@@ -1,12 +1,14 @@
 #!/bin/bash
 set -u
 
-# Guards the "Hooks (N)" sync convention: the README header count, every
-# `Hooks (N)`/`#hooks-N` reference, and the number of hook scripts actually
-# registered in hooks.json must agree. Catches the drift where a hook is added
-# (header bumped) but the prose count / intra-doc anchor is left stale.
+# Guards the "Hooks (N)" sync convention: the header count in the hook
+# reference (docs/configuration.md), every `Hooks (N)`/`#hooks-N` reference in
+# it or in README.md, and the number of hook scripts actually registered in
+# hooks.json must agree. Catches the drift where a hook is added (header
+# bumped) but the prose count / intra-doc anchor is left stale.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
+HOOKS_DOC="$PLUGIN_DIR/docs/configuration.md"
 README="$PLUGIN_DIR/README.md"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 
@@ -17,7 +19,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-HDR_N="$(grep -oE '^### Hooks \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
+HDR_N="$(grep -oE '^### Hooks \([0-9]+\)' "$HOOKS_DOC" | grep -oE '[0-9]+' | head -1)"
 [ -n "$HDR_N" ] && check "H1 '### Hooks (N)' header present" PASS || check "H1 '### Hooks (N)' header present" FAIL
 
 REG_N="$(node -e '
@@ -38,7 +40,7 @@ REG_N="$(node -e '
   || check "H2 header ($HDR_N) == registered hook scripts ($REG_N)" FAIL
 
 # Every 'Hooks (N)' and '#hooks-N' reference must use the header's N.
-BAD="$(grep -oE 'Hooks \([0-9]+\)|#hooks-[0-9]+' "$README" | grep -oE '[0-9]+' | sort -u | grep -vx "${HDR_N:-x}" | tr '\n' ' ')"
+BAD="$(grep -hoE 'Hooks \([0-9]+\)|#hooks-[0-9]+' "$HOOKS_DOC" "$README" | grep -oE '[0-9]+' | sort -u | grep -vx "${HDR_N:-x}" | tr '\n' ' ')"
 [ -z "$BAD" ] && check "H3 all 'Hooks (N)'/'#hooks-N' refs use N=$HDR_N" PASS \
   || check "H3 inconsistent hook-count refs (stray: $BAD vs header $HDR_N)" FAIL
 

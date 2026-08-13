@@ -30,7 +30,8 @@ ENGINE="$PLUGIN_DIR/hooks/lib/secret-patterns.js"
 DECIDE="$PLUGIN_DIR/hooks/lib/secret-scan-decide.js"
 PARSER="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
-README="$PLUGIN_DIR/README.md"
+CONFIG_DOC="$PLUGIN_DIR/docs/configuration.md"
+GATES_DOC="$PLUGIN_DIR/docs/gates.md"
 
 PASS=0; FAIL=0
 check() {
@@ -39,7 +40,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$HOOK" "$ENGINE" "$DECIDE" "$PARSER" "$HOOKS_JSON" "$README"; do
+for f in "$HOOK" "$ENGINE" "$DECIDE" "$PARSER" "$HOOKS_JSON" "$CONFIG_DOC" "$GATES_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -114,26 +115,26 @@ else
   check "P5b source-write gate pins BSWG_MODE= at its call site" FAIL
 fi
 
-# P6 — README: header exists, hook-table row, config row, Secret Scan section
-if grep -qE '^### Hooks \([0-9]+\)$' "$README"; then
-  check "P6a README has a '### Hooks (N)' header (count owned by sibling test)" PASS
+# P6 — docs: header exists, hook-table row, config row, Secret Scan section
+if grep -qE '^### Hooks \([0-9]+\)$' "$CONFIG_DOC"; then
+  check "P6a docs/configuration.md has a '### Hooks (N)' header (count owned by sibling test)" PASS
 else
-  check "P6a README has a '### Hooks (N)' header (count owned by sibling test)" FAIL
+  check "P6a docs/configuration.md has a '### Hooks (N)' header (count owned by sibling test)" FAIL
 fi
-if grep -qF '| `pre-write-secret-scan.sh` |' "$README"; then
-  check "P6b README hook table carries the secret-scan row" PASS
+if grep -qF '| `pre-write-secret-scan.sh` |' "$CONFIG_DOC"; then
+  check "P6b docs/configuration.md hook table carries the secret-scan row" PASS
 else
-  check "P6b README hook table carries the secret-scan row" FAIL
+  check "P6b docs/configuration.md hook table carries the secret-scan row" FAIL
 fi
-if grep -qF '| `secretScan` | `pre-write-secret-scan.sh` |' "$README"; then
-  check "P6c README config table carries the secretScan row" PASS
+if grep -qF '| `secretScan` | `pre-write-secret-scan.sh` |' "$CONFIG_DOC"; then
+  check "P6c docs/configuration.md config table carries the secretScan row" PASS
 else
-  check "P6c README config table carries the secretScan row" FAIL
+  check "P6c docs/configuration.md config table carries the secretScan row" FAIL
 fi
-if grep -qxF '## Secret Scan' "$README"; then
-  check "P6d README has the Secret Scan section" PASS
+if grep -qxF '## Secret Scan' "$GATES_DOC"; then
+  check "P6d docs/gates.md has the Secret Scan section" PASS
 else
-  check "P6d README has the Secret Scan section" FAIL
+  check "P6d docs/gates.md has the Secret Scan section" FAIL
 fi
 
 # U — engine CLI unit cases (stdin -> JSON), one per rule + suppressions

@@ -2,7 +2,8 @@
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
-README="$PLUGIN_DIR/README.md"
+# The config reference lives in docs/configuration.md; README.md is the front door.
+README="$PLUGIN_DIR/docs/configuration.md"
 
 PASS=0; FAIL=0
 check() {

@@ -16,7 +16,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 COVER_MD="$PLUGIN_DIR/skills/cover/SKILL.md"
 PRTR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
-README="$PLUGIN_DIR/README.md"
+REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 
 PASS=0; FAIL=0
 check() {
@@ -25,7 +25,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$TDD_MD" "$COVER_MD" "$PRTR_MD" "$README"; do
+for f in "$TDD_MD" "$COVER_MD" "$PRTR_MD" "$REVIEW_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -75,20 +75,20 @@ overlay_pins cover "$COVER_MD"
 overlay_pins pr-team-review "$PRTR_MD"
 
 # P2 — README section
-if grep -qF '#### Skill overlays (additive-only)' "$README" && grep -qF '.zensu/overlays/<name>.md' "$README"; then
-  check "P2a README documents the overlay path + section" PASS
+if grep -qF '#### Skill overlays (additive-only)' "$REVIEW_DOC" && grep -qF '.zensu/overlays/<name>.md' "$REVIEW_DOC"; then
+  check "P2a docs/review-chain.md documents the overlay path + section" PASS
 else
-  check "P2a README documents the overlay path + section" FAIL
+  check "P2a docs/review-chain.md documents the overlay path + section" FAIL
 fi
-if grep -qF 'NEVER disable, replace, weaken, or reorder' "$README" && grep -qiF 'not enforced by code' "$README"; then
-  check "P2b README states additive-only + trust boundary" PASS
+if grep -qF 'NEVER disable, replace, weaken, or reorder' "$REVIEW_DOC" && grep -qiF 'not enforced by code' "$REVIEW_DOC"; then
+  check "P2b docs/review-chain.md states additive-only + trust boundary" PASS
 else
-  check "P2b README states additive-only + trust boundary" FAIL
+  check "P2b docs/review-chain.md states additive-only + trust boundary" FAIL
 fi
-if grep -qF '.zensu/overlays/tdd.md' "$README" && grep -qF 'Team convention:' "$README"; then
-  check "P2c README carries an example overlay" PASS
+if grep -qF '.zensu/overlays/tdd.md' "$REVIEW_DOC" && grep -qF 'Team convention:' "$REVIEW_DOC"; then
+  check "P2c docs/review-chain.md carries an example overlay" PASS
 else
-  check "P2c README carries an example overlay" FAIL
+  check "P2c docs/review-chain.md carries an example overlay" FAIL
 fi
 
 # P3 — NEGATIVE guards: mandatory-phase sentences stay intact

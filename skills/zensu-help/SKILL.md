@@ -71,15 +71,18 @@ Before answering questions in the right column, `Read` the source file in the le
 | Question type | Source to Read |
 |---|---|
 | Plugin version, declared skills/agents | `.claude-plugin/plugin.json` |
-| CLI command surface / install; plugin tool wiring | `README.md` § CLI + `zensu --help` + `.claude-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
-| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `README.md` § Configuration → Hook Opt-Out table |
-| Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `README.md` § Configuration → Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
-| Config resolution order, `ZENSU_CONFIG` precedence | `README.md` § Config Resolution Order |
-| Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `README.md` § Claude Environment and Native Placeholders |
+| CLI command surface / install; plugin tool wiring | `README.md` § Install + `zensu --help` + `.claude-plugin/plugin.json` (the MCP server stays live for the Zensu web app but is no longer wired into the plugin) |
+| Hook flags (`autoTdd`, `tddImplementation`, `chainEnforcer`, `autoFix`, `autoFixIncludeSuggestions`, `autoFixMaxRounds`, `combinedSummary`, `pulseSession`, `sessionBanner`) | `docs/configuration.md` § Hook Opt-Out table |
+| Context-nudge settings (`context.compactionNudge`, `context.nudgeThreshold`, `context.windowSize`) — top-level `context` node, gate the `/compact` proposal | `docs/configuration.md` § Hook Opt-Out table + `hooks/user-prompt-context-nudge.sh` |
+| Config resolution order, `ZENSU_CONFIG` precedence | `docs/configuration.md` § Config Resolution Order |
+| Environment variables and native placeholders (`ZENSU_API_KEY`, `ZENSU_TDD_GATE`, `ZENSU_TEST_WITNESS`, `ZENSU_CHAIN`, `CLAUDE_AGENT_TYPE`, `CLAUDE_PLUGIN_ROOT`, `CLAUDE_PLUGIN_DATA`, `CLAUDE_CODE_SESSION_ID`, `CLAUDE_SESSION_ID`, `CLAUDE_PROJECT_DIR`, `CLAUDE_ENV_FILE`) | `docs/configuration.md` § Claude Environment and Native Placeholders |
+| The write gates (CLI write-gate, source-write gate, secret scan, TDD phase gate) | `docs/gates.md` |
+| Subagent safety, Session Control principals, unbindable sessions | `docs/session-control.md` |
+| The review agents, custom repo personas, skill overlays, templates | `docs/review-chain.md` |
 | TDD FSM details, phase transitions, gate logic, four-channel logging | `docs/tdd-manager-workflow.md` |
 | Documentation: doc types, how to write code-grounded feature/wiki docs | `docs/documentation-guide.md` |
-| Evidence discipline / anti-hallucination rule, the three carriers, why the injector has no opt-out flag, why the block names no file | `docs/evidence-discipline.md` + `README.md` § Evidence Discipline |
-| Hook scripts (what each does, when it fires) | `README.md` § Hooks table + `hooks/<script>.sh` source |
+| Evidence discipline / anti-hallucination rule, the three carriers, why the injector has no opt-out flag, why the block names no file | `docs/evidence-discipline.md` + `docs/architecture.md` § Evidence Discipline |
+| Hook scripts (what each does, when it fires) | `docs/configuration.md` § Hooks table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
 | Transactionally resetting `reviewRound`/`stopBlockCount` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
@@ -87,12 +90,12 @@ Before answering questions in the right column, `Read` the source file in the le
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |
 | Live feature/worktree/preview verification, local vs remote mode, browser evidence, Playwright MCP | `skills/verify-feature/SKILL.md` + `skills/verify-feature/rules/*.md` (`/zensu:verify-feature` — report-only live proof) |
 | Durable unit/integration/E2E test authoring for existing code | `skills/cover/SKILL.md` (`/zensu:cover` — committed regression net) |
-| Workflow step order (new product / existing codebase / quick feature) | `README.md` § Typical Workflows |
-| Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.md` § Decision Rules + `README.md` § Typical Workflows |
+| Workflow step order (new product / existing codebase / quick feature) | `docs/architecture.md` § Typical Workflows |
+| Greenfield vs brownfield vs hybrid; feature build-out stages (revisions) & fan-out | Core Glossary (above) + `agents/zensu-plm.md` § Decision Rules + `docs/architecture.md` § Typical Workflows |
 | "What changed in version X" | `CHANGELOG.md` (search for `[X.Y.Z]`) |
 | License / Permitted Purpose / Competing Use | `README.md` § License + `LICENSE` file |
-| Platform support, Windows caveats | `README.md` § Platform Support |
-| Troubleshooting (`zensu` CLI not found, OAuth login, gate blocking) | `README.md` § Troubleshooting |
+| Platform support, Windows caveats | `docs/operations.md` § Platform Support |
+| Troubleshooting (`zensu` CLI not found, OAuth login, gate blocking) | `docs/operations.md` § Troubleshooting |
 | Diagnosing the install (CLI auth, hooks wired, config validity + quoted-boolean trap, validated CAS workflow state, version sync) | `skills/doctor/SKILL.md` (`/zensu:doctor` — read-only status table) |
 
 ## Response Style

@@ -83,7 +83,8 @@ they are different diagnoses with different remedies:
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.
-The authoritative per-gate roster is the "Unbindable sessions" table in `README.md`, which
+The authoritative per-gate roster is the "Unbindable sessions" table in
+`docs/session-control.md`, which
 carries one column per state; keep exactly one roster and do not duplicate it here. Two
 properties are easy to get wrong and cost the whole feature:
 
@@ -138,7 +139,8 @@ re-decisions, doctor row) is per host. A port that takes only the core delta kee
 worktree-deletion wedge; a port that takes neither drifts from this core.
 
 Operator-facing accounts that must move with the predicates: the "Unbindable sessions"
-table in `README.md`, the Stop-binding section of `docs/tdd-manager-workflow.md`, and the
+table in `docs/session-control.md`, the Stop-binding section of
+`docs/tdd-manager-workflow.md`, and the
 binding rows in `skills/doctor/SKILL.md`.
 `tests/structure/test-orphaned-project-root.sh` pins the predicate truth table, the
 capability gate, every Bash-matcher hook, the Edit gate and the doctor rows;
@@ -176,9 +178,9 @@ The hook header in `hooks/pre-bash-source-write-gate.sh` must NAME `GIT_MUTATION
 and `GIT_READONLY_FORMS` and re-author neither — W165 fails if a gated verb is
 enumerated there. The parser header must NAME every accepted gap — W192 matches each
 gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
-security boundary" framing to survive. README §"Source-Write Gate", the README
-hook-reference row and the `bashWriteGate` config row point at the tables rather than
-listing them, for the same reason; they are not pinned.
+security boundary" framing to survive. `docs/gates.md` §"Source-Write Gate", the
+hook-reference row and the `bashWriteGate` config row in `docs/configuration.md` point at
+the tables rather than listing them, for the same reason; they are not pinned.
 
 The `worktree`/`remove|move` literals appear three times — the `GIT_READONLY_FORMS`
 entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in

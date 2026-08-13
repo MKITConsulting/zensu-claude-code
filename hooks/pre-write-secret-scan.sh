@@ -141,7 +141,7 @@ RULES="$VERDICT" node -e '
         "zensu-secret-allow marker to that line or use an obvious placeholder (EXAMPLE, " +
         "YOUR_...). Prefer the surgical, auditable escape (the allow marker, visible in " +
         "the diff) over disabling the gate. A blanket opt-out exists but is documented in " +
-        "the README (§ Secret Scan) rather than inlined here, so turning the whole gate " +
+        "docs/gates.md (§ Secret Scan) rather than inlined here, so turning the whole gate " +
         "off stays a deliberate, human choice."
     }
   }));

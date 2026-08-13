@@ -21,7 +21,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$PLUGIN_DIR/hooks/lib/persona-activation.js"
 TDD_MD="$PLUGIN_DIR/skills/tdd/SKILL.md"
 ASPECT_MD="$PLUGIN_DIR/agents/review-aspect.md"
-README="$PLUGIN_DIR/README.md"
+REVIEW_DOC="$PLUGIN_DIR/docs/review-chain.md"
 PR_MD="$PLUGIN_DIR/skills/pr-team-review/SKILL.md"
 PLAN_MD="$PLUGIN_DIR/skills/plan-review/SKILL.md"
 
@@ -32,7 +32,7 @@ check() {
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
 }
 
-for f in "$LIB" "$TDD_MD" "$ASPECT_MD" "$README" "$PR_MD" "$PLAN_MD"; do
+for f in "$LIB" "$TDD_MD" "$ASPECT_MD" "$REVIEW_DOC" "$PR_MD" "$PLAN_MD"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -69,32 +69,32 @@ if [ "$LINES" -le 433 ]; then
 else
   check "P3e tdd skill stays under the 433-line cap (actual: $LINES)" FAIL
 fi
-if grep -qF '.claude/agents/zensu-review-' "$README" && grep -qF 'activation:' "$README"; then
-  check "P3f README documents discovery path + activation field" PASS
+if grep -qF '.claude/agents/zensu-review-' "$REVIEW_DOC" && grep -qF 'activation:' "$REVIEW_DOC"; then
+  check "P3f docs/review-chain.md documents discovery path + activation field" PASS
 else
-  check "P3f README documents discovery path + activation field" FAIL
+  check "P3f docs/review-chain.md documents discovery path + activation field" FAIL
 fi
-if grep -qiF 'no `activation:` field always joins' "$README"; then
-  check "P3g README documents the always-join default" PASS
+if grep -qiF 'no `activation:` field always joins' "$REVIEW_DOC"; then
+  check "P3g docs/review-chain.md documents the always-join default" PASS
 else
-  check "P3g README documents the always-join default" FAIL
+  check "P3g docs/review-chain.md documents the always-join default" FAIL
 fi
-if grep -qiE 'cap(ped)? (of |at )?(five|5)' "$README" && grep -qiF 'glob-matched personas take slots before always-join' "$README"; then
-  check "P3h README documents the cap + matched-first policy" PASS
+if grep -qiE 'cap(ped)? (of |at )?(five|5)' "$REVIEW_DOC" && grep -qiF 'glob-matched personas take slots before always-join' "$REVIEW_DOC"; then
+  check "P3h docs/review-chain.md documents the cap + matched-first policy" PASS
 else
-  check "P3h README documents the cap + matched-first policy" FAIL
+  check "P3h docs/review-chain.md documents the cap + matched-first policy" FAIL
 fi
-if grep -qF '"**/domain/**"' "$README"; then
-  check "P3i README example globs are quoted and project-agnostic" PASS
+if grep -qF '"**/domain/**"' "$REVIEW_DOC"; then
+  check "P3i docs/review-chain.md example globs are quoted and project-agnostic" PASS
 else
-  check "P3i README example globs are quoted and project-agnostic" FAIL
+  check "P3i docs/review-chain.md example globs are quoted and project-agnostic" FAIL
 fi
 if grep -qiE 'custom personas?' "$ASPECT_MD" && grep -qF '## Aspect: <persona-name>' "$ASPECT_MD"; then
   check "P3j review-aspect.md references the persona output shape" PASS
 else
   check "P3j review-aspect.md references the persona output shape" FAIL
 fi
-if grep -qF 'PERSONA SKIPPED — <name> (not registered)' "$TDD_MD" && grep -qF '(not registered)' "$README"; then
+if grep -qF 'PERSONA SKIPPED — <name> (not registered)' "$TDD_MD" && grep -qF '(not registered)' "$REVIEW_DOC"; then
   check "P3k spawn-failure path is defined (not registered)" PASS
 else
   check "P3k spawn-failure path is defined (not registered)" FAIL
@@ -104,17 +104,17 @@ if grep -qF 'PERSONA DISCOVERY UNAVAILABLE' "$TDD_MD"; then
 else
   check "P3l helper-command failure is loudly distinguished" FAIL
 fi
-if grep -qiF 'Trust boundary' "$README" \
-  && grep -qF 'Custom personas stay neutral `host-profile-v1`' "$README" \
-  && grep -qF 'ordinary host tools remain governed by their own frontmatter' "$README"; then
-  check "P3m README states the persona trust boundary" PASS
+if grep -qiF 'Trust boundary' "$REVIEW_DOC" \
+  && grep -qF 'Custom personas stay neutral `host-profile-v1`' "$REVIEW_DOC" \
+  && grep -qF 'ordinary host tools remain governed by their own frontmatter' "$REVIEW_DOC"; then
+  check "P3m docs/review-chain.md states the persona trust boundary" PASS
 else
-  check "P3m README states the persona trust boundary" FAIL
+  check "P3m docs/review-chain.md states the persona trust boundary" FAIL
 fi
-if grep -qF '## Aspect: <persona-name>' "$README" && grep -qF 'name:` must equal the filename stem' "$README"; then
-  check "P3n README pins output grammar + name shape" PASS
+if grep -qF '## Aspect: <persona-name>' "$REVIEW_DOC" && grep -qF 'name:` must equal the filename stem' "$REVIEW_DOC"; then
+  check "P3n docs/review-chain.md pins output grammar + name shape" PASS
 else
-  check "P3n README pins output grammar + name shape" FAIL
+  check "P3n docs/review-chain.md pins output grammar + name shape" FAIL
 fi
 if grep -qF 'git rev-parse --show-toplevel' "$TDD_MD"; then
   check "P3o personas dir resolves from the git root" PASS
@@ -140,15 +140,15 @@ if grep -qF 'persona-activation.js' "$PLAN_MD" && grep -qF '.claude/agents' "$PL
 else
   check "P4b plan-review discovers custom personas via the helper" FAIL
 fi
-if grep -qiF 'output-format-agnostic' "$README" && grep -qF '/zensu:pr-team-review' "$README" && grep -qF '/zensu:plan-review' "$README"; then
-  check "P4c README documents the three-consumer per-flow output contract" PASS
+if grep -qiF 'output-format-agnostic' "$REVIEW_DOC" && grep -qF '/zensu:pr-team-review' "$REVIEW_DOC" && grep -qF '/zensu:plan-review' "$REVIEW_DOC"; then
+  check "P4c docs/review-chain.md documents the three-consumer per-flow output contract" PASS
 else
-  check "P4c README documents the three-consumer per-flow output contract" FAIL
+  check "P4c docs/review-chain.md documents the three-consumer per-flow output contract" FAIL
 fi
-if grep -qiF 'base checkout' "$README" && grep -qF 'never the PR-head' "$README"; then
-  check "P4d README documents the PR-review base-checkout trust guard" PASS
+if grep -qiF 'base checkout' "$REVIEW_DOC" && grep -qF 'never the PR-head' "$REVIEW_DOC"; then
+  check "P4d docs/review-chain.md documents the PR-review base-checkout trust guard" PASS
 else
-  check "P4d README documents the PR-review base-checkout trust guard" FAIL
+  check "P4d docs/review-chain.md documents the PR-review base-checkout trust guard" FAIL
 fi
 
 if ! command -v node >/dev/null 2>&1; then

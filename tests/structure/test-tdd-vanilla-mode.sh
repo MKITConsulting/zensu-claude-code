@@ -505,8 +505,8 @@ node -e 'const c=require(process.argv[1]);process.exit(c.hooks&&c.hooks.tddImple
   || check "H3 SKILL.md name-based audit refs" FAIL
 grep -qF -- "--mode" "$PLUGIN_DIR/skills/self-review/SKILL.md" \
   && check "H4 self-review detects vanilla via the --mode query verb" PASS || check "H4 self-review --mode" FAIL
-grep -qF "checked into" "$PLUGIN_DIR/README.md" && grep -A3 "| \`tddImplementation\` |" "$PLUGIN_DIR/README.md" | grep -qF ".zensu/config.json" \
-  && check "H5 README documents the repo-shipped project-overlay vector" PASS || check "H5 README overlay vector" FAIL
+grep -qF "checked into" "$PLUGIN_DIR/docs/configuration.md" && grep -A3 "| \`tddImplementation\` |" "$PLUGIN_DIR/docs/configuration.md" | grep -qF ".zensu/config.json" \
+  && check "H5 docs/configuration.md documents the repo-shipped project-overlay vector" PASS || check "H5 config-doc overlay vector" FAIL
 
 echo "----"
 echo "test-tdd-vanilla-mode: $PASS PASS / $FAIL FAIL"

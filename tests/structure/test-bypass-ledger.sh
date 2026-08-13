@@ -25,7 +25,7 @@ DECIDE_JS="$PLUGIN_DIR/hooks/lib/secret-scan-decide.js"
 DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 SELF_REVIEW_MD="$PLUGIN_DIR/skills/self-review/SKILL.md"
 AUTOPILOT_MD="$PLUGIN_DIR/skills/autopilot/SKILL.md"
-README="$PLUGIN_DIR/README.md"
+CONFIG_DOC="$PLUGIN_DIR/docs/configuration.md"
 
 PASS=0; FAIL=0
 check() {
@@ -38,7 +38,7 @@ session_key() {
   node "$SESSION_CORE" session-key "$1"
 }
 
-for f in "$PHASE_LIB" "$LOG_SH" "$PARSE_JS" "$DECIDE_JS" "$DELEGATE" "$SELF_REVIEW_MD" "$AUTOPILOT_MD" "$README"; do
+for f in "$PHASE_LIB" "$LOG_SH" "$PARSE_JS" "$DECIDE_JS" "$DELEGATE" "$SELF_REVIEW_MD" "$AUTOPILOT_MD" "$CONFIG_DOC"; do
   if [ ! -f "$f" ]; then
     check "P0 required file exists: $f" FAIL
     echo "----"
@@ -181,10 +181,10 @@ if grep -qF 'Gates bypassed during build:' "$AUTOPILOT_MD" && grep -qF -- '--byp
 else
   check "P4c autopilot PR body carries the durable build-level ledger line" FAIL
 fi
-if grep -qiF 'bypass ledger' "$README" && grep -qF -- '--bypass-list' "$README" && grep -qF 'decision point' "$README"; then
-  check "P4d README documents the ledger with the decision-point semantic" PASS
+if grep -qiF 'bypass ledger' "$CONFIG_DOC" && grep -qF -- '--bypass-list' "$CONFIG_DOC" && grep -qF 'decision point' "$CONFIG_DOC"; then
+  check "P4d docs/configuration.md documents the ledger with the decision-point semantic" PASS
 else
-  check "P4d README documents the ledger with the decision-point semantic" FAIL
+  check "P4d docs/configuration.md documents the ledger with the decision-point semantic" FAIL
 fi
 
 # P5 — functional (sandboxed state dir; ZENSU_CONFIG pinned to defaults;
