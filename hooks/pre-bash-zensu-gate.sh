@@ -143,6 +143,14 @@ zensu_hook_enabled mcpGate || exit 0
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_hook_session "$INPUT"; then
+  # The read-only diagnostic is reachable in EVERY bind failure, not only the two
+  # relaxable ones — including a record that exists and disagrees, which is what
+  # a mid-session plugin upgrade produces. Denying it there put /zensu:doctor
+  # behind the very defect it reports. It stays a single recognized command for
+  # the interactive thread; everything else in this branch denies as before.
+  if zensu_doctor_allowed "$INPUT"; then
+    exit 0
+  fi
   zensu_emit_hook_session_deny
   exit 0
 fi
