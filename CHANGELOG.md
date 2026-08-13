@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.3] - 2026-08-13
+
+### Added
+
+- **doctor**: Keep /zensu:doctor reachable when a plugin update wedges the session (#229)
+
 ## [0.17.2] - 2026-08-10
 
 ### Added

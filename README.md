@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.17.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.17.3-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
