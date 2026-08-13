@@ -448,8 +448,9 @@ fi
 # Driving only the Bash gate cannot catch that; this drives the real gate.
 capability_gate() {
   local principal="$1" data="$2" session="${3:-orphan-gone}"
+  local command="${4:-bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh}"
   run_gate "$PLUGIN_DIR/hooks/pre-reviewer-capability-gate.sh" \
-    "$(bash_payload "bash $PLUGIN_DIR/hooks/lib/zensu-doctor.sh" "$session" "$principal")" "$data"
+    "$(bash_payload "$command" "$session" "$principal")" "$data"
 }
 # Guard against the vacuous version of the three assertions below: prove the
 # harness can produce an ALLOW at all, on a genuinely healthy bound session.
@@ -470,11 +471,28 @@ else
   check "O26 reviewer child allowed in the orphaned state" FAIL
 fi
 # And it stays bound to the state: a record disagreeing for another reason denies
-# every principal, main thread included.
-if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "deny" ]; then
+# every principal, main thread included. The probe is deliberately an ORDINARY
+# command — the read-only diagnostic is allowed there by a separate rule (O27a),
+# so probing with it would grade that rule instead of this one and this check
+# would silently stop testing the leak it is named for.
+if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there" "ls -la")" = "deny" ]; then
   check "O27 a record that disagrees otherwise is denied by the capability gate too" PASS
 else
   check "O27 capability relaxation leaked to a disagreeing record" FAIL
+fi
+# The one exception, and it is NOT the relaxation above reaching further: the
+# read-only diagnostic is admitted in EVERY bind failure by zensu-doctor-invocation.js,
+# because denying it there put /zensu:doctor behind the very defect it reports.
+if [ "$(capability_gate "" "$STILL_DATA" "orphan-still-there")" = "allow" ]; then
+  check "O27a the diagnostic itself stays reachable on a disagreeing record" PASS
+else
+  check "O27a the diagnostic is denied on a disagreeing record" FAIL
+fi
+# ... and the allowance is main-thread only, exactly like the relaxations above.
+if [ "$(capability_gate "zensu:code-reviewer" "$STILL_DATA" "orphan-still-there")" = "deny" ]; then
+  check "O27b a reviewer child never receives the diagnostic allowance" PASS
+else
+  check "O27b reviewer child allowed to run the diagnostic" FAIL
 fi
 # The two Bash gates each re-check the principal INSIDE their relaxed branch,
 # deliberately not relying on the capability gate as the only layer keeping a

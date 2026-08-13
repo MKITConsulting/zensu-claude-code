@@ -16,6 +16,25 @@ set -u
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Root preflight, moved here from skills/doctor/SKILL.md Phase 1. It used to be a
+# compound if/elif block in the skill, which meant the diagnostic reached Bash as
+# a multi-command script — and nothing that shape-heavy can be admitted by the
+# allowlist in zensu-doctor-invocation.js that keeps /zensu:doctor reachable when
+# the session binding has failed. Living here, the skill emits ONE command.
+#
+# The skill keeps a prose fallback for the case this script cannot be started at
+# all; a guard inside a file that never ran cannot print anything. Exits 0 like
+# every other path here: a red row is a finding, not a failure.
+ZDOC_ROOT="${DIR%/hooks/lib}"
+if [ -z "$DIR" ] || [ "$ZDOC_ROOT" = "$DIR" ] || [ -L "$ZDOC_ROOT" ] || [ ! -d "$ZDOC_ROOT" ] \
+  || [ -L "$DIR/zensu-doctor.sh" ] || [ ! -f "$DIR/zensu-doctor.sh" ]; then
+  printf '%s\n' \
+    'Zensu doctor — read-only setup diagnostics' '' 'Plugin integrity' \
+    '  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' \
+    '' 'Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.'
+  exit 0
+fi
+
 # Resolve the pending-review TTL through the CANONICAL getter the Stop enforcer
 # uses, so the doctor never reports a TTL the real hooks would disagree with.
 if [ -z "${ZDOC_TTL_HOURS:-}" ] && [ -f "$DIR/zensu-config.sh" ]; then

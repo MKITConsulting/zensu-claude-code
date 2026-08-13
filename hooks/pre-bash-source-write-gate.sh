@@ -129,6 +129,14 @@ zensu_bind_hook_session "$INPUT" || ZENSU_SESSION_BOUND=false
 # channel. The Session Control rebind check above is unaffected: it runs before
 # the bind and remains the real trust boundary.
 if [ "$ZENSU_SESSION_BOUND" != true ]; then
+  # The read-only diagnostic comes FIRST, because it is reachable in every bind
+  # failure and not only in the two relaxable states below — a record that exists
+  # and disagrees (what a mid-session plugin upgrade produces) previously denied
+  # here, which put /zensu:doctor behind the very defect it reports. The command
+  # writes nothing, so none of the rules below have anything to judge.
+  if zensu_doctor_allowed "$INPUT"; then
+    exit 0
+  fi
   if ! zensu_session_unregistered "$INPUT" \
     && ! zensu_session_orphaned_project_root "$INPUT" >/dev/null; then
     zensu_emit_hook_session_deny narrowed

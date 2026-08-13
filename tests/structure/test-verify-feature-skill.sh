@@ -612,7 +612,7 @@ else
 fi
 if grep -qF 'playwright_mcp_declared' "$DOCTOR_SH" && grep -qF 'ZDOC_PLAYWRIGHT=configured' "$DOCTOR_SH" \
   && grep -qF 'valid integrity-locked plugin config + npm present' "$DOCTOR_REPORT" \
-  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" \
+  && grep -qF 'ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" \
   && grep -qF 'Session Control: plugin root unavailable or invalid' "$DOCTOR_SKILL"; then
   check "P7c doctor validates config without claiming unproven MCP readiness" PASS
 else

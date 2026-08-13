@@ -68,27 +68,42 @@ requires the core operation suffixes used by `/zensu:verify-feature`: `browser_n
 `browser_network_requests`, and `browser_close`. Accept each
 suffix under either `mcp__playwright__*` or `mcp__plugin_zensu_playwright__*`.
 
-Run the following as one Bash call. Replace `READY=0` with `READY=1` only when
-that complete tool set is loaded. The explicit preflight intentionally does not
-use `${VAR:?…}`: a missing or invalid root must still print the same standardized
-doctor table fragment instead of terminating in an unformatted shell error.
-Never paste the root value into shell source.
+Run **exactly one** of the two commands below as a single Bash call — the first
+when that complete tool set is loaded, the second otherwise. Nothing may be added
+to it: no `&&`, no `;`, no pipe, no redirection, no second command, no extra
+variable.
+
+That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
+this diagnostic reachable when the session binding has failed — the state a
+mid-session plugin upgrade produces, where every other Bash call denies — and it
+admits only this shape: assignments drawn from a closed allowlist followed by one
+`bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
+doctor goes back to being denied by the very defect it reports.
+
+Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
+assignment when the tool set is not loaded. The root preflight now lives inside
+`zensu-doctor.sh`, so an invalid root still prints the standardized doctor table
+fragment rather than an unformatted shell error.
 
 ```bash
-READY=0
-ROOT="${CLAUDE_PLUGIN_ROOT}"
-case "$ROOT" in /*) ;; *) ROOT="" ;; esac
-if [ -z "$ROOT" ] || [ -L "$ROOT" ] || [ ! -d "$ROOT" ] \
-  || [ -L "$ROOT/hooks/lib/zensu-doctor.sh" ] || [ ! -f "$ROOT/hooks/lib/zensu-doctor.sh" ]; then
-  printf '%s\n' \
-    'Zensu doctor — read-only setup diagnostics' '' 'Plugin integrity' \
-    '  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session' \
-    '' 'Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.'
-elif [ "$READY" = 1 ]; then
-  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "$ROOT/hooks/lib/zensu-doctor.sh"
-else
-  CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "$ROOT/hooks/lib/zensu-doctor.sh"
-fi
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
+```
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
+```
+
+If the Bash call itself fails to run — the plugin root is gone, so there is no
+script to start and no guard inside it can speak — print this fragment verbatim
+instead, and do not retry with a modified command:
+
+```
+Zensu doctor — read-only setup diagnostics
+
+Plugin integrity
+  ❌  Session Control: plugin root unavailable or invalid — start a fresh Claude Code session
+
+Summary: 1 ❌  0 ⚠️  — resolve the ❌ items first.
 ```
 
 The plain helper validates the integrity-locked plugin declaration and `npm` presence offline but
