@@ -46,6 +46,15 @@ module.exports = (output, context = {}) => {
   if (root && canonicalPath(attestation.resolved_plugin_root) !== canonicalPath(root)) {
     checks.push('resolved plugin root does not match the wrapper target');
   }
+  // No compatible upgrade is in play in a wrapper run, so the runtime that ran
+  // is the runtime the session was bound to. Checking the executing field too
+  // keeps a tampered value from passing on shape alone.
+  if (root && canonicalPath(attestation.executing_plugin_root) !== canonicalPath(root)) {
+    checks.push('executing plugin root does not match the wrapper target');
+  }
+  if (attestation.executing_runtime_digest !== attestation.runtime_digest) {
+    checks.push('executing runtime digest disagrees with the bound runtime digest');
+  }
 
   const revision = expected(vars, 'expected_source_revision', 'ZENSU_EXPECTED_SOURCE_REVISION');
   const installedLive = attestation.hook_sequence.includes('ClaudePluginRegistry:installed-cache');
