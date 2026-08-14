@@ -406,13 +406,16 @@ bash_payload() {
   '
 }
 
-# Prints the gate's permission decision, or "allow" when it emitted none.
+# Prints the gate's permission decision, or "allow" when it emitted none. The
+# third argument names the EXECUTING root and defaults to the 0.16.1 install, so
+# every existing call keeps reproducing the incompatible-runtime state.
 gate_decision() {
-  local hook="$1" payload="$2" out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
+  local hook="$1" payload="$2" from="${3:-$SYNTHETIC_EXISTING_ROOT}"
+  local out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
   if printf '%s' "$payload" \
-      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_EXISTING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      | CLAUDE_PLUGIN_ROOT="$from" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
-        bash "$SYNTHETIC_EXISTING_ROOT/hooks/$hook" >"$out" 2>"$err"; then
+        bash "$from/hooks/$hook" >"$out" 2>"$err"; then
     :
   else
     printf 'hook-exit-nonzero\n'
@@ -501,6 +504,60 @@ for DOCTOR_AGENT in zensu:review-aspect zensu:pr-review-worker; do
     check "$DOCTOR_AGENT never receives the diagnostic allowance" FAIL
   fi
 done
+
+# Runtime lineage: which installation may serve a record it did not mint.
+#
+# $SESSION is still bound to the 0.17.0 candidate root. A patch sibling shares
+# that record's lineage and takes over the whole capability set, which is the
+# point — the session survives an update that lands underneath it instead of
+# denying every tool for the rest of its life. A minor bump does not, because
+# while major is 0 the minor number carries the breaking change, and the 0.16.1
+# check far above is the same rule in the backwards direction.
+#
+# The non-sibling case is the one that cannot be inferred from the version
+# numbers: it is what keeps a working checkout declaring a compatible version
+# from adopting an installed session's record.
+SYNTHETIC_PATCH_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.1 "$ROOT_REVISION"
+)"
+SYNTHETIC_MINOR_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.18.0 "$ROOT_REVISION"
+)"
+DETACHED_CACHE_PARENT="$TMP/checkout/zensu/zensu"
+DETACHED_PATCH_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$DETACHED_CACHE_PARENT" 0.17.1 "$ROOT_REVISION"
+)"
+
+LINEAGE_PAYLOAD="$(bash_payload "$SESSION" 'ls -la')"
+for LINEAGE_CASE in \
+  "compatible patch sibling|$SYNTHETIC_PATCH_ROOT|allow" \
+  "incompatible minor sibling|$SYNTHETIC_MINOR_ROOT|deny" \
+  "compatible version outside the install parent|$DETACHED_PATCH_ROOT|deny"; do
+  LINEAGE_LABEL="${LINEAGE_CASE%%|*}"
+  LINEAGE_REST="${LINEAGE_CASE#*|}"
+  LINEAGE_ROOT="${LINEAGE_REST%%|*}"
+  LINEAGE_EXPECTED="${LINEAGE_REST##*|}"
+  LINEAGE_SEEN="$(gate_decision pre-reviewer-capability-gate.sh "$LINEAGE_PAYLOAD" "$LINEAGE_ROOT")"
+  if [ "$LINEAGE_SEEN" = "$LINEAGE_EXPECTED" ]; then
+    check "an ordinary command from a $LINEAGE_LABEL is $LINEAGE_EXPECTED" PASS
+  else
+    check "an ordinary command from a $LINEAGE_LABEL is $LINEAGE_EXPECTED (got $LINEAGE_SEEN)" FAIL
+  fi
+done
+
+# Serving a record is not re-binding it. The record stays write-once and keeps
+# naming the runtime the session was bound to, which is what every attestation,
+# every cross-session comparison and the digest check all still read.
+if RECORD_INPUT="$RECORD" ROOT_INPUT="$SYNTHETIC_CANDIDATE_ROOT" node -e '
+      const fs = require("node:fs");
+      const record = JSON.parse(fs.readFileSync(process.env.RECORD_INPUT, "utf8"));
+      const root = fs.realpathSync.native(process.env.ROOT_INPUT);
+      if (record.plugin_root !== root || record.plugin_version !== "0.17.0") process.exit(1);
+    '; then
+  check "a compatible runtime serves the record without rewriting it" PASS
+else
+  check "a compatible runtime serves the record without rewriting it" FAIL
+fi
 
 printf '%s\n' '----' "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

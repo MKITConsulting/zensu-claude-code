@@ -146,7 +146,7 @@ function resolveOrphanedProjectRoot(payload, environment = process.env) {
     // cannot see the running installation. Without them a record minted against
     // a DIFFERENT plugin installation whose root also happens to be gone would
     // have two disagreements relaxed instead of one.
-    if (context.plugin_root !== executedPluginRoot) return null;
+    if (!core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) return null;
     if (context.plugin_data !== pluginData) return null;
     return context.project_root;
   } catch {
@@ -206,7 +206,9 @@ function resolveHookSession(payload, environment = process.env) {
   const recordsDir = privateRecordsDirectory(pluginData);
   const sessionKey = core.sessionKey(payload.session_id);
   const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });
-  if (context.plugin_root !== executedPluginRoot) fail('context plugin root does not match the executing plugin');
+  if (!core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) {
+    fail('context plugin root is not a compatible lineage of the executing plugin');
+  }
   if (context.plugin_data !== pluginData) fail('context plugin data does not match CLAUDE_PLUGIN_DATA');
 
   return {
