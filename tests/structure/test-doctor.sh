@@ -384,6 +384,115 @@ case "$OUT" in *'pending-review.json is'*'old (TTL'*'expired'*) check "P1n expir
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'pending-review.json present and within'*) check "P1o fresh pending-review ✅" PASS ;; *) check "P1o fresh pending-review ✅ (got: $OUT)" FAIL ;; esac
 
+# --- host-refused reviewer spawn note --------------------------------------
+# Only the Stop chain-enforcer can see the refusal (it reads the transcript this
+# diagnostic never gets), so the note it leaves is the sole way doctor can name
+# the cause. An unreadable note must still be counted, never silently dropped.
+# The renderer takes the accepted kinds from the module that writes them, so the
+# sandbox plugin root needs it; a root without it is exercised at P1qf.
+mkdir -p "$SBOX/plug/hooks/lib"
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js" "$SBOX/plug/hooks/lib/reviewer-spawn-denial-v1.js"
+DENY_KEY_A="scv1_$(printf '%064d' 0)"
+DENY_KEY_B="scv1_$(printf '%063d' 0)a"
+NOTE_A="$STATE_DIR_CANON/reviewer-spawn-denied-${DENY_KEY_A}.json"
+NOTE_B="$STATE_DIR_CANON/reviewer-spawn-denied-${DENY_KEY_B}.json"
+NOW_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
+note_json() { printf '{"schemaVersion":%s,"kind":"%s","subagentType":"zensu:code-reviewer","detectedAtMs":%s}\n' "$1" "$2" "${3:-$NOW_MS}"; }
+note_json 1 auto-mode-classifier > "$NOTE_A"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'1 session(s) where the host permission layer refused the zensu:code-reviewer spawn (auto-mode-classifier×1)'*)
+    case "$OUT" in
+      *'"Agent(zensu:code-reviewer)"'*) check "P1q refused reviewer spawn is reported with its remedy rule" PASS ;;
+      *) check "P1q refused reviewer spawn names the remedy rule (got: $OUT)" FAIL ;;
+    esac ;;
+  *) check "P1q refused reviewer spawn ⚠️ (got: $OUT)" FAIL ;;
+esac
+# A file this plugin did not write must never be counted as a refusal: an empty
+# planted note would otherwise manufacture a row telling the user to widen
+# permissions. It is reported separately instead.
+printf 'not json\n' > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn note(s) this plugin did not write'*)
+    check "P1qa an unreadable note is reported separately, never as a refusal" PASS ;;
+  *) check "P1qa unreadable note is not a refusal (got: $OUT)" FAIL ;;
+esac
+note_json 1 permission-denied > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'auto-mode-classifier×1, permission-denied×1'*) check "P1qc the second host kind renders as its own kind" PASS ;; *) check "P1qc second host kind (got: $OUT)" FAIL ;; esac
+# The note sits in a directory the session itself can write, so its `kind` is
+# untrusted: a value outside the writer's own closed set is rejected, and the
+# tally is prototype-free so such a key can never become the count.
+note_json 1 constructor > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'native code'*|*'constructor×'*) check "P1qd a kind outside the closed set is rejected, not rendered (got: $OUT)" FAIL ;;
+  *'auto-mode-classifier×1)'*'1 reviewer-spawn note(s) this plugin did not write'*) check "P1qd a kind outside the closed set is rejected, not rendered" PASS ;;
+  *) check "P1qd a kind outside the closed set is rejected, not rendered (got: $OUT)" FAIL ;;
+esac
+# The writer emits an EMPTY kind for a refusal whose form it could not classify.
+# Rejecting it would tell the user to delete the note describing a refusal the
+# block reason had just named correctly.
+note_json 1 '' > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'2 session(s) where the host permission layer refused'*'auto-mode-classifier×1, unclassified×1'*) check "P1ql an unclassified kind keeps its row, labelled rather than rejected" PASS ;;
+  *) check "P1ql unclassified kind keeps its row (got: $OUT)" FAIL ;;
+esac
+note_json 2 auto-mode-classifier > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'1 reviewer-spawn note(s) this plugin did not write'*) check "P1qe a note from an unknown schema version is not read as v1" PASS ;; *) check "P1qe unknown schema version (got: $OUT)" FAIL ;; esac
+# The enforcer retires its own note, but a session that never Stops again cannot
+# — so an old note must age out instead of warning forever.
+note_json 1 auto-mode-classifier 1 > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'1 reviewer-spawn refusal note(s) older than'*'safe to delete'*) check "P1qg a note older than the TTL ages out instead of warning forever" PASS ;; *) check "P1qg stale note ages out (got: $OUT)" FAIL ;; esac
+# A TTL of 0 DISABLES the age-out (docs/configuration.md). Reading it as
+# "everything is instantly stale" would suppress the one actionable row.
+OUT="$(ZDOC_TTL_HOURS=0 run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'older than 0h'*) check "P1qh a TTL of 0 disables the age-out rather than staling every note (got: $OUT)" FAIL ;;
+  *'2 session(s) where the host permission layer refused'*) check "P1qh a TTL of 0 disables the age-out rather than staling every note" PASS ;;
+  *) check "P1qh a TTL of 0 disables the age-out (got: $OUT)" FAIL ;;
+esac
+# `isFinite` would coerce a quoted timestamp into a fresh one and count a note
+# the writer never wrote as a live refusal; `Number.isFinite` rejects it.
+printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":"%s"}\n' "$NOW_MS" > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn note(s) this plugin did not write'*)
+    check "P1qi a string timestamp is rejected, not coerced into a live refusal" PASS ;;
+  *) check "P1qi string timestamp rejected (got: $OUT)" FAIL ;;
+esac
+# The row advertises an oversize and a hard-link refusal; both were unexercised.
+head -c 5000 /dev/zero | tr '\0' 'x' > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'1 reviewer-spawn note(s) this plugin did not write'*) check "P1qj an oversized note is rejected, not read" PASS ;; *) check "P1qj oversized note rejected (got: $OUT)" FAIL ;; esac
+rm -f "$NOTE_B"
+# Linking A to B raises nlink on BOTH, so both are refused — a note the writer
+# minted is single-linked by construction.
+if ln "$NOTE_A" "$NOTE_B" 2>/dev/null; then
+  OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+  case "$OUT" in
+    *'host permission layer refused'*) check "P1qk a hard-linked note is rejected, not counted (got: $OUT)" FAIL ;;
+    *'2 reviewer-spawn note(s) this plugin did not write'*) check "P1qk a hard-linked note is rejected, not counted" PASS ;;
+    *) check "P1qk hard-linked note rejected (got: $OUT)" FAIL ;;
+  esac
+  rm -f "$NOTE_B"
+else
+  check "P1qk hard links unavailable on this filesystem — skipped" PASS
+fi
+# A plugin root without the module must still report the refusal — losing the
+# kind is acceptable, losing the row is not.
+rm -f "$NOTE_B" "$SBOX/plug/hooks/lib/reviewer-spawn-denial-v1.js"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'1 session(s) where the host permission layer refused'*'unknown×1'*) check "P1qf a plugin root without the module still reports the refusal" PASS ;; *) check "P1qf missing module still reports the refusal (got: $OUT)" FAIL ;; esac
+cp "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js" "$SBOX/plug/hooks/lib/reviewer-spawn-denial-v1.js"
+rm -f "$NOTE_A" "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in *'host permission layer refused'*) check "P1qb no note means no row" FAIL ;; *) check "P1qb no note means no row" PASS ;; esac
+
 # --- empty state dir -------------------------------------------------------
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'does not exist yet'*) check "P1p missing state dir handled read-only" PASS ;; *) check "P1p missing state dir handled (got: $OUT)" FAIL ;; esac

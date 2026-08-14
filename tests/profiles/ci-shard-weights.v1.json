@@ -94,7 +94,7 @@
     "structure/test-smoke-main-thread-chain.sh": 63,
     "structure/test-state-verb-diagnostics.sh": 20,
     "structure/test-stop-enforcer-escapes.sh": 43,
-    "structure/test-stop-enforcer-self-review-routing.sh": 73,
+    "structure/test-stop-enforcer-self-review-routing.sh": 242,
     "structure/test-stop-enforcer-subagent-noop.sh": 8,
     "structure/test-stop-session-binding-recovery.sh": 19,
     "structure/test-tdd-begin-chain-reset.sh": 44,

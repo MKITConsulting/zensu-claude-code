@@ -36,6 +36,7 @@ var BAD = '❌';
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 var CHAIN_ROW_LIMIT = 8;
+var NOTE_MAX_BYTES = 4096;
 
 var env = process.env;
 var out = [];
@@ -266,6 +267,109 @@ function chainRows(entries) {
   }
 }
 
+// The note sits in a directory the session itself can write, so it is read the
+// way every other record there is: shape decided before the open, no symlink
+// followed, no unbounded read. A file this cannot read is never counted as a
+// refusal — that would let a planted empty file manufacture a row recommending
+// the user widen permissions.
+function readNoteJson(file) {
+  var fd;
+  try {
+    var pre = fs.lstatSync(file);
+    if (!pre.isFile() || pre.nlink !== 1 || pre.size > NOTE_MAX_BYTES) return null;
+    var noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+      ? fs.constants.O_NOFOLLOW : 0;
+    var nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
+    var st = fs.fstatSync(fd);
+    if (!st.isFile() || st.size > NOTE_MAX_BYTES) return null;
+    var buf = Buffer.allocUnsafe(st.size);
+    var read = fs.readSync(fd, buf, 0, st.size, 0);
+    return JSON.parse(buf.toString('utf8', 0, read));
+  } catch (e) {
+    return null;
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) { /* already closed */ } }
+  }
+}
+
+// The Stop chain-enforcer is the only place that can observe a reviewer spawn
+// the host refused — it reads the transcript its payload points at, which this
+// diagnostic never sees. The note it leaves behind is therefore the only way to
+// report the cause outside the turn it happened in. The enforcer retires the
+// note itself on every terminal path, but a session that never Stops again
+// cannot, so a note also ages out against the same TTL as pending-review.
+function reviewerDenialRows(entries, dir, nowMs) {
+  var notes = entries.filter(function (f) {
+    return /^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$/.test(f);
+  }).sort();
+  if (!notes.length) return;
+  // The `kind` is untrusted too: only values the writer itself issues are
+  // accepted, and the tally is prototype-free so a key like `constructor`
+  // cannot become the count it is rendered with.
+  var allowed = [];
+  try {
+    var denial = require(path.join(pluginDir(), 'hooks', 'lib', 'reviewer-spawn-denial-v1.js'));
+    if (Array.isArray(denial.DENIAL_MARKERS)) {
+      allowed = denial.DENIAL_MARKERS.map(function (m) {
+        return m && typeof m.kind === 'string' ? m.kind : '';
+      }).filter(Boolean);
+    }
+  } catch (e) { /* every kind then reads as unrecognized */ }
+  var kinds = Object.create(null);
+  var ttl = ttlHours();
+  var valid = 0;
+  var stale = 0;
+  var rejected = 0;
+  // A plugin root without the classifier module cannot vet the kind, and losing
+  // the kind must never cost the row: the refusal is the finding, the label is
+  // decoration. The empty kind is the same case seen from the writer's side —
+  // the enforcer emits it for a refusal whose form it could not classify, and
+  // rejecting it would tell the user to delete the note describing a refusal the
+  // block reason had just named correctly.
+  var vettable = allowed.length > 0;
+  notes.forEach(function (f) {
+    var parsed = readNoteJson(path.join(dir, f));
+    if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.kind !== 'string'
+      || !Number.isFinite(parsed.detectedAtMs)
+      || (vettable && parsed.kind !== '' && allowed.indexOf(parsed.kind) === -1)) {
+      rejected += 1;
+      return;
+    }
+    // `0` DISABLES the TTL (docs/configuration.md), and the canonical
+    // `_tdd_pending_file_stale` reads it the same way. Dropping this conjunct
+    // would age every live note out instantly at that setting and suppress the
+    // one actionable row this whole feature exists to render.
+    if (ttl > 0 && (nowMs - parsed.detectedAtMs) / 3600000 > ttl) {
+      stale += 1;
+      return;
+    }
+    var kind = vettable ? (parsed.kind || 'unclassified') : 'unknown';
+    kinds[kind] = (kinds[kind] || 0) + 1;
+    valid += 1;
+  });
+  if (valid) {
+    var summary = Object.keys(kinds).sort().map(function (k) {
+      return k + '×' + kinds[k];
+    }).join(', ');
+    line(WARN, 'state: ' + valid + ' session(s) where the host permission layer refused the '
+      + 'zensu:code-reviewer spawn (' + summary + ') — no review ran and the chain cannot close on its own. '
+      + 'Allow it with the permissions.allow rule "Agent(zensu:code-reviewer)" in ~/.claude/settings.json '
+      + '(all projects) or the project\'s .claude/settings.local.json (this one), or leave '
+      + 'the permission mode that refused it, then re-run the review from the owning session. This note is '
+      + 'retired automatically once a spawn succeeds or the chain closes.');
+  }
+  if (stale) {
+    line(WARN, 'state: ' + stale + ' reviewer-spawn refusal note(s) older than ' + ttl + 'h — the session that '
+      + 'wrote them never ended a turn again, so nothing retired them; they say nothing about the current state '
+      + 'and are safe to delete.');
+  }
+  if (rejected) {
+    line(WARN, 'state: ' + rejected + ' reviewer-spawn note(s) this plugin did not write (unreadable, oversized, '
+      + 'or an unrecognized kind or schema) — NOT counted as refusals; delete them.');
+  }
+}
+
 function truncatedList(rows) {
   var listed = rows.slice(0, CHAIN_ROW_LIMIT);
   var overflow = rows.length - listed.length;
@@ -346,6 +450,7 @@ function stateBlock(nowMs) {
     }
     chainRows(states);
   }
+  reviewerDenialRows(entries, dir, nowMs);
   var pr = path.join(dir, 'pending-review.json');
   try {
     var st = fs.statSync(pr);
