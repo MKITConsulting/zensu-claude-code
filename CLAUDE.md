@@ -43,6 +43,54 @@ The version/ref invariant above is machine-enforced: the gate runs `tests/run-al
 
 If marketplace version or source `ref` ever lags `plugin.json` (for example, a hand bump forgot one field), fix both in the release PR before any tag is created or any user-side `claude plugin install <name>@<name>` attempt.
 
+## Runtime Lineage (`version_type` is load-bearing)
+
+A plugin update that lands while a session is running leaves the Session Control
+record naming the installation that minted it. The running installation may
+still **serve** that record when the two share a lineage —
+`servesRecordedRuntime` / `runtimeLineageCompatible` in
+`hooks/lib/session-control-core-v1.js`, applied at `resolveHookSession`, at the
+`resolveOrphanedProjectRoot` mirror and in `currentClaudeSessionContext`. The
+axis:
+
+- **same major**, and **while major is `0`, the same minor as well** — `0.17.1 ↔
+  0.17.2` compatible, `0.17.x ↔ 0.18.0` not. Without the second clause "same
+  major" would make `0.9.2` compatible with `0.17.2`.
+- **never backwards**: the executing version must be at least the recorded one.
+- the executing root must be a **sibling** of the recorded one, which is what
+  keeps a `--plugin-dir` checkout from adopting an installed session's record.
+
+**While the plugin is at major `0`, MINOR is therefore the breaking axis.** A
+breaking change costs a `minor` release and a non-breaking feature is a `patch`.
+Anything below forces the breaking bump, because a running session would
+otherwise be served by a runtime that cannot read what it wrote:
+
+- the context record or workflow-state **schema** (`SCHEMA_VERSION`, any field
+  added, removed or retyped);
+- **any strict key set** — `reviewRearm`'s `exactKeys`,
+  `deferredReviewCancellation`, and every other validator that rejects an
+  unknown or missing key rather than ignoring it;
+- **removing or renaming a registered hook, or changing a hook's matcher**;
+- the **attestation shape**, which is itself a schema two versions must agree
+  on. A change to it has to ship in the release that *introduces* the policy it
+  serves, never one release later.
+
+Consequence: the `Release` workflow's `version_type` input carries meaning, not
+just a number. Choosing `patch` for a change in that list ships a compatibility
+claim the code cannot honour. The predicate encodes what the numbers *mean*; it
+cannot verify that this policy was followed.
+
+**The release that introduces this policy is itself a `minor`**, because it adds
+`executing_plugin_root` and `executing_runtime_digest` to the attestation. It is
+the last release before the policy binds, so nothing is served across it.
+
+`docs/session-control.md` "Unbindable sessions" carries the operator-facing
+account, including the pin this weakens and the two attestation fields that
+state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
+pins the axis and the sibling rule;
+`tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
+across synthetic installs, including that serving a record never rewrites it.
+
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
 The plugin drives Zensu through the typed `zensu` CLI (the MCP server still exists for the Zensu web app, but is no longer wired into the plugin). The write-gate now intercepts `zensu <noun> <verb>` Bash invocations rather than MCP tool calls.

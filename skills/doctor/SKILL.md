@@ -74,8 +74,9 @@ to it: no `&&`, no `;`, no pipe, no redirection, no second command, no extra
 variable.
 
 That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
-this diagnostic reachable when the session binding has failed — the state a
-mid-session plugin upgrade produces, where every other Bash call denies — and it
+this diagnostic reachable when the session binding has failed — the state an
+*incompatible* mid-session plugin change produces (a compatible upgrade now binds
+normally), where every other Bash call denies — and it
 admits only this shape: assignments drawn from a closed allowlist followed by one
 `bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
 doctor goes back to being denied by the very defect it reports.
