@@ -14,7 +14,7 @@ Every persona returns exactly one raw JSON object as its entire final assistant 
   "summary": "<2-4 sentence overview>",
   "inline_findings": [
     {
-      "path": "<repo-relative path>",
+      "path": "<repo-relative path — MUST be a file listed in `_name-status.txt`>",
       "line": <integer>,
       "side": "RIGHT" | "LEFT",
       "severity": "P1" | "P2" | "P3",
@@ -22,7 +22,7 @@ Every persona returns exactly one raw JSON object as its entire final assistant 
       "body": "<markdown comment incl. reasoning + concrete fix>"
     }
   ],
-  "overall_notes": ["<cross-cutting points without a single line anchor>"],
+  "overall_notes": ["<cross-cutting points, plus every finding anchored outside `_name-status.txt`>"],
   "positives": ["<things done well — for the synthesis Strengths section>"]
 }
 ```
@@ -33,6 +33,8 @@ Hard caps: ≤ 8 inline findings, ≤ 32 overall notes, and ≤ 32 positives per
 - **P1** — required before merge (correctness, security, data integrity, contract break)
 - **P2** — suggested (idiom, robustness, maintainability)
 - **P3** — nit (style, naming, redundancy)
+
+**Hard rule for the finding channel**: every `inline_findings[].path` MUST be one of the files listed in `_name-status.txt` — the exact set this PR changes. A finding about a file the PR does not touch is **legitimate and wanted** whenever it interacts with the change: a pre-existing bug the new code now reaches, a caller the change breaks, a missing guard in untouched middleware the new path traverses. It simply cannot travel as an inline comment, because the forge can only anchor one to a line inside the diff. Route it to `overall_notes` instead and name the anchor in the note text (`` `path/to/file.ts:42` — <finding>``). Never drop such a finding to satisfy the rule, and never re-anchor it to an unrelated changed file to smuggle it in — that produces a comment on code that does not contain the problem. The collector rejects your **entire** result when a single inline path falls outside the set, and `finalize` requires every worker in the generation to have been accepted, so one misrouted finding discards your whole review and blocks the run for every other reviewer too. The same bind applies to every path inside `coverage-audit`'s `coverage_report`.
 
 **Hard rule for `body` field**: NO Markdown tables in a persona's inline-finding `body` — GitHub PR view compresses tables into unreadable narrow columns. Use code fences, bullet lists, and bold prefixes only. Internal fields like `coverage-audit`'s `coverage_report` stay as JSON objects — they are not posted; the lead synthesises them into the overall body, where the ONLY permitted table is the compact `### Test Coverage` counts table (four numeric columns, see `workflow.md` Phase D). That body-only carve-out never extends to inline comments.
 
