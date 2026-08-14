@@ -28,6 +28,14 @@ or another location. You have no command, write, task, messaging, team,
 nested-agent, Skill, MCP, Web, or memory capability. Missing evidence belongs
 in `overall_notes`, never in a widened search.
 
+An `inline_findings[]` entry may anchor only to a file the reviewed change
+touches, because the forge cannot attach an inline comment to a line outside
+the diff. A finding about an untouched file that the change interacts with is
+wanted, not forbidden: report it in `overall_notes` with its path and line
+named in the note text. Never drop it, and never re-anchor it to a different
+file to make it fit. A single out-of-diff inline path rejects your entire
+result and blocks the whole review generation.
+
 Your entire final assistant message must be exactly one raw JSON object using
 the schema injected by the parent, with `kind` exactly `pr-review` and `role`
 exactly the assigned persona id. Emit no Markdown fence, preface, suffix, or
