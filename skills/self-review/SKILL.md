@@ -220,45 +220,54 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
 
 ### Final report
 
-Render a CHAIN-END SUMMARY in narrative form with these sections IN THIS ORDER
-(pull from your own context; do NOT re-spawn any agent). The TL;DR comes LAST:
+Render a CHAIN-END SUMMARY as TABLES, not prose: every section below is a table
+plus at most one line of text, never a paragraph. Keep it scannable — no
+restating, no narration of the process, no filler. Sections IN THIS ORDER, the
+TL;DR LAST (pull from your own context; do NOT re-spawn any agent):
 
 ```
 ## Problem
-In plain words: the feature, bug, or need this session addressed — why the work happened.
+Exactly ONE sentence: the feature, bug, or need this session addressed.
 
 ## What I built
-Numbered deliverables. For each: what it does in plain words, its status (done /
-merged / built-tested), and a PR link if one exists. Carry the audit facts: feature
-title, files modified, tests created, build status, coverage status, and the
-Edit Landing verdict — the step 5b close marker plus any `EDIT NOT LANDED` line,
-and the `UNVERIFIED (no claims logged)` or unresolved `PENDING PREDICATE` close
-when either applies (those are NOT clean states), each rendered verbatim — a
-claimed edit that never produced a change must not vanish between the Phase 6
-report and this summary. Carry the Phase-4 step-2 **evidence cross-check verdict**
-the same way — the `EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
-`EVIDENCE CONTRADICTION` line verbatim, or `no evidence claims to cross-check` when
-that is what it reported. Cite the plan
-+ log paths. When the session plan carries a ## Requirements table, also give
-per-requirement status keyed by its stable IDs (AC-###/FR-###: met / partial / dropped).
+Table, columns: # | Deliverable | Status | Link. One row per deliverable, max 15
+words per cell, Status is done / merged / built-tested, Link is a PR URL or `—`.
+
+Then a second table, columns: Check | Verdict, with exactly these rows — Feature,
+Files modified, Tests created, Build, Coverage, Edit landing, Evidence cross-check,
+Plan, Log. Verdict cells are values, not sentences. Two rows carry text VERBATIM and
+must never be dropped, paraphrased, or shortened: **Edit landing** takes the step 5b
+close marker plus any `EDIT NOT LANDED` line and the `UNVERIFIED (no claims logged)`
+or unresolved `PENDING PREDICATE` close (those are NOT clean states) — a claimed edit
+that never produced a change must not vanish between the Phase 6 report and this
+summary; **Evidence cross-check** takes the Phase-4 step-2
+`EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
+`EVIDENCE CONTRADICTION` line, or `no evidence claims to cross-check` when that
+is what it reported.
+
+When the session plan carries a ## Requirements table, add a third table, columns:
+ID | Status, keyed by its stable IDs (AC-###/FR-###: met / partial / dropped). One
+row per requirement, no commentary.
 
 ## How I built it
-The TDD discipline followed, then the final zensu:code-reviewer verdict (PASS /
-suggestions-only / max-rounds reached) with findings by severity and files
-reviewed. Then the auto-fix history: list EVERY code-review round 1..N — including
-rounds that fixed nothing. For each round give the round number and either what was
-fixed in-thread, OR — for a verification round with no findings — mark it explicitly
-as `PASS — 0 findings, nothing to fix`. Always include the final clean verification
-round so the reader sees the chain converged. Skip this section only if no review
-round ran at all.
+Exactly ONE line: the TDD discipline followed, the final zensu:code-reviewer verdict
+(PASS / suggestions-only / max-rounds reached), findings by severity, files reviewed.
+
+Then a table, columns: Round | Findings | Fixed | Result. One row per code-review
+round 1..N including rounds that fixed nothing, whose Result cell reads
+`PASS — 0 findings, nothing to fix`. Always include the final clean verification
+round. Skip this section only if no review round ran at all.
 
 ## Self-Review Summary
-The self-reflection verdict, the seven-dimension findings, what the single self-review fix round
-changed (if any), and any advisory findings buffered (not fixed). State whether a fix round ran.
+Table, columns: Dimension | Verdict | Note. One row per reviewed dimension
+(architecture, consistency, edge-cases, test coverage, security, simplification,
+conventions), Verdict is clean / advisory / must-fix, Note max 12 words. Close with
+ONE line: whether the single fix round ran and what it changed.
 
 ## Open
-What is left: any deferred suggestions or max-rounds findings requiring manual fix,
-plus the next step. If nothing is open, say so in one line. Close the section with
+Table, columns: Item | Type | Next step. One row per deferred suggestion or
+max-rounds finding requiring a manual fix. If nothing is open, write the single
+line `Nothing open.` Close the section with
 the bypass-ledger audit line: run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
 `Gates bypassed during this session: <output>` (the verb echoes `none` when the
