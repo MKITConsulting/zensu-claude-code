@@ -240,9 +240,10 @@ must never be dropped, paraphrased, or shortened: **Edit landing** takes the ste
 close marker plus any `EDIT NOT LANDED` line and the `UNVERIFIED (no claims logged)`
 or unresolved `PENDING PREDICATE` close (those are NOT clean states) — a claimed edit
 that never produced a change must not vanish between the Phase 6 report and this
-summary; **Evidence cross-check** takes the Phase-4 step-2 `EVIDENCE CROSS-CHECK
-SUMMARY` line plus every `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line, or
-`no evidence claims to cross-check` when that is what it reported.
+summary; **Evidence cross-check** takes the Phase-4 step-2
+`EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
+`EVIDENCE CONTRADICTION` line, or `no evidence claims to cross-check` when that
+is what it reported.
 
 When the session plan carries a ## Requirements table, add a third table, columns:
 ID | Status, keyed by its stable IDs (AC-###/FR-###: met / partial / dropped). One
