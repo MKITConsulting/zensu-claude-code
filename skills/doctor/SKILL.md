@@ -150,6 +150,43 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   workable — this read-only report runs, `Stop` is released rather than wedged,
   and `Edit`/`Write` stay denied because nothing can anchor a write to a
   project. Do NOT report this row as a missing record.
+- **A plugin upgrade is normally NOT a binding failure any more.** A record binds
+  to any executing installation whose declared version is a compatible lineage of
+  the recorded one — strict `X.Y.Z`, equal major, equal minor while major is `0`,
+  and executing at least the recorded version — so an ordinary update that lands
+  mid-session leaves the session working and produces no binding row at all.
+  Reaching a failure means the update crossed a **breaking** boundary (a minor
+  bump while major is `0`, or a major bump), the executing runtime is **older**
+  than the record, a version is not a strict `X.Y.Z`, or the executing root
+  carries no zensu manifest. That cannot be repaired in place — the record is
+  immutable by design and is never rewritten to the new root — so the remedy is a
+  fresh Claude Code session.
+  **Known reporting gap, and you must not paper over it:** the report has no row
+  of its own for that state. `zensu-doctor.sh` asks only whether the recorded
+  project root is gone, so an incompatible runtime falls through to the
+  `unbound` row above and is rendered as *"this session has no valid Session
+  Control record"* — which is false, the record is intact in plugin data. When
+  the user reports a plugin update right before the failure, say so explicitly
+  instead of repeating that row's wording: the record exists and the executing
+  runtime is not a compatible lineage of it. The remedy (a fresh session) is the
+  same either way.
+  **The converse also has no row, and it matters for a trust question.** Because
+  the rule compares declared versions and never content, a *bound* session's
+  enforcing runtime may be a different installation that merely shares
+  `CLAUDE_PLUGIN_DATA` and declares a compatible version — including a copy whose
+  hook bytes differ. Nothing in the report shows that. If the user asks which code
+  is actually enforcing their session, say plainly that this report cannot answer
+  it, and point at the executing installation (the plugin root the running hooks
+  resolve from) rather than the record's `plugin_root`, which names only where the
+  session started.
+  **One post-upgrade failure the report cannot name either.** Review-evidence
+  leases still compare their recorded plugin root strictly, and the lease reader
+  validates every record in the session's store and stops at the first failure —
+  so a single lease minted before the update makes every later review-evidence
+  operation fail for the rest of that session, with no row explaining it. If a
+  user reports that reviews stopped working shortly after a plugin update while
+  everything else still runs, name this as the likely cause; the remedy is a fresh
+  session.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

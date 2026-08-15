@@ -49,9 +49,13 @@ A plugin update that lands while a session is running leaves the Session Control
 record naming the installation that minted it. The running installation may
 still **serve** that record when the two share a lineage —
 `servesRecordedRuntime` / `runtimeLineageCompatible` in
-`hooks/lib/session-control-core-v1.js`, applied at `resolveHookSession`, at the
-`resolveOrphanedProjectRoot` mirror and in `currentClaudeSessionContext`. The
-axis:
+`hooks/lib/session-control-core-v1.js`. It is the ONE implementation all five
+call sites share: `resolveHookSession` and its `resolveOrphanedProjectRoot`
+mirror in `hooks/lib/claude-hook-session-v1.js`, `currentClaudeSessionContext`,
+and both the SessionStart-resume and SubagentStart branches of
+`hooks/lib/claude-session-control-v1.js`. `relatedClaudeSessionContexts` is
+deliberately excluded: it compares two records against each other, not a record
+against the executing runtime. The axis:
 
 - **same major**, and **while major is `0`, the same minor as well** — `0.17.1 ↔
   0.17.2` compatible, `0.17.x ↔ 0.18.0` not. Without the second clause "same
@@ -83,6 +87,16 @@ cannot verify that this policy was followed.
 **The release that introduces this policy is itself a `minor`**, because it adds
 `executing_plugin_root` and `executing_runtime_digest` to the attestation. It is
 the last release before the policy binds, so nothing is served across it.
+
+**Known gap 1 — the review-evidence lease is NOT lineage-relaxed.**
+`hooks/lib/review-evidence-lease-v1.js` still compares its recorded
+`plugin_root` strictly, so a lease minted before an upgrade is refused after it.
+Because `listRecords` validates every record and propagates the first failure,
+that one lease then fails every later lease operation for the session. Closing it
+needs a lease-schema change — the lease record carries no `plugin_version`, so
+there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
+`tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
+so changing it silently fails loudly.
 
 `docs/session-control.md` "Unbindable sessions" carries the operator-facing
 account, including the pin this weakens and the two attestation fields that
@@ -128,6 +142,12 @@ they are different diagnoses with different remedies:
   never `realpath`, so a dangling symlink stays a present-but-wrong root. It then
   re-applies the plugin-root and plugin-data identity checks `resolveHookSession`
   applies, so a second disagreement is never relaxed alongside the first.
+  **Amended by semver-compatible binding:** the plugin-root check there is now the
+  lineage-relaxed `servesRecordedRuntime`, so a vanished project root IS relaxed
+  alongside an executing root that is a declared-compatible upgrade — deliberate,
+  since neither disagreement can anchor a workflow document. An INCOMPATIBLE root,
+  a differing `plugin_data`, and every other disagreement stay unrelaxed. See
+  "Runtime Compatibility & Breaking Changes" above.
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.

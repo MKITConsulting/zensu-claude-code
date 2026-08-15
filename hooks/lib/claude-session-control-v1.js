@@ -165,7 +165,15 @@ function main() {
         sessionId: payload.session_id,
         expectedHost: 'claude',
       });
-      if (context.plugin_root !== pluginRoot) fail('SessionStart plugin root does not match the existing session');
+      // A resume or compact is where a mid-session plugin upgrade surfaces
+      // again: the record still names the root it was minted against, while
+      // this hook now executes from the new one. Refusing here would kill the
+      // very session the compatible-lineage rule exists to keep alive, one
+      // compaction after it survived every tool call. The record is NOT
+      // rewritten — it stays the immutable anchor it always was.
+      if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
+        fail('SessionStart plugin root is neither the existing session\'s plugin nor a compatible upgrade of it');
+      }
       if (context.plugin_data !== pluginData) fail('SessionStart plugin data does not match the existing session');
       if (isFresh && eventCwd !== context.project_root) {
         fail('fresh SessionStart cwd does not match the existing session project');
@@ -202,8 +210,12 @@ function main() {
       sessionId: payload.session_id,
       expectedHost: 'claude',
     });
-    if (context.plugin_root !== pluginRoot) {
-      fail('SubagentStart plugin root does not match the parent session');
+    // Same reasoning as the SessionStart branch above, and just as load-bearing:
+    // the review chain fans out subagents, so a strict comparison here would let
+    // an upgraded session keep working right up to the moment it tries to
+    // review itself.
+    if (!core.servesRecordedRuntime(context, pluginRoot, 'claude')) {
+      fail('SubagentStart plugin root is neither the parent session\'s plugin nor a compatible upgrade of it');
     }
     if (context.plugin_data !== pluginData) {
       fail('SubagentStart plugin data does not match the parent session');

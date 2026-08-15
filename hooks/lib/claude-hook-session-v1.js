@@ -143,9 +143,15 @@ function resolveOrphanedProjectRoot(payload, environment = process.env) {
     });
     // The same two identity checks resolveHookSession applies, because
     // readOrphanedProjectRootContext validates the record against itself and
-    // cannot see the running installation. Without them a record minted against
-    // a DIFFERENT plugin installation whose root also happens to be gone would
-    // have two disagreements relaxed instead of one.
+    // cannot see the running installation.
+    //
+    // Since semver-compatible binding the plugin-root check is itself
+    // lineage-relaxed, so state the property that actually holds: a vanished
+    // project root may be relaxed ALONGSIDE an executing root that is a
+    // declared-compatible upgrade of the recorded one — that combination is
+    // deliberate, because neither disagreement can anchor a workflow document.
+    // What is still never relaxed alongside it is an INCOMPATIBLE root, a
+    // differing plugin_data, or any other disagreement readContext rejects.
     if (!core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) return null;
     if (context.plugin_data !== pluginData) return null;
     return context.project_root;
@@ -206,6 +212,12 @@ function resolveHookSession(payload, environment = process.env) {
   const recordsDir = privateRecordsDirectory(pluginData);
   const sessionKey = core.sessionKey(payload.session_id);
   const context = core.readContext({ recordsDir, sessionId: payload.session_id, expectedHost: 'claude' });
+  // Equal root, or a declared-compatible upgrade of it: a plugin update that
+  // lands mid-session moves the executing root while the record stays valid
+  // against its own (see readContextInternal, which recomputes the digest and
+  // re-reads the manifest against the RECORDED root). plugin_data below is NOT
+  // relaxed — it is what keeps an inline/dev source and an installed
+  // marketplace plugin on separate record stores.
   if (!core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) {
     fail('context plugin root is not a compatible lineage of the executing plugin');
   }

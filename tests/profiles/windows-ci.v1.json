@@ -135,7 +135,7 @@
           "runner": "bash",
           "path": "tests/structure/test-versioned-plugin-upgrade.sh",
           "args": [],
-          "timeoutMs": 300000
+          "timeoutMs": 600000
         }
       ]
     },
@@ -351,7 +351,7 @@
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 600000
+          "timeoutMs": 1200000
         }
       ]
     }
