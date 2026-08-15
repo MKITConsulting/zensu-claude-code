@@ -264,6 +264,36 @@ bash "$LOG" --phase GREEN_PASS --step SX --session "$SID_B" >/dev/null 2>&1
   && check "E1 config flip to default mid-session: vanilla gate still allows (frozen)" PASS || check "E1 freeze vanilla->default" FAIL
 [ "$(gate "$(prod_payload "$SID_A")" "$CFG_VANILLA")" = "deny" ] \
   && check "E2 config flip to vanilla mid-session: strict gate still denies (frozen)" PASS || check "E2 freeze strict->vanilla" FAIL
+# E3/E3b extend the freeze to the /zensu:tdd-mode SESSION override, which outranks
+# the config at --tdd-begin. Outranking the config must not mean outranking the
+# frozen flag: the gate reads state only, so a mid-chain switch can neither un-gate
+# a strict chain nor re-arm a vanilla one — exactly as a config flip cannot.
+E3_MARKER="$(bash -c 'source "$0"; zensu_tdd_mode_marker_path "$1" "$2"' \
+  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$PROJ" "$(session_key "$SID_B")")"
+printf '%s' '{"mode":"strict"}' > "$E3_MARKER"
+# Positive control first: the marker this block writes IS the one the resolver reads,
+# so the two no-effect assertions below cannot pass through a spelling drift.
+activate_session "vanilla-conv"
+E3_CTRL="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "vanilla-conv" 2>/dev/null)"
+E3_MARKER_CONV="$(bash -c 'source "$0"; zensu_tdd_mode_marker_path "$1" "$2"' \
+  "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$PROJ" "$(session_key "vanilla-conv")")"
+printf '%s' '{"mode":"strict"}' > "$E3_MARKER_CONV"
+bash "$LOG" --tdd-reset --session "vanilla-conv" >/dev/null 2>&1
+E3_CTRL2="$(ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "vanilla-conv" 2>/dev/null)"
+{ [ "$E3_CTRL" = "mode: vanilla" ] && [ "$E3_CTRL2" = "mode: strict" ]; } \
+  && check "E3c control: a marker at this path IS read by --tdd-begin (vanilla -> strict on re-arm)" PASS \
+  || check "E3c marker path control (first='$E3_CTRL' after='$E3_CTRL2')" FAIL
+rm -f "$E3_MARKER_CONV"
+[ "$(gate "$(prod_payload "$SID_B")")" = "allow" ] \
+  && check "E3 session override flipped to strict mid-session: vanilla gate still allows (frozen)" PASS || check "E3 freeze vs session override" FAIL
+# Read the allow above against a LIVE gate: an allow is also what a silently-exiting
+# gate produces, so a deny from the strict session pins that the gate still decides.
+[ "$(gate "$(prod_payload "$SID_A")")" = "deny" ] \
+  && check "E3d control: the gate is still deciding while E3 reads its allow" PASS || check "E3d live-gate control" FAIL
+activate_session "$SID_B"   # --mode refuses a cross-session query (M3); bind first
+[ "$(bash "$LOG" --mode --session "$SID_B" 2>/dev/null)" = "vanilla" ] \
+  && check "E3b --mode still reports the frozen mode, not the new session override" PASS || check "E3b --mode vs session override" FAIL
+rm -f "$E3_MARKER"
 
 echo "== Gate: session-state files are write-protected =="
 state_payload() { printf '{"hook_event_name":"PreToolUse","tool_name":"Edit","tool_input":{"file_path":".zensu/state/tdd-phase-evil.json"},"session_id":"%s"}' "$1"; }

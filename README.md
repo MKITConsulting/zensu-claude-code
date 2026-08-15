@@ -70,9 +70,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (22)
+### Skills (23)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (23 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (24 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -80,6 +80,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them |
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
+| `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |

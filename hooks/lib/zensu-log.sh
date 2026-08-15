@@ -321,6 +321,7 @@ case "${1:-}" in
     autopilot_return_stage_val=""
     chain_id_val=""
     chain_outcome_val=""
+    tdd_mode_val=""
     seen_session=false
     seen_tools=false
     seen_claimed_ticket=false
@@ -329,6 +330,7 @@ case "${1:-}" in
     seen_autopilot_return=false
     seen_chain_id=false
     seen_outcome=false
+    seen_tdd_mode=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -360,6 +362,9 @@ case "${1:-}" in
           claimed_ticket_val="$2"
           shift 2
           ;;
+        --tdd-mode)
+          [ "$seen_tdd_mode" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --tdd-mode" >&2; exit 2; }
+          seen_tdd_mode=true; tdd_mode_val="$2"; shift 2 ;;
         *) echo "zensu-log.sh $verb: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
@@ -367,7 +372,31 @@ case "${1:-}" in
       echo "zensu-log.sh $verb: --session must not be empty" >&2
       exit 2
     fi
+    # --tdd-mode carries the caller's OWN default into the one verb that freezes
+    # the mode, and it is ESCALATION-ONLY: `strict` is the only accepted value.
+    # The value reaches this flag from a `TDD-MODE:` line in a model-read
+    # specification, and a spec body is not always user-authored — /zensu:pr-fix-findings
+    # builds one from PR review-comment bodies. An accepted `vanilla` there would
+    # let text a commenter controls relax a project that set
+    # hooks.tddImplementation:true, with no bypass-ledger entry. Lowering the
+    # discipline stays the user's own `/zensu:tdd-mode --vanilla` session choice,
+    # which outranks this flag anyway.
+    if [ "$seen_tdd_mode" = true ]; then
+      case "$tdd_mode_val" in
+        strict) ;;
+        *)
+          echo "zensu-log.sh $verb: --tdd-mode accepts only 'strict' — a caller may raise the discipline, never lower it; run /zensu:tdd-mode --vanilla to opt this session out" >&2
+          exit 2
+          ;;
+      esac
+    fi
     invalid_known_flag=false
+    # --tdd-mode belongs to exactly ONE verb, and the rule is written once rather
+    # than as a `seen_tdd_mode=false` conjunct in every other branch: a verb added
+    # later inherits the refusal instead of silently accepting a flag that only
+    # `--tdd-begin` can act on. It is stated before the per-verb matrix so the
+    # matrix keeps the shape its own structure test reads.
+    [ "$seen_tdd_mode" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
     case "$verb" in
       --tdd-begin|--tdd-complete)
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
@@ -431,11 +460,30 @@ case "${1:-}" in
           exit 1
         }
         outgoing_bypasses="$(tdd_bypasses "$begin_state_file" 2>/dev/null)"
-        if zensu_tdd_strict_enabled; then
-          begin_vanilla=false
-        else
-          begin_vanilla=true
-        fi
+        # Mode precedence, resolved ONCE here and then frozen into this chain
+        # generation's `vanilla` flag:
+        #   1. the session override /zensu:tdd-mode recorded for this session
+        #   2. --tdd-mode strict, the CALLER's own default (e.g. the strict
+        #      default /zensu:pr-fix-findings asks for) — escalation only
+        #   3. hooks.tddImplementation
+        #   4. vanilla
+        # The user's explicit session choice therefore outranks a skill's default,
+        # and a skill's default outranks the config — otherwise the shipped
+        # `false` would make every such default unreachable. Only rank 1 can lower
+        # the discipline. An unresolvable project dir yields `auto` and falls
+        # through, never a forced mode.
+        begin_project_dir="$(zensu_resolve_project_dir 2>/dev/null)" || begin_project_dir=""
+        begin_mode="$(zensu_tdd_mode_override "$begin_project_dir" "$session_val")"
+        # `auto` (and anything unreadable, which the reader also reports as auto)
+        # hands the decision down to the caller's flag, then to the config. The
+        # ranks are collapsed into one flat case on purpose: a bare `;;` line here
+        # would truncate the structure test's extraction of this branch.
+        [ "$begin_mode" = "strict" ] || [ "$begin_mode" = "vanilla" ] || begin_mode="$tdd_mode_val"
+        case "$begin_mode" in
+          strict)  begin_vanilla=false ;;
+          vanilla) begin_vanilla=true ;;
+          *) if zensu_tdd_strict_enabled; then begin_vanilla=false; else begin_vanilla=true; fi ;;
+        esac
         if [ -n "$autopilot_run_val$autopilot_attempt_val$autopilot_return_stage_val$chain_id_val" ]; then
           [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] \
             && [ -n "$autopilot_return_stage_val" ] && [ -n "$chain_id_val" ] || {

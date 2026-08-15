@@ -15,6 +15,14 @@
 # getters apply the same hardcoded defaults they always have, so a no-config
 # install behaves exactly as before.
 #
+# ONE exception to "this file only reads config": the TDD-mode trio at the bottom
+# (`zensu_tdd_mode_marker_path`, `zensu_tdd_mode_override`, `zensu_tdd_strict_effective`)
+# also reads the session-scoped mode marker under `<project>/.zensu/state/`,
+# node-free and outside the merge machinery above. It lives here so the writer
+# (`hooks/lib/zensu-tdd-mode.sh`) and every reader share ONE path template and ONE
+# parse; zen-mode hand-copies its template into its reader hook, and that is the
+# drift this placement avoids.
+#
 # _ZENSU_CFG_JS holds the shared reader/merge/select JS. It uses only
 # double-quoted JS string literals so each getter can embed it inside a
 # single-quoted extraction snippet and keep a single `node -e` spawn:
@@ -75,6 +83,85 @@ zensu_tdd_strict_enabled() {
   local val
   val=$(_zensu_config_node -e "$_ZENSU_CFG_JS"' var j=cfg();console.log(j.hooks&&j.hooks.tddImplementation===true?"1":"0")' 2>/dev/null)
   [ "$val" = "1" ]
+}
+
+# Session-scoped strict/vanilla OVERRIDE — the recorded choice that
+# hooks/lib/zensu-tdd-mode.sh writes for `/zensu:tdd-mode`. It outranks BOTH the
+# caller-supplied `--tdd-begin --tdd-mode` flag and hooks.tddImplementation, so a
+# user who switched the mode for this session is never overruled by a skill's own
+# default. Echoes `strict`, `vanilla`, or `auto`.
+#
+# Everything that is not an explicit, parsable mode resolves to `auto` (= no
+# override, fall through to caller/config): an absent, unreadable, or malformed
+# marker must never impose a mode, and a symlinked state path is refused here for
+# the same reason the writer refuses to create one. Deliberately node-free — the
+# override has to keep working on a host without node, where the config reader
+# already degrades to vanilla.
+#
+# The marker path template lives HERE, in zensu_tdd_mode_marker_path, and the
+# writer sources this file rather than re-spelling it: zen-mode's template is
+# hand-copied into its reader hook, and a divergence there would silently split
+# the writer's file from the reader's.
+zensu_tdd_mode_marker_path() {
+  local project_dir="${1:-}" session_key="${2:-}"
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || return 1
+  printf '%s\n' "$project_dir/.zensu/state/tdd-mode-$session_key.json"
+}
+
+zensu_tdd_mode_override() {
+  local project_dir="${1:-}" session_key="${2:-}" state_dir marker
+  [ -n "$project_dir" ] && [ -n "$session_key" ] || { echo "auto"; return 0; }
+  marker="$(zensu_tdd_mode_marker_path "$project_dir" "$session_key")" || { echo "auto"; return 0; }
+  # Derived, never re-spelled — the writer derives its own state dir the same way.
+  state_dir="$(dirname "$marker")"
+  # `.zensu` is checked with them: a link there relocates the state directory
+  # while both leaf checks stay false, and the writer refuses the same shape.
+  if [ -L "$project_dir/.zensu" ] || [ -L "$state_dir" ] || [ -L "$marker" ] || [ ! -f "$marker" ]; then
+    echo "auto"
+    return 0
+  fi
+  # The marker the writer emits is exactly one line: `{"mode":"<value>"}`. Match the
+  # FIRST line, as a whole, and only when the file holds nothing after it.
+  #
+  # Both halves are load-bearing. A grep over the FILE would let a body contradict
+  # its own key — `{"mode":"vanilla"} "mode":"strict"` on one line, or a second line
+  # spelling the other mode — because `grep`'s `^`/`$` anchor a LINE, not the file.
+  # Anything this rejects is by definition not a marker this plugin wrote, and falls
+  # through to `auto`. The remainder is DRAINED, not sampled one line deep: reading
+  # only line 2 would let `{"mode":"strict"}` + a blank line + `{"mode":"vanilla"}`
+  # through unexamined. Trailing whitespace of any shape is tolerated; any other
+  # content is not.
+  # Bound the file before draining it. The writer's own output is 19 bytes, so a
+  # small ceiling refuses nothing legitimate — while an unbounded `$(cat)` would
+  # pull an arbitrarily large file into a shell variable on a path that runs on
+  # every prompt, and the marker is writable in-session (see the T9f gap).
+  local size=""
+  size="$(wc -c < "$marker" 2>/dev/null | tr -d '[:space:]')"
+  case "$size" in ''|*[!0-9]*) echo "auto"; return 0 ;; esac
+  [ "$size" -le 512 ] || { echo "auto"; return 0; }
+  local first="" rest=""
+  { IFS= read -r first || true; rest="$(cat)"; } < "$marker" 2>/dev/null
+  case "$rest" in *[![:space:]]*) echo "auto"; return 0 ;; esac
+  if printf '%s\n' "$first" | grep -Eq '^[[:space:]]*\{[[:space:]]*"mode"[[:space:]]*:[[:space:]]*"strict"[[:space:]]*\}[[:space:]]*$'; then
+    echo "strict"
+  elif printf '%s\n' "$first" | grep -Eq '^[[:space:]]*\{[[:space:]]*"mode"[[:space:]]*:[[:space:]]*"vanilla"[[:space:]]*\}[[:space:]]*$'; then
+    echo "vanilla"
+  else
+    echo "auto"
+  fi
+}
+
+# Effective strict check = the session override layered over the config flag.
+# Callers that can resolve a session pass its project dir and Session Control
+# session key. Callers that cannot resolve one — SessionStart, where no marker for
+# the new session can exist yet — call zensu_tdd_strict_enabled directly instead;
+# passing empty arguments here is equivalent and stays config-only.
+zensu_tdd_strict_effective() {
+  case "$(zensu_tdd_mode_override "${1:-}" "${2:-}")" in
+    strict)  return 0 ;;
+    vanilla) return 1 ;;
+  esac
+  zensu_tdd_strict_enabled
 }
 
 _zensu_log_style() {

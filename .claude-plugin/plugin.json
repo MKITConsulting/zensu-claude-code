@@ -38,6 +38,7 @@
     "./skills/security-review",
     "./skills/setup",
     "./skills/tdd",
+    "./skills/tdd-mode",
     "./skills/verify-feature",
     "./skills/wargame",
     "./skills/zen-mode",

@@ -97,6 +97,7 @@
     "test-tdd-full-cycle.sh",
     "test-tdd-log-path-anchor.sh",
     "test-tdd-manager-patches.sh",
+    "test-tdd-mode-toggle.sh",
     "test-tdd-no-flock-external-lease.sh",
     "test-tdd-protocol-prominence.sh",
     "test-tdd-reminder-hook.sh",
