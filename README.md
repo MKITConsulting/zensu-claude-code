@@ -40,6 +40,15 @@ claude plugin marketplace add MKITConsulting/zensu-claude-code
 claude plugin install zensu --scope project
 ```
 
+If the install fails with `Host key verification failed` or
+`Permission denied (publickey)`, Claude Code cloned the plugin over SSH. That is
+its default for GitHub plugin sources, and unlike `marketplace add` the install
+step has no HTTPS fallback. Force HTTPS:
+
+```bash
+CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 claude plugin install zensu --scope project
+```
+
 Update later with:
 
 ```bash
