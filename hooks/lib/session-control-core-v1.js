@@ -267,6 +267,73 @@ function pluginMetadata(pluginRootInput, host) {
   return { pluginRoot, manifest, manifestFile: file };
 }
 
+// A record minted by an EARLIER installation of this same plugin may still be
+// served by the running one when the two declare a compatible lineage. That is
+// the ordinary consequence of a plugin update landing while a session is live:
+// the record stays valid in every respect and only the version directory it
+// names is no longer the executing one. Before this predicate existed such a
+// session denied every tool for the rest of its life, including the read-only
+// diagnostic that reports the state.
+//
+// The axis is semver with the one clause the specification leaves to the
+// publisher: while major is 0 the MINOR number is the breaking axis, so 0.17.1
+// and 0.17.2 share a lineage and 0.17.x and 0.18.0 do not. Without that clause
+// "same major" would make 0.9.2 compatible with 0.17.2. A downgrade is never
+// compatible — only the newer tree can be expected to understand the older
+// one's state, never the reverse — so the executing version must be at least
+// the recorded one. `CLAUDE.md` "Runtime Lineage" states which changes force
+// the breaking bump; this function cannot verify that policy was followed, it
+// only encodes what the version numbers then mean.
+const RUNTIME_VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/;
+
+function parseRuntimeVersion(value) {
+  if (typeof value !== 'string') return null;
+  const match = RUNTIME_VERSION_RE.exec(value);
+  return match === null ? null : [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function runtimeLineageCompatible(recordedVersion, executingVersion) {
+  const recorded = parseRuntimeVersion(recordedVersion);
+  const executing = parseRuntimeVersion(executingVersion);
+  if (recorded === null || executing === null) return false;
+  if (recorded[0] !== executing[0]) return false;
+  if (recorded[0] === 0 && recorded[1] !== executing[1]) return false;
+  for (let index = 0; index < recorded.length; index += 1) {
+    if (executing[index] !== recorded[index]) return executing[index] > recorded[index];
+  }
+  return true;
+}
+
+// The single identity a compatible upgrade may change is the version DIRECTORY.
+// Three conditions, all required, and none of them waives an integrity check:
+//
+//   - The two roots are siblings under one parent. Every marketplace install of
+//     the same plugin lands beside the versions it replaces, while a working
+//     checkout loaded through a development flag lives in a repository and is
+//     never a sibling of a cache entry — so it cannot adopt an installed
+//     session's record no matter which version its manifest declares. That
+//     bound is structural rather than a claim about any host's environment.
+//   - The executing manifest parses and shares the recorded lineage.
+//   - The RECORDED runtime is still measured exactly as before: readContext
+//     computes the digest against the recorded root and requires that root's
+//     manifest to still declare the recorded version. This predicate decides
+//     only WHICH runtime may serve a record, never whether the record is sound.
+//
+// The cost is stated plainly in `docs/session-control.md`: the pin weakens from
+// "the measured code is the enforcing code" to "the enforcing code shares a
+// declared-compatible lineage with the measured code".
+function servesRecordedRuntime(context, executedPluginRoot, host) {
+  if (context.plugin_root === executedPluginRoot) return true;
+  if (path.dirname(context.plugin_root) !== path.dirname(executedPluginRoot)) return false;
+  let executingVersion;
+  try {
+    executingVersion = pluginMetadata(executedPluginRoot, host).manifest.version;
+  } catch {
+    return false;
+  }
+  return runtimeLineageCompatible(context.plugin_version, executingVersion);
+}
+
 function localManifestEntry(pluginRoot, value, label) {
   const raw = requireText(value, label)
     .replace(/^\$\{(?:CLAUDE_|CODEX_)?PLUGIN_ROOT\}/, pluginRoot);
@@ -1876,12 +1943,24 @@ function currentClaudeSessionContext(options) {
   if (recordsDir !== expectedRecordsDir) {
     fail('records directory is outside current Claude plugin data');
   }
+  // The digest the caller supplies always describes the EXECUTING runtime. When
+  // that runtime is the recorded one the record's own digest is the thing to
+  // compare it against, exactly as before. When a compatible upgrade landed
+  // mid-session the two describe different trees by construction, so comparing
+  // them would reject every command in an upgraded session; the executing tree
+  // is measured directly instead, which keeps the caller's claim checked rather
+  // than waived. The record's internal consistency is asserted either way, and
+  // the extra measurement is only paid in the upgraded case.
   if (
     current.project_root !== projectRoot
-    || current.plugin_root !== pluginRoot
-    || current.runtime_digest !== runtimeDigest
-    || current.source_revision !== runtimeDigest
+    || !servesRecordedRuntime(current, pluginRoot, 'claude')
   ) {
+    fail('current context provenance does not match the executing runtime');
+  }
+  const executingDigest = current.plugin_root === pluginRoot
+    ? current.runtime_digest
+    : computeRuntimeDigest(pluginRoot, 'claude');
+  if (runtimeDigest !== executingDigest || current.source_revision !== current.runtime_digest) {
     fail('current context provenance does not match the executing runtime');
   }
 
@@ -3335,6 +3414,22 @@ function createAttestation(options) {
       || Object.prototype.hasOwnProperty.call(options, 'sourceRevisionAuthority')) {
     fail('sourceRevision/sourceRevisionAuthority overrides are unsupported in attestations');
   }
+  // `resolved_plugin_root`, `runtime_digest` and `plugin_version` all name the
+  // runtime the session was BOUND to. Once a compatible upgrade may serve that
+  // record they no longer name the runtime that ran, so the attestation states
+  // both. The executing digest is MEASURED here rather than accepted from the
+  // caller — there is no option to supply it — so the pair cannot disagree with
+  // the tree it claims to describe, and an executing root outside the recorded
+  // lineage is refused instead of recorded.
+  const executingPluginRoot = options.executingPluginRoot === undefined
+    ? context.plugin_root
+    : canonicalDirectory(options.executingPluginRoot, 'executingPluginRoot');
+  if (!servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    fail('executingPluginRoot must share the immutable context runtime lineage');
+  }
+  const executingRuntimeDigest = executingPluginRoot === context.plugin_root
+    ? context.runtime_digest
+    : computeRuntimeDigest(executingPluginRoot, context.host);
   return {
     schema: ATTESTATION_SCHEMA,
     schema_version: SCHEMA_VERSION,
@@ -3342,6 +3437,8 @@ function createAttestation(options) {
     session_id_hash: context.session_id_hash,
     resolved_plugin_root: context.plugin_root,
     runtime_digest: context.runtime_digest,
+    executing_plugin_root: executingPluginRoot,
+    executing_runtime_digest: executingRuntimeDigest,
     workflow_state: state.workflow_state,
     revision: state.revision,
     hook_sequence: [...options.hookSequence],
@@ -3433,6 +3530,8 @@ module.exports = {
   sessionIdHash,
   sessionKey,
   computeRuntimeDigest,
+  runtimeLineageCompatible,
+  servesRecordedRuntime,
   buildContext,
   registerContext,
   readContext,
