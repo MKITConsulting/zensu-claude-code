@@ -36,6 +36,7 @@
     "./skills/reset-review-limit",
     "./skills/self-review",
     "./skills/security-review",
+    "./skills/session-trail",
     "./skills/setup",
     "./skills/tdd",
     "./skills/tdd-mode",

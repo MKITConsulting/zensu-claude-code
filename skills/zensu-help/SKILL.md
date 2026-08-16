@@ -85,6 +85,7 @@ Before answering questions in the right column, `Read` the source file in the le
 | Hook scripts (what each does, when it fires) | `docs/configuration.md` § Hooks table + `hooks/<script>.sh` source |
 | Data flow, what's transmitted, retention, self-hosting | `README.md` § Data & Privacy |
 | Pulse session lifecycle, idempotency, privacy guarantees | `skills/pulse/SKILL.md` + `README.md` § Data & Privacy |
+| What another Claude Code instance or session is doing, which worktree it runs in, handing work over between instances, taking over a session that hit a usage limit, what "Archive" actually removes | `skills/session-trail/SKILL.md` (`/zensu:session-trail` — reads the shared `~/.claude/` state; see its Limits and Safety sections for what it cannot know and what leaves a project's boundaries) |
 | Transactionally resetting `reviewRound`/`stopBlockCount` after "max rounds reached" | `skills/reset-review-limit/SKILL.md` + `hooks/post-review-tdd-delegate.sh` (convergence branch) |
 | A review chain that will not advance: `--review-ticket` refuses, no ticket to claim, `/zensu:reset-review-limit` not applicable; chain shapes and the guarded escape hatch | `skills/recover-chain/SKILL.md` (`/zensu:recover-chain` — `zensu-log.sh --chain-status` diagnoses, `--chain-recover` repairs only a receipt that disagrees with its own document) |
 | Flow-back audit, spec drift, gap classification (missing/partial/contradicts/unrequested) | `skills/converge/SKILL.md` (`/zensu:converge` — read-only, plan Requirements table as intent anchor) |

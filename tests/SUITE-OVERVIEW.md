@@ -121,11 +121,11 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (17)
+### Skill contracts (18)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `setup-skill` · `skill-overlays` ·
-`templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` · `setup-skill` ·
+`skill-overlays` · `templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
