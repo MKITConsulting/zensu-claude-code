@@ -9,6 +9,9 @@ const ATTESTATION_FIELDS = Object.freeze([
   'session_id_hash',
   'resolved_plugin_root',
   'runtime_digest',
+  // The runtime that RAN, which a compatible-lineage upgrade can move away from
+  // the recorded pair above. This list is compared by value AND by order, so it
+  // moves in the same commit as createAttestation.
   'executing_plugin_root',
   'executing_runtime_digest',
   'workflow_state',

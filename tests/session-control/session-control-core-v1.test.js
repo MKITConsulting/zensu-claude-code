@@ -208,6 +208,27 @@ function writeDeferredClaim(f, overrides = {}) {
   return claim;
 }
 
+// FR-002: currentClaudeSessionContext carries its own copy of the plugin-root
+// comparison, and it is the one call site no gate-level suite reaches. Under an
+// equal root servesRecordedRuntime short-circuits before any manifest read, so a
+// test that never varies the root cannot tell the relaxed comparison from the
+// byte equality it replaced. These build a sibling plugin root that differs only
+// in its declared version — the fixture declares 9.8.7, a non-zero major, so a
+// minor step forward is compatible and a major step is not.
+function siblingPluginRoot(f, version) {
+  // A real sibling of the RECORDED root, because servesRecordedRuntime requires
+  // one: every marketplace install lands beside the versions it replaces, and a
+  // root elsewhere on disk is refused however compatible its version reads.
+  const root = fs.mkdtempSync(path.join(path.dirname(f.pluginRoot), 'zensu-lineage-sibling-'));
+  const manifestDir = f.currentContext.host === 'codex' ? '.codex-plugin' : '.claude-plugin';
+  fs.mkdirSync(path.join(root, manifestDir), { recursive: true });
+  fs.writeFileSync(
+    path.join(root, manifestDir, 'plugin.json'),
+    JSON.stringify({ name: 'zensu', version }),
+  );
+  return fs.realpathSync.native(root);
+}
+
 function inspectDeferredOptions(f, overrides = {}) {
   return {
     currentContextFile: f.currentContextFile,
@@ -1513,12 +1534,23 @@ test('creates a schema-versioned trusted attestation', () => {
   assert.equal(attestation.session_id_hash, context.session_id_hash);
   assert.equal(attestation.resolved_plugin_root, context.plugin_root);
   assert.equal(attestation.runtime_digest, context.runtime_digest);
+  // AC-012: the runtime that RAN. With no upgrade in play the caller supplies no
+  // executing root, so it defaults to the recorded one and the two pairs agree.
+  // The divergent case — where they must NOT agree — is asserted separately in
+  // "attestations name the executing runtime alongside the bound one".
   assert.equal(attestation.executing_plugin_root, context.plugin_root);
   assert.equal(attestation.executing_runtime_digest, context.runtime_digest);
   assert.equal(attestation.workflow_state, 'review');
   assert.equal(attestation.revision, 2);
   assert.deepEqual(attestation.hook_sequence, ['SessionStart', 'SubagentStart', 'PreToolUse']);
   assert.equal(attestation.exit_code, 0);
+  // The key SEQUENCE, not just its length: ATTESTATION_FIELDS is compared by
+  // value AND by position on the eval side, so a reorder or an equal-count
+  // rename here would pass a count assertion and reject every attestation there.
+  const attestationFields = require(path.join(
+    __dirname, '..', '..', 'evals', 'session-control', 'lib', 'attestation-common.js',
+  )).ATTESTATION_FIELDS;
+  assert.deepEqual(Object.keys(attestation), [...attestationFields]);
   assert.equal(Object.keys(attestation).length, 17);
   assert.ok(!JSON.stringify(attestation).includes(RAW_SESSION));
 });
@@ -1526,6 +1558,55 @@ test('creates a schema-versioned trusted attestation', () => {
 // After a compatible upgrade the bound fields and the executing fields name
 // different trees, and the executing digest is measured from that tree rather
 // than accepted from the caller — there is no option to supply it.
+test('rejects incomplete or context-divergent attestations', () => {
+  const f = fixture();
+  const context = register(f);
+  initialize(f);
+  const state = core.transitionWorkflowState({
+    projectRoot: f.projectRoot,
+    sessionId: RAW_SESSION,
+    workflowState: 'review',
+    event: 'review_start',
+  });
+  const valid = {
+    context,
+    state,
+    hookSequence: ['SessionStart'],
+    reviewerCapabilities: 'reviewer-readonly-v1',
+    changedFileHashes: {},
+    cliVersion: 'test-cli',
+    exitCode: 0,
+  };
+  assert.throws(() => core.createAttestation({ ...valid, hookSequence: [] }), /hookSequence/i);
+  assert.throws(() => core.createAttestation({ ...valid, reviewerCapabilities: 'main-v1' }), /reviewerCapabilities/i);
+  assert.throws(() => core.createAttestation({ ...valid, pluginVersion: 'other' }), /pluginVersion/i);
+  assert.throws(() => core.createAttestation({ ...valid, sourceRevision: context.source_revision }), /sourceRevision/i);
+  assert.throws(() => core.createAttestation({ ...valid, sourceRevision: 'other' }), /sourceRevision/i);
+  assert.throws(() => core.createAttestation({
+    ...valid,
+    sourceRevisionAuthority: 'verified-runtime-provenance-v1',
+  }), /sourceRevisionAuthority/i);
+  // AC-012: the executing DIGEST is evidence and a caller may never spell it —
+  // it is measured from whichever tree the root names. The ROOT is a caller
+  // input, because a wrapper run has to be able to say which tree it installed
+  // and ran, but only inside the recorded lineage: a root that is neither the
+  // recorded one nor a declared-compatible sibling of it is refused rather than
+  // recorded.
+  assert.throws(() => core.createAttestation({
+    ...valid,
+    executingRuntimeDigest: context.runtime_digest,
+  }), /executingRuntimeDigest/i);
+  assert.throws(() => core.createAttestation({
+    ...valid,
+    executingPluginRoot: os.tmpdir(),
+  }), /runtime lineage/i);
+  assert.doesNotThrow(() => core.createAttestation({ ...valid, executingPluginRoot: undefined }));
+  assert.throws(() => core.createAttestation({
+    ...valid,
+    changedFileHashes: { bad: 'sha256:deadbeef' },
+  }), /changed file hash/i);
+});
+
 test('attestations name the executing runtime alongside the bound one', () => {
   const f = fixture();
   const context = register(f);
@@ -1576,38 +1657,46 @@ test('attestations name the executing runtime alongside the bound one', () => {
   assert.throws(() => attest(path.join(f.root, 'absent')), /executingPluginRoot/i);
 });
 
-test('rejects incomplete or context-divergent attestations', () => {
-  const f = fixture();
-  const context = register(f);
-  initialize(f);
-  const state = core.transitionWorkflowState({
-    projectRoot: f.projectRoot,
-    sessionId: RAW_SESSION,
-    workflowState: 'review',
-    event: 'review_start',
-  });
-  const valid = {
-    context,
-    state,
-    hookSequence: ['SessionStart'],
-    reviewerCapabilities: 'reviewer-readonly-v1',
-    changedFileHashes: {},
-    cliVersion: 'test-cli',
-    exitCode: 0,
-  };
-  assert.throws(() => core.createAttestation({ ...valid, hookSequence: [] }), /hookSequence/i);
-  assert.throws(() => core.createAttestation({ ...valid, reviewerCapabilities: 'main-v1' }), /reviewerCapabilities/i);
-  assert.throws(() => core.createAttestation({ ...valid, pluginVersion: 'other' }), /pluginVersion/i);
-  assert.throws(() => core.createAttestation({ ...valid, sourceRevision: context.source_revision }), /sourceRevision/i);
-  assert.throws(() => core.createAttestation({ ...valid, sourceRevision: 'other' }), /sourceRevision/i);
-  assert.throws(() => core.createAttestation({
-    ...valid,
-    sourceRevisionAuthority: 'verified-runtime-provenance-v1',
-  }), /sourceRevisionAuthority/i);
-  assert.throws(() => core.createAttestation({
-    ...valid,
-    changedFileHashes: { bad: 'sha256:deadbeef' },
-  }), /changed file hash/i);
+test('FR-002 currentClaudeSessionContext accepts a compatible executing root and refuses a breaking one', () => {
+  const f = deferredFixture({ ownerSession: 'lineage-current-context' });
+  seedDeferredOwner(f);
+  writeDeferredClaim(f);
+  const base = { ...inspectDeferredOptions(f), ttlHours: 6 };
+  delete base.claimStale;
+  const PROVENANCE = /current context provenance does not match the executing runtime/i;
+
+  // Control: the recorded root itself is accepted, so a failure below is about
+  // the lineage rule and not about the fixture.
+  assert.doesNotThrow(() => core.deferredReviewOwnedByOther(base), PROVENANCE);
+
+  // A minor step forward at a non-zero major is a compatible lineage. The call
+  // must get PAST the provenance check — whatever it decides afterwards.
+  const compatible = siblingPluginRoot(f, '9.9.0');
+  try {
+    core.deferredReviewOwnedByOther({ ...base, pluginRoot: compatible });
+  } catch (error) {
+    assert.doesNotMatch(error.message, PROVENANCE);
+  }
+
+  // A major step is breaking, and a downgrade never binds.
+  for (const version of ['10.0.0', '9.7.0']) {
+    const breaking = siblingPluginRoot(f, version);
+    assert.throws(
+      () => core.deferredReviewOwnedByOther({ ...base, pluginRoot: breaking }),
+      PROVENANCE,
+      `executing ${version} must be refused at the provenance check`,
+    );
+  }
+
+  // A root carrying no zensu manifest cannot be identified, so it is refused
+  // rather than answering true through the predicate's swallowed read.
+  const hostless = fs.realpathSync.native(
+    fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lineage-hostless-')),
+  );
+  assert.throws(
+    () => core.deferredReviewOwnedByOther({ ...base, pluginRoot: hostless }),
+    PROVENANCE,
+  );
 });
 
 test('preserves prototype-shaped changed filenames in trusted attestations', () => {

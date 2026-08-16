@@ -5,6 +5,7 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 INSTALL_FIXTURE="$ROOT/tests/structure/fixtures/install-claude-runtime-fixture.js"
 PASS=0
 FAIL=0
+SKIPPED=0
 
 check() {
   if [ "$2" = PASS ]; then
@@ -406,26 +407,28 @@ bash_payload() {
   '
 }
 
-# Prints the gate's permission decision, or "allow" when it emitted none. The
-# third argument names the EXECUTING root and defaults to the 0.16.1 install, so
-# every existing call keeps reproducing the incompatible-runtime state.
-gate_decision() {
-  local hook="$1" payload="$2" from="${3:-$SYNTHETIC_EXISTING_ROOT}"
-  local out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
+# Prints the gate's permission decision, or "allow" when it emitted none, for a
+# gate executed from an ARBITRARY runtime root. gate_decision below pins the
+# 0.16.1 root every Part A check uses; the Part B checks vary the root, and both
+# share this one implementation so the stderr and decision handling cannot drift
+# apart between them.
+gate_decision_from() {
+  local root="$1" hook="$2" payload="$3" out="$TMP/doctor-gate.out" err="$TMP/doctor-gate.err"
   if printf '%s' "$payload" \
-      | CLAUDE_PLUGIN_ROOT="$from" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
-        bash "$from/hooks/$hook" >"$out" 2>"$err"; then
+        bash "$root/hooks/$hook" >"$out" 2>"$err"; then
     :
   else
     printf 'hook-exit-nonzero\n'
     return
   fi
   # stdout is the decision channel; stderr is NOT empty here by design. A failed
-  # bind makes the binder print "context plugin root does not match the executing
-  # plugin" before any gate decides, so requiring an empty stderr would grade
-  # every allow as a failure. Anything OTHER than that diagnostic — a crash, a
-  # node stack — still fails, so a real regression stays visible.
+  # bind makes the binder print its "context plugin root is neither the
+  # executing plugin nor a compatible upgrade of it" diagnostic before any gate
+  # decides, so requiring an empty stderr would grade every allow as a failure.
+  # Anything OTHER than that diagnostic — a crash, a node stack — still fails,
+  # so a real regression stays visible.
   if [ -s "$err" ] && grep -qv '^claude hook session binder: ' "$err"; then
     printf 'hook-stderr\n'
     return
@@ -438,6 +441,10 @@ gate_decision() {
       process.stdout.write(`${JSON.parse(raw).hookSpecificOutput?.permissionDecision || "allow"}\n`);
     } catch (_error) { process.stdout.write("unparseable\n"); }
   '
+}
+
+gate_decision() {
+  gate_decision_from "$SYNTHETIC_EXISTING_ROOT" "$1" "$2"
 }
 
 # The allowance is POSIX-only, and that is pinned per platform rather than
@@ -505,45 +512,364 @@ for DOCTOR_AGENT in zensu:review-aspect zensu:pr-review-worker; do
   fi
 done
 
-# Runtime lineage: which installation may serve a record it did not mint.
+# ---------------------------------------------------------------------------
+# Part B — compatible-lineage binding.
 #
-# $SESSION is still bound to the 0.17.0 candidate root. A patch sibling shares
-# that record's lineage and takes over the whole capability set, which is the
-# point — the session survives an update that lands underneath it instead of
-# denying every tool for the rest of its life. A minor bump does not, because
-# while major is 0 the minor number carries the breaking change, and the 0.16.1
-# check far above is the same rule in the backwards direction.
+# $SESSION above is bound to the 0.17.0 candidate root. Every check here serves
+# that same record from a DIFFERENT executing root and asks whether the session
+# survives. The 0.16.1 case is already pinned above and must keep denying; these
+# add the two directions it cannot observe.
 #
-# The non-sibling case is the one that cannot be inferred from the version
-# numbers: it is what keeps a working checkout declaring a compatible version
-# from adopting an installed session's record.
-SYNTHETIC_PATCH_ROOT="$(
+# The synthetic roots carry identical bytes and differ only in their declared
+# version, which is the point: the verdict must come from the declared lineage,
+# never from the code happening to match.
+# ---------------------------------------------------------------------------
+
+# Snapshot the record BYTES before any Part B call touches it. Comparing two
+# fields after the first binding would miss a rewrite of any other field, and
+# would miss one performed by the SubagentStart calls further down entirely.
+RECORD_BEFORE_PART_B="$(cat "$RECORD")"
+
+SYNTHETIC_COMPATIBLE_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.1 "$ROOT_REVISION"
 )"
-SYNTHETIC_MINOR_ROOT="$(
+SYNTHETIC_BREAKING_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.18.0 "$ROOT_REVISION"
 )"
+
+if runtime_roots_are_safe \
+      "$SYNTHETIC_CACHE_PARENT" \
+      "$SYNTHETIC_COMPATIBLE_ROOT" 0.17.1 \
+      "$SYNTHETIC_BREAKING_ROOT" 0.18.0 \
+    && [ "$SYNTHETIC_COMPATIBLE_ROOT" != "$SYNTHETIC_CANDIDATE_ROOT" ] \
+    && [ "$SYNTHETIC_BREAKING_ROOT" != "$SYNTHETIC_CANDIDATE_ROOT" ] \
+    && [ "$(tree_digest "$SYNTHETIC_COMPATIBLE_ROOT")" != "$(tree_digest "$SYNTHETIC_CANDIDATE_ROOT")" ]; then
+  check "Part B synthetic 0.17.1 and 0.18.0 runtimes occupy distinct roots" PASS
+else
+  check "Part B synthetic 0.17.1 and 0.18.0 runtimes occupy distinct roots" FAIL
+fi
+
+# AC-008 — the whole point of Part B: a patch-forward runtime serves the record.
+if [ "$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" pre-reviewer-capability-gate.sh "$TOOL_PAYLOAD")" = allow ]; then
+  check "AC-008 a 0.17.0 record binds to an executing 0.17.1 runtime" PASS
+else
+  check "AC-008 a 0.17.0 record binds to an executing 0.17.1 runtime" FAIL
+fi
+
+# AC-009 — the zero-major minor is the breaking axis, so this must still deny.
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$TOOL_PAYLOAD")" = deny ]; then
+  check "AC-009 a 0.17.0 record denies an executing 0.18.0 runtime" PASS
+else
+  check "AC-009 a 0.17.0 record denies an executing 0.18.0 runtime" FAIL
+fi
+
+# An ordinary Bash command is the discrimination test for AC-008: the doctor
+# allowance would let a Bash call through even on a denied bind, so a Bash
+# check that passed for THAT reason would prove nothing about the binding.
+COMPATIBLE_BASH="$(bash_payload "$SESSION" 'ls -la')"
+if [ "$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")" = allow ] \
+    && [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")" = deny ]; then
+  check "AC-008 an ordinary Bash command runs again under a compatible upgrade, and only there" PASS
+else
+  check "AC-008 an ordinary Bash command runs again under a compatible upgrade, and only there" FAIL
+fi
+
+# Every hook on the Bash matcher has to agree, for the same reason Part A
+# enumerates them: a deny from any one of them wins.
+BASH_MATCHER_HOOKS="$(
+  HOOKS_FILE="$SYNTHETIC_COMPATIBLE_ROOT/hooks/hooks.json" node -e '
+    const fs = require("node:fs");
+    const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
+    const names = new Set();
+    // A matcher is a REGEX, and a deny from any hook that matches "Bash" wins.
+    // An exact-string filter silently drops the ".*" capability gate — the very
+    // hook Part A above proves is decision-bearing for a Bash payload — and any
+    // future "Bash|Edit" alternation, so the check would report a working
+    // feature while never testing the gate that decides it.
+    for (const entry of config.hooks?.PreToolUse || []) {
+      let matches = false;
+      try {
+        matches = new RegExp(`^(?:${entry.matcher})$`).test("Bash");
+      } catch (_error) {
+        matches = entry.matcher === "Bash";
+      }
+      if (!matches) continue;
+      for (const hook of entry.hooks || []) {
+        const match = /hooks\/([A-Za-z0-9._-]+\.sh)/.exec(hook.command || "");
+        if (match) names.add(match[1]);
+      }
+    }
+    process.stdout.write([...names].join("\n"));
+  '
+)"
+if [ -z "$BASH_MATCHER_HOOKS" ]; then
+  check "AC-008 every Bash-matcher hook allows under a compatible upgrade (no hooks enumerated)" FAIL
+else
+  BASH_MATCHER_OK=1
+  for BASH_HOOK in $BASH_MATCHER_HOOKS; do
+    if [ "$(gate_decision_from "$SYNTHETIC_COMPATIBLE_ROOT" "$BASH_HOOK" "$COMPATIBLE_BASH")" != allow ]; then
+      BASH_MATCHER_OK=0
+      printf '    hook %s did not allow\n' "$BASH_HOOK"
+    fi
+  done
+  if [ "$BASH_MATCHER_OK" -eq 1 ]; then
+    check "AC-008 every Bash-matcher hook allows under a compatible upgrade" PASS
+  else
+    check "AC-008 every Bash-matcher hook allows under a compatible upgrade" FAIL
+  fi
+fi
+
+# AC-014 — the session has to survive its next compaction too, not only its
+# tool calls. A resume SessionStart re-reads the record from the new root.
+resume_payload() {
+  EVENT=SessionStart SESSION="$1" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      source: "resume",
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  '
+}
+# Prints "bound" on a clean success, "refused" ONLY when the hook failed with the
+# lineage diagnostic, and "other:<rc>" for any other nonzero exit. A bare `!= 0`
+# would be satisfied by a node crash or a missing fixture root, so the negative
+# arms below would pass while proving nothing about the version rule.
+session_start_verdict() {
+  local root="$1" payload="$2" rc=0
+  # The status is captured from the pipeline itself, NOT after an `if` compound:
+  # an `if` whose condition fails and which has no `else` exits 0, so `$?` read
+  # after `fi` would report 0 for every refusal and the other:<rc> label would
+  # never carry a real code.
+  printf '%s' "$payload" \
+    | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$root/hooks/session-start-session-control.sh" \
+      >"$TMP/partb-start.out" 2>"$TMP/partb-start.err" || rc=$?
+  if [ "$rc" -eq 0 ]; then
+    if [ -s "$TMP/partb-start.err" ]; then
+      printf 'bound-with-stderr\n'
+    else
+      printf 'bound\n'
+    fi
+    return
+  fi
+  if grep -qF 'plugin nor a compatible upgrade of it' "$TMP/partb-start.err"; then
+    printf 'refused\n'
+  else
+    printf 'other:%s\n' "$rc"
+  fi
+}
+RESUME_PAYLOAD="$(resume_payload "$SESSION")"
+RESUME_COMPATIBLE="$(session_start_verdict "$SYNTHETIC_COMPATIBLE_ROOT" "$RESUME_PAYLOAD")"
+RESUME_BREAKING="$(session_start_verdict "$SYNTHETIC_BREAKING_ROOT" "$RESUME_PAYLOAD")"
+if [ "$RESUME_COMPATIBLE" = bound ] && [ "$RESUME_BREAKING" = refused ]; then
+  check "AC-014 a resume SessionStart reuses the record under a compatible upgrade only" PASS
+else
+  check "AC-014 a resume SessionStart reuses the record under a compatible upgrade only (compatible=$RESUME_COMPATIBLE breaking=$RESUME_BREAKING)" FAIL
+fi
+
+# The rule compares DECLARED versions and never content, so a compatible-version
+# root whose hook bytes differ binds too. That is the accepted trade, and it is
+# pinned here so a later narrowing is deliberate rather than accidental.
+SYNTHETIC_ALTERED_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.1 "$ROOT_REVISION"
+)"
+printf '%s\n' '# altered runtime byte: the rule is version-declared, not content-addressed' \
+  >> "$SYNTHETIC_ALTERED_ROOT/hooks/lib/zensu-session.sh"
+if [ "$(tree_digest "$SYNTHETIC_ALTERED_ROOT")" != "$(tree_digest "$SYNTHETIC_COMPATIBLE_ROOT")" ] \
+    && [ "$(gate_decision_from "$SYNTHETIC_ALTERED_ROOT" pre-reviewer-capability-gate.sh "$COMPATIBLE_BASH")" = allow ]; then
+  check "a compatible-version root with ALTERED bytes still binds (accepted content-blindness)" PASS
+else
+  check "a compatible-version root with ALTERED bytes still binds (accepted content-blindness)" FAIL
+fi
+
+# AC-015 — the review chain fans out subagents, so SubagentStart has to bind too.
+subagent_payload() {
+  EVENT=SubagentStart SESSION="$1" CWD="$PROJECT" AGENT="$2" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      agent_type: process.env.AGENT,
+      agent_id: "agent-partb-1",
+    }));
+  '
+}
+SUBAGENT_PAYLOAD="$(subagent_payload "$SESSION" 'zensu:review-aspect')"
+SUB_COMPATIBLE="$(session_start_verdict "$SYNTHETIC_COMPATIBLE_ROOT" "$SUBAGENT_PAYLOAD")"
+SUB_BREAKING="$(session_start_verdict "$SYNTHETIC_BREAKING_ROOT" "$SUBAGENT_PAYLOAD")"
+if [ "$SUB_COMPATIBLE" = bound ] && [ "$SUB_BREAKING" = refused ]; then
+  check "AC-015 a SubagentStart binds to the parent record under a compatible upgrade only" PASS
+else
+  check "AC-015 a SubagentStart binds to the parent record under a compatible upgrade only (compatible=$SUB_COMPATIBLE breaking=$SUB_BREAKING)" FAIL
+fi
+
+# The record is an immutable anchor: nothing above may have rewritten it — not
+# the gate calls, not the resume, not the SubagentStart binds. Whole-file byte
+# comparison, and placed AFTER the last binding call rather than before it.
+if [ "$RECORD_BEFORE_PART_B" = "$(cat "$RECORD")" ]; then
+  check "AC-014 surviving a compatible upgrade never rewrites the record (byte-identical)" PASS
+else
+  check "AC-014 surviving a compatible upgrade never rewrites the record (byte-identical)" FAIL
+fi
+
+# The orphan predicate's own copy of the comparison (claude-hook-session-v1.js
+# resolveOrphanedProjectRoot) is lineage-relaxed too, and nothing else exercises
+# it across versions: test-orphaned-project-root.sh has no multi-version fixture,
+# so the case lives here where the synthetic roots already exist. Under an equal
+# root servesRecordedRuntime short-circuits before any manifest read, so that
+# suite alone cannot tell the new comparison from the old byte equality.
+ORPHAN_SESSION='versioned-upgrade-orphan-session'
+ORPHAN_PROJECT="$TMP/orphan-project"
+mkdir -p "$ORPHAN_PROJECT"
+ORPHAN_START="$(EVENT=SessionStart SESSION="$ORPHAN_SESSION" CWD="$ORPHAN_PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$ORPHAN_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$ORPHAN_PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" \
+    >/dev/null 2>&1
+rm -rf "$ORPHAN_PROJECT"
+orphan_predicate() {
+  local root="$1"
+  EVENT=PreToolUse SESSION="$ORPHAN_SESSION" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      tool_name: "Read",
+      tool_input: {file_path: "README.md"},
+    }));
+  ' | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$root/hooks/lib/claude-hook-session-v1.js" orphaned-project-root \
+      >/dev/null 2>&1 && printf 'orphaned\n' || printf 'not-orphaned\n'
+}
+if [ "$(orphan_predicate "$SYNTHETIC_CANDIDATE_ROOT")" = orphaned ] \
+    && [ "$(orphan_predicate "$SYNTHETIC_COMPATIBLE_ROOT")" = orphaned ] \
+    && [ "$(orphan_predicate "$SYNTHETIC_BREAKING_ROOT")" = not-orphaned ]; then
+  check "the orphaned-project-root predicate follows the same lineage rule" PASS
+else
+  check "the orphaned-project-root predicate follows the same lineage rule (equal=$(orphan_predicate "$SYNTHETIC_CANDIDATE_ROOT") compatible=$(orphan_predicate "$SYNTHETIC_COMPATIBLE_ROOT") breaking=$(orphan_predicate "$SYNTHETIC_BREAKING_ROOT"))" FAIL
+fi
+
+# Known gap 1, pinned as the CURRENT behavior rather than left accidental: the
+# review-evidence lease still compares its recorded plugin_root strictly, so a
+# lease minted before the upgrade is refused after it — and because listRecords
+# validates every record and propagates the first failure, that one record fails
+# every later lease operation for the session. Closing it needs a lease-schema
+# change (the record carries no plugin_version), so this asserts the refusal
+# exists and will fail loudly the day someone changes it silently.
+if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
+      "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
+    && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
+    && grep -qF 'Known gap 1' "$ROOT/CLAUDE.md"; then
+  check "the review-evidence lease keeps the strict comparison, documented as gap 1" PASS
+else
+  check "the review-evidence lease keeps the strict comparison, documented as gap 1" FAIL
+fi
+
+# AC-013 — a record and workflow document minted by the PREVIOUS RELEASE, from
+# that release's own committed bytes, must still validate under the current
+# tree. The synthetic roots above all carry the current tree at a relabelled
+# version, so none of them can observe schema drift across a real release.
+PREVIOUS_RELEASE_TAG=v0.17.3
+PREVIOUS_RELEASE_REVISION="$(
+  git -C "$ROOT" rev-parse --verify --quiet "${PREVIOUS_RELEASE_TAG}^{commit}" 2>/dev/null
+)"
+if [ -z "$PREVIOUS_RELEASE_REVISION" ]; then
+  # Not a PASS: reporting a skip as a pass makes "29 PASS" unable to distinguish
+  # "the cross-release schema check ran" from "it silently retired itself in a
+  # shallow clone". CI fetches with depth 0, so the tag is present there.
+  printf '  SKIP  %s\n' \
+    "AC-013 previous-release record validates under the current tree ($PREVIOUS_RELEASE_TAG not present)"
+  SKIPPED=$((SKIPPED + 1))
+else
+  GOLDEN_DATA="$TMP/golden-data/zensu-zensu"
+  GOLDEN_PROJECT="$TMP/golden-project"
+  GOLDEN_SESSION='versioned-upgrade-previous-release-session'
+  mkdir -p "$GOLDEN_DATA" "$GOLDEN_PROJECT"
+  GOLDEN_ROOT="$(
+    node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.17.3 \
+      "$PREVIOUS_RELEASE_REVISION"
+  )"
+  GOLDEN_START="$(EVENT=SessionStart SESSION="$GOLDEN_SESSION" CWD="$GOLDEN_PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      source: "startup",
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+    }));
+  ')"
+  if printf '%s' "$GOLDEN_START" \
+      | CLAUDE_PLUGIN_ROOT="$GOLDEN_ROOT" CLAUDE_PLUGIN_DATA="$GOLDEN_DATA" \
+        CLAUDE_PROJECT_DIR="$GOLDEN_PROJECT" \
+        bash "$GOLDEN_ROOT/hooks/session-start-session-control.sh" \
+        >"$TMP/golden-start.out" 2>"$TMP/golden-start.err"; then
+    GOLDEN_START_RC=0
+  else
+    GOLDEN_START_RC=$?
+  fi
+  GOLDEN_KEY="$(
+    node "$GOLDEN_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GOLDEN_SESSION"
+  )"
+  GOLDEN_RECORD="$GOLDEN_DATA/session-control/v1/records/$GOLDEN_KEY.json"
+  # Read the previous release's artifacts with the CURRENT tree's core: that is
+  # the direction that matters, and readContext revalidates the digest, the
+  # manifest version, the schema and the principal profiles as it goes.
+  if [ "$GOLDEN_START_RC" -eq 0 ] && [ -f "$GOLDEN_RECORD" ] \
+      && CORE="$ROOT/hooks/lib/session-control-core-v1.js" \
+         RECORDS_DIR="$GOLDEN_DATA/session-control/v1/records" \
+         SESSION_INPUT="$GOLDEN_SESSION" PROJECT_INPUT="$GOLDEN_PROJECT" node -e '
+        const core = require(process.env.CORE);
+        const context = core.readContext({
+          recordsDir: process.env.RECORDS_DIR,
+          sessionId: process.env.SESSION_INPUT,
+          expectedHost: "claude",
+        });
+        if (context.plugin_version !== "0.17.3") process.exit(1);
+        const state = core.readWorkflowState({
+          projectRoot: process.env.PROJECT_INPUT,
+          sessionId: process.env.SESSION_INPUT,
+        });
+        if (!state || typeof state.workflow_state !== "string") process.exit(1);
+      '; then
+    check "AC-013 a $PREVIOUS_RELEASE_TAG record and workflow document validate under the current tree" PASS
+  else
+    check "AC-013 a $PREVIOUS_RELEASE_TAG record and workflow document validate under the current tree" FAIL
+  fi
+fi
+
+# AC-011 — the predicate's own truth table. Driven from here rather than
+# registered separately: this suite is already in every profile, so the unit
+# file cannot be silently left out of a shard.
+LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
+if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1; then
+  check "AC-011 runtimeLineageCompatible unit suite passes" PASS
+else
+  check "AC-011 runtimeLineageCompatible unit suite passes" FAIL
+  sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
+fi
+
+# The non-sibling case is the one that cannot be inferred from the version
+# numbers: it is what keeps a working checkout declaring a compatible version
+# from adopting an installed session's record. servesRecordedRuntime requires
+# the executing root to sit beside the recorded one — every marketplace install
+# lands there, a development checkout does not.
 DETACHED_CACHE_PARENT="$TMP/checkout/zensu/zensu"
-DETACHED_PATCH_ROOT="$(
+DETACHED_COMPATIBLE_ROOT="$(
   node "$INSTALL_FIXTURE" "$ROOT" "$DETACHED_CACHE_PARENT" 0.17.1 "$ROOT_REVISION"
 )"
-
-LINEAGE_PAYLOAD="$(bash_payload "$SESSION" 'ls -la')"
-for LINEAGE_CASE in \
-  "compatible patch sibling|$SYNTHETIC_PATCH_ROOT|allow" \
-  "incompatible minor sibling|$SYNTHETIC_MINOR_ROOT|deny" \
-  "compatible version outside the install parent|$DETACHED_PATCH_ROOT|deny"; do
-  LINEAGE_LABEL="${LINEAGE_CASE%%|*}"
-  LINEAGE_REST="${LINEAGE_CASE#*|}"
-  LINEAGE_ROOT="${LINEAGE_REST%%|*}"
-  LINEAGE_EXPECTED="${LINEAGE_REST##*|}"
-  LINEAGE_SEEN="$(gate_decision pre-reviewer-capability-gate.sh "$LINEAGE_PAYLOAD" "$LINEAGE_ROOT")"
-  if [ "$LINEAGE_SEEN" = "$LINEAGE_EXPECTED" ]; then
-    check "an ordinary command from a $LINEAGE_LABEL is $LINEAGE_EXPECTED" PASS
-  else
-    check "an ordinary command from a $LINEAGE_LABEL is $LINEAGE_EXPECTED (got $LINEAGE_SEEN)" FAIL
-  fi
-done
+if [ "$(gate_decision_from "$DETACHED_COMPATIBLE_ROOT" pre-reviewer-capability-gate.sh "$TOOL_PAYLOAD")" = deny ]; then
+  check "a compatible version outside the install parent is denied" PASS
+else
+  check "a compatible version outside the install parent is denied" FAIL
+fi
 
 # Serving a record is not re-binding it. The record stays write-once and keeps
 # naming the runtime the session was bound to, which is what every attestation,
@@ -559,5 +885,6 @@ else
   check "a compatible runtime serves the record without rewriting it" FAIL
 fi
 
-printf '%s\n' '----' "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL"
+printf '%s\n' '----' \
+  "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"
 [ "$FAIL" -eq 0 ]

@@ -128,6 +128,7 @@
     "structure/test-zen-mode.sh": 20,
     "structure/test-zensu-help-skill.sh": 1,
     "structure/test-zensu-plm-arg-guidance.sh": 1,
-    "structure/test-zensu-runtime-controller.sh": 17
+    "structure/test-zensu-runtime-controller.sh": 17,
+    "structure/test-session-control-core.sh": 55
   }
 }
