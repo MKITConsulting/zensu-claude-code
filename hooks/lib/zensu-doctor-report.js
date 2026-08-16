@@ -272,6 +272,13 @@ function chainRows(entries) {
 // followed, no unbounded read. A file this cannot read is never counted as a
 // refusal — that would let a planted empty file manufacture a row recommending
 // the user widen permissions.
+// Distinct from `null` on purpose. The enforcer retires notes from every one of
+// its terminal paths, so a note disappearing between this report's directory
+// listing and this open is the DESIGN working, not a planted file — and the
+// rejected row tells the user the plugin did not write it and to delete it.
+// Accusing our own artifact over an expected race is the worse failure.
+var NOTE_MISSING = {};
+
 function readNoteJson(file) {
   var fd;
   try {
@@ -284,9 +291,18 @@ function readNoteJson(file) {
     var st = fs.fstatSync(fd);
     if (!st.isFile() || st.size > NOTE_MAX_BYTES) return null;
     var buf = Buffer.allocUnsafe(st.size);
-    var read = fs.readSync(fd, buf, 0, st.size, 0);
+    // Loop rather than a single readSync, matching readTail in
+    // reviewer-spawn-denial-v1.js. A short read would truncate the JSON, throw in
+    // JSON.parse, and land this plugin's own note in the "did not write it" row.
+    var read = 0;
+    while (read < st.size) {
+      var n = fs.readSync(fd, buf, read, st.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
     return JSON.parse(buf.toString('utf8', 0, read));
   } catch (e) {
+    if (e && e.code === 'ENOENT') return NOTE_MISSING;
     return null;
   } finally {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) { /* already closed */ } }
@@ -330,8 +346,23 @@ function reviewerDenialRows(entries, dir, nowMs) {
   var vettable = allowed.length > 0;
   notes.forEach(function (f) {
     var parsed = readNoteJson(path.join(dir, f));
+    // Retired between the directory listing and the open — count nothing.
+    if (parsed === NOTE_MISSING) return;
+    // A note is only this plugin's word if a session that could have written it
+    // still exists. Without this the note stands entirely on its own contents,
+    // and the state directory is writable from inside the session — so anything
+    // able to write there could mint a row telling the user to widen
+    // permissions for the very spawn the writer wants. The workflow document is
+    // the one sibling the writer cannot fabricate on its own.
+    var owner = /^reviewer-spawn-denied-(scv1_[a-f0-9]{64})\.json$/.exec(f);
+    if (!owner || entries.indexOf('tdd-phase-' + owner[1] + '.json') === -1) {
+      rejected += 1;
+      return;
+    }
     if (!parsed || parsed.schemaVersion !== 1 || typeof parsed.kind !== 'string'
-      || !Number.isFinite(parsed.detectedAtMs)
+      // Integer and positive, not merely finite: a timestamp the writer could
+      // never have produced is not evidence about the present.
+      || !Number.isInteger(parsed.detectedAtMs) || parsed.detectedAtMs <= 0
       || (vettable && parsed.kind !== '' && allowed.indexOf(parsed.kind) === -1)) {
       rejected += 1;
       return;
@@ -340,7 +371,14 @@ function reviewerDenialRows(entries, dir, nowMs) {
     // `_tdd_pending_file_stale` reads it the same way. Dropping this conjunct
     // would age every live note out instantly at that setting and suppress the
     // one actionable row this whole feature exists to render.
-    if (ttl > 0 && (nowMs - parsed.detectedAtMs) / 3600000 > ttl) {
+    //
+    // The future-timestamp arm closes the other side: a negative age never
+    // exceeds the TTL, so without it a clock that stepped backwards — or a
+    // planted stamp — makes the note immortal and keeps recommending a
+    // permission change for a refusal that is not current. Stale is the honest
+    // bucket: its own text already says the note says nothing about now.
+    if (ttl > 0 && (parsed.detectedAtMs > nowMs
+        || (nowMs - parsed.detectedAtMs) / 3600000 > ttl)) {
       stale += 1;
       return;
     }
@@ -354,10 +392,15 @@ function reviewerDenialRows(entries, dir, nowMs) {
     }).join(', ');
     line(WARN, 'state: ' + valid + ' session(s) where the host permission layer refused the '
       + 'zensu:code-reviewer spawn (' + summary + ') — no review ran and the chain cannot close on its own. '
-      + 'Allow it with the permissions.allow rule "Agent(zensu:code-reviewer)" in ~/.claude/settings.json '
-      + '(all projects) or the project\'s .claude/settings.local.json (this one), or leave '
-      + 'the permission mode that refused it, then re-run the review from the owning session. This note is '
-      + 'retired automatically once a spawn succeeds or the chain closes.');
+      // Names ONLY the user-scoped file, for the reason stop-chain-enforcer.sh
+      // gives where it builds the same remedy: the project-local spelling sits
+      // inside the session root and is a path the agent itself could write, so
+      // printing it beside the exact rule that grants the refused capability is
+      // an invitation. This row is read by the model too.
+      + 'Allow it with the permissions.allow rule "Agent(zensu:code-reviewer)" in ~/.claude/settings.json, '
+      + 'or leave the permission mode that refused it, then re-run the review from the owning session. '
+      + 'You have to apply this yourself — no agent may edit a settings file to widen its own permissions. '
+      + 'This note is retired automatically once a spawn succeeds or the chain closes.');
   }
   if (stale) {
     line(WARN, 'state: ' + stale + ' reviewer-spawn refusal note(s) older than ' + ttl + 'h — the session that '
@@ -366,7 +409,8 @@ function reviewerDenialRows(entries, dir, nowMs) {
   }
   if (rejected) {
     line(WARN, 'state: ' + rejected + ' reviewer-spawn note(s) this plugin did not write (unreadable, oversized, '
-      + 'or an unrecognized kind or schema) — NOT counted as refusals; delete them.');
+      + 'an unrecognized kind or schema, an impossible timestamp, or no matching session) — NOT counted as '
+      + 'refusals; delete them.');
   }
 }
 

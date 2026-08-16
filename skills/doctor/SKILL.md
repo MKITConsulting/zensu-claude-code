@@ -163,13 +163,18 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   chain-enforcer saw the refusal in the session transcript and left the note this
   row reads; the chain cannot close because no review ever ran. Report the
   remedy the row prints — the `permissions.allow` rule
-  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json` for every project or
-  the project's own `.claude/settings.local.json`, or leaving the permission
-  mode that refused it — and say plainly that the user has to apply it, since it
-  is a harness setting no agent can grant itself — and never edit a settings file
-  on their behalf to widen your own permissions. Never suggest `--chain-done` or
-  a fresh `/zensu:tdd` generation as the way past it: both would leave the change
-  unreviewed, and a new generation hits the same refusal. The note is retired
+  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, or leaving the
+  permission mode that refused it — and say plainly that the user has to apply it,
+  since it is a harness setting no agent can grant itself — and never edit a
+  settings file on their behalf to widen your own permissions. Name only the
+  user-scoped file, the way the row and the Stop reason both do: the project-local
+  spelling sits inside the session root and is a path you could write yourself, so
+  reciting it beside the rule that grants the capability you just lost is the one
+  thing this instruction exists to prevent. Never suggest `--chain-done` or a
+  fresh `/zensu:tdd` generation as the way past it *while the permission is still
+  missing*: both would leave the change unreviewed, and a new generation hits the
+  same refusal. Once the user has applied the rule, re-entering `/zensu:tdd` is
+  exactly what the cap-release message tells them to do. The note is retired
   automatically once a spawn succeeds or the chain closes, so a standing row means
   no reviewer has run since. A row whose kind reads `unknown` means this plugin
   root could not load the classifier module — report the refusal, not the kind.

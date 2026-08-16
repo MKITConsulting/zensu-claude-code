@@ -30,8 +30,17 @@
 // on both sides, so field order and separators are load-bearing.
 //
 // This module is a diagnostic, never a gate: `scanTranscript` never throws and
-// the CLI always exits 0. A verdict it cannot establish is `none`/`unreadable`,
-// which every caller must treat as "no detection, existing behavior stands".
+// the CLI always exits 0. A verdict it cannot establish is `none`/`unreadable`/
+// `errored`, which every caller must treat as "no detection, existing behavior
+// stands".
+//
+// `errored` exists because `clear` is a POSITIVE claim, not the absence of one,
+// and the shell acts on it by RETIRING the refusal note. A result that is keyed
+// to a reviewer spawn and carries the host's own `is_error` but matches no
+// marker is a refusal this module does not recognize — a reworded host message,
+// a subagent crash, a transport failure. Reporting that as `clear` would delete
+// a correct diagnosis written by an earlier, recognized refusal. It gets its own
+// verdict so callers can fall through instead, exactly as they do for `none`.
 
 const fs = require('node:fs');
 
@@ -45,6 +54,13 @@ const DENIAL_MARKERS = Object.freeze([
     text: 'Permission for this action has been denied.',
   }),
 ]);
+
+// The build the two literals above were read out of. Exported and pinned by the
+// unit suite against the header text, so the version cannot be edited in one
+// place and left stale in the other — a reworded host message is invisible to
+// every other check in this repo, and this is the line that forces a human to
+// re-verify rather than assume.
+const DENIAL_MARKERS_SOURCE_BUILD = '2.1.231';
 
 const REVIEWER_SUBAGENT_TYPE = 'zensu:code-reviewer';
 const SPAWN_TOOL_NAMES = Object.freeze(['Agent', 'Task']);
@@ -185,12 +201,20 @@ function scanTranscript(transcriptPath, options) {
       if (!toolName) continue;
       const marker = matchMarker(block);
       if (marker) denials += 1;
-      last = { toolName: toolName, kind: marker ? marker.kind : '' };
+      // The host's error flag is carried out separately from the marker match:
+      // together they are a refusal, but the flag ALONE is an error this module
+      // cannot classify, and that must not be reported as a clean spawn.
+      last = {
+        toolName: toolName,
+        kind: marker ? marker.kind : '',
+        isError: block.is_error === true,
+      };
     }
   }
 
   if (!last) return verdict('none', { subagentType: subagentType, spawns: spawns });
-  return verdict(last.kind ? 'blocked' : 'clear', {
+  const status = last.kind ? 'blocked' : (last.isError ? 'errored' : 'clear');
+  return verdict(status, {
     kind: last.kind,
     toolName: last.toolName,
     subagentType: subagentType,
@@ -224,10 +248,16 @@ function main(argv) {
 
 module.exports = {
   DENIAL_MARKERS: DENIAL_MARKERS,
+  DENIAL_MARKERS_SOURCE_BUILD: DENIAL_MARKERS_SOURCE_BUILD,
   REVIEWER_SUBAGENT_TYPE: REVIEWER_SUBAGENT_TYPE,
   SPAWN_TOOL_NAMES: SPAWN_TOOL_NAMES,
   MAX_TAIL_BYTES: MAX_TAIL_BYTES,
   MAX_LINES: MAX_LINES,
+  // Exported so the open flags can be pinned directly. The lstat shape guard in
+  // readTail answers first for a FIFO and for a symlink, so a test driving those
+  // paths exercises the guard and never reaches the open — leaving the flags
+  // themselves uncovered unless the composition is asserted here.
+  readOnlyFlags: readOnlyFlags,
   scanTranscript: scanTranscript,
   main: main,
 };

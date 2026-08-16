@@ -151,14 +151,57 @@ test('a result whose body STARTS with a marker but is not an error reports clear
   assert.equal(report.denials, 0);
 });
 
-test('an errored reviewer result that only mentions a marker mid-text reports clear', () => {
+// `errored`, NOT `clear`. The prefix rule still refuses to call this a denial —
+// that is condition 3 doing its job — but the host's own error flag is set, so
+// this is a refusal shape the module does not recognize, not a spawn that came
+// back fine. Reporting `clear` here would have the enforcer RETIRE a note an
+// earlier recognized refusal wrote, deleting a correct diagnosis.
+test('an errored reviewer result that only mentions a marker mid-text reports errored', () => {
   const file = transcript([
     toolUse('t1', REVIEWER),
     toolResult('t1', 'Agent failed. Context: ' + CLASSIFIER_TEXT, true),
   ]);
   const report = denial.scanTranscript(file);
-  assert.equal(report.status, 'clear');
+  assert.equal(report.status, 'errored');
   assert.equal(report.denials, 0);
+});
+
+// The other half of the same rule, with no marker text at all: any errored
+// reviewer result is `errored`. This is the shape a subagent crash or a
+// transport failure takes, and it is the one that used to erase the note.
+test('an errored reviewer result with no marker at all reports errored', () => {
+  const file = transcript([
+    toolUse('t1', REVIEWER),
+    toolResult('t1', 'Error: connection reset by peer', true),
+  ]);
+  const report = denial.scanTranscript(file);
+  assert.equal(report.status, 'errored');
+  assert.equal(report.denials, 0);
+});
+
+// The discriminator for the fix: same body, flag flipped. Only the flag decides
+// between the verdict the enforcer acts on and the one it must ignore.
+test('the error flag alone separates errored from clear', () => {
+  const body = 'Agent failed. Context: ' + CLASSIFIER_TEXT;
+  const errored = transcript([toolUse('t1', REVIEWER), toolResult('t1', body, true)]);
+  const clean = transcript([toolUse('t1', REVIEWER), toolResult('t1', body, false)]);
+  assert.equal(denial.scanTranscript(errored).status, 'errored');
+  assert.equal(denial.scanTranscript(clean).status, 'clear');
+});
+
+// A recognized refusal followed by an unrecognized error must NOT read as clear:
+// this is the exact sequence that deleted the note — refusal, user applies the
+// permission, retry dies for an unrelated reason.
+test('an unrecognized error after a real denial reports errored, never clear', () => {
+  const file = transcript([
+    toolUse('t1', REVIEWER),
+    toolResult('t1', CLASSIFIER_TEXT, true),
+    toolUse('t2', REVIEWER),
+    toolResult('t2', 'Error: subagent terminated unexpectedly', true),
+  ]);
+  const report = denial.scanTranscript(file);
+  assert.equal(report.status, 'errored');
+  assert.equal(report.denials, 1);
 });
 
 test('a denial keyed to a different subagent is not a reviewer denial', () => {
@@ -271,9 +314,12 @@ test('a symlinked transcript is refused rather than followed', (t) => {
   assert.equal(denial.scanTranscript(link).status, 'unreadable');
 });
 
-// The timeout is the point: dropping O_NONBLOCK would make the open hang on a
-// writerless FIFO, and an unbounded case would hang CI instead of failing it.
-test('a FIFO transcript is refused instead of blocking the open', { timeout: 5000 }, (t) => {
+// This exercises the lstat SHAPE GUARD, not O_NONBLOCK. `!pre.isFile()` answers
+// for a FIFO before readTail ever reaches the open, so the flag composition is
+// unreachable from here — see the flag test below, which asserts it directly.
+// The timeout stays: if the guard is ever removed, a writerless FIFO would hang
+// the open, and an unbounded case would hang CI instead of failing it.
+test('a FIFO transcript is refused by the lstat shape guard, before any open', { timeout: 5000 }, (t) => {
   if (process.platform === 'win32') return t.skip('no mkfifo on win32');
   const fifo = path.join(tmpRoot, 'fifo-transcript');
   try {
@@ -283,6 +329,38 @@ test('a FIFO transcript is refused instead of blocking the open', { timeout: 500
   }
   assert.ok(fs.lstatSync(fifo).isFIFO(), 'precondition: the path is a FIFO');
   assert.equal(denial.scanTranscript(fifo).status, 'unreadable');
+});
+
+// The open flags have no behavioral test that can reach them — both the symlink
+// and the FIFO case are answered by the lstat guard first — so they are pinned
+// on the composition itself. Without this, deleting either flag leaves the whole
+// suite green while the TOCTOU window between lstat and open reopens.
+test('the read flags carry O_NONBLOCK, and O_NOFOLLOW off win32', () => {
+  const flags = denial.readOnlyFlags();
+  assert.equal(typeof flags, 'number');
+  assert.equal(flags & fs.constants.O_ACCMODE, fs.constants.O_RDONLY);
+  if (Number.isInteger(fs.constants.O_NONBLOCK)) {
+    assert.notEqual(flags & fs.constants.O_NONBLOCK, 0, 'O_NONBLOCK must be set');
+  }
+  if (process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)) {
+    assert.notEqual(flags & fs.constants.O_NOFOLLOW, 0, 'O_NOFOLLOW must be set off win32');
+  }
+});
+
+// The two literals are the feature's entire premise, and they were read out of
+// one specific host build. Nothing else in this repo can notice a reword — the
+// scanner just stops matching and every check stays green. Pinning the version
+// against the header forces a human to re-verify when either is touched, rather
+// than letting the constant drift away from the provenance note beside it.
+test('the denial-marker provenance names the build the literals came from', () => {
+  const build = denial.DENIAL_MARKERS_SOURCE_BUILD;
+  assert.match(build, /^\d+\.\d+\.\d+$/);
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'hooks', 'lib', 'reviewer-spawn-denial-v1.js'), 'utf8');
+  const header = src.slice(0, src.indexOf('const fs = require'));
+  assert.ok(
+    header.includes('(' + build + ')'),
+    'the module header must name build ' + build + ' beside the literals it describes');
 });
 
 test('only the tail of an oversized transcript is scanned', () => {

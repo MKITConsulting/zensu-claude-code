@@ -218,24 +218,49 @@ STATE_FILE="$(tdd_state_file "$SESSION_ID")"
 # verdict leaves the existing routing exactly as it was.
 REVIEWER_DENIAL_STATUS=""
 REVIEWER_DENIAL_KIND=""
+REVIEWER_DENIALS=0
+# Set only by the branch that routes this Stop as a host refusal — see the mint
+# guard at the end of the file. Declared here so `set -u` holds on every path.
+REVIEWER_DENIAL_ROUTED=false
 reviewer_spawn_denial_probe() {
   local lib probe
   [ -n "$REVIEWER_DENIAL_STATUS" ] && return 0
   REVIEWER_DENIAL_STATUS="none"
   REVIEWER_DENIAL_KIND=""
+  REVIEWER_DENIALS=0
   lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/reviewer-spawn-denial-v1.js"
   [ -n "$TRANSCRIPT_PATH" ] || return 0
   [ -f "$lib" ] && [ ! -L "$lib" ] || return 0
-  probe="$(node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
+  # The byte and line clamps inside the module bound the WORK, not the wall
+  # clock, and O_NONBLOCK is a no-op for a regular file. The transcript path is
+  # host-supplied and lives outside the project root, so it can sit on stalled or
+  # network-backed storage while this runs on the Stop path with no deadline
+  # above it. A kill degrades exactly like every other probe failure: the
+  # existing `|| return 0` leaves the verdict `none` and routing untouched.
+  # `timeout` is absent on base macOS and some Git Bash installs, hence the guard.
+  if command -v timeout >/dev/null 2>&1; then
+    probe="$(timeout 5 node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
+  else
+    probe="$(node "$lib" --transcript "$TRANSCRIPT_PATH" 2>/dev/null)" || return 0
+  fi
   case "$probe" in
     'status=blocked '*) REVIEWER_DENIAL_STATUS="blocked" ;;
     'status=clear '*) REVIEWER_DENIAL_STATUS="clear" ;;
+    # `status=errored` and `status=unreadable` deliberately fall through here:
+    # neither is a verdict this hook may act on, so both leave `none`.
     *) return 0 ;;
   esac
   case "$probe" in
     *' kind=auto-mode-classifier '*) REVIEWER_DENIAL_KIND="auto-mode-classifier" ;;
     *' kind=permission-denied '*) REVIEWER_DENIAL_KIND="permission-denied" ;;
   esac
+  # `denials` is the LAST field of the contract line, so this suffix strip is
+  # exact and does not depend on the space-delimited globs above. It is what
+  # bounds the one-further-attempt sanction in the block reason: without a count,
+  # every blocked Stop re-licenses a retry and the reason becomes the naive loop
+  # it forbids two sentences earlier.
+  REVIEWER_DENIALS="${probe##* denials=}"
+  case "$REVIEWER_DENIALS" in ''|*[!0-9]*) REVIEWER_DENIALS=0 ;; esac
 }
 
 reviewer_spawn_denied() {
@@ -271,7 +296,11 @@ reviewer_denial_note_path() {
 reviewer_denial_note_clear() {
   local note
   note="$(reviewer_denial_note_path)" || return 0
-  rm -f "$note" "$note.tmp" 2>/dev/null || true
+  # The temp carries a per-process suffix (see the writer), so the glob is what
+  # reaps a crashed writer's leftover. An unmatched glob is silently ignored
+  # under `rm -f`, and the shape guard above has already pinned every character
+  # of the name, so this cannot widen past the intended file.
+  rm -f "$note" "$note".*.tmp 2>/dev/null || true
   return 0
 }
 
@@ -283,14 +312,24 @@ reviewer_denial_note() {
     # The state directory is writable from inside the session, so the note is
     # written the way every other record in it is: refuse a pre-planted link or
     # hard link outright, then land an exclusive temp file by rename.
+    # stdout is redirected too, not just stderr: this hook's stdout IS the Stop
+    # decision channel and this runs immediately before emit_block, so a single
+    # stray byte here would prefix the decision JSON and lose the block entirely.
     KIND="$REVIEWER_DENIAL_KIND" NOTE="$note" node -e '
       const fs=require("node:fs");
-      const note=process.env.NOTE, tmp=note+".tmp";
+      const note=process.env.NOTE;
+      // Per-process temp name. With a deterministic one, every writer unlinked
+      // it before creating it, so O_EXCL rejected nobody: two writers could each
+      // create their own inode and the losing rename published bytes that
+      // process never wrote. A private name means O_EXCL guards the create, and no
+      // process removes a path another process owns. It also removes the
+      // one-mkdir denial of service: a planted directory at the fixed .tmp made
+      // rmSync throw EISDIR and permanently silenced the note.
+      const tmp=note+"."+process.pid+".tmp";
       try {
         const st=fs.lstatSync(note);
         if(st.isSymbolicLink()||!st.isFile()||st.nlink!==1) process.exit(0);
       } catch (e) { if(e.code!=="ENOENT") process.exit(0); }
-      try { fs.rmSync(tmp,{force:true}); } catch (e) { process.exit(0); }
       try {
         const fd=fs.openSync(tmp,
           fs.constants.O_WRONLY|fs.constants.O_CREAT|fs.constants.O_EXCL, 0o600);
@@ -303,9 +342,10 @@ reviewer_denial_note() {
         fs.renameSync(tmp, note);
       } catch (e) {
         // A half-written temp file must not outlive the attempt that made it.
+        // Safe now that only this pid can name it.
         try { fs.rmSync(tmp,{force:true}); } catch (_) { /* nothing else to do */ }
       }
-    ' 2>/dev/null || true
+    ' >/dev/null 2>&1 || true
   elif [ "$REVIEWER_DENIAL_STATUS" = "clear" ]; then
     reviewer_denial_note_clear
   fi
@@ -807,6 +847,15 @@ if [ "$BLOCKS" -gt "$CAP" ]; then
   # report "no review ran" for a chain that already converged.
   if [ "$(tdd_code_review_done "$STATE_FILE")" != "true" ]; then
     reviewer_denial_note
+    # Emitted HERE, above the bound arms, because both of them exit before the
+    # standalone release message below. A bound Autopilot run whose spawn the
+    # host refused would otherwise be told only that the review "did not
+    # converge" — the sentence that sends the reader hunting inside Zensu, which
+    # is the outcome this diagnosis exists to prevent. The probe is memoized, so
+    # this costs no second transcript read.
+    if reviewer_spawn_denied; then
+      echo "zensu chain-enforcer: that chain never stalled inside Zensu — the zensu:code-reviewer spawn was refused by the host permission layer${REVIEWER_DENIAL_KIND:+ (${REVIEWER_DENIAL_KIND})}. Nothing was reviewed. The remedy is the user's to apply and no agent may apply it for them, least of all by editing a settings file itself: allow the spawn with the permissions.allow rule \"Agent(zensu:code-reviewer)\", or leave the permission mode that refused it. Then re-enter /zensu:tdd for the current task." >&2
+    fi
   else
     reviewer_denial_note_clear
   fi
@@ -821,11 +870,8 @@ if [ "$BLOCKS" -gt "$CAP" ]; then
     echo "zensu chain-enforcer: terminal self-review did not converge after ${BLOCKS} nudges (cap ${CAP}); releasing the standalone Inner guard. Run /zensu:reset-review-limit to re-arm this ticket-bound review generation, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
   else
     echo "zensu chain-enforcer: review chain did not converge after ${BLOCKS} nudges (cap ${CAP}); releasing the standalone Inner guard. This is a stalled pre-terminus chain, so /zensu:reset-review-limit is not applicable. Run /zensu:doctor (or /zensu:recover-chain) to read the chain shape and the command it names; only otherwise re-enter /zensu:tdd for the current task to start a fresh guarded chain, or set ZENSU_CHAIN=off explicitly. Any durable Outer run remains enforced." >&2
-    # The chain did not stall on its own: the host refused the spawn every time,
-    # so naming the chain shape alone would send the reader hunting inside Zensu.
-    if reviewer_spawn_denied; then
-      echo "zensu chain-enforcer: that chain never stalled inside Zensu — the zensu:code-reviewer spawn was refused by the host permission layer${REVIEWER_DENIAL_KIND:+ (${REVIEWER_DENIAL_KIND})}. Nothing was reviewed. The remedy is the user's to apply and no agent may apply it for them, least of all by editing a settings file itself: allow the spawn with the permissions.allow rule \"Agent(zensu:code-reviewer)\", or leave the permission mode that refused it. Then re-enter /zensu:tdd for the current task." >&2
-    fi
+    # The refusal diagnosis itself is emitted above, before the bound arms, so
+    # every cap sub-path carries it rather than the standalone one alone.
   fi
   outer_finish
   exit 0
@@ -921,6 +967,18 @@ if [ "$CODE_REVIEW_DONE" = "true" ]; then
   fi
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER}"
 elif reviewer_spawn_denied; then
+  # This branch fires on EVERY blocked Stop up to the cap, and the reason carries
+  # no memory of its own. Sanctioning "one further attempt" unconditionally
+  # therefore re-licenses a retry each time — the naive loop the same reason
+  # forbids two sentences earlier. The scanner already counts every refused
+  # reviewer result in the scanned tail, so a second refusal is observable:
+  # after it, the sanction is withdrawn instead of repeated.
+  REVIEWER_DENIAL_ROUTED=true
+  if [ "${REVIEWER_DENIALS:-0}" -ge 2 ]; then
+    DENIAL_RETRY_CLAUSE="A retry has already been spent and was refused again, so there is no attempt left to make: stop and report this to the user."
+  else
+    DENIAL_RETRY_CLAUSE="The ONE case for trying again: if the user says in this conversation that they have just applied it, make exactly ONE further spawn attempt — a second refusal means stop and say so."
+  fi
   # Names only the user-scoped file on purpose. The project-local spelling is a
   # path this very agent could write, and pointing at it — beside the exact rule
   # that grants the refused capability — is an invitation the prose below can
@@ -942,9 +1000,15 @@ elif reviewer_spawn_denied; then
       DENIAL_REMEDY="${DENIAL_RULE}, remove any deny rule that names the Agent tool, and check the permission mode this session runs in."
       ;;
   esac
-  REASON="STOP intercepted by zensu chain-enforcer. The zensu:code-reviewer spawn this chain needs was refused by the HOST permission layer, not by a Zensu gate: the most recent Agent call with subagent_type='zensu:code-reviewer' in this session's transcript came back refused, because ${DENIAL_CAUSE}. Spawning it again cannot succeed until that permission exists, so do NOT retry it in a loop, and do NOT reach for a terminus instead: an unqualified --chain-done would claim a review that never ran, and it refuses anyway while the worktree still reports a changed file. This is not something you can grant yourself — it is a harness setting outside the conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${DENIAL_REMEDY} Your next message MUST report this blocker to the user, naming the rule above, instead of retrying the spawn or inventing a review result; /zensu:doctor reports the same diagnosis from outside this turn. The ONE case for trying again: if the user says in this conversation that they have just applied it, make exactly ONE further spawn attempt — a second refusal means stop and say so. This guard is bounded and will not wedge the session, but nothing here has been reviewed yet. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
+  REASON="STOP intercepted by zensu chain-enforcer. The zensu:code-reviewer spawn this chain needs was refused by the HOST permission layer, not by a Zensu gate: the most recent Agent call with subagent_type='zensu:code-reviewer' in this session's transcript came back refused, because ${DENIAL_CAUSE}. Spawning it again cannot succeed until that permission exists, so do NOT retry it in a loop, and do NOT reach for a terminus instead: an unqualified --chain-done would claim a review that never ran, and it refuses anyway while the worktree still reports a changed file. This is not something you can grant yourself — it is a harness setting outside the conversation, so the user has to lift it, and you must never edit a settings file yourself to widen your own permissions. ${DENIAL_REMEDY} Your next message MUST report this blocker to the user, naming the rule above, instead of retrying the spawn or inventing a review result; /zensu:doctor reports the same diagnosis from outside this turn. ${DENIAL_RETRY_CLAUSE} This guard is bounded and will not wedge the session, but nothing here has been reviewed yet. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 else
+  # Reached by CONSULTING the probe — the `elif` above evaluated it and it said
+  # no — so this Stop is entitled to act on the verdict, and for a `clear` that
+  # means retiring a note an earlier refusal in this same session left behind.
+  # The self-review branch at the top of this ladder never evaluates the probe
+  # and therefore never sets this, which is the whole point of the flag.
+  REVIEWER_DENIAL_ROUTED=true
   REASON="STOP intercepted by zensu chain-enforcer. A main-thread TDD session finished implementation (or a fix round) but the zensu:code-reviewer chain has not completed. Resume the /zensu:tdd Phase 6 review sequence where it left off: fan out the five zensu:review-aspect agents over the changed files ('git diff --name-only HEAD'), merge their findings in-thread, run the zensu:review-judge second pass when hooks.reviewJudge is enabled (the default), run the Phase 6 step 4c Finding Verification Gate over the merged list when hooks.findingVerification is enabled (the default) and annotate every finding it does not confirm '[Unverified — do not fix]', issue a fresh review ticket, then your NEXT action MUST be the Agent tool with subagent_type='zensu:code-reviewer' ${INNER_REVIEW_HEADERS}${INNER_REVIEW_SUFFIX} the merged findings + build/test status. Do NOT end your turn, and do NOT fix anything inline first — the post-review hook routes findings back to you and sets chain completion on PASS or max rounds. Only valid exception: if implementation produced ZERO file changes, run: ${LOG_COMMAND} --chain-done${INNER_ZERO_CHANGE_ARGS}; then stop.${INNER_ZERO_CHANGE_NOTE}"
   REASON="${REASON} ${STATE_LEGEND} ${LEGEND_CLOSER_WITH_EXCEPTION}"
 fi
@@ -953,11 +1017,17 @@ if ! tdd_mark_pending_review_handoff "$SESSION_ID" "$DEFERRED_OWNER_PID" 2>/dev/
   emit_block "Zensu review-chain Stop denied: the review handoff lease could not be persisted safely. No actionable review instruction was emitted; repair storage and retry Stop."
   exit 0
 fi
-# Only a branch that actually consulted the probe may touch the note: the
-# self-review branch above never evaluates it, and minting a note there would
-# have /zensu:doctor report "no review ran" for a chain that already converged.
-case "$REVIEWER_DENIAL_STATUS" in
-  blocked|clear) reviewer_denial_note ;;
-esac
+# Only the branch that actually ROUTED this Stop as a refusal may touch the note.
+# Testing REVIEWER_DENIAL_STATUS instead would test "some branch happened to call
+# the memoizing probe" — true today only because one branch can, so adding a
+# probe call anywhere above for an unrelated message would silently start minting
+# notes on the converged path, with every existing check still green. The flag
+# says what the case was only implying.
+# An `if` rather than `[ ... ] && ...`: the short-circuit form leaves a non-zero
+# status on the false branch, which a later `set -e` would turn into an exit
+# right before the block is emitted.
+if [ "$REVIEWER_DENIAL_ROUTED" = "true" ]; then
+  reviewer_denial_note
+fi
 emit_block "$REASON"
 exit 0

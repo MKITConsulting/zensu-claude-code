@@ -62,6 +62,37 @@ start_session() {
   STARTED_PROJECT_ROOT="$ZENSU_PROJECT_ROOT"
 }
 
+# The scanner's own properties — structural keying by tool_use_id, the host
+# error flag, the tail bound, and every degrade-to-none failure mode — cannot be
+# observed through the hook. Drive its unit suite from here so the tree runner,
+# which only discovers tests/structure/test-*.sh, still covers them. Exit 0
+# alone would also accept a file that registers zero cases, so the pass count is
+# asserted too, and a failure prints which case failed.
+#
+# Deliberately FIRST, before any scenario. This suite is the most expensive one
+# in the Windows profile, and a TIMED_OUT shard still reports every check it
+# reached — so whatever sits at the tail is what silently goes unverified. At the
+# tail this was the entire unit suite, the only coverage those properties have
+# anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
+UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
+if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
+  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
+  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^. tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
+  case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
+  case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
+  # The total is the real floor; the pass floor is lower because the symlink and
+  # FIFO cases skip themselves where the platform cannot create one.
+  if [ "$UNIT_TOTAL" -ge 29 ] && [ "$UNIT_PASS" -ge 27 ]; then
+    check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
+  else
+    check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases" FAIL
+  fi
+else
+  echo "--- reviewer-spawn-denial-v1 unit failures ---"
+  grep -B2 -A 20 '^not ok' "$UNIT_OUT" | head -60
+  check "T26 reviewer-spawn-denial-v1 unit suite passes" FAIL
+fi
+
 # --- Scenario 1: codeReviewDone=false -> force code-reviewer (unchanged) ---
 SID1_RAW="stop-cr-pending"
 start_session "$SID1_RAW"
@@ -350,11 +381,15 @@ fi
 # its own claim against the worktree. Closing a chain that HAS changes would
 # claim a review that never ran, and the reason must say so. The release
 # threshold is deliberately not disclosed: a count is a wait-it-out recipe.
+# The negative asserts the SHAPE of a leak, not one phrasing — $CAP and $BLOCKS
+# are both in scope where the reason is built, so any wording that interpolates
+# either has to fail here. A regex naming a sentence the code never emits (the
+# earlier spelling) is satisfied unconditionally and pins nothing at all.
 if printf '%s' "$REASON7" | grep -qF 'would claim a review that never ran' \
   && printf '%s' "$REASON7" | grep -qF 'Only valid exception: if implementation produced ZERO file changes' \
   && printf '%s' "$REASON7" | grep -qF 'That terminus verifies the claim before it closes anything' \
   && printf '%s' "$REASON7" | grep -qF 'This guard is bounded and will not wedge the session' \
-  && ! printf '%s' "$REASON7" | grep -qE 'releases itself after [0-9]+ Stop nudges'; then
+  && ! printf '%s' "$REASON7" | grep -qE '\(cap [0-9]+\)|[0-9]+ (Stop )?nudges'; then
   check "T15 denial reason keeps only the worktree-verified zero-change exit and discloses no cap count" PASS
 else
   check "T15 denial reason keeps only the worktree-verified zero-change exit and discloses no cap count" FAIL
@@ -579,6 +614,28 @@ else
   check "T29 a Stop with no armed chain retires a leftover note" FAIL
 fi
 
+# The remaining clearing exit, and the one no scenario reached: a chain that was
+# armed but whose implementation never completed. Every other session in this
+# file runs --tdd-begin AND --tdd-complete, so the `implComplete != true` branch
+# was unreachable from here — while being exactly the state a user leaves behind
+# by abandoning a run after a refusal, and the state in which nothing else can
+# ever remove the note.
+SID15_RAW="stop-reviewer-denied-impl-incomplete"
+start_session "$SID15_RAW"
+SID15="$STARTED_SESSION_KEY"
+SID15_PROJECT="$STARTED_PROJECT_ROOT"
+SIDECAR15="$SID15_PROJECT/.zensu/state/reviewer-spawn-denied-$SID15.json"
+bash "$LOG" --tdd-begin --session "$SID15" >/dev/null
+mkdir -p "$SID15_PROJECT/.zensu/state"
+printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":1}\n' > "$SIDECAR15"
+PRE15="absent"; [ -f "$SIDECAR15" ] && PRE15="present"
+stop_run '{"session_id":"'"$SID15_RAW"'"}' >/dev/null
+if [ "$PRE15" = "present" ] && [ ! -f "$SIDECAR15" ]; then
+  check "T32 an armed chain with implementation unfinished retires a leftover note" PASS
+else
+  check "T32 an armed chain with implementation unfinished retires a leftover note (pre=$PRE15)" FAIL
+fi
+
 # The cap path consults the probe ABOVE the codeReviewDone split, so it needs its
 # own guard: a reviewer re-spawned against the self-review directive and refused
 # there must not leave doctor reporting "no review ran" for a converged chain.
@@ -641,31 +698,6 @@ case "$DOC_OUT" in
     check "T25 /zensu:doctor renders the note the hook itself wrote" PASS ;;
   *) check "T25 /zensu:doctor renders the note the hook itself wrote (got: $DOC_OUT)" FAIL ;;
 esac
-
-# The scanner's own properties — structural keying by tool_use_id, the host
-# error flag, the tail bound, and every degrade-to-none failure mode — cannot be
-# observed through the hook. Drive its unit suite from here so the tree runner,
-# which only discovers tests/structure/test-*.sh, still covers them. Exit 0
-# alone would also accept a file that registers zero cases, so the pass count is
-# asserted too, and a failure prints which case failed.
-UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
-if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
-  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^. tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
-  case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
-  # The total is the real floor; the pass floor is lower because the symlink and
-  # FIFO cases skip themselves where the platform cannot create one.
-  if [ "$UNIT_TOTAL" -ge 24 ] && [ "$UNIT_PASS" -ge 22 ]; then
-    check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
-  else
-    check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases" FAIL
-  fi
-else
-  echo "--- reviewer-spawn-denial-v1 unit failures ---"
-  grep -B2 -A 20 '^not ok' "$UNIT_OUT" | head -60
-  check "T26 reviewer-spawn-denial-v1 unit suite passes" FAIL
-fi
 
 start_session "stop-routing-restore"
 

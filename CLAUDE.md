@@ -522,11 +522,13 @@ permission layer refuses that spawn, the call never executes — so no PreToolUs
 or PostToolUse hook can see it, and without this module the enforcer repeats an
 impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
 
-Four things are coupled and must move together:
+Five things are coupled and must move together:
 
 - **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
-  binary (2.1.231: `Permission for this action was denied by the Claude Code auto
-  mode classifier.` and `Permission for this action has been denied.`). They are
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  denied by the Claude Code auto mode classifier.` and `Permission for this action
+  has been denied.`). The build is exported and pinned against the module header,
+  so the constant cannot drift away from the provenance note beside it. They are
   matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
   that rewords them silently disables the diagnosis — re-verify against the
   binary, never against memory, and keep the `kind` values in step with the
@@ -551,7 +553,16 @@ Four things are coupled and must move together:
   `*.test.js` with no driver is never executed by the tree runner. That driver
   charges the unit suite's runtime to this shard's Windows budget
   (`tests/profiles/windows-ci.v1.json`, `stop-enforcer-self-review-routing`), where
-  a `TIMED_OUT` means the tail of the file — every check added here — never ran.
+  a `TIMED_OUT` means the tail of the file never ran. The driver therefore runs
+  FIRST in that file, before any scenario: it needs only `PLUGIN_DIR` and
+  `STATE_DIR`, and at the tail a timeout cost the whole unit suite — the only
+  coverage the scanner's own properties have anywhere.
+- **The note is only this plugin's word when a session backs it.** `reviewerDenialRows`
+  requires `tdd-phase-<same key>.json` beside the note before counting it. The state
+  directory is writable from inside the session, so a note judged purely on its own
+  contents would let anything able to write there mint a row telling the user to widen
+  `permissions.allow` for the very spawn it wants. Change the workflow-document name and
+  the binding silently stops matching; `P1qq` is the pin.
 
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
@@ -583,21 +594,32 @@ implementation not complete, chain closed), both inner-guard escapes
 escape branch, and the BLOCKED-outer release that owns the current inner
 generation — plus the cap path once the chain has converged, and the writing path
 itself on a `clear` verdict. Treat that as the rule, not the list: a NEW release
-path added above the routing branches needs the same call. T23/T29/T30/T31 pin the
-reachable ones; the Autopilot-escape and BLOCKED-outer sites are unpinned.
+path added above the routing branches needs the same call. T23/T29/T30/T31/T32 pin
+the reachable ones; the Autopilot-escape and BLOCKED-outer sites are unpinned.
+An `errored` verdict retires NOTHING, deliberately: it means the module could not
+tell whether the spawn was refused, and clearing on it would delete a correct
+diagnosis whenever a retry died of something else.
 
 **A converged chain must never mint a note — and must not inherit one either.**
 The self-review branch retires any note first, because a refusal EARLIER in the
 same session is stale the moment a spawn succeeds, and that branch never consults
 the probe, so nothing below it would clear one. BOTH write sites enforce the
-minting half separately. The routing site is a `case` on `REVIEWER_DENIAL_STATUS` rather than an
-unconditional call, because the self-review branch never evaluates the probe. The
+minting half separately. The routing site is guarded by `REVIEWER_DENIAL_ROUTED`, a
+flag both arms of the routing ladder set and the self-review branch never does.
+Testing the probe's STATUS there instead would test "some branch happened to consult
+the probe" — true today only because one branch can, so a probe call added anywhere
+above for an unrelated message would silently start minting notes on the converged
+path with every check still green. The
 cap-release site sits ABOVE that branch and does consult the probe, so it is guarded
 by `tdd_code_review_done` by hand: a model that re-spawns the reviewer against the
 self-review directive and has THAT refused would otherwise leave doctor reporting
 "no review ran" for a chain that had already converged. A session that never Stops
 again still cannot clear its own note, so `reviewerDenialRows` ages one out against
-the same TTL `pending-review.json` uses. T23/T27/T29 and P1qg are the pins.
+the same TTL `pending-review.json` uses — in BOTH directions, since a timestamp in
+the future yields a negative age that never crosses the bound. T23/T27/T29 and
+P1qg/P1qm/P1qn/P1qo are the pins. **Known gap:** nothing reaps the note of a session
+that ended; the TTL suppresses the row but the file stays, and the doctor is
+read-only by contract.
 
 **The note path is anchored on `PROJECT_ROOT`, never on `TDD_STATE_DIR`.** That
 variable is a retired ambient root the repo pins as non-authoritative, and the only

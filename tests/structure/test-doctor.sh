@@ -398,6 +398,15 @@ NOTE_A="$STATE_DIR_CANON/reviewer-spawn-denied-${DENY_KEY_A}.json"
 NOTE_B="$STATE_DIR_CANON/reviewer-spawn-denied-${DENY_KEY_B}.json"
 NOW_MS="$(node -e 'process.stdout.write(String(Date.now()))')"
 note_json() { printf '{"schemaVersion":%s,"kind":"%s","subagentType":"zensu:code-reviewer","detectedAtMs":%s}\n' "$1" "$2" "${3:-$NOW_MS}"; }
+# A note counts only when a workflow document for the SAME session sits beside
+# it. Without that binding the note stands entirely on its own contents — and
+# this directory is writable from inside the session, so anything able to write
+# here could mint a row telling the user to widen permissions for the very spawn
+# it wants. Every fixture below plants the sibling; the unbound case is pinned on
+# its own at P1qq.
+deny_session_doc() { : > "$STATE_DIR_CANON/tdd-phase-$1.json"; }
+deny_session_doc "$DENY_KEY_A"
+deny_session_doc "$DENY_KEY_B"
 note_json 1 auto-mode-classifier > "$NOTE_A"
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in
@@ -456,6 +465,39 @@ case "$OUT" in
   *'2 session(s) where the host permission layer refused'*) check "P1qh a TTL of 0 disables the age-out rather than staling every note" PASS ;;
   *) check "P1qh a TTL of 0 disables the age-out (got: $OUT)" FAIL ;;
 esac
+# The TTL comparison was one-sided: a negative age never exceeds the bound, so a
+# timestamp the writer could not have produced made the note immortal and kept
+# recommending a permission change for a refusal that is not current. Reachable
+# without an attacker — a clock stepped backwards does it. Stale is the honest
+# bucket; that row's own text already says the note describes nothing current.
+note_json 1 auto-mode-classifier "$((NOW_MS + 86400000))" > "$NOTE_B"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn refusal note(s) older than'*)
+    check "P1qm a timestamp in the future ages out instead of living forever" PASS ;;
+  *) check "P1qm future timestamp is not immortal (got: $OUT)" FAIL ;;
+esac
+# The TTL was sampled only at the extremes — now and the epoch — so the bound
+# itself was never exercised and a `>` flipped to `>=`, or an off-by-one-hour
+# error in the division, would have stayed green. These two drive a FIXED clock
+# so the cases sit exactly on and exactly past the boundary rather than racing
+# the wall clock. ZDOC_NOW_MS is the override the pending-review checks below
+# already rely on.
+TTL_BOUND_MS=$((NOW_MS - 6 * 3600000))
+note_json 1 auto-mode-classifier "$TTL_BOUND_MS" > "$NOTE_B"
+OUT="$(ZDOC_NOW_MS="$NOW_MS" run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'2 session(s) where the host permission layer refused'*)
+    check "P1qn a note exactly at the TTL bound is still live" PASS ;;
+  *) check "P1qn note at the TTL bound stays live (got: $OUT)" FAIL ;;
+esac
+note_json 1 auto-mode-classifier "$((TTL_BOUND_MS - 1))" > "$NOTE_B"
+OUT="$(ZDOC_NOW_MS="$NOW_MS" run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'1 reviewer-spawn refusal note(s) older than'*)
+    check "P1qo one millisecond past the TTL bound ages out" PASS ;;
+  *) check "P1qo one ms past the TTL bound is stale (got: $OUT)" FAIL ;;
+esac
 # `isFinite` would coerce a quoted timestamp into a fresh one and count a note
 # the writer never wrote as a live refusal; `Number.isFinite` rejects it.
 printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":"%s"}\n' "$NOW_MS" > "$NOTE_B"
@@ -480,6 +522,23 @@ if ln "$NOTE_A" "$NOTE_B" 2>/dev/null; then
     *) check "P1qk hard-linked note rejected (got: $OUT)" FAIL ;;
   esac
   rm -f "$NOTE_B"
+  # The binding itself: a perfectly well-formed note whose session has no
+  # workflow document beside it. Every other rejection case here is malformed in
+  # some way, so without this the accept path rested entirely on the note's own
+  # contents — and this directory is writable from inside the session, which
+  # makes "widen your permissions" a row an agent could manufacture for itself.
+  note_json 1 auto-mode-classifier > "$NOTE_B"
+  rm -f "$STATE_DIR_CANON/tdd-phase-${DENY_KEY_B}.json"
+  OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+  case "$OUT" in
+    *'2 session(s) where the host permission layer refused'*)
+      check "P1qq a well-formed note with no matching session is counted as a refusal (got: $OUT)" FAIL ;;
+    *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn note(s) this plugin did not write'*)
+      check "P1qq a well-formed note with no matching session is rejected, not counted" PASS ;;
+    *) check "P1qq unbound note rejected (got: $OUT)" FAIL ;;
+  esac
+  rm -f "$NOTE_B"
+  deny_session_doc "$DENY_KEY_B"
 else
   check "P1qk hard links unavailable on this filesystem — skipped" PASS
 fi
