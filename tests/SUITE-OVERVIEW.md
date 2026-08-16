@@ -12,7 +12,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **131** — 124 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **124 structure suites + 5 offline evals = 129 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 131 − 124 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | **16 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -24,8 +25,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 127 structure suites + 5 offline evals | none |
-| `--ci` | 120 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 131 structure suites + 5 offline evals | none |
+| `--ci` | 124 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -48,8 +49,9 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (12)
-`session-control-claude` · `session-control-sandbox-hook-integration` · `session-id-v1` ·
+### Session Control & workflow state (13)
+`orphaned-project-root` · `session-control-claude` ·
+`session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `versioned-plugin-upgrade` · `workflow-scope` ·
@@ -63,10 +65,11 @@ assertions.
 
 ### TDD engine & phase gate (14)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
-`pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
-`tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
-`tdd-protocol-prominence` · `tdd-reminder-hook` · `tdd-skill-review-fanout` ·
-`tdd-skill-self-review-handoff` · `tdd-vanilla-mode`
+`pretool-config-prompts` · `smoke-main-thread-chain` ·
+`tdd-begin-chain-reset` · `tdd-complete-receipt-gate` · `tdd-full-cycle` ·
+`tdd-manager-patches` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
+`tdd-skill-review-fanout` · `tdd-skill-self-review-handoff` ·
+`tdd-vanilla-mode`
 
 Covers arming (`--tdd-begin`), the PreToolUse edit phase-gate, the RED→GREEN→IMPL
 lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
@@ -74,16 +77,19 @@ lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 retained), the edit-landing receipt required by `--tdd-complete`, and the 5-agent
 review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (25)
-`chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
-`deferred-review-fallback` · `finding-verification` · `pending-review-ttl` ·
+### Review chain & findings (26)
+`chain-recover` · `chain-terminus-zero-change-gate` ·
+`deferred-review-claim` · `deferred-review-fallback` · `evidence-crosscheck` ·
+`finding-verification` · `pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
-`post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
-`reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
-`review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
-`reviewer-readonly-v1` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
-`stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
-`stop-enforcer-subagent-noop` · `stop-session-binding-recovery`
+`post-review-self-review-handoff` · `post-review-tdd-scope` ·
+`reset-review-limit-skill` · `reset-review-limit-transaction` ·
+`review-aspect-agent` · `review-judge` · `review-personas` ·
+`review-worker-evidence-lease` · `reviewer-capability-gate` ·
+`reviewer-readonly-v1` · `self-review-flags` · `self-review-markers` ·
+`self-review-skill` · `stop-enforcer-escapes` ·
+`stop-enforcer-self-review-routing` · `stop-enforcer-subagent-noop` ·
+`stop-session-binding-recovery`
 
 The largest group. Covers the Stop-hook chain enforcer and its two-stage routing
 (code-reviewer → self-review), its escape hatches and anti-deadlock budget cap, the
@@ -96,11 +102,11 @@ unqualified chain terminus.
 ### Autopilot (15)
 `autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
 `autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
-`autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·
-`autopilot-inner-termination` · `autopilot-plan-delegate` ·
-`autopilot-post-review-max-rounds` · `autopilot-review-rearm` ·
-`autopilot-session-resume` · `autopilot-skill` · `autopilot-state-machine` ·
-`autopilot-stop-enforcer`
+`autopilot-durable-skill` · `autopilot-full-cycle` ·
+`autopilot-id-and-start-boundaries` · `autopilot-inner-termination` ·
+`autopilot-plan-delegate` · `autopilot-post-review-max-rounds` ·
+`autopilot-review-rearm` · `autopilot-session-resume` · `autopilot-skill` ·
+`autopilot-state-machine` · `autopilot-stop-enforcer`
 
 Covers the durable outer state machine (schema, transitions, idempotency, storage —
 ~132 assertions), inner-TDD ↔ outer-Autopilot linkage and crash reconciliation,
@@ -109,8 +115,9 @@ rearm/retirement, the read-only SessionStart resume hook, and a composed full-li
 walk.
 
 ### Bash gates, witness & secrets (7)
-`bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` · `post-bash-witness` ·
-`secret-scan-gate` · `skill-workflow-markers` · `witness-scenario-assertions`
+`bash-source-write-gate` · `bash-zensu-gate` · `bypass-ledger` ·
+`post-bash-witness` · `secret-scan-gate` · `skill-workflow-markers` ·
+`witness-scenario-assertions`
 
 Covers the PreToolUse(Bash) source-write gate incl. rule (C) git-repo escape
 (183 probe cases + a 30-case pure unit suite), the `zensu <noun> <verb>` write gate,
@@ -119,37 +126,41 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
 ### Skill contracts (17)
-`converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
-`ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `setup-skill` · `skill-overlays` ·
-`templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` ·
+`doctor` · `ghost-scan-test-detection` · `pilot-skill` ·
+`plan-requirement-ids` · `plan-review-skill` · `pr-fix-findings-skill` ·
+`pr-team-review-skill` · `setup-skill` · `skill-overlays` · `templates` ·
+`verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
 consistency. Heaviest: `pr-team-review-skill` (~121), `verify-feature-skill` (~117).
 
-### Prompt routing & payloads (6)
-`agent-context` · `context-nudge-hook` · `intent-router-hook` · `plan-approved-delegate` ·
-`plan-payload-fallback` · `zensu-plm-arg-guidance`
+### Prompt routing & payloads (7)
+`agent-context` · `best-solution-first` · `context-nudge-hook` ·
+`intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
+`zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, and how the PostToolUse(ExitPlanMode)
 delegate reads the approved plan (with a distinct receipt for each failure mode).
 
 ### VCS / forge integration (7)
-`valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` · `vcs-reconcile` ·
-`vcs-review-marker-reconcile` · `workflow-checkout-credentials`
+`valid-diff-lines` · `vcs-detect` · `vcs-pr-ops` · `vcs-publish` ·
+`vcs-reconcile` · `vcs-review-marker-reconcile` ·
+`workflow-checkout-credentials`
 
 GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (13)
-`changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
-`file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
-`promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
+### Release & repo hygiene (14)
+`changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` ·
+`drift-audit-regex` · `file-exists-replacement` · `gitignore-zensu` ·
+`immutable-marketplace-release` · `promptfoo-config-refs` ·
+`promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
-`run-all-required-offline-suites` · `version-sync`
+`run-all-required-offline-suites` · `run-all-sharding` · `version-sync`
 
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
 invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
@@ -164,9 +175,10 @@ Git-Bash/MSYS path translation boundaries, native-Node module loading from a plu
 root containing whitespace and an apostrophe, and the Windows CI manifest contract.
 
 ### Promptfoo local-only (7 — skipped under `--ci`)
-`claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
-`promptfoo-reset-review-limit` · `promptfoo-session-upgrade` (~206) ·
-`promptfoo-verify-feature` · `promptfoo-zen-mode`
+`claude-promptfoo-wrapper` · `promptfoo-concurrency` ·
+`promptfoo-context-nudge-reaction` · `promptfoo-reset-review-limit` ·
+`promptfoo-session-upgrade` · `promptfoo-verify-feature` ·
+`promptfoo-zen-mode`
 
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.

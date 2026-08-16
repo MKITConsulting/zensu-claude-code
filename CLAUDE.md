@@ -71,6 +71,20 @@ otherwise be served by a runtime that cannot read what it wrote:
   `deferredReviewCancellation`, and every other validator that rejects an
   unknown or missing key rather than ignoring it;
 - **removing or renaming a registered hook, or changing a hook's matcher**;
+  **adding** one is NOT in this list and is a `patch`. The argument has two halves
+  and the second is the load-bearing one. First, `runtimeLineageCompatible`
+  compares version tuples only and never inspects the hook inventory, an older
+  harness never loads a hook its own `hooks.json` does not declare, and the new
+  hook is invoked from the tree that declares it. Second — and this is the part a
+  reader will otherwise miss — adding a file DOES change the runtime digest, since
+  `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale; what keeps an
+  in-flight bind alive is that `readContextInternal` measures the **recorded**
+  root, and the upgraded case re-measures the executing tree against the caller's
+  claim rather than against the record. A new permissively-read config key is
+  likewise non-breaking — `zensu_hook_enabled` tests only
+  `j.hooks[key] === false`, so an older runtime ignores a key it does not know
+  rather than failing on it. Do not over-bump defensively; do re-derive this if
+  the added hook writes session state or participates in a strict key set;
 - the **attestation shape**, which is itself a schema two versions must agree
   on. A change to it has to ship in the release that *introduces* the policy it
   serves, never one release later.

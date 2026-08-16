@@ -23,6 +23,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -432,6 +433,26 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The best-solution-first rule reader is the third file carrying a hardened open,
+# and it is enrolled here for the reason stated above: every count pin in this
+# suite is per-file, so a NEW file carrying a secure open is invisible until it is
+# named. It deliberately omits the reference's `nlink !== 1` clause — its path is
+# fixed under the executing plugin root rather than payload-named, so a hard link
+# is not a way to reach a file the symlink check refuses, and refusing one would
+# silently disable the rule on any install that materializes files by hard link.
+# That omission is pinned as a negative so it cannot be reintroduced by accident.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
+  && [ "$(grep -cF 'const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
+  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$BEST_SOLUTION_HOOK" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$BEST_SOLUTION_HOOK" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$BEST_SOLUTION_HOOK" \
+  && ! grep -vE '^\s*//' "$BEST_SOLUTION_HOOK" | grep -qF 'nlink'; then
+  check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" PASS
+else
+  check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

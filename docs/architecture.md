@@ -108,6 +108,58 @@ That cross-check is `hooks/lib/zensu-evidence-crosscheck.js`, and it is code for
 
 Moving it into a library fixes that and adds what the prose never had: a witness entry that is itself a log write cannot corroborate anything, matching is equality rather than containment, the format is decoded rather than pattern-scraped, a missing witness log fails closed, and the verdict is a deterministic exit code. `/zensu:tdd` Phase 6 and the terminal `/zensu:self-review` report both call it instead of describing it, and `tests/structure/test-evidence-crosscheck.sh` pins each of those properties — including the log-write exclusion — against fixtures. The lesson generalizes past this one check: a correct procedure that a model re-executes from prose each run is not yet enforcement.
 
+## Best Solution First
+
+A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session. A third such rule belongs here too — and one already exists without following it:
+`hooks/user-prompt-zen-mode.sh` injects a ~2.7 KB always-on contract on the same
+`UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
+block. It is named here so the next reader does not conclude it was overlooked. The two
+instances also disagree on file hardening today: the best-solution-first reader does a
+full lstat → `O_NOFOLLOW` open → fstat dev/ino re-check, while
+`session-start-evidence-discipline.sh` still reads its file with a plain `readFileSync`
+behind the shell pre-check alone. Backporting that reader is the obvious next step and is
+deliberately not part of the change that introduced the pattern — it is tracked as a
+follow-up together with the second known divergence, the tamper-evidence sentence both
+hook headers carry, which is imprecise for a lineage-served session (the executing tree
+is not the measured one; see the Runtime Lineage section of `CLAUDE.md`). Both live in
+`hooks/session-start-evidence-discipline.sh`, so they move together or not at all. A
+divergence with no owner is how a pattern permanently forks; this note is a pointer to
+work, not a standing exemption.
+
+[`docs/best-solution-first.md`](best-solution-first.md) is the second instance: **when you put choices in front of the user, the option set must contain the solution you would defend as best for them over the long run, and that option must come first.** Its carrier is `hooks/user-prompt-best-solution-first.sh`, on `UserPromptSubmit` — every prompt, for the whole session — and on `SubagentStart`, so every spawned child gets it too.
+
+Three things differ from evidence discipline, each deliberate:
+
+| Axis | Evidence discipline | Best solution first |
+|------|---------------------|---------------------|
+| Carriers | three (hook, `agents/*.md`, `skills/*/SKILL.md`) | one (the hook) |
+| Config flag | none by design | `hooks.bestSolutionFirst`, default on |
+| Main-thread event | `SessionStart` | `UserPromptSubmit`, every prompt |
+
+The **flag** exists because this rule governs how a decision is *presented*, not whether a claim is *true*; a project may reasonably turn it off, and one that does still receives evidence discipline. The consequence to keep in view is that the project-local config wins per key, so a repository under review can silence it for the subagents reviewing it — acceptable for a presentation rule, and precisely why evidence discipline reads no configuration at all.
+
+The **per-prompt** event, rather than `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
+
+**What it costs, measured rather than asserted.** Driving the hook directly, each injection
+is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
+`session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
+injects roughly 2.7 KB on the same prompt channel. A `/zensu:tdd` review round spawns five
+`review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
+12 KB across one fan-out. That leg deliberately has no per-`agent_type` filter — the requirement
+was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
+it never reorders output whose shape a contract fixes. `tests/structure/test-best-solution-first.sh`
+B4d pins the absence of that filter, so the decision stays deliberate rather than accidental.
+
+Worth stating for anyone re-measuring: a session running an *installed* plugin does not load a
+hook that exists only in a development worktree, so the leg cannot be observed from such a session
+at all. The figures above come from driving the hook directly, not from watching it fire.
+
+The **single carrier** is the honest weak spot. Every failure mode of that hook is silent absence: an unknown event, a malformed payload, a missing `node`, a symlinked or oversized or malformed block all exit `0` with no output, and no downstream check notices a reminder that never arrived. In particular a block re-wrapped across two markdown lines is not truncated — it is dropped entirely. The only place that shape becomes a hard failure is build time, which is why `tests/structure/test-best-solution-first.sh` drives all five malformed-block refusals against the hook's own parser and pins each clause of the block separately.
+
+Pinning the clauses separately matters because the block's two halves pull against each other. It forbids letting a shortcut take the first slot by default, and it forbids treating that as licence to inflate scope: when the durable answer genuinely is to do less, that option goes first, on the merits. A block carrying only the prohibition would push every agent toward over-engineering, so the carve-out is pinned as its own check rather than trusted to survive an edit.
+
+Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
+
 ## Typical Workflows
 
 ### New Product (Planning → Implementation → Release)
