@@ -6,7 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 const assertion = require('../assertions/control-attestation.js');
-const { controlLine, strictParse } = require('../lib/attestation-common.js');
+const { controlLine, strictParse, validateShape } = require('../lib/attestation-common.js');
 
 const root = path.resolve(__dirname, '..', '..', '..');
 const provider = path.join(root, 'evals', 'session-control', 'lib', 'contract-provider.js');
@@ -85,6 +85,35 @@ const duplicateExpectedHookVerdict = assertion(controlLine(duplicateExpectedHook
   vars: { expected_valid: true, expected_host: 'claude', expected_hook: 'Contract:ExactMarker' },
 });
 assert.equal(duplicateExpectedHookVerdict.pass, false, 'expected_hook must occur exactly once');
+
+// The executing pair validateShape gained with compatible-upgrade binding. Both
+// branches were unreachable from any test: this file runs in Linux CI and had no
+// occurrence of `executing` at all, so a malformed pair validated here by
+// omission. Driven through validateShape directly rather than through assertion(),
+// because assertion() treats a shape failure as a PASS whenever expected_valid is
+// false — which would grade these cases green without reaching the branch.
+//
+// Positive control first, so a later case fails for the field under test rather
+// than for something the object spread broke.
+assert.doesNotThrow(() => validateShape(strictParse(happy.output)));
+
+for (const value of ['', 'relative/plugin', 42, null]) {
+  const bad = { ...strictParse(happy.output), executing_plugin_root: value };
+  assert.throws(
+    () => validateShape(bad),
+    /executing plugin root is invalid/,
+    `executing_plugin_root ${JSON.stringify(value)} must be rejected`,
+  );
+}
+
+for (const value of ['', 'sha256:not-hex', 'deadbeef', 42, null]) {
+  const bad = { ...strictParse(happy.output), executing_runtime_digest: value };
+  assert.throws(
+    () => validateShape(bad),
+    /executing runtime digest is invalid/,
+    `executing_runtime_digest ${JSON.stringify(value)} must be rejected`,
+  );
+}
 
 const catalogue = fs.readFileSync(path.join(root, 'evals', 'session-control', 'scenarios', 'catalog.yaml'), 'utf8');
 assert.ok((catalogue.match(/^- description:/gm) || []).length >= 20);
