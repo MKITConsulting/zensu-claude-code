@@ -146,8 +146,17 @@ else
   check "CI retains deterministic eval coverage without launching Promptfoo" FAIL
 fi
 
-EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
-if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ]; then
+# `gate` became a variable when `skip_test_gate` was added, so the value is no
+# longer a literal `"passed"` — a skipped release must be able to say so. The pin
+# still exists for the same reason it always did: prepare and publish must emit
+# ONE schema, so a reader of the evidence artifact never has to know which job
+# wrote it. Both halves are counted, because the conditional addendum carries the
+# skip reason and drifting it alone would split the schema just as effectively.
+EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
+EVIDENCE_SKIP_SHAPE='+ (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)'
+if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
+  && [ "$(grep -Fc "$EVIDENCE_SKIP_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
+  && ! grep -Fq 'gate:"passed"' "$WORKFLOWS/release.yml"; then
   check "Prepare and publish emit the same deterministic release evidence schema" PASS
 else
   check "Prepare and publish emit the same deterministic release evidence schema" FAIL
