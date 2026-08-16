@@ -513,6 +513,26 @@ jobs:
               -H 'X-GitHub-Api-Version: 2026-03-10' \
               "repos/$GITHUB_REPOSITORY/releases/$id"
           }
+          # A release created moments ago is not guaranteed to be visible on the
+          # LIST endpoint yet, and `release_json` resolves the id from that list
+          # because a draft carries no tag to look up. A bare
+          # `RELEASE="$(release_json)"` therefore fails under `set -e` with NO
+          # message at all — which is exactly how v0.18.0 stranded as an untagged
+          # draft: the log held the draft URL, then `exit 1`, and the cause had to
+          # be reconstructed from timestamps. Every read-back after a mutation
+          # goes through this bounded retry instead.
+          release_json_retry() {
+            local what="$1" attempt out
+            for attempt in $(seq 1 10); do
+              if out="$(release_json 2>/dev/null)" && [ -n "$out" ]; then
+                printf '%s' "$out"
+                return 0
+              fi
+              sleep 2
+            done
+            echo "::error::could not read back the release after $what (10 attempts over ~20s); the release list never returned $TAG" >&2
+            return 1
+          }
           verify_asset() {
             printf '%s' "$1" | jq -e --arg name "$ASSET" --arg digest "$EXPECTED_DIGEST" '
               (.assets | length) == 1
@@ -567,7 +587,10 @@ jobs:
                 echo "::error::existing published release metadata is not the exact immutable contract; refusing repair"
                 exit 1
               }
-              verify_exact_tag
+              verify_exact_tag || {
+                echo "::error::$TAG is published but does not resolve to exact main SHA ${{ github.sha }}"
+                exit 1
+              }
               verify_asset "$RELEASE" || {
                 echo "::error::existing immutable release asset is incomplete or has the wrong digest"
                 exit 1
@@ -593,7 +616,7 @@ jobs:
             gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
               --draft --title "$TAG" --target "${{ github.sha }}" \
               --notes-file "${{ runner.temp }}/notes.md"
-            RELEASE="$(release_json)"
+            RELEASE="$(release_json_retry "draft creation")"
             printf '%s' "$RELEASE" | jq -e '
               .draft == true and .immutable == false and (.assets | length) == 0
             ' >/dev/null || {
@@ -603,19 +626,27 @@ jobs:
             gh release upload "$TAG" "$ASSET" --repo "$GITHUB_REPOSITORY"
           fi
 
-          RELEASE="$(release_json)"
-          normalize_draft_metadata "$RELEASE"
-          RELEASE="$(release_json)"
+          RELEASE="$(release_json_retry "asset upload")"
+          normalize_draft_metadata "$RELEASE" || {
+            echo "::error::could not normalize the draft metadata before publish"
+            exit 1
+          }
+          RELEASE="$(release_json_retry "metadata normalization")"
           verify_metadata "$RELEASE" true false || {
             echo "::error::draft tag/target/prerelease/title/body metadata differs immediately before publish"
             exit 1
           }
-          verify_asset "$RELEASE"
+          verify_asset "$RELEASE" || {
+            echo "::error::draft asset is incomplete or has the wrong digest immediately before publish"
+            exit 1
+          }
           gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false
 
           PUBLISHED=""
           for ATTEMPT in $(seq 1 10); do
-            CANDIDATE="$(release_json)"
+            # Bare, but deliberately so: this IS the retry loop, and a read that
+            # fails here must cost one attempt rather than kill the step.
+            CANDIDATE="$(release_json 2>/dev/null || true)"
             if verify_metadata "$CANDIDATE" false true && verify_asset "$CANDIDATE"; then
               PUBLISHED="$CANDIDATE"
               break

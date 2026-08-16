@@ -126,5 +126,27 @@ else
   check "Both deterministic evidence uploads use the pinned artifact action" FAIL
 fi
 
+# v0.18.0 stranded as an untagged draft because `RELEASE="$(release_json)"` ran
+# straight after `gh release create --draft`, lost the race against the release
+# LIST endpoint, and — being a bare assignment under `set -e` — killed the step
+# with no message. The class is grep-able even though the behaviour is not: a
+# read-back assignment must go through the bounded retry, never through the raw
+# resolver. The retry loop's own read is the ONE exemption and is spelled with an
+# explicit `|| true`, so it cannot be confused with an unguarded assignment.
+RAW_READBACK="$(grep -nE '^[[:space:]]*(RELEASE|CANDIDATE)="\$\(release_json\)"' \
+  "$WORKFLOW" 2>/dev/null || true)"
+if [ -z "$RAW_READBACK" ]; then
+  check "Release read-backs use the bounded retry, never a bare release_json assignment" PASS
+else
+  check "Release read-backs use the bounded retry (unguarded:$RAW_READBACK)" FAIL
+fi
+
+if grep -qE '^[[:space:]]*release_json_retry\(\) \{' "$WORKFLOW" \
+  && grep -qE 'could not read back the release after' "$WORKFLOW"; then
+  check "The bounded read-back retry exists and names its failure" PASS
+else
+  check "The bounded read-back retry exists and names its failure" FAIL
+fi
+
 printf '%s\n' '----' "test-release-session-control-gate: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
