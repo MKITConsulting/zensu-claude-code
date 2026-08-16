@@ -375,7 +375,7 @@ for f in "$PLUGIN_DIR"/skills/*/SKILL.md; do
   SKILL_N=$((SKILL_N+1))
   carries_block "$f" || SKILL_MISS="$SKILL_MISS $(basename "$(dirname "$f")")"
 done
-EXPECTED_SKILLS=24
+EXPECTED_SKILLS=25
 if [ "$SKILL_N" != "$EXPECTED_SKILLS" ]; then
   check "C2 skill inventory changed ($SKILL_N found, $EXPECTED_SKILLS pinned) — bump EXPECTED_SKILLS deliberately so a new skill cannot slip past this guard" FAIL
 elif [ -z "$SKILL_MISS" ]; then
