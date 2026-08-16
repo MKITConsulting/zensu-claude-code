@@ -20,6 +20,19 @@ name: Release
 #      publishes a catalog entry for an as-yet unavailable immutable ref.
 #      Only successful tag creation makes the new plugin source resolvable;
 #      it runs only after deterministic exact-main-SHA validation.
+#
+# skip_test_gate: an explicit, recorded escape for a release that must ship
+# without waiting for the suite. It removes the ONE thing the pipeline otherwise
+# guarantees — that the exact bytes being tagged were green — so it is opt-in,
+# refuses without a reason, and can never report `gate: "passed"`. What it does
+# NOT relax: the exact-SHA pin, the clean-tree check, the runtime digest, the
+# version/ref invariant, or the evidence artifact. The decision is written into
+# the release commit as a `Release-Test-Gate: skipped` trailer so it reaches the
+# push-triggered publish job (where `inputs.*` is empty) and so a human sees it in
+# the release PR. Consequence worth stating: any commit whose subject starts with
+# the release prefix AND carries that trailer skips the publish gate, so the
+# protected-PR review is what stands between a hand-written trailer and an
+# unverified tag.
 
 on:
   workflow_dispatch:
@@ -46,6 +59,16 @@ on:
         required: false
         default: false
         type: boolean
+      skip_test_gate:
+        description: 'DANGER: ship WITHOUT running the suite. Evidence records gate=skipped, never passed. Requires skip_reason.'
+        required: false
+        default: false
+        type: boolean
+      skip_reason:
+        description: 'Why the test gate is being skipped (required when skip_test_gate is true; recorded in the commit, the evidence and the job summary)'
+        required: false
+        default: ''
+        type: string
   push:
     branches: [main]
 
@@ -160,6 +183,19 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # An escape hatch with no stated reason is an escape hatch nobody can audit
+      # later. Fail before anything is committed or pushed rather than after.
+      - name: Validate test-gate skip request
+        if: ${{ inputs.skip_test_gate }}
+        run: |
+          set -euo pipefail
+          REASON="${{ inputs.skip_reason }}"
+          if [ -z "${REASON//[[:space:]]/}" ]; then
+            echo "::error::skip_test_gate requires a non-empty skip_reason"
+            exit 1
+          fi
+          echo "::warning::Test gate will be SKIPPED for this release. Reason: $REASON"
+
       - name: Create release commit
         id: release_commit
         if: ${{ !inputs.dry_run }}
@@ -170,7 +206,18 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$BR"
           git add .claude-plugin/plugin.json .claude-plugin/marketplace.json README.md CHANGELOG.md
-          git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          # The skip decision travels IN the release commit, not only in this run's
+          # inputs. The publish job is push-triggered by this commit landing on main,
+          # where `inputs.*` is empty, so a trailer is the only carrier that reaches
+          # it. It is also the copy a human reads in the release PR.
+          if [ "${{ inputs.skip_test_gate }}" = "true" ]; then
+            git commit \
+              -m "chore(release): bump version to ${{ steps.ver.outputs.version }}" \
+              -m "Release-Test-Gate: skipped" \
+              -m "Release-Test-Gate-Reason: ${{ inputs.skip_reason }}"
+          else
+            git commit -m "chore(release): bump version to ${{ steps.ver.outputs.version }}"
+          fi
           RELEASE_SHA="$(git rev-parse HEAD)"
           test -n "$RELEASE_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
@@ -184,7 +231,18 @@ jobs:
           EXPECTED_SHA="${{ steps.release_commit.outputs.sha }}"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          bash tests/run-all.sh --ci
+          # Only the suite run is optional. The exact-SHA pin, the clean-tree
+          # check and the runtime digest still bind the bytes that ship, so a
+          # skipped release is unverified — never unattributed.
+          if [ "${{ inputs.skip_test_gate }}" = "true" ]; then
+            GATE=skipped
+            GATE_REASON="${{ inputs.skip_reason }}"
+            echo "::warning::Deterministic release gate SKIPPED — the suite did not run against $EXPECTED_SHA. Reason: $GATE_REASON"
+          else
+            GATE=passed
+            GATE_REASON=""
+            bash tests/run-all.sh --ci
+          fi
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           EVIDENCE_DIR="$RUNNER_TEMP/deterministic-release-evidence"
@@ -195,8 +253,21 @@ jobs:
             --arg source_git_revision "$EXPECTED_SHA" \
             --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
             --arg runtime_digest "$RUNTIME_DIGEST" \
-            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
+            --arg gate "$GATE" \
+            --arg gate_skip_reason "$GATE_REASON" \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}
+             + (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)' \
             > "$EVIDENCE_DIR/release-gate.json"
+          {
+            echo "### Release test gate"
+            if [ "$GATE" = skipped ]; then
+              echo "**SKIPPED** — the suite did not run against \`$EXPECTED_SHA\`."
+              echo ""
+              echo "Reason: $GATE_REASON"
+            else
+              echo "Passed against \`$EXPECTED_SHA\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
@@ -314,7 +385,27 @@ jobs:
           set -euo pipefail
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
-          bash tests/run-all.sh --ci
+          # This job is normally push-triggered, where `inputs.*` is empty, so the
+          # skip decision is read back from the release commit's own trailer — the
+          # same text a reviewer saw in the release PR. A dispatched publish retry
+          # may also pass the input directly. Absent both, the gate runs: the skip
+          # is opt-in on every path.
+          COMMIT_MSG="$(git log -1 --format=%B HEAD)"
+          GATE_REASON=""
+          if printf '%s\n' "$COMMIT_MSG" | grep -qE '^Release-Test-Gate:[[:space:]]*skipped[[:space:]]*$'; then
+            GATE=skipped
+            GATE_REASON="$(printf '%s\n' "$COMMIT_MSG" | sed -n 's/^Release-Test-Gate-Reason:[[:space:]]*//p' | head -1)"
+          elif [ "${{ github.event_name }}" = workflow_dispatch ] && [ "${{ inputs.skip_test_gate }}" = "true" ]; then
+            GATE=skipped
+            GATE_REASON="${{ inputs.skip_reason }}"
+          else
+            GATE=passed
+          fi
+          if [ "$GATE" = skipped ]; then
+            echo "::warning::Deterministic publish gate SKIPPED — the suite did not run against ${{ github.sha }}. Reason: $GATE_REASON"
+          else
+            bash tests/run-all.sh --ci
+          fi
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
           EVIDENCE_DIR="$RUNNER_TEMP/deterministic-publish-evidence"
@@ -325,8 +416,21 @@ jobs:
             --arg source_git_revision "${{ github.sha }}" \
             --arg plugin_version "$(jq -r .version .claude-plugin/plugin.json)" \
             --arg runtime_digest "$RUNTIME_DIGEST" \
-            '{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}' \
+            --arg gate "$GATE" \
+            --arg gate_skip_reason "$GATE_REASON" \
+            '{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}
+             + (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)' \
             > "$EVIDENCE_DIR/publish-gate.json"
+          {
+            echo "### Publish test gate"
+            if [ "$GATE" = skipped ]; then
+              echo "**SKIPPED** — the suite did not run against \`${{ github.sha }}\`."
+              echo ""
+              echo "Reason: $GATE_REASON"
+            else
+              echo "Passed against \`${{ github.sha }}\`."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
           test "$(git rev-parse HEAD)" = "${{ github.sha }}"
           test -z "$(git status --porcelain=v1 --untracked-files=all)"
 
