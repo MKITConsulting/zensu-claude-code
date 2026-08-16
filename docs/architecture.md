@@ -118,11 +118,14 @@ instances also disagree on file hardening today: the best-solution-first reader 
 full lstat → `O_NOFOLLOW` open → fstat dev/ino re-check, while
 `session-start-evidence-discipline.sh` still reads its file with a plain `readFileSync`
 behind the shell pre-check alone. Backporting that reader is the obvious next step and is
-deliberately not part of the change that introduced the pattern — it is tracked as a
-follow-up together with the second known divergence, the tamper-evidence sentence both
-hook headers carry, which is imprecise for a lineage-served session (the executing tree
-is not the measured one; see the Runtime Lineage section of `CLAUDE.md`). Both live in
-`hooks/session-start-evidence-discipline.sh`, so they move together or not at all. A
+deliberately not part of the change that introduced the pattern — it is recorded here as
+outstanding work — not filed as an issue, so this paragraph is the only record — together with a
+second, wider divergence: the tamper-evidence sentence is imprecise for a lineage-served session
+(the executing tree is not the measured one; see the Runtime Lineage section of `CLAUDE.md`), and
+unlike the reader it is NOT confined to one file. It appears in both hook headers and in three
+prose sites, this section among them. A follow-up that edits only
+`hooks/session-start-evidence-discipline.sh` therefore closes the first divergence and leaves the
+second standing in the hook this change added. A
 divergence with no owner is how a pattern permanently forks; this note is a pointer to
 work, not a standing exemption.
 
@@ -132,7 +135,7 @@ Three things differ from evidence discipline, each deliberate:
 
 | Axis | Evidence discipline | Best solution first |
 |------|---------------------|---------------------|
-| Carriers | three (hook, `agents/*.md`, `skills/*/SKILL.md`) | one (the hook) |
+| Carriers | three (hook, `agents/*.md`, `skills/*/SKILL.md`) | one on the subagent leg (the hook); zen-mode carries a partial second copy on the main thread |
 | Config flag | none by design | `hooks.bestSolutionFirst`, default on |
 | Main-thread event | `SessionStart` | `UserPromptSubmit`, every prompt |
 
@@ -145,7 +148,13 @@ is **1756 characters / 1764 bytes** of `additionalContext`, identical on both le
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
 injects roughly 2.7 KB on the same prompt channel. A `/zensu:tdd` review round spawns five
 `review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
-12 KB across one fan-out. That leg deliberately has no per-`agent_type` filter — the requirement
+**at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
+round. The dominant term, though, is the other leg, and it is the one the design deliberately
+leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
+— the shipped default — the standing per-prompt injection is 2804 + 1764 = about **4.5 KB every
+turn**, roughly 89 KiB over 20 turns and 268 KiB over 60. That is the real price of "resident
+rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
+The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
 it never reorders output whose shape a contract fixes. `tests/structure/test-best-solution-first.sh`
 B4d pins the absence of that filter, so the decision stays deliberate rather than accidental.
@@ -154,7 +163,9 @@ Worth stating for anyone re-measuring: a session running an *installed* plugin d
 hook that exists only in a development worktree, so the leg cannot be observed from such a session
 at all. The figures above come from driving the hook directly, not from watching it fire.
 
-The **single carrier** is the honest weak spot. Every failure mode of that hook is silent absence: an unknown event, a malformed payload, a missing `node`, a symlinked or oversized or malformed block all exit `0` with no output, and no downstream check notices a reminder that never arrived. In particular a block re-wrapped across two markdown lines is not truncated — it is dropped entirely. The only place that shape becomes a hard failure is build time, which is why `tests/structure/test-best-solution-first.sh` drives all five malformed-block refusals against the hook's own parser and pins each clause of the block separately.
+**Carrier count, stated precisely.** On `SubagentStart` this hook is the only carrier. On the main thread `hooks/user-prompt-zen-mode.sh` carries a partial second copy — the ranking obligation and its anti-inflation counterweight, not the whole block — because its brevity contract would otherwise license the very omission the rule forbids. That copy is hand-written rather than read from the marker block, which is a drift seam: `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin it from this side, and zen-mode's own suite pins nothing, so a zen-mode author can break it and still see green. Note also what the fallback cannot do: zen-mode exits for any non-main principal and is not registered on `SubagentStart`, so turning this hook off silences the rule for every spawned child with nothing left carrying it there.
+
+The **single carrier on the subagent leg** is the honest weak spot. Every failure mode of that hook is silent absence: an unknown event, a malformed payload, a missing `node`, a symlinked or oversized or malformed block all exit `0` with no output, and no downstream check notices a reminder that never arrived. In particular a block re-wrapped across two markdown lines is not truncated — it is dropped entirely. The only place that shape becomes a hard failure is build time, which is why `tests/structure/test-best-solution-first.sh` drives all five malformed-block refusals against the hook's own parser and pins each clause of the block separately.
 
 Pinning the clauses separately matters because the block's two halves pull against each other. It forbids letting a shortcut take the first slot by default, and it forbids treating that as licence to inflate scope: when the durable answer genuinely is to do less, that option goes first, on the merits. A block carrying only the prohibition would push every agent toward over-engineering, so the carve-out is pinned as its own check rather than trusted to survive an edit.
 

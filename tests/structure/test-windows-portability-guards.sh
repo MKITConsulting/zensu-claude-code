@@ -449,7 +449,7 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$BEST_SOLUTION_HOOK" \
   && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$BEST_SOLUTION_HOOK" \
   && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$BEST_SOLUTION_HOOK" \
-  && ! grep -vE '^\s*//' "$BEST_SOLUTION_HOOK" | grep -qF 'nlink'; then
+  && ! grep -v '^[[:space:]]*//' "$BEST_SOLUTION_HOOK" | grep -qF 'nlink'; then
   check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" FAIL

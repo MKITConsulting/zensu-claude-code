@@ -74,12 +74,18 @@ present a decision, not a correctness invariant, so it honours the standard opt-
 `hooks.bestSolutionFirst: false` in `.zensu/config.json` silences **this hook's injection**,
 resolved through `zensu_hook_enabled` like every other hook flag. Default is enabled.
 
-It does not silence the rule outright, and the difference matters. `hooks/user-prompt-zen-mode.sh`
-carries the ranking obligation inside its own SCOPE clause, because zen-mode's brevity contract
+It does not silence the rule outright on the main thread, and the limits of that are worth being
+precise about. `hooks/user-prompt-zen-mode.sh` carries the ranking obligation and its
+anti-inflation counterweight inside its own SCOPE clause, because zen-mode's brevity contract
 otherwise licenses exactly the omission this rule forbids. That clause is gated on `hooks.zenMode`,
-not on this flag, so a user who turns this hook off while zen-mode is active still receives the
-obligation. `tests/structure/test-best-solution-first.sh` B14 pins that clause so the two cannot
-drift apart silently.
+not on this flag, so a user who turns this hook off while zen-mode is active still receives both
+halves. `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin it so the two cannot drift
+apart silently.
+
+**That fallback reaches the main thread only.** `hooks/user-prompt-zen-mode.sh` exits early for any
+non-main principal and is not registered on `SubagentStart` at all, so it covers none of the
+subagent exposure described next. Turning this hook off silences the rule for every spawned child,
+with nothing left carrying it there.
 
 Know who that opt-out reaches. `zensu_hook_enabled` resolves the merged config, and the
 project-local `$CLAUDE_PROJECT_DIR/.zensu/config.json` wins per key over the global file —

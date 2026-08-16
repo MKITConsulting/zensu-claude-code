@@ -261,10 +261,22 @@ else
 fi
 # The suite's fail-safe number is a hand copy; bind it to the hook's literal so raising
 # one without the other cannot leave B2g's label describing a bound that is not enforced.
-if grep -qF "const MAX_BLOCK = $MAX_BLOCK;" "$HOOK"; then
-  check "B2h the suite's MAX_BLOCK matches the constant the hook enforces" PASS
+B2H_CODE="$(grep -v '^[[:space:]]*//' "$HOOK")"
+if printf '%s\n' "$B2H_CODE" | grep -qF "const MAX_BLOCK = $MAX_BLOCK;" \
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'block.length > MAX_BLOCK'; then
+  check "B2h the hook declares MAX_BLOCK = $MAX_BLOCK and compares the block against it" PASS
 else
-  check "B2h the hook's MAX_BLOCK no longer equals the suite's $MAX_BLOCK" FAIL
+  check "B2h the hook no longer declares $MAX_BLOCK or no longer compares the block against it" FAIL
+fi
+# MAX_FILE, the short-read refusal and the guarded close are one-line additions with no
+# behavioral case; without these pins any of them can be deleted with the suite green.
+if printf '%s\n' "$B2H_CODE" | grep -qF 'const MAX_FILE =' \
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'post.size > MAX_FILE' \
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'if (filled !== post.size) process.exit(0);' \
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'try { fs.closeSync(fd); } catch (_) {}'; then
+  check "B2i reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
+else
+  check "B2i reader lost its size ceiling, short-read refusal or guarded close" FAIL
 fi
 
 # ── B1: registration on both events ─────────────────────────────────────────
@@ -322,11 +334,20 @@ esac
 # The framing prefix is what tells the reader the rule binds every process; without
 # this the prefix could be dropped with B3a still green.
 case "$UP_CTX" in
-  *'binding for every process in this session, main thread and subagents alike'*)
-    check "B3b emitted context carries the framing prefix verbatim, not just extra bytes" PASS ;;
+  'Zensu best-solution-first — binding for every process in this session, main thread and subagents alike. '*)
+    check "B3b emitted context OPENS with the full framing prefix, then the block" PASS ;;
   *)
-    check "B3b emitted context lost its framing prefix (len ${#UP_CTX} vs block ${#BLOCK})" FAIL ;;
+    check "B3b emitted context lost or reordered its framing prefix (len ${#UP_CTX} vs block ${#BLOCK})" FAIL ;;
 esac
+# The hook's central claim is that it can never block a prompt or a spawn. Any other
+# top-level key — decision, continue, permissionDecision — would make that false.
+UP_KEYS="$(PAYLOAD="$OUT" node -e '
+  try { process.stdout.write(Object.keys(JSON.parse(process.env.PAYLOAD || "{}")).sort().join(",")); }
+  catch (_) { process.stdout.write("unparseable"); }
+' 2>/dev/null)"
+[ "$UP_KEYS" = "hookSpecificOutput" ] \
+  && check "B3c emitted object carries hookSpecificOutput and nothing else — it cannot block" PASS \
+  || check "B3c emitted object carries extra top-level keys ($UP_KEYS) — it could block a prompt" FAIL
 
 # A REAL subagent payload: one carrying neither agent_id nor agent_type classifies
 # as main-v1 (hooks/lib/claude-principal-v1.js), so the bare shape cannot tell a
@@ -472,18 +493,25 @@ if [ -n "$FAKE_BLOCK" ] && build_fake "$FAKE_BLOCK"; then
   ' "$RULES" > "$BLOCK_FILE"
   block_case "B7f a blank line between the markers drops the injection (exit 0, no output)"
 
-  # The fifth refusal branch. Without this the `block.length > MAX_BLOCK` guard is new
-  # production code with no behavioral coverage — deleting it leaves the suite green.
-  awk -v o="$OPEN_MARKER" -v n="$MAX_BLOCK" '
+  # The fifth refusal branch. Two independent reviewers caught the first version of this
+  # fixture leaving the original block line in place, which made it a TWO-line block — so
+  # the hook refused at the close-marker-position check and this case silently duplicated
+  # B7e while claiming to cover the length guard. The builder below REPLACES the block
+  # instead of splicing before it, and the guard asserts the SHAPE (close marker exactly
+  # two lines below open) as well as the size, so a fixture that degrades into a different
+  # refusal fails loudly rather than passing for the wrong reason.
+  awk -v o="$OPEN_MARKER" -v c="$CLOSE_MARKER" -v n="$MAX_BLOCK" '
+    $0 == o { print; pad = "> "; for (i = 0; i < n + 200; i++) pad = pad "x"; print pad; skip = 1; next }
+    skip && $0 == c { skip = 0 }
+    skip { next }
     { print }
-    $0 == o { pad = "> "; for (i = 0; i < n + 200; i++) pad = pad "x"; print pad; skip = 1 }
-    skip && ++c == 1 { next }
-  ' "$RULES" | awk -v o="$OPEN_MARKER" 'BEGIN{drop=0} {if(prev==o && drop==0 && $0 !~ /^> x/){drop=1; prev=$0; next} print; prev=$0}' > "$BLOCK_FILE"
+  ' "$RULES" > "$BLOCK_FILE"
   BSZ="$(awk -v o="$OPEN_MARKER" '$0==o{getline; print length($0); exit}' "$BLOCK_FILE")"
-  if [ -n "$BSZ" ] && [ "$BSZ" -gt "$MAX_BLOCK" ]; then
-    block_case "B7g a block longer than $MAX_BLOCK chars drops the injection (built ${BSZ})"
+  BCLOSE="$(awk -v o="$OPEN_MARKER" '$0==o{getline; getline; print; exit}' "$BLOCK_FILE")"
+  if [ -n "$BSZ" ] && [ "$BSZ" -gt "$MAX_BLOCK" ] && [ "$BCLOSE" = "$CLOSE_MARKER" ]; then
+    block_case "B7g a block longer than $MAX_BLOCK chars drops the injection (built ${BSZ}, close marker at open+2)"
   else
-    check "B7g could not build an oversized block (got ${BSZ:-none}, need > $MAX_BLOCK)" FAIL
+    check "B7g fixture is not an oversized ONE-line block (size=${BSZ:-none} need > $MAX_BLOCK; open+2='${BCLOSE:-none}' need the close marker) — it would test a different refusal" FAIL
   fi
 else
   check "B7b could not build the malformed-block plugin tree" FAIL
@@ -522,7 +550,7 @@ B8A_FSTAT="$(printf '%s\n' "$HOOK_CODE" | grep -n 'fs.fstatSync(fd)' | head -1 |
 B8A_READ="$(printf '%s\n' "$HOOK_CODE" | grep -n 'fs.readSync(fd' | head -1 | cut -d: -f1)"
 if printf '%s\n' "$HOOK_CODE" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' \
    && printf '%s\n' "$HOOK_CODE" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
-   && printf '%s\n' "$HOOK_CODE" | grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' \
+   && printf '%s\n' "$HOOK_CODE" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);' \
    && [ -n "$B8A_FSTAT" ] && [ -n "$B8A_READ" ] && [ "$B8A_FSTAT" -lt "$B8A_READ" ]; then
   check "B8a reader opens O_NOFOLLOW|O_NONBLOCK and re-checks dev/ino BEFORE reading" PASS
 else
@@ -672,6 +700,13 @@ if [ -f "$ZEN_HOOK" ]; then
   else
     check "B14a zen-mode's brevity clause again licenses dropping alternatives wholesale" FAIL
   fi
+  # A fallback carrying only the prohibition reconstitutes the exact bias the block's
+  # anti-inflation carve-out exists to prevent, so the counterweight is pinned too.
+  if grep -qF 'never licenses inflating scope' "$ZEN_HOOK"; then
+    check "B14b zen-mode's clause carries the anti-inflation counterweight, not the prohibition alone" PASS
+  else
+    check "B14b zen-mode carries only the prohibition — it would bias every agent toward inflating scope" FAIL
+  fi
 else
   check "B14 zen-mode hook not found" FAIL
 fi
@@ -713,6 +748,16 @@ if [ "$B16_FIRST" -gt 0 ] && [ "$B16_SECOND" = "$B16_FIRST" ]; then
   check "B16 consecutive prompts in one session both emit — no de-bounce band" PASS
 else
   check "B16 a second consecutive prompt emitted differently ($B16_FIRST then $B16_SECOND)" FAIL
+fi
+
+# B16a is the structural half: a de-bounce modelled on user-prompt-context-nudge.sh needs
+# a state path and a bound session. If such a band failed OPEN when it could not resolve
+# one — the fail-silent convention this hook otherwise follows — B16's two drives would
+# emit identically and the de-bounce would slip through.
+if grep -v '^[[:space:]]*//' "$HOOK" | grep -qE 'zensu-session\.sh|zensu_bind_hook_session|\.zensu/state|transcript_path'; then
+  check "B16a hook gained state/session plumbing — a de-bounce band may now be present" FAIL
+else
+  check "B16a hook references no state path or session binding, so no de-bounce can exist" PASS
 fi
 
 # ── B17: the quoted-boolean trap ───────────────────────────────────────────
