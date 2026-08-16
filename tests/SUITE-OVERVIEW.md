@@ -12,7 +12,7 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **131** — 124 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **16 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -24,8 +24,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 127 structure suites + 5 offline evals | none |
-| `--ci` | 120 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 131 structure suites + 5 offline evals | none |
+| `--ci` | 124 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -118,11 +118,11 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (17)
+### Skill contracts (18)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `setup-skill` · `skill-overlays` ·
-`templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` · `setup-skill` ·
+`skill-overlays` · `templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version

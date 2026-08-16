@@ -82,6 +82,7 @@
     "test-session-control-sandbox-hook-integration.sh",
     "test-session-id-v1.sh",
     "test-session-start-banner.sh",
+    "test-session-trail-skill.sh",
     "test-setup-skill.sh",
     "test-skill-overlays.sh",
     "test-skill-workflow-markers.sh",
