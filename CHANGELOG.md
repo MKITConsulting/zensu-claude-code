@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-08-16
+
+### Added
+
+- **session-trail**: Add cross-instance session tracking skill (#239)
+- **tdd**: Situational TDD mode — strict by default for pr-fix-findings, plus a session toggle (#236)
+- **session-control**: Bind a session across a compatible plugin upgrade (#235)
+- **session-control**: Let a compatible plugin upgrade keep serving a live session (#234)
+- **summary**: Render the CHAIN-END SUMMARY as tables instead of prose (#232)
+
+### Changed
+
+- **readme**: Document the HTTPS fallback for a failed plugin install (#237)
+- **pr-team-review**: Route out-of-diff findings to overall_notes (#231)
+
+### Fixed
+
+- **release**: Unbreak the skill counters and add an auditable test-gate skip (#241)
+- **converge**: Carry the chain-end offer into every carrier that renders a report (#240)
+
 ## [0.17.3] - 2026-08-13
 
 ### Added
