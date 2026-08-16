@@ -202,7 +202,7 @@
           "path": "tests/structure/test-deferred-review-claim.sh",
           "args": [
             "--cases",
-            "P0,P1,P2,P3,L1,L2,C1,C2,C2f,C2c,C2d,C2e"
+            "P0,P1,P2,P3,L1,L2,C1,C2,C2f,C2c,C2d,C2e,D1"
           ],
           "timeoutMs": 900000
         },

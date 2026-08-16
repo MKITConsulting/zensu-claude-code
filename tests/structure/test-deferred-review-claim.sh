@@ -1688,6 +1688,15 @@ else
   check "C8 timestampStyle none lease renewal (a=$LEASE_NONE_A_DECISION b=$LEASE_NONE_B_DECISION prepared_rc=$LEASE_NONE_PREPARED_RC has_ts=$LEASE_NONE_HAS_TS assignment_mtime=$LEASE_NONE_ASSIGNMENT_MTIME fixture_mtime=$LEASE_NONE_FIXTURE_MTIME fresh_rc=$LEASE_NONE_C_FRESH_RC fresh=$LEASE_NONE_C_FRESH_DECISION stale_rc=$LEASE_NONE_STALE_MTIME_RC stale_mtime=$LEASE_NONE_STALE_MTIME expired_rc=$LEASE_NONE_C_EXPIRED_RC expired=$LEASE_NONE_C_EXPIRED_DECISION b_active=$LEASE_NONE_B_ACTIVE c_active=$LEASE_NONE_C_ACTIVE owner=$LEASE_NONE_OWNER_DIAG)" FAIL
 fi
 
+setup_case seed_mode_ladder
+# This bare setup_case is the CASE BLOCK BOUNDARY, not setup for the checks below.
+# deferred-review-claim-cases.js splits this file on /^setup_case / at column 0 and
+# requires exactly one check id per block; the four real per-case setups happen inside
+# seed_mode_case, indented, so they are invisible to that split. Without this line the
+# whole D1 block is absorbed into the preceding case and the shard selector fails closed
+# with "must contain exactly one unique check id" — which is what
+# tests/structure/test-windows-ci-contract.sh reports.
+#
 # The Stop-hook adoption seed (stop-chain-enforcer.sh, VANILLA_SEED) resolves the
 # TDD-mode ladder for every rank that exists at that site: rank 1 (the session
 # marker) over rank 3 (hooks.tddImplementation) over rank 4 (vanilla). There is no

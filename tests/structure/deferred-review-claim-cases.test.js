@@ -56,13 +56,14 @@ const expectedCaseIds = [
   'C6b',
   'C7',
   'C8',
+  'D1',
 ];
 
-test('discovers exactly the 36 isolated deferred-review cases in source order', () => {
+test('discovers exactly the 37 isolated deferred-review cases in source order', () => {
   const source = fs.readFileSync(sourcePath, 'utf8');
   const discovered = discoverCases(source);
   assert.deepEqual(discovered.map(({ id }) => id), expectedCaseIds);
-  assert.equal(new Set(discovered.map(({ id }) => id)).size, 36);
+  assert.equal(new Set(discovered.map(({ id }) => id)).size, 37);
 });
 
 test('the four Windows profiles assign every case exactly once', () => {
