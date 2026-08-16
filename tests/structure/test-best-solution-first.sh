@@ -261,11 +261,20 @@ fi
 # still be rewritten in a docs-only commit with no test literal changing. That is the
 # low-visibility channel this digest closes: the bytes that reach every prompt and every
 # spawn cannot change without a matching literal here, in the same commit.
-BLOCK_SHA="$(printf '%s' "$BLOCK" | shasum -a 256 2>/dev/null | cut -d' ' -f1)"
-[ -n "$BLOCK_SHA" ] || BLOCK_SHA="$(printf '%s' "$BLOCK" | sha256sum 2>/dev/null | cut -d' ' -f1)"
+# Hashed through node, not shasum/sha256sum: node is already required at P0, while
+# neither hashing binary is guaranteed on every supported host. This suite runs in
+# windows-shard-7, and a check that goes red because a tool is missing fails for a
+# reason unrelated to what it tests — the exact defect class this suite was written
+# to catch.
+BLOCK_SHA="$(BLOCK_TEXT="$BLOCK" node -e '
+  try {
+    process.stdout.write(require("crypto").createHash("sha256")
+      .update(process.env.BLOCK_TEXT || "", "utf8").digest("hex"));
+  } catch (_) { process.stdout.write(""); }
+' 2>/dev/null)"
 EXPECTED_BLOCK_SHA='3bfc50602b524b7ca37e96504c11409f2d72fbc8ed908c137e7efc566cd77420'
 if [ -z "$BLOCK_SHA" ]; then
-  check "B2f1 no sha256 tool available to pin the injected block" FAIL
+  check "B2f1 node could not hash the injected block" FAIL
 elif [ "$BLOCK_SHA" = "$EXPECTED_BLOCK_SHA" ]; then
   check "B2f1 injected block matches its pinned digest" PASS
 else
