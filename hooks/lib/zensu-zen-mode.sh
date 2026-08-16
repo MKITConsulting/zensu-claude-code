@@ -43,6 +43,13 @@ case "$ZEN_VERB" in
     ;;
 esac
 
+# TWIN PROLOGUE — the block from here to the end of the two resolver guards is
+# duplicated, near-verbatim, in hooks/lib/zensu-tdd-mode.sh (only the script name in
+# the messages and the skill named in the CLAUDE_PLUGIN_DATA hint differ). It is NOT
+# extracted into zensu-session.sh: the plugin-root self-validation above has to
+# precede this `source` to mean anything, so the two halves cannot move together
+# without restructuring both helpers. Change the Session Control binding contract and
+# you change it TWICE — the twin carries the same reference back to this file.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_model_session; then
   echo "zensu-zen-mode.sh: rendered Session Control binding unavailable" >&2

@@ -12,7 +12,7 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **131** — 124 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **16 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -24,8 +24,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 127 structure suites + 5 offline evals | none |
-| `--ci` | 120 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 131 structure suites + 5 offline evals | none |
+| `--ci` | 124 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -61,18 +61,21 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (14)
+### TDD engine & phase gate (15)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
-`tdd-protocol-prominence` · `tdd-reminder-hook` · `tdd-skill-review-fanout` ·
+`tdd-mode-toggle` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
+`tdd-skill-review-fanout` ·
 `tdd-skill-self-review-handoff` · `tdd-vanilla-mode`
 
 Covers arming (`--tdd-begin`), the PreToolUse edit phase-gate, the RED→GREEN→IMPL
 lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 (`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
-retained), the edit-landing receipt required by `--tdd-complete`, and the 5-agent
-review fan-out wiring in `skills/tdd/SKILL.md`.
+retained), the mode precedence at the freeze point (`tdd-mode-toggle` — session
+choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
+unreadable marker forces nothing), the edit-landing receipt required by
+`--tdd-complete`, and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
 ### Review chain & findings (25)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
