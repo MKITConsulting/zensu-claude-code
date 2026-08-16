@@ -1,4 +1,8 @@
 #!/bin/bash
+# V22-V24 own the ## Open report contracts the /zensu:converge chain-end offer
+# sits beside: the ordered backslash-then-pipe escaping rule for every carried
+# line, and the unrunnable-cross-check verdict. The offer itself is pinned by
+# test-converge-skill.sh P3d/P3g.6.
 # Pins skills/self-review/SKILL.md (ported from /reflect, English-only) plus its
 # registration + cross-file version consistency (plugin.json, marketplace.json, README,
 # CHANGELOG). self-review is the terminal review-chain stage and owns --chain-done.
@@ -151,6 +155,30 @@ MARKETPLACE_VERSION="$(jq -r '.plugins[0].version' "$MARKETPLACE_JSON" 2>/dev/nu
 { [ -f "$README_MD" ] && grep -qE '^### Skills \([0-9]+\)$' "$README_MD"; } && check "V19 README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" PASS || check "V19 README Skills heading missing" FAIL
 { [ -f "$README_MD" ] && grep -qF "/zensu:self-review" "$README_MD"; } && check "V20 README.md mentions /zensu:self-review in the skills table" PASS || check "V20 README mentions self-review" FAIL
 { [ -f "$CHANGELOG_MD" ] && grep -qE "^## \[${EXPECTED_VERSION}\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" "$CHANGELOG_MD"; } && check "V21 CHANGELOG.md has '## [${EXPECTED_VERSION}] - <date>' section" PASS || check "V21 CHANGELOG $EXPECTED_VERSION dated section" FAIL
+
+OPEN_REGION_FLAT="$(awk '/^## Open$/{f=1} /^## TL;DR$/{if(f) exit} f' "$SKILL_MD" | tr '\n' ' ' | tr -s ' ')"
+case "$OPEN_REGION_FLAT" in
+  *'first write every `\` as `\\`, then every `|` as `\|`'*)
+    check "V22 ## Open escapes backslash before pipe in every carried line" PASS ;;
+  *)
+    check "V22 ## Open escapes backslash before pipe in every carried line" FAIL ;;
+esac
+case "$OPEN_REGION_FLAT" in
+  *'EVIDENCE CROSS-CHECK UNAVAILABLE'*)
+    check "V23 ## Open surfaces an unrunnable cross-check instead of a clean Nothing open." PASS ;;
+  *)
+    check "V23 ## Open surfaces an unrunnable cross-check instead of a clean Nothing open." FAIL ;;
+esac
+if grep -qF 'EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` when the' "$SKILL_MD" \
+  && grep -qF 'Both verbatim cells follow the `## Open` escaping rule' "$SKILL_MD" \
+  && grep -qF 'into BOTH the `Evidence cross-check`' "$SKILL_MD" \
+  && grep -qF 'The library writes everything to STDOUT' "$SKILL_MD" \
+  && grep -qF 'An unreadable run log is deliberately' "$SKILL_MD" \
+  && grep -qF 'witness log unreadable' "$SKILL_MD"; then
+  check "V24 the unrunnable-cross-check verdict is defined for the What-I-built cell and sourced in Phase 4 step 2" PASS
+else
+  check "V24 the unrunnable-cross-check verdict is defined for the What-I-built cell and sourced in Phase 4 step 2" FAIL
+fi
 
 echo "----"
 echo "test-self-review-skill: $PASS PASS / $FAIL FAIL"

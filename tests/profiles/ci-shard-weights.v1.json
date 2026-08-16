@@ -102,6 +102,7 @@
     "structure/test-tdd-full-cycle.sh": 101,
     "structure/test-tdd-log-path-anchor.sh": 1,
     "structure/test-tdd-manager-patches.sh": 1,
+    "structure/test-tdd-mode-toggle.sh": 31,
     "structure/test-tdd-no-flock-external-lease.sh": 3,
     "structure/test-tdd-protocol-prominence.sh": 1,
     "structure/test-tdd-reminder-hook.sh": 7,
@@ -128,6 +129,7 @@
     "structure/test-zen-mode.sh": 20,
     "structure/test-zensu-help-skill.sh": 1,
     "structure/test-zensu-plm-arg-guidance.sh": 1,
-    "structure/test-zensu-runtime-controller.sh": 17
+    "structure/test-zensu-runtime-controller.sh": 17,
+    "structure/test-session-control-core.sh": 55
   }
 }

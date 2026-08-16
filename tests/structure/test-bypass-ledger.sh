@@ -11,7 +11,11 @@ set -u
 # the zensu-gate embedded parser, __bypass__: verdict from
 # secret-scan-decide.js); the recording call sites in all six hooks;
 # the rendering surfaces (delegate directive incl. unconditional `none`,
-# self-review template, autopilot PR-body line, README docs); and functional
+# self-review template, autopilot PR-body line, README docs); the converge
+# chain-end offer's runtime behavior on the selfReview-off delegate path (P5x1
+# emission, P5x3 suppression when no chain-end summary is emitted; bound-chain
+# suppression is pinned by P14b in test-post-review-self-review-handoff.sh,
+# structure pins live in test-converge-skill.sh); and functional
 # end-to-end recording through the REAL hooks for every gate in a sandboxed
 # state dir. Gate ALLOW behavior under bypass must stay unchanged.
 
@@ -277,9 +281,9 @@ if [ -n "$SBOX" ]; then
   run_log --tdd-reset --session fx2 >/dev/null 2>&1
   RESET_L="$(run_log --bypass-list --session fx2 2>/dev/null)"
   if [ "$RESET_L" = "none" ]; then
-    check "P5c2 --tdd-reset clears the ledger" PASS
+    check "P5c3 --tdd-reset clears the ledger" PASS
   else
-    check "P5c2 --tdd-reset clears the ledger (got: $RESET_L)" FAIL
+    check "P5c3 --tdd-reset clears the ledger (got: $RESET_L)" FAIL
   fi
 
   start_session hx
@@ -557,6 +561,12 @@ if [ -n "$SBOX" ]; then
     *)
       check "P5x delegate attests none on a clean ledger (selfReview off)" FAIL ;;
   esac
+  case "$DOUT2" in
+    *'Optional next step: /zensu:converge — flow-back audit of the code against the plan'"'"'s Requirements table.'*)
+      check "P5x1 standalone chain: the delegate directive actually emits the converge offer line (selfReview off)" PASS ;;
+    *)
+      check "P5x1 standalone chain: the delegate directive actually emits the converge offer line (selfReview off)" FAIL ;;
+  esac
   printf '{"hooks":{"selfReview":false,"combinedSummary":false}}\n' > "$SBOX/config-doubleoff.json"
   start_session dx
   DOUT3="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-doubleoff.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
@@ -565,6 +575,12 @@ if [ -n "$SBOX" ]; then
       check "P5x2 ledger line survives combinedSummary:false + selfReview:false" PASS ;;
     *)
       check "P5x2 ledger line survives combinedSummary:false + selfReview:false" FAIL ;;
+  esac
+  case "$DOUT3" in
+    *'Optional next step: /zensu:converge'*)
+      check "P5x3 no chain-end summary emitted: the converge offer is suppressed with it" FAIL ;;
+    *)
+      check "P5x3 no chain-end summary emitted: the converge offer is suppressed with it" PASS ;;
   esac
 
   rm -rf "$SBOX" 2>/dev/null

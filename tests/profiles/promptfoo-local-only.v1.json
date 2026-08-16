@@ -75,29 +75,32 @@
     "test-reviewer-readonly-v1.sh",
     "test-run-all-preflight-watchdog.sh",
     "test-run-all-required-offline-suites.sh",
+    "test-run-all-sharding.sh",
     "test-secret-scan-gate.sh",
     "test-self-review-flags.sh",
     "test-self-review-markers.sh",
     "test-self-review-skill.sh",
     "test-session-control-claude.sh",
+    "test-session-control-core.sh",
     "test-session-control-sandbox-hook-integration.sh",
     "test-session-id-v1.sh",
     "test-session-start-banner.sh",
+    "test-session-trail-skill.sh",
     "test-setup-skill.sh",
     "test-skill-overlays.sh",
     "test-skill-workflow-markers.sh",
     "test-smoke-main-thread-chain.sh",
+    "test-state-verb-diagnostics.sh",
     "test-stop-enforcer-escapes.sh",
     "test-stop-enforcer-self-review-routing.sh",
     "test-stop-enforcer-subagent-noop.sh",
     "test-stop-session-binding-recovery.sh",
-    "test-run-all-sharding.sh",
-    "test-state-verb-diagnostics.sh",
     "test-tdd-begin-chain-reset.sh",
     "test-tdd-complete-receipt-gate.sh",
     "test-tdd-full-cycle.sh",
     "test-tdd-log-path-anchor.sh",
     "test-tdd-manager-patches.sh",
+    "test-tdd-mode-toggle.sh",
     "test-tdd-no-flock-external-lease.sh",
     "test-tdd-protocol-prominence.sh",
     "test-tdd-reminder-hook.sh",
@@ -139,8 +142,12 @@
     {
       "label": "evals/config-gate (--self-check)",
       "path": "evals/config-gate/run-eval.sh",
-      "args": ["--self-check"],
-      "ciArgs": ["--self-check"],
+      "args": [
+        "--self-check"
+      ],
+      "ciArgs": [
+        "--self-check"
+      ],
       "needsNodeDeps": false,
       "windowsSafety": true
     },
@@ -148,7 +155,9 @@
       "label": "evals/session-control (self-check)",
       "path": "evals/session-control/run-self-check.sh",
       "args": [],
-      "ciArgs": ["--ci"],
+      "ciArgs": [
+        "--ci"
+      ],
       "needsNodeDeps": true,
       "windowsSafety": false
     },
@@ -164,15 +173,21 @@
       "label": "evals/reset-review-limit (self-check)",
       "path": "evals/reset-review-limit/run-self-check.sh",
       "args": [],
-      "ciArgs": ["--ci"],
+      "ciArgs": [
+        "--ci"
+      ],
       "needsNodeDeps": true,
       "windowsSafety": false
     },
     {
       "label": "evals/tdd-manager-pretool (--self-check)",
       "path": "evals/tdd-manager-pretool/run-eval.sh",
-      "args": ["--self-check"],
-      "ciArgs": ["--self-check"],
+      "args": [
+        "--self-check"
+      ],
+      "ciArgs": [
+        "--self-check"
+      ],
       "needsNodeDeps": false,
       "windowsSafety": true
     }

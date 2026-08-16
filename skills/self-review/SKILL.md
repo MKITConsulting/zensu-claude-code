@@ -216,14 +216,27 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
      `EVIDENCE GAP` / `EVIDENCE CONTRADICTION` line it emits goes verbatim into the
      final report's `## What I built` audit facts and, when any exists, into `## Open`
      — a fabricated green must not reach the user through the chain's terminal report.
+     If the command cannot run at all — `node` missing, a usage error, an internal
+     exception, any non-zero exit that is not a reported gap — carry
+     `EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` into BOTH the `Evidence cross-check`
+     verdict cell and a `## Open` row. The library writes everything to STDOUT, so take
+     `<reason>` from its own `EVIDENCE CROSS-CHECK UNAVAILABLE — …` stdout line when it
+     emitted one, else from stderr, else from the exit code; run it as `2>&1` so neither
+     channel is lost. That is NOT a clean state. An unreadable run log is deliberately
+     NOT in this list: `--allow-missing-log` makes it exit 0 with
+     `no evidence claims to cross-check`, which is the clean state by design.
   3. Render the final report (below), then stop.
 
 ### Final report
 
 Render a CHAIN-END SUMMARY as TABLES, not prose: every section below is a table
-plus at most one line of text, never a paragraph. Keep it scannable — no
-restating, no narration of the process, no filler. Sections IN THIS ORDER, the
-TL;DR LAST (pull from your own context; do NOT re-spawn any agent):
+plus at most one line of text, never a paragraph — the sole exception is
+`## Open`, which carries the verbatim `EVIDENCE GAP` / `EVIDENCE CONTRADICTION`
+lines whenever the cross-check emitted any, and then ends with the bypass-ledger
+line followed, when it applies, by the
+converge offer. Keep it scannable — no restating, no narration of the process, no
+filler. Sections IN THIS ORDER, the TL;DR LAST (pull from your own context; do
+NOT re-spawn any agent):
 
 ```
 ## Problem
@@ -243,7 +256,12 @@ that never produced a change must not vanish between the Phase 6 report and this
 summary; **Evidence cross-check** takes the Phase-4 step-2
 `EVIDENCE CROSS-CHECK SUMMARY` line plus every `EVIDENCE GAP` /
 `EVIDENCE CONTRADICTION` line, or `no evidence claims to cross-check` when that
-is what it reported.
+is what it reported, or `EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>` when the
+check could not run. When it also emits its `witness log unreadable` line, carry
+that verbatim too: without it every claim reads as an uncorroborated gap with no
+stated cause. Both verbatim cells follow the `## Open` escaping rule
+(`\` first, then `|`), for the same reason: an unescaped pipe splits the row and
+the renderer drops the cells past the last column.
 
 When the session plan carries a ## Requirements table, add a third table, columns:
 ID | Status, keyed by its stable IDs (AC-###/FR-###: met / partial / dropped). One
@@ -266,12 +284,38 @@ ONE line: whether the single fix round ran and what it changed.
 
 ## Open
 Table, columns: Item | Type | Next step. One row per deferred suggestion or
-max-rounds finding requiring a manual fix. If nothing is open, write the single
-line `Nothing open.` Close the section with
-the bypass-ledger audit line: run
+max-rounds finding requiring a manual fix, and one row per `EVIDENCE GAP` /
+`EVIDENCE CONTRADICTION` line the cross-check emitted, carrying that line
+verbatim under this escaping rule, applied in this order: first write every `\`
+as `\\`, then every `|` as `\|`. An unescaped pipe splits the row and the
+renderer drops the cells past the third, which is exactly the verdict clause the
+row exists to surface; doing it in the other order turns an already-escaped `\|`
+inside a shell command back into a delimiter. The same rule applies to every
+carried line in this report — the `Evidence cross-check` and `Edit landing`
+verdict cells in `## What I built`, and the UNAVAILABLE row below.
+Also add a row when the
+cross-check could not run at all (missing `node`, a usage error, an internal
+exception, any other non-zero exit), carrying
+`EVIDENCE CROSS-CHECK UNAVAILABLE — <reason>`; that is
+NOT a clean state and must never be silently absent. Write the single line
+`Nothing open.` only when that table has no rows at all — an emitted evidence line
+is always a row, so `Nothing open.` can never stand above one.
+
+Always render the bypass-ledger audit line next, in both cases — whether or not
+the table has rows: run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
 `Gates bypassed during this session: <output>` (the verb echoes `none` when the
 ledger is empty).
+
+Then, for a STANDALONE handoff only, when the session plan carries a
+`## Requirements` table, close `## Open` with ONE more line, exactly:
+`Optional next step: /zensu:converge — flow-back audit of the code against the plan's Requirements table.`
+It is an offer only — never run it unasked — and it never gates, delays, or
+precedes the `--chain-done` terminus, which already landed before this report
+renders. Omit the line entirely for an Autopilot-bound handoff:
+`/zensu:autopilot` runs converge report-only at its own step 2b and that run is
+non-interactive. Omit it too when the session plan carries no `## Requirements`
+table, because converge would have nothing to anchor on.
 
 ## TL;DR
 Exactly ONE sentence, and it is the last section: what shipped and the test verdict.

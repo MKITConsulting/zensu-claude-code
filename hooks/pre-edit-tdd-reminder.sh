@@ -174,9 +174,11 @@ if [ "$PATH_CLASS" = "state" ]; then
 fi
 
 # Vanilla implementation mode: the per-session `vanilla` flag was frozen into
-# the state file by `--tdd-begin` (hooks.tddImplementation=false at begin time).
-# The gate reads ONLY the state flag — never live config — so a mid-session
-# config flip can neither un-gate a strict session nor wedge a vanilla one.
+# the state file at begin time, from whichever rank won there — the session's
+# `/zensu:tdd-mode` marker, the caller's `--tdd-mode strict`, then
+# hooks.tddImplementation. The gate reads ONLY the state flag — never live config
+# and never the marker — so a mid-session flip of either can neither un-gate a
+# strict session nor wedge a vanilla one.
 VANILLA_STATE="$(tdd_vanilla_mode "$STATE_FILE")"
 [ "$VANILLA_STATE" = "invalid" ] && deny_invalid_state
 if [ "$VANILLA_STATE" = "true" ]; then

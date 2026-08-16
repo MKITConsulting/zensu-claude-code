@@ -4,6 +4,9 @@
 #   PASS / suggestions-only menu -> instructs --code-review-done + Skill zensu:self-review, NO --chain-done
 #   max-rounds                   -> sets codeReviewDone (NOT chainDone), routes to self-review
 # With selfReview disabled: legacy --chain-done close, no self-review.
+# P14b additionally pins that an Autopilot-BOUND chain never receives the
+# interactive /zensu:converge chain-end offer, behind a positive control that
+# the chain-end tail actually rendered.
 set -u
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -233,6 +236,12 @@ printf '{"hooks":{"selfReview":false}}' > "$OFFCFG"
 bash "$LOG" --tdd-begin --session "$SID_C" >/dev/null
 bash "$LOG" --tdd-complete --session "$SID_C" >/dev/null
 CTX_C="$(postrev "$SID_C" "$OFFCFG")"
+case "$CTX_C" in
+  *'Optional next step: /zensu:converge'*)
+    check "P7a standalone control on this harness DOES emit the converge offer (co-located with P14b)" PASS ;;
+  *)
+    check "P7a standalone control on this harness DOES emit the converge offer (co-located with P14b)" FAIL ;;
+esac
 echo "$CTX_C" | grep -q -- "--chain-done" && check "P8 selfReview off -> legacy --chain-done close" PASS || check "P8 legacy --chain-done" FAIL
 if echo "$CTX_C" | grep -qF "skill='zensu:self-review'"; then
   check "P9 selfReview off -> no self-review invoke" FAIL
@@ -328,6 +337,25 @@ if [ "$(exact_line_count "$CTX_E" "$CALLER_E")" = 1 ] \
   check "P14 bound handoff preserves each official caller/binding/stage line exactly once" PASS
 else
   check "P14 exact-once official bound handoff lines" FAIL
+fi
+
+printf '{"hooks":{"selfReview":false}}\n' > "$PROJ/config-bound-nosr.json"
+TICKET_E2="$(bash "$LOG" --review-ticket --session "$SID_E" 2>/dev/null)"
+if [ -n "$TICKET_E2" ]; then
+  CTX_E2="$(ZENSU_CONFIG="$PROJ/config-bound-nosr.json" postrev_with_ticket "$SID_E" "$TICKET_E2" "$ENVELOPE_E")"
+  case "$CTX_E2" in
+    *'Nothing open.'*'Gates bypassed during this session:'*)
+      case "$CTX_E2" in
+        *'Optional next step: /zensu:converge'*)
+          check "P14b bound chain: the converge offer is suppressed (positive control: the chain-end tail did render)" FAIL ;;
+        *)
+          check "P14b bound chain: the converge offer is suppressed (positive control: the chain-end tail did render)" PASS ;;
+      esac ;;
+    *)
+      check "P14b bound chain: positive control failed — no chain-end tail rendered, so an absent offer proves nothing" FAIL ;;
+  esac
+else
+  check "P14b bound-chain converge suppression (ticket unavailable)" FAIL
 fi
 
 # --- F: standalone claims fail closed around every live/corrupt Outer state ---
