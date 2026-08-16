@@ -79,14 +79,24 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 
 `--auto` hands the decision back to the caller and the config. It **writes**
 `{"mode":"auto"}` rather than deleting the marker: absence and `auto` resolve
-identically, but a recorded release stays readable instead of looking like a
-choice that was never made. Never delete the marker file by hand.
+identically for mode purposes, but the marker's presence stays observable, so a
+recorded release reads as one instead of looking like a choice that was never made.
+Never delete the marker file by hand.
 
 `--status` reports the resolved mode and where it came from — `strict (session)`,
-`vanilla (session)`, `strict (config)`, or `vanilla (config)`. It resolves ranks 1, 3
-and 4 only: a caller's `--tdd-mode strict` exists just at the moment of arming, so
-`--status` can say `vanilla (config)` while the next `/zensu:pr-fix-findings` run
-legitimately arms strict. The `mode:` line `--tdd-begin` echoes is the authoritative
+`vanilla (session)`, `strict (config, session choice released)`,
+`vanilla (config, session choice released)`, `strict (config)`, or `vanilla (config)`.
+The two `released` forms are what distinguish a deliberate `--auto` from a session
+that never chose. It resolves ranks 1, 3 and 4 only: a caller's `--tdd-mode strict`
+exists just at the moment of arming, so `--status` can say `vanilla (config)` while
+the next `/zensu:pr-fix-findings` run legitimately arms strict.
+
+When a chain is already armed and its frozen mode disagrees with the resolved
+session mode, `--status` appends the running chain's mode and says the choice takes
+effect at the next `--tdd-begin`. Switching governs the NEXT chain, never the running
+one, and the PreToolUse edit gate reads only the frozen flag — so without that
+disclosure `--status` could answer `strict (session)` for a session whose every edit
+still passes through. The `mode:` line `--tdd-begin` echoes remains the authoritative
 report for a given chain.
 
 ## Precedence

@@ -42,6 +42,11 @@ BANNER="$PLUGIN_DIR/hooks/session-start-banner.sh"
 PRIMER="$PLUGIN_DIR/hooks/session-start-primer.sh"
 
 PASS=0; FAIL=0; SKIP=0
+# SKIP is not one thing. A host that cannot create a symlink leaves invariant 6
+# unverified; a host that does not enforce a file mode for this user leaves only the
+# two privilege probes unverified. Counting them together would let the UNVERIFIED
+# banner claim the symlink refusals went unchecked on a run where they passed.
+SKIP_SYMLINK=0; SKIP_PRIVILEGE=0
 check() {
   local label="$1" cond="$2"
   case "$cond" in
@@ -68,7 +73,8 @@ for BASELINE_SID in \
   tddmode-helper tddmode-helper-strict tddmode-iso-a tddmode-iso-b \
   tddmode-flag-strict tddmode-flag-vanilla tddmode-session-strict \
   tddmode-session-vanilla tddmode-session-vanilla-strictcfg tddmode-auto \
-  tddmode-default tddmode-reject tddmode-wording tddmode-plan; do
+  tddmode-default tddmode-reject tddmode-wording tddmode-plan \
+  tddmode-anchor tddmode-disclose tddmode-agree tddmode-released-strictcfg; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$BASELINE_SID"
 done
@@ -163,8 +169,14 @@ toggle "$S_H" --vanilla >/dev/null
 ST_C="$(toggle "$S_H" --status)"
 toggle "$S_H" --auto >/dev/null
 ST_D="$(toggle "$S_H" --status)"; M_D="$(marker_count)"
+# ST_A vs ST_D is the bite, and they MUST differ: A is a session that never chose,
+# D is a session that deliberately released. `--auto` writing `{"mode":"auto"}`
+# instead of unlinking exists precisely so the two are distinguishable — while they
+# read identically, that write bought nothing and the claim in the helper header was
+# false.
 if [ "$ST_A" = "vanilla (config)" ] && [ "$ST_B" = "strict (session)" ] && [ "$M_B" = "1" ] \
-  && [ "$ST_C" = "vanilla (session)" ] && [ "$ST_D" = "vanilla (config)" ] && [ "$M_D" = "1" ]; then
+  && [ "$ST_C" = "vanilla (session)" ] && [ "$ST_D" = "vanilla (config, session choice released)" ] \
+  && [ "$ST_D" != "$ST_A" ] && [ "$M_D" = "1" ]; then
   check "T6 --strict/--vanilla/--auto round-trip; --auto releases without deleting the marker" PASS
 else
   check "T6 round-trip (A='$ST_A' B='$ST_B' C='$ST_C' D='$ST_D' markers=$M_D)" FAIL
@@ -282,6 +294,7 @@ if [ -n "$MARKER_PATH" ] && ln -s "$S_SYM" "$MARKER_PATH" 2>/dev/null && [ -L "$
     || check "T9b reader symlink fall-through" FAIL
   rm -f "$MARKER_PATH"
 else
+  SKIP_SYMLINK=$((SKIP_SYMLINK+2))
   check "T9 writer symlink refusal — this host cannot create a symlink to probe with" SKIP
   check "T9b reader symlink fall-through — no symlink support" SKIP
 fi
@@ -314,6 +327,18 @@ mv "$SYM_PROJ2/.zensu" "$SYM_PROJ2/real-zensu-moved" 2>/dev/null || true
 if ln -s "$SYM_PROJ/real-state" "$SYM_PROJ/.zensu/state" 2>/dev/null && [ -L "$SYM_PROJ/.zensu/state" ] \
   && ln -s "$SYM_PROJ2/real-zensu" "$SYM_PROJ2/.zensu" 2>/dev/null && [ -L "$SYM_PROJ2/.zensu" ]; then
   SYM_BAD=""
+  # Plant a marker the reader WOULD answer if it followed the link. `[ -f ]` follows
+  # symlinks, so without these two files the reader short-circuits on its own
+  # `[ ! -f "$marker" ]` disjunct and answers `auto` because the marker is ABSENT —
+  # which means deleting both `-L` disjuncts from the reader would leave the two
+  # assertions below green. With them planted, `auto` can only come from the guard.
+  printf '%s\n' '{"mode":"strict"}' > "$SYM_PROJ/real-state/tdd-mode-any-key.json"
+  mkdir -p "$SYM_PROJ2/real-zensu/state"
+  printf '%s\n' '{"mode":"strict"}' > "$SYM_PROJ2/real-zensu/state/tdd-mode-any-key.json"
+  # Positive control: the planted markers really are reachable through the links, so
+  # a later `auto` is attributable to the guard and not to a path that never resolved.
+  [ -f "$SYM_PROJ/.zensu/state/tdd-mode-any-key.json" ] || SYM_BAD="$SYM_BAD decoy-state-unreachable"
+  [ -f "$SYM_PROJ2/.zensu/state/tdd-mode-any-key.json" ] || SYM_BAD="$SYM_BAD decoy-zensu-unreachable"
   [ "$(read_override "$SYM_PROJ" "any-key")" = "auto" ] || SYM_BAD="$SYM_BAD reader-state-dir"
   [ "$(read_override "$SYM_PROJ2" "any-key")" = "auto" ] || SYM_BAD="$SYM_BAD reader-zensu-dir"
   # The WRITER half: without these two calls the state-dir and `.zensu` disjuncts of
@@ -321,12 +346,21 @@ if ln -s "$SYM_PROJ/real-state" "$SYM_PROJ/.zensu/state" 2>/dev/null && [ -L "$S
   # marker disjunct alone would keep the suite green.
   writer_refuses "$SYM_PROJ" "$SYM_SID" || SYM_BAD="$SYM_BAD writer-state-dir"
   writer_refuses "$SYM_PROJ2" "$SYM_SID2" || SYM_BAD="$SYM_BAD writer-zensu-dir"
-  [ -z "$(find "$SYM_PROJ/real-state" "$SYM_PROJ2/real-zensu" -type f 2>/dev/null)" ] \
-    || SYM_BAD="$SYM_BAD wrote-through-link"
+  # Nothing was written THROUGH the link. The two planted decoys are the only files
+  # that may exist behind it, and their bytes must be untouched — the writer above
+  # was asked for a different mode, so a write that followed the link would show up
+  # either as a third file or as changed content.
+  SYM_FILES="$(find "$SYM_PROJ/real-state" "$SYM_PROJ2/real-zensu" -type f 2>/dev/null | wc -l | tr -d ' ')"
+  [ "$SYM_FILES" = "2" ] || SYM_BAD="$SYM_BAD wrote-through-link-newfile"
+  grep -qxF '{"mode":"strict"}' "$SYM_PROJ/real-state/tdd-mode-any-key.json" 2>/dev/null \
+    || SYM_BAD="$SYM_BAD wrote-through-link-state"
+  grep -qxF '{"mode":"strict"}' "$SYM_PROJ2/real-zensu/state/tdd-mode-any-key.json" 2>/dev/null \
+    || SYM_BAD="$SYM_BAD wrote-through-link-zensu"
   [ -z "$SYM_BAD" ] \
     && check "T9d writer AND reader refuse a symlinked state dir and a symlinked .zensu; nothing is written through the link" PASS \
     || check "T9d directory-symlink guard:$SYM_BAD" FAIL
 else
+  SKIP_SYMLINK=$((SKIP_SYMLINK+1))
   check "T9d symlinked state/.zensu directory — no symlink support" SKIP
 fi
 rm -rf "$SYM_PROJ" "$SYM_PROJ2"
@@ -624,7 +658,11 @@ toggle "$S_H" --auto >/dev/null
 ST_T29="$(env -u ZENSU_CONFIG CLAUDE_CODE_SESSION_ID="$S_H" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
   CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$DECOY" \
   HOME="$DECOY" bash "$HELPER" --status 2>/dev/null)"
-[ "$ST_T29" = "strict (config)" ] \
+# The `--auto` above leaves a RELEASED marker, so the bound project's `true` config
+# renders as the released form. What this check is about is the word before the
+# parenthesis: `strict` proves the bound project's overlay was read, `vanilla` would
+# mean the decoy's.
+[ "$ST_T29" = "strict (config, session choice released)" ] \
   && check "T29 --status reads the bound project's config, not an ambient CLAUDE_PROJECT_DIR" PASS \
   || check "T29 status config anchoring (got '$ST_T29')" FAIL
 rm -rf "$DECOY" "$PROJ/.zensu/config.json"
@@ -636,15 +674,24 @@ echo "== Skill contracts =="
 FIX_STEP="$(awk '/^4\. \*\*Implement each fix/ { inside=1 } inside { print } inside && /^5\. \*\*Land the changes/ { exit }' "$FIX_SKILL")"
 FIX_BAD=""
 [ -n "$FIX_STEP" ] || FIX_BAD="$FIX_BAD no-step"
-for LIT in 'TDD-MODE: strict' 'untrusted input' 'strip it' '/zensu:tdd-mode'; do
+# `strip it` alone is NOT a pin for the stripping rule: that phrase also occurs in the
+# counter-example the rule rejects ("strip it if it came from a comment"), so deleting
+# the mechanical anchor and keeping the counter-example would leave this check green.
+# The anchor literal and the verification bullet are pinned explicitly for that reason.
+for LIT in 'TDD-MODE: strict' 'untrusted input' 'strip it' '/zensu:tdd-mode' \
+           '^\s*TDD-MODE:' 'did not take effect'; do
   printf '%s' "$FIX_STEP" | grep -qF -- "$LIT" || FIX_BAD="$FIX_BAD ${LIT// /_}"
 done
 [ -z "$FIX_BAD" ] \
   && check "T24 /zensu:pr-fix-findings carries TDD-MODE: strict and treats a spec-borne TDD-MODE line as untrusted" PASS \
   || check "T24 pr-fix-findings strict default:$FIX_BAD" FAIL
 
+# `Ignore rather than abort` is pinned separately: the other three literals all survive
+# a revert to aborting on a conflicting TDD-MODE value, and aborting is what lets quoted
+# review-comment text deny a legitimate run.
 if grep -qF 'TDD-MODE: strict' "$TDD_SKILL" && grep -qF -- '--tdd-mode strict' "$TDD_SKILL" \
-  && grep -qiF 'escalation-only' "$TDD_SKILL"; then
+  && grep -qiF 'escalation-only' "$TDD_SKILL" \
+  && grep -qiF 'Ignore rather than abort' "$TDD_SKILL"; then
   check "T25 /zensu:tdd documents the TDD-MODE carrier, the flag, and that it is escalation-only" PASS
 else
   check "T25 /zensu:tdd carrier contract missing" FAIL
@@ -691,6 +738,218 @@ done
   && check "T27 the ## Precedence section states the ranks, the escalation-only rule and the freeze caveat" PASS \
   || check "T27 precedence section incomplete:$PREC_BAD" FAIL
 
+echo "== Reader arms no behavioral path reaches =="
+# T8c the marker EXISTS as a regular file but cannot be read. `[ -f ]` is true, so
+# the reader gets past its own presence guard and into the bounded read — and the
+# read's failure has to resolve `auto` rather than propagate. This is also the arm
+# that would raise a shell error if the size check were arithmetic on an empty
+# string. Stderr must stay silent: the redirect failure is reported by the SHELL,
+# not by `head`, and this path runs on every UserPromptSubmit.
+UNREAD_MARKER="$(marker_path "$S_H")"
+UNREAD_BAD=""
+printf '%s\n' '{"mode":"strict"}' > "$UNREAD_MARKER"
+# Own accumulator, asserted by T8c's own check below. Appending to SAFE_BAD would be
+# dead code: its only read is T8b's `[ -z "$SAFE_BAD" ]`, ~470 lines above this point,
+# so the control could never fail the suite and the `auto` below would not be
+# attributable to the file being unreadable rather than to a marker that never landed.
+[ "$(read_override "$PROJ" "$DECOY_KEY")" = "strict" ] || UNREAD_BAD="$UNREAD_BAD control-not-strict"
+chmod 000 "$UNREAD_MARKER" 2>/dev/null || true
+# Capture whether mode 000 is actually enforced BEFORE restoring it — probing after the
+# `chmod 644` below would make the term constantly false and reduce the guard to `id -u`.
+UNREAD_ENFORCED=1; [ -r "$UNREAD_MARKER" ] && UNREAD_ENFORCED=0
+UNREAD_ERR="$(CLAUDE_PROJECT_DIR="$PROJ" bash -c 'source "$0"; zensu_tdd_mode_override "$1" "$2" >/dev/null' \
+  "$CONFIG_LIB" "$PROJ" "$DECOY_KEY" 2>&1)"
+UNREAD_OUT="$(read_override "$PROJ" "$DECOY_KEY")"
+chmod 644 "$UNREAD_MARKER" 2>/dev/null || true
+if [ "$UNREAD_ENFORCED" = "1" ]; then
+  { [ "$UNREAD_OUT" = "auto" ] && [ -z "$UNREAD_ERR" ] && [ -z "$UNREAD_BAD" ]; } \
+    && check "T8c an unreadable marker resolves auto and prints nothing on stderr" PASS \
+    || check "T8c unreadable marker (out='$UNREAD_OUT' err='${UNREAD_ERR:0:60}'$UNREAD_BAD)" FAIL
+else
+  SKIP_PRIVILEGE=$((SKIP_PRIVILEGE+1))
+  check "T8c unreadable marker — this host does not enforce mode 000 for this user" SKIP
+fi
+rm -f "$UNREAD_MARKER"
+
+# T8d the ceiling itself, at the boundary. The previous probe was four times over the
+# limit, so an off-by-one in the comparison would have passed. The 513-byte case also
+# pins the sentinel: its tail is newlines, which command substitution strips, so a
+# reader that measured AFTER stripping would score it short and accept it.
+BOUND_MARKER="$UNREAD_MARKER"
+{ printf '{"mode":"strict"}'; head -c 494 /dev/zero | tr '\0' ' '; printf '\n'; } > "$BOUND_MARKER"
+B512_SIZE="$(wc -c < "$BOUND_MARKER" | tr -d ' ')"; B512="$(read_override "$PROJ" "$DECOY_KEY")"
+{ printf '{"mode":"strict"}'; head -c 495 /dev/zero | tr '\0' ' '; printf '\n'; } > "$BOUND_MARKER"
+B513_SIZE="$(wc -c < "$BOUND_MARKER" | tr -d ' ')"; B513="$(read_override "$PROJ" "$DECOY_KEY")"
+{ printf '{"mode":"strict"}'; head -c 496 /dev/zero | tr '\0' '\n'; printf '{"mode":"vanilla"}\n'; } > "$BOUND_MARKER"
+BNL="$(read_override "$PROJ" "$DECOY_KEY")"
+{ [ "$B512_SIZE" = "512" ] && [ "$B512" = "strict" ] \
+  && [ "$B513_SIZE" = "513" ] && [ "$B513" = "auto" ] && [ "$BNL" = "auto" ]; } \
+  && check "T8d the 512-byte ceiling holds at the boundary and a newline tail past it is still examined" PASS \
+  || check "T8d ceiling boundary (512b=$B512@$B512_SIZE 513b=$B513@$B513_SIZE newline-tail=$BNL)" FAIL
+rm -f "$BOUND_MARKER"
+
+echo "== Released state vs a strict config =="
+# T21c/T22d the released fall-through, discriminated. T21b/T22b assert the vanilla
+# directive under a VANILLA config, so an implementation that returned vanilla for
+# every non-strict override — the config fall-through deleted outright — passes them
+# unchanged. Pair the released marker with a STRICT config: only a real fall-through
+# to the config can produce the strict directive here.
+S_RS="tddmode-released-strictcfg"
+toggle "$S_RS" --auto >/dev/null
+CTX_T21C="$(printf '{"hook_event_name":"UserPromptSubmit","session_id":"%s","prompt":"add a helper function"}' "$S_RS" \
+  | hook_ctx "$REMINDER" "$CFG_STRICT")"
+case "$CTX_T21C" in
+  *"strict"*) check "T21c released, a strict config still reaches the reminder directive" PASS ;;
+  *) check "T21c released fallback ignores the config (got: ${CTX_T21C:0:60})" FAIL ;;
+esac
+ST_RS="$(toggle "$S_RS" --status "$CFG_STRICT")"
+[ "$ST_RS" = "strict (config, session choice released)" ] \
+  && check "T22d --status renders the released state against a strict config" PASS \
+  || check "T22d released status under strict config (got '$ST_RS')" FAIL
+
+echo "== Freeze point anchoring and disclosure =="
+# T30 the FREEZE point must read the bound project, not an ambient CLAUDE_PROJECT_DIR.
+# T29 pins that for `--status`; every precedence case (T11-T16) runs with the two
+# already equal, so a resolver that simply echoed the ambient variable would pass all
+# of them — and the wrong-anchor outcome is silent, since the override resolves to
+# `auto` and the run falls through to the config exactly as a legitimate `auto` does.
+S_AN="tddmode-anchor"
+toggle "$S_AN" --strict >/dev/null
+ANCHOR_DECOY="$(mktemp -d)"; mkdir -p "$ANCHOR_DECOY/.zensu/state"
+OUT_T30="$(CLAUDE_CODE_SESSION_ID="$S_AN" ZENSU_CONFIG="$CFG_VANILLA" CLAUDE_PROJECT_DIR="$ANCHOR_DECOY" \
+  bash "$LOG" --tdd-begin --session "$S_AN" 2>/dev/null)"
+{ printf '%s' "$OUT_T30" | grep -qF 'mode: strict' && [ "$(vanilla_flag "$S_AN")" = "false" ]; } \
+  && check "T30 --tdd-begin reads the bound project's marker, not an ambient CLAUDE_PROJECT_DIR" PASS \
+  || check "T30 freeze-point anchoring (got '$OUT_T30' flag=$(vanilla_flag "$S_AN"))" FAIL
+rm -rf "$ANCHOR_DECOY"
+
+# T34 the disclosure. A chain armed vanilla, then switched to strict for the NEXT
+# chain, is the state in which `--status` used to answer `strict (session)` while the
+# edit gate still passed every write through off the frozen flag. The agreeing case
+# is the control: it must stay byte-identical to the undisclosed line.
+S_DS="tddmode-disclose"
+ARM_DS="$(CLAUDE_CODE_SESSION_ID="$S_DS" ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$S_DS" 2>/dev/null)"
+toggle "$S_DS" --strict >/dev/null
+ST_DS="$(toggle "$S_DS" --status)"
+S_AG="tddmode-agree"
+toggle "$S_AG" --vanilla >/dev/null
+ARM_AG="$(CLAUDE_CODE_SESSION_ID="$S_AG" ZENSU_CONFIG="$CFG_VANILLA" bash "$LOG" --tdd-begin --session "$S_AG" 2>/dev/null)"
+ST_AG="$(toggle "$S_AG" --status)"
+# The arm's own `mode:` echo is the authoritative freeze evidence, so the disclosure
+# is measured against a chain that was genuinely armed vanilla. `vanilla_flag` is
+# deliberately NOT used here: tdd_get_flag answers `false` for a MISSING state file
+# too, so a `false` there would not discriminate a strict chain from no chain at all.
+# The agreeing case asserts its OWN arm too. The disclosure only fires on an ACTIVE
+# chain, so an arm that silently failed would leave no running chain, `--status` would
+# print exactly `vanilla (session)`, and the quiet-when-agreeing half would pass while
+# proving nothing.
+{ [ "$ARM_DS" = "mode: vanilla" ] \
+  && printf '%s' "$ST_DS" | grep -qF 'strict (session)' \
+  && printf '%s' "$ST_DS" | grep -qF 'the chain now running is frozen vanilla' \
+  && printf '%s' "$ST_DS" | grep -qF 'next --tdd-begin' \
+  && [ "$ARM_AG" = "mode: vanilla" ] \
+  && [ "$ST_AG" = "vanilla (session)" ]; } \
+  && check "T34 --status discloses a running chain whose frozen mode disagrees, and stays quiet when it agrees" PASS \
+  || check "T34 running-chain disclosure (armDS='$ARM_DS' disagree='$ST_DS' armAG='$ARM_AG' agree='$ST_AG')" FAIL
+
+echo "== Helper refusal paths =="
+# T31 the refusals that ship with the helper and were never driven. Every other
+# invocation in this suite goes through toggle(), which always supplies a matching
+# CLAUDE_PLUGIN_ROOT and a real CLAUDE_PLUGIN_DATA, so none of these branches was
+# ever entered. EMPTY STDOUT is asserted alongside the message because `--status`
+# output is parsed by callers: a diagnostic that drifted onto stdout would be read
+# as a mode.
+REFUSE_BAD=""
+refuses() {  # $1 label, $2.. env assignments applied to the helper call
+  local label="$1"; shift
+  local out err rc before after
+  before="$(marker_count)"
+  err="$(env "$@" bash "$HELPER" --strict 2>&1 >/dev/null)"; rc=$?
+  out="$(env "$@" bash "$HELPER" --strict 2>/dev/null)"
+  after="$(marker_count)"
+  [ "$rc" -eq 2 ] || REFUSE_BAD="$REFUSE_BAD $label:rc=$rc"
+  [ -z "$out" ] || REFUSE_BAD="$REFUSE_BAD $label:stdout"
+  [ "$before" = "$after" ] || REFUSE_BAD="$REFUSE_BAD $label:wrote-marker"
+  printf '%s' "$err" | grep -qF "$REFUSE_NEEDLE" || REFUSE_BAD="$REFUSE_BAD $label:message"
+}
+REFUSE_ALIEN="$(mktemp -d)"
+REFUSE_NEEDLE='inherited CLAUDE_PLUGIN_ROOT does not match'
+refuses plugin-root CLAUDE_CODE_SESSION_ID="$S_H" CLAUDE_PLUGIN_ROOT="$REFUSE_ALIEN" \
+  CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEFAULT"
+REFUSE_NEEDLE='CLAUDE_PLUGIN_DATA is not set'
+refuses plugin-data -u CLAUDE_PLUGIN_DATA CLAUDE_CODE_SESSION_ID="$S_H" \
+  CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEFAULT"
+REFUSE_NEEDLE='CLAUDE_CODE_SESSION_ID is not set'
+refuses session-id -u CLAUDE_CODE_SESSION_ID CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  CLAUDE_PLUGIN_DATA="$CLAUDE_PLUGIN_DATA" CLAUDE_PROJECT_DIR="$PROJ" ZENSU_CONFIG="$CFG_DEFAULT"
+rm -rf "$REFUSE_ALIEN"
+[ -z "$REFUSE_BAD" ] \
+  && check "T31 the plugin-root and Session Control refusals exit 2, name the missing input, write no marker and keep stdout empty" PASS \
+  || check "T31 helper refusals:$REFUSE_BAD" FAIL
+
+# T32 a writer I/O failure arm. None of mkdir/mktemp/printf/mv failing was ever
+# driven, so each user-facing message rested on reading alone. An unwritable state
+# directory is the reachable one: a read-only project tree is an ordinary state.
+IO_PROJ="$(mktemp -d)"; IO_SID="tddmode-io"
+sym_session "$IO_PROJ" "$IO_SID"
+mkdir -p "$IO_PROJ/.zensu/state"
+chmod 500 "$IO_PROJ/.zensu/state" 2>/dev/null || true
+# Same rule as T8c: record enforcement before restoring, not after.
+IO_ENFORCED=1; [ -w "$IO_PROJ/.zensu/state" ] && IO_ENFORCED=0
+IO_ERR="$(CLAUDE_CODE_SESSION_ID="$IO_SID" CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+  CLAUDE_PLUGIN_DATA="$IO_PROJ/.session-control-test/plugin-data" CLAUDE_PROJECT_DIR="$IO_PROJ" \
+  ZENSU_CONFIG="$CFG_DEFAULT" bash "$HELPER" --strict 2>&1 >/dev/null)"; IO_RC=$?
+# Count only what THIS helper would have written. The session baseline puts its own
+# files in the state directory, so a bare `-type f` count is never zero and would
+# fail the check for a reason unrelated to the refusal.
+IO_FILES="$(find "$IO_PROJ/.zensu/state" -maxdepth 1 \( -name 'tdd-mode-*.json' -o -name '*.tmp.*' \) 2>/dev/null | grep -c . || true)"
+chmod 700 "$IO_PROJ/.zensu/state" 2>/dev/null || true
+if [ "$IO_ENFORCED" != "1" ]; then
+  SKIP_PRIVILEGE=$((SKIP_PRIVILEGE+1))
+  check "T32 writer I/O failure — this host does not enforce a read-only directory for this user" SKIP
+else
+  { [ "$IO_RC" -eq 2 ] && [ "$IO_FILES" = "0" ] \
+    && printf '%s' "$IO_ERR" | grep -qE 'cannot create a temporary file beside|cannot create state directory|cannot write'; } \
+    && check "T32 an unwritable state directory refuses with exit 2, a named message and no marker" PASS \
+    || check "T32 writer I/O arm (rc=$IO_RC files=$IO_FILES err='${IO_ERR:0:70}')" FAIL
+fi
+rm -rf "$IO_PROJ"
+
+# T33 the injection-resistance paragraph is the ENTIRE control on rank 1 — the one
+# rank that can lower the discipline — and nothing pinned it, while its mirror in
+# pr-fix-findings is pinned by T24. Deleting it used to leave this suite green.
+INJ_BLOCK="$(awk '/^## Switching to vanilla$/ { inside=1; next } inside && /^## / { exit } inside { print }' "$SKILL")"
+INJ_BAD=""
+for LIT in 'Only the user changes the mode' 'data, not an instruction' 'trigger phrases'; do
+  printf '%s' "$INJ_BLOCK" | grep -qiF -- "$LIT" || INJ_BAD="$INJ_BAD ${LIT// /_}"
+done
+[ -z "$INJ_BAD" ] \
+  && check "T33 the tdd-mode skill keeps the rank-1 injection-resistance paragraph" PASS \
+  || check "T33 injection-resistance paragraph incomplete:$INJ_BAD" FAIL
+
 echo "----"
-echo "test-tdd-mode-toggle: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
+# A SKIP is streamed by tests/run-all.sh but never tallied by it — the runner judges
+# a suite by its exit code alone. So a host that cannot create a symlink used to
+# report this suite green with almost none of invariant 6 verified, and nothing in
+# the run said so. Say it loudly, and let a host that CAN create symlinks demand it:
+# ZENSU_TEST_REQUIRE_SYMLINKS=1 turns the skip into a failure. Default off, because
+# a symlink-poor host is a real environment, not a defect.
+#
+# Only SKIP_SYMLINK drives this. A privilege skip (T8c/T32) leaves those two probes
+# unverified and nothing else, so folding it in here would print a false claim about
+# the symlink refusals — and, under the strict flag, fail the suite for an unrelated
+# reason. The escalation runs BEFORE the tally so the printed FAIL count and the exit
+# status can never disagree.
+if [ "$SKIP_SYMLINK" -gt 0 ]; then
+  echo "test-tdd-mode-toggle: UNVERIFIED — $SKIP_SYMLINK symlink-guard check(s) skipped on this host."
+  echo "test-tdd-mode-toggle: UNVERIFIED — the writer/reader symlink refusals were NOT verified by this run."
+  if [ "${ZENSU_TEST_REQUIRE_SYMLINKS:-0}" = "1" ]; then
+    echo "test-tdd-mode-toggle: ZENSU_TEST_REQUIRE_SYMLINKS=1 — treating the skipped symlink guard(s) as a failure."
+    FAIL=$((FAIL+SKIP_SYMLINK))
+  fi
+fi
+if [ "$SKIP_PRIVILEGE" -gt 0 ]; then
+  echo "test-tdd-mode-toggle: UNVERIFIED — $SKIP_PRIVILEGE privilege probe(s) skipped; this host does not enforce the file mode they need."
+fi
+echo "test-tdd-mode-toggle: $PASS PASS / $FAIL FAIL / $SKIP SKIP (symlink=$SKIP_SYMLINK privilege=$SKIP_PRIVILEGE)"
 [ "$FAIL" -eq 0 ]

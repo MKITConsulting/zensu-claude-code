@@ -1688,6 +1688,47 @@ else
   check "C8 timestampStyle none lease renewal (a=$LEASE_NONE_A_DECISION b=$LEASE_NONE_B_DECISION prepared_rc=$LEASE_NONE_PREPARED_RC has_ts=$LEASE_NONE_HAS_TS assignment_mtime=$LEASE_NONE_ASSIGNMENT_MTIME fixture_mtime=$LEASE_NONE_FIXTURE_MTIME fresh_rc=$LEASE_NONE_C_FRESH_RC fresh=$LEASE_NONE_C_FRESH_DECISION stale_rc=$LEASE_NONE_STALE_MTIME_RC stale_mtime=$LEASE_NONE_STALE_MTIME expired_rc=$LEASE_NONE_C_EXPIRED_RC expired=$LEASE_NONE_C_EXPIRED_DECISION b_active=$LEASE_NONE_B_ACTIVE c_active=$LEASE_NONE_C_ACTIVE owner=$LEASE_NONE_OWNER_DIAG)" FAIL
 fi
 
+# The Stop-hook adoption seed (stop-chain-enforcer.sh, VANILLA_SEED) resolves the
+# TDD-mode ladder for every rank that exists at that site: rank 1 (the session
+# marker) over rank 3 (hooks.tddImplementation) over rank 4 (vanilla). There is no
+# caller flag at an adoption, so rank 2 is structurally absent here by design.
+#
+# P0 above pins the call site's ARGUMENT SPELLING with a fixed-string match. That
+# match cannot observe an empty ZENSU_SESSION_KEY: the arguments would still be
+# spelled identically while zensu_tdd_strict_effective silently fell through to the
+# configured mode, collapsing rank 1 into rank 3 with the whole suite green. The
+# four cases below decide the seed through the FROZEN flag the adopted generation
+# actually carries, and they discriminate in BOTH directions — a marker that only
+# ever agreed with its config would prove nothing.
+seed_mode_case() {
+  local label="$1" config="$2" marker="$3" sid="seed-mode-$1"
+  setup_case "seed_mode_$label" "$config"
+  activate_session "$sid"
+  local key
+  key="$(canonical_session "$sid")" || { printf 'missing'; return; }
+  mkdir -p "$CASE_STATE"
+  if [ -n "$marker" ]; then
+    printf '{"mode":"%s"}\n' "$marker" > "$CASE_STATE/tdd-mode-$key.json"
+  fi
+  zlog --pending-review --files "seed-$label.ts" --summary "$label" >/dev/null
+  stop "$sid" >/dev/null
+  printf '%s/%s' "$(state_flag "$sid" active)" "$(state_flag "$sid" vanilla)"
+}
+VANILLA_CFG='{"hooks":{"tddImplementation":false}}'
+STRICT_CFG='{"hooks":{"tddImplementation":true}}'
+SEED_STRICT_MARKER="$(seed_mode_case strict_marker "$VANILLA_CFG" strict)"
+SEED_VANILLA_CFG="$(seed_mode_case vanilla_config "$VANILLA_CFG" '')"
+SEED_VANILLA_MARKER="$(seed_mode_case vanilla_marker "$STRICT_CFG" vanilla)"
+SEED_STRICT_CFG="$(seed_mode_case strict_config "$STRICT_CFG" '')"
+if [ "$SEED_STRICT_MARKER" = "true/false" ] \
+  && [ "$SEED_VANILLA_CFG" = "true/true" ] \
+  && [ "$SEED_VANILLA_MARKER" = "true/true" ] \
+  && [ "$SEED_STRICT_CFG" = "true/false" ]; then
+  check "D1 Stop adoption seed resolves the marker over the configured mode in both directions" PASS
+else
+  check "D1 Stop adoption seed mode ladder (strict_marker=$SEED_STRICT_MARKER vanilla_config=$SEED_VANILLA_CFG vanilla_marker=$SEED_VANILLA_MARKER strict_config=$SEED_STRICT_CFG; each active/vanilla)" FAIL
+fi
+
 echo "----"
 echo "test-deferred-review-claim: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

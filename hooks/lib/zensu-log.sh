@@ -394,8 +394,15 @@ case "${1:-}" in
     # --tdd-mode belongs to exactly ONE verb, and the rule is written once rather
     # than as a `seen_tdd_mode=false` conjunct in every other branch: a verb added
     # later inherits the refusal instead of silently accepting a flag that only
-    # `--tdd-begin` can act on. It is stated before the per-verb matrix so the
-    # matrix keeps the shape its own structure test reads.
+    # `--tdd-begin` can act on.
+    #
+    # One real coupling, named rather than alluded to: T18 in
+    # tests/structure/test-tdd-mode-toggle.sh derives the gated-verb list by
+    # extracting the OUTER verb-dispatch line of this file (the
+    # `--tdd-begin|--tdd-complete|...)` case label far above) and comparing it
+    # against a hardcoded count. Reformatting THAT line breaks T18; the per-verb
+    # matrix below is not what it reads, and this line's placement is a readability
+    # choice, not a constraint.
     [ "$seen_tdd_mode" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
     case "$verb" in
       --tdd-begin|--tdd-complete)
@@ -475,9 +482,7 @@ case "${1:-}" in
         begin_project_dir="$(zensu_resolve_project_dir 2>/dev/null)" || begin_project_dir=""
         begin_mode="$(zensu_tdd_mode_override "$begin_project_dir" "$session_val")"
         # `auto` (and anything unreadable, which the reader also reports as auto)
-        # hands the decision down to the caller's flag, then to the config. The
-        # ranks are collapsed into one flat case on purpose: a bare `;;` line here
-        # would truncate the structure test's extraction of this branch.
+        # hands the decision down to the caller's flag, then to the config.
         [ "$begin_mode" = "strict" ] || [ "$begin_mode" = "vanilla" ] || begin_mode="$tdd_mode_val"
         case "$begin_mode" in
           strict)  begin_vanilla=false ;;

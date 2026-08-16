@@ -20,10 +20,18 @@
 # line, and a spec body is not always user-authored.
 #
 # `--auto` WRITES `{"mode":"auto"}` rather than deleting the marker. Absence and
-# `auto` resolve identically (no override), but writing keeps `--status` able to
-# tell a deliberate release from a choice that was never made, and the writer
-# never has to distinguish the two. (No /zensu:doctor row reads the marker yet —
-# a known gap, not a claim this file gets to make.)
+# `auto` resolve identically for MODE purposes (no override), but the marker's
+# presence is still observable: `zensu_tdd_mode_marker_state` answers `released`
+# for a present `{"mode":"auto"}` and `none` for absence, and `--status` renders
+# the two differently — so a deliberate release reads as one, not as a choice that
+# was never made. The writer still never has to distinguish them. (No
+# /zensu:doctor row reads the marker yet — a known gap, not a claim this file gets
+# to make.)
+#
+# `--status` also reports the RUNNING chain when its frozen mode disagrees with the
+# resolved session mode. Switching governs the next chain, never the running one,
+# and that caveat used to live only in prose the model reads — while the surface a
+# human actually asks said `strict (session)` over a chain frozen vanilla.
 #
 # Choosing vanilla here is a MODE choice, not a gate escape: vanilla is the
 # shipped default of hooks.tddImplementation, so this writes no bypass-ledger
@@ -66,6 +74,13 @@ case "$TDD_MODE_VERB" in
     ;;
 esac
 
+# TWIN PROLOGUE — the block from here to the end of the two resolver guards is
+# duplicated, near-verbatim, in hooks/lib/zensu-zen-mode.sh (only the script name in
+# the messages and the skill named in the CLAUDE_PLUGIN_DATA hint differ). It is NOT
+# extracted into zensu-session.sh: the plugin-root self-validation above has to
+# precede this `source` to mean anything, so the two halves cannot move together
+# without restructuring both helpers. Change the Session Control binding contract and
+# you change it TWICE — the twin carries the same reference back to this file.
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_model_session; then
   echo "zensu-tdd-mode.sh: rendered Session Control binding unavailable" >&2
@@ -128,11 +143,13 @@ export CLAUDE_PROJECT_DIR="$TDD_MODE_PROJECT_DIR"
 # directory — and the link check is applied to it too.
 tdd_mode_write_marker() {
   local tmp
-  # `.zensu` is checked alongside `state` and the marker: the project root itself is
-  # canonicalized by Session Control, so `.zensu` is the one remaining component a
-  # checked-out tree could carry as a link — and a link there relocates the whole
-  # state directory while both leaf checks stay false.
-  if [ -L "$TDD_MODE_PROJECT_DIR/.zensu" ] || [ -L "$TDD_MODE_STATE_DIR" ] || [ -L "$TDD_MODE_MARKER" ]; then
+  # The component list lives ONCE, in zensu_tdd_mode_state_linked beside the path
+  # template, and both the reader and this writer call it — `.zensu` is checked
+  # alongside `state` and the marker because the project root itself is canonicalized
+  # by Session Control, so `.zensu` is the one remaining component a checked-out tree
+  # could carry as a link, and a link there relocates the whole state directory while
+  # both leaf checks stay false.
+  if zensu_tdd_mode_state_linked "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_MARKER"; then
     echo "zensu-tdd-mode.sh: refusing to follow a symlinked state path — remove $TDD_MODE_MARKER and its directory link by hand" >&2
     exit 2
   fi
@@ -150,9 +167,14 @@ tdd_mode_write_marker() {
     echo "zensu-tdd-mode.sh: cannot write $tmp" >&2
     exit 2
   }
-  # Re-assert every component the rename depends on, including the temp leaf.
-  if [ -L "$TDD_MODE_PROJECT_DIR/.zensu" ] || [ -L "$TDD_MODE_STATE_DIR" ] \
-    || [ -L "$TDD_MODE_MARKER" ] || [ -L "$tmp" ]; then
+  # Re-assert every component the RENAME depends on, including the temp leaf. This
+  # is deliberately a SECOND call of the shared predicate rather than a shared
+  # result — the duplication is the TOCTOU defense, and only the component list is
+  # shared. Note what it does and does not cover: the write on the line above has
+  # already happened, so what this prevents is a misdirected rename, not a
+  # misdirected write. `mktemp` creates the temp leaf with O_EXCL, which is what
+  # keeps that window narrow; it does not close it.
+  if zensu_tdd_mode_state_linked "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_MARKER" "$tmp"; then
     echo "zensu-tdd-mode.sh: refusing to follow a symlinked state path — remove $TDD_MODE_MARKER and its directory link by hand" >&2
     exit 2
   fi
@@ -184,13 +206,57 @@ case "$TDD_MODE_VERB" in
     echo "tdd-mode: auto"
     ;;
   --status)
-    case "$(zensu_tdd_mode_override "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_SESSION_KEY")" in
-      strict)  echo "strict (session)" ;;
-      vanilla) echo "vanilla (session)" ;;
+    # Two questions, and they are NOT the same one: what will the NEXT chain arm,
+    # and what is the chain running RIGHT NOW frozen to. Reporting only the first
+    # is what let this verb answer `strict (session)` for a session whose armed
+    # chain is frozen vanilla and whose every edit therefore still passes the gate
+    # through — the user asked the one surface that could have told them, and it
+    # said the opposite of what governed their edits.
+    TDD_MODE_RESOLVED=""
+    case "$(zensu_tdd_mode_marker_state "$TDD_MODE_PROJECT_DIR" "$TDD_MODE_SESSION_KEY")" in
+      strict)
+        TDD_MODE_RESOLVED="strict"
+        TDD_MODE_LINE="strict (session)"
+        ;;
+      vanilla)
+        TDD_MODE_RESOLVED="vanilla"
+        TDD_MODE_LINE="vanilla (session)"
+        ;;
+      released)
+        # A recorded release, distinct from a choice that was never made — this is
+        # the whole reason `--auto` writes `{"mode":"auto"}` instead of unlinking.
+        if zensu_tdd_strict_enabled; then
+          TDD_MODE_RESOLVED="strict"; TDD_MODE_LINE="strict (config, session choice released)"
+        else
+          TDD_MODE_RESOLVED="vanilla"; TDD_MODE_LINE="vanilla (config, session choice released)"
+        fi
+        ;;
       *)
-        if zensu_tdd_strict_enabled; then echo "strict (config)"; else echo "vanilla (config)"; fi
+        if zensu_tdd_strict_enabled; then
+          TDD_MODE_RESOLVED="strict"; TDD_MODE_LINE="strict (config)"
+        else
+          TDD_MODE_RESOLVED="vanilla"; TDD_MODE_LINE="vanilla (config)"
+        fi
         ;;
     esac
+    # The running chain's FROZEN flag is the only thing the PreToolUse edit gate
+    # reads, so it is the only honest answer to "am I in strict right now". Read it
+    # from the same accessor pre-edit-tdd-reminder.sh uses; anything other than a
+    # clean true/false on an ACTIVE chain means there is nothing reliable to
+    # disclose, and the line stays exactly what it was before this branch existed.
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+    TDD_MODE_STATE_FILE="$(tdd_state_file "$TDD_MODE_SESSION_KEY" 2>/dev/null)" || TDD_MODE_STATE_FILE=""
+    if [ -n "$TDD_MODE_STATE_FILE" ] && [ "$(tdd_session_active "$TDD_MODE_STATE_FILE")" = "true" ]; then
+      case "$(tdd_vanilla_mode "$TDD_MODE_STATE_FILE")" in
+        true)  TDD_MODE_FROZEN="vanilla" ;;
+        false) TDD_MODE_FROZEN="strict" ;;
+        *)     TDD_MODE_FROZEN="" ;;
+      esac
+      if [ -n "$TDD_MODE_FROZEN" ] && [ "$TDD_MODE_FROZEN" != "$TDD_MODE_RESOLVED" ]; then
+        TDD_MODE_LINE="$TDD_MODE_LINE — the chain now running is frozen $TDD_MODE_FROZEN; this takes effect at the next --tdd-begin"
+      fi
+    fi
+    echo "$TDD_MODE_LINE"
     ;;
 esac
 exit 0

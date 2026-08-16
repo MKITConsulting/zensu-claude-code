@@ -64,6 +64,15 @@ deferred-review generation vanilla. Everything downstream — the edit gate, the
 `--mode` — reads the FROZEN flag and never the marker, so a mid-chain switch changes
 nothing. Say "the next chain", never "this session".
 
+**`/zensu:tdd-mode --status` is the ONE reader that consults both**, and it is not a
+counter-example to the rule above — it exists to report the rule. It resolves the session
+mode from the marker (ranks 1 → 3 → 4) and then reads the running chain's FROZEN flag via
+`tdd_state_file` / `tdd_session_active` / `tdd_vanilla_mode`, appending a disclosure when
+the two disagree. That makes it a fourth frozen-flag reader, so a change to the flag's
+name, shape or accessors lands here as well as in the three above. It degrades to the
+resolved-mode answer when the phase library cannot be sourced, because the source happens
+after the base line is computed — a load fault loses the disclosure, never the mode.
+
 **Effective vs configured is a deliberate split.** `plan-approved-delegate.sh`,
 `user-prompt-tdd-reminder.sh` and the Stop seed call `zensu_tdd_strict_effective`
 (marker over config); `session-start-banner.sh` and `session-start-primer.sh` stay on
@@ -73,10 +82,20 @@ A directive that names a cause must name the one that actually decided: after th
 switch to the effective mode, the vanilla branches may not assert
 `hooks.tddImplementation=false`.
 
-Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_override`
-/ `zensu_tdd_strict_effective` (the single path template and parse — the writer sources
+Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_state_linked`
+/ `zensu_tdd_mode_marker_state` / `zensu_tdd_mode_override` / `zensu_tdd_strict_effective`
+(the single path template and parse — the writer sources
 them rather than re-spelling, unlike zen-mode, whose template is hand-copied into its
-reader hook), the `TDD-MODE:` producer (`skills/pr-fix-findings/SKILL.md`) and its parser
+reader hook). `zensu_tdd_mode_marker_state` owns the marker VOCABULARY —
+`strict|vanilla|released|none`, four values, where `released` is a present `{"mode":"auto"}`
+and `none` is absence-or-unreadable — and it is the only parse; `zensu_tdd_mode_override` is a
+total reduction over it that collapses `released|none` to `auto`, so its callers keep a
+three-value contract and the two cannot drift. `zensu_tdd_mode_state_linked` is the symlink
+guard for the `.zensu` / state-dir / marker triple plus an optional extra leaf, and the WRITER
+now calls the reader's copy rather than spelling its own; its pre-rename re-check is
+deliberately a SECOND call, because that duplication is the TOCTOU defense and collapsing the
+two would remove it. A new marker value lands in the reader, in the reduction, and in
+`--status`'s label set. Then the `TDD-MODE:` producer (`skills/pr-fix-findings/SKILL.md`) and its parser
 (`skills/tdd/SKILL.md` Phase 0 + Mandatory command protocol step 1), that same skill's
 §"Vanilla Implementation Mode", which states the ladder a THIRD time for the model,
 `skills/tdd-mode/SKILL.md`, `docs/configuration.md` (the `tddImplementation` row),
