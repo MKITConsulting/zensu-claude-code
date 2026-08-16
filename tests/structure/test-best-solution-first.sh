@@ -653,39 +653,52 @@ else
 fi
 
 # ── B13: a host without node fails silent ───────────────────────────────────
-# PATH is narrowed to a directory holding exactly the externals the hook needs
-# BEFORE its node probe — `dirname`, which the plugin-root guard shells out to.
-# Narrowing to bash alone made the guard itself fail and the check reported exit 2
-# for a reason that had nothing to do with node; the positive control below is what
-# keeps that confusion from recurring.
+# The PATH must stay USABLE: the hook still needs `dirname` to resolve its own
+# root, and blanking PATH would test the shebang rather than the node guard.
+# Git Bash is where this degenerates — `ln -s` falls back to a copy of
+# dirname.exe under a name Windows will not load, so the hook cannot resolve its
+# root and refuses with exit 2 long before the node probe. Scoring that as a
+# fail-silent defect is exactly what turned windows-shard-7 red once; the guard
+# below detects it instead, mirroring test-evidence-discipline.sh H10.
 NODELESS_BIN="$(mk_dir)"
-BASH_BIN="$(command -v bash)"
-DIRNAME_BIN="$(command -v dirname)"
-if [ -n "$NODELESS_BIN" ] && [ -n "$BASH_BIN" ] && [ -n "$DIRNAME_BIN" ] \
-   && ln -s "$BASH_BIN" "$NODELESS_BIN/bash" 2>/dev/null \
-   && ln -s "$DIRNAME_BIN" "$NODELESS_BIN/dirname" 2>/dev/null; then
-  # Positive control: with node linked in as well, this same narrowed PATH emits.
-  NODE_BIN="$(command -v node)"
-  if [ -n "$NODE_BIN" ] && ln -s "$NODE_BIN" "$NODELESS_BIN/node" 2>/dev/null; then
-    CTRL_OUT="$(printf '{"hook_event_name":"UserPromptSubmit"}' | PATH="$NODELESS_BIN" "$BASH_BIN" "$HOOK" 2>/dev/null)"
-    CTRL_RC=$?
-    [ "$CTRL_RC" -eq 0 ] && [ -n "$CTRL_OUT" ] \
-      && check "B13a positive control: the narrowed PATH still emits while node is present" PASS \
-      || check "B13a narrowed PATH does not emit even with node present (exit=$CTRL_RC bytes=${#CTRL_OUT}) — B13 would be vacuous" FAIL
-    rm -f "$NODELESS_BIN/node"
+if [ -n "$NODELESS_BIN" ]; then
+  mkdir -p "$NODELESS_BIN/bin"
+  for helper in dirname; do
+    src="$(command -v "$helper" 2>/dev/null)"
+    [ -n "$src" ] && ln -s "$src" "$NODELESS_BIN/bin/$helper" 2>/dev/null
+  done
+  ABS_BASH="$(command -v bash 2>/dev/null)"
+  ABS_NODE="$(command -v node 2>/dev/null)"
+  if PATH="$NODELESS_BIN/bin" command -v node >/dev/null 2>&1; then
+    check "B13 could not build a node-free PATH" FAIL
+  elif [ -z "$ABS_BASH" ]; then
+    check "B13 could not resolve an absolute bash path" FAIL
+  elif ! PATH="$NODELESS_BIN/bin" dirname -- /a/b >/dev/null 2>&1; then
+    # Only a host whose `ln -s` cannot produce a runnable helper reaches this.
+    if [ "$(node -p 'process.platform === "win32" ? "true" : "false"' 2>/dev/null)" = true ]; then
+      check "B13 missing-node fail-silent (no runnable dirname on a stripped PATH)" PASS
+    else
+      check "B13 could not keep dirname runnable on the node-free PATH" FAIL
+    fi
   else
-    check "B13a could not link node into the narrowed PATH" FAIL
-  fi
-
-  NODELESS_OUT="$(printf '{"hook_event_name":"UserPromptSubmit"}' | PATH="$NODELESS_BIN" "$BASH_BIN" "$HOOK" 2>/dev/null)"
-  NODELESS_RC=$?
-  if [ "$NODELESS_RC" -eq 0 ] && [ -z "$NODELESS_OUT" ]; then
-    check "B13 a host without node emits nothing and exits 0" PASS
-  else
-    check "B13 node-free host not handled silently (exit=$NODELESS_RC bytes=${#NODELESS_OUT})" FAIL
+    # Positive control on the SAME stripped PATH: with node linked in, it emits.
+    if [ -n "$ABS_NODE" ] && ln -s "$ABS_NODE" "$NODELESS_BIN/bin/node" 2>/dev/null \
+       && PATH="$NODELESS_BIN/bin" command -v node >/dev/null 2>&1; then
+      CTRL_OUT="$(printf '%s' '{"hook_event_name":"UserPromptSubmit"}' | PATH="$NODELESS_BIN/bin" "$ABS_BASH" "$HOOK" 2>/dev/null)"; CTRL_RC=$?
+      [ "$CTRL_RC" = 0 ] && [ -n "$CTRL_OUT" ] \
+        && check "B13a positive control: the stripped PATH still emits while node is present" PASS \
+        || check "B13a stripped PATH does not emit even with node present (exit=$CTRL_RC bytes=${#CTRL_OUT}) — B13 would be vacuous" FAIL
+      rm -f "$NODELESS_BIN/bin/node"
+    else
+      check "B13a could not link node onto the stripped PATH — B13 runs without a positive control" FAIL
+    fi
+    NODELESS_OUT="$(printf '%s' '{"hook_event_name":"UserPromptSubmit"}' | PATH="$NODELESS_BIN/bin" "$ABS_BASH" "$HOOK" 2>/dev/null)"; NODELESS_RC=$?
+    [ "$NODELESS_RC" = 0 ] && [ -z "$NODELESS_OUT" ] \
+      && check "B13 a host without node emits nothing and exits 0" PASS \
+      || check "B13 node-free host not handled silently (exit=$NODELESS_RC bytes=${#NODELESS_OUT})" FAIL
   fi
 else
-  check "B13 could not build the node-free PATH fixture" FAIL
+  check "B13 could not create a fixture dir for the node-free PATH" FAIL
 fi
 
 # ── B13b: the shipped example config ───────────────────────────────────────
