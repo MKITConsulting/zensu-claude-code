@@ -62,8 +62,10 @@ axis:
 
 **While the plugin is at major `0`, MINOR is therefore the breaking axis.** A
 breaking change costs a `minor` release and a non-breaking feature is a `patch`.
-Anything below forces the breaking bump, because a running session would
-otherwise be served by a runtime that cannot read what it wrote:
+The list below is signed: entries are breaking unless the entry says otherwise.
+A breaking one forces the bump because a running session would otherwise be
+served by a runtime that cannot read what it wrote; the two marked NOT are
+carve-outs kept here so a releaser meets them where they will look:
 
 - the context record or workflow-state **schema** (`SCHEMA_VERSION`, any field
   added, removed or retyped);
@@ -83,8 +85,8 @@ otherwise be served by a runtime that cannot read what it wrote:
   claim rather than against the record. Do not over-bump defensively; do
   re-derive this if the added hook writes session state or participates in a
   strict key set;
-- **adding a permissively-read config key** is likewise NOT breaking, for a
-  reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
+- **adding a permissively-read config key** is likewise NOT in this list and is
+  a `patch`, for a reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
   `j.hooks[key] === false`, so an older runtime ignores a key it does not know
   rather than failing on it. A key read by a STRICT validator is the opposite
   case and belongs under the strict-key-set bullet above;

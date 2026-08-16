@@ -165,17 +165,23 @@ at all. The figures above come from driving the hook directly, not from watching
 
 **Carrier count, stated precisely.** On `SubagentStart` this hook is the only carrier. On the main thread `hooks/user-prompt-zen-mode.sh` carries a partial second copy — the ranking obligation and its anti-inflation counterweight, not the whole block — because its brevity contract would otherwise license the very omission the rule forbids. That copy is hand-written rather than read from the marker block, which is a drift seam: `tests/structure/test-best-solution-first.sh` B14/B14a/B14b pin it from this side, and zen-mode's own suite pins nothing, so a zen-mode author can break it and still see green. Note also what the fallback cannot do: zen-mode exits for any non-main principal and is not registered on `SubagentStart`, so turning this hook off silences the rule for every spawned child with nothing left carrying it there.
 
-**Known open gap, recorded in the same voice as the two divergences above.** No surface anywhere
-can tell an operator that the rule stopped injecting: not build time, whose pins govern only this
-repository's copy of the file; not run time, where every refusal exits `0` with no output by design;
-and not `/zensu:doctor`, which verifies that `hooks.json` points at files on disk and so catches a
-missing hook but not a malformed block behind a present one. One doctor row that extracts the block
-and reports present/malformed would close this for BOTH marker-block readers at once. It is not
-filed as an issue, so this paragraph is the only record.
-
 The **single carrier on the subagent leg** is the honest weak spot. Every failure mode of that hook is silent absence: an unknown event, a malformed payload, a missing `node`, a symlinked or oversized or malformed block all exit `0` with no output, and no downstream check notices a reminder that never arrived. In particular a block re-wrapped across two markdown lines is not truncated — it is dropped entirely. The only place that shape becomes a hard failure is build time, which is why `tests/structure/test-best-solution-first.sh` drives all five malformed-block refusals against the hook's own parser and pins each clause of the block separately.
 
 Pinning the clauses separately matters because the block's two halves pull against each other. It forbids letting a shortcut take the first slot by default, and it forbids treating that as licence to inflate scope: when the durable answer genuinely is to do less, that option goes first, on the merits. A block carrying only the prohibition would push every agent toward over-engineering, so the carve-out is pinned as its own check rather than trusted to survive an edit.
+
+**Known open gap, recorded in the same voice as the two divergences above.** The pins the previous
+paragraphs describe do not close everything: nothing can tell an operator that the rule stopped
+injecting in *their* installation. Build-time pins govern only this repository's copy of the file.
+At run time every refusal but one is silent by design — the exception is a mismatched inherited
+`CLAUDE_PLUGIN_ROOT`, which exits `2` on stderr, and it is the only failure an operator sees. And `/zensu:doctor`
+verifies that `hooks.json` points at files on disk, so it catches a missing hook but not a block
+that is present yet unreadable-as-a-block — nor, separately, a project that simply set the flag to
+`false`, since its config row reports JSON validity and quoted-boolean traps but never resolved flag
+state. A doctor row would have to report block health as present / malformed / **oversized** —
+an over-long block is well-formed and refused on length alone, which is its own branch — alongside
+the resolved flag, to close what is actually open here. It would then cover BOTH marker-block
+readers at once. It is not filed as an issue, so this paragraph and the corresponding one in
+[`docs/best-solution-first.md`](best-solution-first.md) are the only record.
 
 Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 

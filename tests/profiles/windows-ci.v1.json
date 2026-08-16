@@ -340,6 +340,13 @@
           "timeoutMs": 900000
         },
         {
+          "id": "best-solution-first",
+          "runner": "bash",
+          "path": "tests/structure/test-best-solution-first.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
           "id": "review-worker-evidence-lease",
           "runner": "bash",
           "path": "tests/structure/test-review-worker-evidence-lease.sh",

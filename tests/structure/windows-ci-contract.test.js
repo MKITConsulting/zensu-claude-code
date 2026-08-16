@@ -29,8 +29,8 @@ const expectedProfiles = [
   'windows-shard-6',
   'windows-shard-7',
 ];
-const expectedCommandCount = 40;
-const expectedCommandDigest = 'f139ab999158dca7bc322303480564ea9c6cf9aad9e07dea9ebe5b27082c5f94';
+const expectedCommandCount = 41;
+const expectedCommandDigest = '88570b0273fee478ddff24dc600d98266df84d44c1b865837d2a787725e644a3';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);

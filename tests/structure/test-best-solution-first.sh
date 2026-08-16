@@ -730,7 +730,14 @@ if [ -n "$FAKE_LIB" ] && build_fake "$FAKE_LIB" && cp "$RULES" "$FAKE_LIB/docs/b
       && check "B15 a symlinked zensu-config.sh is refused before it is sourced" PASS \
       || check "B15 symlinked library was sourced anyway (exit=$RC bytes=${#OUT})" FAIL
   else
-    check "B15 host produced no real symlink for the library fixture" FAIL
+    # Same policy as B8: a host that cannot make a real symlink falls back to the
+    # source-level pin rather than failing for a reason unrelated to the guard.
+    # Git Bash on Windows is that host, and this suite runs in a Windows shard.
+    if grep -qF '[ ! -L "$ZENSU_BEST_SOLUTION_CONFIG_LIB" ]' "$HOOK"; then
+      check "B15 host produced no real symlink; source-level pin confirms the library ! -L guard" PASS
+    else
+      check "B15 host produced no real symlink AND the library ! -L guard is gone from the hook" FAIL
+    fi
   fi
   rm -rf "$FAKE_LIB"; FAKE_LIB=""
 else
