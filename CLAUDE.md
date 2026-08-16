@@ -80,11 +80,14 @@ otherwise be served by a runtime that cannot read what it wrote:
   `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale; what keeps an
   in-flight bind alive is that `readContextInternal` measures the **recorded**
   root, and the upgraded case re-measures the executing tree against the caller's
-  claim rather than against the record. A new permissively-read config key is
-  likewise non-breaking — `zensu_hook_enabled` tests only
+  claim rather than against the record. Do not over-bump defensively; do
+  re-derive this if the added hook writes session state or participates in a
+  strict key set;
+- **adding a permissively-read config key** is likewise NOT breaking, for a
+  reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
   `j.hooks[key] === false`, so an older runtime ignores a key it does not know
-  rather than failing on it. Do not over-bump defensively; do re-derive this if
-  the added hook writes session state or participates in a strict key set;
+  rather than failing on it. A key read by a STRICT validator is the opposite
+  case and belongs under the strict-key-set bullet above;
 - the **attestation shape**, which is itself a schema two versions must agree
   on. A change to it has to ship in the release that *introduces* the policy it
   serves, never one release later.
