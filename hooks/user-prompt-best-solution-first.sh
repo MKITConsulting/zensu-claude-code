@@ -11,8 +11,13 @@
 # line between the zensu:best-solution-first markers) rather than duplicated here, so
 # this carrier can never drift from the canonical block. docs/ is inside the Session
 # Control runtime digest (manifestRuntimeEntries in hooks/lib/session-control-core-v1.js),
-# so that file is tamper-evident within a session; the load additionally refuses a
-# symlink, as session-start-evidence-discipline.sh does for its own policy file.
+# so that file is tamper-evident within a session THAT IS SERVED BY THE RUNTIME WHICH
+# MINTED ITS RECORD — servesRecordedRuntime lets a compatible sibling install serve a
+# record it did not mint, and this hook reads from the EXECUTING root, so a lineage-served
+# upgrade injects bytes no in-session digest measured. The build-time digest pin in
+# tests/structure/test-best-solution-first.sh (B2f1) is what actually binds the text.
+# The load additionally refuses a symlink, as session-start-evidence-discipline.sh does
+# for its own policy file.
 #
 # Deliberately different from session-start-evidence-discipline.sh in two ways: it IS
 # switchable (hooks.bestSolutionFirst, default on) because it directs how a decision is

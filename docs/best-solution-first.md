@@ -63,8 +63,14 @@ to frame a question is not observable in advance.
 
 **Why the file lives under `docs/`.** `manifestRuntimeEntries` in
 `hooks/lib/session-control-core-v1.js` folds `hooks`, `agents`, `skills`, `docs` and
-`templates` into the Session Control runtime digest, so this file is tamper-evident
-within a session — the same reason `docs/evidence-discipline.md` lives there. A
+`templates` into the Session Control runtime digest, so this file is tamper-evident within
+a session — the same reason `docs/evidence-discipline.md` lives there. Be precise about the
+limit: the digest measures the **recorded** plugin root, while the hook reads from the
+**executing** one, and `servesRecordedRuntime` deliberately lets a compatible sibling
+install serve a record it did not mint. Across a mid-session upgrade the injected bytes
+therefore come from a tree no in-session digest measured. What actually binds this text is
+the build-time digest pin, `tests/structure/test-best-solution-first.sh` B2f1: the block
+cannot change without a matching literal in the same commit. A
 top-level `rules/` directory would not be covered, which would leave the declared source
 of truth the one normative surface an installed-plugin modification could change
 undetected.

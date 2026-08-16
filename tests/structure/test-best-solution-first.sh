@@ -246,14 +246,31 @@ case "$BLOCK" in
   *)
     check "B2e block no longer declares precedence against a contract-fixed order" FAIL ;;
 esac
-# The block never names a file, so no reader can be pointed at a project-resolvable
-# path claiming to be an expanded version of it.
-case "$BLOCK" in
-  *'best-solution-first.md'*)
-    check "B2f block names its own file — a hostile repo could plant that path" FAIL ;;
-  *)
-    check "B2f block names no file path" PASS ;;
-esac
+# The block must name NO file, so no reader can be pointed at a project-resolvable path
+# claiming to be an expanded version of it — a reviewer principal resolves reads against
+# the PROJECT root, so a hostile repository can plant any path the block names. Rejecting
+# only this file's own name would let any OTHER path through while the label still read
+# "names no file path", so the predicate is path-SHAPED rather than one literal.
+if printf '%s' "$BLOCK" | grep -qE '[A-Za-z0-9_-]+\.(md|json|sh|js|mjs|cjs|txt|ya?ml)|/'; then
+  check "B2f block names a file path or a slash-separated location — a hostile repo could plant it" FAIL
+else
+  check "B2f block names no file path of any shape" PASS
+fi
+
+# The clause pins above cover a lede and five substrings; the rest of the directive could
+# still be rewritten in a docs-only commit with no test literal changing. That is the
+# low-visibility channel this digest closes: the bytes that reach every prompt and every
+# spawn cannot change without a matching literal here, in the same commit.
+BLOCK_SHA="$(printf '%s' "$BLOCK" | shasum -a 256 2>/dev/null | cut -d' ' -f1)"
+[ -n "$BLOCK_SHA" ] || BLOCK_SHA="$(printf '%s' "$BLOCK" | sha256sum 2>/dev/null | cut -d' ' -f1)"
+EXPECTED_BLOCK_SHA='3bfc50602b524b7ca37e96504c11409f2d72fbc8ed908c137e7efc566cd77420'
+if [ -z "$BLOCK_SHA" ]; then
+  check "B2f1 no sha256 tool available to pin the injected block" FAIL
+elif [ "$BLOCK_SHA" = "$EXPECTED_BLOCK_SHA" ]; then
+  check "B2f1 injected block matches its pinned digest" PASS
+else
+  check "B2f1 injected block CHANGED ($BLOCK_SHA != $EXPECTED_BLOCK_SHA) — update this literal deliberately, in the same commit" FAIL
+fi
 if [ "${#BLOCK}" -le "$REVIEW_CEILING" ]; then
   check "B2g block is within the ${REVIEW_CEILING}-char review ceiling (${#BLOCK})" PASS
 else
