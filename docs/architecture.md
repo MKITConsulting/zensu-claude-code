@@ -82,7 +82,7 @@ flowchart TD
 
 One rule runs underneath every other mechanism in this plugin: **an agent may state only what it has actually observed.** A plausible sentence nobody checked is the most expensive defect the plugin can produce, because every later stage — the review chain, the Phase 6 audits, the PR body, the user's decision — treats it as established fact and builds on it.
 
-[`docs/evidence-discipline.md`](evidence-discipline.md) is the single source of truth: no unobserved assertion; cite the observation behind every claim; mark what could not be verified as unverified instead of smoothing it over; settle assumptions with a check before acting and surface the ones you cannot; never invent a path, symbol, identifier, command, flag, API shape, version, or citation; never restate a build/test/coverage result this session did not produce. It lives under `docs/` on purpose — that directory is inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session exactly like the carriers that quote it.
+[`docs/evidence-discipline.md`](evidence-discipline.md) is the single source of truth: no unobserved assertion; cite the observation behind every claim; mark what could not be verified as unverified instead of smoothing it over; settle assumptions with a check before acting and surface the ones you cannot; never invent a path, symbol, identifier, command, flag, API shape, version, or citation; never restate a build/test/coverage result this session did not produce. It lives under `docs/` on purpose — that directory is inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session exactly like the carriers that quote it. That holds only while the executing plugin root *is* the recorded one: the digest measures the recorded root, the hook reads from the executing one, and `servesRecordedRuntime` deliberately lets a compatible sibling install serve a record it did not mint (see [Runtime Lineage](../CLAUDE.md)), so a mid-session upgrade injects bytes no in-session digest measured. The build-time pins in `tests/structure/test-evidence-discipline.sh` are what bind the text across that case.
 
 It reaches every process through three deliberately redundant carriers, because each one alone has a hole:
 
@@ -110,24 +110,25 @@ Moving it into a library fixes that and adds what the prose never had: a witness
 
 ## Best Solution First
 
-A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session. A third such rule belongs here too — and one already exists without following it:
+A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
 `hooks/user-prompt-zen-mode.sh` injects a ~2.7 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
-block. It is named here so the next reader does not conclude it was overlooked. The two
-instances also disagree on file hardening today: the best-solution-first reader does a
-full lstat → `O_NOFOLLOW` open → fstat dev/ino re-check, while
-`session-start-evidence-discipline.sh` still reads its file with a plain `readFileSync`
-behind the shell pre-check alone. Backporting that reader is the obvious next step and is
-deliberately not part of the change that introduced the pattern — it is recorded here as
-outstanding work — not filed as an issue, so this paragraph is the only record — together with a
-second, wider divergence: the tamper-evidence sentence is imprecise for a lineage-served session
-(the executing tree is not the measured one; see the Runtime Lineage section of `CLAUDE.md`), and
-unlike the reader it is NOT confined to one file. It appears in both hook headers and in three
-prose sites, this section among them. A follow-up that edits only
-`hooks/session-start-evidence-discipline.sh` therefore closes the first divergence and leaves the
-second standing in the hook this change added. A
-divergence with no owner is how a pattern permanently forks; this note is a pointer to
-work, not a standing exemption.
+block. It is named here so the next reader does not conclude it was overlooked.
+
+The two instances used to diverge in two ways, and no longer do. On **file hardening**,
+`session-start-evidence-discipline.sh` read its file with a plain `readFileSync` behind the
+shell pre-check alone; it now carries the same lstat → platform-gated `O_NOFOLLOW` open →
+fstat dev/ino re-check → size-bounded looped read → guarded close as the best-solution-first
+reader, and is enrolled beside it in the per-file secure-open inventory in
+`tests/structure/test-windows-portability-guards.sh` — together with a pin that the two
+carriers' reader bodies stay byte-identical, since every other pin in that inventory is
+per-file and would let a one-sided edit fork the pattern with the suite green. On the
+**tamper-evidence sentence**,
+which was never confined to one file, the imprecision for a lineage-served session is narrowed
+in both hook headers and in every prose site that repeated it. Both were recorded here as
+outstanding work rather than filed as issues, so this paragraph was their only record and is
+now the record that they closed. A divergence with no owner is how a pattern permanently
+forks.
 
 [`docs/best-solution-first.md`](best-solution-first.md) is the second instance: **when you put choices in front of the user, the option set must contain the solution you would defend as best for them over the long run, and that option must come first.** Its carrier is `hooks/user-prompt-best-solution-first.sh`, on `UserPromptSubmit` — every prompt, for the whole session — and on `SubagentStart`, so every spawned child gets it too.
 

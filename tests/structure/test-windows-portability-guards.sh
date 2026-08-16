@@ -24,6 +24,7 @@ BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
+EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -453,6 +454,44 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The evidence-discipline carrier is the fourth file carrying a hardened open. It read its
+# rule file with a plain readFileSync behind the shell pre-check alone until the reader was
+# backported from the sibling above; it is enrolled here for the same reason the sibling is,
+# because every count pin in this suite is per-file and a NEW file carrying a secure open is
+# invisible until it is named. The literals are deliberately IDENTICAL to the sibling's — the
+# two readers are one reader in two carriers, and a divergence in either is a divergence in
+# the pattern. It omits the reference's `nlink !== 1` clause for the same reason and that
+# omission is pinned as a negative so it cannot be reintroduced by accident.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
+  && [ "$(grep -cF 'const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
+  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$EVIDENCE_DISCIPLINE_HOOK" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$EVIDENCE_DISCIPLINE_HOOK" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$EVIDENCE_DISCIPLINE_HOOK" \
+  && ! grep -v '^[[:space:]]*//' "$EVIDENCE_DISCIPLINE_HOOK" | grep -qF 'nlink'; then
+  check "evidence-discipline reader omits unsupported O_NOFOLLOW on Windows" PASS
+else
+  check "evidence-discipline reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The pattern only holds if the two carriers keep the SAME reader. Comparing the extracted
+# blocks catches a one-sided edit that leaves both per-file pins above green — each of them
+# only asserts that its own file still satisfies the shape, never that the two agree.
+# Starts one line BELOW `const rulePath = …`, which is the only line the two legitimately
+# differ on — each names its own rule-file variable.
+extract_reader() {
+  sed -n '/const pre = fs.lstatSync(rulePath);/,/^    }$/p' "$1" | grep -v '^[[:space:]]*//'
+}
+BSF_READER="$(extract_reader "$BEST_SOLUTION_HOOK")"
+EVD_READER="$(extract_reader "$EVIDENCE_DISCIPLINE_HOOK")"
+if [ -n "$BSF_READER" ] && [ -n "$EVD_READER" ] \
+  && printf '%s\n' "$BSF_READER" | grep -qF 'fs.closeSync(fd)' \
+  && [ "$BSF_READER" = "$EVD_READER" ]; then
+  check "both marker-block carriers share one hardened reader body" PASS
+else
+  check "the two marker-block carriers' hardened readers have diverged (bsf=${#BSF_READER}B evd=${#EVD_READER}B)" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

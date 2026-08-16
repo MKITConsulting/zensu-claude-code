@@ -34,12 +34,13 @@ CLOSE_MARKER='<!-- /zensu:evidence-discipline -->'
 # (test-session-start-banner.sh, test-plan-approved-delegate.sh) do the same.
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
-CFG_TMP=""; FIX_DIR=""; NODE_DIR=""; LINK_DIR=""
+CFG_TMP=""; FIX_DIR=""; NODE_DIR=""; LINK_DIR=""; BIG_DIR=""
 cleanup() {
   [ -n "$CFG_TMP" ] && rm -f "$CFG_TMP"
   [ -n "$FIX_DIR" ] && rm -rf "$FIX_DIR"
   [ -n "$NODE_DIR" ] && rm -rf "$NODE_DIR"
   [ -n "$LINK_DIR" ] && rm -rf "$LINK_DIR"
+  [ -n "$BIG_DIR" ] && rm -rf "$BIG_DIR"
   return 0
 }
 trap cleanup EXIT
@@ -204,6 +205,48 @@ else
   check "H4 hook carries its own copy of the rule text — it will drift" FAIL
 fi
 
+# The hardened open, backported from hooks/user-prompt-best-solution-first.sh. The shell
+# `-f` / `! -L` pre-check above only narrows the swap window; the reader closes it by
+# re-checking the inode it actually opened. JS comment lines are stripped first: the
+# reader's own commentary names O_NOFOLLOW and nlink in prose, so a bare token grep would
+# stay green after the flag was deleted from the open. The composition and the ORDER are
+# pinned, not the vocabulary.
+HOOK_JS="$(grep -v '^[[:space:]]*//' "$HOOK")"
+H4B_FSTAT="$(printf '%s\n' "$HOOK_JS" | grep -n 'fs.fstatSync(fd)' | head -1 | cut -d: -f1)"
+H4B_READ="$(printf '%s\n' "$HOOK_JS" | grep -n 'fs.readSync(fd' | head -1 | cut -d: -f1)"
+if printf '%s\n' "$HOOK_JS" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);' \
+   && [ -n "$H4B_FSTAT" ] && [ -n "$H4B_READ" ] && [ "$H4B_FSTAT" -lt "$H4B_READ" ]; then
+  check "H4b reader opens O_NOFOLLOW|O_NONBLOCK and re-checks dev/ino BEFORE reading" PASS
+else
+  check "H4b hardened-open sequence broken (fstat line ${H4B_FSTAT:-?} vs read line ${H4B_READ:-?})" FAIL
+fi
+
+# The size ceiling has a behavioral case below; the short-read refusal and the guarded
+# close are one-line additions with none, and either can be deleted with the rest of the
+# suite green. A swallowed close is the worse of the two: it drops the injection AFTER
+# the bytes were already read, which looks exactly like a correct refusal.
+if printf '%s\n' "$HOOK_JS" | grep -qF 'const MAX_FILE =' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'post.size > MAX_FILE' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (filled !== post.size) process.exit(0);' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'try { fs.closeSync(fd); } catch (_) {}'; then
+  check "H4c reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
+else
+  check "H4c reader lost its size ceiling, short-read refusal or guarded close" FAIL
+fi
+
+# The nlink clause of the plan-payload-v1.js reference is deliberately ABSENT here for the
+# same reason it is absent from the sibling carrier: the path is fixed under the executing
+# plugin root, so a hard link is not a way to reach a file the symlink check refuses, and
+# refusing one would silently disable an UNSWITCHABLE rule on any install that materializes
+# files by hard link (cp -al, content-addressed stores).
+if printf '%s\n' "$HOOK_JS" | grep -qF 'nlink'; then
+  check "H4d the nlink refusal came back — it silently disables the rule on cp -al installs" FAIL
+else
+  check "H4d reader carries no nlink refusal (deliberate divergence from plan-payload-v1)" PASS
+fi
+
 emitted() {
   printf '%s' "$1" | bash "$HOOK" 2>/dev/null | node -e '
     let s = "";
@@ -326,6 +369,44 @@ if [ -n "$LINK_DIR" ]; then
   rm -rf "$LINK_DIR"; LINK_DIR=""
 else
   check "H10b could not create a fixture dir" FAIL
+fi
+
+# The size ceiling is a NEW refusal path on an UNSWITCHABLE rule: an oversized canonical
+# file drops the injection entirely and nothing reports it. Driven against a fixture
+# plugin tree, because the hook resolves its rule file from its own executing root and the
+# path is not overridable from outside. The control emits from the SAME tree with the file
+# unpadded, so a fixture that could never emit at all cannot be mistaken for an enforced
+# ceiling — and MAX_FILE is read out of the hook rather than hand-copied, so raising it
+# there cannot leave this case silently padding to under the real bound.
+HOOK_BASE="$(basename "$HOOK")"
+MAXF="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_FILE = \([0-9]*\);.*/\1/p' | head -1)"
+BIG_DIR="$(mktemp -d -t zensu-evidence-big-XXXXXX)" || BIG_DIR=""
+if [ -n "$BIG_DIR" ] && [ -n "$MAXF" ] \
+   && mkdir -p "$BIG_DIR/hooks" "$BIG_DIR/docs" \
+   && cp "$HOOK" "$BIG_DIR/hooks/$HOOK_BASE" \
+   && cp "$RULES" "$BIG_DIR/docs/evidence-discipline.md"; then
+  BIG_PAYLOAD='{"hook_event_name":"SessionStart","source":"startup"}'
+  BIG_OK="$(printf '%s' "$BIG_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$BIG_DIR" bash "$BIG_DIR/hooks/$HOOK_BASE" 2>/dev/null | wc -c | tr -d ' ')"
+  # Padded past MAX_FILE with trailing filler: the marker pair stays intact and one line
+  # long, so the ceiling is the ONLY reason the injection can stop.
+  if node -e '
+      const fs = require("fs");
+      fs.appendFileSync(process.argv[1], "\n" + "x".repeat(Number(process.argv[2]) + 1024));
+    ' "$BIG_DIR/docs/evidence-discipline.md" "$MAXF" 2>/dev/null; then
+    BIG_OUT="$(printf '%s' "$BIG_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$BIG_DIR" bash "$BIG_DIR/hooks/$HOOK_BASE" 2>/dev/null)"; BIG_RC=$?
+    if [ "$BIG_OK" -gt 0 ] && [ "$BIG_RC" = "0" ] && [ -z "$BIG_OUT" ]; then
+      check "H10c oversized canonical file exits 0 with no output (control emitted ${BIG_OK}B)" PASS
+    else
+      check "H10c size ceiling not enforced (control=${BIG_OK}B rc=$BIG_RC len=${#BIG_OUT})" FAIL
+    fi
+  else
+    check "H10c could not pad the fixture past MAX_FILE=$MAXF" FAIL
+  fi
+  rm -rf "$BIG_DIR"; BIG_DIR=""
+else
+  check "H10c could not create a fixture plugin tree (MAX_FILE=${MAXF:-unset})" FAIL
 fi
 
 CFG_TMP="$(mktemp -t zensu-evidence-cfg-XXXXXX)" || CFG_TMP=""
