@@ -1618,13 +1618,26 @@ function adoptContext(options) {
     if (fs.existsSync(supersededFile)) {
       fail('a superseded record for this version already exists; adoption would overwrite it');
     }
-    fs.renameSync(file, supersededFile);
+    // COPY aside, then replace in place — never rename-then-create. A rename
+    // first leaves a window in which `<key>.json` resolves to nothing, and a
+    // clean ENOENT there is `unregisteredSession`, the MOST relaxed state of all
+    // (the Stop hook releases on it). A process death in that window would turn
+    // a repairable lineage break into a permanently record-less session with a
+    // live workflow document still on disk — strictly worse than what is being
+    // repaired, and beyond the reach of any rollback.
+    //
+    // copyFileSync rather than linkSync on purpose: atomicWriteJson refuses a
+    // target with nlink > 1, so a hard link would make the very next step fail.
+    // atomicWriteJson writes a temp file and renames it over the target, so at
+    // every instant the record name resolves to either the old bytes or the new.
+    fs.copyFileSync(file, supersededFile);
     try {
-      atomicCreateJson(file, next);
+      atomicWriteJson(file, next);
     } catch (error) {
-      // Put the original back rather than leaving the session with no record at
-      // all, which would be a strictly worse state than the one being repaired.
-      try { fs.renameSync(supersededFile, file); } catch { /* nothing better to try */ }
+      // The original was never modified — atomicWriteJson replaces by rename —
+      // so the only thing to undo is the copy. Leaving it would block a retry
+      // on the "already exists" guard above.
+      try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
       throw error;
     }
     return {

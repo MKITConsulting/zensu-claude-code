@@ -198,6 +198,15 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         ZDOC_BINDING=incompatible-runtime
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
+        # Same shape guard the deny path applies, and for the same reason: a
+        # manifest version is validated only by requireText, and this pair is
+        # rendered verbatim into the terminal and into the model's context by the
+        # doctor skill. Losing two numbers is a worse message, never a wrong one.
+        if ! [[ "$ZDOC_BINDING_RECORDED_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]] \
+          || ! [[ "$ZDOC_BINDING_EXECUTING_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+          ZDOC_BINDING_RECORDED_VERSION=""
+          ZDOC_BINDING_EXECUTING_VERSION=""
+        fi
       else
         ZDOC_BINDING=unbound
       fi

@@ -1052,6 +1052,80 @@ else
   check "AC-019 an ordinary Bash command in the same state still denies" FAIL
 fi
 
+# TEST-1 — the deny REASON, not just the decision. gate_decision_from discards
+# permissionDecisionReason, so every check above would stay green with the
+# `incompatible-runtime` scope deleted — which is exactly how that scope shipped
+# with no caller at all in the first place.
+gate_reason_from() {
+  local root="$1" hook="$2" payload="$3" out="$TMP/reason-gate.out"
+  printf '%s' "$payload" \
+    | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$root/hooks/$hook" >"$out" 2>/dev/null
+  OUT_FILE="$out" node -e '
+    const fs = require("node:fs");
+    const raw = fs.readFileSync(process.env.OUT_FILE, "utf8").trim();
+    if (raw === "") process.exit(0);
+    try {
+      const parsed = JSON.parse(raw);
+      process.stdout.write(String(parsed?.hookSpecificOutput?.permissionDecisionReason || ""));
+    } catch { process.stdout.write("UNPARSEABLE"); }
+  '
+}
+ADOPT_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Edit",
+    tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+  }));
+')"
+LINEAGE_REASON_FAILURES=''
+for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
+  reason_payload="$ADOPT_EDIT_PAYLOAD"
+  reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
+  case "$reason_text" in
+    *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*) ;;
+    *) LINEAGE_REASON_FAILURES="$LINEAGE_REASON_FAILURES $reason_hook" ;;
+  esac
+done
+if [ -z "$LINEAGE_REASON_FAILURES" ]; then
+  check "TEST-1 every gate denying an Edit in the lineage state names both versions and the remedy" PASS
+else
+  check "TEST-1 every gate denying an Edit in the lineage state names both versions and the remedy (generic:$LINEAGE_REASON_FAILURES)" FAIL
+fi
+
+# TEST-2 — the Edit matcher itself. pre-edit-tdd-reminder.sh is what denies
+# writes in this state, and no check exercised its matcher at all: a regression
+# that made it ALLOW a write here would have been invisible.
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = deny ]; then
+  check "TEST-2 the Edit gate denies a write in the lineage state" PASS
+else
+  check "TEST-2 the Edit gate denies a write in the lineage state" FAIL
+fi
+
+# TEST-3 — negative controls for the WRITE-capable second recognized command.
+# It had exactly one positive assertion; widening the argument whitelist,
+# dropping the main-principal conjunct, or admitting the script under a foreign
+# root all left the suite green.
+ADOPT_SCRIPT="$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
+RECOGNIZER_FAILURES=''
+recognizer_denies() {
+  [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$1")" = deny ] \
+    || RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES $2"
+}
+recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --forge")" undeclared-flag
+recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm --confirm")" repeated-flag
+recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $SYNTHETIC_CANDIDATE_ROOT/hooks/lib/zensu-session-adopt.sh --confirm")" foreign-root
+recognizer_denies "$(bash_payload "$ADOPT_SESSION" "EVIL=1 bash $ADOPT_SCRIPT")" undeclared-assignment
+recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')" reviewer-principal
+if [ -z "$RECOGNIZER_FAILURES" ]; then
+  check "TEST-3 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
+else
+  check "TEST-3 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
+fi
+
 # AC-018 — the self-closing gate, and the single most important check here: a
 # workflow document this runtime cannot read must REFUSE adoption. Driven by
 # corrupting the document's schema, which is exactly what a real persisted-shape
@@ -1330,6 +1404,114 @@ if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
   fi
 else
   check "AC-004 an installation that declares no usable version may not adopt (fixture unavailable)" FAIL
+fi
+
+# TEST-2 (second half) — after the adoption the same Edit is no longer denied by
+# the binding. This is the pair that makes the first half a discrimination rather
+# than a constant.
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = allow ]; then
+  check "TEST-2 the Edit gate allows the same write once the session is adopted" PASS
+else
+  check "TEST-2 the Edit gate allows the same write once the session is adopted" FAIL
+fi
+
+# TEST-4 — the bare entry point must be filesystem-inert. That claim is the
+# premise the whole gate widening rests on, and $PROJECT always already has
+# .zensu/state, so no check above could observe a regression. Driven on a project
+# that has none.
+INERT_PROJECT="$TMP/inert-project"
+mkdir -p "$INERT_PROJECT"
+INERT_SESSION='versioned-upgrade-adoption-inert'
+INERT_START="$(EVENT=SessionStart SESSION="$INERT_SESSION" CWD="$INERT_PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$INERT_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+rm -rf "$INERT_PROJECT/.zensu"
+INERT_OUT="$TMP/adopt-inert.out"
+CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$INERT_OUT" 2>&1
+if grep -qF 'ADOPTABLE' "$INERT_OUT" && [ ! -e "$INERT_PROJECT/.zensu" ]; then
+  check "TEST-4 the bare entry point creates nothing in the project" PASS
+else
+  check "TEST-4 the bare entry point creates nothing in the project (.zensu present: $([ -e "$INERT_PROJECT/.zensu" ] && echo yes || echo no))" FAIL
+  head -c 300 "$INERT_OUT" 2>/dev/null
+fi
+
+# JUDGE-3 — the whole feature needs the SUPERSEDED installation to still exist.
+# Remove the recorded root and the diagnosis degrades to the `unbound` row whose
+# wording this work exists to remove. Pinned so the boundary is a stated contract
+# rather than an unnoticed fallback.
+PRUNED_CACHE_PARENT="$TMP/pruned/zensu/zensu"
+PRUNED_ROOT="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.17.0 "$ROOT_REVISION" 2>/dev/null)"
+PRUNED_SUCCESSOR="$(node "$INSTALL_FIXTURE" "$ROOT" "$PRUNED_CACHE_PARENT" 0.18.0 "$ROOT_REVISION" 2>/dev/null)"
+PRUNED_DATA="$TMP/pruned-data"
+mkdir -p "$PRUNED_DATA" && chmod 700 "$PRUNED_DATA"
+PRUNED_SESSION='versioned-upgrade-pruned-root'
+PRUNED_START="$(EVENT=SessionStart SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
+    && printf '%s' "$PRUNED_START" \
+      | CLAUDE_PLUGIN_ROOT="$PRUNED_ROOT" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+        CLAUDE_PROJECT_DIR="$PROJECT" \
+        bash "$PRUNED_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
+  rm -rf "$PRUNED_ROOT"
+  PRUNED_VERDICT="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
+  PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Read",
+      tool_input: {file_path: "README.md"},
+    }));
+  ')"
+  PRUNED_NAMED=no
+  if printf '%s' "$PRUNED_TOOL_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$PRUNED_SUCCESSOR" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
+        node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" incompatible-runtime >/dev/null 2>&1; then
+    PRUNED_NAMED=yes
+  fi
+  if [ "$PRUNED_VERDICT" = record-unreadable ] && [ "$PRUNED_NAMED" = no ]; then
+    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (documented boundary)" PASS
+  else
+    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (verdict='$PRUNED_VERDICT' named=$PRUNED_NAMED)" FAIL
+  fi
+else
+  check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (fixture unavailable)" FAIL
+fi
+
+# CONV-1 — the skill's refusal table is the one independent re-encoding of
+# ADOPTION_REFUSALS (the REMEDY map uses computed keys off the constant and
+# cannot drift on the key side). Pinned here, the T42 analogue for this feature.
+ADOPT_SKILL="$ROOT/skills/adopt-session/SKILL.md"
+REFUSAL_GAPS="$(
+  CORE="$SYNTHETIC_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" SKILL="$ADOPT_SKILL" node -e '
+    const fs = require("node:fs");
+    const core = require(process.env.CORE);
+    const skill = fs.readFileSync(process.env.SKILL, "utf8");
+    const missing = Object.values(core.ADOPTION_REFUSALS).filter((r) => !skill.includes(r));
+    process.stdout.write(missing.join(","));
+  ' 2>/dev/null
+)"
+if [ -z "$REFUSAL_GAPS" ]; then
+  check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill" PASS
+else
+  check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL
 fi
 
 # The reserved phase cannot be minted by a caller — the same protection

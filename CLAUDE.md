@@ -252,6 +252,44 @@ Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
 module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
 stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
 
+**The whole feature needs the SUPERSEDED installation to still be on disk.**
+`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
+recomputes the digest against it, so an absent recorded root makes `readContext`
+throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
+to the `unbound` row whose "no valid record" wording this work exists to remove,
+and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
+the misleading wording exactly when the repair is impossible. Do not describe the
+lineage row as covering every mid-session upgrade; it covers the ones whose
+previous version was not pruned.
+
+**Three re-encodings move with this, and none of them is checked by a test:**
+
+- the `recorded<TAB>executing` wire format — one producer
+  (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
+  `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
+  `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
+  Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
+  field: adding a third field silently redirects all five rather than failing.
+- the version-shape rule, spelled twice for two different hazards —
+  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
+  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
+  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the review-evidence store layout, hardcoded in `discardSupersededLeases` as
+  `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
+  ownership predicate that `review-evidence-lease-v1.js` owns. The dependency
+  runs the other way (that module requires the binder, which requires this core),
+  so it is a copy rather than a call, and the sweep's `readdir` failure is
+  swallowed — a layout change makes it a SILENT no-op, not an error.
+
+**Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
+`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
+plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
+half is six separate obligations, and a port that takes only the core delta gets
+`adoptContext` with no reachable caller and keeps the wedge: the entry script, the
+recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
+deny scope at every gate that denies in this state, and the skill. `zensu-codex`,
+`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+
 Operator-facing accounts that must move with it: `docs/session-control.md`
 "Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and
 `skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
@@ -341,9 +379,24 @@ properties are easy to get wrong and cost the whole feature:
   the deleted-root and unset-anchor shapes.
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
-`zensu_session_orphaned_project_root`, `..._model`). The orphaned wrapper **prints the
-dead path on stdout**; inside a PreToolUse gate stdout is the JSON decision channel, so a
-caller wanting the predicate alone must discard it explicitly.
+`zensu_session_orphaned_project_root`, `..._model`, plus
+`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
+predicate alone must discard it explicitly, and a caller wanting the value must capture
+it into a variable before emitting anything.
+
+**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
+belongs to this roster only because every gate that consults the two above must decide what
+to do about it too — and the answer is the same everywhere: keep denying. A workflow document
+is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
+one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+`incompatible-runtime`, taking the two versions as positional arguments, and all four gates
+that can deny in that state emit it rather than the generic wording. A gate left on the
+generic text tells the user to start a fresh session while its sibling says the session can
+be repaired in place — two denies contradicting each other about the one bind failure that
+has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
+read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is

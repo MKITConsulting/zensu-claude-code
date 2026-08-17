@@ -63,11 +63,15 @@ const COMMAND_MAX_BYTES = 4096;
 const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // The SECOND recognized script, and the one that breaks the "writes nothing"
 // premise the paragraph above rests on. It is admitted on a DIFFERENT
-// justification, which lives in the header of hooks/lib/zensu-session-adopt.sh:
-// its only write is one record for the calling session plus one workflow history
-// entry, every location is derived from the record being adopted rather than
-// from the command, and it refuses unless every adoptableRecord condition holds.
-// Without --confirm it is read-only.
+// justification, which lives in the header of hooks/lib/zensu-session-adopt.sh
+// and is NOT restated here — a second copy is a second thing to go stale, and
+// this comment is where a future reviewer decides whether the list stays at two.
+// In one line: its only write is one record for the calling session plus one
+// workflow history entry, and what BOUNDS that write is readContext (session
+// hash, digest recomputed against the RECORDED root, that root's declared
+// version) plus the sibling-root and plugin_data checks — NOT derivation, since
+// the two path assignments are caller-supplied literals here exactly as they are
+// for the diagnostic. Without --confirm it is read-only.
 //
 // Admitting it is what makes the lineage diagnosis actionable: the state it
 // repairs denies Edit, Write and every other Bash call, so a remedy the user
@@ -88,8 +92,13 @@ const RECOGNIZED = {
 
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-// Every name the doctor script reads and the Bash tool does not supply. `path`
-// requires a rooted, traversal-free literal; a Set requires one of its members.
+// The UNION of names the recognized scripts read and the Bash tool does not
+// supply. `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are read by both;
+// `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only, and accepting it on the adoption form
+// costs nothing because that script never reads it. Kept as one shared set
+// rather than per-entry: unlike `args`, an assignment cannot change what a
+// script DOES, only what it can see. `path` requires a rooted, traversal-free
+// literal; a Set requires one of its members.
 const ASSIGNMENTS = {
   CLAUDE_PLUGIN_DATA: "path",
   CLAUDE_PROJECT_DIR: "path",
