@@ -108,6 +108,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
+| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`
