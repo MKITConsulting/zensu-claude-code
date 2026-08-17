@@ -1033,8 +1033,14 @@ fi
 # The discrimination test for AC-019: the recognizer must stay exactly this
 # narrow. An ordinary Bash command in the same state still denies, so an allow
 # above cannot have come from the bind succeeding.
+#
+# Graded through the ".*" capability gate, NOT pre-bash-zensu-gate.sh: that gate
+# exits 0 before it ever binds when the command carries no zensu invocation
+# (`[ -z "$INVOCATIONS" ] && exit 0`), so `ls -la` is allowed there in EVERY
+# state and would grade this discrimination as a failure for a reason that has
+# nothing to do with binding. Part B above compares the same way.
 ADOPT_ORDINARY="$(bash_payload "$ADOPT_SESSION" 'ls -la')"
-if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-bash-zensu-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
   check "AC-019 an ordinary Bash command in the same state still denies" PASS
 else
   check "AC-019 an ordinary Bash command in the same state still denies" FAIL
@@ -1130,9 +1136,10 @@ else
   head -c 400 "$ADOPT_CONFIRM_OUT" 2>/dev/null
 fi
 
-# The point of the whole feature: the session works again, in place.
+# The point of the whole feature: the session works again, in place. Both are
+# graded through the capability gate, the one that actually denied before.
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_TOOL_PAYLOAD")" = allow ] \
-    && [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-bash-zensu-gate.sh "$ADOPT_ORDINARY")" = allow ]; then
+    && [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = allow ]; then
   check "AC-017 after adoption the same session binds and ordinary commands run again" PASS
 else
   check "AC-017 after adoption the same session binds and ordinary commands run again" FAIL

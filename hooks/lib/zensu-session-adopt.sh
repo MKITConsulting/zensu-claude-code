@@ -128,9 +128,9 @@ const REMEDY = {
   [core.ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED]:
     "The executing installation does not declare a usable version, so no lineage judgement is possible. Repair the plugin installation; /zensu:doctor reports plugin integrity.",
   [core.ADOPTION_REFUSALS.BACKWARDS]:
-    "The executing installation is OLDER than the one that minted the record. Only a newer runtime may take over an older one's state, never the reverse. Re-install the newer version, or start a fresh Claude Code session.",
+    "The executing installation is OLDER than the one that minted the record. Only a newer runtime may take over the state of an older one, never the reverse. Re-install the newer version, or start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.WORKFLOW_SCHEMA]:
-    "This session's workflow document cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
+    "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
 };
 
 const verdict = core.adoptableRecord(request);
