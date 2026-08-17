@@ -476,6 +476,17 @@ function main() {
           || doctorInvocation.isRecognizedInvocation(payload))) {
       return;
     }
+    // The FIFTH denier in the incompatible-runtime state, and it used to be the
+    // only one left on generic wording — an Edit produced "revalidation failed"
+    // here while the Edit gate said the session could be repaired in place. Two
+    // denies contradicting each other about the one bind failure that HAS an
+    // in-place remedy is exactly what CLAUDE.md forbids, so this branch names the
+    // same cause and remedy the four emitting gates do.
+    const lineage = hookSession.resolveIncompatibleRuntime(payload);
+    if (lineage) {
+      deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
+      return;
+    }
     deny(`immutable context revalidation failed: ${error.message}`);
     return;
   }

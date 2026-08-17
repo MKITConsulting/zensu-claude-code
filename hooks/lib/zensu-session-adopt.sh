@@ -51,6 +51,15 @@ CORE="$DIR/session-control-core-v1.js"
   printf '%s\n' 'zensu:adopt-session: the Session Control runtime is missing or symlinked; repair the Zensu plugin installation' >&2
   exit 1
 }
+# The binder is loaded from inside the node payload for its private-store
+# constructor, so it gets the same guard the core does — zensu-session.sh applies
+# it to this exact file at three sites, and a symlinked binder must not be the one
+# library this write-capable script loads unchecked.
+BINDER="$DIR/claude-hook-session-v1.js"
+[ -f "$BINDER" ] && [ ! -L "$BINDER" ] || {
+  printf '%s\n' 'zensu:adopt-session: the Session Control binder is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
 
 CONFIRM=0
 case "${1:-}" in
@@ -120,15 +129,21 @@ const sessionId = process.env.ZADOPT_SESSION_ID;
 // Skipping those checks would let the repair mint a record into a store that the
 // very next tool call refuses for exactly those reasons — a false success, and a
 // new record sitting somewhere another local user can rewrite it.
-const recordsDir = require("./claude-hook-session-v1.js").privateRecordsDirectory(pluginData);
-const request = {
-  recordsDir,
+//
+// Resolved INSIDE main(), never at module top level: all five of its refusal
+// conditions throw, and a throw out here would escape the handler below and print
+// a raw stack trace — in the one state where every other channel is already
+// denied, and where those conditions are exactly the diagnosis the user needs
+// stated plainly.
+const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
+const buildRequest = () => ({
+  recordsDir: privateRecordsDirectory(pluginData),
   sessionId,
   host: "claude",
   pluginData,
   projectRoot,
   executingPluginRoot: pluginRoot,
-};
+});
 
 // Every refusal names the condition that was not met, and every one of them has
 // a different remedy. A generic "not adoptable" would put the user back where
@@ -156,6 +171,18 @@ const REMEDY = {
 // bare `return` is a syntax error — and a syntax error here would surface as a
 // crashed helper rather than as the refusal it was meant to print.
 function main() {
+  let request;
+  try {
+    request = buildRequest();
+  } catch (error) {
+    process.stdout.write("Zensu session adoption — NOT adoptable (private-record-store-unsafe)\n\n");
+    process.stdout.write("The private Session Control record store could not be opened safely: "
+      + (error && error.message ? error.message : "unknown") + "\n");
+    process.stdout.write("It is missing, aliased, or has unsafe permissions or ownership. Repair the store\n");
+    process.stdout.write("or start a fresh Claude Code session; adoption cannot mint a record into it.\n");
+    process.exitCode = 1;
+    return;
+  }
   const verdict = core.adoptableRecord(request);
   if (!verdict.ok) {
     process.stdout.write("Zensu session adoption — NOT adoptable (" + verdict.reason + ")\n\n");
@@ -193,6 +220,11 @@ function main() {
   if (adopted.leasesDiscarded > 0) {
     process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
     process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
+  }
+  if (adopted.leasesUnsafe) {
+    process.stdout.write("\nWARNING: the review-evidence lease store of this session could not be opened safely,\n");
+    process.stdout.write("so no lease was inspected or set aside. If any lease there names the previous\n");
+    process.stdout.write("installation, review-evidence operations keep failing until it is moved out by hand.\n");
   }
   if (adopted.leasesFailed.length > 0) {
     process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.join(", ") + "\n");

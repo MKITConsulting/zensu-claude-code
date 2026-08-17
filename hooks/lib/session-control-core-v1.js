@@ -1402,6 +1402,13 @@ function readOrphanedProjectRootContext(options) {
 // document's decision fields, and never relaxes plugin_data — the boundary that
 // keeps a development checkout and an installed marketplace plugin on separate
 // record stores.
+// The ONE spelling of the workflow document's location. workflowStateDirectory
+// composes it with the creating helpers; adoptionWorkflowStatePath composes it
+// without them. Both must agree, or the read-only probe and the read it guards
+// resolve to different files.
+const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
+
 const ADOPTION_REFUSALS = {
   RECORD_UNREADABLE: 'record-unreadable',
   PLUGIN_DATA: 'plugin-data-mismatch',
@@ -1428,7 +1435,16 @@ function adoptionRefusal(reason) {
 // adoptability report and the provenance guard need to ask "is there a document"
 // without answering "there is now".
 function adoptionWorkflowStatePath(projectRoot, sessionId) {
-  return path.join(projectRoot, '.zensu', 'state', `tdd-phase-${sessionKey(sessionId)}.json`);
+  // Composed from the SAME segment constants workflowStateDirectory uses, so the
+  // guard and the read it guards can never resolve to different files. A separate
+  // spelling would let a layout move skip condition 7 entirely — silently
+  // removing one conjunct of the self-closing property the whole authorising
+  // argument rests on.
+  return path.join(
+    projectRoot,
+    ...WORKFLOW_STATE_SEGMENTS,
+    `${WORKFLOW_STATE_PREFIX}${sessionKey(sessionId)}.json`,
+  );
 }
 
 // Never throws: every caller is on a failure path already, and an exception
@@ -1544,12 +1560,15 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // aliased records directory is left ALONE rather than swept through.
   try {
     const stat = fs.lstatSync(recordsDirectory);
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [] };
+    // `unsafe` distinguishes a store this sweep REFUSED to touch from the
+    // ordinary "no lease was ever minted" case. Both discard nothing; only one of
+    // them is a clean outcome, and the caller must be able to say which.
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: true };
     if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
-      return { discarded: 0, failed: [] };
+      return { discarded: 0, failed: [], unsafe: true };
     }
-  } catch {
-    return { discarded: 0, failed: [] };
+  } catch (error) {
+    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' };
   }
   let entries;
   try {
@@ -1565,8 +1584,30 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
   let discarded = 0;
   const failed = [];
+  // The DESTINATION gets the same treatment as the source. mkdirSync with
+  // `recursive` does NOT fail on an existing symlink-to-directory, so without
+  // this a pre-created link there would quietly receive every moved lease while
+  // the sweep still reported a clean count.
+  const asideIsSafe = () => {
+    try {
+      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
+      const stat = fs.lstatSync(asideDirectory);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
+      if (process.platform !== 'win32') {
+        if ((stat.mode & 0o077) !== 0) return false;
+        if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!asideIsSafe()) return { discarded: 0, failed: entries.slice().sort(), unsafe: true };
   for (const name of entries.sort()) {
-    if (!name.endsWith('.json')) continue;
+    // EVERY entry listRecords would reject, not only the `.json` ones: it fails
+    // the whole set on an unexpected name, so a leftover `.tmp` from a killed
+    // lease write wedges it exactly as hard as a stale record would.
     const file = path.join(recordsDirectory, name);
     let record;
     try {
@@ -1576,7 +1617,9 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     }
     // An unreadable lease is moved aside too: listRecords would fail on it just
     // as hard, and leaving it would defeat the whole point of this sweep.
-    if (record && typeof record === 'object' && record.plugin_root === executingPluginRoot) {
+    if (name.endsWith('.json')
+      && record && typeof record === 'object'
+      && record.plugin_root === executingPluginRoot) {
       continue;
     }
     try {
@@ -1667,10 +1710,16 @@ function adoptContext(options) {
       // outcome worse than reporting a failure. Re-read the record and keep the
       // copy when the new bytes are already there.
       let committed = false;
+      let readable = false;
       try {
         committed = JSON.stringify(readJson(file)) === JSON.stringify(next);
-      } catch { committed = false; }
-      if (!committed) {
+        readable = true;
+      } catch { readable = false; }
+      // Only an unambiguous "not committed" removes the copy. An unreadable
+      // re-read is INDETERMINATE, and if the record did commit that copy is the
+      // last readable image of the superseded record — deleting it on a guess is
+      // the one outcome worse than reporting a failure.
+      if (readable && !committed) {
         try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
       }
       throw error;
@@ -1732,6 +1781,7 @@ function adoptContext(options) {
     provenance,
     leasesDiscarded: leases.discarded,
     leasesFailed: leases.failed,
+    leasesUnsafe: Boolean(leases.unsafe),
   };
 }
 
@@ -1797,8 +1847,9 @@ function renderHostContext(contextInput) {
 
 function workflowStateDirectory(projectRootInput) {
   const projectRoot = canonicalDirectory(projectRootInput, 'project root');
-  const zensuDirectory = ensureDescendantDirectory(projectRoot, path.join(projectRoot, '.zensu'));
-  return ensureDescendantDirectory(zensuDirectory, path.join(zensuDirectory, 'state'));
+  const [zensuSegment, stateSegment] = WORKFLOW_STATE_SEGMENTS;
+  const zensuDirectory = ensureDescendantDirectory(projectRoot, path.join(projectRoot, zensuSegment));
+  return ensureDescendantDirectory(zensuDirectory, path.join(zensuDirectory, stateSegment));
 }
 
 function resolveWorkflowStateDirectory(options) {
@@ -1811,7 +1862,7 @@ function resolveWorkflowStateDirectory(options) {
 function workflowStateFile(projectRoot, sessionId) {
   return path.join(
     workflowStateDirectory(projectRoot),
-    `tdd-phase-${sessionKey(sessionId)}.json`,
+    `${WORKFLOW_STATE_PREFIX}${sessionKey(sessionId)}.json`,
   );
 }
 

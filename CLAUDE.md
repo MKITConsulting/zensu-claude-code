@@ -200,6 +200,13 @@ installation OUT of the records directory (into a sibling `superseded/<key>/`,
 because `listRecords` fails on any non-`.json` entry, so setting one aside in
 place would be strictly worse). The count is reported, never absorbed.
 
+`docs/session-control.md` "Unbindable sessions" carries the operator-facing
+account, including the pin this weakens and the two attestation fields that
+state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
+pins the axis and the sibling rule;
+`tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
+across synthetic installs, including that serving a record never rewrites it.
+
 ## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
 
 The lineage rule above judges DECLARED versions and cannot see whether the
@@ -296,13 +303,6 @@ Operator-facing accounts that must move with it: `docs/session-control.md`
 Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
 end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
-
-`docs/session-control.md` "Unbindable sessions" carries the operator-facing
-account, including the pin this weakens and the two attestation fields that
-state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
-pins the axis and the sibling rule;
-`tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
-across synthetic installs, including that serving a record never rewrites it.
 
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 

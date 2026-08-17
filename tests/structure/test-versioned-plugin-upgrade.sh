@@ -896,6 +896,10 @@ fi
 # ---------------------------------------------------------------------------
 # Part C — naming the incompatible-lineage state, and adopting out of it.
 #
+# Requirement labels here are namespaced AC-C##/FR-C## on purpose: Parts A and B
+# already own AC-008/AC-014/AC-015 for unrelated assertions, and this repo never
+# recycles an id. Grep by an id and you get exactly one check.
+#
 # Part B pins that a breaking-boundary runtime DENIES. Everything here is about
 # what the user is then told and what they can do about it. The session below is
 # its OWN record on purpose: adoption mutates the record it acts on, and every
@@ -938,7 +942,7 @@ ADOPT_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" n
   }));
 ')"
 
-# AC-014 — the state is NAMED, and named only here. The two relaxable predicates
+# AC-C01 — the state is NAMED, and named only here. The two relaxable predicates
 # must both answer no: this is a third diagnosis, never a widening of either.
 ADOPT_VERSIONS="$(
   printf '%s' "$ADOPT_TOOL_PAYLOAD" \
@@ -946,9 +950,9 @@ ADOPT_VERSIONS="$(
       node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" incompatible-runtime 2>/dev/null
 )" || ADOPT_VERSIONS=''
 if [ "$ADOPT_VERSIONS" = "$(printf '0.17.0\t0.18.0')" ]; then
-  check "AC-014 the incompatible-runtime predicate names both declared versions" PASS
+  check "AC-C01 the incompatible-runtime predicate names both declared versions" PASS
 else
-  check "AC-014 the incompatible-runtime predicate names both declared versions (got '$ADOPT_VERSIONS')" FAIL
+  check "AC-C01 the incompatible-runtime predicate names both declared versions (got '$ADOPT_VERSIONS')" FAIL
 fi
 if ! printf '%s' "$ADOPT_TOOL_PAYLOAD" \
       | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
@@ -956,12 +960,12 @@ if ! printf '%s' "$ADOPT_TOOL_PAYLOAD" \
     && ! printf '%s' "$ADOPT_TOOL_PAYLOAD" \
       | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
         node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" orphaned-project-root >/dev/null 2>&1; then
-  check "AC-014 the two relaxable predicates stay false for the lineage state" PASS
+  check "AC-C01 the two relaxable predicates stay false for the lineage state" PASS
 else
-  check "AC-014 the two relaxable predicates stay false for the lineage state" FAIL
+  check "AC-C01 the two relaxable predicates stay false for the lineage state" FAIL
 fi
 
-# AC-015 — the doctor row. The bite is the ABSENCE of the old wording: before the
+# AC-C02 — the doctor row. The bite is the ABSENCE of the old wording: before the
 # fourth branch existed this state fell through to a line asserting the session
 # has no record, which is false.
 DOCTOR_OUT="$TMP/adopt-doctor.out"
@@ -971,13 +975,13 @@ CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
 if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
     && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT"; then
-  check "AC-015 the doctor row names both versions and never claims 'no valid record'" PASS
+  check "AC-C02 the doctor row names both versions and never claims 'no valid record'" PASS
 else
-  check "AC-015 the doctor row names both versions and never claims 'no valid record'" FAIL
+  check "AC-C02 the doctor row names both versions and never claims 'no valid record'" FAIL
   grep -F 'binding:' "$DOCTOR_OUT" 2>/dev/null
 fi
 
-# AC-016 — the Stop hook RELEASES. Blocking here loops a session whose Edit and
+# AC-C03 — the Stop hook RELEASES. Blocking here loops a session whose Edit and
 # Bash channels are already denied, so the remedy never reaches the user.
 ADOPT_STOP_PAYLOAD="$(EVENT=Stop SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1000,13 +1004,13 @@ if [ ! -s "$STOP_OUT" ] \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$STOP_ERR" \
     && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
     && grep -qF 'no completion was proven' "$STOP_ERR"; then
-  check "AC-016 the Stop hook releases the lineage state instead of blocking" PASS
+  check "AC-C03 the Stop hook releases the lineage state instead of blocking" PASS
 else
-  check "AC-016 the Stop hook releases the lineage state instead of blocking" FAIL
+  check "AC-C03 the Stop hook releases the lineage state instead of blocking" FAIL
   head -c 400 "$STOP_ERR" 2>/dev/null
 fi
 
-# AC-019 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
+# AC-C04 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
 # matcher wins. Enumerated from hooks.json for the same reason Part A and B do:
 # a hook added later is covered without editing this check.
 ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
@@ -1064,9 +1068,9 @@ done <<EOF
 $ADOPT_MATCHER_HOOKS
 EOF
 if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_ENUMERATION_MISSING" ] && [ -z "$ADOPT_GATE_FAILURES" ]; then
-  check "AC-019 every hook on the Bash matcher $ADOPT_LABEL" PASS
+  check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL" PASS
 else
-  check "AC-019 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
+  check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
 fi
 
 # The discrimination test for AC-019: the recognizer must stay exactly this
@@ -1080,20 +1084,23 @@ fi
 # nothing to do with binding. Part B above compares the same way.
 ADOPT_ORDINARY="$(bash_payload "$ADOPT_SESSION" 'ls -la')"
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
-  check "AC-019 an ordinary Bash command in the same state still denies" PASS
+  check "AC-C04 an ordinary Bash command in the same state still denies" PASS
 else
-  check "AC-019 an ordinary Bash command in the same state still denies" FAIL
+  check "AC-C04 an ordinary Bash command in the same state still denies" FAIL
 fi
 
-# TEST-1 — the deny REASON, not just the decision. gate_decision_from discards
+# FR-C01 — the deny REASON, not just the decision. gate_decision_from discards
 # permissionDecisionReason, so every check above would stay green with the
 # `incompatible-runtime` scope deleted — which is exactly how that scope shipped
 # with no caller at all in the first place.
 gate_reason_from() {
   local root="$1" hook="$2" payload="$3" out="$TMP/reason-gate.out"
+  # ZENSU_API_URL is neutralized: a local backend makes pre-bash-zensu-gate.sh
+  # drop every invocation and exit BEFORE its bind, so the reason would be empty
+  # for a reason unrelated to the scope under test.
   printf '%s' "$payload" \
     | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
       bash "$root/hooks/$hook" >"$out" 2>/dev/null
   OUT_FILE="$out" node -e '
     const fs = require("node:fs");
@@ -1121,11 +1128,14 @@ ADOPT_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" n
 LINEAGE_REASON_FAILURES=''
 ADOPT_ZENSU_PAYLOAD="$(bash_payload "$ADOPT_SESSION" 'zensu features list')"
 for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-bash-zensu-gate.sh; do
-  if [ "$reason_hook" = pre-bash-zensu-gate.sh ]; then
-    reason_payload="$ADOPT_ZENSU_PAYLOAD"
-  else
-    reason_payload="$ADOPT_EDIT_PAYLOAD"
-  fi
+  # Each gate gets a payload its own matcher accepts in production:
+  # pre-bash-source-write-gate.sh is registered on `Bash` ONLY, so grading it with
+  # an Edit payload would test a shape it never receives.
+  case "$reason_hook" in
+    pre-bash-zensu-gate.sh) reason_payload="$ADOPT_ZENSU_PAYLOAD" ;;
+    pre-bash-source-write-gate.sh) reason_payload="$ADOPT_ORDINARY" ;;
+    *) reason_payload="$ADOPT_EDIT_PAYLOAD" ;;
+  esac
   reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
   case "$reason_text" in
     *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*) ;;
@@ -1133,21 +1143,21 @@ for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-wr
   esac
 done
 if [ -z "$LINEAGE_REASON_FAILURES" ]; then
-  check "TEST-1 every gate denying an Edit in the lineage state names both versions and the remedy" PASS
+  check "FR-C01 every gate denying an Edit in the lineage state names both versions and the remedy" PASS
 else
-  check "TEST-1 every gate denying an Edit in the lineage state names both versions and the remedy (generic:$LINEAGE_REASON_FAILURES)" FAIL
+  check "FR-C01 every gate denying an Edit in the lineage state names both versions and the remedy (generic:$LINEAGE_REASON_FAILURES)" FAIL
 fi
 
-# TEST-2 — the Edit matcher itself. pre-edit-tdd-reminder.sh is what denies
+# FR-C02 — the Edit matcher itself. pre-edit-tdd-reminder.sh is what denies
 # writes in this state, and no check exercised its matcher at all: a regression
 # that made it ALLOW a write here would have been invisible.
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = deny ]; then
-  check "TEST-2 the Edit gate denies a write in the lineage state" PASS
+  check "FR-C02 the Edit gate denies a write in the lineage state" PASS
 else
-  check "TEST-2 the Edit gate denies a write in the lineage state" FAIL
+  check "FR-C02 the Edit gate denies a write in the lineage state" FAIL
 fi
 
-# TEST-3 — negative controls for the WRITE-capable second recognized command.
+# FR-C03 — negative controls for the WRITE-capable second recognized command.
 # It had exactly one positive assertion; widening the argument whitelist,
 # dropping the main-principal conjunct, or admitting the script under a foreign
 # root all left the suite green.
@@ -1162,13 +1172,22 @@ recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm
 recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $SYNTHETIC_CANDIDATE_ROOT/hooks/lib/zensu-session-adopt.sh --confirm")" foreign-root
 recognizer_denies "$(bash_payload "$ADOPT_SESSION" "EVIL=1 bash $ADOPT_SCRIPT")" undeclared-assignment
 recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')" reviewer-principal
+# The reviewer case above is graded through the JS gate, whose own principal
+# check short-circuits before the recognizer — so it cannot pin the INDEPENDENT
+# shell conjunct in zensu_doctor_allowed. Grade it through two Bash gates too.
+for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
+    RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+  fi
+done
 if [ -z "$RECOGNIZER_FAILURES" ]; then
-  check "TEST-3 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
+  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
 else
-  check "TEST-3 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
+  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
 fi
 
-# AC-018 — the self-closing gate, and the single most important check here: a
+# AC-C05 — the self-closing gate, and the single most important check here: a
 # workflow document this runtime cannot read must REFUSE adoption. Driven by
 # corrupting the document's schema, which is exactly what a real persisted-shape
 # break would look like to the reader.
@@ -1197,15 +1216,15 @@ if [ -f "$ADOPT_STATE_FILE" ]; then
   )" || SCHEMA_VERDICT='threw'
   cp "$ADOPT_STATE_BACKUP" "$ADOPT_STATE_FILE"
   if [ "$SCHEMA_VERDICT" = workflow-schema-mismatch ]; then
-    check "AC-018 a workflow document this runtime cannot read refuses adoption" PASS
+    check "AC-C05 a workflow document this runtime cannot read refuses adoption" PASS
   else
-    check "AC-018 a workflow document this runtime cannot read refuses adoption (got '$SCHEMA_VERDICT')" FAIL
+    check "AC-C05 a workflow document this runtime cannot read refuses adoption (got '$SCHEMA_VERDICT')" FAIL
   fi
 else
-  check "AC-018 a workflow document this runtime cannot read refuses adoption" FAIL
+  check "AC-C05 a workflow document this runtime cannot read refuses adoption" FAIL
 fi
 
-# AC-020 — two disagreements are never one diagnosis. A record whose plugin_data
+# AC-C06 — two disagreements are never one diagnosis. A record whose plugin_data
 # points elsewhere is not adoptable no matter how the lineage compares.
 FOREIGN_DATA="$TMP/foreign-plugin-data"
 mkdir -p "$FOREIGN_DATA" && chmod 700 "$FOREIGN_DATA"
@@ -1223,12 +1242,12 @@ FOREIGN_VERDICT="$(
   ' 2>/dev/null
 )" || FOREIGN_VERDICT='threw'
 if [ "$FOREIGN_VERDICT" = plugin-data-mismatch ]; then
-  check "AC-020 a second disagreement is never relaxed alongside the lineage" PASS
+  check "AC-C06 a second disagreement is never relaxed alongside the lineage" PASS
 else
-  check "AC-020 a second disagreement is never relaxed alongside the lineage (got '$FOREIGN_VERDICT')" FAIL
+  check "AC-C06 a second disagreement is never relaxed alongside the lineage (got '$FOREIGN_VERDICT')" FAIL
 fi
 
-# AC-017 — the repair itself, end to end through the shipped entry point. This
+# AC-C07 — the repair itself, end to end through the shipped entry point. This
 # runs LAST of the adoption checks because it mutates the record.
 ADOPT_REPORT_OUT="$TMP/adopt-report.out"
 if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
@@ -1237,16 +1256,16 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     && grep -qF 'ADOPTABLE' "$ADOPT_REPORT_OUT" \
     && grep -qF 'Nothing has been changed' "$ADOPT_REPORT_OUT" \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
-  check "AC-017 the bare entry point reports adoptable and changes nothing" PASS
+  check "AC-C07 the bare entry point reports adoptable and changes nothing" PASS
 else
-  check "AC-017 the bare entry point reports adoptable and changes nothing" FAIL
+  check "AC-C07 the bare entry point reports adoptable and changes nothing" FAIL
   head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
 fi
 
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
 cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
 
-# AC-008 — seed the lease store so the sweep has something to sweep. Without this
+# AC-C08 — seed the lease store so the sweep has something to sweep. Without this
 # the whole moving branch never runs: discardSupersededLeases returns 0 through
 # its readdir catch when the per-session records directory does not exist, so a
 # --confirm assertion on an empty store proves nothing about the discard.
@@ -1271,9 +1290,9 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     >"$ADOPT_CONFIRM_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'provenance       : recorded' "$ADOPT_CONFIRM_OUT"; then
-  check "AC-017 --confirm performs the adoption" PASS
+  check "AC-C07 --confirm performs the adoption" PASS
 else
-  check "AC-017 --confirm performs the adoption" FAIL
+  check "AC-C07 --confirm performs the adoption" FAIL
   head -c 400 "$ADOPT_CONFIRM_OUT" 2>/dev/null
 fi
 
@@ -1307,22 +1326,22 @@ if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && grep -qF 'leases set aside : 0' "$NOLEASE_OUT" \
     && grep -qF 'leases stuck     : 0' "$NOLEASE_OUT" \
     && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
-  check "AC-008 a session with no lease store adopts cleanly and exits 0" PASS
+  check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
-  check "AC-008 a session with no lease store adopts cleanly and exits 0" FAIL
+  check "AC-C08 a session with no lease store adopts cleanly and exits 0" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
-# AC-008 — exactly the stale lease moves, the current one stays, none is deleted,
+# AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
 if grep -qF 'leases set aside : 1' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/stale.json" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/stale.json" ] \
     && [ -f "$ADOPT_LEASE_DIR/current.json" ]; then
-  check "AC-008 the stale lease is set aside, the current one is left in place" PASS
+  check "AC-C08 the stale lease is set aside, the current one is left in place" PASS
 else
-  check "AC-008 the stale lease is set aside, the current one is left in place" FAIL
+  check "AC-C08 the stale lease is set aside, the current one is left in place" FAIL
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
 fi
 
@@ -1330,9 +1349,9 @@ fi
 # graded through the capability gate, the one that actually denied before.
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_TOOL_PAYLOAD")" = allow ] \
     && [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_ORDINARY")" = allow ]; then
-  check "AC-017 after adoption the same session binds and ordinary commands run again" PASS
+  check "AC-C07 after adoption the same session binds and ordinary commands run again" PASS
 else
-  check "AC-017 after adoption the same session binds and ordinary commands run again" FAIL
+  check "AC-C07 after adoption the same session binds and ordinary commands run again" FAIL
 fi
 
 # The previous record is set aside, never overwritten, and stays readable.
@@ -1340,12 +1359,12 @@ ADOPT_SUPERSEDED="$SHARED_DATA/session-control/v1/records/$ADOPT_KEY.superseded-
 if [ -f "$ADOPT_SUPERSEDED" ] \
     && [ "$ADOPT_RECORD_BEFORE" = "$(cat "$ADOPT_SUPERSEDED")" ] \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.18.0 ]; then
-  check "AC-017 the superseded record is set aside byte-for-byte, never rewritten" PASS
+  check "AC-C07 the superseded record is set aside byte-for-byte, never rewritten" PASS
 else
-  check "AC-017 the superseded record is set aside byte-for-byte, never rewritten" FAIL
+  check "AC-C07 the superseded record is set aside byte-for-byte, never rewritten" FAIL
 fi
 
-# AC-007 — provenance is a history entry and the record gains NO field. This is
+# AC-C10 — provenance is a history entry and the record gains NO field. This is
 # what keeps the release a patch: a record shape change would itself be the
 # breaking bump this feature exists to survive.
 if STATE_IN="$PROJECT/.zensu/state/tdd-phase-$ADOPT_KEY.json" \
@@ -1362,12 +1381,12 @@ if STATE_IN="$PROJECT/.zensu/state/tdd-phase-$ADOPT_KEY.json" \
       if (beforeKeys !== afterKeys) process.exit(1);
       if (before.created_at !== after.created_at) process.exit(1);
     ' 2>/dev/null; then
-  check "AC-007 provenance is a history entry, the record keeps its exact field set" PASS
+  check "AC-C10 provenance is a history entry, the record keeps its exact field set" PASS
 else
-  check "AC-007 provenance is a history entry, the record keeps its exact field set" FAIL
+  check "AC-C10 provenance is a history entry, the record keeps its exact field set" FAIL
 fi
 
-# AC-004 — the rest of the refusal truth table, one check per condition, each
+# AC-C09 — the rest of the refusal truth table, one check per condition, each
 # with exactly ONE thing wrong. Run after the adoption because they reuse the
 # record it produced: it now declares 0.18.0, which is what makes the backwards
 # and non-sibling cases expressible from the roots this suite already built.
@@ -1386,32 +1405,32 @@ ADOPT_RECORDS_DIR="$SHARED_DATA/session-control/v1/records"
 
 REASON_BACKWARDS="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT")"
 if [ "$REASON_BACKWARDS" = executing-runtime-older ]; then
-  check "AC-004 an OLDER installation may not adopt a newer record" PASS
+  check "AC-C09 an OLDER installation may not adopt a newer record" PASS
 else
-  check "AC-004 an OLDER installation may not adopt a newer record (got '$REASON_BACKWARDS')" FAIL
+  check "AC-C09 an OLDER installation may not adopt a newer record (got '$REASON_BACKWARDS')" FAIL
 fi
 
 REASON_DETACHED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$DETACHED_COMPATIBLE_ROOT")"
 if [ "$REASON_DETACHED" = not-a-sibling-installation ]; then
-  check "AC-004 an installation outside the install parent may not adopt" PASS
+  check "AC-C09 an installation outside the install parent may not adopt" PASS
 else
-  check "AC-004 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
+  check "AC-C09 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
 fi
 
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
 if [ "$REASON_PROJECT" = project-root-mismatch ]; then
-  check "AC-004 a record for another project may not be adopted" PASS
+  check "AC-C09 a record for another project may not be adopted" PASS
 else
-  check "AC-004 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
+  check "AC-C09 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
 fi
 
 REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
 if [ "$REASON_ABSENT" = record-unreadable ]; then
-  check "AC-004 a session with no record is not adoptable" PASS
+  check "AC-C09 a session with no record is not adoptable" PASS
 else
-  check "AC-004 a session with no record is not adoptable (got '$REASON_ABSENT')" FAIL
+  check "AC-C09 a session with no record is not adoptable (got '$REASON_ABSENT')" FAIL
 fi
 
 # The record now names $SYNTHETIC_BREAKING_ROOT, so that root has nothing left to
@@ -1419,9 +1438,9 @@ fi
 # session's record, which is the one thing immutability exists to prevent.
 REASON_SERVED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
 if [ "$REASON_SERVED" = already-served ]; then
-  check "AC-004 a record this installation already serves is not adoptable" PASS
+  check "AC-C09 a record this installation already serves is not adoptable" PASS
 else
-  check "AC-004 a record this installation already serves is not adoptable (got '$REASON_SERVED')" FAIL
+  check "AC-C09 a record this installation already serves is not adoptable (got '$REASON_SERVED')" FAIL
 fi
 
 # A sibling root whose manifest declares no usable version is not a lineage claim
@@ -1440,24 +1459,24 @@ if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
     '; then
   REASON_UNIDENTIFIED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$UNIDENTIFIED_ROOT")"
   if [ "$REASON_UNIDENTIFIED" = executing-runtime-unidentified ]; then
-    check "AC-004 an installation that declares no usable version may not adopt" PASS
+    check "AC-C09 an installation that declares no usable version may not adopt" PASS
   else
-    check "AC-004 an installation that declares no usable version may not adopt (got '$REASON_UNIDENTIFIED')" FAIL
+    check "AC-C09 an installation that declares no usable version may not adopt (got '$REASON_UNIDENTIFIED')" FAIL
   fi
 else
-  check "AC-004 an installation that declares no usable version may not adopt (fixture unavailable)" FAIL
+  check "AC-C09 an installation that declares no usable version may not adopt (fixture unavailable)" FAIL
 fi
 
 # TEST-2 (second half) — after the adoption the same Edit is no longer denied by
 # the binding. This is the pair that makes the first half a discrimination rather
 # than a constant.
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$ADOPT_EDIT_PAYLOAD")" = allow ]; then
-  check "TEST-2 the Edit gate allows the same write once the session is adopted" PASS
+  check "FR-C02 the Edit gate allows the same write once the session is adopted" PASS
 else
-  check "TEST-2 the Edit gate allows the same write once the session is adopted" FAIL
+  check "FR-C02 the Edit gate allows the same write once the session is adopted" FAIL
 fi
 
-# TEST-4 — the bare entry point must be filesystem-inert. That claim is the
+# FR-C04 — the bare entry point must be filesystem-inert. That claim is the
 # premise the whole gate widening rests on, and $PROJECT always already has
 # .zensu/state, so no check above could observe a regression. Driven on a project
 # that has none.
@@ -1482,10 +1501,29 @@ CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
   CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$INERT_OUT" 2>&1
 if grep -qF 'ADOPTABLE' "$INERT_OUT" && [ ! -e "$INERT_PROJECT/.zensu" ]; then
-  check "TEST-4 the bare entry point creates nothing in the project" PASS
+  check "FR-C04 the bare entry point creates nothing in the project" PASS
 else
-  check "TEST-4 the bare entry point creates nothing in the project (.zensu present: $([ -e "$INERT_PROJECT/.zensu" ] && echo yes || echo no))" FAIL
+  check "FR-C04 the bare entry point creates nothing in the project (.zensu present: $([ -e "$INERT_PROJECT/.zensu" ] && echo yes || echo no))" FAIL
   head -c 300 "$INERT_OUT" 2>/dev/null
+fi
+
+# AC-C10 — the no-workflow-document provenance branch, which adoptableRecord
+# explicitly blesses. Before this it was reachable by no check, so a regression
+# routing it back through the FAILURE branch — reporting a completed adoption as
+# an anomaly — would have been invisible. The fixture already exists: the same
+# .zensu-less project TEST-4 just proved the bare form leaves alone.
+INERT_CONFIRM_OUT="$TMP/adopt-inert-confirm.out"
+if CLAUDE_CODE_SESSION_ID="$INERT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$INERT_PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$INERT_CONFIRM_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$INERT_CONFIRM_OUT" \
+    && grep -qF 'provenance       : no-workflow-document' "$INERT_CONFIRM_OUT" \
+    && grep -qF 'had no workflow document' "$INERT_CONFIRM_OUT"; then
+  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" PASS
+else
+  check "AC-C10 a session with no workflow document adopts and says so, rather than reporting a fault" FAIL
+  head -c 400 "$INERT_CONFIRM_OUT" 2>/dev/null
 fi
 
 # JUDGE-3 — the whole feature needs the SUPERSEDED installation to still exist.
@@ -1511,6 +1549,13 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
       | CLAUDE_PLUGIN_ROOT="$PRUNED_ROOT" CLAUDE_PLUGIN_DATA="$PRUNED_DATA" \
         CLAUDE_PROJECT_DIR="$PROJECT" \
         bash "$PRUNED_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1; then
+  # Positive control FIRST: without it both assertions below are absences that a
+  # fixture which never worked would satisfy just as well.
+  PRUNED_KEY="$(node "$PRUNED_SUCCESSOR/hooks/lib/session-control-core-v1.js" session-key "$PRUNED_SESSION")"
+  PRUNED_BEFORE="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
+  PRUNED_CONTROL=no
+  [ -f "$PRUNED_DATA/session-control/v1/records/$PRUNED_KEY.json" ] \
+    && [ "$PRUNED_BEFORE" = ok ] && PRUNED_CONTROL=yes
   rm -rf "$PRUNED_ROOT"
   PRUNED_VERDICT="$(adoption_reason "$PRUNED_DATA/session-control/v1/records" "$PRUNED_SESSION" "$PRUNED_DATA" "$PROJECT" "$PRUNED_SUCCESSOR")"
   PRUNED_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$PRUNED_SESSION" CWD="$PROJECT" node -e '
@@ -1528,10 +1573,10 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
         node "$PRUNED_SUCCESSOR/hooks/lib/claude-hook-session-v1.js" incompatible-runtime >/dev/null 2>&1; then
     PRUNED_NAMED=yes
   fi
-  if [ "$PRUNED_VERDICT" = record-unreadable ] && [ "$PRUNED_NAMED" = no ]; then
+  if [ "$PRUNED_CONTROL" = yes ] && [ "$PRUNED_VERDICT" = record-unreadable ] && [ "$PRUNED_NAMED" = no ]; then
     check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (documented boundary)" PASS
   else
-    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (verdict='$PRUNED_VERDICT' named=$PRUNED_NAMED)" FAIL
+    check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (control=$PRUNED_CONTROL before='$PRUNED_BEFORE' verdict='$PRUNED_VERDICT' named=$PRUNED_NAMED)" FAIL
   fi
 else
   check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (fixture unavailable)" FAIL

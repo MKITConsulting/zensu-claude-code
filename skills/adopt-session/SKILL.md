@@ -26,7 +26,7 @@ description: >
 Rescue a session whose Session Control record is intact but is no longer served
 by the running plugin installation.
 
-## When this applies
+## When to Use
 
 While the plugin is at major `0` the MINOR is the breaking axis, so a record
 minted by `0.17.2` is not served by `0.18.0`. When such an update lands mid
@@ -44,7 +44,7 @@ If the doctor row instead says the session has **no** record, or that the
 recorded **project root** no longer exists, this skill does not apply — those are
 different states with different remedies, and it will refuse.
 
-## What adoption is
+## What This Skill Does
 
 The lineage rule is a judgement about DECLARED versions. It cannot see whether
 the persisted shapes actually moved. When they did not, its refusal wedges a
@@ -60,7 +60,7 @@ Adoption is the one explicit, verified exit from that, and it is authorised by
 A release that genuinely breaks a persisted shape is therefore non-adoptable by
 construction. That is the gate, and it closes itself.
 
-## What it does and does not do
+## Strict Scope
 
 It mints a NEW record for the same session under the executing runtime, carrying
 the original `created_at`. It sets the previous record aside as
@@ -78,9 +78,17 @@ The cost is real and stated plainly: the pin weakens from "the measured code is
 the enforcing code" to "the enforcing code shares the persisted shapes of the
 measured code". Do not run it to make an unrelated failure go away.
 
-## Procedure
+## Prerequisites
 
-**Step 1 — report.** Run the read-only form. It changes nothing.
+None beyond a running session. No network, no API key. The entry point needs
+`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and the three
+values the recognized command carries — `CLAUDE_CODE_SESSION_ID` (inherited),
+`CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR`; it names any that is missing.
+Main thread only: a reviewer or neutral child is refused by every gate.
+
+## Phase 1: Report, confirm, adopt
+
+**Step 1 of 4 — report.** Run the read-only form. It changes nothing.
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
@@ -100,12 +108,12 @@ and its remedy verbatim too and STOP — every refusal names a different cause:
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
 | `workflow-schema-mismatch` | The workflow document cannot be read by this runtime — the case adoption must refuse. |
 
-**Step 2 — confirm with the user.** Adoption changes the session's immutable
+**Step 2 of 4 — confirm with the user.** Adoption changes the session's immutable
 anchor. Ask before running it, in the user's language, naming both versions and
 the one consequence that is not obvious: any review-evidence lease from before
 the update has to be re-gathered.
 
-**Step 3 — adopt.** Only after the user agrees:
+**Step 3 of 4 — adopt.** Only after the user agrees:
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
@@ -128,11 +136,11 @@ Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
 precondition failure, `2` on a bad argument. A non-zero exit is not a broken
 command — read the message.
 
-**Step 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
+**Step 4 of 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row. The session is bound from the next tool call onward; do not tell the user to
 restart.
 
-## Invocation constraints
+## Phase 2: Invocation constraints
 
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
 the two assignments above, `bash`, the script path in the executing installation,
@@ -140,6 +148,18 @@ and at most the literal `--confirm`. Anything else — a second command, a
 different flag, a copy of the script — is denied. Emit the command exactly as
 written above; do not wrap it, redirect it, or chain anything onto it.
 
-Never run this skill on a session that is binding normally, and never as a way to
-clear a review chain: the chain state survives adoption untouched and is enforced
-again on the next Stop.
+## Do NOT Use For
+
+- A session that is binding normally. If tools fail for another reason, that is
+  `/zensu:doctor`.
+- Clearing a review chain or granting a budget. The chain state survives adoption
+  untouched and is enforced again on the very next Stop.
+- Any bind failure other than the declared-incompatible lineage — the refusal
+  table above names each one and its own remedy.
+
+## Response Style
+
+Render both command outputs verbatim; they are already formatted. Name both
+versions. Never summarize away a `provenance` other than `recorded`/
+`no-workflow-document`, a non-zero `leases set aside`, or a non-zero
+`leases stuck`. After a successful adoption, do not tell the user to restart.

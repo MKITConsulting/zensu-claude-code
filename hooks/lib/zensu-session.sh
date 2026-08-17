@@ -358,7 +358,13 @@ zensu_emit_hook_session_deny() {
   local scope="${1:-}"
   if [ "$scope" = incompatible-runtime ]; then
     local recorded="${2:-}" executing="${3:-}"
-    if [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] && [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+    # ONE degradation policy across all three consumers of this pair: substitute a
+    # placeholder and KEEP the lineage wording. Falling back to `narrowed` here
+    # dropped the in-place remedy entirely and told the user to start a fresh
+    # session — the contradiction this scope exists to remove.
+    [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
+    [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
+    if true; then
       printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
         "$recorded" "$executing"
       return
