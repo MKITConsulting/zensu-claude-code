@@ -885,6 +885,303 @@ else
   check "a compatible runtime serves the record without rewriting it" FAIL
 fi
 
+# ---------------------------------------------------------------------------
+# Part C — naming the incompatible-lineage state, and adopting out of it.
+#
+# Part B pins that a breaking-boundary runtime DENIES. Everything here is about
+# what the user is then told and what they can do about it. The session below is
+# its OWN record on purpose: adoption mutates the record it acts on, and every
+# Part A/B check above reads the shared one.
+# ---------------------------------------------------------------------------
+
+ADOPT_SESSION='versioned-upgrade-adoption-session'
+ADOPT_START_PAYLOAD="$(EVENT=SessionStart SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+if printf '%s' "$ADOPT_START_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" \
+      >/dev/null 2>&1; then
+  ADOPT_START_RC=0
+else
+  ADOPT_START_RC=$?
+fi
+ADOPT_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$ADOPT_SESSION")"
+ADOPT_RECORD="$SHARED_DATA/session-control/v1/records/$ADOPT_KEY.json"
+if [ "$ADOPT_START_RC" -eq 0 ] && [ -f "$ADOPT_RECORD" ]; then
+  check "Part C a second 0.17.0 session registers for the adoption checks" PASS
+else
+  check "Part C a second 0.17.0 session registers for the adoption checks" FAIL
+fi
+
+ADOPT_TOOL_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+    tool_name: "Read",
+    tool_input: {file_path: "README.md"},
+  }));
+')"
+
+# AC-014 — the state is NAMED, and named only here. The two relaxable predicates
+# must both answer no: this is a third diagnosis, never a widening of either.
+ADOPT_VERSIONS="$(
+  printf '%s' "$ADOPT_TOOL_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" incompatible-runtime 2>/dev/null
+)" || ADOPT_VERSIONS=''
+if [ "$ADOPT_VERSIONS" = "$(printf '0.17.0\t0.18.0')" ]; then
+  check "AC-014 the incompatible-runtime predicate names both declared versions" PASS
+else
+  check "AC-014 the incompatible-runtime predicate names both declared versions (got '$ADOPT_VERSIONS')" FAIL
+fi
+if ! printf '%s' "$ADOPT_TOOL_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" unregistered >/dev/null 2>&1 \
+    && ! printf '%s' "$ADOPT_TOOL_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+        node "$SYNTHETIC_BREAKING_ROOT/hooks/lib/claude-hook-session-v1.js" orphaned-project-root >/dev/null 2>&1; then
+  check "AC-014 the two relaxable predicates stay false for the lineage state" PASS
+else
+  check "AC-014 the two relaxable predicates stay false for the lineage state" FAIL
+fi
+
+# AC-015 — the doctor row. The bite is the ABSENCE of the old wording: before the
+# fourth branch existed this state fell through to a line asserting the session
+# has no record, which is false.
+DOCTOR_OUT="$TMP/adopt-doctor.out"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_OUT" 2>/dev/null
+if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
+    && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
+    && ! grep -qF 'no valid Session Control record' "$DOCTOR_OUT"; then
+  check "AC-015 the doctor row names both versions and never claims 'no valid record'" PASS
+else
+  check "AC-015 the doctor row names both versions and never claims 'no valid record'" FAIL
+  grep -F 'binding:' "$DOCTOR_OUT" 2>/dev/null
+fi
+
+# AC-016 — the Stop hook RELEASES. Blocking here loops a session whose Edit and
+# Bash channels are already denied, so the remedy never reaches the user.
+ADOPT_STOP_PAYLOAD="$(EVENT=Stop SESSION="$ADOPT_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+STOP_OUT="$TMP/adopt-stop.out"
+STOP_ERR="$TMP/adopt-stop.err"
+printf '%s' "$ADOPT_STOP_PAYLOAD" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" >"$STOP_OUT" 2>"$STOP_ERR"
+if [ ! -s "$STOP_OUT" ] && grep -qF 'releasing Stop' "$STOP_ERR" \
+    && grep -qF 'no completion was proven' "$STOP_ERR"; then
+  check "AC-016 the Stop hook releases the lineage state instead of blocking" PASS
+else
+  check "AC-016 the Stop hook releases the lineage state instead of blocking" FAIL
+  head -c 400 "$STOP_OUT" 2>/dev/null
+fi
+
+# AC-019 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
+# matcher wins. Enumerated from hooks.json for the same reason Part A and B do:
+# a hook added later is covered without editing this check.
+ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
+ADOPT_MATCHER_HOOKS="$(
+  HOOKS_FILE="$SYNTHETIC_BREAKING_ROOT/hooks/hooks.json" node -e '
+    const fs = require("node:fs");
+    const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
+    const names = new Set();
+    for (const entry of config.hooks?.PreToolUse || []) {
+      let matches = false;
+      try { matches = new RegExp(entry.matcher || ".*").test("Bash"); } catch { matches = true; }
+      if (!matches) continue;
+      for (const hook of entry.hooks || []) {
+        const command = String(hook.command || "");
+        const found = command.match(/hooks\/[A-Za-z0-9._-]+\.sh/);
+        if (found) names.add(found[0].slice("hooks/".length));
+      }
+    }
+    process.stdout.write([...names].sort().join("\n"));
+  '
+)"
+ADOPT_GATE_FAILURES=''
+while IFS= read -r hook_name; do
+  [ -n "$hook_name" ] || continue
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != allow ]; then
+    ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
+  fi
+done <<EOF
+$ADOPT_MATCHER_HOOKS
+EOF
+if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_GATE_FAILURES" ]; then
+  check "AC-019 every hook on the Bash matcher lets the adoption command through" PASS
+else
+  check "AC-019 every hook on the Bash matcher lets the adoption command through (denied by:$ADOPT_GATE_FAILURES)" FAIL
+fi
+
+# The discrimination test for AC-019: the recognizer must stay exactly this
+# narrow. An ordinary Bash command in the same state still denies, so an allow
+# above cannot have come from the bind succeeding.
+ADOPT_ORDINARY="$(bash_payload "$ADOPT_SESSION" 'ls -la')"
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-bash-zensu-gate.sh "$ADOPT_ORDINARY")" = deny ]; then
+  check "AC-019 an ordinary Bash command in the same state still denies" PASS
+else
+  check "AC-019 an ordinary Bash command in the same state still denies" FAIL
+fi
+
+# AC-018 — the self-closing gate, and the single most important check here: a
+# workflow document this runtime cannot read must REFUSE adoption. Driven by
+# corrupting the document's schema, which is exactly what a real persisted-shape
+# break would look like to the reader.
+ADOPT_STATE_FILE="$PROJECT/.zensu/state/tdd-phase-$ADOPT_KEY.json"
+ADOPT_STATE_BACKUP="$TMP/adopt-state-backup.json"
+if [ -f "$ADOPT_STATE_FILE" ]; then
+  cp "$ADOPT_STATE_FILE" "$ADOPT_STATE_BACKUP"
+  STATE_FILE="$ADOPT_STATE_FILE" node -e '
+    const fs = require("node:fs");
+    const state = JSON.parse(fs.readFileSync(process.env.STATE_FILE, "utf8"));
+    state.schema_version = 999;
+    fs.writeFileSync(process.env.STATE_FILE, JSON.stringify(state));
+  '
+  SCHEMA_VERDICT="$(
+    RECORDS="$SHARED_DATA/session-control/v1/records" SID="$ADOPT_SESSION" \
+    DATA="$SHARED_DATA" PROJECT_IN="$PROJECT" EXEC_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+    node -e '
+      const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+      const verdict = core.adoptableRecord({
+        recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+        pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+        executingPluginRoot: process.env.EXEC_ROOT,
+      });
+      process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+    ' 2>/dev/null
+  )" || SCHEMA_VERDICT='threw'
+  cp "$ADOPT_STATE_BACKUP" "$ADOPT_STATE_FILE"
+  if [ "$SCHEMA_VERDICT" = workflow-schema-mismatch ]; then
+    check "AC-018 a workflow document this runtime cannot read refuses adoption" PASS
+  else
+    check "AC-018 a workflow document this runtime cannot read refuses adoption (got '$SCHEMA_VERDICT')" FAIL
+  fi
+else
+  check "AC-018 a workflow document this runtime cannot read refuses adoption" FAIL
+fi
+
+# AC-020 — two disagreements are never one diagnosis. A record whose plugin_data
+# points elsewhere is not adoptable no matter how the lineage compares.
+FOREIGN_DATA="$TMP/foreign-plugin-data"
+mkdir -p "$FOREIGN_DATA" && chmod 700 "$FOREIGN_DATA"
+FOREIGN_VERDICT="$(
+  RECORDS="$SHARED_DATA/session-control/v1/records" SID="$ADOPT_SESSION" \
+  DATA="$FOREIGN_DATA" PROJECT_IN="$PROJECT" EXEC_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+  node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+      executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+  ' 2>/dev/null
+)" || FOREIGN_VERDICT='threw'
+if [ "$FOREIGN_VERDICT" = plugin-data-mismatch ]; then
+  check "AC-020 a second disagreement is never relaxed alongside the lineage" PASS
+else
+  check "AC-020 a second disagreement is never relaxed alongside the lineage (got '$FOREIGN_VERDICT')" FAIL
+fi
+
+# AC-017 — the repair itself, end to end through the shipped entry point. This
+# runs LAST of the adoption checks because it mutates the record.
+ADOPT_REPORT_OUT="$TMP/adopt-report.out"
+if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" >"$ADOPT_REPORT_OUT" 2>&1 \
+    && grep -qF 'ADOPTABLE' "$ADOPT_REPORT_OUT" \
+    && grep -qF 'Nothing has been changed' "$ADOPT_REPORT_OUT" \
+    && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
+  check "AC-017 the bare entry point reports adoptable and changes nothing" PASS
+else
+  check "AC-017 the bare entry point reports adoptable and changes nothing" FAIL
+  head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
+fi
+
+ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
+cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
+ADOPT_CONFIRM_OUT="$TMP/adopt-confirm.out"
+if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$ADOPT_CONFIRM_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$ADOPT_CONFIRM_OUT" \
+    && grep -qF 'provenance       : recorded' "$ADOPT_CONFIRM_OUT"; then
+  check "AC-017 --confirm performs the adoption" PASS
+else
+  check "AC-017 --confirm performs the adoption" FAIL
+  head -c 400 "$ADOPT_CONFIRM_OUT" 2>/dev/null
+fi
+
+# The point of the whole feature: the session works again, in place.
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$ADOPT_TOOL_PAYLOAD")" = allow ] \
+    && [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-bash-zensu-gate.sh "$ADOPT_ORDINARY")" = allow ]; then
+  check "AC-017 after adoption the same session binds and ordinary commands run again" PASS
+else
+  check "AC-017 after adoption the same session binds and ordinary commands run again" FAIL
+fi
+
+# The previous record is set aside, never overwritten, and stays readable.
+ADOPT_SUPERSEDED="$SHARED_DATA/session-control/v1/records/$ADOPT_KEY.superseded-0.17.0.json"
+if [ -f "$ADOPT_SUPERSEDED" ] \
+    && [ "$ADOPT_RECORD_BEFORE" = "$(cat "$ADOPT_SUPERSEDED")" ] \
+    && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.18.0 ]; then
+  check "AC-017 the superseded record is set aside byte-for-byte, never rewritten" PASS
+else
+  check "AC-017 the superseded record is set aside byte-for-byte, never rewritten" FAIL
+fi
+
+# AC-007 — provenance is a history entry and the record gains NO field. This is
+# what keeps the release a patch: a record shape change would itself be the
+# breaking bump this feature exists to survive.
+if STATE_IN="$PROJECT/.zensu/state/tdd-phase-$ADOPT_KEY.json" \
+    BEFORE_IN="$TMP/adopt-record-before.json" AFTER_IN="$ADOPT_RECORD" node -e '
+      const fs = require("node:fs");
+      const state = JSON.parse(fs.readFileSync(process.env.STATE_IN, "utf8"));
+      const entry = (state.history || []).find((h) => h.phase === "RUNTIME_ADOPTED");
+      if (!entry) process.exit(1);
+      if (entry.reason !== "runtime-adopted: 0.17.0 -> 0.18.0") process.exit(1);
+      const before = JSON.parse(fs.readFileSync(process.env.BEFORE_IN, "utf8"));
+      const after = JSON.parse(fs.readFileSync(process.env.AFTER_IN, "utf8"));
+      const beforeKeys = Object.keys(before).sort().join(",");
+      const afterKeys = Object.keys(after).sort().join(",");
+      if (beforeKeys !== afterKeys) process.exit(1);
+      if (before.created_at !== after.created_at) process.exit(1);
+    ' 2>/dev/null; then
+  check "AC-007 provenance is a history entry, the record keeps its exact field set" PASS
+else
+  check "AC-007 provenance is a history entry, the record keeps its exact field set" FAIL
+fi
+
+# The reserved phase cannot be minted by a caller — the same protection
+# CHAIN_RECOVERED has, for the same reason: a forgeable provenance entry is worse
+# than none, because it is believed.
+if ! CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-log.sh" --phase RUNTIME_ADOPTED --step forged \
+      >/dev/null 2>&1; then
+  check "the RUNTIME_ADOPTED provenance phase cannot be minted through --phase" PASS
+else
+  check "the RUNTIME_ADOPTED provenance phase cannot be minted through --phase" FAIL
+fi
+
 printf '%s\n' '----' \
   "test-versioned-plugin-upgrade: $PASS PASS / $FAIL FAIL / $SKIPPED SKIP"
 [ "$FAIL" -eq 0 ]

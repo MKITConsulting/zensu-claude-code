@@ -453,17 +453,20 @@ function main() {
     // worker that cannot prove its lease must not run. So does a record that
     // EXISTS and disagrees about anything else, which is a security signal that
     // keeps denying for everyone, main thread included.
-    // The read-only diagnostic is the third case, and unlike the two above it is
-    // NOT a relaxable-state question: it holds in EVERY bind failure, including a
-    // record that exists and disagrees. That is the state a mid-session plugin
-    // upgrade produces, and denying it here put /zensu:doctor behind the very
-    // defect it reports — this gate matches every tool, so a deny here is reached
-    // before the Bash gates ever run. It admits exactly one recognized command
-    // for the main thread; hooks/lib/zensu-doctor.sh writes nothing.
+    // The recognized commands are the third case, and unlike the two above they
+    // are NOT a relaxable-state question: they hold in EVERY bind failure,
+    // including a record that exists and disagrees. That is the state a
+    // mid-session plugin upgrade produces, and denying it here put /zensu:doctor
+    // behind the very defect it reports — this gate matches every tool, so a deny
+    // here is reached before the Bash gates ever run. It admits exactly two
+    // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
+    // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes only its
+    // own session's record and carries its own justification in its header. A
+    // remedy the user cannot invoke is not a remedy.
     if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
         && (hookSession.unregisteredSession(payload)
           || hookSession.orphanedProjectRootSession(payload)
-          || doctorInvocation.isDoctorInvocation(payload))) {
+          || doctorInvocation.isRecognizedInvocation(payload))) {
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

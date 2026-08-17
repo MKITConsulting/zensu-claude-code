@@ -15,10 +15,15 @@
 // a record exists, validates in every other respect, and its recorded project
 // root is simply gone — and on a match prints that dead path so callers can
 // name it; `model-orphaned-project-root` is the same question asked from
-// CLAUDE_CODE_SESSION_ID, for the model-side /zensu:doctor. None of the three
-// prints bindings: a session in any of those states must stay unbound. They
-// exist so the gates can tell the two relaxable bind failures apart from each
-// other and from all the rest.
+// CLAUDE_CODE_SESSION_ID, for the model-side /zensu:doctor;
+// `incompatible-runtime` and its `model-` twin answer by exit status — 0 when
+// the record is intact and the SOLE disagreement is a declared-incompatible
+// executing lineage — and on a match print `recorded<TAB>executing`. None of the
+// five prints bindings: a session in any of those states must stay unbound. The
+// first four exist so the gates can tell the two RELAXABLE bind failures apart
+// from each other and from all the rest; the fifth names a state that is NOT
+// relaxable — a workflow document is still reachable there — and exists so the
+// diagnosis stops being reported as "no record", which is false.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -164,6 +169,64 @@ function orphanedProjectRootSession(payload, environment = process.env) {
   return resolveOrphanedProjectRoot(payload, environment) !== null;
 }
 
+// The THIRD bind-failure diagnosis, and a THIRD separate predicate — never a
+// widening of either one above. Those two answer "is there anything left to
+// enforce"; this one answers "is the record fine and only the runtime serving it
+// declared incompatible". A plugin update that lands mid-session produces
+// exactly that: the record is intact, its digest still verifies against the root
+// it was minted under, and runtimeLineageCompatible refuses because at major 0
+// the minor is the breaking axis.
+//
+// It is NOT a relaxable state. A workflow document IS reachable here, so
+// relaxing a write gate would waive a live guarantee — unlike the two states
+// above, where nothing is left to waive. What it buys is a NAME: the doctor row,
+// the Stop release and the deny text can state the real cause and both versions
+// instead of falling through to "no valid record", which is false and sends the
+// user hunting for a record that is sitting intact in plugin data.
+//
+// Uses the STRICT reader on purpose. Every other check must pass, including the
+// recorded project root still existing — a vanished root is the OTHER diagnosis
+// and has its own predicate. Two disagreements are never one diagnosis, so a
+// record that is both orphaned and lineage-incompatible answers null here and is
+// classified by the orphan predicate, which is the heavier remedy.
+//
+// Returns { recorded, executing } — both declared versions — or null when this
+// is not that state. Any additional disagreement, any unreadable or ambiguous
+// state, and any exception answers null, so the caller keeps failing closed.
+function resolveIncompatibleRuntime(payload, environment = process.env) {
+  try {
+    validateSessionId(payload.session_id);
+    const executedPluginRoot = canonicalDirectory(path.resolve(__dirname, '..', '..'), 'executed plugin root');
+    if (canonicalDirectory(environment.CLAUDE_PLUGIN_ROOT, 'CLAUDE_PLUGIN_ROOT') !== executedPluginRoot) {
+      return null;
+    }
+    const pluginData = canonicalDirectory(environment.CLAUDE_PLUGIN_DATA, 'CLAUDE_PLUGIN_DATA', true);
+    const recordsDir = privateRecordsDirectory(pluginData, true);
+    if (recordsDir === null) return null;
+    const context = core.readContext({
+      recordsDir,
+      sessionId: payload.session_id,
+      expectedHost: 'claude',
+    });
+    if (context.plugin_data !== pluginData) return null;
+    // The disagreement must be the lineage and nothing else: if this root DOES
+    // serve the record, the bind failed for some other reason and naming the
+    // lineage would be a wrong diagnosis.
+    if (core.servesRecordedRuntime(context, executedPluginRoot, 'claude')) return null;
+    const executing = core.executingPluginVersion(executedPluginRoot, 'claude');
+    // A root that declares nothing readable is not a lineage claim — it is a
+    // root that cannot be identified — so it is not this state either.
+    if (typeof executing !== 'string' || executing === '') return null;
+    return { recorded: context.plugin_version, executing };
+  } catch {
+    return null;
+  }
+}
+
+function incompatibleRuntimeSession(payload, environment = process.env) {
+  return resolveIncompatibleRuntime(payload, environment) !== null;
+}
+
 function validateSessionId(sessionId) {
   if (
     typeof sessionId !== 'string'
@@ -302,6 +365,31 @@ function main() {
     process.stdout.write(`${orphanedRoot}\n`);
     return;
   }
+  if (process.argv[2] === 'incompatible-runtime' || process.argv[2] === 'model-incompatible-runtime') {
+    // Exit 0 only when the record is intact and the SOLE disagreement is that
+    // the executing runtime declares an incompatible lineage, and on a match
+    // print `recorded<TAB>executing` so the caller can name both versions
+    // instead of reporting an anonymous mismatch. The two spellings differ only
+    // in where the session id comes from, exactly as the orphan pair does.
+    // Never any bindings: this state stays unbound until it is adopted.
+    const mode = process.argv[2];
+    if (process.argv.length !== 3) fail(`${mode} does not accept arguments`);
+    let sessionPayload;
+    if (mode === 'model-incompatible-runtime') {
+      const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
+      validateSessionId(hostSessionId);
+      sessionPayload = { session_id: hostSessionId };
+    } else {
+      sessionPayload = readPayload();
+    }
+    const versions = resolveIncompatibleRuntime(sessionPayload);
+    if (versions === null) {
+      process.exitCode = 1;
+      return;
+    }
+    process.stdout.write(`${versions.recorded}\t${versions.executing}\n`);
+    return;
+  }
   if (process.argv[2] === 'model-bind') {
     if (process.argv.length !== 3) fail('model-bind does not accept arguments');
     const hostSessionId = process.env.CLAUDE_CODE_SESSION_ID;
@@ -335,9 +423,11 @@ if (require.main === module) {
 }
 
 module.exports = {
+  incompatibleRuntimeSession,
   orphanedProjectRootSession,
   resolveFreshHookProject,
   resolveHookSession,
+  resolveIncompatibleRuntime,
   resolveOrphanedProjectRoot,
   unregisteredSession,
 };

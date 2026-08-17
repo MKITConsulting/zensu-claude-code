@@ -193,18 +193,88 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
-# Returns 0 ONLY when this PreToolUse payload is the one read-only /zensu:doctor
-# Bash call. This is NOT a relaxable-state predicate and does not belong beside
-# the two above: those answer "is there anything left to enforce", this one
-# answers "is this the diagnostic itself". It applies in EVERY bind failure,
-# including a record that exists and disagrees — the state where the diagnostic
-# was previously denied by the very defect it reports.
+# Returns 0 ONLY when a Session Control record is intact in every respect and the
+# SOLE disagreement is that the executing runtime declares an incompatible
+# lineage — what a plugin update landing mid-session produces. It is NOT a
+# relaxable state and does not belong to the pair above: a workflow document is
+# still reachable here, so relaxing a write gate for it would waive a live
+# guarantee rather than a dead one. It exists so the doctor row, the Stop release
+# and the deny text can NAME the cause instead of falling through to "no record",
+# which is false and sends the user hunting for a record that is sitting intact.
+# The decision lives in claude-hook-session-v1.js so every caller shares exactly
+# one implementation.
+#
+# On a match this PRINTS `recorded<TAB>executing` on stdout. The same warning the
+# orphaned wrapper carries applies with equal force: inside a PreToolUse gate
+# stdout is the hook's JSON decision channel, so a caller that wants the
+# predicate alone MUST discard stdout explicitly (`>/dev/null`).
+zensu_session_incompatible_runtime() {
+  local payload="${1:-}"
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js incompatible-runtime
+  ) 2>/dev/null
+}
+
+# The model-side twin of the predicate above, for /zensu:doctor: same question
+# and same printed version pair, but no hook payload exists there, so the session
+# id comes from CLAUDE_CODE_SESSION_ID.
+zensu_session_incompatible_runtime_model() {
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      node ./claude-hook-session-v1.js model-incompatible-runtime
+  ) 2>/dev/null
+}
+
+# Returns 0 ONLY when this PreToolUse payload is one of the two recognized Bash
+# calls: the read-only /zensu:doctor diagnostic, or /zensu:adopt-session. This is
+# NOT a relaxable-state predicate and does not belong beside the two above: those
+# answer "is there anything left to enforce", this one answers "is this one of
+# the commands that must stay reachable while unbound". It applies in EVERY bind
+# failure, including a record that exists and disagrees — the state where the
+# diagnostic was previously denied by the very defect it reports, and the state
+# the adoption repairs.
+#
+# The two are admitted on DIFFERENT grounds and the distinction is load-bearing:
+# the diagnostic writes nothing, while the adoption writes its own session's
+# record. See the header of hooks/lib/zensu-session-adopt.sh for that second
+# justification; do not fold them into one argument.
 #
 # The decision lives in zensu-doctor-invocation.js so all three Bash gates and
 # the all-tool capability gate share exactly one recognizer, and it derives the
 # executing plugin root itself rather than trusting a caller. Every caller must
-# still conjoin its own main-principal check: a reviewer or neutral child has no
-# diagnostic to run.
+# still conjoin its own main-principal check: a reviewer or neutral child has
+# neither command to run.
 #
 # Prints nothing on purpose. Inside a PreToolUse gate stdout is the JSON decision
 # channel, so a stray byte here would corrupt the verdict.
@@ -268,8 +338,31 @@ zensu_doctor_allowed() {
 #   damaged-runtime   the session IS in a relaxable state, so the diagnostic
 #                     would normally be reachable, but a runtime library the
 #                     gate needs is missing — so the doctor is denied too
+#   incompatible-runtime  the caller POSITIVELY identified the lineage state and
+#                     supplies both declared versions ($2 recorded, $3 executing);
+#                     this is the one scope that can name a remedy which fixes
+#                     the session in place rather than telling the user to start
+#                     over
+#
+# The version pair is interpolated into a JSON string, so it is held to a strict
+# shape first. A manifest version is ordinary text as far as the record schema is
+# concerned (validateContext only requireText's it), and an unchecked value here
+# would let a crafted manifest inject a quote and rewrite the decision object.
+# A value that fails the check falls back to the unversioned narrowed wording:
+# losing two numbers is a worse message, never a wrong verdict.
+ZENSU_SAFE_VERSION_RE='^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$'
+
 zensu_emit_hook_session_deny() {
   local scope="${1:-}"
+  if [ "$scope" = incompatible-runtime ]; then
+    local recorded="${2:-}" executing="${3:-}"
+    if [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] && [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+        "$recorded" "$executing"
+      return
+    fi
+    scope=narrowed
+  fi
   if [ "$scope" = narrowed ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. The most common cause is a Zensu plugin change across a breaking version boundary that landed while this session was running: a compatible upgrade keeps serving the record, but a breaking one or a downgrade cannot, because the record stays bound to the installation the session started on and no session can be re-bound in place. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'
     return
@@ -358,4 +451,5 @@ zensu_resolve_project_dir() {
 export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_session_deny \
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
+  zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

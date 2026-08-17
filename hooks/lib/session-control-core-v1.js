@@ -356,6 +356,25 @@ function servesRecordedRuntime(context, executedPluginRoot, host) {
   return runtimeLineageCompatible(context.plugin_version, executingVersion);
 }
 
+// The version a root DECLARES, or null when it declares nothing readable. It
+// exists so a caller that has already been refused by servesRecordedRuntime can
+// NAME the two versions instead of reporting an anonymous disagreement — the
+// whole difference between "start a fresh session" and "0.17.2 recorded, 0.18.0
+// executing".
+//
+// TOTAL and never throws, for the same reason servesRecordedRuntime is a
+// predicate: every caller is already on a failure path, and an exception there
+// would replace a precise diagnosis with a manifest error. A null answer means
+// the root could not be identified at all, which callers report as such rather
+// than guessing a number.
+function executingPluginVersion(pluginRootInput, host) {
+  try {
+    return pluginMetadata(pluginRootInput, host).manifest.version;
+  } catch {
+    return null;
+  }
+}
+
 function localManifestEntry(pluginRoot, value, label) {
   const raw = requireText(value, label)
     .replace(/^\$\{(?:CLAUDE_|CODEX_)?PLUGIN_ROOT\}/, pluginRoot);
@@ -1346,6 +1365,285 @@ function readOrphanedProjectRootContext(options) {
   // `return context`, which would hand back a root that still exists if fail()
   // ever stopped throwing: the exact value this reader must never return.
   fail('context project root still exists');
+}
+
+// ---------------------------------------------------------------------------
+// Adoption — serving an intact record from a declared-incompatible lineage.
+// ---------------------------------------------------------------------------
+//
+// runtimeLineageCompatible decides who may serve a record from the DECLARED
+// versions, and while the plugin is at major 0 a differing minor is a refusal.
+// That rule is unchanged and is not weakened here. What it cannot see is whether
+// the persisted shapes actually moved — and when they did not, its refusal
+// wedges a session the running code could read perfectly well. Every write
+// channel is denied, so the user cannot repair it, and before the diagnosis
+// existed they were not even told why.
+//
+// Adoption is the one explicit, verified, ledgered exit. It is authorised by
+// SCHEMA EQUALITY rather than by the version numbers, because the schema is what
+// the bytes on disk are actually held to — and that gate CLOSES ITSELF:
+//
+//   - the record's own `schema_version` is enforced by validateContext, so a
+//     future SCHEMA_VERSION bump makes readContext throw and adoption refuses
+//     without anyone having to remember to add a check;
+//   - the workflow document's `schema` and `schema_version` are enforced by
+//     validateWorkflowState, for the same reason and with the same consequence.
+//
+// A release that genuinely breaks a persisted shape is therefore non-adoptable
+// by construction, not by policy. Everything else below is identity: the record
+// must still be provably the one it claims to be, and the runtime taking it over
+// must be a sibling installation of the one that minted it.
+//
+// What adoption does NOT do: it never rewrites a record (the old one is set
+// aside under a new name and stays readable), never touches the workflow
+// document's decision fields, and never relaxes plugin_data — the boundary that
+// keeps a development checkout and an installed marketplace plugin on separate
+// record stores.
+const ADOPTION_REFUSALS = {
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  PROJECT_ROOT: 'project-root-mismatch',
+  ALREADY_SERVED: 'already-served',
+  NOT_SIBLING: 'not-a-sibling-installation',
+  EXECUTING_UNIDENTIFIED: 'executing-runtime-unidentified',
+  BACKWARDS: 'executing-runtime-older',
+  WORKFLOW_SCHEMA: 'workflow-schema-mismatch',
+};
+
+// A version reaches a FILENAME below, so it is held to a strict shape first. The
+// record schema only requireText's plugin_version, so without this a crafted
+// manifest could steer the superseded record anywhere in the tree.
+const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+
+function adoptionRefusal(reason) {
+  return { ok: false, reason };
+}
+
+// Never throws: every caller is on a failure path already, and an exception
+// would replace a named condition with a stack trace. A refusal always names
+// exactly which of the conditions was not met.
+function adoptableRecord(options) {
+  let executingPluginRoot;
+  let pluginData;
+  let context;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+    // Condition 1 — the record is still provably itself. readContext recomputes
+    // the runtime digest against the RECORDED root and re-reads that root's
+    // manifest, so a forged or hand-edited record cannot reach adoption; it also
+    // enforces the context schema and that the recorded project root exists.
+    context = readContext({
+      recordsDir: options.recordsDir,
+      sessionId: options.sessionId,
+      expectedHost: options.host,
+    });
+  } catch {
+    return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
+  }
+  // Condition 2 — the record store boundary is never relaxed.
+  if (context.plugin_data !== pluginData) return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA);
+  // Condition 3 — adopting a record for a different project would move a
+  // session's anchor, which is exactly what immutability exists to prevent.
+  let projectRoot;
+  try {
+    projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+  } catch {
+    return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
+  }
+  if (context.project_root !== projectRoot) return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
+  // Condition 4 — nothing to adopt when this runtime already serves the record.
+  // Refusing here keeps adoption from being a way to re-mint a healthy session.
+  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
+  }
+  // Condition 5 — the same structural bound servesRecordedRuntime applies: a
+  // marketplace install lands beside the versions it replaces, a development
+  // checkout never does, so a --plugin-dir tree cannot adopt an installed
+  // session's record no matter what its manifest declares.
+  if (path.dirname(context.plugin_root) !== path.dirname(executingPluginRoot)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.NOT_SIBLING);
+  }
+  const executingVersion = executingPluginVersion(executingPluginRoot, context.host);
+  if (typeof executingVersion !== 'string'
+    || !ADOPTION_SAFE_VERSION_RE.test(executingVersion)
+    || !ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+  }
+  // Condition 6 — never backwards. Only a newer tree can be expected to
+  // understand an older one's state; the reverse is the direction that loses
+  // data, and it stays refused here exactly as it is in runtimeLineageCompatible.
+  const recordedParts = parseRuntimeVersion(context.plugin_version);
+  const executingParts = parseRuntimeVersion(executingVersion);
+  if (recordedParts === null || executingParts === null) {
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+  }
+  for (let index = 0; index < recordedParts.length; index += 1) {
+    if (executingParts[index] !== recordedParts[index]) {
+      if (executingParts[index] < recordedParts[index]) {
+        return adoptionRefusal(ADOPTION_REFUSALS.BACKWARDS);
+      }
+      break;
+    }
+  }
+  // Condition 7 — the workflow document, when there is one, must be readable by
+  // THIS runtime. validateWorkflowState enforces `schema` and `schema_version`,
+  // so a real persisted-shape break refuses here. A missing document is not a
+  // disagreement: there is no shape to disagree about, and adoption leaves the
+  // session exactly as able to mint one as a fresh session would be.
+  const workflowFile = workflowStateFile(context.project_root, options.sessionId);
+  if (fs.existsSync(workflowFile)) {
+    try {
+      readWorkflowState({ projectRoot: context.project_root, sessionId: options.sessionId });
+    } catch {
+      return adoptionRefusal(ADOPTION_REFUSALS.WORKFLOW_SCHEMA);
+    }
+  }
+  return {
+    ok: true,
+    context,
+    recorded: context.plugin_version,
+    executing: executingVersion,
+  };
+}
+
+// Stale leases are moved OUT of the records directory, never renamed inside it:
+// listRecords fails on any entry that does not end in `.json`, so a set-aside
+// file left in place would be strictly worse than the stale lease it replaced.
+//
+// Why they must go at all: review-evidence-lease-v1.js compares its recorded
+// plugin_root STRICTLY and listRecords propagates the first failure, so a single
+// lease minted before the adoption would fail every later lease operation for
+// this session. A lease is a short-lived evidence reservation — losing one costs
+// a repeat, not a guarantee — so this is the cheapest correct resolution, and it
+// sets them aside rather than deleting them.
+function discardSupersededLeases(pluginData, key, executingPluginRoot) {
+  const recordsDirectory = path.join(pluginData, 'review-evidence', 'v1', 'records', key);
+  let entries;
+  try {
+    entries = fs.readdirSync(recordsDirectory);
+  } catch {
+    return 0;
+  }
+  const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
+  let discarded = 0;
+  for (const name of entries.sort()) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(recordsDirectory, name);
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      record = null;
+    }
+    // An unreadable lease is moved aside too: listRecords would fail on it just
+    // as hard, and leaving it would defeat the whole point of this sweep.
+    if (record && typeof record === 'object' && record.plugin_root === executingPluginRoot) {
+      continue;
+    }
+    try {
+      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
+      fs.renameSync(file, path.join(asideDirectory, name));
+      discarded += 1;
+    } catch {
+      // A lease that cannot be moved is reported by COUNT, never silently
+      // claimed as handled: the caller renders the number it is given.
+    }
+  }
+  return discarded;
+}
+
+const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
+const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
+
+// Performs the adoption re-checked UNDER the records lock. The precondition is
+// deliberately evaluated twice — once by the caller to report, once here to act
+// — because between the two the plugin could have changed again.
+function adoptContext(options) {
+  const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+  const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
+  const locksDir = ensureDescendantDirectory(pluginData, path.join(path.dirname(recordsDir), 'locks'));
+  const key = sessionKey(options.sessionId);
+  const file = contextRecordFile(recordsDir, key);
+
+  const adopted = withFileLock(locksDir, key, () => {
+    const verdict = adoptableRecord({ ...options, pluginData, recordsDir });
+    if (!verdict.ok) fail(`record is not adoptable: ${verdict.reason}`);
+    const executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    // created_at is carried over on purpose: the session began when it began,
+    // and rewriting that would erase the only provenance the record still holds
+    // about its own origin.
+    const next = buildContext({
+      host: verdict.context.host,
+      sessionId: options.sessionId,
+      projectRoot: verdict.context.project_root,
+      pluginRoot: executingPluginRoot,
+      pluginData,
+      createdAt: verdict.context.created_at,
+    });
+    // Set aside, never overwrite. "The record is immutable" stays literally true:
+    // no record is ever rewritten, a second one is minted beside it, and the
+    // first stays readable under a name that says what happened to it.
+    const supersededFile = path.join(
+      recordsDir,
+      `${key}.superseded-${verdict.recorded}.json`,
+    );
+    if (fs.existsSync(supersededFile)) {
+      fail('a superseded record for this version already exists; adoption would overwrite it');
+    }
+    fs.renameSync(file, supersededFile);
+    try {
+      atomicCreateJson(file, next);
+    } catch (error) {
+      // Put the original back rather than leaving the session with no record at
+      // all, which would be a strictly worse state than the one being repaired.
+      try { fs.renameSync(supersededFile, file); } catch { /* nothing better to try */ }
+      throw error;
+    }
+    return {
+      context: next,
+      supersededFile,
+      recorded: verdict.recorded,
+      executing: verdict.executing,
+      projectRoot: verdict.context.project_root,
+    };
+  });
+
+  // Provenance is a workflow history entry and NOT a record field, so the
+  // context record keeps the exact shape every other release reads. It is
+  // recorded after the swap because it is provenance, not a precondition: a
+  // failure here is reported to the caller, never smoothed over, and never
+  // reverts an adoption that already succeeded.
+  let provenance = 'recorded';
+  try {
+    mutateWorkflowState({
+      projectRoot: adopted.projectRoot,
+      sessionId: options.sessionId,
+      actor: 'main-v1',
+      workflowState: 'runtime_adopted',
+      event: 'runtime-adopted',
+    }, (state) => {
+      const history = Array.isArray(state.history) ? state.history : [];
+      history.push({
+        step: '',
+        phase: ADOPTION_HISTORY_PHASE,
+        timestamp: nowIso(),
+        reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+      });
+      state.history = history;
+      return state;
+    });
+  } catch (error) {
+    provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+  }
+
+  const leasesDiscarded = discardSupersededLeases(
+    pluginData,
+    key,
+    adopted.context.plugin_root,
+  );
+
+  return { ...adopted, provenance, leasesDiscarded };
 }
 
 function renderMainContext(contextInput) {
@@ -3566,10 +3864,16 @@ module.exports = {
   computeRuntimeDigest,
   runtimeLineageCompatible,
   servesRecordedRuntime,
+  executingPluginVersion,
   buildContext,
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  ADOPTION_REFUSALS,
+  ADOPTION_HISTORY_PHASE,
+  ADOPTION_HISTORY_REASON_PREFIX,
+  adoptableRecord,
+  adoptContext,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,

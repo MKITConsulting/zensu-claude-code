@@ -154,6 +154,11 @@ fi
 # Injectable alongside ZDOC_BINDING, and empty for every verdict except
 # orphaned-project-root, which is the only one that has a path to report.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
+# Same contract for the version pair: empty for every verdict except
+# incompatible-runtime, the only one that has two versions to name.
+ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
+ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
+ZDOC_BINDING_VERSIONS=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
   if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
     ZDOC_BINDING=unknown
@@ -179,12 +184,29 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
-      ZDOC_BINDING=unbound
+      # The SECOND narrow follow-up, asked only after the orphan question and
+      # never before it. A record can be both orphaned and lineage-incompatible;
+      # the vanished root is the heavier diagnosis and the one whose remedy is
+      # different, so it wins. Asking in the other order would report a repairable
+      # lineage state for a session whose workflow document is already gone.
+      ZDOC_BINDING_VERSIONS="$(
+        # shellcheck disable=SC1090
+        source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+          && zensu_session_incompatible_runtime_model
+      )" || ZDOC_BINDING_VERSIONS=""
+      if [ -n "$ZDOC_BINDING_VERSIONS" ]; then
+        ZDOC_BINDING=incompatible-runtime
+        ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
+        ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
+      else
+        ZDOC_BINDING=unbound
+      fi
     fi
   fi
 fi
 
-export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT
+export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
+  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'
