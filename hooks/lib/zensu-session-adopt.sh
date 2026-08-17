@@ -133,38 +133,50 @@ const REMEDY = {
     "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
 };
 
-const verdict = core.adoptableRecord(request);
-if (!verdict.ok) {
-  process.stdout.write("Zensu session adoption — NOT adoptable (" + verdict.reason + ")\n\n");
-  process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+// Wrapped in a function because `node -e` evaluates at module top level, where a
+// bare `return` is a syntax error — and a syntax error here would surface as a
+// crashed helper rather than as the refusal it was meant to print.
+function main() {
+  const verdict = core.adoptableRecord(request);
+  if (!verdict.ok) {
+    process.stdout.write("Zensu session adoption — NOT adoptable (" + verdict.reason + ")\n\n");
+    process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
+    process.exitCode = 1;
+    return;
+  }
+
+  if (process.env.ZADOPT_CONFIRM !== "1") {
+    process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
+    process.stdout.write("  record minted by : " + verdict.recorded + "\n");
+    process.stdout.write("  executing        : " + verdict.executing + "\n");
+    process.stdout.write("  project          : " + verdict.context.project_root + "\n\n");
+    process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
+    return;
+  }
+
+  const adopted = core.adoptContext(request);
+  process.stdout.write("Zensu session adoption — ADOPTED\n\n");
+  process.stdout.write("  record minted by : " + adopted.recorded + "\n");
+  process.stdout.write("  now served by    : " + adopted.executing + "\n");
+  process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
+  process.stdout.write("  provenance       : " + adopted.provenance + "\n");
+  process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n\n");
+  process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  if (adopted.provenance !== "recorded") {
+    process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
+    process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
+  }
+  if (adopted.leasesDiscarded > 0) {
+    process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
+    process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
+  }
+}
+
+try {
+  main();
+} catch (error) {
+  process.stderr.write("zensu:adopt-session: " + (error && error.message ? error.message : "unknown failure") + "\n");
   process.exitCode = 1;
-  return;
-}
-
-if (process.env.ZADOPT_CONFIRM !== "1") {
-  process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-  process.stdout.write("  record minted by : " + verdict.recorded + "\n");
-  process.stdout.write("  executing        : " + verdict.executing + "\n");
-  process.stdout.write("  project          : " + verdict.context.project_root + "\n\n");
-  process.stdout.write("The record is intact and this installation can take it over in place.\n");
-  process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
-  return;
-}
-
-const adopted = core.adoptContext(request);
-process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-process.stdout.write("  record minted by : " + adopted.recorded + "\n");
-process.stdout.write("  now served by    : " + adopted.executing + "\n");
-process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
-process.stdout.write("  provenance       : " + adopted.provenance + "\n");
-process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n\n");
-process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
-if (adopted.provenance !== "recorded") {
-  process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
-  process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
-}
-if (adopted.leasesDiscarded > 0) {
-  process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
-  process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
 }
 '
