@@ -8,8 +8,12 @@
 # inherit /zensu:doctor's justification and needs its own, stated here because
 # hooks/lib/zensu-doctor-invocation.js points at this header:
 #
-#   - The only write is one record for THIS session, in the private plugin-data
-#     store, plus one workflow history entry in the recorded project.
+#   - THREE write classes, all confined: one record for THIS session in the
+#     private plugin-data store; one workflow history entry in the recorded
+#     project; and any review-evidence lease naming the previous installation,
+#     MOVED (never deleted) out of that session's own lease records directory
+#     into a sibling `superseded/` one. Nothing else, and nothing outside
+#     <plugin_data>/{session-control,review-evidence} and the recorded project.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA and
 #     CLAUDE_PROJECT_DIR are caller-supplied literals, exactly as they are for
 #     the diagnostic — it is readContext: the session-hash must match, the
@@ -110,7 +114,13 @@ const pluginRoot = process.env.ZADOPT_PLUGIN_ROOT;
 const pluginData = process.env.ZADOPT_PLUGIN_DATA;
 const projectRoot = process.env.ZADOPT_PROJECT_DIR;
 const sessionId = process.env.ZADOPT_SESSION_ID;
-const recordsDir = path.join(pluginData, "session-control", "v1", "records");
+// The binder OWNS the private-store constructor, and this uses it rather than a
+// hand-joined path: it additionally rejects a records directory that is a
+// symlink, an alias, group- or world-accessible, or owned by another user.
+// Skipping those checks would let the repair mint a record into a store that the
+// very next tool call refuses for exactly those reasons — a false success, and a
+// new record sitting somewhere another local user can rewrite it.
+const recordsDir = require("./claude-hook-session-v1.js").privateRecordsDirectory(pluginData);
 const request = {
   recordsDir,
   sessionId,

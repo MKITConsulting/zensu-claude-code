@@ -66,8 +66,9 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // justification, which lives in the header of hooks/lib/zensu-session-adopt.sh
 // and is NOT restated here — a second copy is a second thing to go stale, and
 // this comment is where a future reviewer decides whether the list stays at two.
-// In one line: its only write is one record for the calling session plus one
-// workflow history entry, and what BOUNDS that write is readContext (session
+// In one line: it writes one record for the calling session, one workflow
+// history entry, and moves that session's stale review-evidence leases aside;
+// what BOUNDS those writes is readContext (session
 // hash, digest recomputed against the RECORDED root, that root's declared
 // version) plus the sibling-root and plugin_data checks — NOT derivation, since
 // the two path assignments are caller-supplied literals here exactly as they are
@@ -133,8 +134,8 @@ const REASONS = {
   SHAPE: "COMMAND_SHAPE_REJECTED",
   ASSIGNMENT: "ASSIGNMENT_REJECTED",
   DUPLICATE: "ASSIGNMENT_DUPLICATED",
-  PATH: "DOCTOR_PATH_REJECTED",
-  NOT_REGULAR: "DOCTOR_PATH_NOT_REGULAR",
+  PATH: "SCRIPT_PATH_REJECTED",
+  NOT_REGULAR: "SCRIPT_PATH_NOT_REGULAR",
   ARGUMENT: "SCRIPT_ARGUMENT_REJECTED",
 };
 

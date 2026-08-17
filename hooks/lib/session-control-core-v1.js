@@ -1537,6 +1537,20 @@ function adoptableRecord(options) {
 // sets them aside rather than deleting them.
 function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   const recordsDirectory = path.join(pluginData, 'review-evidence', 'v1', 'records', key);
+  // The owning module reaches this directory only through ensurePrivateDirectory,
+  // which rejects a symlink, an alias and unsafe permissions or ownership. This
+  // copy cannot call that constructor (the dependency runs the other way), so it
+  // re-applies the part that matters before it renames anything: a symlinked or
+  // aliased records directory is left ALONE rather than swept through.
+  try {
+    const stat = fs.lstatSync(recordsDirectory);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [] };
+    if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
+      return { discarded: 0, failed: [] };
+    }
+  } catch {
+    return { discarded: 0, failed: [] };
+  }
   let entries;
   try {
     entries = fs.readdirSync(recordsDirectory);
@@ -1615,9 +1629,11 @@ function adoptContext(options) {
       recordsDir,
       `${key}.superseded-${verdict.recorded}.json`,
     );
-    if (fs.existsSync(supersededFile)) {
-      fail('a superseded record for this version already exists; adoption would overwrite it');
-    }
+    // The existence check is the COPY's own O_EXCL, never a separate existsSync:
+    // that call resolves through symlinks, so a dangling link at the superseded
+    // name would answer false and copyFileSync would then write the record
+    // through it — and the rollback would unlink the link, leaving the collateral
+    // write behind. COPYFILE_EXCL refuses both, atomically, with no TOCTOU window.
     // COPY aside, then replace in place — never rename-then-create. A rename
     // first leaves a window in which `<key>.json` resolves to nothing, and a
     // clean ENOENT there is `unregisteredSession`, the MOST relaxed state of all
@@ -1630,14 +1646,33 @@ function adoptContext(options) {
     // target with nlink > 1, so a hard link would make the very next step fail.
     // atomicWriteJson writes a temp file and renames it over the target, so at
     // every instant the record name resolves to either the old bytes or the new.
-    fs.copyFileSync(file, supersededFile);
+    try {
+      fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        // Names the file, because this is also the crash-resume shape — a death
+        // between the copy and the swap leaves it behind — and the session has
+        // no other write channel to find it with.
+        fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+      }
+      throw error;
+    }
     try {
       atomicWriteJson(file, next);
     } catch (error) {
-      // The original was never modified — atomicWriteJson replaces by rename —
-      // so the only thing to undo is the copy. Leaving it would block a retry
-      // on the "already exists" guard above.
-      try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
+      // atomicWriteJson commits by rename and then re-checks the parent
+      // directory's identity, so a throw can land AFTER the new record is in
+      // place. Unlinking the copy then would destroy the only remaining bytes of
+      // the superseded record while the adoption has in fact landed — the one
+      // outcome worse than reporting a failure. Re-read the record and keep the
+      // copy when the new bytes are already there.
+      let committed = false;
+      try {
+        committed = JSON.stringify(readJson(file)) === JSON.stringify(next);
+      } catch { committed = false; }
+      if (!committed) {
+        try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
+      }
       throw error;
     }
     return {

@@ -8,8 +8,9 @@ boundaries — see [Session Control](session-control.md) for the part that is.
 bind failure including a record that exists and disagrees, and they are
 recognized by `hooks/lib/zensu-doctor-invocation.js` rather than by any
 individual gate: `/zensu:doctor`, which writes nothing, and
-`/zensu:adopt-session`, which writes only the calling session's own record and
-carries its own justification in the header of
+`/zensu:adopt-session`, whose writes are confined to the calling session's own
+record, one workflow history entry, and a move of that session's stale
+review-evidence leases; it carries its own justification in the header of
 `hooks/lib/zensu-session-adopt.sh`. Both are matched as exact whitelisted shapes
 — a closed set of assignments, one `bash <script in the executing installation>`,
 and for the adoption at most the literal `--confirm`. Every hook on the `Bash`

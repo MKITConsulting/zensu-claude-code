@@ -134,8 +134,9 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # exists and disagrees (what a mid-session plugin upgrade produces) previously
   # denied here, which put /zensu:doctor behind the very defect it reports and
   # left the repair unreachable with it. The diagnostic writes nothing; the
-  # adoption writes only its own session's record in plugin data and one workflow
-  # history entry. Neither touches project source, so none of the rules below —
+  # adoption writes only its own session's record in plugin data, one workflow
+  # history entry, and a move of that session's stale review-evidence leases.
+  # Neither touches project source, so none of the rules below —
   # which judge writes to the session's own tree — has anything to judge.
   if zensu_doctor_allowed "$INPUT"; then
     exit 0

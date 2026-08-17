@@ -158,6 +158,15 @@ if ! zensu_bind_hook_session "$INPUT"; then
     && [ -n "$INCOMPATIBLE_RUNTIME" ]; then
     RECORDED_VERSION="${INCOMPATIBLE_RUNTIME%%$'\t'*}"
     EXECUTING_VERSION="${INCOMPATIBLE_RUNTIME##*$'\t'}"
+    # Same shape guard every sibling consumer applies. A manifest version is only
+    # requireText-validated, and this pair is interpolated into a single stderr
+    # line the transcript renders verbatim — a newline in it would split one
+    # diagnostic into several that look like separate hook messages.
+    if ! [[ "$RECORDED_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]] \
+      || ! [[ "$EXECUTING_VERSION" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+      RECORDED_VERSION="(unreadable)"
+      EXECUTING_VERSION="(unreadable)"
+    fi
     # The remedy is OFFERED, never promised: this predicate also matches a
     # DOWNGRADE, and adoption refuses that outright (`executing-runtime-older`).
     # Claiming the guarantee is merely deferred would be false there — a rolled

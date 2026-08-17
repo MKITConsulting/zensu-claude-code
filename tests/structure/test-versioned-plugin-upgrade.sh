@@ -1081,9 +1081,18 @@ ADOPT_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" n
     tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
   }));
 ')"
+# The fourth emitter, pre-bash-zensu-gate.sh, needs a DIFFERENT payload: it exits
+# before its bind for any command without a `zensu <noun> <verb>` form, so an Edit
+# never reaches it. Pairing each hook with a payload it can actually see is what
+# keeps this loop from silently covering three of four.
 LINEAGE_REASON_FAILURES=''
-for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
-  reason_payload="$ADOPT_EDIT_PAYLOAD"
+ADOPT_ZENSU_PAYLOAD="$(bash_payload "$ADOPT_SESSION" 'zensu features list')"
+for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-bash-zensu-gate.sh; do
+  if [ "$reason_hook" = pre-bash-zensu-gate.sh ]; then
+    reason_payload="$ADOPT_ZENSU_PAYLOAD"
+  else
+    reason_payload="$ADOPT_EDIT_PAYLOAD"
+  fi
   reason_text="$(gate_reason_from "$SYNTHETIC_BREAKING_ROOT" "$reason_hook" "$reason_payload")"
   case "$reason_text" in
     *"record was minted by 0.17.0 and 0.18.0 is executing"*"/zensu:adopt-session"*) ;;
@@ -1498,17 +1507,22 @@ fi
 # CONV-1 — the skill's refusal table is the one independent re-encoding of
 # ADOPTION_REFUSALS (the REMEDY map uses computed keys off the constant and
 # cannot drift on the key side). Pinned here, the T42 analogue for this feature.
-ADOPT_SKILL="$ROOT/skills/adopt-session/SKILL.md"
+# Both sides come from the SAME tree, and the probe cannot pass by crashing: an
+# empty stdout was its success signal, so a renamed skill, an unloadable core or a
+# removed constant set all read as "no gaps" — the exact drift it exists to catch.
+ADOPT_SKILL="$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"
 REFUSAL_GAPS="$(
   CORE="$SYNTHETIC_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" SKILL="$ADOPT_SKILL" node -e '
     const fs = require("node:fs");
     const core = require(process.env.CORE);
     const skill = fs.readFileSync(process.env.SKILL, "utf8");
-    const missing = Object.values(core.ADOPTION_REFUSALS).filter((r) => !skill.includes(r));
-    process.stdout.write(missing.join(","));
+    const reasons = Object.values(core.ADOPTION_REFUSALS);
+    if (reasons.length !== 8) { process.stdout.write("count:" + reasons.length); process.exit(0); }
+    const missing = reasons.filter((r) => !skill.includes(r));
+    process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
-)"
-if [ -z "$REFUSAL_GAPS" ]; then
+)" || REFUSAL_GAPS=threw
+if [ "$REFUSAL_GAPS" = ok ]; then
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill" PASS
 else
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL

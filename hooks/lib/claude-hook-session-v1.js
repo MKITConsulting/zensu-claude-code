@@ -424,6 +424,7 @@ if (require.main === module) {
 
 module.exports = {
   incompatibleRuntimeSession,
+  privateRecordsDirectory,
   orphanedProjectRootSession,
   resolveFreshHookProject,
   resolveHookSession,

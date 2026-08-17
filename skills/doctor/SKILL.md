@@ -77,9 +77,12 @@ That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
 *incompatible* mid-session plugin change produces (a compatible upgrade now binds
 normally), where every other Bash call denies — and it
-admits only this shape: assignments drawn from a closed allowlist followed by one
-`bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
-doctor goes back to being denied by the very defect it reports.
+admits this diagnostic in only one shape: assignments drawn from a closed
+allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
+Anything else is refused, and the doctor goes back to being denied by the very
+defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
+own separate justification — it WRITES, so it cannot borrow this one; see
+[Session Control](../../docs/session-control.md) "Unbindable sessions".
 
 Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
 assignment when the tool set is not loaded. The root preflight now lives inside

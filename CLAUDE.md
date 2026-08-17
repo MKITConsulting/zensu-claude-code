@@ -346,7 +346,7 @@ they are different diagnoses with different remedies:
   alongside an executing root that is a declared-compatible upgrade — deliberate,
   since neither disagreement can anchor a workflow document. An INCOMPATIBLE root,
   a differing `plugin_data`, and every other disagreement stay unrelaxed. See
-  "Runtime Compatibility & Breaking Changes" above.
+  "Runtime Lineage (`version_type` is load-bearing)" above.
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.
