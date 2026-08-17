@@ -111,10 +111,22 @@ the update has to be re-gathered.
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
-Render the output verbatim. Two lines are NOT clean states and must be surfaced
-rather than summarized away: a `provenance` other than `recorded` means the
-takeover happened but was not written into the history, and a non-zero
-`leases set aside` means evidence reservations were dropped.
+Render the output verbatim. Three lines are NOT clean states and must be
+surfaced rather than summarized away:
+
+- a `provenance` other than `recorded` or `no-workflow-document` means the
+  takeover happened but was not written into the history;
+- a non-zero `leases set aside` means evidence reservations were dropped and
+  have to be gathered again;
+- a non-zero `leases stuck` is the serious one — those leases still name the
+  previous installation, and because every lease read validates the whole set,
+  review-evidence operations keep failing for this session until they are moved
+  out of the records directory by hand. The adoption itself is complete; say
+  both things.
+
+Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
+precondition failure, `2` on a bad argument. A non-zero exit is not a broken
+command — read the message.
 
 **Step 4 — confirm the repair.** Re-run `/zensu:doctor` and report the binding
 row. The session is bound from the next tool call onward; do not tell the user to

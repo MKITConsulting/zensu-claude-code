@@ -143,14 +143,26 @@ if ! zensu_bind_hook_session "$INPUT"; then
   # unlike the two releases above, where the state is gone for good. Say that
   # plainly and still claim no completion was proven, because none was.
   #
-  # Inducing this release means changing which plugin version executes, which
-  # lives outside the project tree and outside every channel a session has. The
-  # version pair is captured for the message and never leaked to stdout.
+  # Inducibility, stated as plainly as the orphan release above states its own:
+  # this fires when the EXECUTING plugin version changes, and a command that
+  # updates the installed plugin is not gated by any hook on the Bash matcher —
+  # pre-bash-zensu-gate.sh exits before its bind for anything that is not a
+  # `zensu <noun> <verb>` form, and the source-write parser's channel detector
+  # does not recognise it as a write. So an armed chain CAN be released this way
+  # from inside a session, unledgered, exactly as renaming the project root
+  # releases the orphan branch. Accepted for the same reason: the alternative
+  # loops every legitimately upgraded session forever with no in-session escape.
+  #
+  # The version pair is captured for the message and never leaked to stdout.
   if INCOMPATIBLE_RUNTIME="$(zensu_session_incompatible_runtime "$INPUT")" \
     && [ -n "$INCOMPATIBLE_RUNTIME" ]; then
     RECORDED_VERSION="${INCOMPATIBLE_RUNTIME%%$'\t'*}"
     EXECUTING_VERSION="${INCOMPATIBLE_RUNTIME##*$'\t'}"
-    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact and the only disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document itself SURVIVES and is unchanged — adopt this session with /zensu:adopt-session --confirm and the very next Stop enforces it again. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
+    # The remedy is OFFERED, never promised: this predicate also matches a
+    # DOWNGRADE, and adoption refuses that outright (`executing-runtime-older`).
+    # Claiming the guarantee is merely deferred would be false there — a rolled
+    # back session has no path back except re-installing the newer version.
+    echo "zensu chain-enforcer: releasing Stop — this session's Session Control record is intact and the only disagreement is that the running installation declares an incompatible lineage (record minted by ${RECORDED_VERSION}, executing ${EXECUTING_VERSION}). The binding that resolves the project root is what failed, so no review-chain or Autopilot state could be read from here: no completion was proven, only an unprovable guard released. The workflow document itself SURVIVES and is unchanged. Run /zensu:adopt-session to find out whether this installation may take the record over; if it can, /zensu:adopt-session --confirm re-binds the session and the very next Stop enforces the chain again. If the executing version is OLDER than the recorded one, adoption refuses and re-installing the newer version is the only way back — the guard stays released until then. Blocking instead would loop a session whose Edit and Bash channels are already denied, so the remedy would never reach you." >&2
     exit 0
   fi
   if ! zensu_stop_guard_opted_out; then

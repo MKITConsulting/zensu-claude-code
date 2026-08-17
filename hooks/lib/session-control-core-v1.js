@@ -1541,7 +1541,12 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   try {
     entries = fs.readdirSync(recordsDirectory);
   } catch {
-    return 0;
+    // ONE shape on every path. The directory only exists once a lease was
+    // minted, so this is the ORDINARY case — a scalar here would hand the
+    // caller `undefined` for both fields and make the reporter throw AFTER the
+    // record swap had already succeeded, reporting failure for a completed
+    // adoption.
+    return { discarded: 0, failed: [] };
   }
   const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
   let discarded = 0;

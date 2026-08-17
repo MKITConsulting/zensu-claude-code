@@ -9,11 +9,18 @@
 # hooks/lib/zensu-doctor-invocation.js points at this header:
 #
 #   - The only write is one record for THIS session, in the private plugin-data
-#     store, plus one workflow history entry in the recorded project. It cannot
-#     name a path: every location is derived from the record it is adopting.
-#   - It refuses unless every adoptableRecord condition holds, and those
-#     conditions re-verify the record against its own recorded root — a forged
-#     or hand-edited record never reaches the write.
+#     store, plus one workflow history entry in the recorded project.
+#   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA and
+#     CLAUDE_PROJECT_DIR are caller-supplied literals, exactly as they are for
+#     the diagnostic — it is readContext: the session-hash must match, the
+#     runtime digest is recomputed against the RECORDED root, and that root's
+#     manifest must still declare the recorded version. Add the sibling-root
+#     bound and the plugin_data equality check, and a record the caller authored
+#     under a directory it controls cannot reach the write for a session it does
+#     not already own. State it this way and not as "every location is derived
+#     from the record": that is the stronger claim, and it is not what the code
+#     enforces.
+#   - It refuses unless every adoptableRecord condition holds.
 #   - It cannot reach project source files, cannot run a build or a test, and
 #     takes no argument other than the single literal `--confirm`.
 #   - Without `--confirm` it is strictly read-only and answers the same question
@@ -72,7 +79,7 @@ command -v node >/dev/null 2>&1 || {
   exit 1
 }
 
-# Both crossings into native Node go through the host-path renderer, exactly as
+# All three crossings into native Node go through the host-path renderer, as
 # every other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
 # shellcheck disable=SC1090
@@ -83,8 +90,10 @@ source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
 NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || exit 1
 NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || exit 1
 NATIVE_PROJECT_DIR="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PROJECT_DIR")" || exit 1
-MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA ZADOPT_PROJECT_DIR)" \
-  || exit 1
+MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA ZADOPT_PROJECT_DIR)" || {
+  printf '%s\n' 'zensu:adopt-session: the host-path environment library is unavailable; repair the Zensu plugin installation' >&2
+  exit 1
+}
 
 cd -P -- "$DIR" || exit 1
 MSYS2_ENV_CONV_EXCL="$MSYS_EXCL" \

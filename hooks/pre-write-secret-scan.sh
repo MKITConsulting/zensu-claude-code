@@ -67,11 +67,16 @@ if [ "$ZENSU_SESSION_BOUND" != true ]; then
   # them wins, so leaving this one closed silently reinstated the exact deadlock
   # the relaxation exists to remove. stdout is the JSON decision channel, so the
   # orphaned probe's printed path is discarded.
-  # The read-only diagnostic comes FIRST, for the same reason it does in the two
-  # sibling Bash gates: it is reachable in every bind failure, not only in the two
-  # relaxable states, and a deny from ANY hook on this matcher wins — so leaving
-  # this one closed would silently reinstate the deadlock the allowance removes.
-  # The command carries no secret-bearing content to scan.
+  # The two recognized commands come FIRST, for the same reason they do in the
+  # sibling Bash gates: they are reachable in every bind failure, not only in the
+  # two relaxable states, and a deny from ANY hook on this matcher wins — so
+  # leaving this one closed would silently reinstate the deadlock the allowance
+  # removes. Both are closed whitelisted shapes (a fixed set of assignments, one
+  # `bash <script in the executing installation>`, and at most `--confirm`), so
+  # neither can carry secret-bearing content for this gate to scan. That the
+  # second one WRITES is irrelevant here — this gate scans payloads, it does not
+  # judge writes; see the header of hooks/lib/zensu-session-adopt.sh for the
+  # justification that admits it.
   if zensu_doctor_allowed "$INPUT"; then
     exit 0
   fi

@@ -1161,6 +1161,42 @@ else
   head -c 400 "$ADOPT_CONFIRM_OUT" 2>/dev/null
 fi
 
+# The ORDINARY case: a session that never minted a review-evidence lease has no
+# per-session records directory at all, so the sweep takes its readdir-failure
+# path. That path returned a scalar while every other path returned an object,
+# which made the reporter throw AFTER the record swap had already succeeded — a
+# completed adoption reported as a failure. Driven on its own session, because
+# the seeded one above can never reach it.
+NOLEASE_SESSION='versioned-upgrade-adoption-no-lease'
+NOLEASE_START="$(EVENT=SessionStart SESSION="$NOLEASE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$NOLEASE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+NOLEASE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$NOLEASE_SESSION")"
+NOLEASE_OUT="$TMP/adopt-nolease.out"
+if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
+    && CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$NOLEASE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$NOLEASE_OUT" \
+    && grep -qF 'leases set aside : 0' "$NOLEASE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$NOLEASE_OUT" \
+    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
+  check "AC-008 a session with no lease store adopts cleanly and exits 0" PASS
+else
+  check "AC-008 a session with no lease store adopts cleanly and exits 0" FAIL
+  head -c 400 "$NOLEASE_OUT" 2>/dev/null
+fi
+
 # AC-008 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
 if grep -qF 'leases set aside : 1' "$ADOPT_CONFIRM_OUT" \
