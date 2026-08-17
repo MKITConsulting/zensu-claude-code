@@ -146,8 +146,23 @@ else
   check "CI retains deterministic eval coverage without launching Promptfoo" FAIL
 fi
 
-EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:"passed", source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
-if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ]; then
+# The gate value became dynamic when the auditable test-gate skip landed: both jobs now
+# emit gate:$gate and attach gate_skip_reason exactly when it resolves to "skipped". This
+# pin still carried the old hardcoded gate:"passed" literal, so it failed against a shape
+# that is correct — and it shipped because the release that introduced the skip used it,
+# which is precisely the case where nothing re-runs the suite.
+#
+# The skip-reason conditional is pinned ALONGSIDE the base shape, not instead of it.
+# Dropping that clause would let a release record gate:"skipped" with no reason, and the
+# reason is the only thing that keeps a skipped release distinguishable from a verified
+# one forever after. A negative pin on the old literal closes the other direction: a
+# "simplification" back to a hardcoded gate:"passed" would make every skipped release
+# claim it was verified.
+EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
+EVIDENCE_SKIP_REASON='+ (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)'
+if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
+  && [ "$(grep -Fc "$EVIDENCE_SKIP_REASON" "$WORKFLOWS/release.yml")" -eq 2 ] \
+  && ! grep -Fq 'gate:"passed"' "$WORKFLOWS/release.yml"; then
   check "Prepare and publish emit the same deterministic release evidence schema" PASS
 else
   check "Prepare and publish emit the same deterministic release evidence schema" FAIL
