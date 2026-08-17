@@ -178,13 +178,18 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   automatically once a spawn succeeds or the chain closes, so a standing row means
   no reviewer has run since. A row whose kind reads `unknown` means this plugin
   root could not load the classifier module — report the refusal, not the kind.
-  Two neighbouring rows are NOT refusals and must not be reported as one: notes
-  "older than Nh" come from a session that never ended a turn again and say
-  nothing about the current state, and notes "this plugin did not write" failed
-  to vet (unreadable, oversized, unknown kind or schema) — a planted file would
-  otherwise manufacture a recommendation to widen permissions. Offer no cleanup
-  for either: Phase 3 below is still the only write, and it covers
-  `pending-review.json` alone.
+  Two neighbouring rows are NOT refusals and must not be reported as one. A
+  "reviewer-spawn refusal note(s) older than Nh" row comes from a session that
+  never ended a turn again and says nothing about the current state; a
+  "reviewer-spawn note(s) this plugin did not write" row failed
+  to vet (unreadable, oversized, an unrecognized kind or schema, an impossible
+  timestamp, or no matching session) — a planted file would otherwise manufacture
+  a recommendation to widen permissions. "No matching session" is the binding
+  check: a note counts only while the workflow document of the session that could
+  have written it still sits beside it. Such a note is also reaped on its own by
+  the next Stop in that project, so this row can clear without anyone acting on
+  it. Offer no cleanup for either row: Phase 3 below is still the only write, and
+  it covers `pending-review.json` alone.
 
 If everything is green, say so in one line and stop — there is nothing to do.
 

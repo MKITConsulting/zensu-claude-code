@@ -250,9 +250,26 @@ reviewer_spawn_denial_probe() {
     # neither is a verdict this hook may act on, so both leave `none`.
     *) return 0 ;;
   esac
+  # The kind is read as a FIELD, not matched against a local copy of the marker
+  # set. That set lives in the module and is re-encoded exactly once more below,
+  # in the `case` arms that render cause and remedy; a third copy here bought
+  # nothing. The value is only ever a `case` SELECTOR — it is never interpolated
+  # into the reason string — and its unknown arm is already the safe one, so a
+  # value this hook does not recognize degrades to "unclassified" rather than
+  # reaching an operator-visible string. `reviewerDenialRows` vets it a second
+  # time against the same module before rendering a row.
+  # Reading it generically also makes a marker ADDED to the module take effect
+  # here with no matching shell edit: the closed set silently degraded such a
+  # kind to the empty string, and the doctor then rendered `unclassified` for a
+  # refusal whose real name both sides already knew.
+  # Position-independent, unlike the `denials` strip below, which requires its
+  # own field to stay last: the leading-space anchor makes `kind=` exact wherever
+  # it sits, and a kind in final position simply has no trailing field to cut.
   case "$probe" in
-    *' kind=auto-mode-classifier '*) REVIEWER_DENIAL_KIND="auto-mode-classifier" ;;
-    *' kind=permission-denied '*) REVIEWER_DENIAL_KIND="permission-denied" ;;
+    *' kind='*)
+      REVIEWER_DENIAL_KIND="${probe#* kind=}"
+      REVIEWER_DENIAL_KIND="${REVIEWER_DENIAL_KIND%% *}"
+      ;;
   esac
   # `denials` is the LAST field of the contract line, so this suffix strip is
   # exact and does not depend on the space-delimited globs above. It is what
@@ -293,8 +310,105 @@ reviewer_denial_note_path() {
 # the terminal paths this hook exits through early — a note that outlived the
 # review it says never happened would have /zensu:doctor reporting a refusal
 # forever, which is exactly what the doctor row promises cannot happen.
-reviewer_denial_note_clear() {
+# The note is the one artifact in `.zensu/state/` written with no lease, and its
+# two halves are an unlink and a rename: a clear can remove a note a concurrent
+# write has just published, or miss one published an instant later. Both halves
+# therefore run inside the same external lease every other writer of this
+# directory takes, keyed on this session's own workflow document.
+#
+# The lease is an IMPROVEMENT, never a precondition. When it cannot be acquired
+# the operation still runs unlocked, because failing to write or retire the note
+# must never change the Stop decision — the contract this whole diagnostic sits
+# under. Both callbacks therefore ALWAYS return 0, which is what makes a non-zero
+# result here unambiguously a lease failure rather than a failed operation.
+# The one overlap is a lease that acquires and then fails to release: the
+# callback already ran and runs a second time. Harmless by construction — the
+# clear is `rm -f` and the write republishes identical bytes under a fresh
+# timestamp — and preferable to the alternative of silently skipping it.
+reviewer_note_locked() {
+  _tdd_locked_run "$STATE_FILE" "$@" 2>/dev/null && return 0
+  "$@"
+  return 0
+}
+
+# Reaps every note no session can own any more, not merely this one's. Nothing
+# else removes them: a session whose spawn was refused and which then never Stops
+# again cannot clear its own note, the doctor is read-only by contract, and there
+# is no reaper for `tdd-phase-*.json` either — so without this the file survives
+# every process able to explain it.
+#
+# The set is exactly the one `reviewerDenialRows` already refuses to count: a
+# note whose sibling workflow document is gone. So this can never destroy a live
+# diagnosis — only files the reader has already stopped believing. The name is
+# matched to the same character-exact shape the writer asserts before it, so the
+# unlink cannot widen past a note this plugin could have written.
+reviewer_denial_notes_reap() {
+  local state_dir ttl
+  state_dir="$PROJECT_ROOT/.zensu/state"
+  [ -d "$state_dir" ] || return 0
+  # Cheap pre-check first: this runs on every clear, and the overwhelming
+  # majority of Stops have no note to reap. Without it every Stop in every
+  # session would pay for a node process to learn there is nothing to do.
+  set -- "$state_dir"/reviewer-spawn-denied-scv1_*.json
+  [ -f "$1" ] || return 0
+  # The SAME TTL the doctor ages a note out against, read from the same config
+  # key. A note past it is the one the doctor's own row calls safe to delete.
+  ttl="$(zensu_pending_review_ttl_hours 2>/dev/null)" || ttl=0
+  case "$ttl" in ''|*[!0-9]*) ttl=0 ;; esac
+  # stdin is redirected below alongside the output channels, and that is not
+  # cosmetic: this runs INSIDE the lease, whose keeper is a bash coprocess, and a
+  # child inheriting those descriptors holds the control channel's write end open
+  # after the parent closes it — the keeper then never sees EOF. It does not
+  # surface as a hang here; it surfaces as unrelated checks failing later,
+  # because the Stop that held the lease finished degraded.
+  # The trailing `|| true` keeps this best-effort, which also means a fault
+  # inside the script below is SILENT. Everything between the quotes is
+  # JavaScript — a stray shell comment in there is a syntax error that reaps
+  # nothing and says nothing.
+  REAP_DIR="$state_dir" REAP_TTL="$ttl" node -e '
+    const fs=require("node:fs"), path=require("node:path");
+    const dir=process.env.REAP_DIR, ttl=Number(process.env.REAP_TTL);
+    // The same character-exact shape the writer asserts before it writes. This
+    // is the one place a Stop unlinks a file belonging to another session, so
+    // the name is pinned rather than prefix-matched.
+    const NAME=/^reviewer-spawn-denied-(scv1_[a-f0-9]{64})\.json$/;
+    let entries;
+    try { entries=fs.readdirSync(dir); } catch (e) { process.exit(0); }
+    const now=Date.now();
+    for (const f of entries) {
+      const m=NAME.exec(f); if(!m) continue;
+      // Unbound: no workflow document for the session that could have written
+      // it. The doctor already refuses to count these, so removing one destroys
+      // no diagnosis anybody still reads.
+      let dead = entries.indexOf("tdd-phase-"+m[1]+".json") === -1;
+      // Past the TTL: its session has not ended a turn in longer than the doctor
+      // is willing to believe the note, and cannot clear it itself. `ttl === 0`
+      // DISABLES the age-out, exactly as it does on the reading side.
+      if (!dead && ttl > 0) {
+        try {
+          const p=path.join(dir,f);
+          const st=fs.lstatSync(p);
+          if (!st.isFile() || st.nlink !== 1) continue;
+          const parsed=JSON.parse(fs.readFileSync(p,"utf8"));
+          const ts=parsed && parsed.detectedAtMs;
+          if (Number.isInteger(ts) && ts > 0 && (now-ts)/3600000 > ttl) dead=true;
+        } catch (e) {
+          // Unreadable or unparseable: the doctor reports it as a note this
+          // plugin did not write and tells the user to delete it. Deleting it
+          // HERE would silently destroy a file this plugin does not own.
+          continue;
+        }
+      }
+      if (!dead) continue;
+      try { fs.rmSync(path.join(dir,f),{force:true}); } catch (e) { /* next Stop retries */ }
+    }
+  ' </dev/null >/dev/null 2>&1 || true
+  return 0
+}
+
+reviewer_denial_note_clear_unlocked() {
   local note
+  reviewer_denial_notes_reap
   note="$(reviewer_denial_note_path)" || return 0
   # The temp carries a per-process suffix (see the writer), so the glob is what
   # reaps a crashed writer's leftover. An unmatched glob is silently ignored
@@ -304,7 +418,11 @@ reviewer_denial_note_clear() {
   return 0
 }
 
-reviewer_denial_note() {
+reviewer_denial_note_clear() {
+  reviewer_note_locked reviewer_denial_note_clear_unlocked
+}
+
+reviewer_denial_note_write_unlocked() {
   local note
   note="$(reviewer_denial_note_path)" || return 0
   [ -d "$(dirname "$note")" ] || return 0
@@ -347,9 +465,23 @@ reviewer_denial_note() {
       }
     ' >/dev/null 2>&1 || true
   elif [ "$REVIEWER_DENIAL_STATUS" = "clear" ]; then
-    reviewer_denial_note_clear
+    # The UNLOCKED spelling on purpose: this already runs inside the lease, and
+    # the lease is not reentrant — taking it again here would fail to acquire and
+    # fall back to an unlocked clear anyway, at the cost of a second keeper
+    # process on the Stop path.
+    reviewer_denial_note_clear_unlocked
   fi
   return 0
+}
+
+reviewer_denial_note() {
+  # The probe runs BEFORE the lease is taken. It reads a host-supplied transcript
+  # that may sit on slow or network-backed storage, and holding this directory's
+  # lease across that read would make every other writer of it wait on a path
+  # with no deadline above it. The probe memoizes, so the callback re-reads
+  # nothing and the verdict it acts on is the same one.
+  reviewer_spawn_denial_probe
+  reviewer_note_locked reviewer_denial_note_write_unlocked
 }
 
 INNER_SNAPSHOT=""

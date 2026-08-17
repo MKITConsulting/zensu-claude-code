@@ -552,6 +552,47 @@ rm -f "$NOTE_A" "$NOTE_B"
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
 case "$OUT" in *'host permission layer refused'*) check "P1qb no note means no row" FAIL ;; *) check "P1qb no note means no row" PASS ;; esac
 
+# The renderer and skills/doctor/SKILL.md are two hand-written accounts of the
+# same three rows, and nothing tied them together: a row could be reworded and
+# the skill would keep telling the model to report the old wording. Measured when
+# this was written — the rejected row had already grown "no matching session"
+# with no matching sentence in the skill.
+#
+# Each phrase is asserted on BOTH sides deliberately. Against the emitted output
+# it catches this list going stale after a renderer reword, so a drift check can
+# never pass by asserting a phrase nothing prints any more; against the skill it
+# catches the documentation falling behind. The list is an independent third copy
+# for the same reason git-repo-escape.test.js hardcodes its membership rather
+# than importing the set it tests.
+DENY_KEY_C="scv1_$(printf '%063d' 0)b"
+NOTE_C="$STATE_DIR_CANON/reviewer-spawn-denied-${DENY_KEY_C}.json"
+deny_session_doc "$DENY_KEY_C"
+note_json 1 auto-mode-classifier > "$NOTE_A"
+note_json 1 auto-mode-classifier 1 > "$NOTE_B"
+printf 'not json\n' > "$NOTE_C"
+ROWS_OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+SKILL_DOC="$PLUGIN_DIR/skills/doctor/SKILL.md"
+ROW_UNEMITTED=""
+ROW_DRIFT=""
+while IFS= read -r row_phrase; do
+  [ -n "$row_phrase" ] || continue
+  case "$ROWS_OUT" in *"$row_phrase"*) ;; *) ROW_UNEMITTED="$ROW_UNEMITTED [$row_phrase]" ;; esac
+  grep -qF "$row_phrase" "$SKILL_DOC" || ROW_DRIFT="$ROW_DRIFT [$row_phrase]"
+done <<'ROW_PHRASES'
+host permission layer refused the zensu:code-reviewer spawn
+Agent(zensu:code-reviewer)
+~/.claude/settings.json
+reviewer-spawn refusal note(s) older than
+reviewer-spawn note(s) this plugin did not write
+no matching session
+ROW_PHRASES
+if [ -z "$ROW_UNEMITTED" ] && [ -z "$ROW_DRIFT" ]; then
+  check "P1qr every denial row phrase is both emitted and documented in the skill" PASS
+else
+  check "P1qr denial rows vs skill (not emitted:$ROW_UNEMITTED not documented:$ROW_DRIFT)" FAIL
+fi
+rm -f "$NOTE_A" "$NOTE_B" "$NOTE_C" "$STATE_DIR_CANON/tdd-phase-${DENY_KEY_C}.json"
+
 # --- empty state dir -------------------------------------------------------
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'does not exist yet'*) check "P1p missing state dir handled read-only" PASS ;; *) check "P1p missing state dir handled (got: $OUT)" FAIL ;; esac

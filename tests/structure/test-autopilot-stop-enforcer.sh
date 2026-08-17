@@ -695,4 +695,45 @@ OUT13B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_orph
   && check "S13b spawned-agent no-op precedes orphan runtime enforcement" PASS \
   || check "S13b orphan hint must not deadlock a spawned agent" FAIL
 
+# Two note-retire sites inside the Autopilot escape branch. The routing suite
+# cannot reach either — the branch needs a durable run and that suite builds none
+# — so both were unpinned. They matter for the same reason the inner-guard
+# escapes do: once an escape releases Stop, this session never routes the inner
+# chain again, so nothing else can remove a note minted before it and
+# /zensu:doctor would keep reporting a refusal that no longer describes anything.
+plant_denial_note() {
+  printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":1}\n' > "$1"
+}
+
+# Site 1: the escape finds the run already at a terminal stage and exits without
+# auditing anything.
+P14="$TMP/escape-note-terminal"; start "$P14" stop_run_esc_term stop_session_esc_term
+CLAUDE_PROJECT_DIR="$P14" bash "$LOG" --tdd-begin --session stop_session_esc_term >/dev/null
+CLAUDE_PROJECT_DIR="$P14" bash "$LOG" --tdd-complete --session stop_session_esc_term >/dev/null
+autopilot_apply_event stop_run_esc_term cancel-esc-term CANCEL '{}' "$P14" >/dev/null
+activate_session "$P14" stop_session_esc_term || exit 1
+NOTE14="$P14/.zensu/state/reviewer-spawn-denied-$ZENSU_SESSION_KEY.json"
+plant_denial_note "$NOTE14"
+invoke "$P14" stop_session_esc_term "$TMP/missing.json" '' off >/dev/null
+[ ! -f "$NOTE14" ] \
+  && check "S14 a terminal-stage Autopilot escape retires a leftover refusal note" PASS \
+  || check "S14 terminal-stage escape leaves the refusal note behind" FAIL
+
+# Site 2: a DIFFERENT line — the escape audits an ACTIVE run to BLOCKED first and
+# releases afterwards. Asserting the audit too keeps this from passing on an
+# escape that never happened.
+P15="$TMP/escape-note-active"; start "$P15" stop_run_esc_active stop_session_esc_active
+CLAUDE_PROJECT_DIR="$P15" bash "$LOG" --tdd-begin --session stop_session_esc_active >/dev/null
+CLAUDE_PROJECT_DIR="$P15" bash "$LOG" --tdd-complete --session stop_session_esc_active >/dev/null
+activate_session "$P15" stop_session_esc_active || exit 1
+NOTE15="$P15/.zensu/state/reviewer-spawn-denied-$ZENSU_SESSION_KEY.json"
+plant_denial_note "$NOTE15"
+invoke "$P15" stop_session_esc_active "$TMP/missing.json" '' off >/dev/null
+RF15="$(autopilot_run_file stop_run_esc_active "$P15")"
+if [ ! -f "$NOTE15" ] && field_ok "$RF15" 'j.stage==="BLOCKED"'; then
+  check "S15 an audited Autopilot escape retires the note and still records BLOCKED" PASS
+else
+  check "S15 audited escape retires the note and records BLOCKED" FAIL
+fi
+
 echo "----"; echo "test-autopilot-stop-enforcer: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

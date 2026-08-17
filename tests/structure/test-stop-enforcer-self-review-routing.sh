@@ -614,6 +614,47 @@ else
   check "T29 a Stop with no armed chain retires a leftover note" FAIL
 fi
 
+# The reaper, which nothing else here exercises: every note the other scenarios
+# plant belongs to a session whose workflow document is present and was written
+# seconds ago, so the sweep never fires and its absence would go unnoticed.
+# Measured — a debug run of this whole file reaped exactly zero files before this
+# check existed. Three planted files, riding the clear the scenario above already
+# performs, so it costs no extra Stop.
+#
+# The LIVE file is the discriminator and the reason this is not a one-sided
+# check: a reaper that simply deleted every note it could name would satisfy the
+# other two assertions and fail this one.
+REAP_DEAD="scv1_$(printf '%063d' 0)c"
+REAP_OLD="scv1_$(printf '%063d' 0)d"
+REAP_LIVE="scv1_$(printf '%063d' 0)e"
+REAP_STATE="$SID12_PROJECT/.zensu/state"
+reap_note() {
+  printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":%s}\n' \
+    "$2" > "$REAP_STATE/reviewer-spawn-denied-$1.json"
+}
+# Unbound: no workflow document beside it.
+reap_note "$REAP_DEAD" 1
+# Bound but far past the TTL — the arm that answers the "a dead session's note
+# outlives everything able to remove it" finding.
+reap_note "$REAP_OLD" 1
+: > "$REAP_STATE/tdd-phase-$REAP_OLD.json"
+# Bound and current: must survive, and belongs to a DIFFERENT session than the
+# one Stopping, so this also pins that the sweep does not eat live neighbours.
+reap_note "$REAP_LIVE" "$(node -e 'process.stdout.write(String(Date.now()))')"
+: > "$REAP_STATE/tdd-phase-$REAP_LIVE.json"
+stop_run '{"session_id":"'"$SID12_RAW"'"}' >/dev/null
+REAP_RESULT=""
+[ -f "$REAP_STATE/reviewer-spawn-denied-$REAP_DEAD.json" ] && REAP_RESULT="$REAP_RESULT unbound-survived"
+[ -f "$REAP_STATE/reviewer-spawn-denied-$REAP_OLD.json" ] && REAP_RESULT="$REAP_RESULT expired-survived"
+[ -f "$REAP_STATE/reviewer-spawn-denied-$REAP_LIVE.json" ] || REAP_RESULT="$REAP_RESULT live-reaped"
+if [ -z "$REAP_RESULT" ]; then
+  check "T35 the reaper removes an unbound and an expired note and spares a live one" PASS
+else
+  check "T35 reaper sweep (unexpected:$REAP_RESULT)" FAIL
+fi
+rm -f "$REAP_STATE/reviewer-spawn-denied-$REAP_LIVE.json" \
+  "$REAP_STATE/tdd-phase-$REAP_OLD.json" "$REAP_STATE/tdd-phase-$REAP_LIVE.json"
+
 # The remaining clearing exit, and the one no scenario reached: a chain that was
 # armed but whose implementation never completed. Every other session in this
 # file runs --tdd-begin AND --tdd-complete, so the `implComplete != true` branch
@@ -698,6 +739,33 @@ case "$DOC_OUT" in
     check "T25 /zensu:doctor renders the note the hook itself wrote" PASS ;;
   *) check "T25 /zensu:doctor renders the note the hook itself wrote (got: $DOC_OUT)" FAIL ;;
 esac
+
+# The marker set lives in the module. It is re-encoded exactly ONCE outside it —
+# the remedy arms below — and the probe reads `kind` as a field instead of
+# holding a second copy. Structural, because the functional bite needs a THIRD
+# marker that does not exist: a module edit plus the full plugin-tree copy this
+# file's Windows budget cannot afford. What it catches is the copy coming back,
+# which is the regression that was actually there.
+PROBE_BODY="$(awk '/^reviewer_spawn_denial_probe\(\) \{/,/^\}/' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh")"
+REMEDY_BODY="$(awk '/^  case "\$REVIEWER_DENIAL_KIND" in/,/^  esac/' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh")"
+if [ -n "$PROBE_BODY" ] \
+  && ! printf '%s' "$PROBE_BODY" | grep -qF 'auto-mode-classifier' \
+  && ! printf '%s' "$PROBE_BODY" | grep -qF 'permission-denied' \
+  && printf '%s' "$PROBE_BODY" | grep -qF 'kind='; then
+  check "T33 the probe reads kind as a field and holds no copy of the marker set" PASS
+else
+  check "T33 the probe reads kind as a field and holds no copy of the marker set" FAIL
+fi
+# The other half: deduplicating must not have taken the remedy arms with it. A
+# probe that parses a kind nothing renders would be silently worse than the copy.
+if [ -n "$REMEDY_BODY" ] \
+  && printf '%s' "$REMEDY_BODY" | grep -qF 'auto-mode-classifier)' \
+  && printf '%s' "$REMEDY_BODY" | grep -qF 'permission-denied)' \
+  && printf '%s' "$REMEDY_BODY" | grep -qF '*)'; then
+  check "T34 both marker kinds keep a remedy arm, and the unknown arm survives" PASS
+else
+  check "T34 both marker kinds keep a remedy arm, and the unknown arm survives" FAIL
+fi
 
 start_session "stop-routing-restore"
 
