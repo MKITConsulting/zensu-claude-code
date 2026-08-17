@@ -1379,7 +1379,10 @@ function readOrphanedProjectRootContext(options) {
 // channel is denied, so the user cannot repair it, and before the diagnosis
 // existed they were not even told why.
 //
-// Adoption is the one explicit, verified, ledgered exit. It is authorised by
+// Adoption is the one explicit, verified exit — and deliberately NOT a ledgered
+// one: the bypass ledger records gate ESCAPES so that everything rendered under
+// "Gates bypassed" is true, and adoption escapes no gate. Its provenance is a
+// workflow history entry, exactly as `--chain-recover`'s is. It is authorised by
 // SCHEMA EQUALITY rather than by the version numbers, because the schema is what
 // the bytes on disk are actually held to — and that gate CLOSES ITSELF:
 //
@@ -1417,6 +1420,15 @@ const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 
 function adoptionRefusal(reason) {
   return { ok: false, reason };
+}
+
+// The workflow document's path WITHOUT creating anything. workflowStateFile
+// resolves through ensureDescendantDirectory, which mkdirs every missing
+// component — fine for a writer, wrong for a read-only probe. Both the
+// adoptability report and the provenance guard need to ask "is there a document"
+// without answering "there is now".
+function adoptionWorkflowStatePath(projectRoot, sessionId) {
+  return path.join(projectRoot, '.zensu', 'state', `tdd-phase-${sessionKey(sessionId)}.json`);
 }
 
 // Never throws: every caller is on a failure path already, and an exception
@@ -1491,7 +1503,13 @@ function adoptableRecord(options) {
   // so a real persisted-shape break refuses here. A missing document is not a
   // disagreement: there is no shape to disagree about, and adoption leaves the
   // session exactly as able to mint one as a fresh session would be.
-  const workflowFile = workflowStateFile(context.project_root, options.sessionId);
+  //
+  // The path is joined by hand rather than through workflowStateFile, which goes
+  // via ensureDescendantDirectory and CREATES the missing components. This
+  // predicate is the read-only half of the command, and "without --confirm it is
+  // read-only" is the premise the gate widening rests on — a probe that mkdirs
+  // <project>/.zensu/state would falsify it.
+  const workflowFile = adoptionWorkflowStatePath(context.project_root, options.sessionId);
   if (fs.existsSync(workflowFile)) {
     try {
       readWorkflowState({ projectRoot: context.project_root, sessionId: options.sessionId });
@@ -1527,6 +1545,7 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   }
   const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
   let discarded = 0;
+  const failed = [];
   for (const name of entries.sort()) {
     if (!name.endsWith('.json')) continue;
     const file = path.join(recordsDirectory, name);
@@ -1546,11 +1565,14 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {
-      // A lease that cannot be moved is reported by COUNT, never silently
-      // claimed as handled: the caller renders the number it is given.
+      // A lease that could NOT be moved is reported separately, never folded
+      // into the success count and never swallowed. Counting only successes
+      // would render a partial sweep as a clean adoption while the exact wedge
+      // this sweep exists to prevent survives.
+      failed.push(name);
     }
   }
-  return discarded;
+  return { discarded, failed };
 }
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
@@ -1615,35 +1637,49 @@ function adoptContext(options) {
   // failure here is reported to the caller, never smoothed over, and never
   // reverts an adoption that already succeeded.
   let provenance = 'recorded';
-  try {
-    mutateWorkflowState({
-      projectRoot: adopted.projectRoot,
-      sessionId: options.sessionId,
-      actor: 'main-v1',
-      workflowState: 'runtime_adopted',
-      event: 'runtime-adopted',
-    }, (state) => {
-      const history = Array.isArray(state.history) ? state.history : [];
-      history.push({
-        step: '',
-        phase: ADOPTION_HISTORY_PHASE,
-        timestamp: nowIso(),
-        reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+  // A session with no workflow document is a state adoptableRecord explicitly
+  // blesses ("a missing document is not a disagreement"), so it must not be
+  // routed through the failure branch below — mutateWorkflowState fails closed on
+  // a missing baseline, and the caller renders that as an anomaly worth
+  // reporting. Say plainly that there was nothing to write to instead.
+  if (!fs.existsSync(adoptionWorkflowStatePath(adopted.projectRoot, options.sessionId))) {
+    provenance = 'no-workflow-document';
+  } else {
+    try {
+      mutateWorkflowState({
+        projectRoot: adopted.projectRoot,
+        sessionId: options.sessionId,
+        actor: 'main-v1',
+        workflowState: 'runtime_adopted',
+        event: 'runtime-adopted',
+      }, (state) => {
+        const history = Array.isArray(state.history) ? state.history : [];
+        // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+        // validates and the one both existing history writers in
+        // zensu-tdd-phase.sh set. A different spelling would make this the one
+        // entry every ts-keyed reader sees as untimestamped.
+        history.push({
+          step: '',
+          phase: ADOPTION_HISTORY_PHASE,
+          ts: nowIso(),
+          reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+        });
+        state.history = history;
+        return state;
       });
-      state.history = history;
-      return state;
-    });
-  } catch (error) {
-    provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+    } catch (error) {
+      provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+    }
   }
 
-  const leasesDiscarded = discardSupersededLeases(
-    pluginData,
-    key,
-    adopted.context.plugin_root,
-  );
+  const leases = discardSupersededLeases(pluginData, key, adopted.context.plugin_root);
 
-  return { ...adopted, provenance, leasesDiscarded };
+  return {
+    ...adopted,
+    provenance,
+    leasesDiscarded: leases.discarded,
+    leasesFailed: leases.failed,
+  };
 }
 
 function renderMainContext(contextInput) {

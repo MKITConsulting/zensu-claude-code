@@ -217,7 +217,9 @@ Do NOT replace either with an explicit version comparison — the self-closing
 property is the whole design, and a hand-written check is the thing that gets
 forgotten.
 
-Seven conditions are ALL required and each refusal names exactly one:
+Seven conditions are ALL required; eight refusal reasons name exactly which one
+failed (condition 6 can fail as either `executing-runtime-unidentified` or
+`executing-runtime-older`):
 `record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
 `already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
 `executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the

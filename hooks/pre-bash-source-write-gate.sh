@@ -129,11 +129,14 @@ zensu_bind_hook_session "$INPUT" || ZENSU_SESSION_BOUND=false
 # channel. The Session Control rebind check above is unaffected: it runs before
 # the bind and remains the real trust boundary.
 if [ "$ZENSU_SESSION_BOUND" != true ]; then
-  # The read-only diagnostic comes FIRST, because it is reachable in every bind
-  # failure and not only in the two relaxable states below — a record that exists
-  # and disagrees (what a mid-session plugin upgrade produces) previously denied
-  # here, which put /zensu:doctor behind the very defect it reports. The command
-  # writes nothing, so none of the rules below have anything to judge.
+  # The two recognized commands come FIRST, because they are reachable in every
+  # bind failure and not only in the two relaxable states below — a record that
+  # exists and disagrees (what a mid-session plugin upgrade produces) previously
+  # denied here, which put /zensu:doctor behind the very defect it reports and
+  # left the repair unreachable with it. The diagnostic writes nothing; the
+  # adoption writes only its own session's record in plugin data and one workflow
+  # history entry. Neither touches project source, so none of the rules below —
+  # which judge writes to the session's own tree — has anything to judge.
   if zensu_doctor_allowed "$INPUT"; then
     exit 0
   fi

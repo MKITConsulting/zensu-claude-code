@@ -19,6 +19,7 @@
     "./agents/pr-review-worker.md"
   ],
   "skills": [
+    "./skills/adopt-session",
     "./skills/autopilot",
     "./skills/bootstrap",
     "./skills/converge",

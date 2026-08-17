@@ -81,7 +81,7 @@ whether to run the guided workflow with its review chain.
 
 ### Skills (25)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (25 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (26 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|

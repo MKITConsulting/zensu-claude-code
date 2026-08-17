@@ -161,15 +161,25 @@ function main() {
   process.stdout.write("  now served by    : " + adopted.executing + "\n");
   process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
   process.stdout.write("  provenance       : " + adopted.provenance + "\n");
-  process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n\n");
+  process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n");
+  process.stdout.write("  leases stuck     : " + adopted.leasesFailed.length + "\n\n");
   process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
-  if (adopted.provenance !== "recorded") {
+  if (adopted.provenance === "no-workflow-document") {
+    process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
+    process.stdout.write("takeover in. That is a normal state, not a fault.\n");
+  } else if (adopted.provenance !== "recorded") {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }
   if (adopted.leasesDiscarded > 0) {
     process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
     process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
+  }
+  if (adopted.leasesFailed.length > 0) {
+    process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.join(", ") + "\n");
+    process.stdout.write("They still name the previous installation, and because every lease read validates the\n");
+    process.stdout.write("whole set, review-evidence operations will keep failing for this session until they are\n");
+    process.stdout.write("moved out of the records directory by hand. The adoption itself is complete.\n");
   }
 }
 

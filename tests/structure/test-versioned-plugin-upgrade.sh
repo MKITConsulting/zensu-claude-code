@@ -984,12 +984,18 @@ printf '%s' "$ADOPT_STOP_PAYLOAD" \
   | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/stop-chain-enforcer.sh" >"$STOP_OUT" 2>"$STOP_ERR"
-if [ ! -s "$STOP_OUT" ] && grep -qF 'releasing Stop' "$STOP_ERR" \
+# The greps name literals ONLY the third release emits. "releasing Stop" and "no
+# completion was proven" also appear in the two opt-out releases (ZENSU_CHAIN=off,
+# hooks.chainEnforcer=false), which read the ambient environment — so on a host
+# with either set this check would have gone green while the new branch was dead.
+if [ ! -s "$STOP_OUT" ] \
+    && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$STOP_ERR" \
+    && grep -qF '/zensu:adopt-session --confirm' "$STOP_ERR" \
     && grep -qF 'no completion was proven' "$STOP_ERR"; then
   check "AC-016 the Stop hook releases the lineage state instead of blocking" PASS
 else
   check "AC-016 the Stop hook releases the lineage state instead of blocking" FAIL
-  head -c 400 "$STOP_OUT" 2>/dev/null
+  head -c 400 "$STOP_ERR" 2>/dev/null
 fi
 
 # AC-019 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
@@ -1123,6 +1129,25 @@ fi
 
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
 cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
+
+# AC-008 — seed the lease store so the sweep has something to sweep. Without this
+# the whole moving branch never runs: discardSupersededLeases returns 0 through
+# its readdir catch when the per-session records directory does not exist, so a
+# --confirm assertion on an empty store proves nothing about the discard.
+# Two leases with exactly one difference: the root they name.
+# Canonicalized: the sweep resolves plugin data through canonicalDirectory, so on
+# a host where the temp root is a symlink (/var -> /private/var on macOS) a
+# seeded path built from the raw value would be a different directory and the
+# sweep would read an empty one.
+CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
+ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
+ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
+mkdir -p "$ADOPT_LEASE_DIR"
+CANONICAL_BREAKING_ROOT="$(cd -P -- "$SYNTHETIC_BREAKING_ROOT" && pwd -P)"
+CANONICAL_CANDIDATE_ROOT="$(cd -P -- "$SYNTHETIC_CANDIDATE_ROOT" && pwd -P)"
+printf '{"plugin_root":"%s"}\n' "$CANONICAL_CANDIDATE_ROOT" > "$ADOPT_LEASE_DIR/stale.json"
+printf '{"plugin_root":"%s"}\n' "$CANONICAL_BREAKING_ROOT" > "$ADOPT_LEASE_DIR/current.json"
+
 ADOPT_CONFIRM_OUT="$TMP/adopt-confirm.out"
 if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     CLAUDE_PROJECT_DIR="$PROJECT" \
@@ -1134,6 +1159,19 @@ if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
 else
   check "AC-017 --confirm performs the adoption" FAIL
   head -c 400 "$ADOPT_CONFIRM_OUT" 2>/dev/null
+fi
+
+# AC-008 — exactly the stale lease moves, the current one stays, none is deleted,
+# and the count is reported rather than absorbed.
+if grep -qF 'leases set aside : 1' "$ADOPT_CONFIRM_OUT" \
+    && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
+    && [ ! -e "$ADOPT_LEASE_DIR/stale.json" ] \
+    && [ -f "$ADOPT_LEASE_ASIDE/stale.json" ] \
+    && [ -f "$ADOPT_LEASE_DIR/current.json" ]; then
+  check "AC-008 the stale lease is set aside, the current one is left in place" PASS
+else
+  check "AC-008 the stale lease is set aside, the current one is left in place" FAIL
+  grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
 fi
 
 # The point of the whole feature: the session works again, in place. Both are
@@ -1224,16 +1262,71 @@ else
   check "AC-004 a session with no record is not adoptable (got '$REASON_ABSENT')" FAIL
 fi
 
+# The record now names $SYNTHETIC_BREAKING_ROOT, so that root has nothing left to
+# adopt. Without this refusal the adoption would be a way to re-mint a HEALTHY
+# session's record, which is the one thing immutability exists to prevent.
+REASON_SERVED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_SERVED" = already-served ]; then
+  check "AC-004 a record this installation already serves is not adoptable" PASS
+else
+  check "AC-004 a record this installation already serves is not adoptable (got '$REASON_SERVED')" FAIL
+fi
+
+# A sibling root whose manifest declares no usable version is not a lineage claim
+# at all — it is a root that cannot be identified, and it must refuse under its
+# own reason rather than being compared as if it had one.
+UNIDENTIFIED_ROOT="$(
+  node "$INSTALL_FIXTURE" "$ROOT" "$SYNTHETIC_CACHE_PARENT" 0.19.0 "$ROOT_REVISION" 2>/dev/null
+)"
+if [ -n "$UNIDENTIFIED_ROOT" ] && [ -d "$UNIDENTIFIED_ROOT" ] \
+    && MANIFEST="$UNIDENTIFIED_ROOT/.claude-plugin/plugin.json" node -e '
+      const fs = require("node:fs");
+      const file = process.env.MANIFEST;
+      const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+      manifest.version = "not a version";
+      fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
+    '; then
+  REASON_UNIDENTIFIED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$UNIDENTIFIED_ROOT")"
+  if [ "$REASON_UNIDENTIFIED" = executing-runtime-unidentified ]; then
+    check "AC-004 an installation that declares no usable version may not adopt" PASS
+  else
+    check "AC-004 an installation that declares no usable version may not adopt (got '$REASON_UNIDENTIFIED')" FAIL
+  fi
+else
+  check "AC-004 an installation that declares no usable version may not adopt (fixture unavailable)" FAIL
+fi
+
 # The reserved phase cannot be minted by a caller — the same protection
 # CHAIN_RECOVERED has, for the same reason: a forgeable provenance entry is worse
 # than none, because it is believed.
-if ! CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" \
-      CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" \
-      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-log.sh" --phase RUNTIME_ADOPTED --step forged \
-      >/dev/null 2>&1; then
-  check "the RUNTIME_ADOPTED provenance phase cannot be minted through --phase" PASS
+#
+# CLAUDE_CODE_SESSION_ID is REQUIRED here, and its absence is what made an earlier
+# version of this check vacuous: zensu-log.sh binds the model session before it
+# reaches the --phase case, so without it the helper exits 2 on the binding and
+# the guard never runs — green in a tree with the guard deleted. The session binds
+# now because the adoption above re-pointed its record at $SYNTHETIC_BREAKING_ROOT.
+# Both reserved spellings are probed, and the assertion is on the guard's own
+# message, not merely on a non-zero exit.
+FORGE_ERR="$TMP/forge-phase.err"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-log.sh" --phase RUNTIME_ADOPTED --step forged \
+  >/dev/null 2>"$FORGE_ERR"
+FORGE_PHASE_RC=$?
+FORGE_REASON_ERR="$TMP/forge-reason.err"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+  CLAUDE_PROJECT_DIR="$PROJECT" CLAUDE_PLUGIN_ROOT="$SYNTHETIC_BREAKING_ROOT" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-log.sh" --phase IMPL --step forged \
+  --reason "runtime-adopted: 0.1.0 -> 9.9.9" >/dev/null 2>"$FORGE_REASON_ERR"
+FORGE_REASON_RC=$?
+if [ "$FORGE_PHASE_RC" -ne 0 ] \
+    && grep -qF 'RUNTIME_ADOPTED is written only by the session adoption' "$FORGE_ERR" \
+    && [ "$FORGE_REASON_RC" -ne 0 ] \
+    && grep -qF "a 'runtime-adopted: ' reason is reserved for the session adoption" "$FORGE_REASON_ERR"; then
+  check "the RUNTIME_ADOPTED provenance phase and reason cannot be minted through --phase" PASS
 else
-  check "the RUNTIME_ADOPTED provenance phase cannot be minted through --phase" FAIL
+  check "the RUNTIME_ADOPTED provenance phase and reason cannot be minted through --phase (phase_rc=$FORGE_PHASE_RC reason_rc=$FORGE_REASON_RC)" FAIL
+  head -c 200 "$FORGE_ERR" 2>/dev/null; head -c 200 "$FORGE_REASON_ERR" 2>/dev/null
 fi
 
 printf '%s\n' '----' \

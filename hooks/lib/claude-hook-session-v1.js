@@ -20,8 +20,8 @@
 // the record is intact and the SOLE disagreement is a declared-incompatible
 // executing lineage — and on a match print `recorded<TAB>executing`. None of the
 // five prints bindings: a session in any of those states must stay unbound. The
-// first four exist so the gates can tell the two RELAXABLE bind failures apart
-// from each other and from all the rest; the fifth names a state that is NOT
+// first three exist so the gates can tell the two RELAXABLE bind failures apart
+// from each other and from all the rest; the last two name a state that is NOT
 // relaxable — a workflow document is still reachable there — and exists so the
 // diagnosis stops being reported as "no record", which is false.
 

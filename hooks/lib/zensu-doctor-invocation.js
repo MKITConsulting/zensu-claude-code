@@ -1,4 +1,6 @@
-// zensu-doctor-invocation.js — recognize THE one read-only /zensu:doctor call.
+// zensu-doctor-invocation.js — recognize the TWO calls that stay reachable when
+// the Session Control bind fails: the read-only /zensu:doctor diagnostic, and
+// /zensu:adopt-session, which repairs the one bind failure that is repairable.
 //
 // A failed bind to the immutable Session Control record denies, and two states
 // are relaxed for it (no record at all; a recorded project root that is gone).
@@ -7,15 +9,21 @@
 // which is the ordinary consequence of running `claude plugin marketplace
 // update` inside a session. In that state /zensu:doctor is denied too, so the
 // pointer every fail-closed message renders is a dead end, denied by the very
-// defect it names. README.md "Unbindable sessions" is the authoritative roster.
+// defect it names. docs/session-control.md "Unbindable sessions" is the authoritative roster.
 //
-// This module is what lets the diagnostic through and NOTHING else. It is a
-// widening of a state that includes genuine tamper suspicion, so it rests on one
-// property: hooks/lib/zensu-doctor.sh writes nothing. The single write in the
-// whole doctor flow is the expired-pending-review cleanup in Phase 3 of
-// skills/doctor/SKILL.md, which the model issues as SEPARATE commands that stay
-// fully gated. Folding that cleanup into the script would silently turn this
-// into a write channel.
+// This module is what lets those two through and NOTHING else. It is a widening
+// of a state that includes genuine tamper suspicion, and the two are admitted on
+// SEPARATE arguments that must not be merged.
+//
+// The diagnostic rests on one property: hooks/lib/zensu-doctor.sh writes nothing.
+// The single write in the whole doctor flow is the expired-pending-review cleanup
+// in Phase 3 of skills/doctor/SKILL.md, which the model issues as SEPARATE
+// commands that stay fully gated. Folding that cleanup into the script would
+// silently turn this into a write channel.
+//
+// The adoption DOES write, so it cannot borrow that argument; its own is in the
+// header of hooks/lib/zensu-session-adopt.sh and is summarised at ADOPT_SEGMENTS
+// below.
 //
 // The recognizer is a WHITELIST, never a blacklist of dangerous characters: it
 // accepts a closed set of assignments followed by exactly one `bash <path>` and

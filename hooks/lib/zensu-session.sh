@@ -300,10 +300,12 @@ zensu_doctor_invocation() {
   ) >/dev/null 2>&1
 }
 
-# The one decision "may this call run the diagnostic despite a failed bind".
-# Both conjuncts are required at every gate: the command must BE the diagnostic,
-# and the caller must be the interactive thread. A reviewer, evidence worker or
-# neutral child has no diagnostic to run, and the all-tool capability gate's own
+# The one decision "may this call run despite a failed bind". Both conjuncts are
+# required at every gate: the command must BE one of the two recognized ones —
+# the read-only diagnostic, or the adoption, which WRITES its own session's
+# record under the justification in its own header — and the caller must be the
+# interactive thread. A reviewer, evidence worker or
+# neutral child has neither to run, and the all-tool capability gate's own
 # principal check is not a substitute here — a deny from ANY hook on the Bash
 # matcher wins, so each gate has to reach this verdict itself or the allowance
 # silently collapses back into a deny.
