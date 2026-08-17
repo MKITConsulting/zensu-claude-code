@@ -1177,6 +1177,53 @@ else
   check "AC-007 provenance is a history entry, the record keeps its exact field set" FAIL
 fi
 
+# AC-004 — the rest of the refusal truth table, one check per condition, each
+# with exactly ONE thing wrong. Run after the adoption because they reuse the
+# record it produced: it now declares 0.18.0, which is what makes the backwards
+# and non-sibling cases expressible from the roots this suite already built.
+adoption_reason() {
+  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+      executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
+ADOPT_RECORDS_DIR="$SHARED_DATA/session-control/v1/records"
+
+REASON_BACKWARDS="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT")"
+if [ "$REASON_BACKWARDS" = executing-runtime-older ]; then
+  check "AC-004 an OLDER installation may not adopt a newer record" PASS
+else
+  check "AC-004 an OLDER installation may not adopt a newer record (got '$REASON_BACKWARDS')" FAIL
+fi
+
+REASON_DETACHED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$DETACHED_COMPATIBLE_ROOT")"
+if [ "$REASON_DETACHED" = not-a-sibling-installation ]; then
+  check "AC-004 an installation outside the install parent may not adopt" PASS
+else
+  check "AC-004 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
+fi
+
+FOREIGN_PROJECT="$TMP/foreign-project"
+mkdir -p "$FOREIGN_PROJECT"
+REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_PROJECT" = project-root-mismatch ]; then
+  check "AC-004 a record for another project may not be adopted" PASS
+else
+  check "AC-004 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
+fi
+
+REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_ABSENT" = record-unreadable ]; then
+  check "AC-004 a session with no record is not adoptable" PASS
+else
+  check "AC-004 a session with no record is not adoptable (got '$REASON_ABSENT')" FAIL
+fi
+
 # The reserved phase cannot be minted by a caller — the same protection
 # CHAIN_RECOVERED has, for the same reason: a forgeable provenance entry is worse
 # than none, because it is believed.
