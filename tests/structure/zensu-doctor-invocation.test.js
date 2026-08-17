@@ -21,8 +21,8 @@ const nodePath = require("node:path");
 
 const modulePath = nodePath.join(__dirname, "..", "..", "hooks", "lib", "zensu-doctor-invocation.js");
 const {
-  recognize, isDoctorInvocation, executingPluginRoot,
-  ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS,
+  recognize, recognizeAny, isDoctorInvocation, isRecognizedInvocation, executingPluginRoot,
+  ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, ADOPT_SEGMENTS, RECOGNIZED,
 } = require(modulePath);
 
 const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zensu-doctor-invocation-"));
@@ -32,6 +32,9 @@ const pluginRoot = nodePath.join(tmpRoot, "plugin");
 const doctorPath = nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS);
 fs.mkdirSync(nodePath.dirname(doctorPath), { recursive: true });
 fs.writeFileSync(doctorPath, "#!/bin/bash\nexit 0\n");
+
+const adoptPath = nodePath.join(pluginRoot, ...ADOPT_SEGMENTS);
+fs.writeFileSync(adoptPath, "#!/bin/bash\nexit 0\n");
 
 const dataDir = nodePath.join(tmpRoot, "plugin-data");
 const projectDir = nodePath.join(tmpRoot, "project");
@@ -110,11 +113,16 @@ test("quoting cannot hide a token — the concatenated literal faces the same wh
   assert.strictEqual(verdict(`PA"TH"=/x bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
 });
 
-test("the interpreter must be the bare word bash in the second-to-last position", () => {
+// The scan runs left to right — assignments, `bash`, the script, then whatever
+// that script DECLARES — because a recognized script may now carry a trailing
+// argument, so the path is no longer the last token. A trailing token is
+// therefore an ARGUMENT question, not a shape one, and the doctor declares none.
+test("the interpreter must be the bare word bash, and the doctor declares no arguments", () => {
   assert.strictEqual(verdict(`sh "${doctorPath}"`).reason, REASONS.SHAPE);
   assert.strictEqual(verdict(`/bin/bash "${doctorPath}"`).reason, REASONS.SHAPE);
   assert.strictEqual(verdict(`bash`).reason, REASONS.SHAPE);
-  assert.strictEqual(verdict(`bash "${doctorPath}" extra`).reason, REASONS.SHAPE);
+  assert.strictEqual(verdict(`bash "${doctorPath}" extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(verdict(`bash "${doctorPath}" --confirm`).reason, REASONS.ARGUMENT);
 });
 
 test("an assignment outside the allowlist is refused", () => {
@@ -210,4 +218,40 @@ test("isDoctorInvocation binds the REAL executing root, which the unit tree is n
   assert.strictEqual(isDoctorInvocation(payload(`bash "${doctorPath}"`)), false);
   const live = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
   assert.strictEqual(isDoctorInvocation(payload(`bash "${live}"`)), true);
+});
+
+// The SECOND recognized script. It is admitted on its own justification and — the
+// whole point of the per-script argument table — it is the only one that may carry
+// `--confirm`, the literal that turns a report into a write.
+const anyVerdict = (command, toolName) => recognizeAny(payload(command, toolName), pluginRoot);
+
+test("the adoption is recognized bare and with exactly one --confirm", () => {
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}"`).ok, true);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm`).ok, true);
+  assert.strictEqual(
+    anyVerdict(`CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" bash "${adoptPath}" --confirm`).ok,
+    true,
+  );
+});
+
+test("the adoption declares exactly one argument and refuses every other shape", () => {
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --force`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm --confirm`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`EVIL=1 bash "${adoptPath}"`).reason, REASONS.ASSIGNMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}"; whoami`).reason, REASONS.CHARSET);
+});
+
+// The doctor-only predicate must stay doctor-only: a caller that means "the
+// read-only diagnostic" has to be able to say exactly that without admitting the
+// write. RECOGNIZED stays at two entries for the same reason.
+test("isDoctorInvocation never admits the write, and the recognized list stays at two", () => {
+  const liveAdopt = nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS);
+  const liveDoctor = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
+  assert.strictEqual(isDoctorInvocation(payload(`bash "${liveAdopt}" --confirm`)), false);
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveAdopt}" --confirm`)), true);
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), true);
+  assert.deepStrictEqual(Object.keys(RECOGNIZED).sort(), ["adopt", "doctor"]);
+  assert.deepStrictEqual(RECOGNIZED.doctor.args, []);
+  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--confirm"]);
 });

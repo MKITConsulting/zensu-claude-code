@@ -460,9 +460,16 @@ function main() {
     // behind the very defect it reports — this gate matches every tool, so a deny
     // here is reached before the Bash gates ever run. It admits exactly two
     // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
-    // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes only its
-    // own session's record and carries its own justification in its header. A
+    // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
+    // session's record, one workflow history entry and a move of its own stale
+    // review-evidence leases, and carries its own justification in its header. A
     // remedy the user cannot invoke is not a remedy.
+    //
+    // NOTE: this gate is the FIFTH denier in the incompatible-runtime state and
+    // the only one still on generic wording — `isRecognizedInvocation` is false
+    // for every non-Bash tool, so an Edit falls through to the deny below with no
+    // cause and no remedy. The four gates that emit `zensu_emit_hook_session_deny`
+    // carry the lineage text; this one does not. Stated rather than glossed.
     if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
         && (hookSession.unregisteredSession(payload)
           || hookSession.orphanedProjectRootSession(payload)

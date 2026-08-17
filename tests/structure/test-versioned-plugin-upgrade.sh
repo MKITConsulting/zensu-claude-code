@@ -848,6 +848,14 @@ fi
 # AC-011 — the predicate's own truth table. Driven from here rather than
 # registered separately: this suite is already in every profile, so the unit
 # file cannot be silently left out of a shard.
+RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
+if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1; then
+  check "the recognizer unit suite passes (driven from here — nothing else referenced it)" PASS
+else
+  check "the recognizer unit suite passes (driven from here — nothing else referenced it)" FAIL
+  sed -n '1,40p' "$TMP/recognizer-unit.out" 2>/dev/null
+fi
+
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
 if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1; then
   check "AC-011 runtimeLineageCompatible unit suite passes" PASS
@@ -1021,19 +1029,44 @@ ADOPT_MATCHER_HOOKS="$(
     process.stdout.write([...names].sort().join("\n"));
   '
 )"
+# The recognizer refuses on win32 BY DESIGN (the MSYS spelling gap the module
+# header documents), so the expected verdict is platform-dependent — exactly as
+# Part A branches for the diagnostic. Hardcoding `allow` would make this check
+# unpassable on the Windows shard where the suite is registered, and the gap would
+# stop being a verified contract.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    ADOPT_EXPECTED=deny
+    ADOPT_LABEL="refuses the adoption command on win32 (documented MSYS spelling gap)"
+    ;;
+  *)
+    ADOPT_EXPECTED=allow
+    ADOPT_LABEL="lets the adoption command through"
+    ;;
+esac
+# Required membership, not just non-emptiness: a matcher or regex change that
+# quietly enumerated fewer hooks would otherwise leave this green while covering
+# a subset. Same rule as O21b in test-orphaned-project-root.sh.
+ADOPT_ENUMERATION_MISSING=''
+for required in pre-bash-zensu-gate.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-reviewer-capability-gate.sh; do
+  case "$ADOPT_MATCHER_HOOKS" in
+    *"$required"*) ;;
+    *) ADOPT_ENUMERATION_MISSING="$ADOPT_ENUMERATION_MISSING $required" ;;
+  esac
+done
 ADOPT_GATE_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != allow ]; then
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$ADOPT_EXPECTED" ]; then
     ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
   fi
 done <<EOF
 $ADOPT_MATCHER_HOOKS
 EOF
-if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_GATE_FAILURES" ]; then
-  check "AC-019 every hook on the Bash matcher lets the adoption command through" PASS
+if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_ENUMERATION_MISSING" ] && [ -z "$ADOPT_GATE_FAILURES" ]; then
+  check "AC-019 every hook on the Bash matcher $ADOPT_LABEL" PASS
 else
-  check "AC-019 every hook on the Bash matcher lets the adoption command through (denied by:$ADOPT_GATE_FAILURES)" FAIL
+  check "AC-019 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
 fi
 
 # The discrimination test for AC-019: the recognizer must stay exactly this

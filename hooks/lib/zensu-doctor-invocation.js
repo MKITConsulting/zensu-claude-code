@@ -282,9 +282,16 @@ function recognizeAny(payload, pluginRoot) {
   const doctor = recognizeScript(payload, pluginRoot, RECOGNIZED.doctor);
   if (doctor.ok) return doctor;
   const adopt = recognizeScript(payload, pluginRoot, RECOGNIZED.adopt);
-  // Report the doctor's refusal when neither matched: it is the command a user
-  // in a bind failure reaches for first, so its reason is the more useful one.
-  return adopt.ok ? adopt : doctor;
+  if (adopt.ok) return adopt;
+  // Neither matched, so pick the more USEFUL refusal rather than a fixed one.
+  // A doctor-first rule reports "wrong path" for an adoption invocation whose
+  // only fault is an undeclared flag — true of the doctor entry, and useless to
+  // the caller. Whichever entry got PAST its path check is the one the user was
+  // actually invoking, so its reason is the one that names their mistake.
+  const doctorPathRejected = doctor.reason === REASONS.PATH || doctor.reason === REASONS.NOT_REGULAR;
+  const adoptPathRejected = adopt.reason === REASONS.PATH || adopt.reason === REASONS.NOT_REGULAR;
+  if (doctorPathRejected && !adoptPathRejected) return adopt;
+  return doctor;
 }
 
 const executingPluginRoot = () => nodePath.resolve(__dirname, "..", "..");
