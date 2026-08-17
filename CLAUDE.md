@@ -194,7 +194,68 @@ that one lease then fails every later lease operation for the session. Closing i
 needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
-so changing it silently fails loudly.
+so changing it silently fails loudly. **Adoption works around it, it does not
+close it:** `discardSupersededLeases` moves every lease naming the previous
+installation OUT of the records directory (into a sibling `superseded/<key>/`,
+because `listRecords` fails on any non-`.json` entry, so setting one aside in
+place would be strictly worse). The count is reported, never absorbed.
+
+## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
+
+The lineage rule above judges DECLARED versions and cannot see whether the
+persisted shapes actually moved. When they did not, its refusal wedges a session
+the running code could read perfectly well — and every write channel is denied,
+so the user cannot repair it. `adoptableRecord` / `adoptContext` in
+`hooks/lib/session-control-core-v1.js` are the one explicit exit.
+
+**The authorising axis is SCHEMA equality, not the version numbers, and that
+gate closes itself.** `validateContext` already enforces the record's
+`schema_version` and `validateWorkflowState` already enforces the workflow
+document's `schema`, so a release that genuinely moves a persisted shape makes
+one of the two unreadable and adoption declines with no new check to remember.
+Do NOT replace either with an explicit version comparison — the self-closing
+property is the whole design, and a hand-written check is the thing that gets
+forgotten.
+
+Seven conditions are ALL required and each refusal names exactly one:
+`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
+`executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
+sibling bound are NOT relaxed here either — the latter is what keeps a
+`--plugin-dir` checkout from adopting an installed session.
+
+**Two invariants, both learned from the chain-recovery precedent:**
+
+1. **No record field is ever added.** Provenance is a workflow `history` entry
+   under the reserved phase `RUNTIME_ADOPTED`, protected in the same two guard
+   sites as `CHAIN_RECOVERED` (`zensu-log.sh --phase` and `tdd_write_phase` /
+   `_tdd_write_phase_critical`). A field would itself be the breaking bump this
+   feature exists to survive, and would cost a `minor` — which would wedge every
+   session then running.
+2. **No bypass-ledger entry.** The ledger records gate ESCAPES so that everything
+   under "Gates bypassed" is true. Adoption escapes no gate; it re-mints a
+   record. Same rule, same reason, as `--chain-recover`.
+
+The previous record is never overwritten — it is renamed to
+`<key>.superseded-<recorded-version>.json` and stays readable, so "the record is
+immutable" remains literally true. `created_at` is carried over.
+
+**The gate channel is a SECOND recognized command, admitted on a DIFFERENT
+argument.** `hooks/lib/zensu-doctor-invocation.js` admitted exactly one shape
+because `zensu-doctor.sh` writes nothing. `zensu-session-adopt.sh` WRITES, so it
+carries its own justification in its own header, and that header is what the
+recognizer points at. Keep the recognized list at two; a third entry needs its
+justification written down the same way, not a wave at either existing one.
+Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
+module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
+stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
+
+Operator-facing accounts that must move with it: `docs/session-control.md`
+"Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and
+`skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
+Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
+allowance with its ordinary-command discrimination, the refusal truth table, the
+end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
 
 `docs/session-control.md` "Unbindable sessions" carries the operator-facing
 account, including the pin this weakens and the two attestation fields that
