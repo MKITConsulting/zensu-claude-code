@@ -569,6 +569,30 @@ else
   check "P15d persona templates are dedicated, untrusted-data-safe, final-message-only contracts" FAIL
 fi
 
+# A finding on a file outside the diff is wanted, but only the forge's inline channel is
+# diff-bound: it must be routed to overall_notes, never dropped and never re-anchored to a
+# changed file. One out-of-diff inline path rejects the whole worker result and, because
+# finalize demands every worker, blocks the entire generation — so the routing rule has to
+# reach the reviewer in all three places it is told what to emit.
+if printf '%s' "$REVIEWER_CONTRACT" | grep -qF '**Finding channel:**' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'every `inline_findings[].path` must appear in `NAME_STATUS`' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'route it to `overall_notes`' \
+   && printf '%s' "$REVIEWER_CONTRACT" | grep -qF 'never drop it, and never re-anchor it' \
+   && grep -qF 'Hard rule for the finding channel' "$PERSONAS_MD" \
+   && grep -qF 'legitimate and wanted' "$PERSONAS_MD" \
+   && grep -qF 'Route it to `overall_notes`' "$PERSONAS_MD" \
+   && grep -qF 'Never drop such a finding' "$PERSONAS_MD" \
+   && grep -qF 'rejects your **entire** result' "$PERSONAS_MD" \
+   && grep -qF 'MUST be a file listed in `_name-status.txt`' "$PERSONAS_MD" \
+   && grep -qF 'plus every finding anchored outside' "$PERSONAS_MD" \
+   && grep -qF 'may anchor only to a file the reviewed change' "$WORKER_MD" \
+   && grep -qF 'wanted, not forbidden' "$WORKER_MD" \
+   && grep -qF 'rejects your entire' "$WORKER_MD"; then
+  check "P15k out-of-diff findings route to overall_notes in prompt, personas, and worker contract" PASS
+else
+  check "P15k out-of-diff findings route to overall_notes in prompt, personas, and worker contract" FAIL
+fi
+
 if grep -qF 'Evidence collection belongs to the main thread' "$WORKFLOW_MD" \
    && grep -qF 'Deny all reviewer command execution with no exception' "$WORKFLOW_MD" \
    && grep -qF '$WORKTREE` is identity context only' "$WORKFLOW_MD" \

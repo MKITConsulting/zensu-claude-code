@@ -823,7 +823,11 @@ if [ "$OUTER_PRESENT" = false ]; then
 fi
 
 if [ "$ADOPT_ELIGIBLE" = "true" ]; then
-  if zensu_tdd_strict_enabled; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
+  # Behavioral, not wording: this seeds the `vanilla` flag of an adopted deferred
+  # review that has no prior state to freeze from. It reads the EFFECTIVE mode so an
+  # adopted chain gets the discipline this session actually chose — the adopting
+  # session's own marker, then the config.
+  if zensu_tdd_strict_effective "$PROJECT_ROOT" "${ZENSU_SESSION_KEY:-}"; then VANILLA_SEED=false; else VANILLA_SEED=true; fi
   if ! declare -F autopilot_adopt_pending_review >/dev/null 2>&1; then
     emit_block "Zensu review-chain Stop denied: the durable Outer-lock adoption helper is unavailable. Repair the plugin runtime before claiming deferred review work."
     exit 0

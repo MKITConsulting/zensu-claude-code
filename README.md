@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.17.3-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.18.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -40,6 +40,15 @@ claude plugin marketplace add MKITConsulting/zensu-claude-code
 claude plugin install zensu --scope project
 ```
 
+If the install fails with `Host key verification failed` or
+`Permission denied (publickey)`, Claude Code cloned the plugin over SSH. That is
+its default for GitHub plugin sources, and unlike `marketplace add` the install
+step has no HTTPS fallback. Force HTTPS:
+
+```bash
+CLAUDE_CODE_PLUGIN_PREFER_HTTPS=1 claude plugin install zensu --scope project
+```
+
 Update later with:
 
 ```bash
@@ -70,9 +79,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (22)
+### Skills (24)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (23 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (25 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -80,6 +89,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:ghost-scan` | Scan an existing repo, discover undocumented features, and import them |
 | `/zensu:implement` | Implement a tracked feature end to end, with artifact linking and revision tracking |
 | `/zensu:tdd` | The guided implementation workflow: build, then the mandatory review chain and auto-fix loop |
+| `/zensu:tdd-mode` | Switch this session between strict RED→GREEN TDD and vanilla, without editing config |
 | `/zensu:autopilot` | Idea → validated pull request, unattended after one planning gate. Never merges or deploys |
 | `/zensu:pilot` | The guided counterpart to autopilot: probes a feature's real state and offers the next step |
 | `/zensu:cover` | Backfill durable tests at the right level (unit → integration → E2E) for existing code |
@@ -93,6 +103,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:wargame` | Map a hard task move by move so a cheaper model can execute it blind |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, and take a session over |
 | `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default |
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |

@@ -876,13 +876,50 @@ fi
 
 mkdir -p "$PLUGIN_COPY"
 cp -R "$ROOT/.claude-plugin" "$ROOT/hooks" "$ROOT/agents" "$ROOT/skills" "$PLUGIN_COPY/"
+# Semver-compatible binding did NOT give this up, and the sibling rule is why.
+# A second installation at a compatible version would otherwise be the same
+# shape as the upgrade the feature exists to survive — a different root sharing
+# the parent store, indistinguishable by version comparison alone. The executing
+# root must therefore also sit BESIDE the recorded one: every marketplace
+# install lands beside the versions it replaces, while this copy sits in the
+# test's own temp directory and is refused however compatible its version reads.
+# That is what keeps "the enforcing code shares a declared-compatible lineage
+# with the measured code" from degrading into "any copy anywhere binds".
+# Recorded in CLAUDE.md under "Runtime Lineage" and in docs/session-control.md.
 if payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-cross-root code-reviewer \
   | run_copy_hook >"$TMP/cross-root.out" 2>"$TMP/cross-root.err"; then
-  check "SubagentStart rejects a byte-identical second plugin copy sharing the parent store" FAIL
+  check "SubagentStart refuses a compatible plugin copy outside the install parent" FAIL
 else
-  grep -qF 'plugin root does not match the parent session' "$TMP/cross-root.err" \
-    && check "SubagentStart rejects a byte-identical second plugin copy sharing the parent store" PASS \
-    || check "SubagentStart rejects a byte-identical second plugin copy sharing the parent store" FAIL
+  grep -qF 'nor a compatible upgrade of it' "$TMP/cross-root.err" \
+    && check "SubagentStart refuses a compatible plugin copy outside the install parent" PASS \
+    || check "SubagentStart refuses a compatible plugin copy outside the install parent" FAIL
+fi
+
+# What the relaxation did NOT give up, and the check that still protects it: the
+# copy has to declare a compatible lineage. Bumping the copy's minor while the
+# major is 0 crosses the breaking axis, and the parent's record must refuse it.
+INCOMPATIBLE_COPY="$TMP/plugin-copy-incompatible"
+mkdir -p "$INCOMPATIBLE_COPY"
+cp -R "$ROOT/.claude-plugin" "$ROOT/hooks" "$ROOT/agents" "$ROOT/skills" "$INCOMPATIBLE_COPY/"
+MANIFEST_INPUT="$INCOMPATIBLE_COPY/.claude-plugin/plugin.json" node -e '
+  const fs = require("node:fs");
+  const file = process.env.MANIFEST_INPUT;
+  const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+  const parts = String(manifest.version).split(".");
+  manifest.version = `${parts[0]}.${Number(parts[1]) + 1}.0`;
+  fs.writeFileSync(file, `${JSON.stringify(manifest, null, 2)}\n`);
+'
+if payload SubagentStart "$SID_A" "$PROJECT_A" reviewer-cross-root-breaking code-reviewer \
+  | CLAUDE_PLUGIN_ROOT="$INCOMPATIBLE_COPY" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
+    CLAUDE_ENV_FILE="$ENV_FILE" \
+    env -u ZENSU_SOURCE_REVISION -u ZENSU_SOURCE_REVISION_AUTHORITY \
+    bash "$INCOMPATIBLE_COPY/hooks/session-start-session-control.sh" \
+    >"$TMP/cross-root-breaking.out" 2>"$TMP/cross-root-breaking.err"; then
+  check "SubagentStart rejects a second plugin copy across a breaking version boundary" FAIL
+else
+  grep -qF 'plugin nor a compatible upgrade of it' "$TMP/cross-root-breaking.err" \
+    && check "SubagentStart rejects a second plugin copy across a breaking version boundary" PASS \
+    || check "SubagentStart rejects a second plugin copy across a breaking version boundary" FAIL
 fi
 
 mkdir -p "$PLUGIN_DATA_B/session-control/v1/records" "$PLUGIN_DATA_B/session-control/v1/locks"

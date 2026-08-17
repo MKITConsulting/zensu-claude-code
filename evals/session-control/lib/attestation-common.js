@@ -9,6 +9,11 @@ const ATTESTATION_FIELDS = Object.freeze([
   'session_id_hash',
   'resolved_plugin_root',
   'runtime_digest',
+  // The runtime that RAN, which a compatible-lineage upgrade can move away from
+  // the recorded pair above. This list is compared by value AND by order, so it
+  // moves in the same commit as createAttestation.
+  'executing_plugin_root',
+  'executing_runtime_digest',
   'workflow_state',
   'revision',
   'hook_sequence',
@@ -71,6 +76,15 @@ function validateShape(value) {
     throw new Error('resolved plugin root is invalid');
   }
   if (!HASH_RE.test(value.runtime_digest)) throw new Error('runtime digest is invalid');
+  // The bound runtime and the running one differ after a compatible upgrade, so
+  // both are stated. Neither may be blank or relative, and the executing digest
+  // is a measurement rather than a copy of the recorded one.
+  if (typeof value.executing_plugin_root !== 'string' || !path.isAbsolute(value.executing_plugin_root)) {
+    throw new Error('executing plugin root is invalid');
+  }
+  if (!HASH_RE.test(value.executing_runtime_digest)) {
+    throw new Error('executing runtime digest is invalid');
+  }
   if (!/^[a-z][a-z0-9_-]{0,63}$/.test(value.workflow_state || '')) {
     throw new Error('workflow state is invalid');
   }

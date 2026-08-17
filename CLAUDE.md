@@ -21,6 +21,102 @@ recognize what multilingual users actually type, never as prose. Keep these
 phrase lists in lockstep across every directive variant (strict and vanilla)
 — never edit one variant alone.
 
+## TDD Mode Precedence (`hooks/lib/zensu-config.sh` + `zensu-log.sh --tdd-begin`)
+
+The strict/vanilla implementation mode is decided by a FOUR-RANK ladder, and
+`hooks/lib/zensu-log.sh`'s `--tdd-begin` branch is the only place that orders all four
+ranks:
+
+1. the session marker `/zensu:tdd-mode` records (`hooks/lib/zensu-tdd-mode.sh` writes
+   `<project>/.zensu/state/tdd-mode-<session-key>.json`)
+2. `--tdd-begin --tdd-mode strict` — the CALLING SKILL's own default
+3. `hooks.tddImplementation`
+4. vanilla
+
+**Rank 2 is escalation-only, and that removes the one downgrade spelling a gate can
+see.** The value reaches the flag from a `TDD-MODE:` line in a model-read
+specification, and a spec body is not always user-authored — `/zensu:pr-fix-findings`
+builds one out of PR review-comment bodies. `strict` is therefore the only accepted
+value; relaxing the discipline stays rank 1, the user's own action. Widening the
+whitelist re-opens a downgrade channel that lands no bypass-ledger entry.
+
+It NARROWS the channel rather than closing it: rank 1's carrier is an ordinary file in
+the project tree, and NO gate covers it while the chain is inactive — not the Edit gate
+(`pre-edit-tdd-reminder.sh` returns early on an inactive chain, ahead of its
+`.zensu/state/` deny) and not the Bash source-write gate (`bash-source-write-parse.js`
+carries no `.zensu` rule at all). Both an `Edit`/`Write` and a shell redirect therefore
+reach `{"mode":"vanilla"}` ungated. The controls there are prose — "only the user
+changes the mode", in `skills/tdd-mode/SKILL.md` and `skills/pr-fix-findings/SKILL.md`
+— not a gate. Say so plainly, name both channels, and do not upgrade the claim:
+hardening one gate would not close it.
+
+**Rank 2 must outrank rank 3**, or the shipped `tddImplementation: false` makes every
+skill default unreachable. **Rank 1 must outrank rank 2**, or a skill overrides the
+user.
+
+**Two sites FREEZE the resolved mode into a chain's `vanilla` flag**, and both resolve
+the same ladder for every rank that exists there: `zensu-log.sh --tdd-begin` (ranks
+1-4), and the Stop-hook adoption of a deferred review (`stop-chain-enforcer.sh`
+`VANILLA_SEED` → `autopilot_adopt_pending_review` → `tdd_seed_deferred_review`), which
+has no caller-flag carrier and therefore resolves 1 → 3 → 4. Accepted consequence: a
+chain armed strict purely through rank 2 in a default-config project seeds its adopted
+deferred-review generation vanilla. Everything downstream — the edit gate, the Stop legend,
+`--mode` — reads the FROZEN flag and never the marker, so a mid-chain switch changes
+nothing. Say "the next chain", never "this session".
+
+**`/zensu:tdd-mode --status` is the ONE reader that consults both**, and it is not a
+counter-example to the rule above — it exists to report the rule. It resolves the session
+mode from the marker (ranks 1 → 3 → 4) and then reads the running chain's FROZEN flag via
+`tdd_state_file` / `tdd_session_active` / `tdd_vanilla_mode`, appending a disclosure when
+the two disagree. That makes it a fourth frozen-flag reader, so a change to the flag's
+name, shape or accessors lands here as well as in the three above. It degrades to the
+resolved-mode answer when the phase library cannot be sourced, because the source happens
+after the base line is computed — a load fault loses the disclosure, never the mode.
+
+**Effective vs configured is a deliberate split.** `plan-approved-delegate.sh`,
+`user-prompt-tdd-reminder.sh` and the Stop seed call `zensu_tdd_strict_effective`
+(marker over config); `session-start-banner.sh` and `session-start-primer.sh` stay on
+`zensu_tdd_strict_enabled` BY DESIGN — at SessionStart no marker for the new session
+can exist yet, so an "effective" read there would only ever return the config anyway.
+A directive that names a cause must name the one that actually decided: after the
+switch to the effective mode, the vanilla branches may not assert
+`hooks.tddImplementation=false`.
+
+Moving together with the ladder: `zensu_tdd_mode_marker_path` / `zensu_tdd_mode_state_linked`
+/ `zensu_tdd_mode_marker_state` / `zensu_tdd_mode_override` / `zensu_tdd_strict_effective`
+(the single path template and parse — the writer sources
+them rather than re-spelling, unlike zen-mode, whose template is hand-copied into its
+reader hook). `zensu_tdd_mode_marker_state` owns the marker VOCABULARY —
+`strict|vanilla|released|none`, four values, where `released` is a present `{"mode":"auto"}`
+and `none` is absence-or-unreadable — and it is the only parse; `zensu_tdd_mode_override` is a
+total reduction over it that collapses `released|none` to `auto`, so its callers keep a
+three-value contract and the two cannot drift. `zensu_tdd_mode_state_linked` is the symlink
+guard for the `.zensu` / state-dir / marker triple plus an optional extra leaf, and the WRITER
+now calls the reader's copy rather than spelling its own; its pre-rename re-check is
+deliberately a SECOND call, because that duplication is the TOCTOU defense and collapsing the
+two would remove it. A new marker value lands in the reader, in the reduction, and in
+`--status`'s label set. Then the `TDD-MODE:` producer (`skills/pr-fix-findings/SKILL.md`) and its parser
+(`skills/tdd/SKILL.md` Phase 0 + Mandatory command protocol step 1), that same skill's
+§"Vanilla Implementation Mode", which states the ladder a THIRD time for the model,
+`skills/tdd-mode/SKILL.md`, `docs/configuration.md` (the `tddImplementation` row),
+`docs/gates.md` §Activation, `docs/tdd-manager-workflow.md` §Vanilla implementation mode,
+and `docs/architecture.md`. A site left behind does not fail closed — it leaves a stale
+rank list the model reads while the helper resolves a different one.
+
+**A second site re-encodes the ORDER**, not just the ladder's prose: `--status` in
+`hooks/lib/zensu-tdd-mode.sh` resolves rank 1 → 3 → 4 itself to report provenance. It
+is structurally blind to rank 2, and so are the two pre-begin directive hooks — a caller
+flag exists only at the moment of arming. So `--status` can answer `vanilla (config)`
+while the next `/zensu:pr-fix-findings` run legitimately arms strict; the `mode:` echo at
+`--tdd-begin` is the only authoritative report. A new rank, or a fourth marker value,
+lands in `--tdd-begin`, in `zensu_tdd_strict_effective` AND here.
+`tests/structure/test-tdd-mode-toggle.sh` pins the ladder and the fail-safes;
+`test-tdd-vanilla-mode.sh` E3/E3b pin that the freeze survives a marker flip.
+
+**Known gap:** no `/zensu:doctor` row reports the marker or a chain's frozen `vanilla`
+flag, so a session-scoped choice is visible only in the `--tdd-begin` echo and in
+`/zensu:tdd-mode --status`. Do not claim doctor visibility until that row exists.
+
 ## Version Bumps
 
 **Every plugin version bump MUST update `.claude-plugin/plugin.json`, the
@@ -36,12 +132,76 @@ Historical: `marketplace.json` was created at `0.2.0` (commit `a0a58b2`) and nev
 **Releasing — automated via the `Release` workflow** (`.github/workflows/release.yml`):
 
 1. Actions → **Release** → run with a `version_type` (`patch`/`minor`/`major`). The `prepare` job computes the next version from the latest `vX.Y.Z` tag, bumps `plugin.json` + marketplace version + marketplace `ref` + the README badge **together**, and generates a `## [X.Y.Z]` CHANGELOG section from the conventional commits since the last tag (git-cliff, `cliff.toml`). For a real run it creates the `release/vX.Y.Z` commit locally, then runs `bash tests/run-all.sh --ci` **against that exact commit** — the suite gates the tree that actually ships, never a pre-bump tree nobody releases — verifies the exact clean commit SHA plus the Session Control runtime digest, uploads deterministic SHA-bound evidence, and **only then pushes the branch** and prints a "Compare & PR" link. The suite runs once per job on purpose: two full runs inside one job exceeded the runner limit and made every release time out. Promptfoo and live-model suites are local-only and are never invoked by GitHub Actions. `dry_run: true` remains an offline version/notes preview: it creates no commit, uploads no release evidence, and pushes nothing.
+
+   **`skip_test_gate: true` ships WITHOUT the suite, and is the one input that removes a guarantee rather than adding one.** It refuses without a non-empty `skip_reason`, and the evidence artifact then records `gate: "skipped"` plus that reason — it can never say `passed`, so a release that skipped is distinguishable forever after from one that did not. Everything else still binds: the exact-SHA pin, the clean-tree check, the runtime digest, the version/ref invariant, and the evidence upload. The decision is written into the release commit as a `Release-Test-Gate: skipped` trailer, because the `publish` job is push-triggered and `inputs.*` is empty there; the trailer is also what a reviewer reads in the release PR. **Consequence, stated rather than glossed:** any commit whose subject starts with `chore(release): bump version to` AND carries that trailer skips the publish gate, so the protected-PR review — not a machine check — is what stands between a hand-written trailer and an unverified tag. Use it for a release whose diff you have already verified another way (a counter bump, a docs-only fix), never as the default path.
 2. Open the PR from that link, then review + **squash-merge** it. (CI pushes the branch but does not open the PR — the org caps the workflow token for PR creation; release/tag creation only needs the per-job `contents: write`, which works.)
 3. The release commit landing on `main` is **not** plugin go-live: the updated catalog points to an as-yet unavailable tag. The `publish` job verifies the GitHub repo/ref/version invariant and rejects a pre-existing tag at any other commit, re-runs `bash tests/run-all.sh --ci` against the exact clean `${{ github.sha }}`, revalidates the runtime digest, and uploads a second deterministic SHA-bound evidence artifact. Only then does it create `vX.Y.Z` at that SHA and a **published** GitHub Release (notes = the new CHANGELOG section, source zip attached). Successful tag creation makes the source resolvable and is go-live. An exact existing tag with a missing release can be repaired idempotently after repeating the deterministic gate. Users pull it via `claude plugin marketplace update zensu`. The release notes were already reviewed in the bump PR body, so there is no separate draft-publish step.
 
 The version/ref invariant above is machine-enforced: the gate runs `tests/run-all.sh --ci` (including the version-sync and immutable-marketplace tests) before the branch is pushed. For a manual hotfix bump, follow the invariant by hand — `plugin.json` version + marketplace version + marketplace `ref: vX.Y.Z` + README badge (same version) + a new `## [X.Y.Z] - YYYY-MM-DD` CHANGELOG section + commit subject `chore(release): bump version to X.Y.Z`.
 
 If marketplace version or source `ref` ever lags `plugin.json` (for example, a hand bump forgot one field), fix both in the release PR before any tag is created or any user-side `claude plugin install <name>@<name>` attempt.
+
+## Runtime Lineage (`version_type` is load-bearing)
+
+A plugin update that lands while a session is running leaves the Session Control
+record naming the installation that minted it. The running installation may
+still **serve** that record when the two share a lineage —
+`servesRecordedRuntime` / `runtimeLineageCompatible` in
+`hooks/lib/session-control-core-v1.js`. It is the ONE implementation all five
+call sites share: `resolveHookSession` and its `resolveOrphanedProjectRoot`
+mirror in `hooks/lib/claude-hook-session-v1.js`, `currentClaudeSessionContext`,
+and both the SessionStart-resume and SubagentStart branches of
+`hooks/lib/claude-session-control-v1.js`. `relatedClaudeSessionContexts` is
+deliberately excluded: it compares two records against each other, not a record
+against the executing runtime. The axis:
+
+- **same major**, and **while major is `0`, the same minor as well** — `0.17.1 ↔
+  0.17.2` compatible, `0.17.x ↔ 0.18.0` not. Without the second clause "same
+  major" would make `0.9.2` compatible with `0.17.2`.
+- **never backwards**: the executing version must be at least the recorded one.
+- the executing root must be a **sibling** of the recorded one, which is what
+  keeps a `--plugin-dir` checkout from adopting an installed session's record.
+
+**While the plugin is at major `0`, MINOR is therefore the breaking axis.** A
+breaking change costs a `minor` release and a non-breaking feature is a `patch`.
+Anything below forces the breaking bump, because a running session would
+otherwise be served by a runtime that cannot read what it wrote:
+
+- the context record or workflow-state **schema** (`SCHEMA_VERSION`, any field
+  added, removed or retyped);
+- **any strict key set** — `reviewRearm`'s `exactKeys`,
+  `deferredReviewCancellation`, and every other validator that rejects an
+  unknown or missing key rather than ignoring it;
+- **removing or renaming a registered hook, or changing a hook's matcher**;
+- the **attestation shape**, which is itself a schema two versions must agree
+  on. A change to it has to ship in the release that *introduces* the policy it
+  serves, never one release later.
+
+Consequence: the `Release` workflow's `version_type` input carries meaning, not
+just a number. Choosing `patch` for a change in that list ships a compatibility
+claim the code cannot honour. The predicate encodes what the numbers *mean*; it
+cannot verify that this policy was followed.
+
+**The release that introduces this policy is itself a `minor`**, because it adds
+`executing_plugin_root` and `executing_runtime_digest` to the attestation. It is
+the last release before the policy binds, so nothing is served across it.
+
+**Known gap 1 — the review-evidence lease is NOT lineage-relaxed.**
+`hooks/lib/review-evidence-lease-v1.js` still compares its recorded
+`plugin_root` strictly, so a lease minted before an upgrade is refused after it.
+Because `listRecords` validates every record and propagates the first failure,
+that one lease then fails every later lease operation for the session. Closing it
+needs a lease-schema change — the lease record carries no `plugin_version`, so
+there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
+`tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
+so changing it silently fails loudly.
+
+`docs/session-control.md` "Unbindable sessions" carries the operator-facing
+account, including the pin this weakens and the two attestation fields that
+state the executing runtime. `tests/session-control/session-control-core-v1.test.js`
+pins the axis and the sibling rule;
+`tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
+across synthetic installs, including that serving a record never rewrites it.
 
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
@@ -80,6 +240,12 @@ they are different diagnoses with different remedies:
   never `realpath`, so a dangling symlink stays a present-but-wrong root. It then
   re-applies the plugin-root and plugin-data identity checks `resolveHookSession`
   applies, so a second disagreement is never relaxed alongside the first.
+  **Amended by semver-compatible binding:** the plugin-root check there is now the
+  lineage-relaxed `servesRecordedRuntime`, so a vanished project root IS relaxed
+  alongside an executing root that is a declared-compatible upgrade — deliberate,
+  since neither disagreement can anchor a workflow document. An INCOMPATIBLE root,
+  a differing `plugin_data`, and every other disagreement stay unrelaxed. See
+  "Runtime Compatibility & Breaking Changes" above.
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.

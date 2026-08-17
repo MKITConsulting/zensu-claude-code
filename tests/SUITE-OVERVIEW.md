@@ -12,8 +12,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **127** — 120 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| `tests/structure/*.test.js` (`node --test` units) | **17 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **133** — 126 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -24,8 +24,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 127 structure suites + 5 offline evals | none |
-| `--ci` | 120 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 133 structure suites + 5 offline evals | none |
+| `--ci` | 124 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -61,18 +61,21 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (14)
+### TDD engine & phase gate (15)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
 `pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
-`tdd-protocol-prominence` · `tdd-reminder-hook` · `tdd-skill-review-fanout` ·
+`tdd-mode-toggle` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
+`tdd-skill-review-fanout` ·
 `tdd-skill-self-review-handoff` · `tdd-vanilla-mode`
 
 Covers arming (`--tdd-begin`), the PreToolUse edit phase-gate, the RED→GREEN→IMPL
 lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 (`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
-retained), the edit-landing receipt required by `--tdd-complete`, and the 5-agent
-review fan-out wiring in `skills/tdd/SKILL.md`.
+retained), the mode precedence at the freeze point (`tdd-mode-toggle` — session
+choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
+unreadable marker forces nothing), the edit-landing receipt required by
+`--tdd-complete`, and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
 ### Review chain & findings (25)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
@@ -118,11 +121,11 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (17)
+### Skill contracts (18)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `setup-skill` · `skill-overlays` ·
-`templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` · `setup-skill` ·
+`skill-overlays` · `templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
@@ -171,7 +174,7 @@ root containing whitespace and an apostrophe, and the Windows CI manifest contra
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (17 files)
+## 4. `node --test` unit suites (19 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -185,8 +188,10 @@ that suite's failure.
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
 | `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
+| `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
+| `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
 | `windows-observation.test.js` | 11 | Windows safety | observation summarizer |
