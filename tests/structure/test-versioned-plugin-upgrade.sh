@@ -1300,18 +1300,35 @@ mkdir -p "$ADOPT_LEASE_DIR"
 # yields the MSYS spelling `/d/a/...`, so a fixture built from it never matched
 # and the keep-lease was swept with the rest: 4 set aside where 3 were expected.
 # Production leases are written from the same native value this renders.
-# Derived with fs.realpathSync.native, which is EXACTLY what canonicalDirectory
-# stores in the record — and what discardSupersededLeases compares a lease
-# against. Neither `pwd -P` nor zensu-host-path.sh produces that string on
-# Windows: the first yields the MSYS spelling `/d/a/...`, the second a
-# drive-qualified FORWARD-slash `D:/a/...`, while the record holds `D:\a\...`.
-# Both earlier spellings made the keep-lease fixture miss and be swept with the
-# rest — 4 set aside where 3 were expected.
+# The record stores what canonicalDirectory produces, and reaching that string
+# from a shell variable takes BOTH steps, in this order — three CI rounds were
+# spent finding that out, one spelling at a time:
+#
+#   1. zensu-host-path.sh renders the shell's MSYS spelling (/d/a/...) into a
+#      host-native one. Skipping it hands node a path it reads as drive-RELATIVE,
+#      so realpathSync resolves D:\d\a\..., throws on the missing directory,
+#      and the helper returns an EMPTY string — a fixture root that can never
+#      match, which looks exactly like a sweep bug.
+#   2. fs.realpathSync.native then produces the separator form the record holds
+#      (D:\a\...). The renderer alone stops at drive-qualified forward slashes
+#      (D:/a/...), which is still not the recorded string.
+#
+# On POSIX both steps are identity, which is why every one of these failures was
+# invisible locally.
 native_root() {
-  ROOT_IN="$1" node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN))'
+  local rendered
+  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
+  ROOT_IN="$rendered" node -e '
+    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
+  ' || return 1
 }
 CANONICAL_BREAKING_ROOT="$(native_root "$SYNTHETIC_BREAKING_ROOT")"
 CANONICAL_CANDIDATE_ROOT="$(native_root "$SYNTHETIC_CANDIDATE_ROOT")"
+# An empty root would silently make every fixture unmatchable and grade the sweep
+# as broken. Fail loudly on the fixture instead of quietly on the feature.
+if [ -z "$CANONICAL_BREAKING_ROOT" ] || [ -z "$CANONICAL_CANDIDATE_ROOT" ]; then
+  check "AC-C08 lease fixture roots resolve to the recorded spelling" FAIL
+fi
 # The fixtures are shaped as listRecords would accept them — a `rel1_<32 hex>`
 # stem whose `lease_id` matches the filename — because the keep-branch mirrors
 # that acceptance. Stubs named `stale.json`/`current.json` would BOTH be swept,
@@ -1404,6 +1421,13 @@ if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
   check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" PASS
 else
   check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" FAIL
+  # Name the two strings that had to match. Every failure of this check so far was
+  # a path-SPELLING mismatch invisible from a POSIX host, and each round cost a
+  # full CI cycle to identify. Printing them turns the next one into a read.
+  printf '    fixture keep root : %s\n' "$CANONICAL_BREAKING_ROOT"
+  printf '    recorded root     : %s\n' \
+    "$(node -p 'require(process.argv[1]).plugin_root' "$ADOPT_RECORD" 2>/dev/null)"
+  grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
 fi

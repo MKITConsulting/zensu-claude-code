@@ -168,36 +168,36 @@ test("ZDOC_PLAYWRIGHT is NOT reachable — only the tools signal is", () => {
 });
 
 test("a doctor script outside the executing plugin root is refused", () => {
-  const foreign = nodePath.join(tmpRoot, "other", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(foreign), { recursive: true });
-  fs.writeFileSync(foreign, "#!/bin/bash\nexit 0\n");
+  const foreign = commandSpelling(nodePath.join(tmpRoot, "other", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(foreign)), { recursive: true });
+  fs.writeFileSync(nodePath.resolve(foreign), "#!/bin/bash\nexit 0\n");
   assert.strictEqual(verdict(`bash "${foreign}"`).reason, REASONS.PATH);
-  assert.strictEqual(verdict(`bash "${nodePath.join(pluginRoot, "hooks", "lib", "zensu-log.sh")}"`).reason, REASONS.PATH);
+  assert.strictEqual(verdict(`bash "${commandSpelling(nodePath.join(pluginRoot, "hooks", "lib", "zensu-log.sh"))}"`).reason, REASONS.PATH);
 });
 
 test("a symlink to the real doctor script is refused even though it resolves correctly", () => {
-  const link = nodePath.join(tmpRoot, "link-plugin", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(link), { recursive: true });
-  fs.symlinkSync(doctorPath, link);
-  assert.strictEqual(fs.realpathSync(link), fs.realpathSync(doctorPath));
+  const link = commandSpelling(nodePath.join(tmpRoot, "link-plugin", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(link)), { recursive: true });
+  fs.symlinkSync(nodePath.resolve(doctorPath), nodePath.resolve(link));
+  assert.strictEqual(fs.realpathSync(nodePath.resolve(link)), fs.realpathSync(nodePath.resolve(doctorPath)));
   assert.strictEqual(recognize(payload(`bash "${link}"`), nodePath.join(tmpRoot, "link-plugin")).reason, REASONS.NOT_REGULAR);
 });
 
 test("a hard link is refused — a second name for the file is still a second name", () => {
-  const linked = nodePath.join(tmpRoot, "hardlink-plugin", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(linked), { recursive: true });
-  fs.linkSync(doctorPath, linked);
+  const linked = commandSpelling(nodePath.join(tmpRoot, "hardlink-plugin", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(linked)), { recursive: true });
+  fs.linkSync(nodePath.resolve(doctorPath), nodePath.resolve(linked));
   assert.strictEqual(recognize(payload(`bash "${linked}"`), nodePath.join(tmpRoot, "hardlink-plugin")).reason, REASONS.NOT_REGULAR);
 });
 
 test("a missing or non-regular doctor path is refused", () => {
   const absentRoot = nodePath.join(tmpRoot, "absent-plugin");
-  const absent = nodePath.join(absentRoot, ...DOCTOR_SEGMENTS);
+  const absent = commandSpelling(nodePath.join(absentRoot, ...DOCTOR_SEGMENTS));
   assert.strictEqual(recognize(payload(`bash "${absent}"`), absentRoot).reason, REASONS.NOT_REGULAR);
 
   const dirRoot = nodePath.join(tmpRoot, "dir-plugin");
   fs.mkdirSync(nodePath.join(dirRoot, ...DOCTOR_SEGMENTS), { recursive: true });
-  assert.strictEqual(recognize(payload(`bash "${nodePath.join(dirRoot, ...DOCTOR_SEGMENTS)}"`), dirRoot).reason, REASONS.NOT_REGULAR);
+  assert.strictEqual(recognize(payload(`bash "${commandSpelling(nodePath.join(dirRoot, ...DOCTOR_SEGMENTS))}"`), dirRoot).reason, REASONS.NOT_REGULAR);
 });
 
 test("an oversized command is refused before it is parsed", () => {
@@ -225,7 +225,7 @@ test("on this POSIX host an MSYS-looking path stays an ordinary path", () => {
   const root = nodePath.join(msysLooking, "plugin");
   fs.mkdirSync(nodePath.join(root, "hooks", "lib"), { recursive: true });
   fs.writeFileSync(nodePath.join(root, ...DOCTOR_SEGMENTS), "#!/bin/bash\nexit 0\n");
-  assert.strictEqual(recognize(payload(`bash "${nodePath.join(root, ...DOCTOR_SEGMENTS)}"`), root).ok, true);
+  assert.strictEqual(recognize(payload(`bash "${commandSpelling(nodePath.join(root, ...DOCTOR_SEGMENTS))}"`), root).ok, true);
 });
 
 test("isDoctorInvocation binds the REAL executing root, which the unit tree is not", () => {
