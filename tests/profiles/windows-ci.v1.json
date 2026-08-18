@@ -13,6 +13,13 @@
           "timeoutMs": 300000
         },
         {
+          "id": "autopilot-state-machine",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-state-machine.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
+        {
           "id": "deferred-lease-refresh",
           "runner": "bash",
           "path": "tests/structure/test-deferred-review-claim.sh",
@@ -333,13 +340,6 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
-          "id": "autopilot-state-machine",
-          "runner": "bash",
-          "path": "tests/structure/test-autopilot-state-machine.sh",
-          "args": [],
-          "timeoutMs": 900000
-        },
-        {
           "id": "review-worker-evidence-lease",
           "runner": "bash",
           "path": "tests/structure/test-review-worker-evidence-lease.sh",
@@ -351,7 +351,7 @@
           "runner": "bash",
           "path": "tests/structure/test-stop-enforcer-self-review-routing.sh",
           "args": [],
-          "timeoutMs": 1200000
+          "timeoutMs": 1500000
         }
       ]
     }
