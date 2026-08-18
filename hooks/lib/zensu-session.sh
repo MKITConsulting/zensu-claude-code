@@ -266,9 +266,9 @@ zensu_session_incompatible_runtime_model() {
 # the adoption repairs.
 #
 # The two are admitted on DIFFERENT grounds and the distinction is load-bearing:
-# the diagnostic writes nothing, while the adoption writes its own session's
-# record. See the header of hooks/lib/zensu-session-adopt.sh for that second
-# justification; do not fold them into one argument.
+# the diagnostic writes nothing, while the adoption WRITES — three classes, named
+# in the header of hooks/lib/zensu-session-adopt.sh, which is also where that
+# second justification lives. Do not fold the two arguments into one.
 #
 # The decision lives in zensu-doctor-invocation.js so all three Bash gates and
 # the all-tool capability gate share exactly one recognizer, and it derives the
@@ -324,7 +324,7 @@ zensu_doctor_allowed() {
   zensu_hook_is_main_principal "$payload" PreToolUse
 }
 
-# Three scopes, because the same emitter serves callers with very different
+# Four scopes, because the same emitter serves callers with very different
 # knowledge. A caller that already ruled out the RELAXABLE states may say so; a
 # caller that denies on any bind failure must NOT, or it tells a user in a
 # relaxable state that /zensu:doctor is denied when it is exactly the command
@@ -350,8 +350,11 @@ zensu_doctor_allowed() {
 # shape first. A manifest version is ordinary text as far as the record schema is
 # concerned (validateContext only requireText's it), and an unchecked value here
 # would let a crafted manifest inject a quote and rewrite the decision object.
-# A value that fails the check falls back to the unversioned narrowed wording:
-# losing two numbers is a worse message, never a wrong verdict.
+# A value that fails the check is SUBSTITUTED with `(unreadable)` and the lineage
+# wording is kept. Falling back to the narrowed scope instead would drop the
+# in-place remedy and tell the user to start a fresh session — the contradiction
+# this scope exists to remove. Losing two numbers is a worse message; losing the
+# remedy is a wrong one.
 ZENSU_SAFE_VERSION_RE='^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$'
 
 zensu_emit_hook_session_deny() {
@@ -364,12 +367,9 @@ zensu_emit_hook_session_deny() {
     # session — the contradiction this scope exists to remove.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    if true; then
-      printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
-        "$recorded" "$executing"
-      return
-    fi
-    scope=narrowed
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+      "$recorded" "$executing"
+    return
   fi
   if [ "$scope" = narrowed ]; then
     printf '%s\n' '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: the immutable Zensu session binding is unavailable or invalid, so this call cannot be attributed to a Session Control record. This is neither relaxable state — a session with no record at all, and a record whose recorded project root no longer exists, are both handled separately — so either a record exists and disagrees with the running plugin installation about something else, or a relaxable-state check could not be evaluated at all. The most common cause is a Zensu plugin change across a breaking version boundary that landed while this session was running: a compatible upgrade keeps serving the record, but a breaking one or a downgrade cannot, because the record stays bound to the installation the session started on and no session can be re-bound in place. Run /zensu:doctor, which stays reachable in this state and names the disagreement, then start a fresh Claude Code session before using stateful tools."}}'

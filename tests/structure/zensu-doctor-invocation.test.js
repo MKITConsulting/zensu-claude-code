@@ -1,7 +1,10 @@
 // Unit pins for hooks/lib/zensu-doctor-invocation.js — the doctor allowlist.
 //
-// Driven by tests/structure/test-doctor-reachability.sh, which pins the
-// end-to-end behavior through the four gates. This file pins what the shell
+// Driven by tests/structure/test-versioned-plugin-upgrade.sh (the AC-011 block),
+// which also pins the end-to-end behavior through every hook on the Bash matcher
+// (AC-C04) and the shell principal conjunct (FR-C03). Nothing else referenced
+// this file, which is how a constant rename once left it red while run-all.sh
+// stayed green. This file pins what the shell
 // layer structurally cannot reach: the refusal codes, the tokenizer's quoting
 // branches, the whitelist's edges, and the filesystem shapes (symlink, hard
 // link, directory) that a synthetic tree can express but a live plugin root

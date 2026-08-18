@@ -1073,7 +1073,7 @@ else
   check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
 fi
 
-# The discrimination test for AC-019: the recognizer must stay exactly this
+# The discrimination test for AC-C04: the recognizer must stay exactly this
 # narrow. An ordinary Bash command in the same state still denies, so an allow
 # above cannot have come from the bind succeeding.
 #
@@ -1127,7 +1127,10 @@ ADOPT_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$ADOPT_SESSION" CWD="$PROJECT" n
 # keeps this loop from silently covering three of four.
 LINEAGE_REASON_FAILURES=''
 ADOPT_ZENSU_PAYLOAD="$(bash_payload "$ADOPT_SESSION" 'zensu features list')"
-for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-bash-zensu-gate.sh; do
+# All FIVE deniers, including pre-reviewer-capability-gate.sh, which spells the
+# lineage cause in JS rather than through zensu_emit_hook_session_deny — without
+# it the whole branch could be deleted with this loop green.
+for reason_hook in pre-edit-tdd-reminder.sh pre-bash-source-write-gate.sh pre-write-secret-scan.sh pre-bash-zensu-gate.sh pre-reviewer-capability-gate.sh; do
   # Each gate gets a payload its own matcher accepts in production:
   # pre-bash-source-write-gate.sh is registered on `Bash` ONLY, so grading it with
   # an Edit payload would test a shape it never receives.

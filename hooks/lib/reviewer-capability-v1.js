@@ -465,11 +465,10 @@ function main() {
     // review-evidence leases, and carries its own justification in its header. A
     // remedy the user cannot invoke is not a remedy.
     //
-    // NOTE: this gate is the FIFTH denier in the incompatible-runtime state and
-    // the only one still on generic wording — `isRecognizedInvocation` is false
-    // for every non-Bash tool, so an Edit falls through to the deny below with no
-    // cause and no remedy. The four gates that emit `zensu_emit_hook_session_deny`
-    // carry the lineage text; this one does not. Stated rather than glossed.
+    // This gate is the FIFTH denier in the incompatible-runtime state, and the
+    // only one that does NOT route through `zensu_emit_hook_session_deny` —
+    // `isRecognizedInvocation` is false for every non-Bash tool, so an Edit
+    // reaches the catch below. It spells the same lineage cause itself there.
     if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
         && (hookSession.unregisteredSession(payload)
           || hookSession.orphanedProjectRootSession(payload)

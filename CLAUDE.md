@@ -291,10 +291,14 @@ previous version was not pruned.
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
 plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
-half is six separate obligations, and a port that takes only the core delta gets
+half is SEVEN separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
-deny scope at every gate that denies in this state, and the skill. `zensu-codex`,
+deny scope at every gate that denies in this state, the skill, and — easy to miss
+— a binder exporting a `privateRecordsDirectory` equivalent that applies the
+symlink/alias/permission/ownership checks, because the entry script resolves the
+records directory through it and never by hand-joining. A port that copies only
+the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
 Operator-facing accounts that must move with it: `docs/session-control.md`
@@ -391,9 +395,11 @@ belongs to this roster only because every gate that consults the two above must 
 to do about it too — and the answer is the same everywhere: keep denying. A workflow document
 is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
 one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
-`incompatible-runtime`, taking the two versions as positional arguments, and all four gates
-that can deny in that state emit it rather than the generic wording. A gate left on the
-generic text tells the user to start a fresh session while its sibling says the session can
+`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
+in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
+same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
+left on the generic text tells the user to start a fresh session while its sibling says the session can
 be repaired in place — two denies contradicting each other about the one bind failure that
 has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
 read the chain from an unbound session at all.

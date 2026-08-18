@@ -44,6 +44,15 @@ If the doctor row instead says the session has **no** record, or that the
 recorded **project root** no longer exists, this skill does not apply — those are
 different states with different remedies, and it will refuse.
 
+## Do NOT Use For
+
+- A session that is binding normally. If tools fail for another reason, that is
+  `/zensu:doctor`.
+- Clearing a review chain or granting a budget. The chain state survives adoption
+  untouched and is enforced again on the very next Stop.
+- Any bind failure other than the declared-incompatible lineage — the refusal
+  table above names each one and its own remedy.
+
 ## What This Skill Does
 
 The lineage rule is a judgement about DECLARED versions. It cannot see whether
@@ -140,22 +149,13 @@ command — read the message.
 row. The session is bound from the next tool call onward; do not tell the user to
 restart.
 
-## Phase 2: Invocation constraints
+## Invocation Constraints
 
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
 the two assignments above, `bash`, the script path in the executing installation,
 and at most the literal `--confirm`. Anything else — a second command, a
 different flag, a copy of the script — is denied. Emit the command exactly as
 written above; do not wrap it, redirect it, or chain anything onto it.
-
-## Do NOT Use For
-
-- A session that is binding normally. If tools fail for another reason, that is
-  `/zensu:doctor`.
-- Clearing a review chain or granting a budget. The chain state survives adoption
-  untouched and is enforced again on the very next Stop.
-- Any bind failure other than the declared-incompatible lineage — the refusal
-  table above names each one and its own remedy.
 
 ## Response Style
 

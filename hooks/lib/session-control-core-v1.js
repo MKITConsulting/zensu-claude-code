@@ -1603,7 +1603,11 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       return false;
     }
   };
-  if (!asideIsSafe()) return { discarded: 0, failed: entries.slice().sort(), unsafe: true };
+  // `unsafe` carries the whole diagnosis, exactly as the three source-unsafe
+  // returns do. Listing every entry as `failed` here would name leases the
+  // keep-branch would have left alone, and the reporter would print two
+  // contradictory warnings about the same sweep.
+  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: true };
   for (const name of entries.sort()) {
     // EVERY entry listRecords would reject, not only the `.json` ones: it fails
     // the whole set on an unexpected name, so a leftover `.tmp` from a killed
@@ -1623,7 +1627,9 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       continue;
     }
     try {
-      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
+      // No mkdir here: asideIsSafe() already created AND validated the directory.
+      // Re-creating it per entry would succeed silently on a link swapped in after
+      // the guard, moving the lease through it — the exact hazard the guard closes.
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {
@@ -1846,10 +1852,13 @@ function renderHostContext(contextInput) {
 }
 
 function workflowStateDirectory(projectRootInput) {
-  const projectRoot = canonicalDirectory(projectRootInput, 'project root');
-  const [zensuSegment, stateSegment] = WORKFLOW_STATE_SEGMENTS;
-  const zensuDirectory = ensureDescendantDirectory(projectRoot, path.join(projectRoot, zensuSegment));
-  return ensureDescendantDirectory(zensuDirectory, path.join(zensuDirectory, stateSegment));
+  // Reduced over the segment list rather than destructured: a third segment must
+  // not be silently dropped here while adoptionWorkflowStatePath's spread picks
+  // it up, which is exactly the split the shared constant exists to prevent.
+  return WORKFLOW_STATE_SEGMENTS.reduce(
+    (parent, segment) => ensureDescendantDirectory(parent, path.join(parent, segment)),
+    canonicalDirectory(projectRootInput, 'project root'),
+  );
 }
 
 function resolveWorkflowStateDirectory(options) {
@@ -2220,7 +2229,7 @@ function workflowStateLockTarget(options) {
   return {
     key,
     stateDirectory,
-    file: path.join(stateDirectory, `tdd-phase-${key}.json`),
+    file: path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`),
   };
 }
 
@@ -2281,7 +2290,7 @@ function mutateWorkflowState(options, mutation) {
 function initializeWorkflowState(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
-  const file = path.join(stateDirectory, `tdd-phase-${key}.json`);
+  const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
     if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
     const initial = stampWorkflowState({
