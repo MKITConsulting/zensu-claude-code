@@ -1300,12 +1300,18 @@ mkdir -p "$ADOPT_LEASE_DIR"
 # yields the MSYS spelling `/d/a/...`, so a fixture built from it never matched
 # and the keep-lease was swept with the rest: 4 set aside where 3 were expected.
 # Production leases are written from the same native value this renders.
-CANONICAL_BREAKING_ROOT="$(
-  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$SYNTHETIC_BREAKING_ROOT"
-)"
-CANONICAL_CANDIDATE_ROOT="$(
-  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$SYNTHETIC_CANDIDATE_ROOT"
-)"
+# Derived with fs.realpathSync.native, which is EXACTLY what canonicalDirectory
+# stores in the record — and what discardSupersededLeases compares a lease
+# against. Neither `pwd -P` nor zensu-host-path.sh produces that string on
+# Windows: the first yields the MSYS spelling `/d/a/...`, the second a
+# drive-qualified FORWARD-slash `D:/a/...`, while the record holds `D:\a\...`.
+# Both earlier spellings made the keep-lease fixture miss and be swept with the
+# rest — 4 set aside where 3 were expected.
+native_root() {
+  ROOT_IN="$1" node -e 'process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN))'
+}
+CANONICAL_BREAKING_ROOT="$(native_root "$SYNTHETIC_BREAKING_ROOT")"
+CANONICAL_CANDIDATE_ROOT="$(native_root "$SYNTHETIC_CANDIDATE_ROOT")"
 # The fixtures are shaped as listRecords would accept them — a `rel1_<32 hex>`
 # stem whose `lease_id` matches the filename — because the keep-branch mirrors
 # that acceptance. Stubs named `stale.json`/`current.json` would BOTH be swept,

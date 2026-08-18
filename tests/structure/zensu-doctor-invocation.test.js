@@ -47,10 +47,14 @@ fs.writeFileSync(nodePath.resolve(doctorPath), "#!/bin/bash\nexit 0\n");
 const adoptPath = commandSpelling(nodePath.join(pluginRoot, ...ADOPT_SEGMENTS));
 fs.writeFileSync(nodePath.resolve(adoptPath), "#!/bin/bash\nexit 0\n");
 
-const dataDir = nodePath.join(tmpRoot, "plugin-data");
-const projectDir = nodePath.join(tmpRoot, "project");
-fs.mkdirSync(dataDir, { recursive: true });
-fs.mkdirSync(projectDir, { recursive: true });
+// Same forward-slash rule as the script paths above, and for the same reason:
+// these two are ASSIGNMENT VALUES inside the command string, so a native win32
+// join puts backslashes through the charset whitelist and every positive case
+// fails on the character rule rather than on anything it means to test.
+const dataDir = commandSpelling(nodePath.join(tmpRoot, "plugin-data"));
+const projectDir = commandSpelling(nodePath.join(tmpRoot, "project"));
+fs.mkdirSync(nodePath.resolve(dataDir), { recursive: true });
+fs.mkdirSync(nodePath.resolve(projectDir), { recursive: true });
 
 const payload = (command, toolName = "Bash") => ({
   hook_event_name: "PreToolUse",
