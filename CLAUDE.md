@@ -1004,8 +1004,9 @@ the label is acceptable, losing the finding is not.
 **The model-facing reason names only `~/.claude/settings.json`.** The project-local
 `.claude/settings.local.json` is a path the agent itself can write, and naming it
 beside the exact rule that grants the refused capability is an invitation that prose
-alone would have to talk it out of. The user-facing doctor row and the docs carry the
-fuller form.
+alone would have to talk it out of. The `/zensu:doctor` row withholds it for the SAME
+reason — that row is read by the model too, so "user-facing" does not make it safe.
+Only the docs carry the fuller form.
 
 **Operator-facing accounts that must move with the markers, the block reason, and
 the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
