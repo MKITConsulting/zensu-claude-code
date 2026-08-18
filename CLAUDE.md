@@ -283,10 +283,16 @@ previous version was not pruned.
   doctor report). Identical alternation, deliberate hand-copy; keep them in step.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
-  ownership predicate that `review-evidence-lease-v1.js` owns. The dependency
-  runs the other way (that module requires the binder, which requires this core),
-  so it is a copy rather than a call, and the sweep's `readdir` failure is
-  swallowed — a layout change makes it a SILENT no-op, not an error.
+  ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
+  destination guard landed — that module's `ensurePrivateDirectory` policy and its
+  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
+  it looks: a core -> lease CALL would cycle (that module requires the binder,
+  which requires this core), but an ENTRY-POINT seam would not, because
+  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
+  that it moves the sweep from the core half to an eighth host obligation. If this
+  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
+  branch is also the silent one: it cannot tell "no lease was ever minted" from a
+  layout that moved, so a layout change makes the sweep a SILENT no-op.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`

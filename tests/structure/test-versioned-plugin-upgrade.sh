@@ -393,6 +393,34 @@ done
 # being a general escape.
 DOCTOR_CMD="CLAUDE_PLUGIN_DATA=\"$SHARED_DATA\" CLAUDE_PROJECT_DIR=\"$PROJECT\" bash \"$SYNTHETIC_EXISTING_ROOT/hooks/lib/zensu-doctor.sh\""
 
+bash_matcher_hooks() {
+  # ONE spelling of "which hooks match the Bash tool". A matcher is a REGEX, and
+  # it is ANCHORED here: an exact-string filter silently drops the ".*" capability
+  # gate — the hook that is decision-bearing for a Bash payload — and any future
+  # "Bash|Edit" alternation, so the caller would report a working feature while
+  # never testing the gate that decides it. A malformed regex falls back to exact
+  # string equality rather than to "matches everything".
+  HOOKS_FILE="$1" node -e '
+    const fs = require("node:fs");
+    const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
+    const names = new Set();
+    for (const entry of config.hooks?.PreToolUse || []) {
+      let matches = false;
+      try {
+        matches = new RegExp(`^(?:${entry.matcher ?? ".*"})$`).test("Bash");
+      } catch {
+        matches = entry.matcher === "Bash";
+      }
+      if (!matches) continue;
+      for (const hook of entry.hooks || []) {
+        const found = /hooks\/([A-Za-z0-9._-]+\.sh)/.exec(String(hook.command || ""));
+        if (found) names.add(found[1]);
+      }
+    }
+    process.stdout.write([...names].sort().join("\n"));
+  '
+}
+
 bash_payload() {
   EVENT=PreToolUse SESSION="$1" CWD="$PROJECT" CMD="$2" AGENT="${3:-}" node -e '
     const payload = {
@@ -1015,24 +1043,10 @@ fi
 # a hook added later is covered without editing this check.
 ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
-ADOPT_MATCHER_HOOKS="$(
-  HOOKS_FILE="$SYNTHETIC_BREAKING_ROOT/hooks/hooks.json" node -e '
-    const fs = require("node:fs");
-    const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
-    const names = new Set();
-    for (const entry of config.hooks?.PreToolUse || []) {
-      let matches = false;
-      try { matches = new RegExp(entry.matcher || ".*").test("Bash"); } catch { matches = true; }
-      if (!matches) continue;
-      for (const hook of entry.hooks || []) {
-        const command = String(hook.command || "");
-        const found = command.match(/hooks\/[A-Za-z0-9._-]+\.sh/);
-        if (found) names.add(found[0].slice("hooks/".length));
-      }
-    }
-    process.stdout.write([...names].sort().join("\n"));
-  '
-)"
+# The SAME enumerator Part B uses, called rather than re-spelled: two copies
+# already disagreed on anchoring, and a matcher regex is exactly the thing whose
+# semantics must not drift between two checks that both claim "every Bash hook".
+ADOPT_MATCHER_HOOKS="$(bash_matcher_hooks "$SYNTHETIC_BREAKING_ROOT/hooks/hooks.json")"
 # The recognizer refuses on win32 BY DESIGN (the MSYS spelling gap the module
 # header documents), so the expected verdict is platform-dependent — exactly as
 # Part A branches for the diagnostic. Hardcoding `allow` would make this check
@@ -1095,12 +1109,15 @@ fi
 # with no caller at all in the first place.
 gate_reason_from() {
   local root="$1" hook="$2" payload="$3" out="$TMP/reason-gate.out"
-  # ZENSU_API_URL is neutralized: a local backend makes pre-bash-zensu-gate.sh
-  # drop every invocation and exit BEFORE its bind, so the reason would be empty
-  # for a reason unrelated to the scope under test.
+  # ZENSU_API_URL is neutralized and nothing else is: a local backend makes
+  # pre-bash-zensu-gate.sh drop every invocation and exit BEFORE its bind, so the
+  # reason would be empty for a cause unrelated to the scope under test.
+  # ZENSU_MCP_GATE deliberately is NOT neutralized — that gate reads it from the
+  # command TEXT, not the ambient environment, and the one ambient read sits in a
+  # branch the lineage state never reaches, so setting it here would buy nothing.
   printf '%s' "$payload" \
     | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= \
       bash "$root/hooks/$hook" >"$out" 2>/dev/null
   OUT_FILE="$out" node -e '
     const fs = require("node:fs");
@@ -1179,6 +1196,13 @@ recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm
 # check short-circuits before the recognizer — so it cannot pin the INDEPENDENT
 # shell conjunct in zensu_doctor_allowed. Grade it through two Bash gates too.
 for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
+  # Positive control on the SAME bare shape first: without it, a recognizer that
+  # stopped accepting the bare form would make both gates deny for the wrong
+  # reason and the principal assertion below would stay green.
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != allow ]; then
+    RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
+  fi
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
       "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"

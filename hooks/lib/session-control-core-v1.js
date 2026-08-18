@@ -1425,6 +1425,12 @@ const ADOPTION_REFUSALS = {
 // manifest could steer the superseded record anywhere in the tree.
 const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 
+// A hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js. That module cannot be
+// required from here (it requires the binder, which requires this core), and the
+// sweep has to agree with its listRecords about which entries are valid — an
+// entry this predicate keeps but listRecords rejects leaves the wedge intact.
+const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
+
 function adoptionRefusal(reason) {
   return { ok: false, reason };
 }
@@ -1621,8 +1627,16 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     }
     // An unreadable lease is moved aside too: listRecords would fail on it just
     // as hard, and leaving it would defeat the whole point of this sweep.
-    if (name.endsWith('.json')
+    // KEEP only what listRecords would ACCEPT. It rejects a stem that is not a
+    // lease id and a lease_id that disagrees with its filename, both before it
+    // ever looks at plugin_root — so keeping on plugin_root alone leaves entries
+    // that still fail the whole set, and the wedge survives a clean-looking
+    // adoption. The id shape is a hand-copy of LEASE_ID_RE in
+    // review-evidence-lease-v1.js; keep the two in step.
+    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
+    if (LEASE_RECORD_ID_RE.test(leaseId)
       && record && typeof record === 'object'
+      && record.lease_id === leaseId
       && record.plugin_root === executingPluginRoot) {
       continue;
     }
