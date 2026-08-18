@@ -880,6 +880,26 @@ Five things are coupled and must move together:
   `permissions.allow` for the very spawn it wants. Change the workflow-document name and
   the binding silently stops matching; `P1qq` is the pin.
 
+**The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
+Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
+at **985846 ms** and **1274496 ms** — a 29% spread on the same GitHub runner class, so a
+single sample here says nothing about headroom. Budget against the HIGH figure: at
+`timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
+its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
+was killed by it, which is exactly the failure this range exists to prevent.
+
+**The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
+`profileTimeoutMs` is 1800000 and every profile is pinned to that same value
+(`windows-ci-contract.test.js`), which is itself pinned against the job's
+`timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
+receives `profileTimeoutMs` MINUS everything its shard already spent. When
+`autopilot-state-machine` (554832 ms) still shared this shard, the routing suite started
+with 1138363 ms and died there while its own cap read 1200000 ms, so raising the cap
+alone would have changed nothing. Do NOT read a suite's `timeoutMs` as its deadline;
+read the shard's remaining budget. Note also that summing a shard's `timeoutMs` values
+and comparing that to `profileTimeoutMs` proves nothing — EVERY shard exceeds it by
+design, because the per-suite values are individual caps and not a shared budget.
+
 **Three conditions decide a refusal, and no one of them is sufficient.** (1) the
 `tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
 `subagent_type` is the reviewer; (2) the host's own `is_error === true`; (3) the
