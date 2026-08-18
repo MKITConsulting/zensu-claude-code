@@ -856,7 +856,12 @@ if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer
   check "the recognizer unit suite passes (driven from here — nothing else referenced it)" PASS
 else
   check "the recognizer unit suite passes (driven from here — nothing else referenced it)" FAIL
-  sed -n '1,40p' "$TMP/recognizer-unit.out" 2>/dev/null
+  # The FAILING lines, not the first forty. node --test emits every passing case
+  # before any failure, so a head-style dump of a 26-case suite showed only
+  # successes and the verdict never reached the log — exactly what happened on
+  # windows-shard-2, where it cost a CI round to notice the dump was truncated.
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/recognizer-unit.out" 2>/dev/null | head -40
 fi
 
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"

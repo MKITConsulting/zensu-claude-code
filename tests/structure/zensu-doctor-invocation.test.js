@@ -26,6 +26,7 @@ const modulePath = nodePath.join(__dirname, "..", "..", "hooks", "lib", "zensu-d
 const {
   recognize, recognizeAny, isDoctorInvocation, isRecognizedInvocation, executingPluginRoot,
   ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, ADOPT_SEGMENTS, RECOGNIZED,
+  PLATFORM_SUPPORTED,
 } = require(modulePath);
 
 // realpathSync.NATIVE, not realpathSync: on Windows the plain form leaves an 8.3
@@ -67,7 +68,12 @@ fs.mkdirSync(nodePath.resolve(projectDir), { recursive: true });
 // name the offenders. This mirrors the module's own SAFE_CHARACTER by hand and is
 // a diagnostic, never a contract pin: the module owns that rule.
 const UNSAFE_IN_FIXTURE = [...new Set(
-  [tmpRoot, pluginRoot, dataDir, projectDir]
+  // Exactly the values that ENTER a command string, all of which already went
+  // through commandSpelling. tmpRoot and pluginRoot are deliberately absent:
+  // they are native paths that never appear in a command, so including them made
+  // this guard fire on its own backslashes and fail the suite it was written to
+  // explain — the diagnostic became the defect it was meant to describe.
+  [doctorPath, adoptPath, dataDir, projectDir]
     .join("")
     .split("")
     .filter((c) => c !== " " && c !== "\t" && c !== '"' && !/^[A-Za-z0-9_./:=+@,-]$/.test(c)),
@@ -252,11 +258,18 @@ test("on this POSIX host an MSYS-looking path stays an ordinary path", () => {
   assert.strictEqual(recognize(payload(`bash "${commandSpelling(nodePath.join(root, ...DOCTOR_SEGMENTS))}"`), root).ok, true);
 });
 
+// PLATFORM_SUPPORTED is the documented win32 gap, and the two predicates below
+// are the only cases here that go through it — recognize() itself is platform
+// agnostic, which is why every other case is host-neutral. On win32 the module
+// refuses outright by design (see its header and docs/session-control.md), so
+// asserting `true` there would assert against the shipped contract. Both halves
+// are pinned rather than skipped: the refusal is as much a contract as the
+// allowance, and a skip would hide a regression that flipped it.
 test("isDoctorInvocation binds the REAL executing root, which the unit tree is not", () => {
   assert.strictEqual(executingPluginRoot(), nodePath.resolve(__dirname, "..", ".."));
   assert.strictEqual(isDoctorInvocation(payload(`bash "${doctorPath}"`)), false);
-  const live = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
-  assert.strictEqual(isDoctorInvocation(payload(`bash "${live}"`)), true);
+  const live = commandSpelling(nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS));
+  assert.strictEqual(isDoctorInvocation(payload(`bash "${live}"`)), PLATFORM_SUPPORTED);
 });
 
 // The SECOND recognized script. It is admitted on its own justification and — the
@@ -286,10 +299,13 @@ test("the adoption declares exactly one argument and refuses every other shape",
 // write. RECOGNIZED stays at two entries for the same reason.
 test("isDoctorInvocation never admits the write, and the recognized list stays at two", () => {
   const liveAdopt = commandSpelling(nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS));
-  const liveDoctor = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
+  const liveDoctor = commandSpelling(nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS));
+  // Unconditional: the doctor predicate must NEVER admit the write, and that
+  // holds on every host — on win32 because nothing is admitted at all.
   assert.strictEqual(isDoctorInvocation(payload(`bash "${liveAdopt}" --confirm`)), false);
-  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveAdopt}" --confirm`)), true);
-  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), true);
+  // Platform-gated for the same reason as the case above.
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveAdopt}" --confirm`)), PLATFORM_SUPPORTED);
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), PLATFORM_SUPPORTED);
   assert.deepStrictEqual(Object.keys(RECOGNIZED).sort(), ["adopt", "doctor"]);
   assert.deepStrictEqual(RECOGNIZED.doctor.args, []);
   assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--confirm"]);
