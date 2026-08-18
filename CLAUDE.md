@@ -307,6 +307,18 @@ records directory through it and never by hand-joining. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
+It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
+and four session lifecycles, but no Windows wall clock was taken — unlike the two
+suites this file records a measured figure for. Budget against a measurement
+before trusting the headroom. The caveat lives here and NOT in the manifest:
+`tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
+`{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
+EVERY Windows shard before a single suite runs — a `note` field there is a
+CI-wide outage, not documentation. Note also that shard-2's `profileTimeoutMs` is
+1800000, so a run genuinely approaching 900 s surfaces as a profile abort rather
+than the suite `TIMED_OUT` this ceiling exists to make visible.
+
 Operator-facing accounts that must move with it: `docs/session-control.md`
 "Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and
 `skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`

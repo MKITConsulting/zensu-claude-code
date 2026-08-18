@@ -604,32 +604,7 @@ fi
 
 # Every hook on the Bash matcher has to agree, for the same reason Part A
 # enumerates them: a deny from any one of them wins.
-BASH_MATCHER_HOOKS="$(
-  HOOKS_FILE="$SYNTHETIC_COMPATIBLE_ROOT/hooks/hooks.json" node -e '
-    const fs = require("node:fs");
-    const config = JSON.parse(fs.readFileSync(process.env.HOOKS_FILE, "utf8"));
-    const names = new Set();
-    // A matcher is a REGEX, and a deny from any hook that matches "Bash" wins.
-    // An exact-string filter silently drops the ".*" capability gate — the very
-    // hook Part A above proves is decision-bearing for a Bash payload — and any
-    // future "Bash|Edit" alternation, so the check would report a working
-    // feature while never testing the gate that decides it.
-    for (const entry of config.hooks?.PreToolUse || []) {
-      let matches = false;
-      try {
-        matches = new RegExp(`^(?:${entry.matcher})$`).test("Bash");
-      } catch (_error) {
-        matches = entry.matcher === "Bash";
-      }
-      if (!matches) continue;
-      for (const hook of entry.hooks || []) {
-        const match = /hooks\/([A-Za-z0-9._-]+\.sh)/.exec(hook.command || "");
-        if (match) names.add(match[1]);
-      }
-    }
-    process.stdout.write([...names].join("\n"));
-  '
-)"
+BASH_MATCHER_HOOKS="$(bash_matcher_hooks "$SYNTHETIC_COMPATIBLE_ROOT/hooks/hooks.json")"
 if [ -z "$BASH_MATCHER_HOOKS" ]; then
   check "AC-008 every Bash-matcher hook allows under a compatible upgrade (no hooks enumerated)" FAIL
 else
@@ -1112,12 +1087,13 @@ gate_reason_from() {
   # ZENSU_API_URL is neutralized and nothing else is: a local backend makes
   # pre-bash-zensu-gate.sh drop every invocation and exit BEFORE its bind, so the
   # reason would be empty for a cause unrelated to the scope under test.
-  # ZENSU_MCP_GATE deliberately is NOT neutralized — that gate reads it from the
-  # command TEXT, not the ambient environment, and the one ambient read sits in a
-  # branch the lineage state never reaches, so setting it here would buy nothing.
+  # ZENSU_MCP_GATE is neutralized too. It IS read ambiently — pre-bash-zensu-gate.sh
+  # and pre-bash-source-write-gate.sh both honour the exported escape — and a
+  # developer running the suite from a shell that exported it would get an empty
+  # reason and a failure misdiagnosed as the scope being gone.
   printf '%s' "$payload" \
     | CLAUDE_PLUGIN_ROOT="$root" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= \
+      CLAUDE_PROJECT_DIR="$PROJECT" ZENSU_API_URL= ZENSU_MCP_GATE= \
       bash "$root/hooks/$hook" >"$out" 2>/dev/null
   OUT_FILE="$out" node -e '
     const fs = require("node:fs");
@@ -1199,8 +1175,11 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # Positive control on the SAME bare shape first: without it, a recognizer that
   # stopped accepting the bare form would make both gates deny for the wrong
   # reason and the principal assertion below would stay green.
+  # Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer
+  # refuses on win32 by design, so a fixed expectation is unpassable on the
+  # Windows shard — the same defect class AC-C04 was corrected for.
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
-      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != allow ]; then
+      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != "$ADOPT_EXPECTED" ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
   fi
   if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
@@ -1307,8 +1286,24 @@ ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_K
 mkdir -p "$ADOPT_LEASE_DIR"
 CANONICAL_BREAKING_ROOT="$(cd -P -- "$SYNTHETIC_BREAKING_ROOT" && pwd -P)"
 CANONICAL_CANDIDATE_ROOT="$(cd -P -- "$SYNTHETIC_CANDIDATE_ROOT" && pwd -P)"
-printf '{"plugin_root":"%s"}\n' "$CANONICAL_CANDIDATE_ROOT" > "$ADOPT_LEASE_DIR/stale.json"
-printf '{"plugin_root":"%s"}\n' "$CANONICAL_BREAKING_ROOT" > "$ADOPT_LEASE_DIR/current.json"
+# The fixtures are shaped as listRecords would accept them — a `rel1_<32 hex>`
+# stem whose `lease_id` matches the filename — because the keep-branch mirrors
+# that acceptance. Stubs named `stale.json`/`current.json` would BOTH be swept,
+# and the check would then pass or fail for a reason unrelated to plugin_root.
+LEASE_KEEP_ID="rel1_$(printf 'a%.0s' $(seq 1 32))"
+LEASE_STALE_ID="rel1_$(printf 'b%.0s' $(seq 1 32))"
+LEASE_MISMATCH_ID="rel1_$(printf 'c%.0s' $(seq 1 32))"
+printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_STALE_ID" "$CANONICAL_CANDIDATE_ROOT" \
+  > "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json"
+printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_KEEP_ID" "$CANONICAL_BREAKING_ROOT" \
+  > "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json"
+# Two entries that exercise the conjuncts the plugin_root check alone cannot: a
+# body whose lease_id disagrees with its filename, and a leftover .tmp of the
+# kind a killed lease write leaves behind. listRecords rejects both, so both must
+# be swept even though one names the CURRENT installation.
+printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_STALE_ID" "$CANONICAL_BREAKING_ROOT" \
+  > "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json"
+printf '{"lease_id":"%s"}\n' "$LEASE_KEEP_ID" > "$ADOPT_LEASE_DIR/.partial.tmp"
 
 ADOPT_CONFIRM_OUT="$TMP/adopt-confirm.out"
 if CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
@@ -1361,15 +1356,20 @@ fi
 
 # AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
-if grep -qF 'leases set aside : 1' "$ADOPT_CONFIRM_OUT" \
+if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
-    && [ ! -e "$ADOPT_LEASE_DIR/stale.json" ] \
-    && [ -f "$ADOPT_LEASE_ASIDE/stale.json" ] \
-    && [ -f "$ADOPT_LEASE_DIR/current.json" ]; then
-  check "AC-C08 the stale lease is set aside, the current one is left in place" PASS
+    && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json" ] \
+    && [ -f "$ADOPT_LEASE_ASIDE/$LEASE_STALE_ID.json" ] \
+    && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json" ] \
+    && [ -f "$ADOPT_LEASE_ASIDE/$LEASE_MISMATCH_ID.json" ] \
+    && [ ! -e "$ADOPT_LEASE_DIR/.partial.tmp" ] \
+    && [ -f "$ADOPT_LEASE_ASIDE/.partial.tmp" ] \
+    && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
+  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" PASS
 else
-  check "AC-C08 the stale lease is set aside, the current one is left in place" FAIL
+  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" FAIL
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
+  ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
 fi
 
 # The point of the whole feature: the session works again, in place. Both are

@@ -135,8 +135,7 @@
           "runner": "bash",
           "path": "tests/structure/test-versioned-plugin-upgrade.sh",
           "args": [],
-          "timeoutMs": 900000,
-      "note": "UNMEASURED on Windows. Raised from 600000 when Part C added roughly five synthetic installs and four session lifecycles; unlike the two suites CLAUDE.md records a measured figure for, no Windows wall clock was taken for this one. Budget against a measurement before trusting the headroom. Note also that shard-2 profileTimeoutMs is 1800000, so a run genuinely approaching 900s surfaces as a profile abort rather than the suite TIMED_OUT this ceiling is meant to make visible."
+          "timeoutMs": 900000
         }
       ]
     },
