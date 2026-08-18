@@ -32,12 +32,20 @@ const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zens
 process.on("exit", () => { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) {} });
 
 const pluginRoot = nodePath.join(tmpRoot, "plugin");
-const doctorPath = nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS);
-fs.mkdirSync(nodePath.dirname(doctorPath), { recursive: true });
-fs.writeFileSync(doctorPath, "#!/bin/bash\nexit 0\n");
+// The COMMAND spelling is always forward-slash, on every host. The recognizer
+// refuses a backslash outright — `\\` is outside SAFE_CHARACTER — so a native
+// win32 join would make every positive case here fail for the charset rule
+// instead of exercising the parser, which is what it did until this line
+// existed. path.resolve() normalizes both spellings identically on win32, so
+// the comparison in scriptPathViolation is unaffected; only filesystem calls
+// keep the native path.
+const commandSpelling = (value) => value.split(nodePath.sep).join("/");
+const doctorPath = commandSpelling(nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS));
+fs.mkdirSync(nodePath.dirname(nodePath.resolve(doctorPath)), { recursive: true });
+fs.writeFileSync(nodePath.resolve(doctorPath), "#!/bin/bash\nexit 0\n");
 
-const adoptPath = nodePath.join(pluginRoot, ...ADOPT_SEGMENTS);
-fs.writeFileSync(adoptPath, "#!/bin/bash\nexit 0\n");
+const adoptPath = commandSpelling(nodePath.join(pluginRoot, ...ADOPT_SEGMENTS));
+fs.writeFileSync(nodePath.resolve(adoptPath), "#!/bin/bash\nexit 0\n");
 
 const dataDir = nodePath.join(tmpRoot, "plugin-data");
 const projectDir = nodePath.join(tmpRoot, "project");
@@ -249,7 +257,7 @@ test("the adoption declares exactly one argument and refuses every other shape",
 // read-only diagnostic" has to be able to say exactly that without admitting the
 // write. RECOGNIZED stays at two entries for the same reason.
 test("isDoctorInvocation never admits the write, and the recognized list stays at two", () => {
-  const liveAdopt = nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS);
+  const liveAdopt = commandSpelling(nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS));
   const liveDoctor = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
   assert.strictEqual(isDoctorInvocation(payload(`bash "${liveAdopt}" --confirm`)), false);
   assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveAdopt}" --confirm`)), true);

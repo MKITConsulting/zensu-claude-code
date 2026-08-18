@@ -1050,7 +1050,17 @@ done
 ADOPT_GATE_FAILURES=''
 while IFS= read -r hook_name; do
   [ -n "$hook_name" ] || continue
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$ADOPT_EXPECTED" ]; then
+  # pre-bash-zensu-gate.sh is the ONE exception on win32, and not because of the
+  # recognizer: it exits 0 before it ever binds when the command carries no
+  # `zensu` CLI verb (`[ -z "$INVOCATIONS" ] && exit 0`), and the adoption command
+  # carries none. So it allows on EVERY platform, for a reason that has nothing to
+  # do with the MSYS spelling gap the other three are refused by. Expecting deny
+  # from it graded the early exit as a regression.
+  hook_expected="$ADOPT_EXPECTED"
+  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
+    hook_expected=allow
+  fi
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_BASH_PAYLOAD")" != "$hook_expected" ]; then
     ADOPT_GATE_FAILURES="$ADOPT_GATE_FAILURES $hook_name"
   fi
 done <<EOF
@@ -1284,8 +1294,18 @@ CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
 ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
 ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
 mkdir -p "$ADOPT_LEASE_DIR"
-CANONICAL_BREAKING_ROOT="$(cd -P -- "$SYNTHETIC_BREAKING_ROOT" && pwd -P)"
-CANONICAL_CANDIDATE_ROOT="$(cd -P -- "$SYNTHETIC_CANDIDATE_ROOT" && pwd -P)"
+# Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
+# recorded plugin_root against the value in the adopted RECORD, which Session
+# Control stores host-natively — `D:\a\...` on Windows. `pwd -P` in Git Bash
+# yields the MSYS spelling `/d/a/...`, so a fixture built from it never matched
+# and the keep-lease was swept with the rest: 4 set aside where 3 were expected.
+# Production leases are written from the same native value this renders.
+CANONICAL_BREAKING_ROOT="$(
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$SYNTHETIC_BREAKING_ROOT"
+)"
+CANONICAL_CANDIDATE_ROOT="$(
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$SYNTHETIC_CANDIDATE_ROOT"
+)"
 # The fixtures are shaped as listRecords would accept them — a `rel1_<32 hex>`
 # stem whose `lease_id` matches the filename — because the keep-branch mirrors
 # that acceptance. Stubs named `stale.json`/`current.json` would BOTH be swept,
@@ -1293,16 +1313,26 @@ CANONICAL_CANDIDATE_ROOT="$(cd -P -- "$SYNTHETIC_CANDIDATE_ROOT" && pwd -P)"
 LEASE_KEEP_ID="rel1_$(printf 'a%.0s' $(seq 1 32))"
 LEASE_STALE_ID="rel1_$(printf 'b%.0s' $(seq 1 32))"
 LEASE_MISMATCH_ID="rel1_$(printf 'c%.0s' $(seq 1 32))"
-printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_STALE_ID" "$CANONICAL_CANDIDATE_ROOT" \
-  > "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json"
-printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_KEEP_ID" "$CANONICAL_BREAKING_ROOT" \
-  > "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json"
+# Written through node, never printf: a native Windows root carries backslashes,
+# and splicing one into JSON by hand produces an invalid document. The sweep would
+# then fail to parse it, treat it as unreadable and set it aside — the keep-lease
+# would "pass" its move for the wrong reason and the count would still be wrong.
+write_lease() {
+  LEASE_FILE="$1" LEASE_ID="$2" LEASE_ROOT="$3" node -e '
+    const fs = require("node:fs");
+    fs.writeFileSync(process.env.LEASE_FILE, JSON.stringify({
+      lease_id: process.env.LEASE_ID,
+      plugin_root: process.env.LEASE_ROOT,
+    }) + "\n");
+  '
+}
+write_lease "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json" "$LEASE_STALE_ID" "$CANONICAL_CANDIDATE_ROOT"
+write_lease "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" "$LEASE_KEEP_ID" "$CANONICAL_BREAKING_ROOT"
 # Two entries that exercise the conjuncts the plugin_root check alone cannot: a
 # body whose lease_id disagrees with its filename, and a leftover .tmp of the
 # kind a killed lease write leaves behind. listRecords rejects both, so both must
 # be swept even though one names the CURRENT installation.
-printf '{"lease_id":"%s","plugin_root":"%s"}\n' "$LEASE_STALE_ID" "$CANONICAL_BREAKING_ROOT" \
-  > "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json"
+write_lease "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json" "$LEASE_STALE_ID" "$CANONICAL_BREAKING_ROOT"
 printf '{"lease_id":"%s"}\n' "$LEASE_KEEP_ID" > "$ADOPT_LEASE_DIR/.partial.tmp"
 
 ADOPT_CONFIRM_OUT="$TMP/adopt-confirm.out"
