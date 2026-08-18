@@ -286,6 +286,19 @@ function bindingLine() {
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
         + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + env.ZDOC_BINDING_PROJECT_ROOT + ')' : '')
         + ' — a deleted or recycled worktree took the workflow state with it, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session');
+    // The record is INTACT and only the runtime serving it declares an
+    // incompatible lineage — a plugin update that landed mid-session. Before this
+    // row existed the state fell through to `unbound` above, whose line asserts
+    // "no valid Session Control record": false, and it sends the user hunting for
+    // a record sitting intact in plugin data. Naming both versions is what makes
+    // the cause checkable rather than a claim the user has to take on faith, and
+    // this is the only binding row whose remedy repairs the session in place.
+    case 'incompatible-runtime':
+      return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
+        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          : '')
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:

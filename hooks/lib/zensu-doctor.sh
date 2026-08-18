@@ -154,6 +154,11 @@ fi
 # Injectable alongside ZDOC_BINDING, and empty for every verdict except
 # orphaned-project-root, which is the only one that has a path to report.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
+# Same contract for the version pair: empty for every verdict except
+# incompatible-runtime, the only one that has two versions to name.
+ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
+ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
+ZDOC_BINDING_VERSIONS=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
   if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
     ZDOC_BINDING=unknown
@@ -179,12 +184,47 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
     if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
       ZDOC_BINDING=orphaned-project-root
     else
-      ZDOC_BINDING=unbound
+      # The SECOND narrow follow-up, asked only after the orphan question and
+      # never before it. A record can be both orphaned and lineage-incompatible;
+      # the vanished root is the heavier diagnosis and the one whose remedy is
+      # different, so it wins. Asking in the other order would report a repairable
+      # lineage state for a session whose workflow document is already gone.
+      # The shape guard runs INSIDE this subshell, where the library that owns
+      # ZENSU_SAFE_VERSION_RE is sourced — the doctor's own shell never sees that
+      # variable, and under `set -u` referencing it out here aborts the branch and
+      # silently falls back to the wrong row. Same guard the deny path applies,
+      # and for the same reason: a manifest version is validated only by
+      # requireText, and this pair is rendered verbatim into the terminal and into
+      # the model's context by the doctor skill. A pair that fails the shape is
+      # dropped, not printed — losing two numbers is a worse message, never a
+      # wrong one, and the row still names the state.
+      ZDOC_BINDING_VERSIONS="$(
+        # shellcheck disable=SC1090
+        source "$DIR/zensu-session.sh" >/dev/null 2>&1 || exit 1
+        zdoc_pair="$(zensu_session_incompatible_runtime_model)" || exit 1
+        [ -n "$zdoc_pair" ] || exit 1
+        zdoc_recorded="${zdoc_pair%%$'\t'*}"
+        zdoc_executing="${zdoc_pair##*$'\t'}"
+        if [[ "$zdoc_recorded" =~ $ZENSU_SAFE_VERSION_RE ]] \
+          && [[ "$zdoc_executing" =~ $ZENSU_SAFE_VERSION_RE ]]; then
+          printf '%s\t%s' "$zdoc_recorded" "$zdoc_executing"
+        else
+          printf '\t'
+        fi
+      )" || ZDOC_BINDING_VERSIONS=""
+      if [ -n "$ZDOC_BINDING_VERSIONS" ]; then
+        ZDOC_BINDING=incompatible-runtime
+        ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
+        ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
+      else
+        ZDOC_BINDING=unbound
+      fi
     fi
   fi
 fi
 
-export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT
+export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
+  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

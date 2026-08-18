@@ -143,12 +143,22 @@ zensu_hook_enabled mcpGate || exit 0
 
 source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
 if ! zensu_bind_hook_session "$INPUT"; then
-  # The read-only diagnostic is reachable in EVERY bind failure, not only the two
-  # relaxable ones — including a record that exists and disagrees, which is what
-  # a mid-session plugin upgrade produces. Denying it there put /zensu:doctor
-  # behind the very defect it reports. It stays a single recognized command for
-  # the interactive thread; everything else in this branch denies as before.
+  # The two recognized commands are reachable in EVERY bind failure, not only the
+  # two relaxable ones — including a record that exists and disagrees, which is
+  # what a mid-session plugin upgrade produces. Denying them there put
+  # /zensu:doctor behind the very defect it reports and left the repair
+  # unreachable with it. Everything else in this branch denies as before.
   if zensu_doctor_allowed "$INPUT"; then
+    exit 0
+  fi
+  # A deny still has to say WHY. The lineage state is the one bind failure with a
+  # remedy that works in place, so it gets its own reason naming both versions
+  # instead of the generic "start a fresh session". stdout is the decision
+  # channel here, so the predicate's own output is captured, never leaked.
+  if ZENSU_LINEAGE="$(zensu_session_incompatible_runtime "$INPUT")" \
+    && [ -n "$ZENSU_LINEAGE" ]; then
+    zensu_emit_hook_session_deny incompatible-runtime \
+      "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
     exit 0
   fi
   zensu_emit_hook_session_deny

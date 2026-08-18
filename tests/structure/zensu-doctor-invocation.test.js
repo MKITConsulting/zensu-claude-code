@@ -1,7 +1,10 @@
 // Unit pins for hooks/lib/zensu-doctor-invocation.js — the doctor allowlist.
 //
-// Driven by tests/structure/test-doctor-reachability.sh, which pins the
-// end-to-end behavior through the four gates. This file pins what the shell
+// Driven by tests/structure/test-versioned-plugin-upgrade.sh (the AC-011 block),
+// which also pins the end-to-end behavior through every hook on the Bash matcher
+// (AC-C04) and the shell principal conjunct (FR-C03). Nothing else referenced
+// this file, which is how a constant rename once left it red while run-all.sh
+// stayed green. This file pins what the shell
 // layer structurally cannot reach: the refusal codes, the tokenizer's quoting
 // branches, the whitelist's edges, and the filesystem shapes (symlink, hard
 // link, directory) that a synthetic tree can express but a live plugin root
@@ -21,22 +24,61 @@ const nodePath = require("node:path");
 
 const modulePath = nodePath.join(__dirname, "..", "..", "hooks", "lib", "zensu-doctor-invocation.js");
 const {
-  recognize, isDoctorInvocation, executingPluginRoot,
-  ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS,
+  recognize, recognizeAny, isDoctorInvocation, isRecognizedInvocation, executingPluginRoot,
+  ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, ADOPT_SEGMENTS, RECOGNIZED,
 } = require(modulePath);
 
-const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zensu-doctor-invocation-"));
+// realpathSync.NATIVE, not realpathSync: on Windows the plain form leaves an 8.3
+// short name intact (C:\Users\RUNNER~1\...), and `~` is outside the recognizer's
+// whitelist, so every positive case below is refused as COMMAND_CHARSET_REJECTED
+// for a property of the CI temp directory rather than of the parser. The native
+// form expands it to the long name.
+const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync.native(os.tmpdir()), "zensu-doctor-invocation-"));
 process.on("exit", () => { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) {} });
 
 const pluginRoot = nodePath.join(tmpRoot, "plugin");
-const doctorPath = nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS);
-fs.mkdirSync(nodePath.dirname(doctorPath), { recursive: true });
-fs.writeFileSync(doctorPath, "#!/bin/bash\nexit 0\n");
+// The COMMAND spelling is always forward-slash, on every host. The recognizer
+// refuses a backslash outright — `\\` is outside SAFE_CHARACTER — so a native
+// win32 join would make every positive case here fail for the charset rule
+// instead of exercising the parser, which is what it did until this line
+// existed. path.resolve() normalizes both spellings identically on win32, so
+// the comparison in scriptPathViolation is unaffected; only filesystem calls
+// keep the native path.
+const commandSpelling = (value) => value.split(nodePath.sep).join("/");
+const doctorPath = commandSpelling(nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS));
+fs.mkdirSync(nodePath.dirname(nodePath.resolve(doctorPath)), { recursive: true });
+fs.writeFileSync(nodePath.resolve(doctorPath), "#!/bin/bash\nexit 0\n");
 
-const dataDir = nodePath.join(tmpRoot, "plugin-data");
-const projectDir = nodePath.join(tmpRoot, "project");
-fs.mkdirSync(dataDir, { recursive: true });
-fs.mkdirSync(projectDir, { recursive: true });
+const adoptPath = commandSpelling(nodePath.join(pluginRoot, ...ADOPT_SEGMENTS));
+fs.writeFileSync(nodePath.resolve(adoptPath), "#!/bin/bash\nexit 0\n");
+
+// Same forward-slash rule as the script paths above, and for the same reason:
+// these two are ASSIGNMENT VALUES inside the command string, so a native win32
+// join puts backslashes through the charset whitelist and every positive case
+// fails on the character rule rather than on anything it means to test.
+const dataDir = commandSpelling(nodePath.join(tmpRoot, "plugin-data"));
+const projectDir = commandSpelling(nodePath.join(tmpRoot, "project"));
+fs.mkdirSync(nodePath.resolve(dataDir), { recursive: true });
+fs.mkdirSync(nodePath.resolve(projectDir), { recursive: true });
+
+// A synthetic tree the recognizer could never accept makes every positive case
+// below fail for the fixture's sake, and the verdict alone does not say which
+// character was at fault — that cost four CI rounds to work out. Fail HERE, and
+// name the offenders. This mirrors the module's own SAFE_CHARACTER by hand and is
+// a diagnostic, never a contract pin: the module owns that rule.
+const UNSAFE_IN_FIXTURE = [...new Set(
+  [tmpRoot, pluginRoot, dataDir, projectDir]
+    .join("")
+    .split("")
+    .filter((c) => c !== " " && c !== "\t" && c !== '"' && !/^[A-Za-z0-9_./:=+@,-]$/.test(c)),
+)];
+if (UNSAFE_IN_FIXTURE.length > 0) {
+  throw new Error(
+    `fixture paths carry characters the recognizer refuses: ${JSON.stringify(UNSAFE_IN_FIXTURE)} `
+    + `— tmpRoot=${tmpRoot}. Pick a temp root the whitelist accepts; this is a harness `
+    + `fault, not a parser verdict.`,
+  );
+}
 
 const payload = (command, toolName = "Bash") => ({
   hook_event_name: "PreToolUse",
@@ -110,11 +152,16 @@ test("quoting cannot hide a token — the concatenated literal faces the same wh
   assert.strictEqual(verdict(`PA"TH"=/x bash "${doctorPath}"`).reason, REASONS.ASSIGNMENT);
 });
 
-test("the interpreter must be the bare word bash in the second-to-last position", () => {
+// The scan runs left to right — assignments, `bash`, the script, then whatever
+// that script DECLARES — because a recognized script may now carry a trailing
+// argument, so the path is no longer the last token. A trailing token is
+// therefore an ARGUMENT question, not a shape one, and the doctor declares none.
+test("the interpreter must be the bare word bash, and the doctor declares no arguments", () => {
   assert.strictEqual(verdict(`sh "${doctorPath}"`).reason, REASONS.SHAPE);
   assert.strictEqual(verdict(`/bin/bash "${doctorPath}"`).reason, REASONS.SHAPE);
   assert.strictEqual(verdict(`bash`).reason, REASONS.SHAPE);
-  assert.strictEqual(verdict(`bash "${doctorPath}" extra`).reason, REASONS.SHAPE);
+  assert.strictEqual(verdict(`bash "${doctorPath}" extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(verdict(`bash "${doctorPath}" --confirm`).reason, REASONS.ARGUMENT);
 });
 
 test("an assignment outside the allowlist is refused", () => {
@@ -145,36 +192,36 @@ test("ZDOC_PLAYWRIGHT is NOT reachable — only the tools signal is", () => {
 });
 
 test("a doctor script outside the executing plugin root is refused", () => {
-  const foreign = nodePath.join(tmpRoot, "other", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(foreign), { recursive: true });
-  fs.writeFileSync(foreign, "#!/bin/bash\nexit 0\n");
+  const foreign = commandSpelling(nodePath.join(tmpRoot, "other", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(foreign)), { recursive: true });
+  fs.writeFileSync(nodePath.resolve(foreign), "#!/bin/bash\nexit 0\n");
   assert.strictEqual(verdict(`bash "${foreign}"`).reason, REASONS.PATH);
-  assert.strictEqual(verdict(`bash "${nodePath.join(pluginRoot, "hooks", "lib", "zensu-log.sh")}"`).reason, REASONS.PATH);
+  assert.strictEqual(verdict(`bash "${commandSpelling(nodePath.join(pluginRoot, "hooks", "lib", "zensu-log.sh"))}"`).reason, REASONS.PATH);
 });
 
 test("a symlink to the real doctor script is refused even though it resolves correctly", () => {
-  const link = nodePath.join(tmpRoot, "link-plugin", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(link), { recursive: true });
-  fs.symlinkSync(doctorPath, link);
-  assert.strictEqual(fs.realpathSync(link), fs.realpathSync(doctorPath));
+  const link = commandSpelling(nodePath.join(tmpRoot, "link-plugin", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(link)), { recursive: true });
+  fs.symlinkSync(nodePath.resolve(doctorPath), nodePath.resolve(link));
+  assert.strictEqual(fs.realpathSync(nodePath.resolve(link)), fs.realpathSync(nodePath.resolve(doctorPath)));
   assert.strictEqual(recognize(payload(`bash "${link}"`), nodePath.join(tmpRoot, "link-plugin")).reason, REASONS.NOT_REGULAR);
 });
 
 test("a hard link is refused — a second name for the file is still a second name", () => {
-  const linked = nodePath.join(tmpRoot, "hardlink-plugin", ...DOCTOR_SEGMENTS);
-  fs.mkdirSync(nodePath.dirname(linked), { recursive: true });
-  fs.linkSync(doctorPath, linked);
+  const linked = commandSpelling(nodePath.join(tmpRoot, "hardlink-plugin", ...DOCTOR_SEGMENTS));
+  fs.mkdirSync(nodePath.dirname(nodePath.resolve(linked)), { recursive: true });
+  fs.linkSync(nodePath.resolve(doctorPath), nodePath.resolve(linked));
   assert.strictEqual(recognize(payload(`bash "${linked}"`), nodePath.join(tmpRoot, "hardlink-plugin")).reason, REASONS.NOT_REGULAR);
 });
 
 test("a missing or non-regular doctor path is refused", () => {
   const absentRoot = nodePath.join(tmpRoot, "absent-plugin");
-  const absent = nodePath.join(absentRoot, ...DOCTOR_SEGMENTS);
+  const absent = commandSpelling(nodePath.join(absentRoot, ...DOCTOR_SEGMENTS));
   assert.strictEqual(recognize(payload(`bash "${absent}"`), absentRoot).reason, REASONS.NOT_REGULAR);
 
   const dirRoot = nodePath.join(tmpRoot, "dir-plugin");
   fs.mkdirSync(nodePath.join(dirRoot, ...DOCTOR_SEGMENTS), { recursive: true });
-  assert.strictEqual(recognize(payload(`bash "${nodePath.join(dirRoot, ...DOCTOR_SEGMENTS)}"`), dirRoot).reason, REASONS.NOT_REGULAR);
+  assert.strictEqual(recognize(payload(`bash "${commandSpelling(nodePath.join(dirRoot, ...DOCTOR_SEGMENTS))}"`), dirRoot).reason, REASONS.NOT_REGULAR);
 });
 
 test("an oversized command is refused before it is parsed", () => {
@@ -202,7 +249,7 @@ test("on this POSIX host an MSYS-looking path stays an ordinary path", () => {
   const root = nodePath.join(msysLooking, "plugin");
   fs.mkdirSync(nodePath.join(root, "hooks", "lib"), { recursive: true });
   fs.writeFileSync(nodePath.join(root, ...DOCTOR_SEGMENTS), "#!/bin/bash\nexit 0\n");
-  assert.strictEqual(recognize(payload(`bash "${nodePath.join(root, ...DOCTOR_SEGMENTS)}"`), root).ok, true);
+  assert.strictEqual(recognize(payload(`bash "${commandSpelling(nodePath.join(root, ...DOCTOR_SEGMENTS))}"`), root).ok, true);
 });
 
 test("isDoctorInvocation binds the REAL executing root, which the unit tree is not", () => {
@@ -210,4 +257,40 @@ test("isDoctorInvocation binds the REAL executing root, which the unit tree is n
   assert.strictEqual(isDoctorInvocation(payload(`bash "${doctorPath}"`)), false);
   const live = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
   assert.strictEqual(isDoctorInvocation(payload(`bash "${live}"`)), true);
+});
+
+// The SECOND recognized script. It is admitted on its own justification and — the
+// whole point of the per-script argument table — it is the only one that may carry
+// `--confirm`, the literal that turns a report into a write.
+const anyVerdict = (command, toolName) => recognizeAny(payload(command, toolName), pluginRoot);
+
+test("the adoption is recognized bare and with exactly one --confirm", () => {
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}"`).ok, true);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm`).ok, true);
+  assert.strictEqual(
+    anyVerdict(`CLAUDE_PLUGIN_DATA="${dataDir}" CLAUDE_PROJECT_DIR="${projectDir}" bash "${adoptPath}" --confirm`).ok,
+    true,
+  );
+});
+
+test("the adoption declares exactly one argument and refuses every other shape", () => {
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --force`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm --confirm`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}" --confirm extra`).reason, REASONS.ARGUMENT);
+  assert.strictEqual(anyVerdict(`EVIL=1 bash "${adoptPath}"`).reason, REASONS.ASSIGNMENT);
+  assert.strictEqual(anyVerdict(`bash "${adoptPath}"; whoami`).reason, REASONS.CHARSET);
+});
+
+// The doctor-only predicate must stay doctor-only: a caller that means "the
+// read-only diagnostic" has to be able to say exactly that without admitting the
+// write. RECOGNIZED stays at two entries for the same reason.
+test("isDoctorInvocation never admits the write, and the recognized list stays at two", () => {
+  const liveAdopt = commandSpelling(nodePath.join(executingPluginRoot(), ...ADOPT_SEGMENTS));
+  const liveDoctor = nodePath.join(executingPluginRoot(), ...DOCTOR_SEGMENTS);
+  assert.strictEqual(isDoctorInvocation(payload(`bash "${liveAdopt}" --confirm`)), false);
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveAdopt}" --confirm`)), true);
+  assert.strictEqual(isRecognizedInvocation(payload(`bash "${liveDoctor}"`)), true);
+  assert.deepStrictEqual(Object.keys(RECOGNIZED).sort(), ["adopt", "doctor"]);
+  assert.deepStrictEqual(RECOGNIZED.doctor.args, []);
+  assert.deepStrictEqual(RECOGNIZED.adopt.args, ["--confirm"]);
 });

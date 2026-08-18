@@ -194,7 +194,11 @@ that one lease then fails every later lease operation for the session. Closing i
 needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
-so changing it silently fails loudly.
+so changing it silently fails loudly. **Adoption works around it, it does not
+close it:** `discardSupersededLeases` moves every lease naming the previous
+installation OUT of the records directory (into a sibling `superseded/<key>/`,
+because `listRecords` fails on any non-`.json` entry, so setting one aside in
+place would be strictly worse). The count is reported, never absorbed.
 
 `docs/session-control.md` "Unbindable sessions" carries the operator-facing
 account, including the pin this weakens and the two attestation fields that
@@ -202,6 +206,125 @@ state the executing runtime. `tests/session-control/session-control-core-v1.test
 pins the axis and the sibling rule;
 `tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
 across synthetic installs, including that serving a record never rewrites it.
+
+## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
+
+The lineage rule above judges DECLARED versions and cannot see whether the
+persisted shapes actually moved. When they did not, its refusal wedges a session
+the running code could read perfectly well — and every write channel is denied,
+so the user cannot repair it. `adoptableRecord` / `adoptContext` in
+`hooks/lib/session-control-core-v1.js` are the one explicit exit.
+
+**The authorising axis is SCHEMA equality, not the version numbers, and that
+gate closes itself.** `validateContext` already enforces the record's
+`schema_version` and `validateWorkflowState` already enforces the workflow
+document's `schema`, so a release that genuinely moves a persisted shape makes
+one of the two unreadable and adoption declines with no new check to remember.
+Do NOT replace either with an explicit version comparison — the self-closing
+property is the whole design, and a hand-written check is the thing that gets
+forgotten.
+
+Seven conditions are ALL required; eight refusal reasons name exactly which one
+failed (condition 6 can fail as either `executing-runtime-unidentified` or
+`executing-runtime-older`):
+`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
+`executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
+sibling bound are NOT relaxed here either — the latter is what keeps a
+`--plugin-dir` checkout from adopting an installed session.
+
+**Two invariants, both learned from the chain-recovery precedent:**
+
+1. **No record field is ever added.** Provenance is a workflow `history` entry
+   under the reserved phase `RUNTIME_ADOPTED`, protected in the same two guard
+   sites as `CHAIN_RECOVERED` (`zensu-log.sh --phase` and `tdd_write_phase` /
+   `_tdd_write_phase_critical`). A field would itself be the breaking bump this
+   feature exists to survive, and would cost a `minor` — which would wedge every
+   session then running.
+2. **No bypass-ledger entry.** The ledger records gate ESCAPES so that everything
+   under "Gates bypassed" is true. Adoption escapes no gate; it re-mints a
+   record. Same rule, same reason, as `--chain-recover`.
+
+The previous record is never overwritten — it is renamed to
+`<key>.superseded-<recorded-version>.json` and stays readable, so "the record is
+immutable" remains literally true. `created_at` is carried over.
+
+**The gate channel is a SECOND recognized command, admitted on a DIFFERENT
+argument.** `hooks/lib/zensu-doctor-invocation.js` admitted exactly one shape
+because `zensu-doctor.sh` writes nothing. `zensu-session-adopt.sh` WRITES, so it
+carries its own justification in its own header, and that header is what the
+recognizer points at. Keep the recognized list at two; a third entry needs its
+justification written down the same way, not a wave at either existing one.
+Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
+module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
+stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
+
+**The whole feature needs the SUPERSEDED installation to still be on disk.**
+`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
+recomputes the digest against it, so an absent recorded root makes `readContext`
+throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
+to the `unbound` row whose "no valid record" wording this work exists to remove,
+and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
+the misleading wording exactly when the repair is impossible. Do not describe the
+lineage row as covering every mid-session upgrade; it covers the ones whose
+previous version was not pruned.
+
+**Three re-encodings move with this, and none of them is checked by a test:**
+
+- the `recorded<TAB>executing` wire format — one producer
+  (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
+  `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
+  `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
+  Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
+  field: adding a third field silently redirects all five rather than failing.
+- the version-shape rule, spelled twice for two different hazards —
+  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
+  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
+  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the review-evidence store layout, hardcoded in `discardSupersededLeases` as
+  `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
+  ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
+  destination guard landed — that module's `ensurePrivateDirectory` policy and its
+  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
+  it looks: a core -> lease CALL would cycle (that module requires the binder,
+  which requires this core), but an ENTRY-POINT seam would not, because
+  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
+  that it moves the sweep from the core half to an eighth host obligation. If this
+  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
+  branch is also the silent one: it cannot tell "no lease was ever minted" from a
+  layout that moved, so a layout change makes the sweep a SILENT no-op.
+
+**Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
+`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
+plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
+half is SEVEN separate obligations, and a port that takes only the core delta gets
+`adoptContext` with no reachable caller and keeps the wedge: the entry script, the
+recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
+deny scope at every gate that denies in this state, the skill, and — easy to miss
+— a binder exporting a `privateRecordsDirectory` equivalent that applies the
+symlink/alias/permission/ownership checks, because the entry script resolves the
+records directory through it and never by hand-joining. A port that copies only
+the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
+`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
+It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
+and four session lifecycles, but no Windows wall clock was taken — unlike the two
+suites this file records a measured figure for. Budget against a measurement
+before trusting the headroom. The caveat lives here and NOT in the manifest:
+`tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
+`{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
+EVERY Windows shard before a single suite runs — a `note` field there is a
+CI-wide outage, not documentation. Note also that shard-2's `profileTimeoutMs` is
+1800000, so a run genuinely approaching 900 s surfaces as a profile abort rather
+than the suite `TIMED_OUT` this ceiling exists to make visible.
+
+Operator-facing accounts that must move with it: `docs/session-control.md`
+"Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and
+`skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
+Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
+allowance with its ordinary-command discrimination, the refusal truth table, the
+end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
 
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
@@ -245,7 +368,7 @@ they are different diagnoses with different remedies:
   alongside an executing root that is a declared-compatible upgrade — deliberate,
   since neither disagreement can anchor a workflow document. An INCOMPATIBLE root,
   a differing `plugin_data`, and every other disagreement stay unrelaxed. See
-  "Runtime Compatibility & Breaking Changes" above.
+  "Runtime Lineage (`version_type` is load-bearing)" above.
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.
@@ -278,9 +401,26 @@ properties are easy to get wrong and cost the whole feature:
   the deleted-root and unset-anchor shapes.
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
-`zensu_session_orphaned_project_root`, `..._model`). The orphaned wrapper **prints the
-dead path on stdout**; inside a PreToolUse gate stdout is the JSON decision channel, so a
-caller wanting the predicate alone must discard it explicitly.
+`zensu_session_orphaned_project_root`, `..._model`, plus
+`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
+predicate alone must discard it explicitly, and a caller wanting the value must capture
+it into a variable before emitting anything.
+
+**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
+belongs to this roster only because every gate that consults the two above must decide what
+to do about it too — and the answer is the same everywhere: keep denying. A workflow document
+is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
+one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
+in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
+same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
+left on the generic text tells the user to start a fresh session while its sibling says the session can
+be repaired in place — two denies contradicting each other about the one bind failure that
+has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
+read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is

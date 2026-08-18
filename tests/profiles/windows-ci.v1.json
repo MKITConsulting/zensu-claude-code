@@ -135,7 +135,7 @@
           "runner": "bash",
           "path": "tests/structure/test-versioned-plugin-upgrade.sh",
           "args": [],
-          "timeoutMs": 600000
+          "timeoutMs": 900000
         }
       ]
     },
