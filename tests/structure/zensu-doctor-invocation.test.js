@@ -67,7 +67,12 @@ fs.mkdirSync(nodePath.resolve(projectDir), { recursive: true });
 // name the offenders. This mirrors the module's own SAFE_CHARACTER by hand and is
 // a diagnostic, never a contract pin: the module owns that rule.
 const UNSAFE_IN_FIXTURE = [...new Set(
-  [tmpRoot, pluginRoot, dataDir, projectDir]
+  // Exactly the values that ENTER a command string, all of which already went
+  // through commandSpelling. tmpRoot and pluginRoot are deliberately absent:
+  // they are native paths that never appear in a command, so including them made
+  // this guard fire on its own backslashes and fail the suite it was written to
+  // explain — the diagnostic became the defect it was meant to describe.
+  [doctorPath, adoptPath, dataDir, projectDir]
     .join("")
     .split("")
     .filter((c) => c !== " " && c !== "\t" && c !== '"' && !/^[A-Za-z0-9_./:=+@,-]$/.test(c)),
