@@ -78,9 +78,12 @@ That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
 *incompatible* mid-session plugin change produces (a compatible upgrade now binds
 normally), where every other Bash call denies — and it
-admits only this shape: assignments drawn from a closed allowlist followed by one
-`bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
-doctor goes back to being denied by the very defect it reports.
+admits this diagnostic in only one shape: assignments drawn from a closed
+allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
+Anything else is refused, and the doctor goes back to being denied by the very
+defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
+own separate justification — it WRITES, so it cannot borrow this one; see
+[Session Control](../../docs/session-control.md) "Unbindable sessions".
 
 Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
 assignment when the tool set is not loaded. The root preflight now lives inside
@@ -159,18 +162,19 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   Reaching a failure means the update crossed a **breaking** boundary (a minor
   bump while major is `0`, or a major bump), the executing runtime is **older**
   than the record, a version is not a strict `X.Y.Z`, or the executing root
-  carries no zensu manifest. That cannot be repaired in place — the record is
-  immutable by design and is never rewritten to the new root — so the remedy is a
-  fresh Claude Code session.
-  **Known reporting gap, and you must not paper over it:** the report has no row
-  of its own for that state. `zensu-doctor.sh` asks only whether the recorded
-  project root is gone, so an incompatible runtime falls through to the
-  `unbound` row above and is rendered as *"this session has no valid Session
-  Control record"* — which is false, the record is intact in plugin data. When
-  the user reports a plugin update right before the failure, say so explicitly
-  instead of repeating that row's wording: the record exists and the executing
-  runtime is not a compatible lineage of it. The remedy (a fresh session) is the
-  same either way.
+  carries no zensu manifest.
+- **❌ binding: this session's Session Control record is intact, but the running
+  Zensu installation declares an incompatible lineage** → the state described
+  above, and it has its own row naming BOTH declared versions (`record minted by
+  X, executing Y`). Never report it as a missing record: the record is intact in
+  plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
+  place — run `/zensu:adopt-session` to see whether the running installation may
+  take the record over, then `/zensu:adopt-session --confirm`. Both stay
+  reachable in this state; so does this diagnostic. A refusal names the exact
+  condition that failed, and `workflow-schema-mismatch` in particular means a
+  persisted shape really did change and a fresh session is the only way forward.
+  Adoption re-binds the session from the next tool call onward — do NOT tell the
+  user to restart after a successful one.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares

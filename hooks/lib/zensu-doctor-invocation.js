@@ -1,4 +1,6 @@
-// zensu-doctor-invocation.js — recognize THE one read-only /zensu:doctor call.
+// zensu-doctor-invocation.js — recognize the TWO calls that stay reachable when
+// the Session Control bind fails: the read-only /zensu:doctor diagnostic, and
+// /zensu:adopt-session, which repairs the one bind failure that is repairable.
 //
 // A failed bind to the immutable Session Control record denies, and two states
 // are relaxed for it (no record at all; a recorded project root that is gone).
@@ -7,15 +9,21 @@
 // which is the ordinary consequence of running `claude plugin marketplace
 // update` inside a session. In that state /zensu:doctor is denied too, so the
 // pointer every fail-closed message renders is a dead end, denied by the very
-// defect it names. README.md "Unbindable sessions" is the authoritative roster.
+// defect it names. docs/session-control.md "Unbindable sessions" is the authoritative roster.
 //
-// This module is what lets the diagnostic through and NOTHING else. It is a
-// widening of a state that includes genuine tamper suspicion, so it rests on one
-// property: hooks/lib/zensu-doctor.sh writes nothing. The single write in the
-// whole doctor flow is the expired-pending-review cleanup in Phase 3 of
-// skills/doctor/SKILL.md, which the model issues as SEPARATE commands that stay
-// fully gated. Folding that cleanup into the script would silently turn this
-// into a write channel.
+// This module is what lets those two through and NOTHING else. It is a widening
+// of a state that includes genuine tamper suspicion, and the two are admitted on
+// SEPARATE arguments that must not be merged.
+//
+// The diagnostic rests on one property: hooks/lib/zensu-doctor.sh writes nothing.
+// The single write in the whole doctor flow is the expired-pending-review cleanup
+// in Phase 3 of skills/doctor/SKILL.md, which the model issues as SEPARATE
+// commands that stay fully gated. Folding that cleanup into the script would
+// silently turn this into a write channel.
+//
+// The adoption DOES write, so it cannot borrow that argument; its own is in the
+// header of hooks/lib/zensu-session-adopt.sh and is summarised at ADOPT_SEGMENTS
+// below.
 //
 // The recognizer is a WHITELIST, never a blacklist of dangerous characters: it
 // accepts a closed set of assignments followed by exactly one `bash <path>` and
@@ -53,10 +61,45 @@ const { msysDrivePrefix } = require("./claude-path-v1.js");
 
 const COMMAND_MAX_BYTES = 4096;
 const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
+// The SECOND recognized script, and the one that breaks the "writes nothing"
+// premise the paragraph above rests on. It is admitted on a DIFFERENT
+// justification, which lives in the header of hooks/lib/zensu-session-adopt.sh
+// and is NOT restated here — a second copy is a second thing to go stale, and
+// this comment is where a future reviewer decides whether the list stays at two.
+// In one line: it writes one record for the calling session, one workflow
+// history entry, and moves that session's stale review-evidence leases aside;
+// what BOUNDS those writes is readContext (session
+// hash, digest recomputed against the RECORDED root, that root's declared
+// version) plus the sibling-root and plugin_data checks — NOT derivation, since
+// the two path assignments are caller-supplied literals here exactly as they are
+// for the diagnostic. Without --confirm it is read-only.
+//
+// Admitting it is what makes the lineage diagnosis actionable: the state it
+// repairs denies Edit, Write and every other Bash call, so a remedy the user
+// cannot invoke is not a remedy. Keep this list at two. A third entry needs its
+// own justification written down the same way, not a wave at this one.
+const ADOPT_SEGMENTS = ["hooks", "lib", "zensu-session-adopt.sh"];
 const INTERPRETER = "bash";
 
-// Every name the doctor script reads and the Bash tool does not supply. `path`
-// requires a rooted, traversal-free literal; a Set requires one of its members.
+// Each recognized script declares the arguments it accepts, as exact literals.
+// The doctor takes none. The adoption takes at most one, and `--confirm` is the
+// whole difference between a report and a write, so it is spelled out here
+// rather than left to the script: the gate decides what may be invoked, and a
+// script cannot widen its own recognition.
+const RECOGNIZED = {
+  doctor: { segments: DOCTOR_SEGMENTS, args: [] },
+  adopt: { segments: ADOPT_SEGMENTS, args: ["--confirm"] },
+};
+
+const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
+
+// The UNION of names the recognized scripts read and the Bash tool does not
+// supply. `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are read by both;
+// `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only, and accepting it on the adoption form
+// costs nothing because that script never reads it. Kept as one shared set
+// rather than per-entry: unlike `args`, an assignment cannot change what a
+// script DOES, only what it can see. `path` requires a rooted, traversal-free
+// literal; a Set requires one of its members.
 const ASSIGNMENTS = {
   CLAUDE_PLUGIN_DATA: "path",
   CLAUDE_PROJECT_DIR: "path",
@@ -91,8 +134,9 @@ const REASONS = {
   SHAPE: "COMMAND_SHAPE_REJECTED",
   ASSIGNMENT: "ASSIGNMENT_REJECTED",
   DUPLICATE: "ASSIGNMENT_DUPLICATED",
-  PATH: "DOCTOR_PATH_REJECTED",
-  NOT_REGULAR: "DOCTOR_PATH_NOT_REGULAR",
+  PATH: "SCRIPT_PATH_REJECTED",
+  NOT_REGULAR: "SCRIPT_PATH_NOT_REGULAR",
+  ARGUMENT: "SCRIPT_ARGUMENT_REJECTED",
 };
 
 // Letters, digits and the punctuation a rooted POSIX path plus `name=value`
@@ -163,13 +207,13 @@ const assignmentViolation = (token, seen) => {
   return null;
 };
 
-// The path must BE the executing installation's doctor script — not a copy of
-// it, not a link to it. lstat rather than realpath: a symlink that resolves to
-// the right file is still a second name an attacker controls.
-const doctorPathViolation = (token, pluginRoot) => {
+// The path must BE the executing installation's own copy of that script — not a
+// copy of it, not a link to it. lstat rather than realpath: a symlink that
+// resolves to the right file is still a second name an attacker controls.
+const scriptPathViolation = (token, pluginRoot, segments) => {
   if (!isRootedLiteralPath(token)) return REASONS.PATH;
   const rooted = msysDrivePrefix(token);
-  if (nodePath.resolve(rooted) !== nodePath.resolve(nodePath.join(pluginRoot, ...DOCTOR_SEGMENTS))) {
+  if (nodePath.resolve(rooted) !== nodePath.resolve(nodePath.join(pluginRoot, ...segments))) {
     return REASONS.PATH;
   }
   let stat;
@@ -181,7 +225,24 @@ const doctorPathViolation = (token, pluginRoot) => {
   return stat.isFile() && stat.nlink === 1 ? null : REASONS.NOT_REGULAR;
 };
 
-function recognize(payload, pluginRoot) {
+// Trailing arguments are matched as exact literals against the script's own
+// declared set, each at most once. This stays a whitelist for the same reason
+// the assignment check is one: a blacklist would have to keep up with every flag
+// a script ever grows, and the gate is what decides which invocation is allowed.
+const argumentViolation = (tokens, allowed) => {
+  const seen = new Set();
+  for (const token of tokens) {
+    if (!allowed.includes(token) || seen.has(token)) return REASONS.ARGUMENT;
+    seen.add(token);
+  }
+  return null;
+};
+
+// Scans left to right instead of indexing from the end, because a recognized
+// script may now carry a trailing argument and the path is no longer the last
+// token. The shape is unchanged otherwise: assignments, then `bash`, then the
+// script, then whatever that script declares.
+function recognizeScript(payload, pluginRoot, spec) {
   if (!payload || typeof payload !== "object" || payload.tool_name !== "Bash") {
     return refuse(REASONS.NOT_BASH);
   }
@@ -193,23 +254,55 @@ function recognize(payload, pluginRoot) {
 
   const tokens = tokenize(command);
   if (tokens === null) return refuse(REASONS.QUOTING);
-  if (tokens.length < 2) return refuse(REASONS.SHAPE);
-  if (tokens[tokens.length - 2] !== INTERPRETER) return refuse(REASONS.SHAPE);
 
   const seen = new Set();
-  for (const token of tokens.slice(0, -2)) {
-    const violation = assignmentViolation(token, seen);
+  let index = 0;
+  while (index < tokens.length && ASSIGNMENT_TOKEN.test(tokens[index])) {
+    const violation = assignmentViolation(tokens[index], seen);
     if (violation) return refuse(violation);
+    index += 1;
   }
-  const pathViolation = doctorPathViolation(tokens[tokens.length - 1], pluginRoot);
+  if (tokens[index] !== INTERPRETER) return refuse(REASONS.SHAPE);
+  index += 1;
+  if (index >= tokens.length) return refuse(REASONS.SHAPE);
+  const pathViolation = scriptPathViolation(tokens[index], pluginRoot, spec.segments);
   if (pathViolation) return refuse(pathViolation);
+  const argViolation = argumentViolation(tokens.slice(index + 1), spec.args);
+  if (argViolation) return refuse(argViolation);
   return { ok: true, reason: "" };
+}
+
+// Kept as the doctor-only recognizer so a caller that means "the read-only
+// diagnostic" can still say exactly that and not accidentally admit the write.
+function recognize(payload, pluginRoot) {
+  return recognizeScript(payload, pluginRoot, RECOGNIZED.doctor);
+}
+
+function recognizeAny(payload, pluginRoot) {
+  const doctor = recognizeScript(payload, pluginRoot, RECOGNIZED.doctor);
+  if (doctor.ok) return doctor;
+  const adopt = recognizeScript(payload, pluginRoot, RECOGNIZED.adopt);
+  if (adopt.ok) return adopt;
+  // Neither matched, so pick the more USEFUL refusal rather than a fixed one.
+  // A doctor-first rule reports "wrong path" for an adoption invocation whose
+  // only fault is an undeclared flag — true of the doctor entry, and useless to
+  // the caller. Whichever entry got PAST its path check is the one the user was
+  // actually invoking, so its reason is the one that names their mistake.
+  const doctorPathRejected = doctor.reason === REASONS.PATH || doctor.reason === REASONS.NOT_REGULAR;
+  const adoptPathRejected = adopt.reason === REASONS.PATH || adopt.reason === REASONS.NOT_REGULAR;
+  if (doctorPathRejected && !adoptPathRejected) return adopt;
+  return doctor;
 }
 
 const executingPluginRoot = () => nodePath.resolve(__dirname, "..", "..");
 
 const isDoctorInvocation = (payload) =>
   PLATFORM_SUPPORTED && recognize(payload, executingPluginRoot()).ok;
+
+// What every gate asks: is this one of the commands that must stay reachable
+// while the session is unbound. Both are, for different reasons.
+const isRecognizedInvocation = (payload) =>
+  PLATFORM_SUPPORTED && recognizeAny(payload, executingPluginRoot()).ok;
 
 if (require.main === module) {
   let raw = "";
@@ -228,11 +321,13 @@ if (require.main === module) {
     } catch {
       process.exit(1);
     }
-    process.exit(isDoctorInvocation(payload) ? 0 : 1);
+    process.exit(isRecognizedInvocation(payload) ? 0 : 1);
   });
 } else {
   module.exports = {
-    recognize, isDoctorInvocation, executingPluginRoot,
-    ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, PLATFORM_SUPPORTED,
+    recognize, recognizeAny, recognizeScript,
+    isDoctorInvocation, isRecognizedInvocation, executingPluginRoot,
+    ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES,
+    DOCTOR_SEGMENTS, ADOPT_SEGMENTS, RECOGNIZED, PLATFORM_SUPPORTED,
   };
 }

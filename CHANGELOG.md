@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-08-18
+
+### Added
+
+- **session-trail**: Make a takeover impossible to refuse (#245)
+
+### Fixed
+
+- **session-control**: Rescue a session across a runtime-lineage break (#244)
+
 ## [0.18.0] - 2026-08-16
 
 ### Added

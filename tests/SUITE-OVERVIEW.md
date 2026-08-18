@@ -8,11 +8,25 @@ Derived by reading `tests/run-all.sh`, `tests/profiles/promptfoo-local-only.v1.j
 source — not from an executed run. Assertion counts are approximations derived from
 each suite's `check()` / `run()` / `expect()` call sites.
 
+**The structure-suite count is owned by `tests/profiles/promptfoo-local-only.v1.json`,
+not by this file.** `run-all.sh` compares that manifest against the actual directory
+listing before any suite runs and refuses to execute at all when they disagree — so a
+new suite file and its manifest entry must land in the same commit, or every mode,
+including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
+reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
+only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
+`test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
+(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
+§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
+machine-checks this document, so treat §3's per-group numbers as descriptive rather than
+authoritative until that sweep happens.
+
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **133** — 126 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **134** — 127 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -24,8 +38,8 @@ each suite's `check()` / `run()` / `expect()` call sites.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 133 structure suites + 5 offline evals | none |
-| `--ci` | 124 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 134 structure suites + 5 offline evals | none |
+| `--ci` | 127 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -121,15 +135,22 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (18)
+### Skill contracts (19)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` · `setup-skill` ·
-`skill-overlays` · `templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
+`session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
+`verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
 consistency. Heaviest: `pr-team-review-skill` (~121), `verify-feature-skill` (~117).
+
+`session-trail-verdict` is the one BEHAVIOURAL suite in this group: it builds synthetic
+transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decides about
+taking a session over, which its structural sibling can only pin as vocabulary. It skips
+loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
+developer's real sessions.
 
 ### Prompt routing & payloads (6)
 `agent-context` · `context-nudge-hook` · `intent-router-hook` · `plan-approved-delegate` ·

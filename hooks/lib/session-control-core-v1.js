@@ -356,6 +356,25 @@ function servesRecordedRuntime(context, executedPluginRoot, host) {
   return runtimeLineageCompatible(context.plugin_version, executingVersion);
 }
 
+// The version a root DECLARES, or null when it declares nothing readable. It
+// exists so a caller that has already been refused by servesRecordedRuntime can
+// NAME the two versions instead of reporting an anonymous disagreement — the
+// whole difference between "start a fresh session" and "0.17.2 recorded, 0.18.0
+// executing".
+//
+// TOTAL and never throws, for the same reason servesRecordedRuntime is a
+// predicate: every caller is already on a failure path, and an exception there
+// would replace a precise diagnosis with a manifest error. A null answer means
+// the root could not be identified at all, which callers report as such rather
+// than guessing a number.
+function executingPluginVersion(pluginRootInput, host) {
+  try {
+    return pluginMetadata(pluginRootInput, host).manifest.version;
+  } catch {
+    return null;
+  }
+}
+
 function localManifestEntry(pluginRoot, value, label) {
   const raw = requireText(value, label)
     .replace(/^\$\{(?:CLAUDE_|CODEX_)?PLUGIN_ROOT\}/, pluginRoot);
@@ -1348,6 +1367,450 @@ function readOrphanedProjectRootContext(options) {
   fail('context project root still exists');
 }
 
+// ---------------------------------------------------------------------------
+// Adoption — serving an intact record from a declared-incompatible lineage.
+// ---------------------------------------------------------------------------
+//
+// runtimeLineageCompatible decides who may serve a record from the DECLARED
+// versions, and while the plugin is at major 0 a differing minor is a refusal.
+// That rule is unchanged and is not weakened here. What it cannot see is whether
+// the persisted shapes actually moved — and when they did not, its refusal
+// wedges a session the running code could read perfectly well. Every write
+// channel is denied, so the user cannot repair it, and before the diagnosis
+// existed they were not even told why.
+//
+// Adoption is the one explicit, verified exit — and deliberately NOT a ledgered
+// one: the bypass ledger records gate ESCAPES so that everything rendered under
+// "Gates bypassed" is true, and adoption escapes no gate. Its provenance is a
+// workflow history entry, exactly as `--chain-recover`'s is. It is authorised by
+// SCHEMA EQUALITY rather than by the version numbers, because the schema is what
+// the bytes on disk are actually held to — and that gate CLOSES ITSELF:
+//
+//   - the record's own `schema_version` is enforced by validateContext, so a
+//     future SCHEMA_VERSION bump makes readContext throw and adoption refuses
+//     without anyone having to remember to add a check;
+//   - the workflow document's `schema` and `schema_version` are enforced by
+//     validateWorkflowState, for the same reason and with the same consequence.
+//
+// A release that genuinely breaks a persisted shape is therefore non-adoptable
+// by construction, not by policy. Everything else below is identity: the record
+// must still be provably the one it claims to be, and the runtime taking it over
+// must be a sibling installation of the one that minted it.
+//
+// What adoption does NOT do: it never rewrites a record (the old one is set
+// aside under a new name and stays readable), never touches the workflow
+// document's decision fields, and never relaxes plugin_data — the boundary that
+// keeps a development checkout and an installed marketplace plugin on separate
+// record stores.
+// The ONE spelling of the workflow document's location. workflowStateDirectory
+// composes it with the creating helpers; adoptionWorkflowStatePath composes it
+// without them. Both must agree, or the read-only probe and the read it guards
+// resolve to different files.
+const WORKFLOW_STATE_SEGMENTS = ['.zensu', 'state'];
+const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
+
+const ADOPTION_REFUSALS = {
+  RECORD_UNREADABLE: 'record-unreadable',
+  PLUGIN_DATA: 'plugin-data-mismatch',
+  PROJECT_ROOT: 'project-root-mismatch',
+  ALREADY_SERVED: 'already-served',
+  NOT_SIBLING: 'not-a-sibling-installation',
+  EXECUTING_UNIDENTIFIED: 'executing-runtime-unidentified',
+  BACKWARDS: 'executing-runtime-older',
+  WORKFLOW_SCHEMA: 'workflow-schema-mismatch',
+};
+
+// A version reaches a FILENAME below, so it is held to a strict shape first. The
+// record schema only requireText's plugin_version, so without this a crafted
+// manifest could steer the superseded record anywhere in the tree.
+const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
+
+// A hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js. That module cannot be
+// required from here (it requires the binder, which requires this core), and the
+// sweep has to agree with its listRecords about which entries are valid — an
+// entry this predicate keeps but listRecords rejects leaves the wedge intact.
+const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
+
+function adoptionRefusal(reason) {
+  return { ok: false, reason };
+}
+
+// The workflow document's path WITHOUT creating anything. workflowStateFile
+// resolves through ensureDescendantDirectory, which mkdirs every missing
+// component — fine for a writer, wrong for a read-only probe. Both the
+// adoptability report and the provenance guard need to ask "is there a document"
+// without answering "there is now".
+function adoptionWorkflowStatePath(projectRoot, sessionId) {
+  // Composed from the SAME segment constants workflowStateDirectory uses, so the
+  // guard and the read it guards can never resolve to different files. A separate
+  // spelling would let a layout move skip condition 7 entirely — silently
+  // removing one conjunct of the self-closing property the whole authorising
+  // argument rests on.
+  return path.join(
+    projectRoot,
+    ...WORKFLOW_STATE_SEGMENTS,
+    `${WORKFLOW_STATE_PREFIX}${sessionKey(sessionId)}.json`,
+  );
+}
+
+// Never throws: every caller is on a failure path already, and an exception
+// would replace a named condition with a stack trace. A refusal always names
+// exactly which of the conditions was not met.
+function adoptableRecord(options) {
+  let executingPluginRoot;
+  let pluginData;
+  let context;
+  try {
+    executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+    // Condition 1 — the record is still provably itself. readContext recomputes
+    // the runtime digest against the RECORDED root and re-reads that root's
+    // manifest, so a forged or hand-edited record cannot reach adoption; it also
+    // enforces the context schema and that the recorded project root exists.
+    context = readContext({
+      recordsDir: options.recordsDir,
+      sessionId: options.sessionId,
+      expectedHost: options.host,
+    });
+  } catch {
+    return adoptionRefusal(ADOPTION_REFUSALS.RECORD_UNREADABLE);
+  }
+  // Condition 2 — the record store boundary is never relaxed.
+  if (context.plugin_data !== pluginData) return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA);
+  // Condition 3 — adopting a record for a different project would move a
+  // session's anchor, which is exactly what immutability exists to prevent.
+  let projectRoot;
+  try {
+    projectRoot = canonicalDirectory(options.projectRoot, 'project root');
+  } catch {
+    return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
+  }
+  if (context.project_root !== projectRoot) return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
+  // Condition 4 — nothing to adopt when this runtime already serves the record.
+  // Refusing here keeps adoption from being a way to re-mint a healthy session.
+  if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
+  }
+  // Condition 5 — the same structural bound servesRecordedRuntime applies: a
+  // marketplace install lands beside the versions it replaces, a development
+  // checkout never does, so a --plugin-dir tree cannot adopt an installed
+  // session's record no matter what its manifest declares.
+  if (path.dirname(context.plugin_root) !== path.dirname(executingPluginRoot)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.NOT_SIBLING);
+  }
+  const executingVersion = executingPluginVersion(executingPluginRoot, context.host);
+  if (typeof executingVersion !== 'string'
+    || !ADOPTION_SAFE_VERSION_RE.test(executingVersion)
+    || !ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) {
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+  }
+  // Condition 6 — never backwards. Only a newer tree can be expected to
+  // understand an older one's state; the reverse is the direction that loses
+  // data, and it stays refused here exactly as it is in runtimeLineageCompatible.
+  const recordedParts = parseRuntimeVersion(context.plugin_version);
+  const executingParts = parseRuntimeVersion(executingVersion);
+  if (recordedParts === null || executingParts === null) {
+    return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
+  }
+  for (let index = 0; index < recordedParts.length; index += 1) {
+    if (executingParts[index] !== recordedParts[index]) {
+      if (executingParts[index] < recordedParts[index]) {
+        return adoptionRefusal(ADOPTION_REFUSALS.BACKWARDS);
+      }
+      break;
+    }
+  }
+  // Condition 7 — the workflow document, when there is one, must be readable by
+  // THIS runtime. validateWorkflowState enforces `schema` and `schema_version`,
+  // so a real persisted-shape break refuses here. A missing document is not a
+  // disagreement: there is no shape to disagree about, and adoption leaves the
+  // session exactly as able to mint one as a fresh session would be.
+  //
+  // The path is joined by hand rather than through workflowStateFile, which goes
+  // via ensureDescendantDirectory and CREATES the missing components. This
+  // predicate is the read-only half of the command, and "without --confirm it is
+  // read-only" is the premise the gate widening rests on — a probe that mkdirs
+  // <project>/.zensu/state would falsify it.
+  const workflowFile = adoptionWorkflowStatePath(context.project_root, options.sessionId);
+  if (fs.existsSync(workflowFile)) {
+    try {
+      readWorkflowState({ projectRoot: context.project_root, sessionId: options.sessionId });
+    } catch {
+      return adoptionRefusal(ADOPTION_REFUSALS.WORKFLOW_SCHEMA);
+    }
+  }
+  return {
+    ok: true,
+    context,
+    recorded: context.plugin_version,
+    executing: executingVersion,
+  };
+}
+
+// Stale leases are moved OUT of the records directory, never renamed inside it:
+// listRecords fails on any entry that does not end in `.json`, so a set-aside
+// file left in place would be strictly worse than the stale lease it replaced.
+//
+// Why they must go at all: review-evidence-lease-v1.js compares its recorded
+// plugin_root STRICTLY and listRecords propagates the first failure, so a single
+// lease minted before the adoption would fail every later lease operation for
+// this session. A lease is a short-lived evidence reservation — losing one costs
+// a repeat, not a guarantee — so this is the cheapest correct resolution, and it
+// sets them aside rather than deleting them.
+function discardSupersededLeases(pluginData, key, executingPluginRoot) {
+  const recordsDirectory = path.join(pluginData, 'review-evidence', 'v1', 'records', key);
+  // The owning module reaches this directory only through ensurePrivateDirectory,
+  // which rejects a symlink, an alias and unsafe permissions or ownership. This
+  // copy cannot call that constructor (the dependency runs the other way), so it
+  // re-applies the part that matters before it renames anything: a symlinked or
+  // aliased records directory is left ALONE rather than swept through.
+  try {
+    const stat = fs.lstatSync(recordsDirectory);
+    // `unsafe` distinguishes a store this sweep REFUSED to touch from the
+    // ordinary "no lease was ever minted" case. Both discard nothing; only one of
+    // them is a clean outcome, and the caller must be able to say which.
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: true };
+    if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
+      return { discarded: 0, failed: [], unsafe: true };
+    }
+  } catch (error) {
+    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' };
+  }
+  let entries;
+  try {
+    entries = fs.readdirSync(recordsDirectory);
+  } catch {
+    // ONE shape on every path. The directory only exists once a lease was
+    // minted, so this is the ORDINARY case — a scalar here would hand the
+    // caller `undefined` for both fields and make the reporter throw AFTER the
+    // record swap had already succeeded, reporting failure for a completed
+    // adoption.
+    return { discarded: 0, failed: [] };
+  }
+  const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
+  let discarded = 0;
+  const failed = [];
+  // The DESTINATION gets the same treatment as the source. mkdirSync with
+  // `recursive` does NOT fail on an existing symlink-to-directory, so without
+  // this a pre-created link there would quietly receive every moved lease while
+  // the sweep still reported a clean count.
+  const asideIsSafe = () => {
+    try {
+      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
+      const stat = fs.lstatSync(asideDirectory);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
+      if (process.platform !== 'win32') {
+        if ((stat.mode & 0o077) !== 0) return false;
+        if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // `unsafe` carries the whole diagnosis, exactly as the three source-unsafe
+  // returns do. Listing every entry as `failed` here would name leases the
+  // keep-branch would have left alone, and the reporter would print two
+  // contradictory warnings about the same sweep.
+  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: true };
+  for (const name of entries.sort()) {
+    // EVERY entry listRecords would reject, not only the `.json` ones: it fails
+    // the whole set on an unexpected name, so a leftover `.tmp` from a killed
+    // lease write wedges it exactly as hard as a stale record would.
+    const file = path.join(recordsDirectory, name);
+    let record;
+    try {
+      record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    } catch {
+      record = null;
+    }
+    // An unreadable lease is moved aside too: listRecords would fail on it just
+    // as hard, and leaving it would defeat the whole point of this sweep.
+    // Keep a SUPERSET of what listRecords accepts — stated as a superset because
+    // that is what it is. Three of that reader's conjuncts are mirrored here (the
+    // id shape, lease_id agreeing with the filename, and the executing root),
+    // which is what stops an entry it rejects from being kept on plugin_root
+    // alone. NOT mirrored: it also rejects a symlinked or multiply-linked record
+    // file, a non-canonical spelling, an oversized one, and every validateRecord
+    // violation. An entry failing only those while naming the executing root is
+    // therefore KEPT and keeps wedging later lease operations — a residual, not
+    // the main gap, because a lease can only name the executing root if that
+    // runtime minted it, and none can be minted while the session is unbound.
+    // The id shape is a hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js,
+    // pinned by test-versioned-plugin-upgrade.sh; keep the two in step.
+    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
+    if (LEASE_RECORD_ID_RE.test(leaseId)
+      && record && typeof record === 'object'
+      && record.lease_id === leaseId
+      && record.plugin_root === executingPluginRoot) {
+      continue;
+    }
+    try {
+      // No mkdir here: asideIsSafe() already created AND validated the directory.
+      // Re-creating it per entry would succeed silently on a link swapped in after
+      // the guard, moving the lease through it — the exact hazard the guard closes.
+      fs.renameSync(file, path.join(asideDirectory, name));
+      discarded += 1;
+    } catch {
+      // A lease that could NOT be moved is reported separately, never folded
+      // into the success count and never swallowed. Counting only successes
+      // would render a partial sweep as a clean adoption while the exact wedge
+      // this sweep exists to prevent survives.
+      failed.push(name);
+    }
+  }
+  return { discarded, failed };
+}
+
+const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
+const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
+
+// Performs the adoption re-checked UNDER the records lock. The precondition is
+// deliberately evaluated twice — once by the caller to report, once here to act
+// — because between the two the plugin could have changed again.
+function adoptContext(options) {
+  const pluginData = canonicalDirectory(options.pluginData, 'plugin data');
+  const recordsDir = ensureDescendantDirectory(options.pluginData, options.recordsDir);
+  const locksDir = ensureDescendantDirectory(pluginData, path.join(path.dirname(recordsDir), 'locks'));
+  const key = sessionKey(options.sessionId);
+  const file = contextRecordFile(recordsDir, key);
+
+  const adopted = withFileLock(locksDir, key, () => {
+    const verdict = adoptableRecord({ ...options, pluginData, recordsDir });
+    if (!verdict.ok) fail(`record is not adoptable: ${verdict.reason}`);
+    const executingPluginRoot = canonicalDirectory(options.executingPluginRoot, 'executing plugin root');
+    // created_at is carried over on purpose: the session began when it began,
+    // and rewriting that would erase the only provenance the record still holds
+    // about its own origin.
+    const next = buildContext({
+      host: verdict.context.host,
+      sessionId: options.sessionId,
+      projectRoot: verdict.context.project_root,
+      pluginRoot: executingPluginRoot,
+      pluginData,
+      createdAt: verdict.context.created_at,
+    });
+    // Set aside, never overwrite. "The record is immutable" stays literally true:
+    // no record is ever rewritten, a second one is minted beside it, and the
+    // first stays readable under a name that says what happened to it.
+    const supersededFile = path.join(
+      recordsDir,
+      `${key}.superseded-${verdict.recorded}.json`,
+    );
+    // The existence check is the COPY's own O_EXCL, never a separate existsSync:
+    // that call resolves through symlinks, so a dangling link at the superseded
+    // name would answer false and copyFileSync would then write the record
+    // through it — and the rollback would unlink the link, leaving the collateral
+    // write behind. COPYFILE_EXCL refuses both, atomically, with no TOCTOU window.
+    // COPY aside, then replace in place — never rename-then-create. A rename
+    // first leaves a window in which `<key>.json` resolves to nothing, and a
+    // clean ENOENT there is `unregisteredSession`, the MOST relaxed state of all
+    // (the Stop hook releases on it). A process death in that window would turn
+    // a repairable lineage break into a permanently record-less session with a
+    // live workflow document still on disk — strictly worse than what is being
+    // repaired, and beyond the reach of any rollback.
+    //
+    // copyFileSync rather than linkSync on purpose: atomicWriteJson refuses a
+    // target with nlink > 1, so a hard link would make the very next step fail.
+    // atomicWriteJson writes a temp file and renames it over the target, so at
+    // every instant the record name resolves to either the old bytes or the new.
+    try {
+      fs.copyFileSync(file, supersededFile, fs.constants.COPYFILE_EXCL);
+    } catch (error) {
+      if (error && error.code === 'EEXIST') {
+        // Names the file, because this is also the crash-resume shape — a death
+        // between the copy and the swap leaves it behind — and the session has
+        // no other write channel to find it with.
+        fail(`a superseded record already exists and adoption would overwrite it: ${supersededFile}`);
+      }
+      throw error;
+    }
+    try {
+      atomicWriteJson(file, next);
+    } catch (error) {
+      // atomicWriteJson commits by rename and then re-checks the parent
+      // directory's identity, so a throw can land AFTER the new record is in
+      // place. Unlinking the copy then would destroy the only remaining bytes of
+      // the superseded record while the adoption has in fact landed — the one
+      // outcome worse than reporting a failure. Re-read the record and keep the
+      // copy when the new bytes are already there.
+      let committed = false;
+      let readable = false;
+      try {
+        committed = JSON.stringify(readJson(file)) === JSON.stringify(next);
+        readable = true;
+      } catch { readable = false; }
+      // Only an unambiguous "not committed" removes the copy. An unreadable
+      // re-read is INDETERMINATE, and if the record did commit that copy is the
+      // last readable image of the superseded record — deleting it on a guess is
+      // the one outcome worse than reporting a failure.
+      if (readable && !committed) {
+        try { fs.unlinkSync(supersededFile); } catch { /* nothing better to try */ }
+      }
+      throw error;
+    }
+    return {
+      context: next,
+      supersededFile,
+      recorded: verdict.recorded,
+      executing: verdict.executing,
+      projectRoot: verdict.context.project_root,
+    };
+  });
+
+  // Provenance is a workflow history entry and NOT a record field, so the
+  // context record keeps the exact shape every other release reads. It is
+  // recorded after the swap because it is provenance, not a precondition: a
+  // failure here is reported to the caller, never smoothed over, and never
+  // reverts an adoption that already succeeded.
+  let provenance = 'recorded';
+  // A session with no workflow document is a state adoptableRecord explicitly
+  // blesses ("a missing document is not a disagreement"), so it must not be
+  // routed through the failure branch below — mutateWorkflowState fails closed on
+  // a missing baseline, and the caller renders that as an anomaly worth
+  // reporting. Say plainly that there was nothing to write to instead.
+  if (!fs.existsSync(adoptionWorkflowStatePath(adopted.projectRoot, options.sessionId))) {
+    provenance = 'no-workflow-document';
+  } else {
+    try {
+      mutateWorkflowState({
+        projectRoot: adopted.projectRoot,
+        sessionId: options.sessionId,
+        actor: 'main-v1',
+        workflowState: 'runtime_adopted',
+        event: 'runtime-adopted',
+      }, (state) => {
+        const history = Array.isArray(state.history) ? state.history : [];
+        // `ts`, never `timestamp`: that is the key validateWorkflowExtensions
+        // validates and the one both existing history writers in
+        // zensu-tdd-phase.sh set. A different spelling would make this the one
+        // entry every ts-keyed reader sees as untimestamped.
+        history.push({
+          step: '',
+          phase: ADOPTION_HISTORY_PHASE,
+          ts: nowIso(),
+          reason: `${ADOPTION_HISTORY_REASON_PREFIX}${adopted.recorded} -> ${adopted.executing}`,
+        });
+        state.history = history;
+        return state;
+      });
+    } catch (error) {
+      provenance = `unavailable: ${error && error.message ? error.message : 'unknown'}`;
+    }
+  }
+
+  const leases = discardSupersededLeases(pluginData, key, adopted.context.plugin_root);
+
+  return {
+    ...adopted,
+    provenance,
+    leasesDiscarded: leases.discarded,
+    leasesFailed: leases.failed,
+    leasesUnsafe: Boolean(leases.unsafe),
+  };
+}
+
 function renderMainContext(contextInput) {
   const context = validateContext(contextInput);
   return [
@@ -1409,9 +1872,13 @@ function renderHostContext(contextInput) {
 }
 
 function workflowStateDirectory(projectRootInput) {
-  const projectRoot = canonicalDirectory(projectRootInput, 'project root');
-  const zensuDirectory = ensureDescendantDirectory(projectRoot, path.join(projectRoot, '.zensu'));
-  return ensureDescendantDirectory(zensuDirectory, path.join(zensuDirectory, 'state'));
+  // Reduced over the segment list rather than destructured: a third segment must
+  // not be silently dropped here while adoptionWorkflowStatePath's spread picks
+  // it up, which is exactly the split the shared constant exists to prevent.
+  return WORKFLOW_STATE_SEGMENTS.reduce(
+    (parent, segment) => ensureDescendantDirectory(parent, path.join(parent, segment)),
+    canonicalDirectory(projectRootInput, 'project root'),
+  );
 }
 
 function resolveWorkflowStateDirectory(options) {
@@ -1424,7 +1891,7 @@ function resolveWorkflowStateDirectory(options) {
 function workflowStateFile(projectRoot, sessionId) {
   return path.join(
     workflowStateDirectory(projectRoot),
-    `tdd-phase-${sessionKey(sessionId)}.json`,
+    `${WORKFLOW_STATE_PREFIX}${sessionKey(sessionId)}.json`,
   );
 }
 
@@ -1782,7 +2249,7 @@ function workflowStateLockTarget(options) {
   return {
     key,
     stateDirectory,
-    file: path.join(stateDirectory, `tdd-phase-${key}.json`),
+    file: path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`),
   };
 }
 
@@ -1843,7 +2310,7 @@ function mutateWorkflowState(options, mutation) {
 function initializeWorkflowState(options) {
   const key = sessionKey(options.sessionId);
   const stateDirectory = workflowStateDirectory(options.projectRoot);
-  const file = path.join(stateDirectory, `tdd-phase-${key}.json`);
+  const file = path.join(stateDirectory, `${WORKFLOW_STATE_PREFIX}${key}.json`);
   return withFileLock(stateDirectory, `state-${key}`, () => {
     if (fs.existsSync(file)) return validateWorkflowState(readJson(file), key);
     const initial = stampWorkflowState({
@@ -3566,10 +4033,16 @@ module.exports = {
   computeRuntimeDigest,
   runtimeLineageCompatible,
   servesRecordedRuntime,
+  executingPluginVersion,
   buildContext,
   registerContext,
   readContext,
   readOrphanedProjectRootContext,
+  ADOPTION_REFUSALS,
+  ADOPTION_HISTORY_PHASE,
+  ADOPTION_HISTORY_REASON_PREFIX,
+  adoptableRecord,
+  adoptContext,
   renderMainContext,
   renderReviewerContext,
   renderEvidenceWorkerContext,

@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.18.1-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -79,9 +79,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (24)
+### Skills (25)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (25 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (26 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -108,6 +108,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
+| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`

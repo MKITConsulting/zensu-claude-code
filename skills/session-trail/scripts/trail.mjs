@@ -21,20 +21,32 @@ const HEAD_BYTES = 256 * 1024;
 const TAIL_BYTES = 768 * 1024;
 
 function parseArgs(argv) {
-  const out = { _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null };
+  const out = { _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
     else if (a === '--all') out.all = true;
+    else if (a === '--force') out.force = true;
     else if (a === '--live') out.live = true;
     else if (a === '--no-git') out.git = false;
-    else if (a === '--days') out.days = Number(argv[++i]);
-    else if (a === '--prompts') out.prompts = Number(argv[++i]);
+    // Both operands are validated. An unvalidated `--prompts` was the worse of
+    // the two: `Number("--json")` is NaN, `Math.max(1, NaN)` is NaN, and
+    // `slice(-NaN)` is `slice(0)` — the ENTIRE prompt history, with the
+    // "(N earlier omitted)" self-report suppressed by the same NaN. The mistake
+    // ran towards maximum disclosure and reported nothing.
+    else if (a === '--days') out.days = numericOperand(a, argv[++i]);
+    else if (a === '--prompts') out.prompts = numericOperand(a, argv[++i]);
     else if (a === '--repo') out.repo = argv[++i];
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
   }
   return out;
+}
+
+function numericOperand(flag, raw) {
+  const n = Number(raw);
+  if (raw === undefined || raw === '' || !Number.isFinite(n)) fail(`${flag} needs a number (got ${raw === undefined ? 'nothing' : `"${raw}"`})`);
+  return n;
 }
 
 function fail(msg, code = 1) {
@@ -162,15 +174,21 @@ function liveRegistry() {
   return map;
 }
 
+// Returns the text AND the two facts only this function can know: whether the
+// read was complete, and where the tail segment starts inside the returned
+// string. Both were previously re-derived by the caller from `size`, and one of
+// those re-derivations now gates a verdict — a second truncation path added here
+// would otherwise leave the caller asserting a full read it never got.
 function readTranscript(file, size) {
-  if (size <= FULL_READ_LIMIT) return fs.readFileSync(file, 'utf8');
+  if (size <= FULL_READ_LIMIT) return { text: fs.readFileSync(file, 'utf8'), full: true, tailOffset: 0 };
   const fd = fs.openSync(file, 'r');
   try {
     const head = Buffer.alloc(HEAD_BYTES);
     fs.readSync(fd, head, 0, HEAD_BYTES, 0);
     const tail = Buffer.alloc(TAIL_BYTES);
     fs.readSync(fd, tail, 0, TAIL_BYTES, size - TAIL_BYTES);
-    return `${head.toString('utf8')}\n${tail.toString('utf8')}`;
+    const headText = head.toString('utf8');
+    return { text: `${headText}\n${tail.toString('utf8')}`, full: false, tailOffset: headText.length + 1 };
   } finally {
     fs.closeSync(fd);
   }
@@ -311,7 +329,20 @@ function isRealTurn(line) {
   return false;
 }
 
-function extractStopCause(text) {
+// `fromOffset` is the tail seam, for the same reason its two siblings take it:
+// `laterTurns` — and therefore `final`, which decides STALLED vs RECOVERED and
+// routes the whole usage-limit handover — is counted by walking forward from the
+// error record. Across a spliced head+tail that walk crosses an unread gap, so a
+// head-resident error would be graded against tail records that are not its
+// successors. Scanning the tail slice alone keeps the count over contiguous text;
+// an error that falls outside it is simply not reported, which is the honest
+// answer for a read that never saw it.
+function extractStopCause(text, fromOffset = 0) {
+  if (fromOffset > 0) return extractStopCauseIn(text.slice(fromOffset));
+  return extractStopCauseIn(text);
+}
+
+function extractStopCauseIn(text) {
   if (text.indexOf('"isApiErrorMessage":true') === -1) return null;
   const lines = text.split('\n');
   let errIdx = -1;
@@ -337,18 +368,101 @@ function extractStopCause(text) {
   const msg = typeof c === 'string'
     ? c
     : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text).join(' ') : '';
+  // ALL FOUR transcript-derived fields are bounded here, not just `message`.
+  // Every one of them is interpolated raw into the takeover brief's `## Source`
+  // block, and a JSON-parsed value can hold a real newline — so bounding only the
+  // obvious one leaves three siblings able to break a line in a persisted file.
+  // `oneLine` is not available at this point in the file, and would be the wrong
+  // tool anyway: these are short identifiers, not prose.
+  const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(/\s+/g, ' ').trim().slice(0, n));
   return {
-    error: err.error || 'api_error',
-    status: err.apiErrorStatus || null,
-    at: err.timestamp || null,
-    message: String(msg || '').trim(),
+    error: flat(err.error, 64) || 'api_error',
+    // `?? null` so the key is always present: `flat` passes `undefined` through,
+    // and `JSON.stringify` would then omit these two entirely, giving a machine
+    // consumer a different `stopCause` shape per record.
+    status: flat(err.apiErrorStatus, 16) ?? null,
+    at: flat(err.timestamp, 40) ?? null,
+    message: flat(msg, 2000) || '',
     final: laterTurns === 0,
     laterTurns,
     resumedUntil: lastTurnAt,
   };
 }
 
-function extractPendingQueue(text) {
+// A stop reason travels from a third-party transcript into the verdict's reason
+// string, which is printed, embedded in both briefs, and persisted outside every
+// repository — so it is the one transcript-derived value here that a crafted
+// record could aim at a reader. Every sibling extractor bounds its text through
+// `oneLine`/`clip`; this one bounds by SHAPE instead, because the value is
+// supposed to be an enum token. A value outside the shape is treated as absent,
+// which resolves to "still working" — the conservative direction.
+const STOP_REASON_SHAPE = /^[a-z_]{1,32}$/;
+
+// Whether the process COULD act at all, which the transcript's file mtime cannot
+// say. A completed assistant turn means it is waiting for its human. Measured on
+// this machine: of 57 idle sessions 51 ended on `end_turn` or `stop_sequence`,
+// and so did 4 of 10 sessions written to under three minutes ago — freshness and
+// activity are different things. Anything else is treated as a turn in flight,
+// including a sidechain record (a subagent is running) and an assistant record
+// whose stop reason is null or absent (4 of 7320 sampled): uncertainty resolves
+// towards "still working", which costs a question rather than a wrong takeover.
+//
+// `fromOffset` is where the caller's TAIL segment begins. On a truncated read the
+// text is head+tail spliced together, so an unbounded backwards scan that found
+// nothing in the tail would silently classify the session from a record at its
+// START. Scanning only the tail makes that case return `unknown` instead, which
+// is the honest answer: the last turn was not read.
+function extractLastTurn(text, fromOffset = 0) {
+  const lines = (fromOffset > 0 ? text.slice(fromOffset) : text).split('\n');
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i];
+    if (!line) continue;
+    if (line.indexOf('"type":"assistant"') === -1 && line.indexOf('"type":"user"') === -1) continue;
+    let o;
+    try { o = JSON.parse(line); } catch { continue; }
+    if (o.type !== 'assistant' && o.type !== 'user') continue;
+    // An API-error record is not a turn. Skipping it is what keeps a session that
+    // died on a rate limit from reading as "a turn is in flight — it is working",
+    // which is exactly the session the usage-limit handover exists to take over.
+    // `isRealTurn` and `extractAssistantTail` carry the same skip — as a substring
+    // test, which cannot tell the FIELD from the same bytes appearing inside an
+    // assistant's own text. This one is checked after the parse, so there is one
+    // guard rather than two, and a fixture can discriminate it.
+    if (o.isApiErrorMessage === true) continue;
+    const sidechain = o.isSidechain === true;
+    const sr = o.message && o.message.stop_reason;
+    const stopReason = typeof sr === 'string' && STOP_REASON_SHAPE.test(sr) ? sr : null;
+    const awaiting = o.type === 'assistant' && !sidechain && stopReason !== null && stopReason !== 'tool_use';
+    return { kind: awaiting ? 'awaiting-input' : 'in-turn', stopReason, sidechain };
+  }
+  return { kind: 'unknown', stopReason: null, sidechain: false };
+}
+
+// `reliable` is false when the caller only had head+tail of the transcript: the
+// depth is an enqueue/dequeue BALANCE, so a dequeue sitting in the unread middle
+// leaves a phantom prompt pending forever. A depth derived from a partial read is
+// not evidence of anything, and a verdict must not be built on it. The parameter
+// carries NO default on purpose — only the reader knows whether it got the whole
+// file, and defaulting it would let a future call site assert a completeness it
+// never established.
+// A partial read is not uniformly blind. Counted over the WHOLE spliced text the
+// depth is a balance across an unread gap and proves nothing — but counted over
+// the TAIL SLICE alone it is a LOWER BOUND: an enqueue inside the slice whose
+// dequeue never follows it inside that same slice is genuinely pending, because
+// everything after it was read. So a positive tail-slice depth is evidence and a
+// zero one still is not. Without this, every transcript past 8 MB discarded a
+// real queued prompt — the one hazard that acts without its human — as "not
+// evidence", and reported PROBABLY_FREE for a session about to move on its own.
+function extractPendingQueue(text, reliable, tailOffset = 0) {
+  if (reliable !== true && tailOffset > 0) {
+    const fromTail = scanQueue(text.slice(tailOffset));
+    if (fromTail.pending > 0) return { ...fromTail, reliable: true };
+    return { pending: 0, last: null, at: null, reliable: false };
+  }
+  return { ...scanQueue(text), reliable: reliable === true };
+}
+
+function scanQueue(text) {
   if (text.indexOf('"type":"queue-operation"') === -1) return { pending: 0, last: null, at: null };
   let depth = 0;
   let last = null;
@@ -369,27 +483,156 @@ function extractPendingQueue(text) {
   return { pending: depth, last, at };
 }
 
+// Both thresholds are re-quoted as prose in SKILL.md's "Verified gotchas" and in
+// the PROBABLY_FREE / BUSY rows of its flow-3 verdict table. Changing a number
+// here without changing them there leaves the model reading one rule while this
+// resolves another; test-session-trail-skill.sh T24 pins the two literals.
 const BUSY_IDLE_MIN = 15;
+// Under this, nothing about the last record is trusted: a turn that ends between
+// two reads would otherwise read as idle while its process is mid-write.
+const ACTIVE_GRACE_MIN = 2;
 
-function activityVerdict(r) {
-  const idleMin = Math.round((Date.now() - r.mtime) / 60000);
-  const q = r.queue || { pending: 0 };
+// The verdict is a hazard report, never a permission gate — nothing here refuses
+// anything, and nothing in this script enforces exclusivity, because none exists
+// (no lock in the gitdir; a registry entry is a registration, not a claim).
+//
+// `force` and the measurement are ORTHOGONAL and stay separate fields. `level` is
+// what a reader should act on; `measuredLevel` is what was actually observed and
+// never changes; `authorized` says only that `--force` was on this invocation.
+// Collapsing them would hide the hazard from every machine consumer the moment
+// someone passed the flag.
+//
+// The wording is deliberately provenance, not conclusion. This script cannot see
+// a user: `--force` is a token its caller types, so "the user authorized this" is
+// a claim it has no evidence for — and that sentence gets persisted into briefs
+// which tell the next instance never to ask again.
+function activityVerdict(r, force = false) {
+  const v = measuredVerdict(r);
+  // The flag alone is not enough: the row must BE the one a selector resolved.
+  // That is what makes the survey rule structural — a command that resolves no
+  // selector cannot authorize any row, whatever it passes, so a future
+  // selector-less command cannot reintroduce the machine-wide stamp by calling
+  // the wrong helper.
+  const selected = SELECTED_SESSION_ID !== null && r.sessionId === SELECTED_SESSION_ID;
+  const base = { ...v, measuredLevel: v.level, measuredReason: v.reason, authorized: force === true && selected };
+  if (v.level !== 'BUSY' || !base.authorized) return base;
+  return {
+    ...base,
+    level: 'CONTESTED',
+    reason: `${v.reason} --force was passed on this invocation, which records an authorization this script cannot verify.`,
+  };
+}
+
+// A command that takes no selector cannot carry an authorization: the user
+// approved ONE session, and rendering that against every busy row on the machine
+// turns one go/no-go into a blanket one. The rule belongs here, at the verdict
+// boundary, rather than in each renderer — applying it to the text path alone
+// left `list --json --force` stamping CONTESTED on every row while the visible
+// output looked correct.
+function surveyVerdict(r) {
+  return activityVerdict(r, false);
+}
+
+// The doctrine, with ONE owner. It was hand-copied into three renderers with
+// different wording and different coverage, so a level could be emitted with no
+// advice attached and every check stayed green. Keyed by level; every level
+// `measuredVerdict` or `activityVerdict` can emit must have an entry, which
+// test-session-trail-skill.sh T18 asserts against the emitted set.
+const ADVICE = {
+  FREE: ['Nothing holds this worktree. Take it over.'],
+  PROBABLY_FREE: ['Proceed, but tell the user not to type in that window, and check for dev servers it may still own.'],
+  BUSY: [
+    'This is a hazard report, not a refusal. State it to the user in one line, take a single',
+    'go/no-go, and on yes re-run with --force to record the authorization and take it over.',
+  ],
+  CONTESTED: [
+    'Authorized. Take it over, name the window the user must not type in, and check whether',
+    'it still owns dev servers or ports.',
+  ],
+};
+
+function measuredVerdict(r) {
+  // FLOOR, not round: `Math.round` crosses each threshold half a minute early —
+  // a transcript touched 95 s ago rounded to 2 and escaped the 2-minute grace
+  // window the docs promise, and 14 min 30 s rounded to 15 and read as "silent
+  // ≥15 min". An age is only past a threshold once it has actually passed it.
+  const idleMin = Math.floor((Date.now() - r.mtime) / 60000);
+  const q = r.queue || { pending: 0, at: null, reliable: false };
+  const turn = r.lastTurn || { kind: 'unknown', stopReason: null };
+  const qAt = q.at ? Date.parse(q.at) : NaN;
+  // An unreadable enqueue timestamp counts as fresh: a real queued prompt is a
+  // genuine hazard, and over-reporting it now costs one question, not a refusal.
+  const queueFresh = !Number.isFinite(qAt) || (Date.now() - qAt) / 60000 < BUSY_IDLE_MIN;
+  // `q.reliable === true` is DEFENCE IN DEPTH and currently unreachable as a
+  // discriminator: since the tail-slice change, `extractPendingQueue` only ever
+  // reports a positive depth it can stand behind, so `pending > 0` already
+  // implies it. A mutation probe confirmed no fixture bites this conjunct — it is
+  // kept rather than removed so a future change to that reader cannot silently
+  // reopen the phantom-queue BUSY, and it is documented rather than left looking
+  // like a tested guarantee.
+  const queueCounts = q.pending > 0 && q.reliable === true && queueFresh;
+  // "Nothing is queued" is a positive claim, so it may only be made from a read
+  // that could have SEEN a queue. An unreliable read reports its own blindness
+  // instead — including when the depth came back zero, which on a partial read
+  // means nothing at all.
+  let queueNote = q.reliable === true
+    ? ' Nothing is queued.'
+    : ' Its queue could not be measured — the transcript was read head+tail only.';
+  if (q.pending > 0 && !queueCounts) {
+    queueNote = q.reliable === true
+      ? ` Its recorded queue depth of ${q.pending} last grew ${ago(qAt)} ago — a stale balance, not a waiting prompt.`
+      : ` Its recorded queue depth of ${q.pending} comes from a partial head+tail transcript read, so it is not evidence.`;
+  }
   if (r.app && r.app.archived) {
-    return { level: 'FREE', idleMin, reason: 'the desktop app archived this session — its process was stopped' };
+    // This branch runs BEFORE the liveness check, so `r.live` can still be set —
+    // asserting "its process was stopped" there contradicts the STATUS line
+    // printed directly above it, and both end up in the same persisted brief.
+    return {
+      level: 'FREE',
+      idleMin,
+      reason: r.live
+        ? `the desktop app archived this session, though pid ${r.live.pid} is still registered and alive`
+        : 'the desktop app archived this session — its process was stopped',
+    };
   }
   if (!r.live) {
     return { level: 'FREE', idleMin, reason: 'no live process holds this worktree' };
   }
-  if (q.pending > 0) {
-    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} has ${q.pending} prompt(s) queued and will act on its own` };
+  if (queueCounts) {
+    // `queueFresh` is true for an unparseable timestamp, so this branch is
+    // reachable with qAt === NaN; `ago(NaN)` would render a bare "?".
+    const when = Number.isFinite(qAt) ? `, last enqueued ${ago(qAt)} ago,` : ' (enqueue time not recorded)';
+    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} has ${q.pending} prompt(s) queued${when} and will act on its own.` };
+  }
+  if (idleMin < ACTIVE_GRACE_MIN) {
+    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} wrote to its transcript ${idleMin} min ago — too recent to judge, its turn may still be streaming.` };
+  }
+  if (turn.kind === 'awaiting-input') {
+    return {
+      level: 'PROBABLY_FREE',
+      idleMin,
+      reason: `pid ${r.live.pid} ended its last turn (${turn.stopReason}) ${ago(r.mtime)} ago, so it cannot act unless the user types in that window.${queueNote}`,
+    };
   }
   if (idleMin < BUSY_IDLE_MIN) {
-    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} wrote to its transcript ${idleMin} min ago — it is actively working` };
+    // `unknown` is not `in-turn`: no last record was identified, so naming one
+    // would assert a measurement that was never taken.
+    const why = turn.kind === 'in-turn'
+      ? 'and its last record is a turn in flight — it is working.'
+      : 'and no assistant or user record could be read from it, so its state is unmeasured.';
+    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} wrote to its transcript ${idleMin} min ago ${why}` };
   }
+  // `awaiting-input` returned above, so this is `in-turn` or `unknown`. Only the
+  // second justifies "it cannot act unless the user types": a turn in flight that
+  // has gone quiet for hours may still be blocked on a long tool call, and that
+  // DOES act without its human when it returns.
+  const silent = `pid ${r.live.pid} is alive but has been silent for ${ago(r.mtime)}`;
   return {
     level: 'PROBABLY_FREE',
     idleMin,
-    reason: `pid ${r.live.pid} is alive but has been silent for ${ago(r.mtime)} with nothing queued — it cannot act unless the user types in that window`,
+    reason: turn.kind === 'in-turn'
+      ? `${silent}, and its last record is a turn in flight — most likely abandoned, but it could still be blocked on something that returns.${queueNote}`
+      : `${silent} — it cannot act unless the user types in that window.${queueNote}`,
   };
 }
 
@@ -467,8 +710,22 @@ function extractTouchedFiles(text, limit) {
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([p, n]) => ({ path: p, hits: n }));
 }
 
+// A pull-request record is transcript-derived, and both of its fields end up
+// somewhere a shape matters: the URL as a markdown link target in two persisted
+// briefs, the number in a command line the user is told to run. Anything that
+// does not match is dropped rather than rendered — a missing PR row is a smaller
+// loss than a link nobody chose.
+const PR_URL_SHAPE = /^https:\/\/[A-Za-z0-9._-]+\/[A-Za-z0-9._\-/]+\/(?:pull|merge_requests|-\/merge_requests)\/\d{1,9}$/;
+function safePr(rec) {
+  const number = String(rec.prNumber ?? '');
+  const url = String(rec.prUrl ?? '');
+  if (!/^\d{1,9}$/.test(number) || !PR_URL_SHAPE.test(url)) return null;
+  return { number, url, repository: oneLine(String(rec.prRepository ?? ''), 120) || null };
+}
+
 function summarize(file, size, deep) {
-  const text = readTranscript(file, size);
+  const read = readTranscript(file, size);
+  const text = read.text;
   const cwd = firstMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
   const cwdLast = lastMatch(text, /"cwd":"((?:[^"\\]|\\.)*)"/g);
   const branch = lastValidBranch(text);
@@ -485,10 +742,15 @@ function summarize(file, size, deep) {
     title: titles.length ? titles[titles.length - 1].customTitle : null,
     lastPrompt: lastPrompts.length ? lastPrompts[lastPrompts.length - 1].lastPrompt : null,
     mode: modes.length ? modes[modes.length - 1].mode : null,
-    pr: prs.length ? { number: prs[prs.length - 1].prNumber, url: prs[prs.length - 1].prUrl, repository: prs[prs.length - 1].prRepository } : null,
-    truncated: size > FULL_READ_LIMIT,
-    stopCause: extractStopCause(text),
-    queue: extractPendingQueue(text),
+    // Bounded at the source like every other transcript-derived value. The URL is
+    // rendered as a markdown LINK TARGET inside both persisted briefs, in the
+    // block a reader treats as machine-derived provenance, and the number reaches
+    // a printed command line — so both are shape-checked rather than trusted.
+    pr: prs.length ? safePr(prs[prs.length - 1]) : null,
+    truncated: !read.full,
+    stopCause: extractStopCause(text, read.tailOffset),
+    queue: extractPendingQueue(text, read.full, read.tailOffset),
+    lastTurn: extractLastTurn(text, read.tailOffset),
   };
   if (deep) {
     out.prompts = extractPrompts(text);
@@ -598,7 +860,12 @@ function buildIndex(opts) {
 
 function inRepo(cwd, ctx) {
   if (ctx.worktrees.has(cwd)) return true;
-  return cwd === ctx.root || cwd.startsWith(`${ctx.root}${path.sep}`);
+  // Normalised before comparing: this cwd is read out of another session's
+  // transcript, and `/repo/../elsewhere` satisfies a raw `startsWith('/repo/')`
+  // — which would fold an out-of-scope row into a listing the user asked to be
+  // repo-scoped, and run a git subprocess in that directory on the way.
+  const c = path.resolve(cwd);
+  return c === ctx.root || c.startsWith(`${ctx.root}${path.sep}`);
 }
 
 function ago(ms) {
@@ -628,7 +895,11 @@ function oneLine(s, n) {
 }
 
 function cmdList(opts) {
-  const { rows, ctx } = buildIndex(opts);
+  const { rows: base, ctx } = buildIndex(opts);
+  // The verdict travels in the payload rather than being left for a consumer to
+  // recompute from the `queue`/`lastTurn` inputs the rows already carry — one
+  // implementation of the policy, on every carrier.
+  const rows = base.map((r) => ({ ...r, takeover: surveyVerdict(r) }));
   if (opts.json) return print(JSON.stringify({ repo: ctx && ctx.root, rows, skipped: SKIPPED }, null, 2));
   const scope = ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS';
   const liveCount = rows.filter((r) => r.live).length;
@@ -641,7 +912,10 @@ function cmdList(opts) {
       ? `${g.branch || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
       : (r.branch || '?');
     const pr = r.pr ? `PR #${r.pr.number}` : 'PR —';
-    const owner = r.live ? `pid ${r.live.pid} ${activityVerdict(r).level}` : '';
+    // `measuredLevel`, not `level`: this command takes no selector, so rendering
+    // an authorization here would show one session's approval against every busy
+    // row in scope. A survey reports what was measured.
+    const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
     print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
@@ -674,12 +948,19 @@ function cmdInstances(opts) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${s.sessionId.slice(0, 8)}  ${(s.entrypoint || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
+      print(`  ${String(s.pid).padStart(6)}  ${oneLine(String(s.sessionId), 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
       print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
     }
     print('');
   }
 }
+
+// The one session a selector actually named. `activityVerdict` requires a row to
+// BE it before `--force` can mean anything, which makes the survey rule
+// structural rather than a convention about which helper each call site happens
+// to call: a command that resolves no selector can never authorize a row, no
+// matter what it passes.
+let SELECTED_SESSION_ID = null;
 
 function resolve(opts, selectorRaw) {
   const { rows } = buildIndex({ ...opts, live: false });
@@ -695,11 +976,12 @@ function resolve(opts, selectorRaw) {
     rows.filter((r) => r.worktree.toLowerCase().includes(low) || (r.branch || '').toLowerCase().includes(low)),
     rows.filter((r) => `${r.title || ''} ${r.lastPrompt || ''}`.toLowerCase().includes(low)),
   ];
+  const select = (row) => { SELECTED_SESSION_ID = row.sessionId; return row; };
   for (const t of tiers) {
-    if (t.length === 1) return t[0];
+    if (t.length === 1) return select(t[0]);
     if (t.length > 1) {
       const byWorktree = new Set(t.map((r) => r.cwd));
-      if (byWorktree.size === 1) return t.sort((a, b) => b.mtime - a.mtime)[0];
+      if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
       for (const r of t) print(`  ${r.sessionId.slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${r.worktree}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
       flush();
@@ -729,17 +1011,21 @@ function cmdShow(opts) {
   const base = resolve(opts, opts._[1]);
   const r = hydrate(base);
   const g = opts.git ? gitState(r.wt, true) : null;
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, skipped: SKIPPED }, null, 2));
+  const v = activityVerdict(r, opts.force);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, skipped: SKIPPED }, null, 2));
   print(`SESSION  ${r.sessionId}`);
-  print(`TITLE    ${r.title || '(none)'}`);
-  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${r.live.entrypoint}  name "${r.live.name}"` : ''}`);
+  print(`TITLE    ${oneLine(r.title, 200) || '(none)'}`);
+  // Bounded like every other third-party value: the registry record is another
+  // instance's JSON, and a newline in `name` or `entrypoint` would fabricate a
+  // line directly above the TAKEOVER verdict a reader acts on.
+  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(r.live.entrypoint, 40)}  name "${oneLine(r.live.name, 92)}"` : ''}`);
   if (r.app) {
     print(`OWNER    desktop instance ${r.app.instance}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
-    print(`CONFIG   model ${r.app.model || '?'}   effort ${r.app.effort || '?'}   permissions ${r.app.permissionMode || '?'}`);
+    print(`CONFIG   model ${oneLine(r.app.model, 40) || '?'}   effort ${oneLine(r.app.effort, 40) || '?'}   permissions ${oneLine(r.app.permissionMode, 40) || '?'}`);
   }
   print(`WORKTREE ${r.wt}${r.cwdExists ? '' : '   !! MISSING'}`);
   if (r.cwd !== r.wt) print(`CWD      ${r.cwd}   (session started in a subdirectory)`);
-  print(`BRANCH   ${(g && g.branch) || r.branch || '?'}`);
+  print(`BRANCH   ${oneLine((g && g.branch) || r.branch, 120) || '?'}`);
   print(`LAST     ${ago(r.mtime)} ago   transcript ${r.transcript}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
@@ -747,12 +1033,11 @@ function cmdShow(opts) {
   if (r.truncated) print('NOTE     transcript is large — head+tail only, middle not scanned');
   const sib = siblings(opts, r);
   if (sib.length) print(`SIBLINGS ${sib.map((s) => `${s.sessionId.slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
-  const v = activityVerdict(r);
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
-  if (v.level === 'FREE') print('         Nothing holds this worktree. Take it over.');
-  if (v.level === 'PROBABLY_FREE') print('         Proceed, but tell the user not to type in that window, and check for dev servers it may still own.');
-  if (v.level === 'BUSY') print('         Do NOT edit this worktree. Read-only follow, or ask the user to park that window.');
+  for (const advice of (ADVICE[v.level] || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
+    print(`         ${advice}`);
+  }
   print('\n--- PROMPT TIMELINE ---');
   const ps = r.prompts || [];
   const shown = ps.slice(-Math.max(1, opts.prompts));
@@ -826,14 +1111,15 @@ function gitDiffText(cwd, base, maxLines) {
 function cmdLimited(opts) {
   const { rows, ctx } = buildIndex({ ...opts, live: false });
   const hit = rows.filter((r) => r.stopCause);
-  const stalled = hit.filter((r) => r.stopCause.final);
-  const recovered = hit.filter((r) => !r.stopCause.final);
+  const verdicted = (list) => list.map((r) => ({ ...r, takeover: surveyVerdict(r) }));
+  const stalled = verdicted(hit.filter((r) => r.stopCause.final));
+  const recovered = verdicted(hit.filter((r) => !r.stopCause.final));
   if (opts.json) return print(JSON.stringify({ repo: ctx && ctx.root, stalled, recovered, skipped: SKIPPED }, null, 2));
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}`);
-    print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}`);
+    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
+    print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
     if (!r.stopCause.final) {
@@ -861,7 +1147,8 @@ function cmdTakeover(opts) {
   const d = g ? gitDiffText(r.wt, g.base, 400) : null;
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch).replace(/\.md$/, '.takeover.md');
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, skipped: SKIPPED }, null, 2));
+  const tv = activityVerdict(r, opts.force);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${r.title || path.basename(r.wt)}`);
   L.push('');
@@ -870,7 +1157,10 @@ function cmdTakeover(opts) {
   L.push('## Source');
   L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
   if (r.app) L.push(`- owning desktop instance: \`${r.app.instance}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
-  L.push(`- takeover verdict: **${activityVerdict(r).level}** — ${activityVerdict(r).reason}`);
+  L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
+  if (tv.authorized) {
+    L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
+  }
   L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
@@ -910,11 +1200,11 @@ function cmdTakeover(opts) {
   const tasks = r.tasks || [];
   if (!tasks.length) L.push('_the session tracked no tasks_');
   for (const t of tasks) {
-    L.push(`- [${t.status}] **#${t.id} ${t.subject}**`);
+    L.push(`- [${oneLine(String(t.status ?? ''), 24)}] **#${oneLine(String(t.id ?? ''), 16)} ${oneLine(String(t.subject ?? ''), 200)}**`);
     if (t.description) L.push(`  - ${clip(t.description, 600)}`);
   }
   const open = tasks.filter((t) => t.status !== 'completed');
-  if (open.length) L.push(`\n**${open.length} task(s) not completed: ${open.map((t) => `#${t.id}`).join(', ')}**`);
+  if (open.length) L.push(`\n**${open.length} task(s) not completed: ${open.map((t) => `#${oneLine(String(t.id ?? ''), 16)}`).join(', ')}**`);
   L.push('');
   L.push('## Recent instructions (verbatim, newest last)');
   const recent = (r.prompts || []).slice(-Math.max(1, opts.prompts));
@@ -948,9 +1238,8 @@ function cmdTakeover(opts) {
   L.push(`1. \`cd ${r.wt}\` — work in this worktree, not a fresh checkout of the branch.`);
   L.push('2. Re-verify before trusting anything above: this is a snapshot, and the working tree may have moved since.');
   L.push('3. Restate the remaining work as a short plan and get the user\'s confirmation before editing.');
-  const tv = activityVerdict(r);
-  if (tv.level === 'BUSY') L.push(`4. ⚠️ **STOP** — ${tv.reason}. Do not edit this worktree.`);
-  else if (tv.level === 'PROBABLY_FREE') L.push(`4. ${tv.reason}. Taking over is fine; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
+  if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and take a single go/no-go before the first edit${tv.authorized ? ' — the authorization above was given when this brief was written, not here' : '; on yes, re-run this command with `--force`'}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
+  else if (tv.measuredLevel === 'PROBABLY_FREE') L.push(`4. ${tv.measuredReason} Taking over is fine; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
   print(`TAKEOVER_TARGET: ${target}`);
   print('--- BEGIN TAKEOVER MARKDOWN ---');
   print(L.join('\n'));
@@ -959,10 +1248,22 @@ function cmdTakeover(opts) {
 
 function handoffPath(r, ctx, liveBranch) {
   const root = (r.cwdExists && nearestRepoRoot(r.wt, new Map())) || null;
-  const repo = (root && path.basename(root)) || (ctx && ctx.name) || path.basename(path.dirname(r.wt));
+  // `repo` is derived from a path this script did not choose — a `gitdir:` line in
+  // a linked worktree's `.git` file, or the parent directory name under `--all`.
+  // Both can spell `..`, and `path.join` would then normalise the target OUT of
+  // the handoffs directory: the model is told to Write to whatever this prints.
+  // Sanitising is not enough on its own, because `..` survives a character class
+  // that permits dots — so the result is asserted to be inside HANDOFFS as well.
+  const rawRepo = (root && path.basename(root)) || (ctx && ctx.name) || path.basename(path.dirname(r.wt));
+  const safe = (s) => String(s || '').replace(/[^A-Za-z0-9._-]/g, '-');
+  const repo = safe(rawRepo).replace(/^\.+$/, 'unknown-repo') || 'unknown-repo';
   const usable = (b) => (b && b !== 'HEAD' ? b : null);
-  const branch = (usable(r.branch) || usable(liveBranch) || path.basename(r.wt)).replace(/[^A-Za-z0-9._-]/g, '-');
-  return path.join(HANDOFFS, repo, `${branch}.md`);
+  const branch = safe(usable(r.branch) || usable(liveBranch) || path.basename(r.wt)).replace(/^\.+$/, 'unknown-branch') || 'unknown-branch';
+  const target = path.join(HANDOFFS, repo, `${branch}.md`);
+  if (!path.resolve(target).startsWith(HANDOFFS + path.sep)) {
+    fail(`refusing to name a brief target outside ${HANDOFFS}: ${target}`);
+  }
+  return target;
 }
 
 function cmdHandoff(opts) {
@@ -975,7 +1276,7 @@ function cmdHandoff(opts) {
   L.push(`# Handoff: ${r.title || path.basename(r.cwd)}`);
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${r.live.entrypoint}` : ''})`);
+  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
   L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
   L.push(`- transcript: \`${r.transcript}\``);
@@ -1013,8 +1314,15 @@ function cmdHandoff(opts) {
   L.push(`cd ${r.cwd} && claude --resume ${r.sessionId}`);
   L.push('```');
   if (r.live) {
+    // `measuredReason`, not `reason`: a label that says "measured" must not carry
+    // the authorization clause, whose "this invocation" is unresolvable in a file
+    // a DIFFERENT instance reads later.
+    const hv = activityVerdict(r, opts.force);
     L.push('');
-    L.push(`> **Still running** in pid ${r.live.pid}. Stop that instance before editing this worktree.`);
+    L.push(`> **Still running** in pid ${r.live.pid} — measured takeover verdict **${hv.measuredLevel}**: ${hv.measuredReason}`);
+    if (hv.authorized) L.push(`> An authorization was recorded at ${new Date().toISOString()} by passing --force to the command that generated this file. It was bounded to that moment and to whoever gave it, and this file cannot carry it forward.`);
+    L.push('> Nothing enforces exclusivity here; the hazard is a human typing in that window, not the process holding a claim.');
+    L.push('> Re-measure before acting: this line is a snapshot, and any authorization behind it was bounded to the moment this file was written.');
   }
   print(`HANDOFF_TARGET: ${target}`);
   print('--- BEGIN HANDOFF MARKDOWN ---');

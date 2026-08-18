@@ -95,6 +95,12 @@ GIT_WORKTREE_WRITE_RE="$GIT_CALL_RE[^]]*\[[[:space:]]*'worktree',[[:space:]]*'(r
 # Files the write-channel guard must cover: every executable the skill ships,
 # not just the one script it ships today.
 SCRIPT_INCLUDES=(--include='*.mjs' --include='*.js' --include='*.cjs')
+# The two bare vetoes the takeover doctrine replaced. They are pinned by their
+# ABSENCE (T23), because a takeover the user asked for is never refused — the
+# verdict reports a hazard and costs at most one up-front question. Both get a
+# control line in the T0 fixture block, like every other negative check here.
+OLD_DOC_VETO='stop. Read-only follow'
+OLD_SCRIPT_VETO='Do NOT edit this worktree'
 
 PASS=0; FAIL=0; SKIP=0
 check() {
@@ -226,6 +232,13 @@ if [ -n "$CTRL_DIR" ]; then
   printf '%s\n' 'run `/session-trail` to start' > "$CTRL_DIR/bare-ref.md"
   grep -qF "$HOME_SKILL_PATH" "$CTRL_DIR/home-path.md" || CTRL_BAD="$CTRL_BAD home-path"
   grep -qF "$BARE_COMMAND_REF" "$CTRL_DIR/bare-ref.md" || CTRL_BAD="$CTRL_BAD bare-ref"
+
+  # The two retired vetoes, in the exact shapes they had before the doctrine
+  # change: one SKILL.md table cell, one script directive line.
+  printf '%s\n' '| `BUSY` | it wrote within the last 15 min | stop. Read-only follow, or ask the user to park that window. |' > "$CTRL_DIR/old-veto.txt"
+  printf '%s\n' "  if (v.level === 'BUSY') print('         Do NOT edit this worktree. Read-only follow.');" >> "$CTRL_DIR/old-veto.txt"
+  grep -qF "$OLD_DOC_VETO" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-doc-veto"
+  grep -qF "$OLD_SCRIPT_VETO" "$CTRL_DIR/old-veto.txt" || CTRL_BAD="$CTRL_BAD old-script-veto"
 
   if [ -z "$CTRL_BAD" ]; then
     check "T0 every branch of every negative-check pattern bites a derived control" PASS
@@ -385,10 +398,17 @@ done
 for v in FREE PROBABLY_FREE BUSY; do
   printf '%s\n' "$EMITTED" | grep -qxF "$v" || VERDICT_UNEMITTED="$VERDICT_UNEMITTED $v"
 done
-if [ "$EMITTED_N" -gt 0 ] && [ -z "$VERDICT_UNDOC" ] && [ -z "$VERDICT_UNEMITTED" ]; then
-  check "T18 all $EMITTED_N emitted TAKEOVER verdicts are documented, and the three named verdicts are still emitted" PASS
+# Third direction, added because a level could be emitted with no advice attached
+# and every check stayed green: the ADVICE table is the doctrine's single owner,
+# so every emitted level must be a key in it.
+VERDICT_UNADVISED=""
+for v in $EMITTED; do
+  grep -qE "^  $v: \[" "$TRAIL_MJS" || VERDICT_UNADVISED="$VERDICT_UNADVISED $v"
+done
+if [ "$EMITTED_N" -gt 0 ] && [ -z "$VERDICT_UNDOC" ] && [ -z "$VERDICT_UNEMITTED" ] && [ -z "$VERDICT_UNADVISED" ]; then
+  check "T18 all $EMITTED_N emitted TAKEOVER verdicts are documented, carry an ADVICE entry, and the three named verdicts are still emitted" PASS
 else
-  check "T18 verdict drift (emitted=$EMITTED_N undocumented:${VERDICT_UNDOC:- none} no-longer-emitted:${VERDICT_UNEMITTED:- none})" FAIL
+  check "T18 verdict drift (emitted=$EMITTED_N undocumented:${VERDICT_UNDOC:- none} no-longer-emitted:${VERDICT_UNEMITTED:- none} no-advice:${VERDICT_UNADVISED:- none})" FAIL
 fi
 
 # T19 — the sections that carry the measured findings and the safety contract.
@@ -494,6 +514,146 @@ if [ -z "$GUARD_MISS" ]; then
   check "T22 every runtime guard added on top of the verbatim relocation is still in place" PASS
 else
   check "T22 runtime guards missing:$GUARD_MISS" FAIL
+fi
+
+# T23 — the takeover doctrine. This is the rule the model actually acts on, so it
+# is pinned on the operative clauses rather than on a heading, and in BOTH
+# directions: the new doctrine must be present AND the two bare vetoes it
+# replaced must be gone. A skill that refuses a takeover the user asked for is
+# the defect; nothing here enforces exclusivity, and a registry entry is a
+# registration, not a claim. The behavioural half — what the script actually
+# decides — is test-session-trail-verdict.sh, which this suite cannot observe.
+WORKFLOWS="$(section_of '## Workflows')"
+DOCTRINE_MISS=""
+while IFS='|' read -r label clause; do
+  [ -n "$label" ] || continue
+  printf '%s\n' "$WORKFLOWS" | grep -qF "$clause" || DOCTRINE_MISS="$DOCTRINE_MISS [$label]"
+done <<'DOCTRINE_PINS'
+not-a-gate|hazard report, never a permission gate
+never-refused|is never refused
+up-front|before the first edit
+one-question|take a single go/no-go
+contested-no-reask|never ask again
+DOCTRINE_PINS
+grep -qF "$OLD_DOC_VETO" "$SKILL_MD" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-doc-veto-is-back]"
+grep -qF "$OLD_SCRIPT_VETO" "$TRAIL_MJS" && DOCTRINE_MISS="$DOCTRINE_MISS [retired-script-veto-is-back]"
+# The script carries its OWN copy of the doctrine in the lines it prints, and at
+# runtime that copy is what the reader acts on — SKILL.md is only read when the
+# skill is loaded. Pinning the SKILL.md clauses positively while pinning the
+# script's only by the absence of the old wording would let the live copy drift
+# into a refusal with every check green. So both are pinned positively.
+# Anchored to an EMISSION, not to the file: the module comment above
+# `activityVerdict` states the same doctrine in near-identical words, so an
+# unanchored grep would stay green after the print/push lines were deleted — the
+# exact drift this pin exists to prevent.
+# Comment lines are stripped first: an emission-shaped line inside a comment is
+# not an emission, and a `// print('…')` would otherwise satisfy the pin with the
+# live call deleted.
+TRAIL_CODE="$(grep -vE '^[[:space:]]*(//|\*|/\*)' "$TRAIL_MJS")"
+# Two anchors, because the doctrine now has two shapes in the script. The
+# per-level advice lives in the single-owner `ADVICE` table (T18 asserts every
+# emitted level has an entry); the brief-only clauses are still written at their
+# emission. Both are matched against comment-stripped source, so a commented-out
+# line satisfies neither.
+ADVICE_BLOCK="$(printf '%s\n' "$TRAIL_CODE" | awk '/^const ADVICE = \{/{f=1} f{print} /^\};$/{if(f) exit}')"
+[ -n "$ADVICE_BLOCK" ] || DOCTRINE_MISS="$DOCTRINE_MISS [script:no-advice-table]"
+while IFS='|' read -r label clause; do
+  [ -n "$label" ] || continue
+  printf '%s\n' "$ADVICE_BLOCK" | grep -qF "$clause" || DOCTRINE_MISS="$DOCTRINE_MISS [advice:$label]"
+done <<'ADVICE_DOCTRINE_PINS'
+not-a-refusal|hazard report, not a refusal
+one-go-no-go|take a single
+force-is-the-escape|re-run with --force
+contested-authorized|Authorized. Take it over
+free-nothing-holds|Nothing holds this worktree
+probably-free-proceed|Proceed, but tell the user not to type
+ADVICE_DOCTRINE_PINS
+while IFS='|' read -r label clause; do
+  [ -n "$label" ] || continue
+  printf '%s\n' "$TRAIL_CODE" | grep -qE "(print|L\.push)\(.*${clause}" || DOCTRINE_MISS="$DOCTRINE_MISS [script:$label]"
+done <<'SCRIPT_DOCTRINE_PINS'
+hazard-not-veto|Hazard, not a veto
+no-exclusivity|Nothing enforces exclusivity
+SCRIPT_DOCTRINE_PINS
+# The table must actually be RENDERED, not merely present.
+printf '%s\n' "$TRAIL_CODE" | grep -qE 'ADVICE\[v\.level\]' || DOCTRINE_MISS="$DOCTRINE_MISS [script:advice-not-rendered]"
+if [ -n "$WORKFLOWS" ] && [ -z "$DOCTRINE_MISS" ]; then
+  check "T23 the takeover doctrine survives in BOTH carriers and neither retired veto is back" PASS
+else
+  check "T23 takeover doctrine drift:${DOCTRINE_MISS:- (## Workflows not found)}" FAIL
+fi
+
+# T24 — the two verdict thresholds are numbers in the script and prose in
+# SKILL.md. Nothing else connects them, so a change to one that misses the other
+# leaves the model reading a rule the helper does not resolve. The doc needles are
+# DERIVED from the source values rather than hardcoded: with both sides pinned as
+# independent literals, the obvious repair for a threshold change (edit the number
+# the check named) re-greens the suite while the prose stays stale — which is the
+# drift this exists to catch.
+GOTCHAS="$(section_of '## Verified gotchas')"
+THRESH_MISS=""
+BUSY_N="$(sed -n 's/^const BUSY_IDLE_MIN = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
+GRACE_N="$(sed -n 's/^const ACTIVE_GRACE_MIN = \([0-9][0-9]*\);$/\1/p' "$TRAIL_MJS")"
+[ -n "$BUSY_N" ] || THRESH_MISS="$THRESH_MISS [script-busy-idle-unreadable]"
+[ -n "$GRACE_N" ] || THRESH_MISS="$THRESH_MISS [script-grace-unreadable]"
+if [ -n "$BUSY_N" ] && [ -n "$GRACE_N" ]; then
+  # Digit-anchored. A fixed-string needle is a SUBSTRING: change BUSY_IDLE_MIN to
+  # 5 and "5 min" matches the still-stale "15 min", so the check passes on exactly
+  # the drift it exists to catch.
+  # Each number bound to ITS OWN clause. A section-wide search passes with the two
+  # thresholds SWAPPED, because both sections already carry both numbers — and a
+  # swap is the one edit most likely to leave the prose describing the opposite
+  # rule while every needle is still present.
+  printf '%s\n' "$WORKFLOWS" | grep -qE "silent .{0,3}$BUSY_N min" || THRESH_MISS="$THRESH_MISS [table-busy-idle]"
+  printf '%s\n' "$WORKFLOWS" | grep -qE "last $GRACE_N min" || THRESH_MISS="$THRESH_MISS [table-grace]"
+  printf '%s\n' "$GOTCHAS" | grep -qE "(^|[^0-9])$BUSY_N minutes" || THRESH_MISS="$THRESH_MISS [gotchas-busy-idle]"
+  printf '%s\n' "$GOTCHAS" | grep -qE "(^|[^0-9])$GRACE_N minutes" || THRESH_MISS="$THRESH_MISS [gotchas-grace]"
+fi
+if [ -n "$GOTCHAS" ] && [ -z "$THRESH_MISS" ]; then
+  check "T24 both verdict thresholds ($GRACE_N / $BUSY_N min) are stated in the script and in the two SKILL.md sections that re-quote them" PASS
+else
+  check "T24 threshold drift:${THRESH_MISS:- (## Verified gotchas not found)}" FAIL
+fi
+
+# T25 — the authorization channel, pinned as a POLICY rather than as a mechanism.
+# `--force` turns a measured BUSY into an authorized CONTESTED, so it must be
+# parsed, documented, and forwarded by every SELECTOR-BEARING command. The two
+# selector-less surveys (`list`, `limited`) must NOT forward it: they render one
+# row per session, and one approval is not approval for all of them. An earlier
+# version of this check required every call site to forward, which is why the
+# survey fix could only be applied in a renderer and left `list --json --force`
+# stamping CONTESTED on every row with the suite green. Every verdict call is now
+# required to be exactly one of the two spellings, and both sets are counted.
+FORCE_MISS=""
+grep -qF "a === '--force'" "$TRAIL_MJS" || FORCE_MISS="$FORCE_MISS [not-parsed]"
+TOOL_SECTION="$(section_of '## The tool')"
+printf '%s\n' "$TOOL_SECTION" | grep -qF '`--force`' || FORCE_MISS="$FORCE_MISS [not-documented]"
+printf '%s\n' "$TOOL_SECTION" | grep -qF 'writes nothing' || FORCE_MISS="$FORCE_MISS [no-write-contract]"
+printf '%s\n' "$TOOL_SECTION" | grep -qF 'selector-less' || FORCE_MISS="$FORCE_MISS [survey-rule-undocumented]"
+AV_LINES="$(grep -c 'activityVerdict(' "$TRAIL_MJS")"
+AV_DEF="$(grep -c '^function activityVerdict(' "$TRAIL_MJS")"
+AV_FORWARDED="$(grep -c 'activityVerdict(r, opts.force)' "$TRAIL_MJS")"
+# The survey wrapper: one definition (which calls activityVerdict with a literal
+# false) plus its uses. Counted so a survey command silently switching back to the
+# forwarding spelling fails here.
+SV_DEF="$(grep -c '^function surveyVerdict(' "$TRAIL_MJS")"
+SV_USES="$(grep -c 'takeover: surveyVerdict(r)' "$TRAIL_MJS")"
+if [ "$AV_DEF" != "1" ] || [ "$SV_DEF" != "1" ]; then
+  FORCE_MISS="$FORCE_MISS [definition-counts av=$AV_DEF sv=$SV_DEF]"
+elif [ "$((AV_LINES - AV_DEF - SV_DEF))" != "$AV_FORWARDED" ]; then
+  FORCE_MISS="$FORCE_MISS [call-sites-forwarding=$AV_FORWARDED/$((AV_LINES - AV_DEF - SV_DEF))]"
+elif [ "$SV_USES" -lt 2 ]; then
+  FORCE_MISS="$FORCE_MISS [survey-commands-using-it=$SV_USES, expected both list and limited]"
+elif ! grep -qE 'return activityVerdict\([A-Za-z_$][A-Za-z0-9_$]*, false\);' "$TRAIL_MJS"; then
+  # Unconditional and parameter-agnostic. Guarding this on an exact definition
+  # shape meant a renamed parameter SKIPPED the clause rather than failing it, and
+  # the surveys could start forwarding the flag again with this check green.
+  FORCE_MISS="$FORCE_MISS [survey-wrapper-does-not-drop-the-flag]"
+fi
+if [ -z "$FORCE_MISS" ]; then
+  check "T25 --force is parsed, documented, forwarded by all $AV_FORWARDED selector-bearing call sites, and dropped by both selector-less surveys" PASS
+else
+  check "T25 --force authorization channel:$FORCE_MISS" FAIL
 fi
 
 echo "----"

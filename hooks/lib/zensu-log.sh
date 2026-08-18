@@ -95,9 +95,17 @@ case "${1:-}" in
       echo "zensu-log.sh --phase: CHAIN_RECOVERED is written only by --chain-recover; it is the provenance record of a repair and cannot be minted by a caller" >&2
       exit 2
     fi
+    if [ "$phase_val" = RUNTIME_ADOPTED ]; then
+      echo "zensu-log.sh --phase: RUNTIME_ADOPTED is written only by the session adoption; it is the provenance record of a runtime takeover and cannot be minted by a caller" >&2
+      exit 2
+    fi
     case "$reason_val" in
       "chain-recovered: "*)
         echo "zensu-log.sh --phase: a 'chain-recovered: ' reason is reserved for --chain-recover" >&2
+        exit 2
+        ;;
+      "runtime-adopted: "*)
+        echo "zensu-log.sh --phase: a 'runtime-adopted: ' reason is reserved for the session adoption" >&2
         exit 2
         ;;
     esac
