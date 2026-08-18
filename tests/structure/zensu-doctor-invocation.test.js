@@ -28,7 +28,12 @@ const {
   ASSIGNMENTS, REASONS, COMMAND_MAX_BYTES, DOCTOR_SEGMENTS, ADOPT_SEGMENTS, RECOGNIZED,
 } = require(modulePath);
 
-const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync(os.tmpdir()), "zensu-doctor-invocation-"));
+// realpathSync.NATIVE, not realpathSync: on Windows the plain form leaves an 8.3
+// short name intact (C:\Users\RUNNER~1\...), and `~` is outside the recognizer's
+// whitelist, so every positive case below is refused as COMMAND_CHARSET_REJECTED
+// for a property of the CI temp directory rather than of the parser. The native
+// form expands it to the long name.
+const tmpRoot = fs.mkdtempSync(nodePath.join(fs.realpathSync.native(os.tmpdir()), "zensu-doctor-invocation-"));
 process.on("exit", () => { try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch (_) {} });
 
 const pluginRoot = nodePath.join(tmpRoot, "plugin");
@@ -55,6 +60,25 @@ const dataDir = commandSpelling(nodePath.join(tmpRoot, "plugin-data"));
 const projectDir = commandSpelling(nodePath.join(tmpRoot, "project"));
 fs.mkdirSync(nodePath.resolve(dataDir), { recursive: true });
 fs.mkdirSync(nodePath.resolve(projectDir), { recursive: true });
+
+// A synthetic tree the recognizer could never accept makes every positive case
+// below fail for the fixture's sake, and the verdict alone does not say which
+// character was at fault — that cost four CI rounds to work out. Fail HERE, and
+// name the offenders. This mirrors the module's own SAFE_CHARACTER by hand and is
+// a diagnostic, never a contract pin: the module owns that rule.
+const UNSAFE_IN_FIXTURE = [...new Set(
+  [tmpRoot, pluginRoot, dataDir, projectDir]
+    .join("")
+    .split("")
+    .filter((c) => c !== " " && c !== "\t" && c !== '"' && !/^[A-Za-z0-9_./:=+@,-]$/.test(c)),
+)];
+if (UNSAFE_IN_FIXTURE.length > 0) {
+  throw new Error(
+    `fixture paths carry characters the recognizer refuses: ${JSON.stringify(UNSAFE_IN_FIXTURE)} `
+    + `— tmpRoot=${tmpRoot}. Pick a temp root the whitelist accepts; this is a harness `
+    + `fault, not a parser verdict.`,
+  );
+}
 
 const payload = (command, toolName = "Bash") => ({
   hook_event_name: "PreToolUse",
