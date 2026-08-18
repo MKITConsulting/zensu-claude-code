@@ -1627,12 +1627,18 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     }
     // An unreadable lease is moved aside too: listRecords would fail on it just
     // as hard, and leaving it would defeat the whole point of this sweep.
-    // KEEP only what listRecords would ACCEPT. It rejects a stem that is not a
-    // lease id and a lease_id that disagrees with its filename, both before it
-    // ever looks at plugin_root — so keeping on plugin_root alone leaves entries
-    // that still fail the whole set, and the wedge survives a clean-looking
-    // adoption. The id shape is a hand-copy of LEASE_ID_RE in
-    // review-evidence-lease-v1.js; keep the two in step.
+    // Keep a SUPERSET of what listRecords accepts — stated as a superset because
+    // that is what it is. Three of that reader's conjuncts are mirrored here (the
+    // id shape, lease_id agreeing with the filename, and the executing root),
+    // which is what stops an entry it rejects from being kept on plugin_root
+    // alone. NOT mirrored: it also rejects a symlinked or multiply-linked record
+    // file, a non-canonical spelling, an oversized one, and every validateRecord
+    // violation. An entry failing only those while naming the executing root is
+    // therefore KEPT and keeps wedging later lease operations — a residual, not
+    // the main gap, because a lease can only name the executing root if that
+    // runtime minted it, and none can be minted while the session is unbound.
+    // The id shape is a hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js,
+    // pinned by test-versioned-plugin-upgrade.sh; keep the two in step.
     const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
     if (LEASE_RECORD_ID_RE.test(leaseId)
       && record && typeof record === 'object'

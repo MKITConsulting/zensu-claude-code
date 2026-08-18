@@ -1633,6 +1633,19 @@ else
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL
 fi
 
+# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
+# in review-evidence-lease-v1.js: the core cannot require that module (it requires
+# the binder, which requires the core), so the two are held in step by hand — and
+# by this pin, the way within() <-> isInside is held. Without it a widened lease id
+# shape would make the sweep silently set aside every new-format lease, green.
+CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = /[^;]*/" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
+OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = /[^;]*/" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
+if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
+  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
+else
+  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
+fi
+
 # The reserved phase cannot be minted by a caller — the same protection
 # CHAIN_RECOVERED has, for the same reason: a forgeable provenance entry is worse
 # than none, because it is believed.
