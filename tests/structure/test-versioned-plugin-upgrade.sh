@@ -1273,10 +1273,20 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
     fi
   fi
 done
-if [ -z "$RECOGNIZER_FAILURES" ]; then
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
+# The label follows the grading, exactly as $ADOPT_LABEL and $ADOPT_SHAPE_LABEL do:
+# on win32 every row above asserts deny, the shape-narrowness clause is supplied by
+# the platform refusal and the main-thread conjunct is skipped outright, so a fixed
+# "admitted in exactly one shape, for the main thread only" would report the
+# opposite of what ran.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  RECOGNIZER_LABEL="the second recognized command is admitted in exactly one shape, for the main thread only"
 else
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
+  RECOGNIZER_LABEL="refuses every adoption payload on win32 (documented MSYS spelling gap; neither the shape narrowness nor the main-thread conjunct discriminates here)"
+fi
+if [ -z "$RECOGNIZER_FAILURES" ]; then
+  check "FR-C03 $RECOGNIZER_LABEL" PASS
+else
+  check "FR-C03 $RECOGNIZER_LABEL (allowed:$RECOGNIZER_FAILURES)" FAIL
 fi
 
 # AC-C05 — the self-closing gate, and the single most important check here: a
@@ -1483,8 +1493,8 @@ cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
 
 # AC-C08 — seed the lease store so the sweep has something to sweep. Without this
 # the whole moving branch never runs: discardSupersededLeases returns 0 through
-# its readdir catch when the per-session records directory does not exist, so a
-# --confirm assertion on an empty store proves nothing about the discard.
+# its lstat ENOENT branch when the per-session records directory does not exist,
+# so a --confirm assertion on an empty store proves nothing about the discard.
 # Two leases with exactly one difference: the root they name.
 # Canonicalized: the sweep resolves plugin data through canonicalDirectory, so on
 # a host where the temp root is a symlink (/var -> /private/var on macOS) a
@@ -1568,11 +1578,13 @@ else
 fi
 
 # The ORDINARY case: a session that never minted a review-evidence lease has no
-# per-session records directory at all, so the sweep takes its readdir-failure
-# path. That path returned a scalar while every other path returned an object,
-# which made the reporter throw AFTER the record swap had already succeeded — a
-# completed adoption reported as a failure. Driven on its own session, because
-# the seeded one above can never reach it.
+# per-session records directory at all, so the sweep returns through its lstat
+# ENOENT branch. That path once returned a scalar while every other path returned
+# an object, which made the reporter throw AFTER the record swap had already
+# succeeded — a completed adoption reported as a failure. Named precisely: the
+# readdir catch below it is NOT this case, it is a directory that exists and
+# cannot be read, and it reports unsafe. Driven on its own session, because the
+# seeded one above can never reach it.
 NOLEASE_SESSION='versioned-upgrade-adoption-no-lease'
 NOLEASE_START="$(EVENT=SessionStart SESSION="$NOLEASE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1600,7 +1612,8 @@ if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && grep -qF 'ADOPTED' "$NOLEASE_OUT" \
     && grep -qF 'leases set aside : 0' "$NOLEASE_OUT" \
     && grep -qF 'leases stuck     : 0' "$NOLEASE_OUT" \
-    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
+    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT" \
+    && ! grep -qF 'WARNING' "$NOLEASE_OUT"; then
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
   # Names the second cause on purpose: this run also supplies AC-C11a's foreign
@@ -1609,6 +1622,53 @@ else
   # to the lease sweep.
   check "AC-C08 a session with no lease store adopts cleanly and exits 0 (also the foreign-project-dir input AC-C11a grades)" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
+fi
+
+# AC-C12 — the DESTINATION refusal, and the only check that reaches either scope
+# string. Both existing sweeps are clean paths: the seeded one passes asideIsSafe()
+# and the no-lease one returns through the lstat ENOENT branch, so before this row
+# nothing in the tree distinguished `source` from `destination`, or either from the
+# bare boolean they replaced. The counts cannot stand in for it — they print BEFORE
+# the unsafe branch, so a refused sweep still reports `set aside : 0`.
+#
+# A regular FILE at the destination, not a symlink: this suite documents `ln -s` as
+# unreliable under Git Bash, and mkdirSync({recursive}) throws EEXIST on a file just
+# as usefully. It costs one session lifecycle, which is what makes the scope strings
+# observable at all.
+DESTUNSAFE_SESSION='versioned-upgrade-adoption-dest-unsafe'
+DESTUNSAFE_START="$(EVENT=SessionStart SESSION="$DESTUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$DESTUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+DESTUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$DESTUNSAFE_SESSION")"
+DESTUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$DESTUNSAFE_KEY"
+DESTUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$DESTUNSAFE_KEY"
+mkdir -p "$DESTUNSAFE_RECORDS" "$(dirname "$DESTUNSAFE_ASIDE")"
+DESTUNSAFE_LEASE='rel1_00112233445566778899aabbccddeeff'
+write_lease "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" "$DESTUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+printf 'not a directory\n' > "$DESTUNSAFE_ASIDE"
+DESTUNSAFE_OUT="$TMP/adopt-dest-unsafe.out"
+if CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$DESTUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$DESTUNSAFE_OUT" \
+    && grep -qF 'SUPERSEDED directory could not be opened safely' "$DESTUNSAFE_OUT" \
+    && ! grep -qF 'lease RECORDS directory of this session could not be' "$DESTUNSAFE_OUT" \
+    && ! grep -qF 'did not report which directory it refused' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$DESTUNSAFE_OUT" \
+    && [ -f "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" ]; then
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" PASS
+else
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" FAIL
+  head -c 400 "$DESTUNSAFE_OUT" 2>/dev/null
 fi
 
 # AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The
@@ -1630,8 +1690,12 @@ fi
 
 # AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
+# The absence of a WARNING is asserted, not assumed: the counts print BEFORE the
+# unsafe branch, so a sweep that refused the store still shows `set aside : 0`
+# under a label reading "adopts cleanly". Costs no extra process.
 if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
+    && ! grep -qF 'WARNING' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/$LEASE_STALE_ID.json" ] \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json" ] \

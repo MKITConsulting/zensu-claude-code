@@ -277,10 +277,17 @@ function main() {
       process.stdout.write("\nWARNING: the review-evidence SUPERSEDED directory could not be opened safely,\n");
       process.stdout.write("so no lease was set aside. It is <plugin_data>/review-evidence/v1/superseded/<session key>,\n");
       process.stdout.write("and it is a directory this plugin only writes to — inspect it before repeating this.\n");
-    } else {
+    } else if (adopted.leasesUnsafeScope === "source") {
       process.stdout.write("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
       process.stdout.write("opened safely, so no lease was inspected or set aside. If any lease there names the\n");
       process.stdout.write("previous installation, review-evidence operations keep failing until it is moved out by hand.\n");
+    } else {
+      // Neither scope: a core that still reports the old bare boolean. Naming one
+      // directory here would re-create the misdirection this branch exists to fix,
+      // so say what is known and name both candidates.
+      process.stdout.write("\nWARNING: the review-evidence lease store could not be opened safely, so no lease was\n");
+      process.stdout.write("inspected or set aside. This runtime did not report which directory it refused —\n");
+      process.stdout.write("check both <plugin_data>/review-evidence/v1/records/<session key> and .../superseded/<session key>.\n");
     }
   }
   if (adopted.leasesFailed.length > 0) {

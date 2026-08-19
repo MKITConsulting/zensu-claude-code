@@ -131,7 +131,7 @@ the update has to be re-gathered.
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
-Render the output verbatim. Three lines are NOT clean states and must be
+Render the output verbatim. Four things are NOT clean states and must be
 surfaced rather than summarized away:
 
 - a `provenance` other than `recorded` or `no-workflow-document` means the
@@ -142,7 +142,12 @@ surfaced rather than summarized away:
   previous installation, and because every lease read validates the whole set,
   review-evidence operations keep failing for this session until they are moved
   out of the records directory by hand. The adoption itself is complete; say
-  both things.
+  both things;
+- any `WARNING:` line about the review-evidence lease store. The one naming the
+  SUPERSEDED directory is the serious one: that directory is only ever written to
+  by this plugin, so something there that is not a plain directory this session
+  owns is a possible tamper signal. Report it and tell the user to inspect it
+  before running the adoption again — never fold it into a summary.
 
 Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
 precondition failure, `2` on a bad argument. A non-zero exit is not a broken
@@ -167,5 +172,5 @@ anything onto it.
 
 Render both command outputs verbatim; they are already formatted. Name both
 versions. Never summarize away a `provenance` other than `recorded`/
-`no-workflow-document`, a non-zero `leases set aside`, or a non-zero
-`leases stuck`. After a successful adoption, do not tell the user to restart.
+`no-workflow-document`, a non-zero `leases set aside`, a non-zero
+`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart.

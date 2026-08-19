@@ -1604,13 +1604,23 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   let entries;
   try {
     entries = fs.readdirSync(recordsDirectory);
-  } catch {
-    // ONE shape on every path. The directory only exists once a lease was
-    // minted, so this is the ORDINARY case — a scalar here would hand the
-    // caller `undefined` for both fields and make the reporter throw AFTER the
-    // record swap had already succeeded, reporting failure for a completed
-    // adoption.
-    return { discarded: 0, failed: [] };
+  } catch (error) {
+    // ONE shape on every path — a scalar here would hand the caller `undefined`
+    // for both fields and make the reporter throw AFTER the record swap had
+    // already succeeded, reporting failure for a completed adoption.
+    //
+    // NOT the ordinary "no lease was ever minted" case, whatever an older
+    // comment here claimed: the lstat guard above has already established that
+    // this directory exists, is a real directory and is canonical, and it is
+    // what answers ENOENT. What reaches this catch is EACCES, EPERM, EMFILE or a
+    // race — a directory that exists and cannot be read, which is precisely the
+    // state the caller must not be told was clean. It carries the same `source`
+    // diagnosis as the guard above, and the ENOENT arm stays clean for the race.
+    return {
+      discarded: 0,
+      failed: [],
+      unsafe: error && error.code === 'ENOENT' ? false : 'source',
+    };
   }
   const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
   let discarded = 0;
@@ -1675,9 +1685,15 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       // No mkdir here: asideIsSafe() already created AND validated the directory.
       // What that buys is one fewer way to CREATE the target — it does not close the
       // race. rename(2) resolves every non-final component, so a link swapped in at
-      // asideDirectory after the guard still redirects each move. The residual is
-      // bounded by the store itself: 0700 and owner-checked, so it needs a same-uid
-      // or root attacker. Do not restate it as closed.
+      // asideDirectory after the guard still redirects each move.
+      //
+      // State the residual's bound narrowly, because the guard is narrower than it
+      // looks: asideIsSafe() applies the 0700 and owner checks to the LEAF only, and
+      // a recursive mkdir validates nothing about components that already exist. So
+      // "needs a same-uid attacker" holds only while every ancestor
+      // (<plugin_data>/review-evidence/v1/superseded) is user-owned and not
+      // group-writable — which nothing here verifies. review-evidence-lease-v1.js's
+      // ensurePrivateDirectory walks every component; this copy does not.
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {
