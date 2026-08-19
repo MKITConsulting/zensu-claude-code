@@ -377,10 +377,13 @@ suites this file records a measured figure for. AC-C11 then added three more
 entry-point process runs on top of that unmeasured baseline, and review of that
 work added a fourth (the `native_root` render), two `adoptableRecord` calls for
 AC-C11b and three gate-layer decisions — each of the last carrying its own node
-payload build and decode. AC-C12 and AC-C12a then added TWO more full session
-lifecycles, each a SessionStart run plus a session-key call plus a `--confirm` run
-that itself spawns the host-path renderer twice and node once. AC-C12b then added a
-THIRD such lifecycle. The ceiling did not move for any of it. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
+payload build and decode. AC-C12, AC-C12a and AC-C12b then added three session
+lifecycles, and they are NOT the same size: counted from the file, the top-level
+node and bash runs are 5, 4 and 5 — each builds its SessionStart payload in its own
+`node -e`, AC-C12 and AC-C12b additionally call `write_lease`, and each `--confirm`
+itself spawns the host-path renderer twice plus node. Two `chmod`s and one `uname`
+sit on top. The ceiling did not move for any of it, and an itemization is a poor
+substitute for the measurement this paragraph keeps asking for. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a

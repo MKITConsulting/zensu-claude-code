@@ -114,8 +114,20 @@ source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2
   exit 1
 }
-NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || exit 1
-NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || exit 1
+# Both renders name their cause. zensu-host-path.sh exits SILENTLY for anything that
+# is not an existing, non-symlink directory, and a bare `|| exit 1` here made this
+# command — the last reachable diagnosis in a wedged session — produce no output at
+# all for a plugin-data store that had been pruned, replaced by a file, or symlinked.
+# The `private-record-store-unsafe` branch below already carries the right wording
+# for exactly those shapes and never got the chance to run.
+NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || {
+  printf '%s\n' 'zensu:adopt-session: the executing plugin root is not a readable directory; repair the Zensu plugin installation' >&2
+  exit 1
+}
+NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || {
+  printf '%s\n' 'zensu:adopt-session: CLAUDE_PLUGIN_DATA does not name a readable directory, so the record store cannot be located. It is missing, a file, or a symlink.' >&2
+  exit 1
+}
 MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA)" || {
   printf '%s\n' 'zensu:adopt-session: the host-path environment library is unavailable; repair the Zensu plugin installation' >&2
   exit 1

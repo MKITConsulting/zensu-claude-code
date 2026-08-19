@@ -1533,8 +1533,10 @@ mkdir -p "$ADOPT_LEASE_DIR"
 # AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
 # sweep returns on ENOENT before asideIsSafe() runs — none consults the mode of these
 # two. Note the asymmetry this chmod does NOT cover: `superseded` IS mode-checked,
-# because nothing in the lease module owns or repairs it. Its own 0700 is asserted
-# where AC-C12 creates it, not here.
+# because nothing in the lease module owns or repairs it. Its 0700 comes from
+# asideIsSafe()'s own per-segment mkdir during the AC-C07 --confirm below; the chmods
+# at AC-C12 and AC-C12b are defensive re-sets so that no row depends on that
+# ordering. No check grades that mode directly.
 chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
@@ -1700,7 +1702,6 @@ if CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA
     && grep -qF 'ADOPTED' "$DESTUNSAFE_OUT" \
     && grep -qF 'SUPERSEDED directory could not be opened safely' "$DESTUNSAFE_OUT" \
     && ! grep -qF 'lease RECORDS directory of this session could not be' "$DESTUNSAFE_OUT" \
-    && ! grep -qF 'did not report which directory it refused' "$DESTUNSAFE_OUT" \
     && grep -qF 'leases set aside : 0' "$DESTUNSAFE_OUT" \
     && grep -qF 'leases stuck     : 0' "$DESTUNSAFE_OUT" \
     && [ -f "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" ]; then
@@ -1712,8 +1713,11 @@ fi
 
 # AC-C12a — the SOURCE refusal, which AC-C12 can only assert the absence of. An
 # absence passes more easily when the text is wrong, so it cannot stand in for the
-# positive case: without this row three of the four `unsafe` returns and one of the
-# three warning arms are never executed. Same technique, one component up — a
+# positive case: without this row the `source` scope and one of the two warning arms
+# are never executed at all. It reaches ONE of the four statements that can return
+# `source` — the symlink-or-non-directory refusal. The other three (a non-canonical
+# records path, a non-ENOENT lstat error, a readdir error) are executed by no row in
+# this suite; that is a stated gap, not an implied covered set. Same technique, one component up — a
 # regular FILE where the per-session records directory belongs makes the lstat
 # guard's `!stat.isDirectory()` fire, with no symlink and no ln -s involved.
 SRCUNSAFE_SESSION='versioned-upgrade-adoption-src-unsafe'
@@ -1739,7 +1743,6 @@ if CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA"
     && grep -qF 'ADOPTED' "$SRCUNSAFE_OUT" \
     && grep -qF 'lease RECORDS directory of this session could not be' "$SRCUNSAFE_OUT" \
     && ! grep -qF 'SUPERSEDED directory could not be opened safely' "$SRCUNSAFE_OUT" \
-    && ! grep -qF 'did not report which directory it refused' "$SRCUNSAFE_OUT" \
     && grep -qF 'leases set aside : 0' "$SRCUNSAFE_OUT" \
     && grep -qF 'leases stuck     : 0' "$SRCUNSAFE_OUT"; then
   check "AC-C12a a refused source is named as the records directory, not the destination" PASS
@@ -1752,9 +1755,11 @@ fi
 # a FILE at the leaf, and the mkdir there raises EEXIST, which the loop tolerates —
 # so the per-segment lstat refuses the non-directory before the leaf mode/uid pair
 # or the realpath check ever run. A pre-existing DIRECTORY at 0777 is what reaches
-# all three: the mkdir neither chmods nor fails on it, so the guard meets a leaf it
-# did not create, which is exactly the case the check exists for. Delete the
-# mode/uid pair and this row is what goes red.
+# the leaf mode/uid pair: the mkdir neither chmods nor fails on it, so the guard
+# meets a leaf it did not create, which is exactly the case the check exists for.
+# The realpath check below that pair is NOT reached on this arm — the mode check
+# returns first — only on the win32 arm, where privateEnough short-circuits to true.
+# Delete the mode/uid pair and this row is what goes red.
 LEAFUNSAFE_SESSION='versioned-upgrade-adoption-leaf-unsafe'
 LEAFUNSAFE_START="$(EVENT=SessionStart SESSION="$LEAFUNSAFE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1772,6 +1777,11 @@ LEAFUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core
 LEAFUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$LEAFUNSAFE_KEY"
 LEAFUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$LEAFUNSAFE_KEY"
 mkdir -p "$LEAFUNSAFE_RECORDS" "$LEAFUNSAFE_ASIDE"
+# Same rule as AC-C12 above, and this mkdir creates `superseded` as an implicit
+# parent: that segment is mode-checked, so leaving it at the ambient umask would let
+# this row pass through the SEGMENT refusal while claiming the LEAF one — both emit
+# the same text — and would make every later clean sweep order-dependent.
+chmod 0700 "$(dirname "$LEAFUNSAFE_ASIDE")"
 LEAFUNSAFE_LEASE='rel1_0123456789abcdef0123456789abcdef'
 write_lease "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" "$LEAFUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
 chmod 0777 "$LEAFUNSAFE_ASIDE"
@@ -2158,8 +2168,8 @@ fi
 # by this pin, the way within() <-> isInside is held. Without it a widened lease id
 # shape would make the sweep silently set aside every new-format lease, green.
 # WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
-CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = /[^;]*/" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = /[^;]*/" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
+CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
+OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
 if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
   check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
 else
