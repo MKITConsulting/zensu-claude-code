@@ -295,10 +295,10 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**Three re-encodings move with this. Their coverage is stated once, in the store-layout
-bullet below, and nowhere else — a ledger that contradicts itself about its own pins is
-the failure mode it exists to prevent. The wire format and the version-shape rule are
-unchecked:
+**Three re-encodings move with this.** Their coverage is stated once, in the
+store-layout bullet below, and nowhere else — a ledger that contradicts itself about
+its own pins is the failure mode it exists to prevent. The wire format and the
+version-shape rule are unchecked:
 
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
@@ -326,7 +326,14 @@ unchecked:
   which requires this core), but an ENTRY-POINT seam would not, because
   `zensu-session-adopt.sh` already requires both. The real cost of the seam is
   that it moves the sweep from the core half to an eighth host obligation. If this
-  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
+  function needs a fourth correction, take the seam. THAT TRIGGER HAS FIRED — eleven
+  review rounds landed corrections here — and taking it was DEFERRED by explicit
+  decision, not overlooked. The reason it stays defensible: none of those rounds
+  added a sixth copied element. The `superseded` mode/uid pair is a policy local to a
+  directory that appears nowhere in the lease module, so nothing there owns or
+  repairs it; the count is still five. The seam belongs in its own change, together
+  with exporting the sweep for a unit driver — which is the same decision, since the
+  module it would move to can be driven directly. The source `lstat`'s ENOENT
   branch is also the silent one: it cannot tell "no lease was ever minted" from a
   layout that moved, so a layout change makes the sweep a SILENT no-op.
 

@@ -1531,7 +1531,10 @@ mkdir -p "$ADOPT_LEASE_DIR"
 # ancestor check restored, so the chmod is what makes the bite umask-independent.
 # It is safe for every row after it: AC-C12 refuses through the per-segment shape lstat,
 # AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
-# sweep returns on ENOENT before asideIsSafe() runs — none consults an ancestor mode.
+# sweep returns on ENOENT before asideIsSafe() runs — none consults the mode of these
+# two. Note the asymmetry this chmod does NOT cover: `superseded` IS mode-checked,
+# because nothing in the lease module owns or repairs it. Its own 0700 is asserted
+# where AC-C12 creates it, not here.
 chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
@@ -1681,6 +1684,12 @@ DESTUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core
 DESTUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$DESTUNSAFE_KEY"
 DESTUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$DESTUNSAFE_KEY"
 mkdir -p "$DESTUNSAFE_RECORDS" "$(dirname "$DESTUNSAFE_ASIDE")"
+# `superseded` IS mode-checked by asideIsSafe(), unlike its two ancestors, so this
+# mkdir must not be what leaves it at the ambient umask. Today the product code
+# creates it first at 0700 during the AC-C07 --confirm above and this is a no-op —
+# but that makes every later clean sweep depend on row ORDER, and a reorder would
+# turn AC-C08's `leases set aside : 3` red for a reason unrelated to the sweep.
+chmod 0700 "$(dirname "$DESTUNSAFE_ASIDE")"
 DESTUNSAFE_LEASE='rel1_00112233445566778899aabbccddeeff'
 write_lease "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" "$DESTUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
 printf 'not a directory\n' > "$DESTUNSAFE_ASIDE"
