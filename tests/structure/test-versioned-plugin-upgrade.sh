@@ -1021,7 +1021,12 @@ fi
 # AC-C04 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
 # matcher wins. Enumerated from hooks.json for the same reason Part A and B do:
 # a hook added later is covered without editing this check.
-ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# The shape the SKILL emits, so this enumeration grades what a real invocation
+# looks like. It carries no CLAUDE_PROJECT_DIR: the adoption never reads it, and
+# passing it would put a value nobody consumes in front of the recognizer's
+# rooted-literal check. A shape the skill no longer emits, graded here, would be a
+# green enumeration over a command that never runs.
+ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
 # already disagreed on anchoring, and a matcher regex is exactly the thing whose
@@ -1103,15 +1108,20 @@ fi
 # the placeholder empty would refuse the whole invocation over a variable nobody
 # reads. Both rows are graded through the ".*" capability gate for the same reason
 # the discrimination test above is.
+# Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer refuses
+# on win32 BY DESIGN, so a literal would make these rows unpassable on the Windows
+# shard — the same defect class the block above was corrected for. The empty-value
+# row below asserts `deny` on every platform and therefore discriminates only on
+# POSIX, where the platform refusal is not already supplying that verdict.
 ADOPT_SHAPE_FAILURES=''
 ADOPT_NO_PROJECT="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
-    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != allow ]; then
-  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir:denied"
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir"
 fi
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
-    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != allow ]; then
-  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm:denied"
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm"
 fi
 if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
     "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
@@ -1325,12 +1335,33 @@ native_root() {
     process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
   ' || return 1
 }
+# Also hoisted above its original site: AC-C11b below is the first consumer, and it
+# has to run BEFORE the adoption, because that is the only window in which `ok` is
+# a reachable verdict at all.
+adoption_reason() {
+  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+      executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
 # Every comparison of a report line or a record field against the shell's own
 # $PROJECT goes through this. On POSIX it is identity; on Git Bash the shell holds
 # /d/a/... while the record and the report hold D:\a\..., so a raw comparison can
 # only ever fail there — silently, since a POSIX run stays green.
+# Asserted as the CORRESPONDENCE its label claims, not as mere non-emptiness: the
+# helper returns an empty string on either failure step, and an empty needle would
+# turn every grep below into a match on the report's fixed label — a row that
+# reports PASS while testing nothing. Compared against the record the adoption is
+# about to be graded on, which is the only thing that makes the rendering right
+# rather than merely present.
 NATIVE_PROJECT="$(native_root "$PROJECT")"
-if [ -n "$NATIVE_PROJECT" ]; then
+if [ -n "$NATIVE_PROJECT" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$ADOPT_RECORD")" = "$NATIVE_PROJECT" ]; then
   check "the project fixture renders to the spelling the record holds" PASS
 else
   check "the project fixture renders to the spelling the record holds" FAIL
@@ -1363,18 +1394,25 @@ adopt_report_shape() {
 }
 PROJECT_SHAPE_FAILURES=''
 adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
-  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset:exit"
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset"
 adopt_report_shape CLAUDE_PROJECT_DIR="$ABSENT_PROJECT" >"$TMP/adopt-projectdir-absent.out" \
-  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES absent:exit"
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES absent"
 adopt_report_shape CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" >"$TMP/adopt-projectdir-different.out" \
-  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES different:exit"
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES different"
 for shape in unset absent different; do
   shape_out="$TMP/adopt-projectdir-$shape.out"
-  grep -qF 'ADOPTABLE' "$shape_out" \
+  # The -n guard is load-bearing, not defensive: an empty NATIVE_PROJECT makes the
+  # third needle the report's own fixed label, which every ADOPTABLE report carries.
+  [ -n "$NATIVE_PROJECT" ] \
+    && grep -qF 'ADOPTABLE' "$shape_out" \
     && grep -qF 'Nothing has been changed' "$shape_out" \
     && grep -qF "project          : $NATIVE_PROJECT" "$shape_out" \
     || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES $shape"
 done
+# One token per shape, appended at most once: the exit-status arm above and this
+# grep arm both fire for a broken shape, and a duplicate made the dump below print
+# the same capture twice.
+PROJECT_SHAPE_FAILURES="$(printf '%s' "$PROJECT_SHAPE_FAILURES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
 # The record must still be untouched: without --confirm every shape is read-only.
 if [ -z "$PROJECT_SHAPE_FAILURES" ] \
     && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
@@ -1385,9 +1423,26 @@ else
   # beside a FAIL verdict, which is worse than printing nothing.
   for failed in $PROJECT_SHAPE_FAILURES; do
     printf '  --- %s ---\n' "$failed"
-    head -c 300 "$TMP/adopt-projectdir-${failed%%:*}.out" 2>/dev/null
+    head -c 300 "$TMP/adopt-projectdir-$failed.out" 2>/dev/null
     printf '\n'
   done
+fi
+
+# AC-C11b — the `ok` verdict, at the FUNCTION boundary, under a project root that
+# is not the recorded one. AC-C11 above cannot supply this and must not be read as
+# if it did: it varies CLAUDE_PROJECT_DIR, and the entry point no longer passes any
+# projectRoot into adoptableRecord at all, so those three shapes exercise the
+# script's environment handling and nothing about the parameter. This row is the
+# only place the parameter itself is driven while `ok` is still reachable — after
+# the --confirm below, $SYNTHETIC_BREAKING_ROOT serves the record and every call
+# stops at already-served, which would leave a reintroduced comparison placed after
+# that condition completely invisible.
+REASON_FRESH_FOREIGN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$SYNTHETIC_BREAKING_ROOT" "$SYNTHETIC_BREAKING_ROOT")"
+REASON_FRESH_OWN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_FRESH_FOREIGN" = ok ] && [ "$REASON_FRESH_OWN" = ok ]; then
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies" PASS
+else
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies (foreign='$REASON_FRESH_FOREIGN' own='$REASON_FRESH_OWN')" FAIL
 fi
 
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
@@ -1610,17 +1665,8 @@ fi
 # with exactly ONE thing wrong. Run after the adoption because they reuse the
 # record it produced: it now declares 0.18.0, which is what makes the backwards
 # and non-sibling cases expressible from the roots this suite already built.
-adoption_reason() {
-  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
-    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
-    const verdict = core.adoptableRecord({
-      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
-      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
-      executingPluginRoot: process.env.EXEC_ROOT,
-    });
-    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
-  ' 2>/dev/null || printf 'threw'
-}
+# `adoption_reason` is defined ABOVE, beside native_root: AC-C11b is its first
+# consumer and it runs before the adoption.
 ADOPT_RECORDS_DIR="$SHARED_DATA/session-control/v1/records"
 
 REASON_BACKWARDS="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT")"
@@ -1648,12 +1694,14 @@ fi
 # the neighbouring rows still exercise.
 #
 # The record here already declares 0.18.0, so $SYNTHETIC_BREAKING_ROOT is the
-# runtime that already serves it and `ok` is not reachable from this row — the
-# `ok` verdict under a differing project root is pinned at AC-C11's `different`
-# shape, before the adoption. So this row asserts the property directly instead of
-# a single verdict: the project argument must change NOTHING. Comparing the two
-# reasons is what makes that a real bite — a verdict literal alone would stay green
-# if the comparison were reintroduced anywhere the two calls agree.
+# runtime that already serves it and `ok` is not reachable from this row — AC-C11b
+# above owns that verdict, at the function boundary, before the adoption. What this
+# row adds is the property at the OTHER end of the walk: the project argument must
+# change nothing even once an earlier condition answers first. Both halves are
+# needed, and neither alone is sufficient: a comparison reintroduced after
+# already-served is invisible here, and one reintroduced before it is invisible at
+# AC-C11b only if it happens to agree for both arguments — which comparing the two
+# reasons is what rules out.
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
@@ -1834,17 +1882,19 @@ REFUSAL_GAPS="$(
     const skill = fs.readFileSync(process.env.SKILL, "utf8");
     const reasons = Object.values(core.ADOPTION_REFUSALS);
     if (reasons.length !== 7) { process.stdout.write("count:" + reasons.length); process.exit(0); }
-    const missing = reasons.filter((r) => !skill.includes(r));
-    // The REVERSE direction, and the one a retirement needs: a row left behind
-    // for a reason that no longer exists matches nothing, so the forward filter
-    // above can never report it. Read from the table cells rather than the whole
-    // file, so the prose that recounts the removed condition is not mistaken for
-    // a live row.
-    const rows = skill.split("\n").filter((l) => /^\|\s*`[a-z-]+`\s*\|/.test(l));
-    const stale = rows
-      .map((l) => l.match(/^\|\s*`([a-z-]+)`/)[1])
-      .filter((r) => !reasons.includes(r));
+    // BOTH directions read the same parsed row set, never the whole file. Prose
+    // elsewhere in the skill mentions several of these reasons, so a forward check
+    // against `skill.includes` would stay green after the TABLE ROW was deleted —
+    // which is the drift it exists to catch. The character class is deliberately
+    // wider than any current value: a reason is a kebab-case identifier, and a
+    // future one carrying a digit must not slip past unnoticed in either direction.
+    const rows = skill.split("\n")
+      .map((l) => l.match(/^\|\s*`([a-z0-9_-]+)`\s*\|/))
+      .filter(Boolean)
+      .map((m) => m[1]);
+    const stale = rows.filter((r) => !reasons.includes(r));
     if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }
+    const missing = reasons.filter((r) => !rows.includes(r));
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
 )" || REFUSAL_GAPS=threw

@@ -253,8 +253,11 @@ is still refused, as `record-unreadable` — `validateContext` canonicalizes it 
 condition 1. Consequently `zensu-session-adopt.sh` no longer requires
 `CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
 rejects a non-directory, so an unset or deleted value exited before printing any
-report. The recognizer still ACCEPTS the assignment (the diagnostic reads it and the
-two share one set), so the shipped skill command is unchanged.
+report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
+two share one set — but the shipped skill command STOPPED PASSING it: the recognizer
+requires every assignment in the prefix to be a rooted literal path, so a harness
+that rendered the placeholder empty would have refused the whole invocation over a
+value nobody reads.
 
 **Two invariants, both learned from the chain-recovery precedent:**
 
@@ -339,9 +342,11 @@ the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
 and four session lifecycles, but no Windows wall clock was taken — unlike the two
 suites this file records a measured figure for. AC-C11 then added three more
-entry-point process runs on top of that unmeasured baseline, and the ceiling did
-not move again. Budget against a measurement
-before trusting the headroom. The caveat lives here and NOT in the manifest:
+entry-point process runs on top of that unmeasured baseline, and review of that
+work added a fourth (the `native_root` render), two `adoptableRecord` calls for
+AC-C11b and three gate-layer decisions — each of the last carrying its own node
+payload build and decode. The ceiling did not move for any of it. Budget against a
+measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a

@@ -12,11 +12,17 @@
 #     private plugin-data store; one workflow history entry in the recorded
 #     project; and any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
-#     into a sibling `superseded/` one. The selector is every entry listRecords
-#     would REJECT — a stale lease, one whose id disagrees with its filename, a
-#     malformed record, a non-.json leftover — not only a lease naming the
-#     previous installation. Nothing else, and nothing outside
-#     <plugin_data>/{session-control,review-evidence} and the recorded project.
+#     into a sibling `superseded/` one. The selector is broader than "names the
+#     previous installation" and narrower than "everything listRecords rejects":
+#     the keep-predicate is a SUPERSET of that reader's accept set, mirroring three
+#     of its conjuncts, so a stale lease, one whose id disagrees with its filename,
+#     a malformed record and a non-.json leftover are all moved — while an entry
+#     that fails only the checks NOT mirrored (symlinked or multiply-linked,
+#     non-canonical, oversized, otherwise validateRecord-invalid) and still names
+#     the executing root is KEPT, and keeps wedging later lease operations. That
+#     residual is documented in the core beside the predicate. Nothing else, and
+#     nothing outside <plugin_data>/{session-control,review-evidence} and the
+#     recorded project.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
 #     readContext: the session-hash must match, the
@@ -158,10 +164,22 @@ const buildRequest = () => ({
 // project is being taken over. The normal path is unchanged, which is what keeps the
 // report greppable. Built with RegExp from a string so the pattern survives every
 // layer this payload travels through as source text.
-const UNSAFE_DISPLAY = new RegExp("[\\u0000-\\u001f\\u007f]");
-const displayPath = (value) => {
+// A POSITIVE allowlist, and every non-constant field in the report goes through it.
+// A deny class was the first attempt and it was wrong in both directions: it caught
+// U+007F, which JSON.stringify does NOT escape, and it missed the bidi overrides and
+// U+2028, which are exactly what could hide the line naming the project being taken
+// over. It was also applied to two fields while provenance, the superseded filename,
+// the stuck-lease names and the error messages carried the same filesystem-derived
+// text raw. So: anything outside the set below is JSON-escaped AND folded to ASCII,
+// because JSON.stringify alone leaves every non-ASCII code point intact. Deliberately
+// no single quote in the class - this whole payload is a single-quoted shell string.
+const SAFE_DISPLAY = new RegExp("^[A-Za-z0-9 _.,:;/\\\\@+~()=-]*$");
+const NON_ASCII = new RegExp("[\\u007f-\\uffff]", "g");
+const safe = (value) => {
   const text = String(value);
-  return UNSAFE_DISPLAY.test(text) ? JSON.stringify(text) : text;
+  if (SAFE_DISPLAY.test(text)) return text;
+  return JSON.stringify(text).replace(NON_ASCII, (c) =>
+    "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 };
 
 // Every refusal names the condition that was not met, and every one of them has
@@ -169,7 +187,7 @@ const displayPath = (value) => {
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified. Its recorded project root may be gone (/zensu:doctor names that directory and it can be re-created in place), the installation that minted it may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Run /zensu:doctor first; only the last two of those need a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, that installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Adoption cannot tell these apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -194,7 +212,7 @@ function main() {
   } catch (error) {
     process.stdout.write("Zensu session adoption — NOT adoptable (private-record-store-unsafe)\n\n");
     process.stdout.write("The private Session Control record store could not be opened safely: "
-      + (error && error.message ? error.message : "unknown") + "\n");
+      + safe(error && error.message ? error.message : "unknown") + "\n");
     process.stdout.write("It is missing, aliased, or has unsafe permissions or ownership. Repair the store\n");
     process.stdout.write("or start a fresh Claude Code session; adoption cannot mint a record into it.\n");
     process.exitCode = 1;
@@ -202,7 +220,7 @@ function main() {
   }
   const verdict = core.adoptableRecord(request);
   if (!verdict.ok) {
-    process.stdout.write("Zensu session adoption — NOT adoptable (" + verdict.reason + ")\n\n");
+    process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
     process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
     process.exitCode = 1;
     return;
@@ -210,9 +228,9 @@ function main() {
 
   if (process.env.ZADOPT_CONFIRM !== "1") {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-    process.stdout.write("  record minted by : " + verdict.recorded + "\n");
-    process.stdout.write("  executing        : " + verdict.executing + "\n");
-    process.stdout.write("  project          : " + displayPath(verdict.context.project_root) + "\n\n");
+    process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
+    process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
+    process.stdout.write("  project          : " + safe(verdict.context.project_root) + "\n\n");
     process.stdout.write("The record is intact and this installation can take it over in place.\n");
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -220,14 +238,14 @@ function main() {
 
   const adopted = core.adoptContext(request);
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-  process.stdout.write("  record minted by : " + adopted.recorded + "\n");
-  process.stdout.write("  now served by    : " + adopted.executing + "\n");
+  process.stdout.write("  record minted by : " + safe(adopted.recorded) + "\n");
+  process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + displayPath(adopted.projectRoot) + "\n");
-  process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
-  process.stdout.write("  provenance       : " + adopted.provenance + "\n");
+  process.stdout.write("  project          : " + safe(adopted.projectRoot) + "\n");
+  process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
+  process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
   process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n");
   process.stdout.write("  leases stuck     : " + adopted.leasesFailed.length + "\n\n");
   process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
@@ -248,7 +266,7 @@ function main() {
     process.stdout.write("installation, review-evidence operations keep failing until it is moved out by hand.\n");
   }
   if (adopted.leasesFailed.length > 0) {
-    process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.join(", ") + "\n");
+    process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.map(safe).join(", ") + "\n");
     process.stdout.write("They still name the previous installation, and because every lease read validates the\n");
     process.stdout.write("whole set, review-evidence operations will keep failing for this session until they are\n");
     process.stdout.write("moved out of the records directory by hand. The adoption itself is complete.\n");
@@ -258,7 +276,7 @@ function main() {
 try {
   main();
 } catch (error) {
-  process.stderr.write("zensu:adopt-session: " + (error && error.message ? error.message : "unknown failure") + "\n");
+  process.stderr.write("zensu:adopt-session: " + safe(error && error.message ? error.message : "unknown failure") + "\n");
   process.exitCode = 1;
 }
 '
