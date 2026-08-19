@@ -5,7 +5,8 @@
 # resolved from the repo's provider, and Playwright MCP) in
 # the shell — `command -v` and auth-status exit codes are a shell concern — then
 # hands the results to zensu-doctor-report.js (env ZDOC_*), which reads the
-# plugin manifest/hooks, the effective config, and the session state dir and
+# plugin manifest/hooks, the effective config, Claude Code's own settings files
+# (read-only, for the reviewer-spawn exposure row), and the session state dir and
 # renders a four-block ✅/⚠️/❌ table. NOTHING here writes; the script always
 # exits 0 (a probe that errors degrades to a warning row, never a failure).
 #

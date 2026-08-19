@@ -8,6 +8,11 @@
 # corrupt, absent, and unsafe state.
 set -u
 
+# The doctor renderer resolves Claude Code settings from HOME/CLAUDE_PROJECT_DIR;
+# pin it at a path that cannot exist so this suite never reads the developer's own.
+ZENSU_DOCTOR_CLAUDE_SETTINGS="${TMPDIR:-/tmp}/zensu-no-such-claude-settings-$$.json"
+export ZENSU_DOCTOR_CLAUDE_SETTINGS
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LOG="$ROOT/hooks/lib/zensu-log.sh"
 CORE="$ROOT/hooks/lib/session-control-core-v1.js"

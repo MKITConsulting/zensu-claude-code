@@ -1,6 +1,13 @@
 #!/bin/bash
 set -u
 
+# The doctor renderer resolves Claude Code settings AND the Zensu config from
+# HOME/CLAUDE_PROJECT_DIR; pin both at paths that cannot exist so this suite
+# never reads the developer's own files.
+ZENSU_DOCTOR_CLAUDE_SETTINGS="${TMPDIR:-/tmp}/zensu-no-such-claude-settings-$$.json"
+ZENSU_CONFIG="${TMPDIR:-/tmp}/zensu-no-such-config-$$.json"
+export ZENSU_DOCTOR_CLAUDE_SETTINGS ZENSU_CONFIG
+
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 INSTALL_FIXTURE="$ROOT/tests/structure/fixtures/install-claude-runtime-fixture.js"
 PASS=0

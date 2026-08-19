@@ -7,7 +7,9 @@ description: >
   from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
-  string is silently ignored by strict === checks), and session state (state
+  string is silently ignored by strict === checks, and Claude Code's own
+  permission settings running in auto mode with no allowance for the
+  zensu:code-reviewer spawn), and session state (state
   dir writable, canonical CAS workflow documents valid, each review chain's
   shape plus any wedged chain and its recovery command, expired pending-review
   surfaced). The only write is an explicit, user-confirmed cleanup of one
@@ -131,6 +133,24 @@ concrete next step for each — but only for rows the table actually marked ⚠�
 - **⚠️ config quoted boolean** → the named key is a string (`"true"`) where a real
   boolean is required; strict `=== true` ignores it, so the feature stays at its
   default. Drop the quotes (offer `/zensu:setup` to rewrite it safely).
+- **⚠️ auto mode without a reviewer-spawn allowance** → the named Claude Code
+  settings file sets `permissions.defaultMode: "auto"` and no settings file
+  allows the `zensu:code-reviewer` spawn, so the auto-mode classifier can refuse
+  it — and a refused spawn leaves the review chain open with no in-session
+  remedy. Remedy: add `"Agent(zensu:code-reviewer)"` to `permissions.allow`.
+  When the row also names an `autoMode.allow` entry, say plainly that such an
+  entry is prose addressed to the classifier rather than a permission rule, that
+  Zensu cannot tell a permissive one from a restrictive one, and that it does
+  NOT substitute for the `permissions.allow` entry.
+- **⚠️ reviewer spawn: a deny/ask rule matches it** → reported independently of
+  `defaultMode`. A deny outranks every allow rule, so adding an allowance will
+  not help; the named file's rule has to be removed or narrowed.
+- **State the limits whenever you report either row**: they are exposure
+  reports, not predictions — the classifier decides per session context, not per
+  agent type. Zensu reads the user and project settings files as a UNION with no
+  precedence applied, and cannot see managed settings or a `--permission-mode`
+  command-line override — so a silent Config block proves nothing either, and an
+  unreadable-settings row means that file was accounted for in neither verdict.
 - **⚠️ forge CLI not authenticated / not found** → authenticate or install the CLI
   the report names for the detected provider: `gh auth login` for GitHub,
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was

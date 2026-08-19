@@ -270,6 +270,26 @@ if [ "$CAP_CORRUPT_BLOCKS" = true ] && printf '%s' "$current" | grep -qi 'corrup
   check "S8c corrupt outer remains fail-closed after the inner Stop budget is exhausted" PASS
 else check "S8c inner cap cannot bypass corrupt outer state" FAIL; fi
 
+P6P="$TMP/bound-permission-hint"; start "$P6P" stop_run_perm_hint stop_session_perm_hint
+autopilot_apply_event stop_run_perm_hint plan-perm-hint PLAN_APPROVED \
+  '{"approvedPlanSha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}' "$P6P" >/dev/null
+CLAUDE_PROJECT_DIR="$P6P" bash "$LOG" --tdd-begin --session stop_session_perm_hint \
+  --autopilot-run stop_run_perm_hint --autopilot-attempt 1 --autopilot-return-stage GATES \
+  --chain-id chain-perm-hint-001 >/dev/null
+CLAUDE_PROJECT_DIR="$P6P" bash "$LOG" --tdd-complete --session stop_session_perm_hint \
+  --autopilot-run stop_run_perm_hint --autopilot-attempt 1 --autopilot-return-stage GATES \
+  --chain-id chain-perm-hint-001 >/dev/null
+PERM_FIRST="$(invoke "$P6P" stop_session_perm_hint)"
+PERM_SECOND="$(invoke "$P6P" stop_session_perm_hint)"
+if printf '%s' "$PERM_FIRST" | grep -qF 'NOT a second exception'; then
+  check "S8p the FIRST bound nudge stays free of the permission-refusal paragraph" FAIL
+else check "S8p the FIRST bound nudge stays free of the permission-refusal paragraph" PASS; fi
+if printf '%s' "$PERM_SECOND" | grep -qF 'REFUSED by the permission layer' \
+  && printf '%s' "$PERM_SECOND" | grep -qF 'outcome no-changes' \
+  && printf '%s' "$PERM_SECOND" | grep -qF 'AUTOPILOT-BINDING: run=stop_run_perm_hint'; then
+  check "S8q the SECOND bound nudge carries the refusal paragraph alongside the Autopilot envelope and its bound terminus" PASS
+else check "S8q bound nudge refusal paragraph + envelope (got: $PERM_SECOND)" FAIL; fi
+
 P7="$TMP/priority"; start "$P7" stop_run_priority stop_session_priority
 SHA=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 autopilot_apply_event stop_run_priority plan-priority PLAN_APPROVED "{\"approvedPlanSha256\":\"$SHA\"}" "$P7" >/dev/null

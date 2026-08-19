@@ -83,6 +83,58 @@ else
   check "T2b standalone zero-change escape is taught as worktree-verified, not audited" FAIL
 fi
 
+if printf '%s' "$REASON1" | grep -qF 'NOT a second exception'; then
+  check "T2c the FIRST nudge stays free of the permission-refusal paragraph" FAIL
+else
+  check "T2c the FIRST nudge stays free of the permission-refusal paragraph" PASS
+fi
+OUT1B="$(stop_run '{"session_id":"'"$SID1_RAW"'"}')"
+REASON1B="$(printf '%s' "$OUT1B" | reason)"
+if printf '%s' "$REASON1B" | grep -qF 'REFUSED by the permission layer' \
+  && printf '%s' "$REASON1B" | grep -qF 'NOT a second exception' \
+  && printf '%s' "$REASON1B" | grep -qF '/zensu:doctor' \
+  && printf '%s' "$REASON1B" | grep -qF 'STOP intercepted by zensu chain-enforcer.'; then
+  check "T2d the SECOND nudge names the permission refusal and keeps the pinned prefix" PASS
+else
+  check "T2d the SECOND nudge names the permission refusal (got: $REASON1B)" FAIL
+fi
+if printf '%s' "$REASON1B" | grep -qF 'not proof the settings are fine'; then
+  check "T2e the refusal paragraph states the doctor cannot see managed settings" PASS
+else
+  check "T2e the refusal paragraph states the doctor limit" FAIL
+fi
+
+# --- Scenario 1c: the pre-terminus cap release names the permission refusal ---
+CAPCFG="$STATE_DIR/cap-config.json"
+printf '%s\n' '{"hooks":{"autoFixMaxRounds":1}}' > "$CAPCFG"
+SIDC_RAW="stop-cap-release"
+start_session "$SIDC_RAW"
+SIDC="$STARTED_SESSION_KEY"
+bash "$LOG" --tdd-begin --session "$SIDC" >/dev/null
+bash "$LOG" --tdd-complete --session "$SIDC" >/dev/null
+CAP_ERR=""
+CAP_N=0
+CAP_BROKE=0
+while [ "$CAP_N" -lt 8 ]; do
+  CAP_N=$((CAP_N+1))
+  CAP_ERR="$(printf '{"hook_event_name":"Stop","session_id":"%s"}' "$SIDC_RAW" \
+    | ZENSU_CONFIG="$CAPCFG" bash "$STOP" 2>&1 >/dev/null)"
+  case "$CAP_ERR" in *'did not converge after'*) CAP_BROKE=1; break ;; esac
+done
+[ "$CAP_BROKE" = 1 ] && check "T2f0 the cap release fired within the bounded loop (autoFixMaxRounds=1 honored)" PASS || check "T2f0 the cap release never fired in 8 stops — cap derivation regressed" FAIL
+if printf '%s' "$CAP_ERR" | grep -qF 'stalled pre-terminus chain' \
+  && printf '%s' "$CAP_ERR" | grep -qF 'REFUSED by the permission layer' \
+  && printf '%s' "$CAP_ERR" | grep -qF 'none of those three commands addresses it'; then
+  check "T2f the pre-terminus cap release names the permission refusal and says the three commands do not address it" PASS
+else
+  check "T2f pre-terminus cap release (got: $CAP_ERR)" FAIL
+fi
+if printf '%s' "$CAP_ERR" | grep -qF 'terminal self-review did not converge'; then
+  check "T2g the pre-terminus release must not be the terminal self-review release" FAIL
+else
+  check "T2g the pre-terminus release must not be the terminal self-review release" PASS
+fi
+
 # --- Scenario 2: codeReviewDone=true -> force self-review (NEW) ---
 SID2_RAW="stop-cr-done"
 start_session "$SID2_RAW"

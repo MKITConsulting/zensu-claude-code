@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // zensu-doctor-report.js — read-only diagnostics renderer for /zensu:doctor.
-// Reads the plugin's own manifest/hooks, the effective config files, and the
-// session state dir, then prints a four-block status table using ✅/⚠️/❌
+// Reads the plugin's own manifest/hooks, the effective config files, Claude
+// Code's own settings files (for the reviewer-spawn exposure row only), and the
+// session dir, then prints a four-block status table using ✅/⚠️/❌
 // glyphs. NEVER writes, NEVER throws out (every failure degrades to a ⚠️ row),
 // ALWAYS exits 0 — the skill decides what to do about warnings.
 //
@@ -15,6 +16,8 @@
 // Inputs (all overridable so the structure test can point at a sandbox):
 //   ZENSU_DOCTOR_PLUGIN_DIR  plugin root holding .claude-plugin/ + hooks/
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
+//   ZENSU_DOCTOR_CLAUDE_SETTINGS  full-override Claude Code settings file
+//                            (else HOME + project settings.json/settings.local.json)
 //   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots; session state
 //                            is always CLAUDE_PROJECT_DIR/.zensu/state
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
@@ -36,6 +39,12 @@ var BAD = '❌';
 var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 var CHAIN_ROW_LIMIT = 8;
+// Hardcoded copy of the review-chain agent name. The same literal is a semantic
+// key in hooks/lib/claude-principal-v1.js (REVIEWER_TYPES) and in
+// hooks/post-review-tdd-delegate.sh; renaming the agent must update all three.
+// Unlike those two, THIS copy fails silently — the row simply stops firing.
+var REVIEWER_AGENT = 'zensu:code-reviewer';
+var MAX_JSON_BYTES = 1048576;
 
 var env = process.env;
 var out = [];
@@ -51,13 +60,37 @@ function block(title) {
   out.push('');
   out.push(title);
 }
-function readJson(p) {
+function readGuardedJson(p) {
+  // One descriptor for the check AND the read, so the file inspected is the file
+  // parsed. O_NONBLOCK where the host has it: a FIFO left at this path would
+  // otherwise block the open itself, and a hung renderer is the one failure the
+  // "always exits 0" contract cannot absorb.
+  var flags = fs.constants.O_RDONLY | (fs.constants.O_NONBLOCK || 0);
+  var fd = fs.openSync(p, flags);
   try {
+    var st = fs.fstatSync(fd);
+    if (!st.isFile()) return { ok: false, missing: false, err: 'not a regular file' };
+    if (st.size > MAX_JSON_BYTES) return { ok: false, missing: false, err: 'larger than ' + MAX_JSON_BYTES + ' bytes' };
+    return { ok: true, data: JSON.parse(fs.readFileSync(fd, 'utf8')) };
+  } finally {
+    // readFileSync does NOT close a descriptor it was handed, so this close is
+    // the only one — do not remove it. The catch is defensive, not expected.
+    try { fs.closeSync(fd); } catch (_) { /* nothing further to do */ }
+  }
+}
+function readJson(p, guarded) {
+  try {
+    if (guarded) return readGuardedJson(p);
     return { ok: true, data: JSON.parse(fs.readFileSync(p, 'utf8')) };
   } catch (e) {
     if (e && e.code === 'ENOENT') return { ok: false, missing: true };
-    return { ok: false, missing: false, err: String((e && e.message) || e) };
+    return { ok: false, missing: false, err: readJsonReason(e) };
   }
+}
+function readJsonReason(e) {
+  if (e && e.code) return 'unreadable (' + String(e.code) + ')';
+  if (e instanceof SyntaxError) return 'invalid JSON';
+  return 'unreadable';
 }
 function pluginDir() {
   if (env.ZENSU_DOCTOR_PLUGIN_DIR) return env.ZENSU_DOCTOR_PLUGIN_DIR;
@@ -68,6 +101,16 @@ function configFiles() {
   var files = [];
   if (env.HOME) files.push(path.join(env.HOME, '.zensu', 'config.json'));
   if (env.CLAUDE_PROJECT_DIR) files.push(path.join(env.CLAUDE_PROJECT_DIR, '.zensu', 'config.json'));
+  return files;
+}
+function claudeSettingsFiles() {
+  if (env.ZENSU_DOCTOR_CLAUDE_SETTINGS) return [env.ZENSU_DOCTOR_CLAUDE_SETTINGS];
+  var files = [];
+  if (env.HOME) files.push(path.join(env.HOME, '.claude', 'settings.json'));
+  if (env.CLAUDE_PROJECT_DIR) {
+    files.push(path.join(env.CLAUDE_PROJECT_DIR, '.claude', 'settings.json'));
+    files.push(path.join(env.CLAUDE_PROJECT_DIR, '.claude', 'settings.local.json'));
+  }
   return files;
 }
 
@@ -117,9 +160,9 @@ function pluginBlock() {
   var mj = readJson(path.join(dir, '.claude-plugin', 'marketplace.json'));
 
   if (!pj.ok) {
-    line(BAD, 'plugin.json: ' + (pj.missing ? 'missing' : 'invalid JSON — ' + pj.err));
+    line(BAD, 'plugin.json: ' + (pj.missing ? 'missing' : pj.err));
   } else if (!mj.ok) {
-    line(WARN, 'marketplace.json: ' + (mj.missing ? 'missing' : 'invalid JSON — ' + mj.err));
+    line(WARN, 'marketplace.json: ' + (mj.missing ? 'missing' : mj.err));
   } else {
     var name = pj.data && pj.data.name;
     var pv = pj.data && pj.data.version;
@@ -139,7 +182,7 @@ function pluginBlock() {
 
   var hj = readJson(path.join(dir, 'hooks', 'hooks.json'));
   if (!hj.ok) {
-    line(BAD, 'hooks.json: ' + (hj.missing ? 'missing' : 'invalid JSON — ' + hj.err));
+    line(BAD, 'hooks.json: ' + (hj.missing ? 'missing' : hj.err));
     return;
   }
   var wired = {};
@@ -181,11 +224,106 @@ function walkQuotedBooleans(obj, prefix, hits) {
     var v = obj[k];
     var dotted = prefix ? prefix + '.' + k : k;
     if (typeof v === 'string' && (v === 'true' || v === 'false')) {
-      hits.push(dotted + ' = "' + v + '"');
+      hits.push(renderableKeyPath(dotted) + ' = "' + v + '"');
     } else if (v && typeof v === 'object' && !Array.isArray(v)) {
       walkQuotedBooleans(v, dotted, hits);
     }
   });
+}
+function autoModeDeclared(data) {
+  var perms = data && data.permissions;
+  return !!(perms && perms.defaultMode === 'auto');
+}
+function agentRuleNames(rule) {
+  var open = rule.indexOf('(');
+  if (open === -1) return rule === 'Agent' ? ['*'] : null;
+  if (rule.slice(0, open).trim() !== 'Agent') return null;
+  var close = rule.lastIndexOf(')');
+  if (close < open) return null;
+  return rule.slice(open + 1, close).split(',').map(function (n) { return n.trim(); });
+}
+function reviewerRuleHit(list) {
+  return reviewerRuleMatch(list) !== '';
+}
+function autoModeMentionsReviewer(data) {
+  var autoAllow = data && data.autoMode && data.autoMode.allow;
+  if (!Array.isArray(autoAllow)) return false;
+  for (var i = 0; i < autoAllow.length; i++) {
+    if (typeof autoAllow[i] === 'string' && autoAllow[i].indexOf(REVIEWER_AGENT) !== -1) return true;
+  }
+  return false;
+}
+function reviewerRuleMatch(list) {
+  if (!Array.isArray(list)) return '';
+  for (var i = 0; i < list.length; i++) {
+    if (typeof list[i] !== 'string') continue;
+    var rule = list[i].trim();
+    var names = agentRuleNames(rule);
+    if (!names) continue;
+    if (names.indexOf('*') !== -1 || names.indexOf(REVIEWER_AGENT) !== -1) return rule;
+  }
+  return '';
+}
+// The rule text comes from a settings file a clone can carry, and the doctor
+// skill prints this table verbatim into the terminal and the model's context.
+// Same drop-don't-print judgment zensu-doctor.sh already makes for the version
+// pair: a rule that is not a plain one-line Agent(...) spelling is described,
+// never echoed.
+var SAFE_RULE_RE = /^Agent\([A-Za-z0-9:_*, .@\/-]{0,120}\)$/;
+var SAFE_KEY_PATH_RE = /^[A-Za-z0-9_.$-]{1,120}$/;
+function renderableRule(rule) {
+  return SAFE_RULE_RE.test(rule) ? '"' + rule + '"' : 'an unprintable rule';
+}
+// Config keys come from the same clone-carried file class as a permission rule
+// and land in the same verbatim-printed table; a key holding a newline would
+// forge a row exactly as a rule could.
+function renderableKeyPath(dotted) {
+  return SAFE_KEY_PATH_RE.test(dotted) ? dotted : 'an unprintable key path';
+}
+function reviewerSpawnRow() {
+  var autoDeclaredIn = '';
+  var allowedIn = '';
+  var mentionedIn = '';
+  var unreadable = 0;
+  var refusals = [];
+  claudeSettingsFiles().forEach(function (f) {
+    var r = readJson(f, true);
+    if (r.missing) return;
+    if (!r.ok) {
+      unreadable++;
+      line(WARN, 'reviewer spawn: Claude Code settings at ' + f + ' could not be read by Zensu — ' + r.err + '. Zensu therefore cannot tell whether that file declares a permission mode or a reviewer-spawn rule, so any row below (or its absence) does not account for it.');
+      return;
+    }
+    var perms = r.data && r.data.permissions;
+    if (!autoDeclaredIn && autoModeDeclared(r.data)) autoDeclaredIn = f;
+    if (!allowedIn && perms && reviewerRuleHit(perms.allow)) allowedIn = f;
+    if (perms) {
+      var d = reviewerRuleMatch(perms.deny);
+      if (d) refusals.push({ file: f, list: 'deny', rule: d });
+      var a = reviewerRuleMatch(perms.ask);
+      if (a) refusals.push({ file: f, list: 'ask', rule: a });
+    }
+    if (!mentionedIn && autoModeMentionsReviewer(r.data)) mentionedIn = f;
+  });
+  var refused = null;
+  for (var i = 0; i < refusals.length; i++) {
+    if (refusals[i].list === 'deny') { refused = refusals[i]; break; }
+  }
+  if (!refused && refusals.length) refused = refusals[0];
+  var limits = ' This row is an exposure report, never a prediction: the classifier decides per session context rather than per agent type; Zensu reads ' + claudeSettingsFiles().length + ' settings file(s) as a union with no precedence applied; and managed settings plus a --permission-mode command-line override are invisible here' + (unreadable ? ', as is every unreadable file named above' : '') + ' — so the absence of a row proves nothing either.';
+  var pendingAuto = autoDeclaredIn && !allowedIn;
+  if (refused) {
+    var effect = refused.list === 'deny'
+      ? 'A deny rule outranks every allow rule, so the review chain cannot be closed from inside a session while it stands, and adding an allow entry will not help — remove or narrow that rule instead.'
+      : 'An ask rule forces a confirmation prompt for that spawn, so an unattended or non-interactive run cannot complete the review chain. Remove or narrow that rule if the chain must run unattended.';
+    line(WARN, 'reviewer spawn: ' + refused.file + ' carries the permissions.' + refused.list + ' rule ' + renderableRule(refused.rule) + ', which matches the ' + REVIEWER_AGENT + ' spawn. ' + effect
+      + (refusals.length > 1 ? ' ' + (refusals.length - 1) + ' further matching rule(s) were found across the settings files; clearing this one may not be enough.' : '')
+      + (pendingAuto ? ' A separate exposure also stands: ' + autoDeclaredIn + ' declares permissions.defaultMode "auto" with no allowance for that spawn, so clearing this rule alone will not silence the auto-mode row.' : '')
+      + limits);
+    return;
+  }
+  if (!pendingAuto) return;
+  line(WARN, 'auto mode: ' + autoDeclaredIn + ' sets permissions.defaultMode "auto" and no settings file allows the ' + REVIEWER_AGENT + ' spawn — the auto-mode classifier can refuse it, and the review chain then cannot be closed from inside the session. Remedy: add "Agent(' + REVIEWER_AGENT + ')" to permissions.allow.' + (mentionedIn ? ' Note: ' + mentionedIn + ' has an autoMode.allow entry naming that agent, but such an entry is prose addressed to the classifier, not a permission rule, and Zensu cannot tell a permissive one from a restrictive one — read it yourself; it does not substitute for the permissions.allow entry.' : '') + limits);
 }
 function configBlock() {
   block('Config');
@@ -195,7 +333,7 @@ function configBlock() {
     if (r.missing) return;
     anyPresent = true;
     if (!r.ok) {
-      line(BAD, 'config: invalid JSON in ' + f + ' — ' + r.err + ' (the whole file is ignored, defaults apply)');
+      line(BAD, 'config: ' + r.err + ' in ' + f + ' (the whole file is ignored, defaults apply)');
       return;
     }
     var hits = [];
@@ -209,6 +347,7 @@ function configBlock() {
   if (!anyPresent) {
     line(OK, 'config: no config file present — built-in defaults apply');
   }
+  reviewerSpawnRow();
 }
 
 function ttlHours() {

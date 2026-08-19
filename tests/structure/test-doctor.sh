@@ -11,7 +11,14 @@ set -u
 # trap (⚠️, real booleans NOT flagged), validated CAS workflow documents (✅),
 # malformed workflow integers (❌ / fail closed), and an expired pending-review
 # marker (⚠️) vs a fresh one (✅); all-green fixture is all ✅. Read-only
-# throughout.
+# throughout. Also covers the reviewer-spawn exposure rows over Claude Code's own
+# settings: auto mode declared with no allowance (⚠️), a deny/ask rule matching the
+# spawn (⚠️, independent of defaultMode), an allowance via permissions.allow
+# (silent — incl. bare Agent, Agent(*), a comma list), a non-Agent rule that must
+# NOT suppress, an autoMode.allow mention (named, never counted as an allowance),
+# a malformed settings file (⚠️ with no file content echoed), and the default
+# three-file resolution. The suite exports a sandbox HOME from the very top so no
+# check can read the developer's real ~/.claude/settings.json.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HELPER="$PLUGIN_DIR/hooks/lib/zensu-doctor.sh"
@@ -19,6 +26,9 @@ REPORT="$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js"
 SKILL_MD="$PLUGIN_DIR/skills/doctor/SKILL.md"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
 README="$PLUGIN_DIR/README.md"
+
+HOME="$PLUGIN_DIR/.no-such-doctor-home"
+export HOME
 
 PASS=0; FAIL=0
 check() {
@@ -201,6 +211,11 @@ STATE_DIR_CANON="$STATE_PROJECT/.zensu/state"
 EMPTY_PROJECT="$SBOX/empty-project"
 mkdir -p "$SBOX/plug/.claude-plugin" "$SBOX/plug/hooks" "$STATE_DIR_CANON" "$EMPTY_PROJECT"
 
+HOME="$SBOX/sandbox-home"
+export HOME
+mkdir -p "$HOME"
+[ ! -e "$HOME/.claude/settings.json" ] && check "P1aj sandbox HOME carries no Claude Code settings (premise of every auto-mode check)" PASS || check "P1aj sandbox HOME must not carry Claude Code settings" FAIL
+
 run_report() {
   # run_report <plugin_dir> <config|-> <project_root>  (tool facts fixed absent)
   local pd="$1" cfg="$2" project="$3"
@@ -326,6 +341,159 @@ case "$OUT" in *secretScan*) check "P1k real boolean secretScan:false NOT flagge
 printf '{not json' > "$SBOX/broken-cfg.json"
 OUT="$(run_report "$SBOX/plug" "$SBOX/broken-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && case "$OUT" in *'config: invalid JSON'*) check "P1l invalid config ❌ (exit 0, defaults apply)" PASS ;; *) check "P1l invalid config ❌ (got: $OUT)" FAIL ;; esac || check "P1l invalid config (rc=$RC)" FAIL
+
+# --- auto mode without a reviewer-spawn allowance --------------------------
+SETTINGS_DIR="$SBOX/cc-settings"
+mkdir -p "$SETTINGS_DIR"
+run_report_settings() {
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  ZENSU_DOCTOR_CLAUDE_SETTINGS="$1" node "$REPORT" 2>/dev/null
+}
+
+probe_row() {
+  # probe_row <json> -> AUTO | DENY | UNREADABLE | SILENT | BROKEN.
+  # BROKEN means the report did not render at all, so a negative verdict can
+  # never be satisfied by a crashed run. mktemp (not a counter) gives each call
+  # its own fixture: probe_row always runs inside $( ), so a parent-shell
+  # counter would never advance and every call would reuse one path.
+  local f; f="$(mktemp "$SETTINGS_DIR/probe-XXXXXX")" || { printf 'BROKEN'; return; }
+  printf '%s\n' "$1" > "$f" || { printf 'BROKEN'; return; }
+  local out; out="$(run_report_settings "$f")"
+  case "$out" in
+    *'Zensu doctor — read-only setup diagnostics'*) ;;
+    *) printf 'BROKEN'; return ;;
+  esac
+  case "$out" in
+    *'could not be read by Zensu'*) printf 'UNREADABLE' ;;
+    *'reviewer spawn:'*) printf 'DENY' ;;
+    *'auto mode:'*) printf 'AUTO' ;;
+    *) printf 'SILENT' ;;
+  esac
+}
+
+AUTO_BARE='{"permissions":{"defaultMode":"auto","allow":[]}}'
+printf '%s\n' "$AUTO_BARE" > "$SETTINGS_DIR/auto-bare.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/auto-bare.json")"; RC=$?
+[ "$RC" -eq 0 ] && case "$OUT" in *'Zensu doctor — read-only setup diagnostics'*) check "P1ak report renders and exits 0 with the auto-mode settings probe" PASS ;; *) check "P1ak report render (got: $OUT)" FAIL ;; esac || check "P1ak report exits 0 (rc=$RC)" FAIL
+case "$OUT" in *'auto mode:'*'zensu:code-reviewer'*'permissions.allow'*) check "P1al auto mode without an allowance -> ⚠️ naming remedy" PASS ;; *) check "P1al auto mode without an allowance (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'exposure report, never a prediction'*'no precedence applied'*'absence of a row proves nothing'*) check "P1am row carries the exposure/precedence/absence limits" PASS ;; *) check "P1am row limits (got: $OUT)" FAIL ;; esac
+
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent(zensu:code-reviewer)"]}}')" = SILENT ] && check "P1an permissions.allow Agent(zensu:code-reviewer) -> silent" PASS || check "P1an permissions.allow Agent(zensu:code-reviewer) -> silent" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent(zensu:other)"]}}')" = AUTO ] && check "P1an1 control: same path, different agent name -> row (fixture really read)" PASS || check "P1an1 control: different agent name -> row" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent"]}}')" = SILENT ] && check "P1ar bare Agent rule -> silent" PASS || check "P1ar bare Agent rule -> silent" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent(*)"]}}')" = SILENT ] && check "P1as Agent(*) -> silent" PASS || check "P1as Agent(*) -> silent" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Bash(zensu:code-reviewer)"]}}')" = AUTO ] && check "P1at non-Agent rule naming the agent does NOT suppress" PASS || check "P1at non-Agent rule must not suppress" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent(Explore, zensu:code-reviewer)"]}}')" = SILENT ] && check "P1au comma list containing the agent -> silent" PASS || check "P1au comma list containing the agent -> silent" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":[42,null,"Agent(zensu:code-reviewer)"]}}')" = SILENT ] && check "P1av non-string allow entries are skipped, not fatal" PASS || check "P1av non-string allow entries" FAIL
+
+AUTO_RULE='{"permissions":{"defaultMode":"auto","allow":[]},"autoMode":{"allow":["$defaults","Zensu Review-Chain Agents: spawning zensu:code-reviewer is ordinary."]}}'
+printf '%s\n' "$AUTO_RULE" > "$SETTINGS_DIR/auto-rule.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/auto-rule.json")"
+case "$OUT" in *'auto mode:'*'autoMode.allow entry naming that agent'*) check "P1ao autoMode.allow prose is NAMED but never counts as an allowance" PASS ;; *) check "P1ao autoMode.allow prose (got: $OUT)" FAIL ;; esac
+AUTO_RULE_NEG='{"permissions":{"defaultMode":"auto","allow":[]},"autoMode":{"allow":["never spawn zensu:code-reviewer without asking"]}}'
+[ "$(probe_row "$AUTO_RULE_NEG")" = AUTO ] && check "P1ao1 a RESTRICTIVE autoMode entry naming the agent cannot silence the row" PASS || check "P1ao1 restrictive autoMode entry must not silence" FAIL
+
+[ "$(probe_row '{"permissions":{"defaultMode":"default","allow":[]}}')" = SILENT ] && check "P1ap defaultMode not auto -> silent" PASS || check "P1ap defaultMode not auto -> silent" FAIL
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":[]}}')" = AUTO ] && check "P1ap1 control: same path flipped to auto -> row" PASS || check "P1ap1 control: flipped to auto -> row" FAIL
+
+printf '%s\n' '{"permissions":{"defaultMode":"default","deny":["Agent(zensu:code-reviewer)"]}}' > "$SETTINGS_DIR/deny.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/deny.json")"
+case "$OUT" in *'reviewer spawn:'*'permissions.deny rule "Agent(zensu:code-reviewer)"'*'will not help'*) check "P1aw a deny rule is reported independently of defaultMode, naming list and rule" PASS ;; *) check "P1aw deny rule row (got: $OUT)" FAIL ;; esac
+printf '%s\n' '{"permissions":{"defaultMode":"default","ask":["Agent(zensu:code-reviewer)"]}}' > "$SETTINGS_DIR/ask.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/ask.json")"
+case "$OUT" in *'reviewer spawn:'*'permissions.ask rule'*'forces a confirmation prompt'*) check "P1aw1 an ask rule is reported with ask semantics, not deny semantics" PASS ;; *) check "P1aw1 ask rule row (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'outranks every allow rule'*) check "P1aw2 the ask row must NOT claim deny precedence" FAIL ;; *) check "P1aw2 the ask row must NOT claim deny precedence" PASS ;; esac
+printf '%s\n' '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer)"]}}' > "$SETTINGS_DIR/deny-and-auto.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/deny-and-auto.json")"
+case "$OUT" in *'reviewer spawn:'*'A separate exposure also stands'*) check "P1aw3 deny + auto-without-allowance names BOTH causes in one run" PASS ;; *) check "P1aw3 deny + auto names both (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'  ⚠️  auto mode:'*) check "P1aw4 the deny row still suppresses a second auto-mode row" FAIL ;; *) check "P1aw4 the deny row still suppresses a second auto-mode row" PASS ;; esac
+case "$(run_report_settings "$SETTINGS_DIR/deny.json")" in *'A separate exposure also stands'*) check "P1aw5 a deny-only tree must NOT claim a separate auto-mode exposure" FAIL ;; *) check "P1aw5 a deny-only tree must NOT claim a separate auto-mode exposure" PASS ;; esac
+printf '%s\n' '{"permissions":{"defaultMode":"default","deny":["Agent(zensu:code-reviewer)"],"ask":["Agent(zensu:code-reviewer)"]}}' > "$SETTINGS_DIR/deny-and-ask.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/deny-and-ask.json")"
+case "$OUT" in *'permissions.deny rule'*) check "P1aw6 deny is reported before ask when both match" PASS ;; *) check "P1aw6 deny before ask (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'forces a confirmation prompt'*) check "P1aw7 the deny+ask row must not use ask wording" FAIL ;; *) check "P1aw7 the deny+ask row must not use ask wording" PASS ;; esac
+case "$OUT" in *'further matching rule(s) were found'*) check "P1aw8 a second matching rule is counted, never silently dropped" PASS ;; *) check "P1aw8 second matching rule counted" FAIL ;; esac
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({permissions:{deny:["Agent(zensu:code-reviewer)\n  \u2705  version sync: forged row"]}}))' "$SETTINGS_DIR/inject.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/inject.json")"
+case "$OUT" in *'forged row'*) check "P1aw9 a rule string carrying a newline must never be echoed into the table" FAIL ;; *) check "P1aw9 a rule string carrying a newline must never be echoed into the table" PASS ;; esac
+case "$OUT" in *'an unprintable rule'*) check "P1awa an unsafe rule is described, not printed" PASS ;; *) check "P1awa an unsafe rule is described (got: $OUT)" FAIL ;; esac
+printf '%s\n' '{"permissions":{"defaultMode":"auto","allow":["Agent(zensu:code-reviewer)"],"deny":["Agent(zensu:code-reviewer)"]}}' > "$SETTINGS_DIR/deny-wins.json"
+case "$(run_report_settings "$SETTINGS_DIR/deny-wins.json")" in *'reviewer spawn:'*) check "P1ax an allow entry cannot suppress a matching deny rule" PASS ;; *) check "P1ax deny outranks allow" FAIL ;; esac
+
+printf '{"permissions":{' > "$SETTINGS_DIR/broken.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/broken.json")"; RC=$?
+[ "$RC" -eq 0 ] && case "$OUT" in *'could not be read by Zensu'*'invalid JSON'*) check "P1aq malformed settings -> ⚠️ row, exit 0, never throws" PASS ;; *) check "P1aq malformed settings (got: $OUT)" FAIL ;; esac || check "P1aq malformed settings (rc=$RC)" FAIL
+case "$OUT" in *'position'*|*'"permissions"'*) check "P1aq1 the unreadable row must not echo settings-file content" FAIL ;; *) check "P1aq1 the unreadable row must not echo settings-file content" PASS ;; esac
+
+node -e 'require("fs").writeFileSync(process.argv[1], JSON.stringify({hooks:{"bad\nkey":"true"}}))' "$SBOX/injected-cfg.json"
+OUT="$(ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/injected-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$REPORT" 2>/dev/null)"
+case "$OUT" in *'an unprintable key path'*) check "P1awb a config key path carrying a newline is described, not echoed into the table" PASS ;; *) check "P1awb config key path sanitized (got: $OUT)" FAIL ;; esac
+case "$OUT" in *'bad
+key'*) check "P1awc the forged key path must not reach the rendered table" FAIL ;; *) check "P1awc the forged key path must not reach the rendered table" PASS ;; esac
+
+PRINCIPAL="$PLUGIN_DIR/hooks/lib/claude-principal-v1.js"
+PRINCIPAL_MEMBER="$(node -e 'const m=require(process.argv[1]);process.stdout.write(m.REVIEWER_TYPES && m.REVIEWER_TYPES.has("zensu:code-reviewer") ? "yes" : "no")' "$PRINCIPAL" 2>/dev/null)"
+if [ "$PRINCIPAL_MEMBER" = yes ] && grep -qF "var REVIEWER_AGENT = 'zensu:code-reviewer';" "$REPORT"; then
+  check "P1bi REVIEWER_AGENT agrees with claude-principal-v1.js REVIEWER_TYPES (this copy fails silently)" PASS
+else
+  check "P1bi REVIEWER_AGENT vs claude-principal-v1.js REVIEWER_TYPES" FAIL
+fi
+STOPSH="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
+HEADING_OUT="$(run_report_settings "$SETTINGS_DIR/auto-bare.json")"
+if printf '%s\n' "$HEADING_OUT" | grep -qxF 'Config' \
+  && grep -qF 'Config block' "$STOPSH" \
+  && grep -qF 'Config block' "$SKILL_MD"; then
+  check "P1bj the rendered block heading is the one the Stop remedy and the skill name" PASS
+else
+  check "P1bj rendered heading vs the Config block name in the Stop remedy/skill" FAIL
+fi
+
+MULTI="$SBOX/multi-project"
+mkdir -p "$MULTI/.claude" "$SBOX/multi-home/.claude"
+printf '%s\n' '{"permissions":{"defaultMode":"auto","allow":[]}}' > "$SBOX/multi-home/.claude/settings.json"
+run_report_default() {
+  ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$MULTI" \
+  HOME="$SBOX/multi-home" node "$REPORT" 2>/dev/null
+}
+case "$(run_report_default)" in *"auto mode: $SBOX/multi-home/.claude/settings.json"*) check "P1ay default 3-file resolution reads HOME settings and names that path" PASS ;; *) check "P1ay default resolution names the HOME path" FAIL ;; esac
+printf '%s\n' '{"permissions":{"allow":["Agent(zensu:code-reviewer)"]}}' > "$MULTI/.claude/settings.local.json"
+OUT="$(run_report_default)"
+case "$OUT" in
+  *'Zensu doctor — read-only setup diagnostics'*)
+    case "$OUT" in *'auto mode:'*) check "P1az an allowance in a project file suppresses a HOME auto-mode row (union walk)" FAIL ;; *) check "P1az an allowance in a project file suppresses a HOME auto-mode row (union walk)" PASS ;; esac ;;
+  *) check "P1az render died, negative verdict not attributable" FAIL ;;
+esac
+printf '%s\n' '{"permissions":{"defaultMode":"auto","allow":[]}}' > "$SBOX/multi-home/.claude/settings.json"
+rm -f "$MULTI/.claude/settings.local.json"
+case "$(run_report_default)" in *'Zensu reads 3 settings file(s) as a union'*) check "P1ba the limits sentence states the real settings-file count (3 on the default path)" PASS ;; *) check "P1ba default-path settings-file count" FAIL ;; esac
+case "$(run_report_settings "$SETTINGS_DIR/auto-bare.json")" in *'Zensu reads 1 settings file(s) as a union'*) check "P1bb the override path reports a count of 1" PASS ;; *) check "P1bb override-path settings-file count" FAIL ;; esac
+printf '%s\n' 'not json at all {' > "$SBOX/multi-home/.claude/settings.json"
+printf '%s\n' '{"permissions":{"defaultMode":"auto","allow":[]}}' > "$MULTI/.claude/settings.json"
+OUT="$(run_report_default)"
+case "$OUT" in *'could not be read by Zensu'*'as is every unreadable file named above'*) check "P1bh an unreadable file is named AND the limits sentence accounts for it" PASS ;; *) check "P1bh unreadable-file limits clause (got: $OUT)" FAIL ;; esac
+rm -f "$MULTI/.claude/settings.json"
+printf '%s\n' '{"permissions":{"defaultMode":"auto","allow":[]}}' > "$SBOX/multi-home/.claude/settings.json"
+[ "$(probe_row '{"permissions":{"defaultMode":"auto","allow":["Agent()"]}}')" = AUTO ] && check "P1bc Agent() with empty parens is not an allowance" PASS || check "P1bc Agent() empty parens" FAIL
+mkdir -p "$SETTINGS_DIR/adir"
+case "$(run_report_settings "$SETTINGS_DIR/adir")" in *'could not be read by Zensu'*'not a regular file'*) check "P1bd a directory at the settings path -> guarded row, never a throw" PASS ;; *) check "P1bd directory settings path" FAIL ;; esac
+node -e 'require("fs").writeFileSync(process.argv[1], "x".repeat(1048577))' "$SETTINGS_DIR/huge.json"
+case "$(run_report_settings "$SETTINGS_DIR/huge.json")" in *'could not be read by Zensu'*'larger than 1048576 bytes'*) check "P1be an oversize settings file is refused before it is read" PASS ;; *) check "P1be oversize settings file" FAIL ;; esac
+ln -sf "$SETTINGS_DIR/auto-bare.json" "$SETTINGS_DIR/linked.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/linked.json")"
+case "$OUT" in
+  *'could not be read by Zensu'*) check "P1bf a symlinked settings file is READ, not refused (dotfiles layouts stay diagnosable)" FAIL ;;
+  *'auto mode:'*'Remedy: add "Agent(zensu:code-reviewer)"'*) check "P1bf a symlinked settings file is READ, not refused (dotfiles layouts stay diagnosable)" PASS ;;
+  *) check "P1bf symlinked settings file is read (got: $OUT)" FAIL ;;
+esac
+ln -sfn "$SETTINGS_DIR/nowhere.json" "$SETTINGS_DIR/dangling.json"
+OUT="$(run_report_settings "$SETTINGS_DIR/dangling.json")"
+case "$OUT" in
+  *'Zensu doctor — read-only setup diagnostics'*)
+    case "$OUT" in *'could not be read by Zensu'*) check "P1bg a dangling settings symlink is treated as absent, not as a row" FAIL ;; *) check "P1bg a dangling settings symlink is treated as absent, not as a row" PASS ;; esac ;;
+  *) check "P1bg render died, negative verdict not attributable" FAIL ;;
+esac
 
 # --- validated CAS workflow state -----------------------------------------
 CAS_PROJECT="$SBOX/cas-project"
