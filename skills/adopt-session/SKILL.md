@@ -143,11 +143,12 @@ surfaced rather than summarized away:
   review-evidence operations keep failing for this session until they are moved
   out of the records directory by hand. The adoption itself is complete; say
   both things;
-- any `WARNING:` line about the review-evidence lease store. The one naming the
-  SUPERSEDED directory is the serious one: that directory is only ever written to
-  by this plugin, so something there that is not a plain directory this session
-  owns is a possible tamper signal. Report it and tell the user to inspect it
-  before running the adoption again — never fold it into a summary.
+- any `WARNING:` line about the review-evidence lease store. Report it verbatim
+  and tell the user to look at the named directory before running the adoption
+  again — never fold it into a summary. Do NOT assert a cause: the same verdict is
+  produced by an entry that is not a plain directory they own, which would be a
+  tamper signal, and by an ordinary I/O failure such as a full or read-only store.
+  The command cannot tell those apart, so neither can you.
 
 Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
 precondition failure, `2` on a bad argument. A non-zero exit is not a broken

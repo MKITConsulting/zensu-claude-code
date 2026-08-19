@@ -1631,10 +1631,10 @@ fi
 # bare boolean they replaced. The counts cannot stand in for it — they print BEFORE
 # the unsafe branch, so a refused sweep still reports `set aside : 0`.
 #
-# A regular FILE at the destination, not a symlink: this suite documents `ln -s` as
-# unreliable under Git Bash, and mkdirSync({recursive}) throws EEXIST on a file just
-# as usefully. It costs one session lifecycle, which is what makes the scope strings
-# observable at all.
+# A regular FILE at the destination, not a symlink: CLAUDE.md §Git Mutation Tables
+# records that `ln -s` exiting 0 is no evidence of a symlink under Git Bash (W167/
+# W168), and mkdirSync({recursive}) throws EEXIST on a file just as usefully. It
+# costs one session lifecycle, which is what makes the scope strings observable.
 DESTUNSAFE_SESSION='versioned-upgrade-adoption-dest-unsafe'
 DESTUNSAFE_START="$(EVENT=SessionStart SESSION="$DESTUNSAFE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1664,11 +1664,50 @@ if CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA
     && ! grep -qF 'lease RECORDS directory of this session could not be' "$DESTUNSAFE_OUT" \
     && ! grep -qF 'did not report which directory it refused' "$DESTUNSAFE_OUT" \
     && grep -qF 'leases set aside : 0' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$DESTUNSAFE_OUT" \
     && [ -f "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" ]; then
   check "AC-C12 a refused destination is named as the destination, and no lease is moved" PASS
 else
   check "AC-C12 a refused destination is named as the destination, and no lease is moved" FAIL
   head -c 400 "$DESTUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12a — the SOURCE refusal, which AC-C12 can only assert the absence of. An
+# absence passes more easily when the text is wrong, so it cannot stand in for the
+# positive case: without this row three of the four `unsafe` returns and one of the
+# three warning arms are never executed. Same technique, one component up — a
+# regular FILE where the per-session records directory belongs makes the lstat
+# guard's `!stat.isDirectory()` fire, with no symlink and no ln -s involved.
+SRCUNSAFE_SESSION='versioned-upgrade-adoption-src-unsafe'
+SRCUNSAFE_START="$(EVENT=SessionStart SESSION="$SRCUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$SRCUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+SRCUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$SRCUNSAFE_SESSION")"
+mkdir -p "$CANONICAL_SHARED_DATA/review-evidence/v1/records"
+printf 'not a directory\n' > "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$SRCUNSAFE_KEY"
+SRCUNSAFE_OUT="$TMP/adopt-src-unsafe.out"
+if CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$SRCUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$SRCUNSAFE_OUT" \
+    && grep -qF 'lease RECORDS directory of this session could not be' "$SRCUNSAFE_OUT" \
+    && ! grep -qF 'SUPERSEDED directory could not be opened safely' "$SRCUNSAFE_OUT" \
+    && ! grep -qF 'did not report which directory it refused' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$SRCUNSAFE_OUT"; then
+  check "AC-C12a a refused source is named as the records directory, not the destination" PASS
+else
+  check "AC-C12a a refused source is named as the records directory, not the destination" FAIL
+  head -c 400 "$SRCUNSAFE_OUT" 2>/dev/null
 fi
 
 # AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The
@@ -1690,9 +1729,10 @@ fi
 
 # AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
-# The absence of a WARNING is asserted, not assumed: the counts print BEFORE the
-# unsafe branch, so a sweep that refused the store still shows `set aside : 0`
-# under a label reading "adopts cleanly". Costs no extra process.
+# The absence of a WARNING is defence in depth on THIS row: `set aside : 3` already
+# excludes a refused sweep, because every unsafe return discards 0. It is the
+# no-lease row above where the conjunct is load-bearing — there the count is 0
+# either way.
 if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
     && ! grep -qF 'WARNING' "$ADOPT_CONFIRM_OUT" \

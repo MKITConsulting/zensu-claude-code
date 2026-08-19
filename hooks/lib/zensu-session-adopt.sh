@@ -276,11 +276,15 @@ function main() {
     if (adopted.leasesUnsafeScope === "destination") {
       process.stdout.write("\nWARNING: the review-evidence SUPERSEDED directory could not be opened safely,\n");
       process.stdout.write("so no lease was set aside. It is <plugin_data>/review-evidence/v1/superseded/<session key>,\n");
-      process.stdout.write("and it is a directory this plugin only writes to — inspect it before repeating this.\n");
+      process.stdout.write("and it is a directory this plugin only writes to. Two causes produce this: an entry\n");
+      process.stdout.write("there that is not a plain directory you own — which is a tamper signal — or an\n");
+      process.stdout.write("ordinary I/O failure such as a full or read-only store. Look before repeating this.\n");
     } else if (adopted.leasesUnsafeScope === "source") {
       process.stdout.write("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
-      process.stdout.write("opened safely, so no lease was inspected or set aside. If any lease there names the\n");
-      process.stdout.write("previous installation, review-evidence operations keep failing until it is moved out by hand.\n");
+      process.stdout.write("opened safely, so no lease was inspected or set aside. Same two causes as above: an\n");
+      process.stdout.write("entry that is not a plain directory you own, or an I/O failure. If any lease there\n");
+      process.stdout.write("names the previous installation, review-evidence operations keep failing until it is\n");
+      process.stdout.write("moved out by hand.\n");
     } else {
       // Neither scope: a core that still reports the old bare boolean. Naming one
       // directory here would re-create the misdirection this branch exists to fix,

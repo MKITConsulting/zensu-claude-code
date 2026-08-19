@@ -1629,16 +1629,31 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // `recursive` does NOT fail on an existing symlink-to-directory, so without
   // this a pre-created link there would quietly receive every moved lease while
   // the sweep still reported a clean count.
+  // EVERY component, not just the leaf. `recursive` applies `mode` only to the
+  // components it actually CREATES and validates nothing about ones that already
+  // exist, so a leaf-only guard left the "needs a same-uid attacker" bound resting
+  // on ancestors nothing had checked — and it is an ancestor an attacker swaps to
+  // win the rename race. This is the per-component policy ensurePrivateDirectory
+  // applies in review-evidence-lease-v1.js; that module cannot be called from here
+  // (it requires the binder, which requires this core), so the loop is inline. Keep
+  // the two in step by hand.
   const asideIsSafe = () => {
     try {
       fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
-      const stat = fs.lstatSync(asideDirectory);
-      if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
-      if (process.platform !== 'win32') {
-        if ((stat.mode & 0o077) !== 0) return false;
-        if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
+      let current = pluginData;
+      for (const segment of ['review-evidence', 'v1', 'superseded', key]) {
+        current = path.join(current, segment);
+        const stat = fs.lstatSync(current);
+        if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+        if (process.platform !== 'win32') {
+          if ((stat.mode & 0o077) !== 0) return false;
+          if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
+        }
       }
+      // Last, and on the leaf only: realpath resolves every component at once, so
+      // one call here covers the whole chain against a link the loop's lstat pass
+      // could still have raced.
+      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
       return true;
     } catch {
       return false;
@@ -1687,13 +1702,12 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       // race. rename(2) resolves every non-final component, so a link swapped in at
       // asideDirectory after the guard still redirects each move.
       //
-      // State the residual's bound narrowly, because the guard is narrower than it
-      // looks: asideIsSafe() applies the 0700 and owner checks to the LEAF only, and
-      // a recursive mkdir validates nothing about components that already exist. So
-      // "needs a same-uid attacker" holds only while every ancestor
-      // (<plugin_data>/review-evidence/v1/superseded) is user-owned and not
-      // group-writable — which nothing here verifies. review-evidence-lease-v1.js's
-      // ensurePrivateDirectory walks every component; this copy does not.
+      // The residual is bounded by the store: asideIsSafe() now walks every
+      // component from pluginData down, applying the same symlink, mode and owner
+      // checks per segment, so winning this race needs write access to a directory
+      // that is 0700 and owned by this user — a same-uid or root attacker. What the
+      // walk cannot do is hold that state across the rename, which is why the race
+      // is a residual and not a closed hazard.
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {
