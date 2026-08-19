@@ -1412,7 +1412,6 @@ const WORKFLOW_STATE_PREFIX = 'tdd-phase-';
 const ADOPTION_REFUSALS = {
   RECORD_UNREADABLE: 'record-unreadable',
   PLUGIN_DATA: 'plugin-data-mismatch',
-  PROJECT_ROOT: 'project-root-mismatch',
   ALREADY_SERVED: 'already-served',
   NOT_SIBLING: 'not-a-sibling-installation',
   EXECUTING_UNIDENTIFIED: 'executing-runtime-unidentified',
@@ -1477,21 +1476,40 @@ function adoptableRecord(options) {
   }
   // Condition 2 — the record store boundary is never relaxed.
   if (context.plugin_data !== pluginData) return adoptionRefusal(ADOPTION_REFUSALS.PLUGIN_DATA);
-  // Condition 3 — adopting a record for a different project would move a
-  // session's anchor, which is exactly what immutability exists to prevent.
-  let projectRoot;
-  try {
-    projectRoot = canonicalDirectory(options.projectRoot, 'project root');
-  } catch {
-    return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
-  }
-  if (context.project_root !== projectRoot) return adoptionRefusal(ADOPTION_REFUSALS.PROJECT_ROOT);
-  // Condition 4 — nothing to adopt when this runtime already serves the record.
+  // There is deliberately NO condition on the CALLER's project root, and
+  // `options.projectRoot` is not read at all. It was one once, refusing as
+  // `project-root-mismatch` whenever the supplied directory was not the recorded
+  // one, and it made this repair unreachable in exactly the state it exists for.
+  //
+  // Two reasons, and the second is why the first was not enough to keep it:
+  //
+  //   - It protected nothing. The anchor is carried FROM the record —
+  //     adoptContext passes `verdict.context.project_root` to buildContext — and
+  //     no write here is located by the caller's value. The write bound is
+  //     readContext (session hash, digest recomputed against the RECORDED root,
+  //     that root's declared version) plus the sibling-root and plugin_data
+  //     checks; the entry script's own header states it that way and never named
+  //     this comparison.
+  //   - It contradicted the module. resolveHookSession answers
+  //     `projectRoot: context.project_root` under "The mutable payload cwd is
+  //     never a project authority" — every gate binds to the record. This was the
+  //     single place that let a caller-supplied directory outrank it.
+  //
+  // The two disagree in practice: the record is minted from the SessionStart
+  // payload cwd, while the adoption is handed CLAUDE_PROJECT_DIR, a literal the
+  // skill renders from the harness. A fork whose cwd was a worktree records that
+  // worktree while the harness still reports the origin repo, and `cd` cannot
+  // change the latter — so the condition was unsatisfiable from inside the very
+  // session it was refusing. A record whose project root is GONE is still
+  // refused, as `record-unreadable`: validateContext canonicalizes it at
+  // condition 1.
+  //
+  // Condition 3 — nothing to adopt when this runtime already serves the record.
   // Refusing here keeps adoption from being a way to re-mint a healthy session.
   if (servesRecordedRuntime(context, executingPluginRoot, context.host)) {
     return adoptionRefusal(ADOPTION_REFUSALS.ALREADY_SERVED);
   }
-  // Condition 5 — the same structural bound servesRecordedRuntime applies: a
+  // Condition 4 — the same structural bound servesRecordedRuntime applies: a
   // marketplace install lands beside the versions it replaces, a development
   // checkout never does, so a --plugin-dir tree cannot adopt an installed
   // session's record no matter what its manifest declares.
@@ -1504,7 +1522,7 @@ function adoptableRecord(options) {
     || !ADOPTION_SAFE_VERSION_RE.test(context.plugin_version)) {
     return adoptionRefusal(ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED);
   }
-  // Condition 6 — never backwards. Only a newer tree can be expected to
+  // Condition 5 — never backwards. Only a newer tree can be expected to
   // understand an older one's state; the reverse is the direction that loses
   // data, and it stays refused here exactly as it is in runtimeLineageCompatible.
   const recordedParts = parseRuntimeVersion(context.plugin_version);
@@ -1520,7 +1538,7 @@ function adoptableRecord(options) {
       break;
     }
   }
-  // Condition 7 — the workflow document, when there is one, must be readable by
+  // Condition 6 — the workflow document, when there is one, must be readable by
   // THIS runtime. validateWorkflowState enforces `schema` and `schema_version`,
   // so a real persisted-shape break refuses here. A missing document is not a
   // disagreement: there is no shape to disagree about, and adoption leaves the

@@ -1283,6 +1283,54 @@ else
   head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
 fi
 
+# AC-C11 — the three CLAUDE_PROJECT_DIR shapes the entry point used to die on,
+# driven through the shipped script rather than through adoptableRecord, because
+# two of them never reached that function: the script required the variable and
+# then rendered it through zensu-host-path.sh, which refuses a path that is not a
+# directory. Both exits happened BEFORE any report, so the one command that can
+# repair the session printed nothing at all in the state it exists for — and
+# neither shape is exotic: the record is minted from the SessionStart payload
+# cwd, so a fork whose cwd was a worktree records that worktree while the harness
+# still reports somewhere else, and a deleted worktree is the harness value gone.
+# The record is still at 0.17.0 here, so ADOPTABLE is the answer in all three and
+# the row also pins the `ok` verdict AC-C09 cannot reach after the adoption.
+# `env -u` rather than an empty assignment: the suite inherits a real
+# CLAUDE_PROJECT_DIR from the session running it, and `VAR= cmd` is a SET empty
+# value that the `-n` guard would have caught for the wrong reason.
+ABSENT_PROJECT="$TMP/adopt-project-that-was-deleted"
+rm -rf "$ABSENT_PROJECT"
+# Only the CLAUDE_PROJECT_DIR spelling varies, so it is the only thing the caller
+# passes; everything else is fixed here. `env "$@"` keeps each spelling a single
+# quoted word — a word-split variable would break on any path with a space and a
+# leading assignment before a FUNCTION name has shell-dependent persistence.
+adopt_report_shape() {
+  env "$@" \
+    CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" 2>&1
+}
+PROJECT_SHAPE_FAILURES=''
+adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset:exit"
+adopt_report_shape CLAUDE_PROJECT_DIR="$ABSENT_PROJECT" >"$TMP/adopt-projectdir-absent.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES absent:exit"
+adopt_report_shape CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" >"$TMP/adopt-projectdir-different.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES different:exit"
+for shape in unset absent different; do
+  shape_out="$TMP/adopt-projectdir-$shape.out"
+  grep -qF 'ADOPTABLE' "$shape_out" \
+    && grep -qF 'Nothing has been changed' "$shape_out" \
+    && grep -qF "project          : $PROJECT" "$shape_out" \
+    || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES $shape"
+done
+# The record must still be untouched: without --confirm every shape is read-only.
+if [ -z "$PROJECT_SHAPE_FAILURES" ] \
+    && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR (failed:$PROJECT_SHAPE_FAILURES)" FAIL
+  head -c 400 "$TMP/adopt-projectdir-unset.out" 2>/dev/null
+fi
+
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
 cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
 
@@ -1397,9 +1445,13 @@ printf '%s' "$NOLEASE_START" \
     bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
 NOLEASE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$NOLEASE_SESSION")"
 NOLEASE_OUT="$TMP/adopt-nolease.out"
+# CLAUDE_PROJECT_DIR is deliberately NOT the recorded root here — see AC-C11a
+# below, which grades the anchor this same run produced. It changes nothing about
+# what AC-C08 itself pins: the sweep and the report are located from the record,
+# never from where the command was invoked.
 if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$NOLEASE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$NOLEASE_OUT" \
@@ -1409,6 +1461,23 @@ if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" FAIL
+  head -c 400 "$NOLEASE_OUT" 2>/dev/null
+fi
+
+# AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The
+# run above passed a project dir that is not the recorded one, so an adoption that
+# re-anchored to the caller's value would be visible in both the report line and
+# the minted record. Neither may move: adoptContext builds the new record from
+# verdict.context.project_root, which is the whole reason dropping the caller-side
+# comparison relaxes nothing. Graded off the SAME run rather than a fresh one — a
+# second adoption of an adopted record can only answer already-served.
+NOLEASE_RECORD="$SHARED_DATA/session-control/v1/records/$NOLEASE_KEY.json"
+if grep -qF "project          : $PROJECT" "$NOLEASE_OUT" \
+    && [ -f "$NOLEASE_RECORD" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$NOLEASE_RECORD")" = "$PROJECT" ]; then
+  check "AC-C11a adoption from a differing project dir still anchors on the record" PASS
+else
+  check "AC-C11a adoption from a differing project dir still anchors on the record" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
@@ -1509,13 +1578,25 @@ else
   check "AC-C09 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
 fi
 
+# AC-C09 — the caller's project root is NOT one of the conditions, and this is the
+# check that says so. It was the inverse once: a supplied directory that was not
+# the recorded one refused as `project-root-mismatch`, which made the repair
+# unreachable in the state it exists for — the record is minted from the
+# SessionStart payload cwd while the adoption is handed CLAUDE_PROJECT_DIR, and a
+# session cannot change the latter. Nothing is relaxed by removing it: the anchor
+# is carried from the record (pinned end to end at AC-C11 below), and the write
+# bound is readContext plus the sibling-root and plugin_data checks, all of which
+# the neighbouring rows still exercise. The record here already declares 0.18.0,
+# so $SYNTHETIC_BREAKING_ROOT is the runtime that already serves it — `ok` is not
+# reachable from this row, and `already-served` is the proof that the walk got
+# PAST the project comparison rather than never reaching it.
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
-if [ "$REASON_PROJECT" = project-root-mismatch ]; then
-  check "AC-C09 a record for another project may not be adopted" PASS
+if [ "$REASON_PROJECT" = already-served ]; then
+  check "AC-C09 a caller-supplied project root that differs is not an authority" PASS
 else
-  check "AC-C09 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
+  check "AC-C09 a caller-supplied project root that differs is not an authority (got '$REASON_PROJECT')" FAIL
 fi
 
 REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
@@ -1687,7 +1768,7 @@ REFUSAL_GAPS="$(
     const core = require(process.env.CORE);
     const skill = fs.readFileSync(process.env.SKILL, "utf8");
     const reasons = Object.values(core.ADOPTION_REFUSALS);
-    if (reasons.length !== 8) { process.stdout.write("count:" + reasons.length); process.exit(0); }
+    if (reasons.length !== 7) { process.stdout.write("count:" + reasons.length); process.exit(0); }
     const missing = reasons.filter((r) => !skill.includes(r));
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null

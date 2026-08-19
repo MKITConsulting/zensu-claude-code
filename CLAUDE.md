@@ -224,14 +224,37 @@ Do NOT replace either with an explicit version comparison — the self-closing
 property is the whole design, and a hand-written check is the thing that gets
 forgotten.
 
-Seven conditions are ALL required; eight refusal reasons name exactly which one
-failed (condition 6 can fail as either `executing-runtime-unidentified` or
+Six conditions are ALL required; seven refusal reasons name exactly which one
+failed (condition 5 can fail as either `executing-runtime-unidentified` or
 `executing-runtime-older`):
-`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`record-unreadable`, `plugin-data-mismatch`,
 `already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
 `executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
 sibling bound are NOT relaxed here either — the latter is what keeps a
 `--plugin-dir` checkout from adopting an installed session.
+
+**There is deliberately NO condition on the CALLER's project root, and
+`adoptableRecord` does not read `options.projectRoot` at all.** There was one, and
+it made this repair unreachable in exactly the state it exists for. Two sources of
+truth disagree about "the project": the record is minted from the SessionStart
+**payload cwd** (`claude-session-control-v1.js`), while the adoption entry point is
+handed **`CLAUDE_PROJECT_DIR`**, a literal the skill renders from the harness. A
+fork whose cwd was a worktree records that worktree while the harness still reports
+somewhere else — and `cd` cannot change `CLAUDE_PROJECT_DIR`, so the refusal named a
+remedy no one in that session could perform. Removing it relaxes nothing: the anchor
+is CARRIED from the record (`adoptContext` passes `verdict.context.project_root` to
+`buildContext`), no write is located by the caller's value, and the bound stated in
+the entry script's header — `readContext`, the sibling root, `plugin_data` — never
+included this comparison. It also put the module back in step with itself:
+`resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
+payload cwd is never a project authority", and this was the one place a
+caller-supplied directory outranked the record. A record whose project root is GONE
+is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
+condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+`CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
+rejects a non-directory, so an unset or deleted value exited before printing any
+report. The recognizer still ACCEPTS the assignment (the diagnostic reads it and the
+two share one set), so the shipped skill command is unchanged.
 
 **Two invariants, both learned from the chain-recovery precedent:**
 

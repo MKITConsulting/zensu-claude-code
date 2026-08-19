@@ -90,10 +90,14 @@ measured code". Do not run it to make an unrelated failure go away.
 ## Prerequisites
 
 None beyond a running session. No network, no API key. The entry point needs
-`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and the three
-values the recognized command carries — `CLAUDE_CODE_SESSION_ID` (inherited),
-`CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR`; it names any that is missing.
-Main thread only: a reviewer or neutral child is refused by every gate.
+`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and two of the
+values the recognized command carries — `CLAUDE_CODE_SESSION_ID` (inherited) and
+`CLAUDE_PLUGIN_DATA`; it names either if it is missing. The command also carries
+`CLAUDE_PROJECT_DIR`, which the adoption **ignores**: the project it repairs is
+the one the record names, so a session whose project directory has moved or been
+deleted still gets its report. Keep passing it — the recognizer admits one exact
+shape and the diagnostic shares that set. Main thread only: a reviewer or neutral
+child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
 
@@ -110,7 +114,6 @@ and its remedy verbatim too and STOP — every refusal names a different cause:
 |--------|---------|
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
-| `project-root-mismatch` | The recorded project root is not this directory. |
 | `already-served` | Nothing to adopt; the failure has another cause. Run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
 | `executing-runtime-unidentified` | The executing installation declares no usable version. |

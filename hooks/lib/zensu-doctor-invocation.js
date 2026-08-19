@@ -71,8 +71,8 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // what BOUNDS those writes is readContext (session
 // hash, digest recomputed against the RECORDED root, that root's declared
 // version) plus the sibling-root and plugin_data checks — NOT derivation, since
-// the two path assignments are caller-supplied literals here exactly as they are
-// for the diagnostic. Without --confirm it is read-only.
+// CLAUDE_PLUGIN_DATA is a caller-supplied literal here exactly as it is for the
+// diagnostic. Without --confirm it is read-only.
 //
 // Admitting it is what makes the lineage diagnosis actionable: the state it
 // repairs denies Edit, Write and every other Bash call, so a remedy the user
@@ -94,9 +94,10 @@ const RECOGNIZED = {
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 // The UNION of names the recognized scripts read and the Bash tool does not
-// supply. `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are read by both;
-// `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only, and accepting it on the adoption form
-// costs nothing because that script never reads it. Kept as one shared set
+// supply. `CLAUDE_PLUGIN_DATA` is read by both; `CLAUDE_PROJECT_DIR` is
+// doctor-only in practice — the adoption is bounded by the record and ignores it
+// — and `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only outright. Accepting either on the
+// adoption form costs nothing, because that script reads neither. Kept as one shared set
 // rather than per-entry: unlike `args`, an assignment cannot change what a
 // script DOES, only what it can see. `path` requires a rooted, traversal-free
 // literal; a Set requires one of its members.

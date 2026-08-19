@@ -14,9 +14,9 @@
 #     MOVED (never deleted) out of that session's own lease records directory
 #     into a sibling `superseded/` one. Nothing else, and nothing outside
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
-#   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA and
-#     CLAUDE_PROJECT_DIR are caller-supplied literals, exactly as they are for
-#     the diagnostic — it is readContext: the session-hash must match, the
+#   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
+#     caller-supplied literal, exactly as it is for the diagnostic — it is
+#     readContext: the session-hash must match, the
 #     runtime digest is recomputed against the RECORDED root, and that root's
 #     manifest must still declare the recorded version. Add the sibling-root
 #     bound and the plugin_data equality check, and a record the caller authored
@@ -87,13 +87,18 @@ command -v node >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: CLAUDE_PLUGIN_DATA is unset, so the record store cannot be located' >&2
   exit 1
 }
-[ -n "${CLAUDE_PROJECT_DIR:-}" ] || {
-  printf '%s\n' 'zensu:adopt-session: CLAUDE_PROJECT_DIR is unset, so the recorded project cannot be checked' >&2
-  exit 1
-}
+# CLAUDE_PROJECT_DIR is deliberately NOT required, and is not read at all. It was
+# required once, and rendered through the host-path script, which rejects a path
+# that is not a directory — so a session whose harness project dir had been
+# deleted exited here, before any report, in exactly the state this command
+# exists to diagnose. adoptableRecord no longer judges the caller's project root:
+# the anchor is carried from the record, and every write below is bounded by
+# readContext, the sibling-root check and plugin_data. The recognizer still
+# ACCEPTS the assignment, because the diagnostic reads it and the two share one
+# set — this script simply ignores it.
 
-# All three crossings into native Node go through the host-path renderer, as
-# every other stateful helper does, and are excluded from Git Bash's heuristic
+# Both crossings into native Node go through the host-path renderer, as every
+# other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
 # shellcheck disable=SC1090
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
@@ -102,8 +107,7 @@ source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
 }
 NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || exit 1
 NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || exit 1
-NATIVE_PROJECT_DIR="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PROJECT_DIR")" || exit 1
-MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA ZADOPT_PROJECT_DIR)" || {
+MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA)" || {
   printf '%s\n' 'zensu:adopt-session: the host-path environment library is unavailable; repair the Zensu plugin installation' >&2
   exit 1
 }
@@ -112,7 +116,6 @@ cd -P -- "$DIR" || exit 1
 MSYS2_ENV_CONV_EXCL="$MSYS_EXCL" \
 ZADOPT_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" \
 ZADOPT_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
-ZADOPT_PROJECT_DIR="$NATIVE_PROJECT_DIR" \
 ZADOPT_SESSION_ID="$CLAUDE_CODE_SESSION_ID" \
 ZADOPT_CONFIRM="$CONFIRM" \
 node -e '
@@ -121,7 +124,6 @@ const core = require("./session-control-core-v1.js");
 
 const pluginRoot = process.env.ZADOPT_PLUGIN_ROOT;
 const pluginData = process.env.ZADOPT_PLUGIN_DATA;
-const projectRoot = process.env.ZADOPT_PROJECT_DIR;
 const sessionId = process.env.ZADOPT_SESSION_ID;
 // The binder OWNS the private-store constructor, and this uses it rather than a
 // hand-joined path: it additionally rejects a records directory that is a
@@ -141,7 +143,6 @@ const buildRequest = () => ({
   sessionId,
   host: "claude",
   pluginData,
-  projectRoot,
   executingPluginRoot: pluginRoot,
 });
 
@@ -153,8 +154,6 @@ const REMEDY = {
     "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.PROJECT_ROOT]:
-    "The recorded project root is not this directory. Run this from the project the session was started in, or start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
     "Nothing to adopt: this installation already serves the record. If tools are still failing, the cause is a different one — run /zensu:doctor.",
   [core.ADOPTION_REFUSALS.NOT_SIBLING]:
@@ -205,6 +204,10 @@ function main() {
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
   process.stdout.write("  record minted by : " + adopted.recorded + "\n");
   process.stdout.write("  now served by    : " + adopted.executing + "\n");
+  // The anchor the session is bound to from here on. It is carried from the
+  // record, never from where this command was invoked, and naming it is the one
+  // place the user learns which project that actually is.
+  process.stdout.write("  project          : " + adopted.projectRoot + "\n");
   process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
   process.stdout.write("  provenance       : " + adopted.provenance + "\n");
   process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n");
