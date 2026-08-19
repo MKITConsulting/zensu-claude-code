@@ -821,6 +821,258 @@ marker, run-id equality, the owner and stage checks that precede every read, and
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
 
+## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
+
+The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
+permission layer refuses that spawn, the call never executes — so no PreToolUse
+or PostToolUse hook can see it, and without this module the enforcer repeats an
+impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
+
+Five things are coupled and must move together:
+
+- **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  denied by the Claude Code auto mode classifier.` and `Permission for this action
+  has been denied.`). The build is exported and pinned against the module header,
+  so the constant cannot drift away from the provenance note beside it. They are
+  matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
+  that rewords them silently disables the diagnosis — re-verify against the
+  binary, never against memory. The `kind` values are re-encoded in exactly TWO
+  places outside the module: the `case` arms in `hooks/stop-chain-enforcer.sh`
+  that render cause and remedy, and the closed set `reviewerDenialRows` accepts
+  from a note. The hook's PROBE deliberately holds no third copy — it reads `kind`
+  as a field, so a marker added to the module reaches the doctor under its real
+  name with no shell edit, where the old closed set degraded it to the empty
+  string and made the doctor render `unclassified` for a refusal both sides could
+  already name. Adding a marker still means adding a remedy arm; without one the
+  refusal renders unclassified, which is a degraded message rather than a wrong
+  one, because the unknown arm is the safe arm. Reading the field is safe only
+  while the value stays a `case` SELECTOR: interpolate `REVIEWER_DENIAL_KIND` into
+  the reason string and module output becomes operator-visible text.
+- **The CLI's one output line is a parsed contract**, not a display string:
+  `status=<s> kind=<k> tool=<n> spawns=<n> denials=<n>`. The probe matches
+  `status=` in first position, and reads `denials` with `${probe##* denials=}`,
+  which requires THAT field to stay last. `kind` is position-independent by
+  construction. Separators stay load-bearing throughout: every field is anchored
+  on a leading space. The exact-line assertion in
+  `tests/structure/reviewer-spawn-denial-v1.test.js` is the pin.
+- **The sidecar name is re-encoded in the doctor renderer.** The hook writes
+  `.zensu/state/reviewer-spawn-denied-<scv1 session key>.json`;
+  `reviewerDenialRows` in `hooks/lib/zensu-doctor-report.js` matches
+  `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$`. Rename one and doctor goes
+  quiet with everything still green. T25 is the only check that drives both sides
+  end to end.
+- **The unit suite needs a driver.** `tests/run-all.sh` discovers only
+  `tests/structure/test-*.sh`, so `tests/structure/reviewer-spawn-denial-v1.test.js`
+  is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which asserts a
+  case-count floor because exit 0 also accepts a file registering zero cases). A new
+  `*.test.js` with no driver is never executed by the tree runner. That driver
+  charges the unit suite's runtime to this shard's Windows budget
+  (`tests/profiles/windows-ci.v1.json`, `stop-enforcer-self-review-routing`), where
+  a `TIMED_OUT` means the tail of the file never ran. The driver therefore runs
+  FIRST in that file, before any scenario: it needs only `PLUGIN_DIR` and
+  `STATE_DIR`, and at the tail a timeout cost the whole unit suite — the only
+  coverage the scanner's own properties have anywhere.
+- **The note is only this plugin's word when a session backs it.** `reviewerDenialRows`
+  requires `tdd-phase-<same key>.json` beside the note before counting it. The state
+  directory is writable from inside the session, so a note judged purely on its own
+  contents would let anything able to write there mint a row telling the user to widen
+  `permissions.allow` for the very spawn it wants. Change the workflow-document name and
+  the binding silently stops matching; `P1qq` is the pin.
+
+**The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
+Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
+at **985846 ms** and **1274496 ms** — a 29% spread on the same GitHub runner class, so a
+single sample here says nothing about headroom. Budget against the HIGH figure: at
+`timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
+its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
+was killed by it, which is exactly the failure this range exists to prevent.
+
+**The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
+`profileTimeoutMs` is 1800000 and every profile is pinned to that same value
+(`windows-ci-contract.test.js`), which is itself pinned against the job's
+`timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
+receives `profileTimeoutMs` MINUS everything its shard already spent. When
+`autopilot-state-machine` (554832 ms) still shared this shard, the routing suite started
+with 1138363 ms and died there while its own cap read 1200000 ms, so raising the cap
+alone would have changed nothing. Do NOT read a suite's `timeoutMs` as its deadline;
+read the shard's remaining budget. Note also that summing a shard's `timeoutMs` values
+and comparing that to `profileTimeoutMs` proves nothing — EVERY shard exceeds it by
+design, because the per-suite values are individual caps and not a shared budget.
+
+**Three conditions decide a refusal, and no one of them is sufficient.** (1) the
+`tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
+`subagent_type` is the reviewer; (2) the host's own `is_error === true`; (3) the
+result text STARTS with a marker. Keying alone was the original design and it was
+wrong: for an `Agent` call the tool_result body IS the subagent's returned message,
+so a reviewer that merely quotes a denial literal — reviewing this module, for
+instance — was read as a refusal and the chain was abandoned with a real review in
+hand. **It is a diagnostic, never a gate:** an unreadable transcript, an absent
+`transcript_path`, or a missing module must leave every existing routing decision
+byte-identical, which is what T19 pins.
+
+**The only terminus the denial branch teaches is the zero-change one.** In its
+STANDALONE spelling that command verifies its own claim and refuses while any file
+is changed, so a chain with real changes cannot be closed there — that would claim a
+review that never ran, and the branch says so. The Autopilot-BOUND spelling carries
+`--outcome no-changes` into the durable receipt and performs no worktree check at
+all; that is pre-existing in `zensu-log.sh` and is restated as a known gap below,
+because this branch is what promotes the command to the only exit on offer. It also does NOT disclose the Stop cap count:
+a number plus "stop acting" is a wait-it-out recipe. Do not "fix" a wedge here by
+teaching an unqualified `--chain-done`.
+
+**The note must never outlive the chain it describes.** Every path that releases
+Stop without routing the inner chain retires it, because after such a release this
+session's Stop never reaches the routing branches again and nothing else can remove
+a note keyed to its session: the three terminal early exits (no active session,
+implementation not complete, chain closed), both inner-guard escapes
+(`ZENSU_CHAIN=off`, `hooks.chainEnforcer=false`), every release in the Autopilot
+escape branch, and the BLOCKED-outer release that owns the current inner
+generation — plus the cap path once the chain has converged, and the writing path
+itself on a `clear` verdict. Treat that as the rule, not the list: a NEW release
+path added above the routing branches needs the same call. T23/T29/T30/T31/T32 pin
+the ones reachable from the routing suite. The Autopilot-escape sites need a
+durable run, which that suite never builds, so their pins live in
+`tests/structure/test-autopilot-stop-enforcer.sh` instead: S14 covers the
+terminal-stage escape and S15 the audited one, which are different lines. The
+BLOCKED-outer release remains unpinned.
+An `errored` verdict retires NOTHING, deliberately: it means the module could not
+tell whether the spawn was refused, and clearing on it would delete a correct
+diagnosis whenever a retry died of something else.
+
+**A converged chain must never mint a note — and must not inherit one either.**
+The self-review branch retires any note first, because a refusal EARLIER in the
+same session is stale the moment a spawn succeeds, and that branch never consults
+the probe, so nothing below it would clear one. BOTH write sites enforce the
+minting half separately. The routing site is guarded by `REVIEWER_DENIAL_ROUTED`, a
+flag both arms of the routing ladder set and the self-review branch never does.
+Testing the probe's STATUS there instead would test "some branch happened to consult
+the probe" — true today only because one branch can, so a probe call added anywhere
+above for an unrelated message would silently start minting notes on the converged
+path with every check still green. The
+cap-release site sits ABOVE that branch and does consult the probe, so it is guarded
+by `tdd_code_review_done` by hand: a model that re-spawns the reviewer against the
+self-review directive and has THAT refused would otherwise leave doctor reporting
+"no review ran" for a chain that had already converged. A session that never Stops
+again still cannot clear its own note, so `reviewerDenialRows` ages one out against
+the same TTL `pending-review.json` uses — in BOTH directions, since a timestamp in
+the future yields a negative age that never crosses the bound. T23/T27/T29 and
+P1qg/P1qm/P1qn/P1qo are the pins.
+
+**The TTL suppresses the row; `reviewer_denial_notes_reap` removes the file.** The
+clear path sweeps two sets, and it is the ONE place a Stop unlinks a file owned by
+another session — which is why the name is matched against the same
+character-exact shape the writer asserts, never a prefix.
+
+- **Unbound** — no `tdd-phase-<key>.json` beside it. `reviewerDenialRows` already
+  refuses to count these, so removing one destroys no diagnosis anyone reads.
+- **Past the TTL** — read from the same config key the doctor ages against
+  (`zensu_pending_review_ttl_hours`), and `0` DISABLES it on both sides. This is
+  the set that matters: the unbound check alone is nearly inert, because
+  SessionStart writes a baseline workflow document for every session, so the
+  session whose note outlives it still HAS one. Without the age arm the sweep
+  would only ever catch a document somebody deleted by hand.
+
+An unreadable or unparseable note is deliberately NOT reaped. The doctor reports
+it as a note this plugin did not write and tells the user to delete it; unlinking
+it here would silently destroy a file this plugin does not own. The doctor stays
+read-only by contract — the reaping lives in the hook, under the same lease as
+every other write to that directory. T35 is the pin, and it plants a LIVE
+neighbour alongside the two dead files precisely because a sweep that deleted
+every note it could name would satisfy a one-sided check.
+
+**Anything spawned inside the lease must redirect stdin, not only its output.**
+The keeper is a bash coprocess and its control channel is a pipe; a child that
+inherits those descriptors holds the write end open after the parent closes it,
+so the keeper never sees EOF and the release hangs. The reaper's node process
+needs `</dev/null` for that reason alone. The failure does not look like a
+deadlock from the outside — it surfaces as unrelated checks failing two scenarios
+later, because the Stop that held the lease finished in a degraded state. Cheap to
+prevent, expensive to diagnose.
+
+**Both halves of the note run under the workflow document's external lease.** It
+was the only artifact in `.zensu/state/` written with none, and its two halves are
+an unlink and a rename, so a clear could remove a note a concurrent write had just
+published. `reviewer_note_locked` wraps both. The lease is an IMPROVEMENT, never a
+precondition — on failure the operation still runs unlocked, because failing to
+write the note must not change the Stop decision. That fallback is only sound while
+both callbacks ALWAYS return 0, which is what makes a non-zero result unambiguously
+a lease failure rather than a failed operation; give either one a meaningful exit
+status and a failed write starts running twice. The probe runs BEFORE the lease is
+taken: it reads a host-supplied transcript with no deadline above it, and holding
+this directory's lease across that read would make every other writer wait on it.
+The nested clear inside the writer therefore calls the UNLOCKED spelling — the
+lease is not reentrant.
+
+**The note path is anchored on `PROJECT_ROOT`, never on `TDD_STATE_DIR`.** That
+variable is a retired ambient root the repo pins as non-authoritative, and the only
+reader resolves the directory from `CLAUDE_PROJECT_DIR` — honoring an override would
+write the note where `/zensu:doctor` never looks and aim an unlink outside the
+session-bound directory.
+
+**Both sides of the note treat it as untrusted.** The session can write that
+directory, so the writer refuses a symlink, a non-file or a hard link and lands an
+`O_EXCL` temp file by rename; the reader decides shape before opening, caps the size,
+and counts a note as a refusal ONLY when it parses with `schemaVersion === 1`, a
+`kind` the writer itself issues, and a finite timestamp. Anything else is reported as
+a note this plugin did not write — never as a refusal, because a planted empty file
+would otherwise manufacture a row telling the user to widen permissions. The one
+deliberate exception: a plugin root that cannot load the module cannot vet the kind,
+and there the row still renders with the kind degraded to `unknown` (P1qf) — losing
+the label is acceptable, losing the finding is not.
+
+**The model-facing reason names only `~/.claude/settings.json`.** The project-local
+`.claude/settings.local.json` is a path the agent itself can write, and naming it
+beside the exact rule that grants the refused capability is an invitation that prose
+alone would have to talk it out of. The `/zensu:doctor` row withholds it for the SAME
+reason — that row is read by the model too, so "user-facing" does not make it safe.
+Only the docs carry the fuller form.
+
+**Operator-facing accounts that must move with the markers, the block reason, and
+the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
+refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` row
+in `docs/configuration.md`.
+
+**Port-relevant.** Every constant here is host-coupled: a port copies
+`DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
+(`message.content[]`, `tool_use`/`tool_result`, `tool_use_id`, `input.subagent_type`,
+`is_error`) into its own file and re-decides them against its harness — a port that
+takes only the module inherits Claude Code's literals and will silently never fire.
+The host half — which payload field carries the transcript, where the note lives, and
+the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
+`subagentType` so a host with a different reviewer name needs no fork of the walk.
+
+**Known gaps, accepted and deliberate:**
+
+- The verdict has no chain-generation lower bound. After a cap release and a fresh
+  `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
+  so the branch fires again before any new spawn is attempted. The reason text handles
+  it by sanctioning exactly ONE further attempt when the user says they applied the
+  rule; a generation bound (an arming ordinal in `options`) is the real fix and is not
+  implemented. **Why it is not a cheap fix, measured rather than assumed:** the
+  transcript DOES carry a per-entry `timestamp`, but the workflow document carries
+  nothing to compare it against. `_tdd_begin_session_critical` writes no history
+  entry, and `history[].ts` is optional and stays EMPTY in vanilla mode, where the
+  RED/GREEN FSM is never driven — so there is no reliable "when did this generation
+  arm" instant to bound the scan with. Supplying one means a new workflow-state
+  field, which under the runtime-lineage rule above is a schema change and therefore
+  a MINOR release. That price buys the removal of a misroute which is bounded to a
+  single Stop and self-corrects as soon as one spawn is attempted, which is exactly
+  what the reason text already asks for. Re-decide it when a schema change lands for
+  another reason and the field can travel with it.
+- The zero-change terminus this branch offers is worktree-verified only in its
+  STANDALONE spelling. An Autopilot-bound chain routes `--outcome no-changes` through
+  `autopilot_finish_tdd_attempt`, which never reads the worktree. That is pre-existing
+  — the untouched ordinary branch offers the same command — but this branch is the one
+  that tells the model the spawn cannot succeed, which promotes it to the only exit on
+  offer. Closing that gap belongs in `zensu-log.sh`, not here.
+- A denial note is keyed to its own session, so no other session can retire it
+  through the ordinary clear path. `reviewer_denial_notes_reap` is the deliberate
+  exception and the only one: any Stop in that project removes a note that is
+  unbound or past the TTL, which is what bounds a note whose session is gone for
+  good. The row it would have rendered was already suppressed by the same TTL, so
+  the sweep changes which files exist, never which findings are reported.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

@@ -9,7 +9,8 @@ description: >
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
   dir writable, canonical CAS workflow documents valid, each review chain's
-  shape plus any wedged chain and its recovery command, expired pending-review
+  shape plus any wedged chain and its recovery command, any reviewer spawn the
+  host permission layer refused, expired pending-review
   surfaced). The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -199,6 +200,38 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
   a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
+- **⚠️ state: the host permission layer refused the zensu:code-reviewer spawn**
+  → this is NOT a Zensu gate and no Zensu command repairs it. The Stop
+  chain-enforcer saw the refusal in the session transcript and left the note this
+  row reads; the chain cannot close because no review ever ran. Report the
+  remedy the row prints — the `permissions.allow` rule
+  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, or leaving the
+  permission mode that refused it — and say plainly that the user has to apply it,
+  since it is a harness setting no agent can grant itself — and never edit a
+  settings file on their behalf to widen your own permissions. Name only the
+  user-scoped file, the way the row and the Stop reason both do: the project-local
+  spelling sits inside the session root and is a path you could write yourself, so
+  reciting it beside the rule that grants the capability you just lost is the one
+  thing this instruction exists to prevent. Never suggest `--chain-done` or a
+  fresh `/zensu:tdd` generation as the way past it *while the permission is still
+  missing*: both would leave the change unreviewed, and a new generation hits the
+  same refusal. Once the user has applied the rule, re-entering `/zensu:tdd` is
+  exactly what the cap-release message tells them to do. The note is retired
+  automatically once a spawn succeeds or the chain closes, so a standing row means
+  no reviewer has run since. A row whose kind reads `unknown` means this plugin
+  root could not load the classifier module — report the refusal, not the kind.
+  Two neighbouring rows are NOT refusals and must not be reported as one. A
+  "reviewer-spawn refusal note(s) older than Nh" row comes from a session that
+  never ended a turn again and says nothing about the current state; a
+  "reviewer-spawn note(s) this plugin did not write" row failed
+  to vet (unreadable, oversized, an unrecognized kind or schema, an impossible
+  timestamp, or no matching session) — a planted file would otherwise manufacture
+  a recommendation to widen permissions. "No matching session" is the binding
+  check: a note counts only while the workflow document of the session that could
+  have written it still sits beside it. Such a note is also reaped on its own by
+  the next Stop in that project, so this row can clear without anyone acting on
+  it. Offer no cleanup for either row: Phase 3 below is still the only write, and
+  it covers `pending-review.json` alone.
 
 If everything is green, say so in one line and stop — there is nothing to do.
 
