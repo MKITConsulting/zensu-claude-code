@@ -16,10 +16,10 @@
 #     previous installation" and narrower than "everything listRecords rejects":
 #     the keep-predicate is a SUPERSET of that reader's accept set, mirroring three
 #     of its conjuncts, so a stale lease, one whose id disagrees with its filename,
-#     a malformed record and a non-.json leftover are all moved — while an entry
-#     that fails only the checks NOT mirrored (symlinked or multiply-linked,
-#     non-canonical, oversized, otherwise validateRecord-invalid) and still names
-#     the executing root is KEPT, and keeps wedging later lease operations. That
+#     a malformed record, a symlinked or oversized one and a non-.json leftover are
+#     all moved — while an entry that fails only the checks NOT mirrored
+#     (multiply-linked, non-canonical, otherwise validateRecord-invalid) and still
+#     names the executing root is KEPT, and keeps wedging later lease operations. That
 #     residual is documented in the core beside the predicate. Nothing else, and
 #     nothing outside <plugin_data>/{session-control,review-evidence} and the
 #     recorded project.

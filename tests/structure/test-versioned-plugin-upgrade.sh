@@ -2121,6 +2121,20 @@ else
   check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
 fi
 
+# The SECOND constant the sweep hand-copies from that module, pinned the same way
+# and for the same reason. The size cap decides which entries the sweep will READ
+# and which it sends straight to the move branch; listRecords holds its records to
+# the owner's value. Let the two drift and a lease between the caps is either moved
+# though that reader would accept it, or kept though it would not — the wedge the
+# sweep exists to clear, arriving silently.
+CORE_LEASE_CAP="$(grep -oE "const LEASE_RECORD_MAX_BYTES = [^;]*" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
+OWNER_LEASE_CAP="$(grep -oE "const MAX_RECORD_BYTES = [^;]*" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
+if [ -n "$CORE_LEASE_CAP" ] && [ "$CORE_LEASE_CAP" = "$OWNER_LEASE_CAP" ]; then
+  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte" PASS
+else
+  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_CAP' owner='$OWNER_LEASE_CAP')" FAIL
+fi
+
 # The reserved phase cannot be minted by a caller — the same protection
 # CHAIN_RECOVERED has, for the same reason: a forgeable provenance entry is worse
 # than none, because it is believed.

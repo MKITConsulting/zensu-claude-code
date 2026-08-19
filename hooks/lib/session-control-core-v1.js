@@ -1695,16 +1695,33 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     const file = path.join(recordsDirectory, name);
     let record;
     try {
-      // lstat and cap BEFORE the read, because a bare readFileSync on a FIFO
-      // blocks forever and raises nothing a catch can see — and this runs AFTER
-      // adoptContext has already swapped the record, so a hang here leaves the one
-      // repair the user can still invoke stuck half-done with no other channel to
-      // finish it. An entry that is not a regular file, or is larger than the cap
-      // listRecords holds its records to, is one that reader would reject anyway,
-      // so it falls through to the move branch exactly as an unparseable one does.
-      const entry = fs.lstatSync(file);
-      if (!entry.isFile() || entry.size > LEASE_RECORD_MAX_BYTES) throw new Error('unreadable');
-      record = JSON.parse(fs.readFileSync(file, 'utf8'));
+      // Decide BEFORE reading, and decide on the DESCRIPTOR, not on the path. A
+      // bare readFileSync on a FIFO blocks forever and raises nothing a catch can
+      // see — and this runs AFTER adoptContext has already swapped the record, so
+      // a hang here leaves the one repair the user can still invoke stuck
+      // half-done with no other channel to finish it. A path-based lstat followed
+      // by a path-based read does not close that: the entry can be swapped for a
+      // symlink-to-FIFO in between. O_NOFOLLOW refuses the symlink at open, and
+      // fstat then judges the exact object the read will consume.
+      //
+      // An entry that is not a regular file, or is larger than the cap listRecords
+      // holds its records to, is one that reader would reject anyway — so it falls
+      // through to the move branch exactly as an unparseable one does, and the
+      // keep-predicate's residual list below must not claim otherwise.
+      const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
+        ? fs.constants.O_NOFOLLOW : 0;
+      // O_NONBLOCK is not optional here, it is the half that stops the hang:
+      // O_NOFOLLOW refuses a symlink, but opening a FIFO directly blocks in
+      // open(2) itself, before fstat can say what it is.
+      const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+      const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
+      try {
+        const entry = fs.fstatSync(descriptor);
+        if (!entry.isFile() || entry.size > LEASE_RECORD_MAX_BYTES) throw new Error('unreadable');
+        record = JSON.parse(fs.readFileSync(descriptor, 'utf8'));
+      } finally {
+        fs.closeSync(descriptor);
+      }
     } catch {
       record = null;
     }
@@ -1714,10 +1731,12 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     // that is what it is. Three of that reader's conjuncts are mirrored here (the
     // id shape, lease_id agreeing with the filename, and the executing root),
     // which is what stops an entry it rejects from being kept on plugin_root
-    // alone. NOT mirrored: it also rejects a symlinked or multiply-linked record
-    // file, a non-canonical spelling, an oversized one, and every validateRecord
-    // violation. An entry failing only those while naming the executing root is
-    // therefore KEPT and keeps wedging later lease operations — a residual, not
+    // alone. NOT mirrored: it also rejects a multiply-linked record file, a
+    // non-canonical spelling, and every other validateRecord violation. A symlink
+    // and an oversized entry USED to belong on that list and no longer do — the
+    // O_NOFOLLOW open and the size cap above send both to the move branch.
+    // An entry failing only what is still on that list, while naming the executing
+    // root, is therefore KEPT and keeps wedging later lease operations — a residual, not
     // the main gap, because a lease can only name the executing root if that
     // runtime minted it, and none can be minted while the session is unbound.
     // The id shape is a hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js,

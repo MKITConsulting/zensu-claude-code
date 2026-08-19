@@ -313,8 +313,15 @@ layout (including the `ensurePrivateDirectory` policy) are unchecked:
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
-  destination guard landed — that module's `ensurePrivateDirectory` policy and its
-  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
+  destination guard landed — that module's `ensurePrivateDirectory` policy, its
+  `LEASE_ID_RE`, and its `MAX_RECORD_BYTES` (copied as `LEASE_RECORD_MAX_BYTES`
+  when the sweep's per-entry read gained a size cap). FIVE copied elements, not
+  one, and two of them are now pinned byte-for-byte against their owner in
+  `test-versioned-plugin-upgrade.sh` — the two regexes-and-constants; the layout
+  and the `ensurePrivateDirectory` policy are not. A cap that moves in the lease
+  module and not here silently disagrees with `listRecords` about which entries
+  are readable, which is the wedge the sweep exists to clear.
+  The stated reason is narrower than
   it looks: a core -> lease CALL would cycle (that module requires the binder,
   which requires this core), but an ENTRY-POINT seam would not, because
   `zensu-session-adopt.sh` already requires both. The real cost of the seam is
