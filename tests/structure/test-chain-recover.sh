@@ -831,14 +831,27 @@ fi
 
 SKILLS_BLOCK="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README")"
 SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
-SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:')"
+SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:[a-z-]+` \|')"
+SKILLS_UNLISTED="$(printf '%s\n' "$SKILLS_BLOCK" | node -e '
+const fs = require("node:fs");
+const rows = new Set(
+  fs.readFileSync(0, "utf8").split("\n")
+    .map((line) => /^\| `\/zensu:([a-z-]+)` \|/.exec(line))
+    .filter(Boolean).map((match) => match[1]),
+);
+const manifest = require(process.argv[1]);
+const registered = (manifest.skills || [])
+  .map((entry) => entry.replace(/^\.\/skills\//, ""));
+process.stdout.write(registered.filter((name) => !rows.has(name)).sort().join(","));
+' "$PLUGIN_JSON" 2>/dev/null)"
 REGISTERED_N="$(node -e 'process.stdout.write(String(require(process.argv[1]).skills.length))' "$PLUGIN_JSON" 2>/dev/null)"
 README_REGISTERED_N="$(printf '%s\n' "$SKILLS_BLOCK" | grep -oE '\([0-9]+ skills are registered' | grep -oE '[0-9]+' | head -1)"
 if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:recover-chain' \
-  && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ]; then
-  check "T39 README lists the skill; header, table and registered count all agree" PASS
+  && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ] \
+  && [ "$SKILLS_UNLISTED" = "doctor" ]; then
+  check "T39 README lists the skill; header, table and registered set all agree" PASS
 else
-  check "T39 README lists the skill; header, table and registered count agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N)" FAIL
+  check "T39 README lists the skill; header, table and registered set agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N; registered-but-unlisted=[$SKILLS_UNLISTED], must be exactly [doctor] — the diagnostics skill P2h in test-doctor.sh keeps out of the table)" FAIL
 fi
 
 SKILL_CODE="$(awk '/^```/{inside=!inside; next} inside{print}' "$SKILL")"

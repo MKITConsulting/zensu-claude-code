@@ -94,7 +94,7 @@ It reaches every process through three deliberately redundant carriers, because 
 | `agents/*.md` | every spawned agent | a child whose hook context is advisory or absent |
 | `skills/*/SKILL.md` | every invoked workflow | a session that started before the plugin was installed or updated |
 
-The hook reads the block out of the canonical file at run time rather than carrying its own copy, so it cannot drift from the 29 prompt carriers when the rule is reworded.
+The hook reads the block out of the canonical file at run time rather than carrying its own copy, so it cannot drift from the `agents/*.md` and `skills/*/SKILL.md` prompt carriers when the rule is reworded. (The carrier population is pinned as `EXPECTED_AGENTS` + `EXPECTED_SKILLS` in `tests/structure/test-evidence-discipline.sh`; it is deliberately not restated as a literal here, because a numeral goes stale on every new skill and nothing fails closed on it.)
 
 It is the only **advisory** hook without a config flag — `hooks.sessionBanner:false`, or disabling every other hook, does not silence it. Other hooks carry no flag either (`session-start-session-control.sh`, `pre-reviewer-capability-gate.sh`, `session-start-autopilot-resume.sh`, the two `review-evidence-subagent-*` hooks), but those are enforcement or evidence-plumbing hooks that must not be disableable at all; what makes this one unusual is that every other *advisory, context-injecting* hook is flagged. It is also fail-silent: an unknown event, a malformed payload, a missing `node`, or an absent, symlinked, or malformed block exits `0` with no output, so an always-on hook can never block a prompt or a spawn.
 

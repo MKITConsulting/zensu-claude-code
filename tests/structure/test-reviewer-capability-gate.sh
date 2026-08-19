@@ -208,6 +208,19 @@ assert_case "neutral agent cannot invoke exec_command tool aliases" deny arbitra
 assert_case "neutral agent cannot invoke terminal tool aliases" deny arbitrary-custom terminal '{"script":"pwd"}'
 assert_case "neutral agent cannot invoke command tool aliases" deny arbitrary-custom command '{"command":"pwd"}'
 assert_case "neutral agent keeps external report writes" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\"}"
+
+# The deny REASON string, not just the verdict. skills/gauntlet-loop/SKILL.md tells
+# the model that no builder or critic subagent can run a shell, and
+# tests/structure/test-gauntlet-loop-skill.sh G8 greps this exact literal out of the
+# module to prove the skill is not describing a gate that stopped existing. Without
+# an owner here, rewording the message would break that unrelated suite with no
+# warning at the site that changed it.
+DENY_REASON='host-profile-v1 cannot invoke command-execution tools'
+if grep -qF "$DENY_REASON" "$ROOT/hooks/lib/reviewer-capability-v1.js"; then
+  check "neutral command-tool deny reason is the literal skills/gauntlet-loop G8 pins" PASS
+else
+  check "neutral command-tool deny reason changed — update tests/structure/test-gauntlet-loop-skill.sh G8 with it" FAIL
+fi
 assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\",\"content\":\"session-control main-v1 ZENSU_SESSION_KEY\"}"
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
 assert_case "neutral agent keeps unrelated MCP tools" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
