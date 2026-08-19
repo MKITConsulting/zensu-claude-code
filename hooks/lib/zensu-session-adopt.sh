@@ -267,9 +267,21 @@ function main() {
     process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
   }
   if (adopted.leasesUnsafe) {
-    process.stdout.write("\nWARNING: the review-evidence lease store of this session could not be opened safely,\n");
-    process.stdout.write("so no lease was inspected or set aside. If any lease there names the previous\n");
-    process.stdout.write("installation, review-evidence operations keep failing until it is moved out by hand.\n");
+    // Names the directory that actually failed. Both cases stop the sweep, but they
+    // sit in different places and mean different things: a refused DESTINATION is
+    // the shared superseded/ directory, which the sweep only ever writes to — a
+    // planted link there is an active tamper signal, and pointing the operator at
+    // the records directory the sweep had just read successfully left it
+    // uninvestigated.
+    if (adopted.leasesUnsafeScope === "destination") {
+      process.stdout.write("\nWARNING: the review-evidence SUPERSEDED directory could not be opened safely,\n");
+      process.stdout.write("so no lease was set aside. It is <plugin_data>/review-evidence/v1/superseded/<session key>,\n");
+      process.stdout.write("and it is a directory this plugin only writes to — inspect it before repeating this.\n");
+    } else {
+      process.stdout.write("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
+      process.stdout.write("opened safely, so no lease was inspected or set aside. If any lease there names the\n");
+      process.stdout.write("previous installation, review-evidence operations keep failing until it is moved out by hand.\n");
+    }
   }
   if (adopted.leasesFailed.length > 0) {
     process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.map(safe).join(", ") + "\n");

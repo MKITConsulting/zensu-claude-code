@@ -1588,13 +1588,18 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     const stat = fs.lstatSync(recordsDirectory);
     // `unsafe` distinguishes a store this sweep REFUSED to touch from the
     // ordinary "no lease was ever minted" case. Both discard nothing; only one of
-    // them is a clean outcome, and the caller must be able to say which.
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: true };
+    // them is a clean outcome, and the caller must be able to say which. It also
+    // names WHICH directory it refused: the two live in different places and have
+    // different remedies — `source` is this session's own lease records directory,
+    // `destination` the shared `superseded/` one. Reported as a bare true, a
+    // planted link at the destination sent the operator to the directory the sweep
+    // had just read successfully, and went uninvestigated.
+    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: 'source' };
     if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
-      return { discarded: 0, failed: [], unsafe: true };
+      return { discarded: 0, failed: [], unsafe: 'source' };
     }
   } catch (error) {
-    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' };
+    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' ? 'source' : false };
   }
   let entries;
   try {
@@ -1633,7 +1638,7 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // returns do. Listing every entry as `failed` here would name leases the
   // keep-branch would have left alone, and the reporter would print two
   // contradictory warnings about the same sweep.
-  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: true };
+  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: 'destination' };
   for (const name of entries.sort()) {
     // EVERY entry listRecords would reject, not only the `.json` ones: it fails
     // the whole set on an unexpected name, so a leftover `.tmp` from a killed
@@ -1668,8 +1673,11 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     }
     try {
       // No mkdir here: asideIsSafe() already created AND validated the directory.
-      // Re-creating it per entry would succeed silently on a link swapped in after
-      // the guard, moving the lease through it — the exact hazard the guard closes.
+      // What that buys is one fewer way to CREATE the target — it does not close the
+      // race. rename(2) resolves every non-final component, so a link swapped in at
+      // asideDirectory after the guard still redirects each move. The residual is
+      // bounded by the store itself: 0700 and owner-checked, so it needs a same-uid
+      // or root attacker. Do not restate it as closed.
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {
@@ -1828,6 +1836,10 @@ function adoptContext(options) {
     leasesDiscarded: leases.discarded,
     leasesFailed: leases.failed,
     leasesUnsafe: Boolean(leases.unsafe),
+    // WHICH directory the sweep refused, so the reporter can name it. Kept beside
+    // the boolean rather than replacing it: every existing reader branches on the
+    // boolean, and a truthy string would have carried them silently.
+    leasesUnsafeScope: typeof leases.unsafe === 'string' ? leases.unsafe : '',
   };
 }
 

@@ -1250,7 +1250,8 @@ recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm
 for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # Positive control on the SAME bare shape first: without it, a recognizer that
   # stopped accepting the bare form would make both gates deny for the wrong
-  # reason and the principal assertion below would stay green.
+  # reason and the principal assertion below would stay green. That argument only
+  # holds where the bare form is admitted at all — see the win32 skip below it.
   # Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer
   # refuses on win32 by design, so a fixed expectation is unpassable on the
   # Windows shard — the same defect class AC-C04 was corrected for.
@@ -1258,9 +1259,18 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
       "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != "$ADOPT_EXPECTED" ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
   fi
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
-      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
-    RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+  # Only meaningful where the recognizer ADMITS the bare form. On win32 it refuses
+  # every payload before the principal is ever consulted (zensu_doctor_allowed
+  # returns at zensu_doctor_invocation, ahead of zensu_hook_is_main_principal), so
+  # the platform refusal alone satisfies this `deny` and the principal conjunct is
+  # never exercised — a row reporting verified while testing nothing, which is the
+  # exact vacuity the positive control above exists to prevent. Skipped explicitly
+  # rather than left silently green.
+  if [ "$ADOPT_EXPECTED" = allow ]; then
+    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+        "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
+      RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+    fi
   fi
 done
 if [ -z "$RECOGNIZER_FAILURES" ]; then
