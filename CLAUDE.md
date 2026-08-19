@@ -195,8 +195,10 @@ needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
 so changing it silently fails loudly. **Adoption works around it, it does not
-close it:** `discardSupersededLeases` moves every lease naming the previous
-installation OUT of the records directory (into a sibling `superseded/<key>/`,
+close it:** `discardSupersededLeases` moves every entry `listRecords` would REJECT
+— broader than "names the previous installation", narrower than "everything that
+reader rejects"; the entry script's header states the exact selector — OUT of the
+records directory (into a sibling `superseded/<key>/`,
 because `listRecords` fails on any non-`.json` entry, so setting one aside in
 place would be strictly worse). The count is reported, never absorbed.
 
@@ -326,8 +328,8 @@ version-shape rule are unchecked:
   which requires this core), but an ENTRY-POINT seam would not, because
   `zensu-session-adopt.sh` already requires both. The real cost of the seam is
   that it moves the sweep from the core half to an eighth host obligation. If this
-  function needs a fourth correction, take the seam. THAT TRIGGER HAS FIRED — eleven
-  review rounds landed corrections here — and taking it was DEFERRED by explicit
+  function needs a fourth correction, take the seam. THAT TRIGGER HAS FIRED — round after
+  round of review landed corrections here — and taking it was DEFERRED by explicit
   decision, not overlooked. The reason it stays defensible: none of those rounds
   added a sixth copied element. The `superseded` mode/uid pair is a policy local to a
   directory that appears nowhere in the lease module, so nothing there owns or
@@ -365,7 +367,8 @@ GREEN against the previous commit, which is not a hypothetical: a real regressio
 measurement of it had been taken before the commit that carried it. Test-file edits
 DO take effect immediately, and SIX rows read the working tree — the
 `zensu-doctor-invocation` and `session-control-lineage` unit drivers, the
-`LEASE_ID_RE` and `MAX_RECORD_BYTES` hand-copy pins, the lease-gap grep, and AC-013
+`LEASE_ID_RE` and `MAX_RECORD_BYTES` hand-copy pins (hoisted to the front of the
+file so a Windows timeout cannot drop them), the lease-gap grep, and AC-013
 — each labelled in place. Getting that count wrong is its own hazard, in the
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
@@ -381,7 +384,7 @@ payload build and decode. AC-C12, AC-C12a and AC-C12b then added three session
 lifecycles, and they are NOT the same size: counted from the file, the top-level
 node and bash runs are 5, 4 and 5 — each builds its SessionStart payload in its own
 `node -e`, AC-C12 and AC-C12b additionally call `write_lease`, and each `--confirm`
-itself spawns the host-path renderer twice plus node. Two `chmod`s and one `uname`
+itself spawns the host-path renderer twice plus node. Three `chmod`s and one `uname`
 sit on top. The ceiling did not move for any of it, and an itemization is a poor
 substitute for the measurement this paragraph keeps asking for. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside

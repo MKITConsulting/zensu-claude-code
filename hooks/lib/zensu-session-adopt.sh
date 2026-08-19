@@ -176,7 +176,8 @@ const buildRequest = () => ({
 // project is being taken over. The normal path is unchanged, which is what keeps the
 // report greppable. Built with RegExp from a string so the pattern survives every
 // layer this payload travels through as source text.
-// A POSITIVE allowlist, and every non-constant field in the report goes through it.
+// A POSITIVE allowlist, and every non-constant STRING field in the report goes
+// through it. The two counts are integers the sweep produces and are not folded.
 // A deny class was the first attempt and it was wrong in both directions: it caught
 // U+007F, which JSON.stringify does NOT escape, and it missed the bidi overrides and
 // U+2028, which are exactly what could hide the line naming the project being taken

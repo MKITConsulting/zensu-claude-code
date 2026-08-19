@@ -17,6 +17,43 @@ check() {
   fi
 }
 
+# HOISTED to the very front on purpose - before the mktemp, before the first
+# synthetic install. These two pins need no fixture, no synthetic install and no
+# session lifecycle: they read $ROOT and compare two strings. They were the LAST
+# checks in the file, behind eleven full tree installs and five session lifecycles,
+# on a Windows ceiling CLAUDE.md records as UNMEASURED. That is the shape in which
+# the source-write-gate suite lost its tail at check ~210 and the plan-payload
+# suite at ~61 of 70, both green for everything before the kill. Same placement,
+# same reason, as the routing suite's unit driver.
+# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
+# in review-evidence-lease-v1.js: the core cannot require that module (it requires
+# the binder, which requires the core), so the two are held in step by hand — and
+# by this pin, the way within() <-> isInside is held. Without it a widened lease id
+# shape would make the sweep silently set aside every new-format lease, green.
+# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
+CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
+OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
+if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
+  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
+else
+  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
+fi
+
+# The SECOND constant the sweep hand-copies from that module, pinned the same way
+# and for the same reason. The size cap decides which entries the sweep will READ
+# and which it sends straight to the move branch; listRecords holds its records to
+# the owner's value. Let the two drift and a lease between the caps is either moved
+# though that reader would accept it, or kept though it would not — the wedge the
+# sweep exists to clear, arriving silently.
+# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
+CORE_LEASE_CAP="$(grep -oE "const LEASE_RECORD_MAX_BYTES = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
+OWNER_LEASE_CAP="$(grep -oE "const MAX_RECORD_BYTES = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
+if [ -n "$CORE_LEASE_CAP" ] && [ "$CORE_LEASE_CAP" = "$OWNER_LEASE_CAP" ]; then
+  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte" PASS
+else
+  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_CAP' owner='$OWNER_LEASE_CAP')" FAIL
+fi
+
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot create isolated temp directory' >&2; exit 1; }
 [ -n "$TMP_RAW" ] && [ -d "$TMP_RAW" ] && [ ! -L "$TMP_RAW" ] \
@@ -114,7 +151,7 @@ fi
 # anything reached through a $SYNTHETIC_*_ROOT path (every behavioural row, and the
 # copies of skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read) grades the
 # LAST COMMIT, while SIX rows read $ROOT — the working tree — directly: the two unit
-# drivers, the two hand-copy pins near the end of the file, the lease-gap grep, and
+# drivers, the two hand-copy pins hoisted to the front of the file, the lease-gap grep, and
 # AC-013. Each of the six is labelled in place. An uncommitted change under hooks/
 # or skills/ therefore reports green against the previous commit everywhere EXCEPT
 # those six; it cost a full review round here once. It proves create-once,
@@ -916,42 +953,6 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# HOISTED above Part C on purpose. These two pins need no fixture, no synthetic
-# install and no session lifecycle - they read $ROOT and compare two strings - yet
-# they were the last checks in the file, behind five session lifecycles on a Windows
-# ceiling CLAUDE.md records as UNMEASURED. That is the shape in which the
-# source-write-gate suite lost its tail at check ~210 and the plan-payload suite at
-# ~61 of 70, both reported green for everything before the kill. Cheapest checks
-# first, for the same reason the routing suite runs its unit driver first.
-# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
-# in review-evidence-lease-v1.js: the core cannot require that module (it requires
-# the binder, which requires the core), so the two are held in step by hand — and
-# by this pin, the way within() <-> isInside is held. Without it a widened lease id
-# shape would make the sweep silently set aside every new-format lease, green.
-# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
-CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
-else
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
-fi
-
-# The SECOND constant the sweep hand-copies from that module, pinned the same way
-# and for the same reason. The size cap decides which entries the sweep will READ
-# and which it sends straight to the move branch; listRecords holds its records to
-# the owner's value. Let the two drift and a lease between the caps is either moved
-# though that reader would accept it, or kept though it would not — the wedge the
-# sweep exists to clear, arriving silently.
-# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
-CORE_LEASE_CAP="$(grep -oE "const LEASE_RECORD_MAX_BYTES = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_CAP="$(grep -oE "const MAX_RECORD_BYTES = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_CAP" ] && [ "$CORE_LEASE_CAP" = "$OWNER_LEASE_CAP" ]; then
-  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte" PASS
-else
-  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_CAP' owner='$OWNER_LEASE_CAP')" FAIL
-fi
-
 # Part C — naming the incompatible-lineage state, and adopting out of it.
 #
 # Requirement labels here are namespaced AC-C##/FR-C## on purpose: Parts A and B

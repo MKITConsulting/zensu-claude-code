@@ -74,10 +74,10 @@ construction. That is the gate, and it closes itself.
 It mints a NEW record for the same session under the executing runtime, carrying
 the original `created_at`. It sets the previous record aside as
 `<session-key>.superseded-<version>.json` — never overwritten, still readable.
-It appends one `RUNTIME_ADOPTED` entry to the workflow history. It sets aside any
-review-evidence lease that names the previous installation, because those compare
-their recorded plugin root strictly and one stale lease would fail every later
-lease operation.
+It appends one `RUNTIME_ADOPTED` entry to the workflow history. It sets aside every
+review-evidence lease entry the owning reader would reject — which is more than just
+the ones naming the previous installation — because those compare their recorded
+plugin root strictly and one stale lease would fail every later lease operation.
 
 It does NOT relax the lineage rule for anything else, rewrite any record, touch
 the workflow document's decision fields, relax the plugin-data boundary, grant a
@@ -168,8 +168,8 @@ restart.
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
 a whitelisted assignment prefix, `bash`, the script path in the executing
 installation, and at most the literal `--confirm`. Anything else — a second
-command, a different flag, a copy of the script — is denied. Every assignment in
-that prefix must carry a rooted literal path; an empty value is refused, which is
+command, a different flag, a copy of the script — is denied. Every PATH assignment in
+that prefix must carry a rooted literal value; an empty one is refused, which is
 one reason the form above passes only the variable the script actually reads.
 Emit the command exactly as written above; do not wrap it, redirect it, or chain
 anything onto it.
