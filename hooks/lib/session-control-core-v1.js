@@ -1430,6 +1430,13 @@ const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 // entry this predicate keeps but listRecords rejects leaves the wedge intact.
 const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
 
+// A hand-copy of MAX_RECORD_BYTES in review-evidence-lease-v1.js, for the same
+// reason LEASE_RECORD_ID_RE is one: the sweep must agree with listRecords about
+// which entries are readable, and that module cannot be required from here. An
+// entry over this cap is one listRecords would reject, so the sweep moves it
+// rather than reading it.
+const LEASE_RECORD_MAX_BYTES = 8 * 1024 * 1024;
+
 function adoptionRefusal(reason) {
   return { ok: false, reason };
 }
@@ -1643,8 +1650,12 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // segment (review-evidence-lease-v1.js) where this one may only look, so
   // refusing here on an ancestor that some earlier version created at 0755 would
   // turn a working sweep into a destination refusal for a permission this code
-  // never manages. The leaf is different: it is created right above with an
-  // explicit 0700, so checking it asserts something this function did.
+  // never manages. The leaf is different because it is the one component this
+  // function creates WHEN ABSENT — and the check earns its place precisely when it
+  // was not absent: `recursive` mkdir neither chmods nor fails on an existing
+  // directory, so on any second adoption of the same session key, or against a
+  // leaf another local process pre-created, the mode it finds is not one this
+  // function set. Refusing a hostile pre-existing leaf is the whole job.
   //
   // The shape it mirrors is privateRecordsDirectory in claude-hook-session-v1.js
   // — check, never repair. Do not "align" it with ensurePrivateDirectory: a
@@ -1684,6 +1695,15 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     const file = path.join(recordsDirectory, name);
     let record;
     try {
+      // lstat and cap BEFORE the read, because a bare readFileSync on a FIFO
+      // blocks forever and raises nothing a catch can see — and this runs AFTER
+      // adoptContext has already swapped the record, so a hang here leaves the one
+      // repair the user can still invoke stuck half-done with no other channel to
+      // finish it. An entry that is not a regular file, or is larger than the cap
+      // listRecords holds its records to, is one that reader would reject anyway,
+      // so it falls through to the move branch exactly as an unparseable one does.
+      const entry = fs.lstatSync(file);
+      if (!entry.isFile() || entry.size > LEASE_RECORD_MAX_BYTES) throw new Error('unreadable');
       record = JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch {
       record = null;

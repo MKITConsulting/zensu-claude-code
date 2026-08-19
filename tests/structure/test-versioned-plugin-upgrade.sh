@@ -108,9 +108,15 @@ else
   check "fixture installer rejects tracked symlinks before any external write" FAIL
 fi
 
-# This offline structure test intentionally materializes both roots from the
-# current checkout. It proves create-once, root-binding, and fail-closed
-# invariants only. The Promptfoo upgrade profile supplies the authoritative
+# This offline structure test materializes both roots from the COMMITTED revision:
+# line 27 captures `git rev-parse HEAD` and the install fixture reads the tree with
+# `git ls-tree`. That is load-bearing to know, because it splits the suite in two —
+# anything reached through a $SYNTHETIC_*_ROOT path (every behavioural row, and the
+# copies of skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read) grades the
+# LAST COMMIT, while the two unit rows below run the WORKING TREE. An uncommitted
+# change under hooks/ or skills/ therefore reports green against the previous
+# commit; it cost a full review round here once. It proves create-once,
+# root-binding, and fail-closed invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
 SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
 SHARED_DATA="$TMP/data/zensu-zensu"
@@ -851,6 +857,8 @@ fi
 # AC-011 — the predicate's own truth table. Driven from here rather than
 # registered separately: this suite is already in every profile, so the unit
 # file cannot be silently left out of a shard.
+# WORKING TREE, not HEAD: this requires ../../hooks/lib directly, unlike every
+# behavioural row above, which reaches the fixture-installed copy of that file.
 RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
 if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1; then
   check "the recognizer unit suite passes (driven from here — nothing else referenced it)" PASS
@@ -864,6 +872,7 @@ else
     "$TMP/recognizer-unit.out" 2>/dev/null | head -40
 fi
 
+# WORKING TREE, not HEAD — same split as the recognizer unit row above.
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
 if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1; then
   check "AC-011 runtimeLineageCompatible unit suite passes" PASS
@@ -1504,16 +1513,21 @@ CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
 ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
 ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
 mkdir -p "$ADOPT_LEASE_DIR"
-# KNOWN GAP, stated rather than left implicit: nothing here pins that asideIsSafe()
-# checks the SHAPE of every component but the PERMISSIONS of the leaf alone. That
-# split is deliberate — `review-evidence` and `v1` are shared and belong to
-# ensurePrivateDirectory, which repairs them, while this guard may only look — and
-# extending the mode check up the chain would turn a store an older version created
-# at 0755 into a permanent destination refusal. An attempt to pin it by forcing
-# those two ancestors to 0755 here made the sweep below report `set aside : 0` with
-# no warning, which the sweep provably does NOT do when driven directly against the
-# same layout; the cause was not identified, so the pin was withdrawn rather than
-# committed red. Re-attempt it with that discrepancy as the starting point.
+# The two SHARED ancestors are forced 0755 rather than left to the ambient umask,
+# which makes this row the pin for a split that is otherwise only prose:
+# asideIsSafe() checks the SHAPE of every component but the PERMISSIONS of the leaf
+# alone. `review-evidence` and `v1` belong to ensurePrivateDirectory, which repairs
+# them; this guard may only look, and extending the mode check up the chain turns a
+# store an older version created at 0755 into a permanent destination refusal. That
+# is not hypothetical — it shipped for one round and `leases set aside : 3` below is
+# what caught it.
+#
+# Under umask 077 the ancestors would land at 0700 and the row would pass with the
+# ancestor check restored, so the chmod is what makes the bite umask-independent.
+# It is safe for every row after it: AC-C12 refuses through the mkdirSync EEXIST,
+# AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
+# sweep returns on ENOENT before asideIsSafe() runs — none consults an ancestor mode.
+chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
 # Control stores host-natively — `D:\a\...` on Windows. `pwd -P` in Git Bash
@@ -1718,6 +1732,47 @@ if CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA"
 else
   check "AC-C12a a refused source is named as the records directory, not the destination" FAIL
   head -c 400 "$SRCUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12b — the LEAF permission arm, which is the only remaining permission check
+# in asideIsSafe() and which neither row above reaches: AC-C12 plants a FILE at the
+# leaf, so mkdirSync throws and the guard exits through its outer catch before the
+# walk, the mode/uid pair or the realpath check ever run. A pre-existing DIRECTORY
+# at 0777 is what drives all three — `recursive` mkdir neither chmods nor fails on
+# it, so the guard meets a leaf it did not create, which is exactly the case the
+# check exists for. Delete the mode/uid pair and this row is what goes red.
+LEAFUNSAFE_SESSION='versioned-upgrade-adoption-leaf-unsafe'
+LEAFUNSAFE_START="$(EVENT=SessionStart SESSION="$LEAFUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$LEAFUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+LEAFUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$LEAFUNSAFE_SESSION")"
+LEAFUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$LEAFUNSAFE_KEY"
+LEAFUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$LEAFUNSAFE_KEY"
+mkdir -p "$LEAFUNSAFE_RECORDS" "$LEAFUNSAFE_ASIDE"
+LEAFUNSAFE_LEASE='rel1_0123456789abcdef0123456789abcdef'
+write_lease "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" "$LEAFUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+chmod 0777 "$LEAFUNSAFE_ASIDE"
+LEAFUNSAFE_OUT="$TMP/adopt-leaf-unsafe.out"
+if CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$LEAFUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT" \
+    && grep -qF 'SUPERSEDED directory could not be opened safely' "$LEAFUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$LEAFUNSAFE_OUT" \
+    && [ -f "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ]; then
+  check "AC-C12b a world-writable pre-existing destination leaf is refused" PASS
+else
+  check "AC-C12b a world-writable pre-existing destination leaf is refused" FAIL
+  head -c 400 "$LEAFUNSAFE_OUT" 2>/dev/null
 fi
 
 # AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The

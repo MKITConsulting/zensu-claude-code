@@ -341,6 +341,18 @@ records directory through it and never by hand-joining. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
+**`test-versioned-plugin-upgrade.sh` grades the LAST COMMIT, not the working tree.**
+It captures `git rev-parse HEAD` and its install fixture materializes both synthetic
+roots with `git ls-tree`, so every behavioral row — and the copies of
+`skills/adopt-session/SKILL.md` that AC-C04 and CONV-1 read — measures the committed
+revision. An uncommitted change under `hooks/` or `skills/` is therefore reported
+GREEN against the previous commit, which is not a hypothetical: a real regression in
+`discardSupersededLeases` shipped that way for a full review round, because every
+measurement of it had been taken before the commit that carried it. Test-file edits
+DO take effect immediately, and exactly two rows run the working tree — the
+`zensu-doctor-invocation` and `session-control-lineage` unit drivers, both labelled
+in place. Commit first, then measure.
+
 **The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
 It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
 and four session lifecycles, but no Windows wall clock was taken — unlike the two
@@ -350,8 +362,8 @@ work added a fourth (the `native_root` render), two `adoptableRecord` calls for
 AC-C11b and three gate-layer decisions — each of the last carrying its own node
 payload build and decode. AC-C12 and AC-C12a then added TWO more full session
 lifecycles, each a SessionStart run plus a session-key call plus a `--confirm` run
-that itself spawns the host-path renderer twice and node once. The ceiling did not
-move for any of it. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
+that itself spawns the host-path renderer twice and node once. AC-C12b then added a
+THIRD such lifecycle. The ceiling did not move for any of it. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a
