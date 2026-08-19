@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-08-19
+
+### Added
+
+- **chain-enforcer**: Diagnose a host-refused reviewer spawn (#233)
+
+### Fixed
+
+- **tests**: Scope the recognizer fixture guard to the values that enter a command (#248)
+
 ## [0.18.1] - 2026-08-18
 
 ### Added
