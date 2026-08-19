@@ -356,9 +356,12 @@ revision. An uncommitted change under `hooks/` or `skills/` is therefore reporte
 GREEN against the previous commit, which is not a hypothetical: a real regression in
 `discardSupersededLeases` shipped that way for a full review round, because every
 measurement of it had been taken before the commit that carried it. Test-file edits
-DO take effect immediately, and exactly two rows run the working tree — the
-`zensu-doctor-invocation` and `session-control-lineage` unit drivers, both labelled
-in place. Commit first, then measure.
+DO take effect immediately, and SIX rows read the working tree — the
+`zensu-doctor-invocation` and `session-control-lineage` unit drivers, the
+`LEASE_ID_RE` and `MAX_RECORD_BYTES` hand-copy pins, the lease-gap grep, and AC-013
+— each labelled in place. Getting that count wrong is its own hazard, in the
+opposite direction: a reader who believes an uncommitted constant is invisible will
+misread a pin that in fact grades it immediately. Commit first, then measure.
 
 **The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
 It was raised 600000 -> 900000 when Part C added roughly five synthetic installs

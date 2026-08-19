@@ -113,9 +113,11 @@ fi
 # `git ls-tree`. That is load-bearing to know, because it splits the suite in two —
 # anything reached through a $SYNTHETIC_*_ROOT path (every behavioural row, and the
 # copies of skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read) grades the
-# LAST COMMIT, while the two unit rows below run the WORKING TREE. An uncommitted
-# change under hooks/ or skills/ therefore reports green against the previous
-# commit; it cost a full review round here once. It proves create-once,
+# LAST COMMIT, while SIX rows read $ROOT — the working tree — directly: the two unit
+# drivers, the two hand-copy pins near the end of the file, the lease-gap grep, and
+# AC-013. Each of the six is labelled in place. An uncommitted change under hooks/
+# or skills/ therefore reports green against the previous commit everywhere EXCEPT
+# those six; it cost a full review round here once. It proves create-once,
 # root-binding, and fail-closed invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
 SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
@@ -774,6 +776,8 @@ fi
 # every later lease operation for the session. Closing it needs a lease-schema
 # change (the record carries no plugin_version), so this asserts the refusal
 # exists and will fail loudly the day someone changes it silently.
+#
+# WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
     && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
@@ -828,8 +832,9 @@ else
     node "$GOLDEN_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GOLDEN_SESSION"
   )"
   GOLDEN_RECORD="$GOLDEN_DATA/session-control/v1/records/$GOLDEN_KEY.json"
-  # Read the previous release's artifacts with the CURRENT tree's core: that is
-  # the direction that matters, and readContext revalidates the digest, the
+  # Read the previous release's artifacts with the WORKING TREE core — one of the
+  # six rows that do, against a suite whose behavioural rows all grade HEAD. That is
+  # the direction that matters here, and readContext revalidates the digest, the
   # manifest version, the schema and the principal profiles as it goes.
   if [ "$GOLDEN_START_RC" -eq 0 ] && [ -f "$GOLDEN_RECORD" ] \
       && CORE="$ROOT/hooks/lib/session-control-core-v1.js" \
@@ -1761,17 +1766,47 @@ mkdir -p "$LEAFUNSAFE_RECORDS" "$LEAFUNSAFE_ASIDE"
 LEAFUNSAFE_LEASE='rel1_0123456789abcdef0123456789abcdef'
 write_lease "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" "$LEAFUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
 chmod 0777 "$LEAFUNSAFE_ASIDE"
+# The mode/uid pair is platform-gated in the guard (`process.platform !== 'win32'`),
+# so on win32 the only defect this row plants is invisible BY DESIGN and the sweep
+# proceeds normally. Asserting a refusal there would be unpassable — the same class
+# the four $ADOPT_LABEL / $RECOGNIZER_LABEL branches above exist for — and it would
+# also contradict AC-C08, which needs asideIsSafe() to return true on that host.
+# So both arms are graded, and the label follows the grading.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    LEAFUNSAFE_EXPECT=swept
+    LEAFUNSAFE_LABEL="a world-writable destination leaf is NOT refused on win32 (the mode/uid arm is platform-gated by design)"
+    ;;
+  *)
+    LEAFUNSAFE_EXPECT=refused
+    LEAFUNSAFE_LABEL="a world-writable pre-existing destination leaf is refused"
+    ;;
+esac
 LEAFUNSAFE_OUT="$TMP/adopt-leaf-unsafe.out"
 if CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$LEAFUNSAFE_OUT" 2>&1 \
-    && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT" \
-    && grep -qF 'SUPERSEDED directory could not be opened safely' "$LEAFUNSAFE_OUT" \
-    && grep -qF 'leases set aside : 0' "$LEAFUNSAFE_OUT" \
-    && [ -f "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ]; then
-  check "AC-C12b a world-writable pre-existing destination leaf is refused" PASS
+    && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT"; then
+  if [ "$LEAFUNSAFE_EXPECT" = refused ]; then
+    grep -qF 'SUPERSEDED directory could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 0' "$LEAFUNSAFE_OUT" \
+      && [ -f "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  else
+    # The positive control on the other arm: the sweep must actually RUN, not merely
+    # avoid warning, or a guard that refused for some other reason would read green.
+    ! grep -qF 'could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 1' "$LEAFUNSAFE_OUT" \
+      && [ ! -e "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  fi
 else
-  check "AC-C12b a world-writable pre-existing destination leaf is refused" FAIL
+  LEAFUNSAFE_OK=0
+fi
+if [ "$LEAFUNSAFE_OK" = 1 ]; then
+  check "AC-C12b $LEAFUNSAFE_LABEL" PASS
+else
+  check "AC-C12b $LEAFUNSAFE_LABEL" FAIL
   head -c 400 "$LEAFUNSAFE_OUT" 2>/dev/null
 fi
 
@@ -2113,6 +2148,7 @@ fi
 # the binder, which requires the core), so the two are held in step by hand — and
 # by this pin, the way within() <-> isInside is held. Without it a widened lease id
 # shape would make the sweep silently set aside every new-format lease, green.
+# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
 CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = /[^;]*/" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
 OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = /[^;]*/" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
 if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
@@ -2127,6 +2163,7 @@ fi
 # the owner's value. Let the two drift and a lease between the caps is either moved
 # though that reader would accept it, or kept though it would not — the wedge the
 # sweep exists to clear, arriving silently.
+# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
 CORE_LEASE_CAP="$(grep -oE "const LEASE_RECORD_MAX_BYTES = [^;]*" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
 OWNER_LEASE_CAP="$(grep -oE "const MAX_RECORD_BYTES = [^;]*" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
 if [ -n "$CORE_LEASE_CAP" ] && [ "$CORE_LEASE_CAP" = "$OWNER_LEASE_CAP" ]; then

@@ -1437,6 +1437,15 @@ const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
 // rather than reading it.
 const LEASE_RECORD_MAX_BYTES = 8 * 1024 * 1024;
 
+// The ONE spelling of the store prefix inside this file. It was written out three
+// times in a single function, and the shape walk has to traverse exactly the chain
+// mkdir created — a divergence would lstat a path that does not exist and land in
+// the outer catch as a blanket destination refusal, silently. Same move
+// WORKFLOW_STATE_SEGMENTS already makes for the workflow document. The layout is
+// still a hand-copy of review-evidence-lease-v1.js; this removes the copies WITHIN
+// the copy, not the copy itself.
+const REVIEW_EVIDENCE_SEGMENTS = ['review-evidence', 'v1'];
+
 function adoptionRefusal(reason) {
   return { ok: false, reason };
 }
@@ -1585,7 +1594,7 @@ function adoptableRecord(options) {
 // a repeat, not a guarantee — so this is the cheapest correct resolution, and it
 // sets them aside rather than deleting them.
 function discardSupersededLeases(pluginData, key, executingPluginRoot) {
-  const recordsDirectory = path.join(pluginData, 'review-evidence', 'v1', 'records', key);
+  const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
   // The owning module reaches this directory only through ensurePrivateDirectory,
   // which rejects a symlink, an alias and unsafe permissions or ownership. This
   // copy cannot call that constructor (the dependency runs the other way), so it
@@ -1629,7 +1638,11 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       unsafe: error && error.code === 'ENOENT' ? false : 'source',
     };
   }
-  const asideDirectory = path.join(pluginData, 'review-evidence', 'v1', 'superseded', key);
+  // Nothing to sweep: return BEFORE the destination guard, so an adoption with an
+  // existing-but-empty records directory neither creates superseded/<key> nor can
+  // report a destination warning about leases that do not exist.
+  if (entries.length === 0) return { discarded: 0, failed: [] };
+  const asideDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'superseded', key);
   let discarded = 0;
   const failed = [];
   // The DESTINATION gets the same treatment as the source. mkdirSync with
@@ -1663,10 +1676,21 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // the one it would be fixing.
   const asideIsSafe = () => {
     try {
-      fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
+      // Create and check ONE segment at a time. A single recursive mkdir up front
+      // resolves an existing symlinked component and creates the leaf THROUGH it —
+      // outside the confinement the entry script's header asserts — and only then
+      // does the walk notice the link and refuse. Nothing is moved either way, but
+      // one directory lands where nothing of this plugin's should. Interleaving
+      // costs nothing and closes it: a planted link is seen before the next segment
+      // is created under it. EEXIST is the ordinary case, not a failure.
       let current = pluginData;
-      for (const segment of ['review-evidence', 'v1', 'superseded', key]) {
+      for (const segment of [...REVIEW_EVIDENCE_SEGMENTS, 'superseded', key]) {
         current = path.join(current, segment);
+        try {
+          fs.mkdirSync(current, { mode: 0o700 });
+        } catch (error) {
+          if (!error || error.code !== 'EEXIST') return false;
+        }
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
       }
