@@ -257,7 +257,8 @@ condition 1. Consequently `zensu-session-adopt.sh` no longer requires
 rejects a non-directory, so an unset or deleted value exited before printing any
 report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
 two share one set — but the shipped skill command STOPPED PASSING it: the recognizer
-requires every assignment in the prefix to be a rooted literal path, so a harness
+holds every PATH assignment in the prefix to a rooted literal value — `ZDOC_PLAYWRIGHT_TOOLS`
+is a Set-membership check, not a path one — so a harness
 that rendered the placeholder empty would have refused the whole invocation over a
 value nobody reads.
 
