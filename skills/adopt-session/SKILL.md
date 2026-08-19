@@ -108,7 +108,12 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 ```
 
 Render both versions and the verdict verbatim. On a refusal, render the reason
-and its remedy verbatim too and STOP — every refusal names a different cause:
+and its remedy verbatim too and STOP — every refusal names a different cause.
+
+The table below is the `adoptableRecord` refusals. The entry point emits one more,
+`private-record-store-unsafe`, before it ever reaches them: the record store itself
+could not be opened safely. It prints its own remedy inline, so render that verbatim
+too.
 
 | Reason | Meaning |
 |--------|---------|

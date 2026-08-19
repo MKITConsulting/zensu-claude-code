@@ -295,10 +295,10 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**Three re-encodings move with this, and only one element of one of them is checked
-by a test** — `test-versioned-plugin-upgrade.sh` pins the `LEASE_ID_RE` hand-copy
-byte-for-byte. The wire format, the version-shape rule, and the rest of the store
-layout (including the `ensurePrivateDirectory` policy) are unchecked:
+**Three re-encodings move with this. Their coverage is stated once, in the store-layout
+bullet below, and nowhere else — a ledger that contradicts itself about its own pins is
+the failure mode it exists to prevent. The wire format and the version-shape rule are
+unchecked:
 
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,

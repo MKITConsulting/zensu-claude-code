@@ -266,7 +266,7 @@ function main() {
     process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
     process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
   }
-  if (adopted.leasesUnsafe) {
+  if (adopted.leasesUnsafeScope) {
     // Names the directory that actually failed. Both cases stop the sweep, but they
     // sit in different places and mean different things: a refused DESTINATION is
     // the shared superseded/ directory, which the sweep only ever writes to — a
@@ -279,19 +279,12 @@ function main() {
       process.stdout.write("and it is a directory this plugin only writes to. Two causes produce this: an entry\n");
       process.stdout.write("there that is not a plain directory you own — which is a tamper signal — or an\n");
       process.stdout.write("ordinary I/O failure such as a full or read-only store. Look before repeating this.\n");
-    } else if (adopted.leasesUnsafeScope === "source") {
+    } else {
       process.stdout.write("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
       process.stdout.write("opened safely, so no lease was inspected or set aside. Same two causes as above: an\n");
       process.stdout.write("entry that is not a plain directory you own, or an I/O failure. If any lease there\n");
       process.stdout.write("names the previous installation, review-evidence operations keep failing until it is\n");
       process.stdout.write("moved out by hand.\n");
-    } else {
-      // Neither scope: a core that still reports the old bare boolean. Naming one
-      // directory here would re-create the misdirection this branch exists to fix,
-      // so say what is known and name both candidates.
-      process.stdout.write("\nWARNING: the review-evidence lease store could not be opened safely, so no lease was\n");
-      process.stdout.write("inspected or set aside. This runtime did not report which directory it refused —\n");
-      process.stdout.write("check both <plugin_data>/review-evidence/v1/records/<session key> and .../superseded/<session key>.\n");
     }
   }
   if (adopted.leasesFailed.length > 0) {

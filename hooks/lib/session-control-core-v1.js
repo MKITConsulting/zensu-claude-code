@@ -1446,6 +1446,16 @@ const LEASE_RECORD_MAX_BYTES = 8 * 1024 * 1024;
 // the copy, not the copy itself.
 const REVIEW_EVIDENCE_SEGMENTS = ['review-evidence', 'v1'];
 
+// The one spelling of "private enough to be a rename destination". Platform-gated
+// exactly as ensurePrivateDirectory's own pair is: win32 has no comparable mode or
+// uid semantics here, so the check is skipped there rather than guessed at.
+function privateEnough(stat) {
+  if (process.platform === 'win32') return true;
+  if ((stat.mode & 0o077) !== 0) return false;
+  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
+  return true;
+}
+
 function adoptionRefusal(reason) {
   return { ok: false, reason };
 }
@@ -1615,7 +1625,7 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       return { discarded: 0, failed: [], unsafe: 'source' };
     }
   } catch (error) {
-    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' ? 'source' : false };
+    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' ? 'source' : '' };
   }
   let entries;
   try {
@@ -1635,27 +1645,27 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     return {
       discarded: 0,
       failed: [],
-      unsafe: error && error.code === 'ENOENT' ? false : 'source',
+      unsafe: error && error.code === 'ENOENT' ? '' : 'source',
     };
   }
   // Nothing to sweep: return BEFORE the destination guard, so an adoption with an
   // existing-but-empty records directory neither creates superseded/<key> nor can
   // report a destination warning about leases that do not exist.
-  if (entries.length === 0) return { discarded: 0, failed: [] };
+  if (entries.length === 0) return { discarded: 0, failed: [], unsafe: '' };
   const asideDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'superseded', key);
   let discarded = 0;
   const failed = [];
-  // The DESTINATION gets the same treatment as the source. mkdirSync with
-  // `recursive` does NOT fail on an existing symlink-to-directory, so without
-  // this a pre-created link there would quietly receive every moved lease while
-  // the sweep still reported a clean count.
+  // The DESTINATION gets the same treatment as the source. mkdirSync does NOT fail
+  // on an existing symlink-to-directory, so without this a pre-created link there
+  // would quietly receive every moved lease while the sweep still reported a clean
+  // count.
   // The SHAPE check runs on every component; the PERMISSION check stays on the
   // leaf. Those are two different questions and only one of them is this
   // function's to ask.
   //
   // Shape, per segment: an ancestor swapped to a symlink is how the rename race
-  // below is won, and `recursive` mkdir neither fails on nor reports one. Checking
-  // only the leaf left that open, so the walk closes it.
+  // below is won, and mkdir neither fails on nor reports one. Checking only the
+  // leaf left that open, so the walk closes it.
   //
   // Permissions, leaf only, and deliberately NOT per segment: `review-evidence`
   // and `v1` are SHARED and this function does not own them. Their mode is
@@ -1663,12 +1673,16 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // segment (review-evidence-lease-v1.js) where this one may only look, so
   // refusing here on an ancestor that some earlier version created at 0755 would
   // turn a working sweep into a destination refusal for a permission this code
-  // never manages. The leaf is different because it is the one component this
-  // function creates WHEN ABSENT — and the check earns its place precisely when it
-  // was not absent: `recursive` mkdir neither chmods nor fails on an existing
-  // directory, so on any second adoption of the same session key, or against a
-  // leaf another local process pre-created, the mode it finds is not one this
-  // function set. Refusing a hostile pre-existing leaf is the whole job.
+  // never manages. In practice the loop never CREATES those two anyway: the source
+  // guard above has already proved <pluginData>/review-evidence/v1/records/<key>
+  // exists and is canonical, so both are there before this runs.
+  //
+  // `superseded` and the leaf are different, and the check earns its place
+  // precisely when they were NOT absent: the mkdir tolerates EEXIST, so it neither
+  // chmods nor fails on an existing directory. On a second adoption of the same
+  // session key, or against a component another local process pre-created, the mode
+  // it finds is not one this function set. Refusing a hostile pre-existing one is
+  // the whole job.
   //
   // The shape it mirrors is privateRecordsDirectory in claude-hook-session-v1.js
   // — check, never repair. Do not "align" it with ensurePrivateDirectory: a
@@ -1693,12 +1707,18 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
         }
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
+        // `superseded` gets the permission pair too, and the shared pair above it
+        // does not. The difference is ownership, not depth: `review-evidence` and
+        // `v1` are created and chmod-repaired by ensurePrivateDirectory, so
+        // refusing on their mode would fight another owner — but `superseded`
+        // appears nowhere in that module. THIS function is its only creator, so
+        // nothing else can be blamed for its mode and nothing else will repair it.
+        // It also matters more than the leaf: renameSync resolves it as a non-final
+        // component, so a writable `superseded` is enough to redirect every moved
+        // lease record out of the store.
+        if (segment === 'superseded' && !privateEnough(stat)) return false;
       }
-      const leaf = fs.lstatSync(asideDirectory);
-      if (process.platform !== 'win32') {
-        if ((leaf.mode & 0o077) !== 0) return false;
-        if (typeof process.getuid === 'function' && leaf.uid !== process.getuid()) return false;
-      }
+      if (!privateEnough(fs.lstatSync(asideDirectory))) return false;
       // Last: realpath resolves every component at once, so one call covers the
       // whole chain against a link the lstat pass above could still have raced.
       if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
@@ -1796,7 +1816,11 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       failed.push(name);
     }
   }
-  return { discarded, failed };
+  // Every return carries the same three keys, and `unsafe` is a total string —
+  // empty for a clean sweep, `source` or `destination` otherwise. One field, not a
+  // boolean plus a scope: the two would be two spellings of one fact, and the
+  // "unknown scope" arm a caller wrote for the boolean could never be reached.
+  return { discarded, failed, unsafe: "" };
 }
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
@@ -1943,10 +1967,11 @@ function adoptContext(options) {
     provenance,
     leasesDiscarded: leases.discarded,
     leasesFailed: leases.failed,
-    leasesUnsafe: Boolean(leases.unsafe),
-    // WHICH directory the sweep refused, so the reporter can name it. Kept beside
-    // the boolean rather than replacing it: every existing reader branches on the
-    // boolean, and a truthy string would have carried them silently.
+    // WHICH directory the sweep refused, empty when it refused nothing. ONE field:
+    // a parallel boolean was a second spelling of the same fact, and the "truthy
+    // but no scope" arm its consumer carried could not be reached from any core
+    // this entry script can load — it resolves the module from its own
+    // installation.
     leasesUnsafeScope: typeof leases.unsafe === 'string' ? leases.unsafe : '',
   };
 }

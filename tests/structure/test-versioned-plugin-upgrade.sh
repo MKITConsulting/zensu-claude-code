@@ -1529,7 +1529,7 @@ mkdir -p "$ADOPT_LEASE_DIR"
 #
 # Under umask 077 the ancestors would land at 0700 and the row would pass with the
 # ancestor check restored, so the chmod is what makes the bite umask-independent.
-# It is safe for every row after it: AC-C12 refuses through the mkdirSync EEXIST,
+# It is safe for every row after it: AC-C12 refuses through the per-segment shape lstat,
 # AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
 # sweep returns on ENOENT before asideIsSafe() runs — none consults an ancestor mode.
 chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
@@ -1662,7 +1662,7 @@ fi
 #
 # A regular FILE at the destination, not a symlink: CLAUDE.md §Git Mutation Tables
 # records that `ln -s` exiting 0 is no evidence of a symlink under Git Bash (W167/
-# W168), and mkdirSync({recursive}) throws EEXIST on a file just as usefully. It
+# W168), and the guard's per-segment lstat refuses a file just as usefully. It
 # costs one session lifecycle, which is what makes the scope strings observable.
 DESTUNSAFE_SESSION='versioned-upgrade-adoption-dest-unsafe'
 DESTUNSAFE_START="$(EVENT=SessionStart SESSION="$DESTUNSAFE_SESSION" CWD="$PROJECT" node -e '
@@ -1739,13 +1739,13 @@ else
   head -c 400 "$SRCUNSAFE_OUT" 2>/dev/null
 fi
 
-# AC-C12b — the LEAF permission arm, which is the only remaining permission check
-# in asideIsSafe() and which neither row above reaches: AC-C12 plants a FILE at the
-# leaf, so mkdirSync throws and the guard exits through its outer catch before the
-# walk, the mode/uid pair or the realpath check ever run. A pre-existing DIRECTORY
-# at 0777 is what drives all three — `recursive` mkdir neither chmods nor fails on
-# it, so the guard meets a leaf it did not create, which is exactly the case the
-# check exists for. Delete the mode/uid pair and this row is what goes red.
+# AC-C12b — the LEAF permission arm, which neither row above reaches: AC-C12 plants
+# a FILE at the leaf, and the mkdir there raises EEXIST, which the loop tolerates —
+# so the per-segment lstat refuses the non-directory before the leaf mode/uid pair
+# or the realpath check ever run. A pre-existing DIRECTORY at 0777 is what reaches
+# all three: the mkdir neither chmods nor fails on it, so the guard meets a leaf it
+# did not create, which is exactly the case the check exists for. Delete the
+# mode/uid pair and this row is what goes red.
 LEAFUNSAFE_SESSION='versioned-upgrade-adoption-leaf-unsafe'
 LEAFUNSAFE_START="$(EVENT=SessionStart SESSION="$LEAFUNSAFE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
