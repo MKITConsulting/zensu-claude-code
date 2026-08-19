@@ -51,7 +51,7 @@ different states with different remedies, and it will refuse.
 - Clearing a review chain or granting a budget. The chain state survives adoption
   untouched and is enforced again on the very next Stop.
 - Any bind failure other than the declared-incompatible lineage — the refusal
-  table above names each one and its own remedy.
+  table in Phase 1 below names each one and its own remedy.
 
 ## What This Skill Does
 

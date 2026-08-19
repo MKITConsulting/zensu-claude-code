@@ -1629,14 +1629,27 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   // `recursive` does NOT fail on an existing symlink-to-directory, so without
   // this a pre-created link there would quietly receive every moved lease while
   // the sweep still reported a clean count.
-  // EVERY component, not just the leaf. `recursive` applies `mode` only to the
-  // components it actually CREATES and validates nothing about ones that already
-  // exist, so a leaf-only guard left the "needs a same-uid attacker" bound resting
-  // on ancestors nothing had checked — and it is an ancestor an attacker swaps to
-  // win the rename race. This is the per-component policy ensurePrivateDirectory
-  // applies in review-evidence-lease-v1.js; that module cannot be called from here
-  // (it requires the binder, which requires this core), so the loop is inline. Keep
-  // the two in step by hand.
+  // The SHAPE check runs on every component; the PERMISSION check stays on the
+  // leaf. Those are two different questions and only one of them is this
+  // function's to ask.
+  //
+  // Shape, per segment: an ancestor swapped to a symlink is how the rename race
+  // below is won, and `recursive` mkdir neither fails on nor reports one. Checking
+  // only the leaf left that open, so the walk closes it.
+  //
+  // Permissions, leaf only, and deliberately NOT per segment: `review-evidence`
+  // and `v1` are SHARED and this function does not own them. Their mode is
+  // `ensurePrivateDirectory`'s to set — that reader REPAIRS with a chmod per
+  // segment (review-evidence-lease-v1.js) where this one may only look, so
+  // refusing here on an ancestor that some earlier version created at 0755 would
+  // turn a working sweep into a destination refusal for a permission this code
+  // never manages. The leaf is different: it is created right above with an
+  // explicit 0700, so checking it asserts something this function did.
+  //
+  // The shape it mirrors is privateRecordsDirectory in claude-hook-session-v1.js
+  // — check, never repair. Do not "align" it with ensurePrivateDirectory: a
+  // read-side guard that silently widens or narrows a mode is a worse defect than
+  // the one it would be fixing.
   const asideIsSafe = () => {
     try {
       fs.mkdirSync(asideDirectory, { recursive: true, mode: 0o700 });
@@ -1645,14 +1658,14 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
         current = path.join(current, segment);
         const stat = fs.lstatSync(current);
         if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-        if (process.platform !== 'win32') {
-          if ((stat.mode & 0o077) !== 0) return false;
-          if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
-        }
       }
-      // Last, and on the leaf only: realpath resolves every component at once, so
-      // one call here covers the whole chain against a link the loop's lstat pass
-      // could still have raced.
+      const leaf = fs.lstatSync(asideDirectory);
+      if (process.platform !== 'win32') {
+        if ((leaf.mode & 0o077) !== 0) return false;
+        if (typeof process.getuid === 'function' && leaf.uid !== process.getuid()) return false;
+      }
+      // Last: realpath resolves every component at once, so one call covers the
+      // whole chain against a link the lstat pass above could still have raced.
       if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
       return true;
     } catch {
@@ -1702,12 +1715,14 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       // race. rename(2) resolves every non-final component, so a link swapped in at
       // asideDirectory after the guard still redirects each move.
       //
-      // The residual is bounded by the store: asideIsSafe() now walks every
-      // component from pluginData down, applying the same symlink, mode and owner
-      // checks per segment, so winning this race needs write access to a directory
-      // that is 0700 and owned by this user — a same-uid or root attacker. What the
-      // walk cannot do is hold that state across the rename, which is why the race
-      // is a residual and not a closed hazard.
+      // State the residual against what the guard actually establishes.
+      // asideIsSafe() refuses a symlinked component anywhere in the chain, so the
+      // swap has to happen AFTER it looked — and the leaf it lands in is 0700 and
+      // owner-checked. What it does NOT establish is the mode of the shared
+      // ancestors, which belong to ensurePrivateDirectory: where those are
+      // group-writable the race needs no same-uid access at all. So: bounded by a
+      // same-uid attacker on a store whose ancestors are private, unbounded on one
+      // where they are not, and never closed either way.
       fs.renameSync(file, path.join(asideDirectory, name));
       discarded += 1;
     } catch {

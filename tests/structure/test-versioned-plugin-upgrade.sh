@@ -1504,6 +1504,16 @@ CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
 ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
 ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
 mkdir -p "$ADOPT_LEASE_DIR"
+# KNOWN GAP, stated rather than left implicit: nothing here pins that asideIsSafe()
+# checks the SHAPE of every component but the PERMISSIONS of the leaf alone. That
+# split is deliberate — `review-evidence` and `v1` are shared and belong to
+# ensurePrivateDirectory, which repairs them, while this guard may only look — and
+# extending the mode check up the chain would turn a store an older version created
+# at 0755 into a permanent destination refusal. An attempt to pin it by forcing
+# those two ancestors to 0755 here made the sweep below report `set aside : 0` with
+# no warning, which the sweep provably does NOT do when driven directly against the
+# same layout; the cause was not identified, so the pin was withdrawn rather than
+# committed red. Re-attempt it with that discrepancy as the starting point.
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
 # Control stores host-natively — `D:\a\...` on Windows. `pwd -P` in Git Bash
