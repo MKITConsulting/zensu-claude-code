@@ -1442,9 +1442,11 @@ function adoptionRefusal(reason) {
 function adoptionWorkflowStatePath(projectRoot, sessionId) {
   // Composed from the SAME segment constants workflowStateDirectory uses, so the
   // guard and the read it guards can never resolve to different files. A separate
-  // spelling would let a layout move skip condition 7 entirely — silently
-  // removing one conjunct of the self-closing property the whole authorising
-  // argument rests on.
+  // spelling would let a layout move skip the workflow-schema condition entirely
+  // — silently removing one conjunct of the self-closing property the whole
+  // authorising argument rests on. Named rather than numbered on purpose: the
+  // ordinal moved once already when a condition was removed, and a stale number
+  // here points at a check that no longer exists.
   return path.join(
     projectRoot,
     ...WORKFLOW_STATE_SEGMENTS,

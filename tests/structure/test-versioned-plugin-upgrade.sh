@@ -1093,6 +1093,36 @@ else
   check "AC-C04 an ordinary Bash command in the same state still denies" FAIL
 fi
 
+# AC-C04 — the SHAPE the skill actually emits, at the GATE layer. AC-C11 below
+# drives the same shapes at the script layer, which cannot see this: the
+# recognizer consumes assignments as an optional whitelist PREFIX, so the form
+# without CLAUDE_PROJECT_DIR — the one the skill emits now that the script never
+# reads it — has to be admitted here or the repair is unreachable no matter what
+# the script does. The empty-value row is the reason the assignment was dropped
+# rather than kept: `isRootedLiteralPath("")` is false, so a harness that rendered
+# the placeholder empty would refuse the whole invocation over a variable nobody
+# reads. Both rows are graded through the ".*" capability gate for the same reason
+# the discrimination test above is.
+ADOPT_SHAPE_FAILURES=''
+ADOPT_NO_PROJECT="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != allow ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir:denied"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != allow ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm:denied"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES empty-project-dir:allowed"
+fi
+if [ -z "$ADOPT_SHAPE_FAILURES" ]; then
+  check "AC-C04 the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not" PASS
+else
+  check "AC-C04 the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not ($ADOPT_SHAPE_FAILURES)" FAIL
+fi
+
 # FR-C01 — the deny REASON, not just the decision. gate_decision_from discards
 # permissionDecisionReason, so every check above would stay green with the
 # `incompatible-runtime` scope deleted — which is exactly how that scope shipped
@@ -1283,6 +1313,29 @@ else
   head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
 fi
 
+# Defined HERE rather than beside the lease fixture that motivated it, because
+# AC-C11 below is the first consumer. The full account of why reaching a recorded
+# path from a shell variable takes BOTH steps — and what each one costs when it is
+# skipped on Windows — is the comment block above the lease fixture further down;
+# do not re-state it, and do not inline either step at a call site.
+native_root() {
+  local rendered
+  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
+  ROOT_IN="$rendered" node -e '
+    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
+  ' || return 1
+}
+# Every comparison of a report line or a record field against the shell's own
+# $PROJECT goes through this. On POSIX it is identity; on Git Bash the shell holds
+# /d/a/... while the record and the report hold D:\a\..., so a raw comparison can
+# only ever fail there — silently, since a POSIX run stays green.
+NATIVE_PROJECT="$(native_root "$PROJECT")"
+if [ -n "$NATIVE_PROJECT" ]; then
+  check "the project fixture renders to the spelling the record holds" PASS
+else
+  check "the project fixture renders to the spelling the record holds" FAIL
+fi
+
 # AC-C11 — the three CLAUDE_PROJECT_DIR shapes the entry point used to die on,
 # driven through the shipped script rather than through adoptableRecord, because
 # two of them never reached that function: the script required the variable and
@@ -1319,7 +1372,7 @@ for shape in unset absent different; do
   shape_out="$TMP/adopt-projectdir-$shape.out"
   grep -qF 'ADOPTABLE' "$shape_out" \
     && grep -qF 'Nothing has been changed' "$shape_out" \
-    && grep -qF "project          : $PROJECT" "$shape_out" \
+    && grep -qF "project          : $NATIVE_PROJECT" "$shape_out" \
     || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES $shape"
 done
 # The record must still be untouched: without --confirm every shape is read-only.
@@ -1328,7 +1381,13 @@ if [ -z "$PROJECT_SHAPE_FAILURES" ] \
   check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR" PASS
 else
   check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR (failed:$PROJECT_SHAPE_FAILURES)" FAIL
-  head -c 400 "$TMP/adopt-projectdir-unset.out" 2>/dev/null
+  # Dump what actually failed. A hardcoded shape here once printed a PASSING run
+  # beside a FAIL verdict, which is worse than printing nothing.
+  for failed in $PROJECT_SHAPE_FAILURES; do
+    printf '  --- %s ---\n' "$failed"
+    head -c 300 "$TMP/adopt-projectdir-${failed%%:*}.out" 2>/dev/null
+    printf '\n'
+  done
 fi
 
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
@@ -1368,13 +1427,9 @@ mkdir -p "$ADOPT_LEASE_DIR"
 #
 # On POSIX both steps are identity, which is why every one of these failures was
 # invisible locally.
-native_root() {
-  local rendered
-  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
-  ROOT_IN="$rendered" node -e '
-    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
-  ' || return 1
-}
+#
+# `native_root` itself is defined ABOVE, beside AC-C11, which is now its first
+# consumer; this block stays here because it is the fixture that paid for it.
 CANONICAL_BREAKING_ROOT="$(native_root "$SYNTHETIC_BREAKING_ROOT")"
 CANONICAL_CANDIDATE_ROOT="$(native_root "$SYNTHETIC_CANDIDATE_ROOT")"
 # An empty root would silently make every fixture unmatchable and grade the sweep
@@ -1460,7 +1515,11 @@ if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
-  check "AC-C08 a session with no lease store adopts cleanly and exits 0" FAIL
+  # Names the second cause on purpose: this run also supplies AC-C11a's foreign
+  # project dir, so a reintroduced CLAUDE_PROJECT_DIR precondition in the entry
+  # script fails HERE first, under a label that would otherwise send the reader
+  # to the lease sweep.
+  check "AC-C08 a session with no lease store adopts cleanly and exits 0 (also the foreign-project-dir input AC-C11a grades)" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
@@ -1472,9 +1531,9 @@ fi
 # comparison relaxes nothing. Graded off the SAME run rather than a fresh one — a
 # second adoption of an adopted record can only answer already-served.
 NOLEASE_RECORD="$SHARED_DATA/session-control/v1/records/$NOLEASE_KEY.json"
-if grep -qF "project          : $PROJECT" "$NOLEASE_OUT" \
+if grep -qF "project          : $NATIVE_PROJECT" "$NOLEASE_OUT" \
     && [ -f "$NOLEASE_RECORD" ] \
-    && [ "$(node -p 'require(process.argv[1]).project_root' "$NOLEASE_RECORD")" = "$PROJECT" ]; then
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$NOLEASE_RECORD")" = "$NATIVE_PROJECT" ]; then
   check "AC-C11a adoption from a differing project dir still anchors on the record" PASS
 else
   check "AC-C11a adoption from a differing project dir still anchors on the record" FAIL
@@ -1584,19 +1643,25 @@ fi
 # unreachable in the state it exists for — the record is minted from the
 # SessionStart payload cwd while the adoption is handed CLAUDE_PROJECT_DIR, and a
 # session cannot change the latter. Nothing is relaxed by removing it: the anchor
-# is carried from the record (pinned end to end at AC-C11 below), and the write
+# is carried from the record (pinned end to end at AC-C11a above), and the write
 # bound is readContext plus the sibling-root and plugin_data checks, all of which
-# the neighbouring rows still exercise. The record here already declares 0.18.0,
-# so $SYNTHETIC_BREAKING_ROOT is the runtime that already serves it — `ok` is not
-# reachable from this row, and `already-served` is the proof that the walk got
-# PAST the project comparison rather than never reaching it.
+# the neighbouring rows still exercise.
+#
+# The record here already declares 0.18.0, so $SYNTHETIC_BREAKING_ROOT is the
+# runtime that already serves it and `ok` is not reachable from this row — the
+# `ok` verdict under a differing project root is pinned at AC-C11's `different`
+# shape, before the adoption. So this row asserts the property directly instead of
+# a single verdict: the project argument must change NOTHING. Comparing the two
+# reasons is what makes that a real bite — a verdict literal alone would stay green
+# if the comparison were reintroduced anywhere the two calls agree.
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
-if [ "$REASON_PROJECT" = already-served ]; then
+REASON_OWN_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_PROJECT" = already-served ] && [ "$REASON_PROJECT" = "$REASON_OWN_PROJECT" ]; then
   check "AC-C09 a caller-supplied project root that differs is not an authority" PASS
 else
-  check "AC-C09 a caller-supplied project root that differs is not an authority (got '$REASON_PROJECT')" FAIL
+  check "AC-C09 a caller-supplied project root that differs is not an authority (foreign='$REASON_PROJECT' own='$REASON_OWN_PROJECT')" FAIL
 fi
 
 REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
@@ -1770,6 +1835,16 @@ REFUSAL_GAPS="$(
     const reasons = Object.values(core.ADOPTION_REFUSALS);
     if (reasons.length !== 7) { process.stdout.write("count:" + reasons.length); process.exit(0); }
     const missing = reasons.filter((r) => !skill.includes(r));
+    // The REVERSE direction, and the one a retirement needs: a row left behind
+    // for a reason that no longer exists matches nothing, so the forward filter
+    // above can never report it. Read from the table cells rather than the whole
+    // file, so the prose that recounts the removed condition is not mistaken for
+    // a live row.
+    const rows = skill.split("\n").filter((l) => /^\|\s*`[a-z-]+`\s*\|/.test(l));
+    const stale = rows
+      .map((l) => l.match(/^\|\s*`([a-z-]+)`/)[1])
+      .filter((r) => !reasons.includes(r));
+    if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
 )" || REFUSAL_GAPS=threw

@@ -12,7 +12,10 @@
 #     private plugin-data store; one workflow history entry in the recorded
 #     project; and any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
-#     into a sibling `superseded/` one. Nothing else, and nothing outside
+#     into a sibling `superseded/` one. The selector is every entry listRecords
+#     would REJECT — a stale lease, one whose id disagrees with its filename, a
+#     malformed record, a non-.json leftover — not only a lease naming the
+#     previous installation. Nothing else, and nothing outside
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
 #   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
 #     caller-supplied literal, exactly as it is for the diagnostic — it is
@@ -146,12 +149,27 @@ const buildRequest = () => ({
   executingPluginRoot: pluginRoot,
 });
 
+// The recorded project root is echoed into a terminal AND into the model context,
+// and the strict read constrains it less than that use deserves: validateContext
+// rejects only NUL, CR and LF there, while the sibling readOrphanedProjectRootContext
+// rejects the whole C0-plus-DEL class for exactly this reason. So print the plain
+// path when it is plain and a JSON-escaped one when it is not: an escape sequence in
+// a directory name must not be able to rewrite or hide the one line that says which
+// project is being taken over. The normal path is unchanged, which is what keeps the
+// report greppable. Built with RegExp from a string so the pattern survives every
+// layer this payload travels through as source text.
+const UNSAFE_DISPLAY = new RegExp("[\\u0000-\\u001f\\u007f]");
+const displayPath = (value) => {
+  const text = String(value);
+  return UNSAFE_DISPLAY.test(text) ? JSON.stringify(text) : text;
+};
+
 // Every refusal names the condition that was not met, and every one of them has
 // a different remedy. A generic "not adoptable" would put the user back where
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Start a fresh Claude Code session.",
+    "The record could not be re-verified. Its recorded project root may be gone (/zensu:doctor names that directory and it can be re-created in place), the installation that minted it may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Run /zensu:doctor first; only the last two of those need a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -194,7 +212,7 @@ function main() {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + verdict.recorded + "\n");
     process.stdout.write("  executing        : " + verdict.executing + "\n");
-    process.stdout.write("  project          : " + verdict.context.project_root + "\n\n");
+    process.stdout.write("  project          : " + displayPath(verdict.context.project_root) + "\n\n");
     process.stdout.write("The record is intact and this installation can take it over in place.\n");
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -207,7 +225,7 @@ function main() {
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + adopted.projectRoot + "\n");
+  process.stdout.write("  project          : " + displayPath(adopted.projectRoot) + "\n");
   process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
   process.stdout.write("  provenance       : " + adopted.provenance + "\n");
   process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n");

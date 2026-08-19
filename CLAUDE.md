@@ -319,7 +319,12 @@ previous version was not pruned.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
-plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
+plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. Note that
+`adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
+so a port that takes only the core delta (the condition gone) while its own entry
+script still requires and host-path-renders a project-dir variable still exits
+before printing any report, which is the same wedge in a different place. The two
+halves move together. The host
 half is SEVEN separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
@@ -333,7 +338,9 @@ the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 **The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
 It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
 and four session lifecycles, but no Windows wall clock was taken — unlike the two
-suites this file records a measured figure for. Budget against a measurement
+suites this file records a measured figure for. AC-C11 then added three more
+entry-point process runs on top of that unmeasured baseline, and the ceiling did
+not move again. Budget against a measurement
 before trusting the headroom. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts

@@ -90,21 +90,21 @@ measured code". Do not run it to make an unrelated failure go away.
 ## Prerequisites
 
 None beyond a running session. No network, no API key. The entry point needs
-`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and two of the
-values the recognized command carries — `CLAUDE_CODE_SESSION_ID` (inherited) and
-`CLAUDE_PLUGIN_DATA`; it names either if it is missing. The command also carries
-`CLAUDE_PROJECT_DIR`, which the adoption **ignores**: the project it repairs is
-the one the record names, so a session whose project directory has moved or been
-deleted still gets its report. Keep passing it — the recognizer admits one exact
-shape and the diagnostic shares that set. Main thread only: a reviewer or neutral
-child is refused by every gate.
+`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and two values
+— `CLAUDE_CODE_SESSION_ID` (inherited) and `CLAUDE_PLUGIN_DATA`; it names either
+if it is missing. It does **not** need `CLAUDE_PROJECT_DIR` and never reads it, so
+the command below does not pass it: the project it repairs is the one the RECORD
+names. A session whose **harness** project directory has moved or been deleted
+therefore still gets its report. That is not the same as a record whose own
+recorded project root is gone — that one still refuses, as `record-unreadable`.
+Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
 
 **Step 1 of 4 — report.** Run the read-only form. It changes nothing.
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
 ```
 
 Render both versions and the verdict verbatim. On a refusal, render the reason
@@ -128,7 +128,7 @@ the update has to be re-gathered.
 **Step 3 of 4 — adopt.** Only after the user agrees:
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
 Render the output verbatim. Three lines are NOT clean states and must be
@@ -155,10 +155,13 @@ restart.
 ## Invocation Constraints
 
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
-the two assignments above, `bash`, the script path in the executing installation,
-and at most the literal `--confirm`. Anything else — a second command, a
-different flag, a copy of the script — is denied. Emit the command exactly as
-written above; do not wrap it, redirect it, or chain anything onto it.
+a whitelisted assignment prefix, `bash`, the script path in the executing
+installation, and at most the literal `--confirm`. Anything else — a second
+command, a different flag, a copy of the script — is denied. Every assignment in
+that prefix must carry a rooted literal path; an empty value is refused, which is
+one reason the form above passes only the variable the script actually reads.
+Emit the command exactly as written above; do not wrap it, redirect it, or chain
+anything onto it.
 
 ## Response Style
 
