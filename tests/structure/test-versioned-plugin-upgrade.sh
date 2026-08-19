@@ -1024,9 +1024,22 @@ fi
 # The shape the SKILL emits, so this enumeration grades what a real invocation
 # looks like. It carries no CLAUDE_PROJECT_DIR: the adoption never reads it, and
 # passing it would put a value nobody consumes in front of the recognizer's
-# rooted-literal check. A shape the skill no longer emits, graded here, would be a
-# green enumeration over a command that never runs.
+# rooted-literal check — which refuses an empty value, so a harness that rendered
+# the placeholder empty would make the repair unreachable.
 ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# And the correspondence is PINNED, not asserted in prose. Without this the skill
+# could re-add the assignment and every row below would stay green while the real
+# invocation was refused — a green enumeration over a command that never runs. The
+# skill is the only producer of that shape and no other suite reads it.
+ADOPT_SKILL_COMMANDS="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"' \
+  "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md" 2>/dev/null || printf 0)"
+if [ "$ADOPT_SKILL_COMMANDS" = 2 ] \
+    && ! grep -q 'CLAUDE_PROJECT_DIR.*zensu-session-adopt\.sh' \
+      "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"; then
+  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
+fi
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
 # already disagreed on anchoring, and a matcher regex is exactly the thing whose
@@ -1127,10 +1140,18 @@ if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-ga
     "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
   ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES empty-project-dir:allowed"
 fi
-if [ -z "$ADOPT_SHAPE_FAILURES" ]; then
-  check "AC-C04 the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not" PASS
+# The label follows the grading, exactly as $ADOPT_LABEL does above: on win32 all
+# three rows assert `deny`, and a fixed "is admitted" label would then report the
+# opposite of what was verified.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  ADOPT_SHAPE_LABEL="the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not"
 else
-  check "AC-C04 the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not ($ADOPT_SHAPE_FAILURES)" FAIL
+  ADOPT_SHAPE_LABEL="refuses every emitted shape on win32 (documented MSYS spelling gap; the empty-value row does not discriminate here)"
+fi
+if [ -z "$ADOPT_SHAPE_FAILURES" ]; then
+  check "AC-C04 $ADOPT_SHAPE_LABEL" PASS
+else
+  check "AC-C04 $ADOPT_SHAPE_LABEL ($ADOPT_SHAPE_FAILURES)" FAIL
 fi
 
 # FR-C01 — the deny REASON, not just the decision. gate_decision_from discards
@@ -1376,8 +1397,10 @@ fi
 # neither shape is exotic: the record is minted from the SessionStart payload
 # cwd, so a fork whose cwd was a worktree records that worktree while the harness
 # still reports somewhere else, and a deleted worktree is the harness value gone.
-# The record is still at 0.17.0 here, so ADOPTABLE is the answer in all three and
-# the row also pins the `ok` verdict AC-C09 cannot reach after the adoption.
+# The record is still at 0.17.0 here, so ADOPTABLE is the answer in all three. This
+# row owns the SCRIPT's environment handling and nothing else — the `ok` verdict at
+# the function boundary belongs to AC-C11b below, which drives the parameter the
+# entry point no longer passes at all.
 # `env -u` rather than an empty assignment: the suite inherits a real
 # CLAUDE_PROJECT_DIR from the session running it, and `VAR= cmd` is a SET empty
 # value that the `-n` guard would have caught for the wrong reason.
@@ -1616,7 +1639,6 @@ else
   printf '    recorded root     : %s\n' \
     "$(node -p 'require(process.argv[1]).plugin_root' "$ADOPT_RECORD" 2>/dev/null)"
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
-  grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
 fi
 
@@ -1722,7 +1744,10 @@ fi
 # The record now names $SYNTHETIC_BREAKING_ROOT, so that root has nothing left to
 # adopt. Without this refusal the adoption would be a way to re-mint a HEALTHY
 # session's record, which is the one thing immutability exists to prevent.
-REASON_SERVED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+# Graded off the call the row above already made with these exact five arguments —
+# a second identical node process buys nothing and this suite's Windows ceiling is
+# explicitly unmeasured.
+REASON_SERVED="$REASON_OWN_PROJECT"
 if [ "$REASON_SERVED" = already-served ]; then
   check "AC-C09 a record this installation already serves is not adoptable" PASS
 else

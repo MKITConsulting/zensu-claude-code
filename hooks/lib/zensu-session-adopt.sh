@@ -173,11 +173,17 @@ const buildRequest = () => ({
 // text raw. So: anything outside the set below is JSON-escaped AND folded to ASCII,
 // because JSON.stringify alone leaves every non-ASCII code point intact. Deliberately
 // no single quote in the class - this whole payload is a single-quoted shell string.
+// The class admits a space and a colon, and the project line is the LAST field of
+// the read-only block, so a run of spaces would let a directory name forge further
+// "label : value" pairs after it — and the skill keys real behaviour off exactly
+// those pairs. Nothing in an ordinary path carries a double space, so requiring one
+// space at a time costs nothing and closes the forgery.
 const SAFE_DISPLAY = new RegExp("^[A-Za-z0-9 _.,:;/\\\\@+~()=-]*$");
+const DOUBLE_SPACE = new RegExp("  ");
 const NON_ASCII = new RegExp("[\\u007f-\\uffff]", "g");
 const safe = (value) => {
   const text = String(value);
-  if (SAFE_DISPLAY.test(text)) return text;
+  if (SAFE_DISPLAY.test(text) && !DOUBLE_SPACE.test(text)) return text;
   return JSON.stringify(text).replace(NON_ASCII, (c) =>
     "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 };
