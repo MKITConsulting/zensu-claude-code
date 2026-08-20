@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only greps
+# hooks/lib/zensu-doctor-report.js for its secure-open inventory, so no renderer
+# process is started and no HOME is resolved.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 SESSION="$ROOT/tests/structure/test-session-control-claude.sh"
 REVIEWER="$ROOT/tests/structure/test-reviewer-capability-gate.sh"
@@ -23,6 +26,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+DOCTOR_REPORT="$ROOT/hooks/lib/zensu-doctor-report.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -432,6 +436,23 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The doctor renderer carries TWO opens, and they differ on purpose — which is the
+# reason it belongs in this inventory rather than being assumed to follow one rule.
+# readNoteJson reads a note in a session-writable directory and therefore refuses a
+# symlink and a hard link; readSettingsJson reads the user's own ~/.claude/settings.json,
+# which dotfile managers link routinely and which Claude Code itself follows, so it
+# deliberately carries NO O_NOFOLLOW. Both must keep the platform-guarded O_NONBLOCK,
+# because a blocking open on a FIFO would hang a renderer contracted to always exit 0.
+if [ "$(grep -cF 'process.platform !== '"'"'win32'"'"' && Number.isInteger(fs.constants.O_NOFOLLOW)' "$DOCTOR_REPORT")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$DOCTOR_REPORT")" -eq 2 ] \
+  && grep -qF 'fd = fs.openSync(file, fs.constants.O_RDONLY | nonBlock);' "$DOCTOR_REPORT" \
+  && grep -qF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock)' "$DOCTOR_REPORT" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$DOCTOR_REPORT"; then
+  check "doctor renderer keeps a guarded O_NONBLOCK on both opens and O_NOFOLLOW only on the note reader" PASS
+else
+  check "doctor renderer keeps a guarded O_NONBLOCK on both opens and O_NOFOLLOW only on the note reader" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

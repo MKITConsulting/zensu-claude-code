@@ -730,10 +730,15 @@ fi
 
 # The hook writes the note and the doctor renderer reads it; each side is
 # otherwise pinned only against a hand-authored filename.
+# See the same guard in tests/structure/test-doctor.sh: the doctor renderer
+# reads HOME for the user-scoped config AND for the reviewer-spawn permission
+# check, so an unsandboxed run reads the developer's own settings.
+DOCTOR_HOME="$STATE_DIR/doctor-home"
+mkdir -p "$DOCTOR_HOME"
 DOC_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$PLUGIN_DIR" CLAUDE_PROJECT_DIR="$SID9_PROJECT" \
   ZDOC_ZENSU=absent ZDOC_NODE=vTEST ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI='' \
   ZDOC_FORGE_STATE='' ZDOC_PLAYWRIGHT=absent \
-  node "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>&1)"
+  HOME="$DOCTOR_HOME" node "$PLUGIN_DIR/hooks/lib/zensu-doctor-report.js" 2>&1)"
 case "$DOC_OUT" in
   *'host permission layer refused the zensu:code-reviewer spawn (auto-mode-classifier'*)
     check "T25 /zensu:doctor renders the note the hook itself wrote" PASS ;;

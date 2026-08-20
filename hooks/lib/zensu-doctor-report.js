@@ -16,7 +16,11 @@
 //   ZENSU_DOCTOR_PLUGIN_DIR  plugin root holding .claude-plugin/ + hooks/
 //   ZENSU_CONFIG             full-override config file (else HOME + project)
 //   HOME, CLAUDE_PROJECT_DIR standard config-resolution roots; session state
-//                            is always CLAUDE_PROJECT_DIR/.zensu/state
+//                            is always CLAUDE_PROJECT_DIR/.zensu/state. HOME is
+//                            also the ONLY root the reviewer-spawn permission
+//                            check reads (HOME/.claude/settings.json) — see
+//                            permissionExposureRows below for why no second
+//                            settings file is opened or named.
 //   ZDOC_NODE/ZENSU/PLAYWRIGHT            tool probe results from the wrapper/skill
 //   ZDOC_FORGE_PROVIDER/CLI/STATE/EDITION forge detection from the VCS driver
 //   ZDOC_TTL_HOURS           pending-review TTL from the canonical getter
@@ -37,6 +41,42 @@ var TTL_HOURS_FALLBACK = 6;
 var TTL_HOURS_MAX = 8760;
 var CHAIN_ROW_LIMIT = 8;
 var NOTE_MAX_BYTES = 4096;
+var SETTINGS_MAX_BYTES = 1048576;
+// A hand-copy of REVIEWER_SUBAGENT_TYPE in hooks/lib/reviewer-spawn-denial-v1.js,
+// which exports it. Deliberate, not an oversight: that module is required lazily
+// inside reviewerDenialRows and a load failure there degrades one row, while a
+// top-level require would take the whole report down with it. The twin literal
+// in stop-chain-enforcer.sh's DENIAL_RULE is a third copy of the same identity.
+var REVIEWER_AGENT = 'zensu:code-reviewer';
+// The Claude Code build (2.1.235) whose settings shape and permission-rule
+// grammar the check below was read against. Recorded for the same reason
+// DENIAL_MARKERS_SOURCE_BUILD is: only a named build lets a human re-verify
+// instead of assume. The parenthesised form above is the ONE spelling of the
+// version in this comment — the structure suite extracts the constant below and
+// requires exactly it, and a second prose copy would sit outside that
+// line-oriented check and could go stale unnoticed.
+//
+// Every item below is host-coupled, and a port (zensu-codex, zensu-kiro,
+// zensu-antigravity) must re-decide each against its own harness:
+//   * `permissions.{defaultMode,allow,deny,ask}` and the `auto` value
+//   * `autoMode.allow`
+//   * the `Agent(<name>)` rule spelling AND the bare tool name `Agent` as a
+//     wildcard grant. The bare form matters more than it looks: on the allow
+//     list a match SUPPRESSES the exposure row, so a host that does not treat
+//     it as a grant inherits a silently-suppressing check.
+//   * whether the host trims whitespace in a rule string. Unverified here, so
+//     deny/ask trim (over-matching is safe) and allow does not — a port that
+//     learns the real answer can collapse the asymmetry.
+//   * the HOME/.claude/settings.json layout
+//   * `FATAL_RULE_KEYS` below, whose membership is DERIVED from that order — it
+//     is exactly the keys evaluated before `allow`. A port that reorders the
+//     ladder and leaves this constant alone ships a wrong fatal/deferred split.
+//   * the deny -> ask -> allow evaluation order, first match wins. This one is
+//     listed separately because its failure mode is the opposite of the others':
+//     a rename makes the check fall silent, which is merely useless, while a
+//     REORDER leaves every row still rendering and turns the deny row's
+//     "adding a permissions.allow rule changes nothing" into a false statement.
+var SETTINGS_SOURCE_BUILD = '2.1.235';
 
 var env = process.env;
 var out = [];
@@ -188,6 +228,318 @@ function walkQuotedBooleans(obj, prefix, hits) {
     }
   });
 }
+// The reviewer-spawn permission check. `reviewerDenialRows` below is REACTIVE —
+// it counts refusal notes the Stop enforcer already wrote, so it can only speak
+// after a chain has wedged. This one is proactive: it reads the settings that
+// decide the refusal and reports the exposure beforehand.
+//
+// It opens exactly ONE path and names exactly one path, both of them
+// ~/.claude/settings.json. The project-local spelling is deliberately absent for
+// the reason stop-chain-enforcer.sh gives where it builds the same remedy: that
+// file sits inside the session root and is a path the agent itself could write,
+// so printing it beside the exact rule that grants the refused capability is an
+// invitation. These rows are read by the model too.
+// Deliberately NOT given a ZDOC_/ZENSU_ override of its own, unlike every other
+// input this file takes. An override would be a second agent-writable channel
+// able to aim a check ABOUT the agent's own permissions at a file that shows a
+// grant. Stated honestly, this NARROWS the channel rather than closing it: HOME
+// is itself settable, so a redirect can still suppress or forge a row. What it
+// cannot do is disclose anything, because the failure vocabulary below is
+// closed — no byte of whatever file it lands on reaches the report. Adding a
+// dedicated override would widen the surface for no gain; the structure suite
+// sandboxes HOME wholesale for the same reason.
+function claudeSettingsFile() {
+  if (!env.HOME) return null;
+  return path.join(env.HOME, '.claude', 'settings.json');
+}
+// No O_NOFOLLOW: unlike a refusal note this is the user's own file in the user's
+// own home, and Claude Code itself follows a symlink there. A dotfile manager
+// (stow, chezmoi) links it routinely, and refusing to follow would report a ⚠️
+// did-not-run row for a healthy setup. The descriptor-side discipline IS kept — decide shape
+// and size from the DESCRIPTOR, not from a second path resolution, open
+// non-blocking so a path swapped to a FIFO cannot hang a process contracted to
+// always exit 0, and read bounded to the size that was actually vetted. Two of
+// readNoteJson's guards are deliberately absent, not overlooked: O_NOFOLLOW, for
+// the symlink reason above, and its `nlink !== 1` hard-link refusal, which
+// belongs to a file in a session-writable directory rather than to the user's
+// own home.
+function readSettingsJson(file) {
+  var fd;
+  try {
+    var nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
+    fd = fs.openSync(file, fs.constants.O_RDONLY | nonBlock);
+    var st = fs.fstatSync(fd);
+    if (!st.isFile()) return { ok: false, missing: false, err: 'not a regular file' };
+    if (st.size > SETTINGS_MAX_BYTES) {
+      return { ok: false, missing: false, err: 'larger than ' + SETTINGS_MAX_BYTES + ' bytes' };
+    }
+    var buf = Buffer.allocUnsafe(st.size);
+    var read = 0;
+    while (read < st.size) {
+      var n = fs.readSync(fd, buf, read, st.size - read, read);
+      if (n <= 0) break;
+      read += n;
+    }
+    return { ok: true, data: JSON.parse(buf.toString('utf8', 0, read)) };
+  } catch (e) {
+    if (e && e.code === 'ENOENT') return { ok: false, missing: true };
+    // A CLOSED vocabulary, never the raw exception text. JSON.parse embeds a
+    // leading slice of its input in the message — measured on node 23:
+    // `Unexpected token 'o', "notjson sk-"... is not valid JSON` — so passing it
+    // through would put bytes of the user's settings file into a report the
+    // doctor skill tells the model to print verbatim. An errno describes the
+    // open; it is a fact about the filesystem, not about the file's contents.
+    //
+    // This rule is LOCAL to this reader and is deliberately not retrofitted onto
+    // readJson above, which still prints the raw parser message for the plugin's
+    // own config files. That is a separate decision about a different file class
+    // (whose path the row already prints anyway) and belongs to its own change —
+    // do not read this file as having one uniform policy.
+    if (e && e.code) return { ok: false, missing: false, err: 'unreadable (' + e.code + ')' };
+    return { ok: false, missing: false, err: 'unparseable JSON' };
+  } finally {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) { /* already closed */ } }
+  }
+}
+// A present-but-wrong shape is a check that could not run, never an all-clear:
+// `typeof [] === 'object'`, so without the Array test `"permissions": []` would
+// read exactly like a settings file with no permissions key at all.
+function plainObject(v) {
+  return (v && typeof v === 'object' && !Array.isArray(v)) ? v : null;
+}
+// An ABSENT key is a fact about the settings ({} reads correctly as "no rules");
+// a PRESENT key of the wrong shape is not, and must reach the did-not-run row
+// rather than silently render as an empty rule set.
+//
+// The vetting goes to the RULE LISTS, not just to the two containers. Stopping
+// at depth 1 was the earlier defect: `matchesReviewerSpawn` opens with an
+// Array.isArray guard, so a `deny` written as an object read as "no deny rules"
+// and the exposure row then recommended an allow rule while an unevaluated deny
+// key sat in the same file — a confidently WRONG remedy, which is worse than the
+// silence this doctrine exists to remove.
+//
+// Returns the same `{ ok: ... }` discriminator readJson and readSettingsJson use.
+// An untagged union would make a forgotten check a property read on undefined,
+// and a throw here costs the whole report, not one row.
+// The unjudgeable keys split by CONSEQUENCE, not by depth — and the consequence
+// is NOT whether the exposure row survives. BOTH classes suppress that row, since
+// neither can support an allow remedy. What they differ in is the deny/ask rows:
+// a malformed `deny` or `ask` is FATAL and takes those down with it, because the
+// determination itself is unreadable. Everything else is DEFERRED and is reported
+// only AFTER the deny/ask branches have had their say, because those two do not
+// depend on it — swallowing the deny row over an unrelated malformed key would
+// drop the highest-value row this check emits.
+var FATAL_RULE_KEYS = ['deny', 'ask'];
+function settingsShape(raw) {
+  var data = plainObject(raw);
+  if (!data) return { ok: false, err: 'the settings root is not a JSON object' };
+  var perms = data.permissions === undefined ? {} : plainObject(data.permissions);
+  if (!perms) return { ok: false, err: 'permissions is present but not an object' };
+  var autoMode = data.autoMode === undefined ? {} : plainObject(data.autoMode);
+  if (!autoMode) return { ok: false, err: 'autoMode is present but not an object' };
+  for (var i = 0; i < FATAL_RULE_KEYS.length; i++) {
+    var k = FATAL_RULE_KEYS[i];
+    if (perms[k] !== undefined && !Array.isArray(perms[k])) {
+      return { ok: false, err: 'permissions.' + k + ' is present but not an array' };
+    }
+  }
+  var deferred = '';
+  if (perms.allow !== undefined && !Array.isArray(perms.allow)) {
+    deferred = 'permissions.allow is present but not an array';
+  } else if (perms.defaultMode !== undefined && typeof perms.defaultMode !== 'string') {
+    deferred = 'permissions.defaultMode is present but not a string';
+  } else if (autoMode.allow !== undefined && !Array.isArray(autoMode.allow)) {
+    deferred = 'autoMode.allow is present but not an array';
+  }
+  return { ok: true, permissions: perms, autoMode: autoMode, deferred: deferred };
+}
+// One wording for both the fatal and the deferred case. A second phrasing would
+// have to be carried into the skill, the operator docs and the drift pin.
+function shapeRow(err) {
+  line(WARN, 'permissions: ~/.claude/settings.json has a shape this check cannot judge — ' + err
+    + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
+}
+// Reused verbatim by the ask row and the exposure row. It shares its second
+// clause — "a deny rule outranks an allow rule, so the deny has to go first" —
+// with THREE copies, none of which consumes this constant: the reactive row
+// further down, DENIAL_REMEDY in hooks/stop-chain-enforcer.sh, and the
+// refused-spawn bullet in skills/doctor/SKILL.md. Only the last is machine-pinned
+// (P1be and P1qr); the other two are by-hand. Reword one and check them.
+//
+// Both allow-ward rows recommend an allow rule, and such a rule takes no effect
+// behind a deny this check could not see or could not judge — a wildcard
+// spelling, a deny in a settings source this file never opens. Saying so costs
+// one clause and is true regardless of spelling, which is why it is preferred
+// over guessing at the host's rule grammar.
+var DENY_FIRST_CAVEAT = ' Remove any deny rule that names the Agent tool first — a deny rule '
+  + 'outranks an allow rule, so the deny has to go first.';
+// Only the two spellings verified against a live permission decision on Claude
+// Code SETTINGS_SOURCE_BUILD are accepted. A wildcard form may well work too,
+// but it is not a verified spelling.
+// `padded` is the deny/ask spelling and is deliberately NOT used for allow.
+// Whether the host trims a rule string is unverified against SETTINGS_SOURCE_BUILD,
+// so trimming has to fall on the side where a wrong guess only over-warns: on
+// deny/ask an extra match costs a row the user can dismiss, while on allow it
+// SUPPRESSES the warning — the direction that leaves no diagnosis at all.
+//
+// Not widened to `Task(...)` on purpose, and the divergence is worth stating
+// because the sibling module invites the opposite conclusion:
+// reviewer-spawn-denial-v1.js declares SPAWN_TOOL_NAMES = ['Agent', 'Task'], but
+// that set governs TRANSCRIPT tool names, not permission-rule spellings. Nothing
+// in this tree verifies `Task(...)` as a rule, so it stays out of both lists —
+// do not "fix" one table into the other.
+function matchesReviewerSpawn(rules, padded) {
+  if (!Array.isArray(rules)) return false;
+  for (var i = 0; i < rules.length; i++) {
+    if (typeof rules[i] !== 'string') continue;
+    var r = padded ? rules[i].trim() : rules[i];
+    if (r === 'Agent' || r === 'Agent(' + REVIEWER_AGENT + ')') return true;
+  }
+  return false;
+}
+// A deny/ask entry that clearly means this spawn but is not one of the two
+// verified spellings. Broadening matchesReviewerSpawn to swallow it was rejected:
+// the deny row makes a strong claim ("every /zensu:tdd run wedges at the review
+// step") that must not fire for an unrelated agent, and a wildcard spelling is
+// the same unverified host grammar moved onto the loud side. Reporting that the
+// entry could not be JUDGED keeps the fall-through from ending at the allow
+// remedy, without asserting what the entry does.
+function namesReviewerSpawn(rules) {
+  if (!Array.isArray(rules)) return false;
+  for (var i = 0; i < rules.length; i++) {
+    if (typeof rules[i] !== 'string') continue;
+    var r = rules[i].trim();
+    // Defensive and UNREACHABLE from the only caller, which reaches this
+    // predicate solely after matchesReviewerSpawn(..., true) rejected the same
+    // list with the same trim and the same two comparisons. Kept so the
+    // predicate is correct standing alone, not because a fixture covers it.
+    if (r === 'Agent' || r === 'Agent(' + REVIEWER_AGENT + ')') continue;
+    if (r.indexOf(REVIEWER_AGENT) !== -1) return true;
+  }
+  return false;
+}
+// A THIRD predicate, and deliberately not a fourth spelling of the other two:
+// this one scans `autoMode.allow`, which holds classifier guidance in PROSE
+// rather than permission rules. So it does not trim (there is no rule to
+// normalize) and it does not exclude the two verified spellings (a prose line
+// that happens to quote one still is not a grant). Collapsing it into
+// namesReviewerSpawn would import both of those behaviours and make this row
+// silent on exactly the sentence it exists to correct.
+function mentionsReviewerAgent(rules) {
+  if (!Array.isArray(rules)) return false;
+  for (var i = 0; i < rules.length; i++) {
+    if (typeof rules[i] === 'string' && rules[i].indexOf(REVIEWER_AGENT) !== -1) return true;
+  }
+  return false;
+}
+function permissionExposureRows() {
+  var file = claudeSettingsFile();
+  if (!file) return;
+  var r = readSettingsJson(file);
+  if (r.missing) return;
+  if (!r.ok) {
+    line(WARN, 'permissions: ~/.claude/settings.json could not be read — ' + r.err
+      + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
+    return;
+  }
+  var shape = settingsShape(r.data);
+  if (!shape.ok) {
+    // NOT "could not be read": this branch is reached only after the file was
+    // read and parsed successfully, and naming the wrong cause sends the user
+    // hunting for a filesystem problem that does not exist.
+    shapeRow(shape.err);
+    return;
+  }
+  var perms = shape.permissions;
+  var autoMode = shape.autoMode;
+  var mode = typeof perms.defaultMode === 'string' ? perms.defaultMode : '';
+  // Claude Code evaluates deny, then ask, then allow, and the first match wins —
+  // so a deny is reported even when an allow rule for the same spawn is present,
+  // and neither depends on the permission mode.
+  if (matchesReviewerSpawn(perms.deny, true)) {
+    line(WARN, 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
+      + REVIEWER_AGENT + ' spawn. Deny is evaluated before ask and allow, so the review chain can never '
+      + 'spawn its reviewer and every /zensu:tdd run wedges at the review step. Remove that entry '
+      // Self-contained on purpose. This used to point at "the refused-spawn row
+      // below", but that row renders only when a refusal note exists, so the
+      // reference dangled in the ordinary case. Naming the RULE instead is true
+      // whether or not the other row prints.
+      + 'yourself if the block was not intended: while it stands, adding a permissions.allow rule for '
+      + 'this spawn changes nothing — including the "Agent(' + REVIEWER_AGENT + ')" rule that a '
+      + 'refused-spawn report recommends.');
+    return;
+  }
+  if (matchesReviewerSpawn(perms.ask, true)) {
+    line(WARN, 'permissions: a permissions.ask entry in ~/.claude/settings.json matches the '
+      + REVIEWER_AGENT + ' spawn. Ask is evaluated before allow, so the spawn prompts every time and a '
+      + 'turn that cannot answer the prompt refuses it. Move the rule to permissions.allow yourself if '
+      + 'you meant to grant it.' + DENY_FIRST_CAVEAT);
+    return;
+  }
+  // Before the fall-through: an entry that plainly names this spawn but is not a
+  // spelling this check verified. Saying nothing here would drop straight to the
+  // exposure row, which recommends an allow rule that such an entry may outrank.
+  if (namesReviewerSpawn(perms.deny) || namesReviewerSpawn(perms.ask)) {
+    line(WARN, 'permissions: a permissions.deny or permissions.ask entry in ~/.claude/settings.json '
+      + 'names ' + REVIEWER_AGENT + ' in a spelling this check has not verified, so it cannot judge '
+      + 'whether that entry blocks the spawn. Read the entry yourself before adding any '
+      + 'permissions.allow rule: deny and ask are both evaluated before allow, so an entry that does '
+      + 'block would make an allow rule take no effect.');
+    return;
+  }
+  // Only now: the deferred half of the shape check. Reporting it earlier would
+  // have swallowed the deny/ask rows above, which do not depend on any of it.
+  //
+  // Resolved BEFORE the deferred branch, not inside it. A user who already holds
+  // the rule must not be told to add it, and that has to hold on a deferred
+  // failure too — where the old inline return was unreachable. Safe even when
+  // `permissions.allow` is itself the malformed key: the predicate opens with an
+  // Array.isArray guard and simply answers false.
+  var granted = matchesReviewerSpawn(perms.allow, false);
+  // An else-guard rather than a `return`, and the difference is the autoMode row
+  // below. A deferred failure suppresses the exposure row — the deferred set
+  // covers `permissions.allow` and `permissions.defaultMode`, which that row's
+  // claim rests on — but the autoMode row reads `autoMode.allow` and says only
+  // that it is not a permission rule. Returning here suppressed that too.
+  //
+  // Accepted asymmetry: `autoMode.allow` is ALSO in the deferred set, so a
+  // malformed one costs the exposure row even though that row does not depend on
+  // it. P1az6 pins the current behaviour; splitting `deferred` into two carriers
+  // would fix it, and that is recorded as a known gap rather than done here.
+  if (shape.deferred) {
+    shapeRow(shape.deferred);
+  } else {
+    // Nothing below applies to a session that already holds the rule. Note what
+    // this exit does NOT say: a deny in a spelling this check declined to judge
+    // can sit in the same file and still outrank that grant, and no row reports
+    // it — the caveat clause is not reachable from here.
+    if (granted) return;
+    if (mode === 'auto') {
+      line(WARN, 'permissions: permission mode "auto" is set in ~/.claude/settings.json and no '
+        + 'permissions.allow entry there spells either "Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" '
+        + '— the auto-mode classifier can refuse the reviewer spawn, and a refused spawn leaves the review '
+        + 'chain with no review it can close on. Add "Agent(' + REVIEWER_AGENT + ')" to permissions.allow in '
+        + '~/.claude/settings.json yourself; no agent may edit a settings file to widen its own permissions.'
+        + DENY_FIRST_CAVEAT
+        + ' This row reports an exposure, never a prediction: the classifier decides per session context, and '
+        + 'settings sources this check does not read may already grant it. The reverse holds too — the '
+        + 'permission mode can be in effect for a session without being written into this file, so the '
+        + 'absence of this row is not evidence that auto mode is inactive.');
+    }
+  }
+  // Self-contained: it used to end "the permissions.allow rule named above",
+  // which dangles whenever the row above did not print — the same defect the
+  // deny row was corrected for. Suppressed by a real grant, and by every earlier
+  // `return` in this function — unset HOME, absent file, unreadable file, fatal
+  // shape, deny, ask, could-not-judge all return before it is reached.
+  if (!granted && mentionsReviewerAgent(autoMode.allow)) {
+    line(WARN, 'permissions: an autoMode.allow entry in ~/.claude/settings.json mentions '
+      + REVIEWER_AGENT + ', but autoMode.allow carries classifier guidance in prose — it is not a '
+      + 'permission rule and does not grant the spawn. Only a permissions.allow entry spelling '
+      + '"Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" does.');
+  }
+}
+
 function configBlock() {
   block('Config');
   var anyPresent = false;
@@ -210,6 +562,7 @@ function configBlock() {
   if (!anyPresent) {
     line(OK, 'config: no config file present — built-in defaults apply');
   }
+  permissionExposureRows();
 }
 
 function ttlHours() {
@@ -397,8 +750,14 @@ function reviewerDenialRows(entries, dir, nowMs) {
       // inside the session root and is a path the agent itself could write, so
       // printing it beside the exact rule that grants the refused capability is
       // an invitation. This row is read by the model too.
-      + 'Allow it with the permissions.allow rule "Agent(zensu:code-reviewer)" in ~/.claude/settings.json, '
-      + 'or leave the permission mode that refused it, then re-run the review from the owning session. '
+      + 'Allow it with the permissions.allow rule "Agent(' + REVIEWER_AGENT + ')" in ~/.claude/settings.json, '
+      // The deny caveat has to live here too, not only in the Config-block deny
+      // row: that row reads one file, so a deny in any source it cannot see
+      // leaves this remedy standing alone. stop-chain-enforcer.sh words the same
+      // remedy with the same caveat.
+      + 'first removing any deny rule that names the Agent tool — a deny rule outranks an allow rule, '
+      + 'so the deny has to go first — or leave the permission mode that refused it, then re-run the '
+      + 'review from the owning session. '
       + 'You have to apply this yourself — no agent may edit a settings file to widen its own permissions. '
       + 'This note is retired automatically once a spawn succeeds or the chain closes.');
   }

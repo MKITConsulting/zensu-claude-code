@@ -828,7 +828,7 @@ permission layer refuses that spawn, the call never executes — so no PreToolUs
 or PostToolUse hook can see it, and without this module the enforcer repeats an
 impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
 
-Five things are coupled and must move together:
+Eight things are coupled and must move together:
 
 - **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
   binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
@@ -862,6 +862,65 @@ Five things are coupled and must move together:
   `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$`. Rename one and doctor goes
   quiet with everything still green. T25 is the only check that drives both sides
   end to end.
+- **`REVIEWER_SUBAGENT_TYPE` has a registered hand-copy, and the doctor also
+  reports this refusal PROACTIVELY.** `REVIEWER_AGENT` in
+  `hooks/lib/zensu-doctor-report.js` copies it rather than importing it: that
+  module is required LAZILY inside `reviewerDenialRows`, so a load failure
+  degrades one row, while a top-level require would take the whole report down.
+  `DENIAL_RULE` in `stop-chain-enforcer.sh` is a third copy of the same identity.
+  **The three copies are NOT pinned against each other — check them by hand**, in
+  the same sense `WRAP` is unpinned above. Rename the agent in one place only and
+  the surviving copies keep telling the user to allow a subagent name nothing
+  spawns, with every check green.
+  Beside the reactive row, that file's `permissionExposureRows` reads
+  `$HOME/.claude/settings.json` — and ONLY that path, for the reason
+  §"The model-facing reason names only `~/.claude/settings.json`" below gives — and warns before any spawn is refused.
+  Its host literals carry their own provenance constant `SETTINGS_SOURCE_BUILD`:
+  `permissions.{defaultMode,allow,deny,ask}`, the `auto` value, `autoMode.allow`,
+  the `Agent(<name>)` rule grammar, the file layout — **and the deny -> ask ->
+  allow evaluation order**, which is listed separately because its failure mode is
+  the opposite of the others': a rename makes the check fall SILENT (useless), a
+  REORDER leaves every row rendering and turns the deny row's "adding a
+  permissions.allow rule changes nothing" into a false claim. P1bd cross-checks
+  the constant against the provenance comment that enumerates them, the way
+  `reviewer-spawn-denial-v1.js` cross-checks `DENIAL_MARKERS_SOURCE_BUILD` against
+  its module header; P1bd1 pins the order clause. Its rows are held in step with
+  `skills/doctor/SKILL.md` by P1be, the same drift pin P1qr applies to the reactive
+  rows — `docs/tdd-manager-workflow.md` §"The proactive counterpart, before any
+  chain wedges" is the third account and is NOT covered by that pin.
+- **The deny-first caveat sentence is a FOURTH hand-copy class, pinned nowhere
+  across its copies.** `DENY_FIRST_CAVEAT` in `hooks/lib/zensu-doctor-report.js`
+  is consumed by the ask row and the exposure row; the reactive row in the SAME
+  file spells its own lead-in and shares only the trailing clause; `DENIAL_REMEDY`
+  in `hooks/stop-chain-enforcer.sh` is a third; `skills/doctor/SKILL.md`'s
+  refused-spawn bullet is a fourth. P1be and P1qr each pin a doctor copy against
+  the skill, and the routing suite pins the enforcer copy against itself — nothing
+  pins the doctor and the enforcer against each other. Reword one and the others
+  go stale with every check green; check them by hand, as with `WRAP` above.
+- **That proactive check's PORT half is not this module's.** A port that renames
+  only the literals still ships a wrong check: the branch LADDER in
+  `permissionExposureRows` encodes the deny -> ask -> allow precedence, so a host
+  that orders them differently needs the ladder reordered, not the strings renamed.
+  A host with no per-user permission-rule file at all DROPS the check rather than
+  repointing it — there is nothing to read. The accounts a port also owns are
+  `skills/doctor/SKILL.md`'s `⚠️ permissions:` bullets and its green-summary bound,
+  `docs/tdd-manager-workflow.md` §"The proactive counterpart", and the bullet above.
+  P1bh requires every suite that NAMES either doctor file to sandbox HOME or to
+  carry an explicit `# zensu-doctor-home-exempt:` sentence — deliberately blunt,
+  because its first version tried to recognise an execution and missed the one
+  suite that binds the path to a variable and runs it six hundred lines later.
+  The renderer reads HOME for both the user-scoped config and the settings file,
+  so a suite without one is environment-dependent. P1bi separately requires every
+  settings key the ladder reads to be shape-vetted, which is the coupling that
+  reopens the original defect if it drifts.
+  **The proactive ladder has no unit seam**: this renderer exports nothing and
+  ends in `process.exit(0)`, so `settingsShape`, the three rule predicates
+  (`matchesReviewerSpawn`, `namesReviewerSpawn`, `mentionsReviewerAgent`) and the
+  branch ladder are pinned only behaviorally, by shell fixtures. Extracting a
+  pure classifier into a `*-v1.js` module would buy one, at the cost of a lazy
+  require, a degraded-row fixture and a `node --test` driver charged to a named
+  Windows shard budget. Deliberately not done; recorded so it is not mistaken for
+  an oversight.
 - **The unit suite needs a driver.** `tests/run-all.sh` discovers only
   `tests/structure/test-*.sh`, so `tests/structure/reviewer-spawn-denial-v1.test.js`
   is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which asserts a
@@ -1031,9 +1090,19 @@ Only the docs carry the fuller form.
 **Operator-facing accounts that must move with the markers, the block reason, and
 the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
 refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` row
-in `docs/configuration.md`.
+in `docs/configuration.md`. The PROACTIVE check has three of its own, listed here
+so a maintainer navigating by this paragraph reaches them: §"The proactive
+counterpart, before any chain wedges" in `docs/tdd-manager-workflow.md`, the
+`⚠️ permissions:` bullets plus the green-summary bound in `skills/doctor/SKILL.md`,
+and the two bullets above.
 
-**Port-relevant.** Every constant here is host-coupled: a port copies
+**Port-relevant.** The PROACTIVE check has its own port half, stated in the two
+bullets above and NOT covered by this paragraph: `permissionExposureRows` and
+`SETTINGS_SOURCE_BUILD` in `hooks/lib/zensu-doctor-report.js`, the `permissions.*`
+/ `autoMode.allow` grammar, the single `~/.claude/settings.json` path, and — the
+one a literal-renaming port misses — the branch ladder, which encodes the
+deny -> ask -> allow precedence in code rather than in a string.
+For the REACTIVE module below, every constant here is host-coupled: a port copies
 `DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
 (`message.content[]`, `tool_use`/`tool_result`, `tool_use_id`, `input.subagent_type`,
 `is_error`) into its own file and re-decides them against its harness — a port that

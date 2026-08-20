@@ -7,11 +7,13 @@ description: >
   from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
-  string is silently ignored by strict === checks), and session state (state
-  dir writable, canonical CAS workflow documents valid, each review chain's
-  shape plus any wedged chain and its recovery command, any reviewer spawn the
-  host permission layer refused, expired pending-review
-  surfaced). The only write is an explicit, user-confirmed cleanup of one
+  string is silently ignored by strict === checks, and whether the permission rules
+  in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
+  before any chain has wedged), and session state (state dir writable, canonical
+  CAS workflow documents valid, each review chain's shape plus any wedged chain and
+  its recovery command, any reviewer spawn the host permission layer refused,
+  expired pending-review surfaced).
+  The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
   setup", "why is a zensu hook/gate not firing", "zensu doctor", or the slash
@@ -123,7 +125,16 @@ the report, not a failed command. Do not re-render or paraphrase the table.
 ## Phase 2: Interpret
 
 Briefly call out, in one or two lines, the highest-severity findings and the
-concrete next step for each — but only for rows the table actually marked ⚠️/❌:
+concrete next step for each — but only for rows the table actually marked ⚠️/❌.
+
+One bound is stated here rather than in a bullet, because it is about a row that
+did NOT print and the bullets below are scoped to rows that did: the
+reviewer-spawn permission check reads `~/.claude/settings.json` and nothing else,
+and the permission mode can be in effect for a session without being written
+there. So the absence of a `permissions:` row means no exposure was found in that
+one file — never that the auto-mode classifier is inactive. Say so whenever the
+user asks whether the classifier will refuse a spawn, not only when the whole
+table is green.
 
 - **❌ version sync** → bump `plugin.json` and `marketplace.json` together (the
   release train owns this; see `CLAUDE.md`).
@@ -132,6 +143,31 @@ concrete next step for each — but only for rows the table actually marked ⚠�
 - **⚠️ config quoted boolean** → the named key is a string (`"true"`) where a real
   boolean is required; strict `=== true` ignores it, so the feature stays at its
   default. Drop the quotes (offer `/zensu:setup` to rewrite it safely).
+- **⚠️ permissions: … the zensu:code-reviewer spawn** → the proactive counterpart
+  to the refused-spawn state row below: it reads `~/.claude/settings.json` and
+  reports the exposure *before* a chain wedges, so it is a warning about what
+  could happen, never a report that it did. Relay the row's own remedy exactly as
+  it words it — add `"Agent(zensu:code-reviewer)"` to `permissions.allow`, remove
+  the `deny` entry, or `Move the rule to permissions.allow` for an `ask` entry
+  (**move**, not remove — the row says so) — and tell
+  the user they must apply it themselves: **never edit a settings file to widen
+  your own permissions, and never name a project-local settings path as the place
+  to do it.** When a `deny` row is present it OUTRANKS the refused-spawn state row
+  below: `deny` is evaluated before `allow`, so relaying that row's allow-rule
+  remedy while the `deny` entry stands recommends a change that cannot take
+  effect. An `autoMode.allow` entry is classifier guidance in prose, not a
+  permission rule; if the row says so, the user's earlier attempt did not grant
+  anything.
+- **⚠️ permissions: … could not be read** / **… has a shape this check cannot judge**
+  → the check did not run. The first names a filesystem problem, the second a file
+  that was read and parsed but whose `permissions`/`autoMode` value or rule list is
+  not the shape the check understands. Report either one as a
+  missing check, not an all-clear — never as evidence that nothing is wrong.
+- **⚠️ permissions: … names zensu:code-reviewer in a spelling this check has not verified**
+  → a `deny`/`ask` entry plainly means this spawn but is not one of the two
+  spellings the check verified, so it cannot say whether that entry blocks it.
+  Tell the user to read the entry before adding any allow rule; do not relay an
+  allow-rule remedy here, because `deny` and `ask` both outrank `allow`.
 - **⚠️ forge CLI not authenticated / not found** → authenticate or install the CLI
   the report names for the detected provider: `gh auth login` for GitHub,
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
@@ -205,7 +241,10 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   chain-enforcer saw the refusal in the session transcript and left the note this
   row reads; the chain cannot close because no review ever ran. Report the
   remedy the row prints — the `permissions.allow` rule
-  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, or leaving the
+  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, after first removing
+  any deny rule that names the Agent tool, because
+  a deny rule outranks an allow rule and the deny has to go first;
+  or leaving the
   permission mode that refused it — and say plainly that the user has to apply it,
   since it is a harness setting no agent can grant itself — and never edit a
   settings file on their behalf to widen your own permissions. Name only the
@@ -233,7 +272,10 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   it. Offer no cleanup for either row: Phase 3 below is still the only write, and
   it covers `pending-review.json` alone.
 
-If everything is green, say so in one line and stop — there is nothing to do.
+If everything is green, say so in one line and stop — there is nothing to do,
+except that the line must carry the `~/.claude/settings.json` bound stated in
+Phase 2: a green table means no exposure was found in that one file, never that
+the auto-mode classifier is inactive.
 
 ## Phase 3: Expired pending-review cleanup (the ONLY write, always user-gated)
 

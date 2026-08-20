@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It greps
+# skills/doctor/SKILL.md for the wrapper invocation line, so no renderer
+# process is started and no HOME is resolved.
 # Structure test for /zensu:verify-feature.
 # Pins the public command, self-contained browser loop, isolated Zensu local adapter,
 # credential-blind auth contract, evidence/verdict gates, pinned Playwright MCP runtime,
