@@ -33,9 +33,13 @@ The skill is also auto-invoked by the `ExitPlanMode` PostToolUse hook when the u
 | Source | test + implementation files | The actual code |
 | Audit | included in log + final report | Build, coverage, mtime discipline, edit landing, precondition drift |
 
-The plan and log are local per-run working artifacts. They are gitignored and
-never auto-staged or committed; the tracked source/tests and final user-facing
-report are the durable repository outputs (see [CLAUDE.md](../CLAUDE.md)).
+The plan and log are per-run artifacts, and the plugin never auto-stages or
+commits them. Whether they END UP committed is the repository's call: they are
+gitignored in THIS one, and deliberately committed as an audit trail in many
+consuming repos — which is why they are written to be publishable in the first
+place (see [Publication safety](#publication-safety-of-the-plan-and-log) and
+[CLAUDE.md](../CLAUDE.md)). The tracked source/tests and the final user-facing
+report remain the durable repository outputs either way.
 
 ---
 
@@ -440,18 +444,156 @@ Every `/zensu:tdd` run uses four channels:
 
 | Channel | What | Lifetime | Format |
 |---------|------|----------|--------|
-| **Plan** | Design decisions, step table, Preconditions, audit checklist | Local per session — **gitignored, never committed** | Markdown |
-| **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Local per session — **gitignored, never committed** | Append-only timestamped text |
+| **Plan** | Design decisions, step table, Preconditions, audit checklist | Per session. **Publication-safe by construction** — gitignored in THIS repo, deliberately committed as an audit trail in many consuming repos | Markdown, English-only |
+| **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Per session. **Publication-safe by construction** — same split as the plan | Append-only timestamped text, English-only |
 | **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
 | **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail, interrupted flag) | Ephemeral per session — **local only, gitignored, never committed** (consumed solely by the in-session Phase 6 cross-check); under promptfoo it lives in the per-test isolated dir | Append-only timestamped text, JSON-escaped fields |
 
 The agent appends to the log via:
 
 ```bash
-printf '%s%s\n' "$(CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" timestamp "$SESSION_EPOCH")" "<message>" >> "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log"
+CLAUDE_PLUGIN_DATA="<resolved-plugin-data>" bash "<absolute-plugin-root>/hooks/lib/zensu-log.sh" \
+  append --log "${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/{ts}_tdd-{slug}.log" \
+  --message "<message>" --start "$SESSION_EPOCH"
 ```
 
-The helper resolves the user's configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the log format is consistent across runs. Do not inline `$(date +%H:%M:%S)` — that bypasses the user's preference.
+`append` is the WRITER, and that is the point of it. Until it existed the helper
+only ever returned the timestamp PREFIX and the model appended the line itself
+with `printf … >> {log}` — so the message never passed through the plugin and
+nothing could rewrite what it carried. It does two things: resolves the user's
+configured `logging.timestampStyle` (`wall`, `relative`, or `none`) so the format
+is consistent across runs, and redacts the message through
+`hooks/lib/zensu-artifact-redact-v1.js` (see [Publication safety](#publication-safety-of-the-plan-and-log)).
+Add `--truncate` to create the file instead of appending. Do not inline
+`$(date +%H:%M:%S)` — that bypasses the user's preference — and do not redirect
+into the log by hand, which bypasses the redaction.
+
+`append` deliberately carries **no leading `--`**, so it does not select the
+Session Control binding case at the top of `zensu-log.sh`: a log append keeps
+working in a shell where `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PLUGIN_DATA` is
+absent. It derives the project root from the log path itself
+(`<root>/.zensu/logs/x.log`), which needs no environment at all, and adds
+`CLAUDE_PROJECT_DIR` as a second candidate root when that variable is set — the
+witness hook resolves the root from the Session Control record instead, and the
+two must substitute identically or the equality match below reports a gap.
+
+**That derivation is ENFORCED, not assumed.** The destination must resolve to a
+real `<root>/.zensu/{plans,logs}/<file>`, with the artifact directory
+canonicalized, and the verb refuses otherwise. Without that check `append` would
+be a write/truncate primitive with a caller-supplied destination that no Bash
+gate can see: it carries none of the redirect, `tee`, `sed -i`, `dd` or heredoc
+tokens `bash-source-write-parse.js` recognizes as a channel, so rules (A)/(B) of
+the source-write gate never judge it. The same check closes the quieter half — an
+unrecognized destination used to leave the derived root empty, which SKIPPED the
+project-root rule and wrote a partially redacted line under exit 0.
+
+`--truncate` is deliberately NOT gated on `CLAUDE_PROJECT_DIR`. An earlier
+revision made it refuse without that variable and broke the shipped Phase 2
+recipe outright: the variable is absent from the model's Bash environment on this
+host, which is exactly why `{log_file}` is rendered from
+`${CLAUDE_PROJECT_DIR:-.}`. What constrains the destructive mode is the module —
+the `logs` bucket only, never a `witness-` name, a canonicalized artifact
+directory, and a descriptor judged for `isFile`/`nlink`/dev+ino — not an ambient
+variable the caller sets anyway. When it IS set it still travels as
+`expectedRoot`, so a bound session gets the stricter check for free.
+
+It does require `node`, and refuses loudly without it rather than writing an
+unredacted line — a host without `node` cannot arm a chain in the first place, so
+there is no session in which that refusal costs a log entry. `--message` must
+carry a value: a flag consumed as the last token would otherwise append a
+timestamp-only line to a committed audit log.
+
+### Publication safety of the plan and log
+
+Consuming repos commit both artifacts as an audit trail and may later
+open-source the repository. A scan of ~27k committed log lines across four such
+repos found **no credential values** and ~436 lines carrying an absolute
+developer path (`/Users/<name>/…`), almost all of them inside the `cmd="…"`
+field of a CHECKPOINT/AUDIT line, because that field quotes a shell command
+verbatim and those commands routinely begin
+`cd "/Users/<name>/IdeaProjects/<product>/<repo>/.claude/worktrees/<name>"`.
+
+`hooks/lib/zensu-artifact-redact-v1.js` is the single source of truth and
+applies three rules **in this order**: the project root becomes `<project>`,
+`$HOME` becomes `~`, and any residual `/Users/<seg>`, `/home/<seg>` or `/root`
+prefix becomes `<home>`. Rule 1 must precede rule 2 because the project root is
+normally nested under `$HOME`; the residual rule is what makes the guarantee
+checkable rather than best-effort. Secret **names** are deliberately NOT
+redacted — a name grants no access, and this repo's own workflows carry
+`secrets.GITHUB_TOKEN` in public. Credential **values** belong to a different
+gate (`hooks/pre-write-secret-scan.sh`).
+
+Three writers apply it:
+
+| Writer | What it covers |
+|--------|----------------|
+| `zensu-log.sh append` | the narrative log, at write time |
+| `hooks/post-bash-witness.sh` | the witness `cmd=` field only — see below |
+| `hooks/post-artifact-redact.sh` | the plan (the named `file_path` on PostToolUse `Edit\|Write\|MultiEdit`), plus a bounded sweep on BOTH matchers that catches a hand-rolled `printf >>` and a subagent-written artifact |
+
+The witness is gitignored and never committed, so it needs no publication safety
+of its own. Its `cmd` is redacted for **symmetry**: `zensu-evidence-crosscheck.js`
+matches a claim against a witness entry by equality, so redacting one side only
+would turn every claim whose command names an absolute path into an
+`EVIDENCE GAP`. Its `tail` is deliberately left RAW. Nothing compares it — the
+equality match reads `cmd` only — and its single reader is the failure-marker
+scan, where redaction is purely subtractive: a `failed` token sitting inside an
+absolute path would be swallowed with the path and an `EVIDENCE CONTRADICTION`
+would silently downgrade to `verified`.
+
+**One protection was removed and then RESTORED at the new chokepoint.** The old recipe wrote the log with `printf … >> {log}`,
+which `hooks/lib/bash-source-write-parse.js` reports as a write channel, so
+`hooks/pre-write-secret-scan.sh` scanned the command text — log message included.
+`append` carries no redirect, so that incidental scan no longer fires on a log
+line. It was never a designed protection, but the reason is not the one an earlier
+revision of this paragraph gave: `hooks/lib/secret-scan-decide.js` has no
+extension filter at all — it scans the whole command text whenever a channel is
+present — so the old redirect form genuinely WAS scanned, and the loss is real
+rather than incidental. It also covers both buckets, not just a log line. What
+makes it acceptable is that `hooks/pre-write-secret-scan.sh` declares itself
+"deliberately NOT a security boundary", and the scan still covers every non-`pathExempt`
+Edit/Write/MultiEdit payload — that gate exempts `tests?/`, `specs?/`,
+`__tests__/`, `testdata/`, `evals/`, `fixtures/` and `*.example.*` — and every real Bash write channel. Teaching the
+shared parser a new channel form would pull the source-write gate's rules
+(A)/(B)/(C) onto it too, which is why `append` enforces its own containment
+instead. `append` now runs the same curated rules (`hooks/lib/secret-patterns.js`)
+over the message before it writes, and REFUSES on a match rather than redacting —
+a credential value is not a location, and rewriting one silently would hide it
+from whoever has to rotate it. Both escapes the gate
+teaches are honoured — `ZENSU_SECRET_SCAN=off` and the `zensu-secret-allow` line
+marker, which the refusal names first because it stays visible in the committed
+artifact. `hooks.secretScan:false` is deliberately NOT consulted: the config
+accessor spawns `node`, and this runs once per log line. The control is
+back where the write happens; what is genuinely gone is only the incidental
+coverage of the surrounding shell command, which never carried the message.
+
+**The witness log is still written by a shell redirect**, not through
+`writeArtifactLine` — which in fact refuses any `witness-` name outright, so the
+"the write happens inside the module" invariant is a property of the two
+publishable artifacts, not of everything under `.zensu/logs/`. The witness is
+gitignored, never committed, and rewritten every run, so the descriptor-judged
+write buys it nothing; saying so here keeps the invariant from being read as
+directory-wide.
+
+**This is writer-side only. No committed OBJECT is rewritten.** The ~436
+already-committed lines carrying absolute paths across four consuming repos stay
+in git history exactly as they are, and no repo becomes safe to open-source
+because of this change alone. One nuance worth stating rather than glossing: the
+sweep filters on mtime and knows nothing about git, so an already-committed
+artifact whose mtime is refreshed re-enters the window and IS redacted in the
+working tree — which shows up as an ordinary uncommitted diff, never as a rewrite
+of anything already recorded. What changes is that everything written from now on
+is publishable, so committing these artifacts stops adding to that pile.
+
+**Bounds, stated rather than implied.** The rule is textual: a path spelled
+through a symlink or an alias that matches no known root is not caught (the one
+alias pair handled by hand is macOS's `/private/{tmp,var}`). A git repository
+root ABOVE the project root is covered only insofar as `$HOME` covers it. The
+PostToolUse sweep — on BOTH registered matchers — only revisits artifacts modified in the last 5 minutes, so plans
+from earlier runs are out of reach — this is a writer-side fix, not a history
+rewrite. And nothing here can recognize a customer name, an internal hostname,
+or a German sentence, which is why the plan template and `skills/tdd/SKILL.md`
+carry the authoring rules (English-only, repo-root-relative paths) as well.
 
 Workflow-state phase transitions are atomic:
 
@@ -468,7 +610,7 @@ are intentionally not part of the state transaction.
 
 ### Witness channel — anti-hallucination evidence
 
-The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. The hook records lines only while that exact Session Control key's chain-state `active` flag is set; it never scans for or adopts another session's state. Disable it with `ZENSU_TEST_WITNESS=off`. The witness log, narrative `.log`, and plan are all **gitignored and never committed** — they are local, single-session working evidence summarized in the final report.
+The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. Its `cmd` is redacted on the RAW string before the JSON encoding, by the same function the narrative log uses; the `tail` is deliberately left raw — see [Publication safety](#publication-safety-of-the-plan-and-log) for both halves of that rule. The hook records lines only while that exact Session Control key's chain-state `active` flag is set; it never scans for or adopts another session's state. Disable it with `ZENSU_TEST_WITNESS=off`. The **witness** is local-only and gitignored everywhere — single-session anti-hallucination evidence with no audit value past the run that produced it. The narrative `.log` and the plan are a different case: gitignored in THIS repository (`.gitignore` ignores `.zensu/*` except `config.json`), and deliberately committed as an audit trail in many consuming repos, which is what the redaction above exists to make safe.
 
 Each line has the form:
 

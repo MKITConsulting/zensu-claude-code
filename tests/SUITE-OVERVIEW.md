@@ -13,20 +13,35 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
-only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
-`test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
-(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
+reconciled to that manifest (135 = 128 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 128
+only because **five** CI suites appear nowhere in §3 at all — `test-artifact-redaction.sh`,
+`test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
+and `test-session-control-core.sh` (the second and last are mentioned elsewhere, in §4 and
+§7, but in no §3 group). Counting
+§3's eleventh header, the local-only group of 7, gives 130 against 135. Nothing
 machine-checks this document, so treat §3's per-group numbers as descriptive rather than
 authoritative until that sweep happens.
+
+**Windows coverage of `test-artifact-redaction.sh` is deliberately
+STRUCTURAL-ONLY.** The suite is in `ciStructureTests`, so POSIX `run-all.sh --ci`
+runs it, but it has no entry in `tests/profiles/windows-ci.v1.json` and therefore
+never executes on a Windows shard. That is a decision, not an oversight: its
+Windows wall clock is unmeasured, every shard is already budgeted against
+`profileTimeoutMs`, and a suite receives the shard's REMAINING budget rather than
+its own cap — so an unmeasured addition risks killing the tail of a shard rather
+than adding coverage. Of the module's three Windows-only code paths, exactly one has a Windows pin:
+`platformNoFollow`, in `test-windows-portability-guards.sh`, which IS in the
+profile. The `\Users\<seg>` residual rule and the `msysSpelling` inverse are
+driven only by the host-independent R11c inside this suite, so on Windows they are
+exercised NOWHERE — stated plainly rather than left implied by a broader claim. Re-decide this if a Windows wall clock
+is ever measured for the suite.
 
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **134** — 127 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **135** — 128 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -38,8 +53,8 @@ authoritative until that sweep happens.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 134 structure suites + 5 offline evals | none |
-| `--ci` | 127 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 135 structure suites + 5 offline evals | none |
+| `--ci` | 128 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -203,7 +218,7 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-crosscheck-v1.test.js` | 27 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
+| `evidence-crosscheck-v1.test.js` | 29 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |

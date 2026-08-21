@@ -28,6 +28,20 @@ function loggingCommandFor(claimLine) {
   );
 }
 
+// The `append` verb replaced the hand-rolled redirect above as the documented
+// log writer. It carries no `>>` at all, so `redirectTargets` finds nothing and
+// LOG_DIR_FRAGMENT is never consulted for this shape: the exclusion rests
+// ENTIRELY on LOG_WRITE_MARKER matching the claim marker inside `--message`.
+// That is worth stating rather than assuming, because it means an `append`
+// whose message carries no CHECKPOINT/AUDIT marker is NOT excluded — the case
+// below pins that, so the boundary is visible instead of inferred.
+function appendCommandFor(claimLine) {
+  return (
+    'bash zensu-log.sh append --log ' + LOG_PATH + ' --message ' +
+    JSON.stringify(claimLine).replace(/"/g, '\\"') + ' --start 1'
+  );
+}
+
 function withTemp(fn) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-xcheck-'));
   try {
@@ -135,6 +149,30 @@ test('the AUDIT-logging command must not corroborate its own claim', () => {
   assert.strictEqual(entries[0].logWriting, true);
   const results = lib.crossCheck(claims, entries, true);
   assert.strictEqual(results[0].verdict, 'gap');
+});
+
+test('the append-verb logging command must not corroborate its own claim', () => {
+  const claimLine = 'AUDIT — cmd="bash tests/run-all.sh --ci" exit=0 result="PASS"';
+  const witness = witnessLine(appendCommandFor(claimLine), '', false, '');
+  const claims = lib.parseClaims(claimLine);
+  const entries = lib.parseWitness(witness, LOG_PATH);
+  assert.strictEqual(entries.length, 1);
+  assert.strictEqual(entries[0].logWriting, true);
+  const results = lib.crossCheck(claims, entries, true);
+  assert.strictEqual(results[0].verdict, 'gap');
+});
+
+test('an append whose message carries no claim marker is NOT log-writing', () => {
+  // The complement of the case above, and the reason its comment can be trusted:
+  // strip the marker and the same command shape stops being excluded, which
+  // shows the verdict comes from LOG_WRITE_MARKER and not from the `--log`
+  // operand. If this ever flips, `redirectTargets` learned the operand and the
+  // comment above must be rewritten.
+  assert.strictEqual(
+    lib.isLogWritingCommand('bash zensu-log.sh append --log ' + LOG_PATH + ' --message "TDD STARTED"',
+      LOG_PATH),
+    false
+  );
 });
 
 test('a redirect into .zensu/logs marks the command log-writing even without a claim marker', () => {

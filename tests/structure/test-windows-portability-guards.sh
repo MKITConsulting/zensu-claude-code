@@ -23,6 +23,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -432,6 +433,35 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The artifact redactor is the third requireable module carrying a hardened
+# open, and it is enrolled here for the same reason the plan-payload reader is:
+# every count pin in this file is per-file, so a NEW file with a secure open is
+# invisible to all of them. It carries TWO such opens — the read in redactFile
+# and the write in writeArtifactLine — and both judge the DESCRIPTOR (fstat),
+# which is what makes the symlink and hard-link refusals unraceable. The absent
+# O_TRUNC is part of the contract: truncating at open would run BEFORE the
+# nlink check could refuse a hard link. The dev/ino comparison and the pre-rename
+# re-stat are pinned here for
+# the same reason the opens are: its REJECT direction is a race no behavioral
+# suite can stage, so the structural pin is the only place it can be held.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'const NON_BLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | noFollow | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF '| platformNoFollow() | NON_BLOCK' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.fstatSync(fd)' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF 'stat.nlink !== 1' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF '!sameInode(stat, target)' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && grep -qF 'expected.dev === stat.dev && expected.ino === stat.ino' "$ARTIFACT_REDACT" \
+  && grep -qF "err.code === 'ELOOP' || err.code === 'EMLINK'" "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== stat.size || now.mtimeMs !== stat.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF "reason: 'concurrent-write'" "$ARTIFACT_REDACT" \
+  && ! grep -qF 'fs.constants.O_TRUNC' "$ARTIFACT_REDACT" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$ARTIFACT_REDACT"; then
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" PASS
+else
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
