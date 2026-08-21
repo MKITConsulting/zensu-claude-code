@@ -32,7 +32,8 @@ export CLAUDE_PROJECT_DIR="$PROJ"
 STATE_DIR="$PROJ/.zensu/state"; export STATE_DIR
 cleanup() { [ -n "${PROJ:-}" ] && rm -rf "$PROJ"; return 0; }
 trap cleanup EXIT INT TERM
-unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN ZENSU_EDIT_LANDING_GATE 2>/dev/null || true
+unset CLAUDE_AGENT_TYPE ZENSU_TDD_GATE ZENSU_TEST_WITNESS ZENSU_CHAIN ZENSU_EDIT_LANDING_GATE \
+  ZENSU_REQUIREMENTS_GATE 2>/dev/null || true
 
 # The gate is scoped to a project that actually changed — same scoping as the
 # --chain-done dirty-tree refusal. Give the session project a real git repo with
@@ -85,14 +86,20 @@ CLEAN_COUNT="$( { git -C "$CLEAN_FIX" diff --name-only HEAD 2>/dev/null
 rm -rf "$CLEAN_FIX"
 [ "$CLEAN_COUNT" -eq 0 ]
 check "W1 the scoping predicate reports zero changes for a clean project (gate out of scope)" "$(verdict $?)"
-awk '/--tdd-complete\)/,/;;/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
 check "W2 the gate scopes itself on the same change set the terminus uses" "$(verdict $?)"
 # W1 above replicates the predicate WITHOUT a fallback, so it cannot see the shape that
 # actually broke: `grep -c .` prints 0 and then exits 1 on no match, so pairing it with an
 # `|| echo 0` fallback appends a SECOND line. The count becomes "0\n0", the -gt comparison
 # aborts with "integer expression expected", and the gate is skipped on exactly the empty
 # change set it was scoping for. Pin the source shape, not a re-typed copy of it.
-! awk '/--tdd-complete\)/,/;;/' "$LOG" | grep -A3 -F '_el_changes="$(' | grep -qE '\|\|[[:space:]]*echo'
+# The anchor is `_tc_changes` since the value became shared with the
+# requirements-table gate. An absence assertion whose haystack is empty proves
+# nothing, so the anchor's own presence is checked FIRST — that is exactly how
+# this check went vacuous when the variable was renamed.
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF '_tc_changes="$('
+check "W3pre the change-count anchor this check greps still exists" "$(verdict $?)"
+! awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -A3 -F '_tc_changes="$(' | grep -qE '\|\|[[:space:]]*echo'
 check "W3 the change-count expression cannot emit a second line on an empty change set" "$(verdict $?)"
 
 # From here on the project really changed, so the gate is in scope.
@@ -185,7 +192,7 @@ check "I4 completion is accepted after the audit deposits the receipt where the 
 echo "== Source pins =="
 grep -qF 'ZENSU_EDIT_LANDING_GATE' "$LOG"
 check "S1 the gate lives in zensu-log.sh" "$(verdict $?)"
-awk '/--tdd-complete\)/,/;;/' "$LOG" | grep -qF 'edit-landing-'
+awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'edit-landing-'
 check "S2 the receipt check sits inside the --tdd-complete verb" "$(verdict $?)"
 # The gate must not weaken the pre-existing refusals around it.
 grep -qF 'corrupt, inactive, or foreign session state' "$LOG"

@@ -330,6 +330,7 @@ case "${1:-}" in
     chain_id_val=""
     chain_outcome_val=""
     tdd_mode_val=""
+    plan_val=""
     seen_session=false
     seen_tools=false
     seen_claimed_ticket=false
@@ -339,6 +340,7 @@ case "${1:-}" in
     seen_chain_id=false
     seen_outcome=false
     seen_tdd_mode=false
+    seen_plan=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -373,11 +375,18 @@ case "${1:-}" in
         --tdd-mode)
           [ "$seen_tdd_mode" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --tdd-mode" >&2; exit 2; }
           seen_tdd_mode=true; tdd_mode_val="$2"; shift 2 ;;
+        --plan)
+          [ "$seen_plan" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh $verb: duplicate/missing --plan" >&2; exit 2; }
+          seen_plan=true; plan_val="$2"; shift 2 ;;
         *) echo "zensu-log.sh $verb: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
     if [ "$seen_session" = true ] && [ -z "$session_val" ]; then
       echo "zensu-log.sh $verb: --session must not be empty" >&2
+      exit 2
+    fi
+    if [ "$seen_plan" = true ] && [ -z "$plan_val" ]; then
+      echo "zensu-log.sh $verb: --plan must not be empty" >&2
       exit 2
     fi
     # --tdd-mode carries the caller's OWN default into the one verb that freezes
@@ -412,6 +421,11 @@ case "${1:-}" in
     # matrix below is not what it reads, and this line's placement is a readability
     # choice, not a constraint.
     [ "$seen_tdd_mode" = false ] || [ "$verb" = "--tdd-begin" ] || invalid_known_flag=true
+    # --plan names the session's TDD plan for the requirements-table gate below,
+    # and belongs to exactly ONE verb for the same reason --tdd-mode does: a verb
+    # added later inherits the refusal rather than silently accepting a flag only
+    # --tdd-complete can act on.
+    [ "$seen_plan" = false ] || [ "$verb" = "--tdd-complete" ] || invalid_known_flag=true
     case "$verb" in
       --tdd-begin|--tdd-complete)
         [ "$seen_tools" = false ] && [ "$seen_claimed_ticket" = false ] \
@@ -555,26 +569,306 @@ case "${1:-}" in
         # Not evaluable means not gated, exactly as the --chain-done zero-change
         # gate treats a non-git root and a repo with no HEAD commit: without a
         # baseline there is no honest claim to check against.
-        _el_changes=0
-        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] \
-           && git -C "${CLAUDE_PROJECT_DIR:-.}" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
+        # The change set scopes BOTH gates in this verb, so it is computed when
+        # either one is armed — the requirements gate below must not inherit the
+        # edit-landing switch. The `_tc_` prefix is verb-scoped rather than
+        # gate-scoped on purpose: these values belong to --tdd-complete and are
+        # read by two different gates, and an `_el_` (edit-landing) name would
+        # keep suggesting the second one is borrowing the first one's state.
+        # ONE spelling of the receipt path for both gates below. The library and
+        # this verb must agree on that filename — a second hand-copy inside the
+        # same verb is exactly how such an agreement drifts. Resolved BEFORE the
+        # change set, because the root it yields is what that count is measured on.
+        _tc_state="$(tdd_state_file "$session_val")" || _tc_state=""
+        if [ -z "$_tc_state" ]; then
+          echo "zensu-log.sh --tdd-complete: current-session workflow path unavailable" >&2
+          exit 1
+        fi
+        _tc_key="$(basename "$_tc_state")"; _tc_key="${_tc_key#tdd-phase-}"; _tc_key="${_tc_key%.json}"
+        _tc_receipt="$(dirname "$_tc_state")/edit-landing-${_tc_key}.json"
+        # The root comes from the accessor that OWNS it, not from path surgery over
+        # `tdd_state_file`'s layout: that layout belongs to another function, and a
+        # change to it would leave this silently mis-rooted with no error. This
+        # file already normalizes `CLAUDE_PROJECT_DIR` to the same value for every
+        # `--*` verb before any verb body runs, so the two cannot diverge — the
+        # accessor is used here for ownership, not to defend against a divergence.
+        _tc_root="$(zensu_resolve_project_dir)" || _tc_root=""
+        if [ -z "$_tc_root" ]; then
+          echo "zensu-log.sh --tdd-complete: Session Control project context unavailable" >&2
+          exit 1
+        fi
+        _tc_changes=0
+        # Armed when either gate is ON — and ALSO when either is OFF, because the
+        # bypass-ledger records below conjoin on this count too: with both switches
+        # off the old condition left the count at 0 and silently recorded NEITHER
+        # escape, while both docs promise the recording unconditionally.
+        # The git environment is SCRUBBED: `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`
+        # override `-C` discovery, so a one-token prefix on the model's own command
+        # would otherwise leave the count at 0 — disarming BOTH gates and, because
+        # the two ledger records conjoin on the same count, suppressing both bypass
+        # entries with nothing recorded anywhere. The identical unscrubbed shape
+        # still ships for the `--chain-done` zero-change terminus below; that one is
+        # knowingly left alone rather than changed in passing.
+        # Builtins in a subshell, not `env`: `env` is an external binary, and if it
+        # cannot be resolved the `if` below is false, the count stays 0, and every
+        # consumer conjoins on it — disarming both gates AND suppressing both ledger
+        # records, which is precisely the outcome this wrapper exists to prevent.
+        _tc_git() { ( unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; git "$@" ); }
+        if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
           # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
           # fallback would append a SECOND line and turn the count into "0\n0" — which
           # makes the -gt comparison below abort with "integer expression expected" and
           # silently skips the gate on exactly the empty change set it is scoping for.
-          _el_changes="$( { git -C "${CLAUDE_PROJECT_DIR:-.}" diff --name-only HEAD 2>/dev/null
-                            git -C "${CLAUDE_PROJECT_DIR:-.}" ls-files --others --exclude-standard 2>/dev/null; } \
+          _tc_changes="$( { _tc_git -C "$_tc_root" diff --name-only HEAD 2>/dev/null
+                            _tc_git -C "$_tc_root" ls-files --others --exclude-standard 2>/dev/null; } \
                           | sort -u | grep -c . 2>/dev/null || true)"
         fi
-        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_el_changes:-0}" -gt 0 ]; then
-          _el_state="$(tdd_state_file "$session_val")"
-          _el_key="$(basename "$_el_state")"; _el_key="${_el_key#tdd-phase-}"; _el_key="${_el_key%.json}"
-          _el_receipt="$(dirname "$_el_state")/edit-landing-${_el_key}.json"
-          if [ ! -f "$_el_receipt" ]; then
+        # The ledger records an escape that short-circuited a DECISION POINT. Out of
+        # scope there is no decision to short-circuit, so the scope conjunct belongs
+        # here too — otherwise a zero-change chain reports a bypass of a gate that
+        # never ran.
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+          tdd_record_bypass "$session_val" ZENSU_EDIT_LANDING_GATE >/dev/null 2>&1 || true
+        fi
+        if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+          if [ ! -f "$_tc_receipt" ]; then
             echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session. A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
+          fi
+        fi
+        # Requirements-table gate. /zensu:converge anchors its flow-back audit on
+        # the plan's `## Requirements` table. Without a usable one it takes its
+        # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
+        # the ONLY edge into OPEN_PR, then passes on an audit that examined
+        # nothing. Prose asked for the table (skills/tdd/SKILL.md Phase 2 step 1b)
+        # and the only check was the warning-level step 6c, which skips silently
+        # when the table is absent; measured across real projects a third of plans
+        # carried none. Same move as the receipt gate above: make the obligation a
+        # precondition of completion.
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" = "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+          # An env escape is free but never silent: the ledger is what keeps
+          # everything a chain renders under "Gates bypassed" true. Fail-open, as
+          # every other recording site is — failing to record must not change the
+          # completion decision. Scoped like the gate itself: out of scope there is
+          # no decision point to short-circuit, so there is no escape to record.
+          tdd_record_bypass "$session_val" ZENSU_REQUIREMENTS_GATE >/dev/null 2>&1 || true
+        fi
+        if [ "${ZENSU_REQUIREMENTS_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
+          _rq_plan="$plan_val"
+          _rq_explicit="$seen_plan"
+          _rq_reason=""
+          _rq_derived=""
+          if [ "$_rq_explicit" = true ]; then
+            # A relative --plan is anchored on the project, exactly like the
+            # derived path below. The skill hands this flag a project-relative
+            # spelling and the explicit channel is fail-closed, so resolving it
+            # against the process cwd would turn a correct plan into a refusal
+            # whenever the shell's cwd is not the project root.
+            case "$_rq_plan" in
+              /*) ;;
+              *) [ -n "$_rq_plan" ] && _rq_plan="${_tc_root}/$_rq_plan" ;;
+            esac
+          fi
+          if [ -f "$_tc_receipt" ] && command -v node >/dev/null 2>&1; then
+            # Derive from the receipt's own record of the run log it audited. The
+            # plan and the log are created from one {SESSION_TS}_tdd-{slug} stem,
+            # so .zensu/logs/<stem>.log names .zensu/plans/<stem>.md. Deriving
+            # through the receipt — rather than taking the newest plan by mtime,
+            # as /zensu:converge does — is what anchors this gate to THIS session:
+            # a stale plan left in the project by an earlier session can never
+            # satisfy it.
+            # The receipt is a file inside the project, so the session can write
+            # it: the reader binds the writer's `schema` discriminator rather than
+            # accepting any object with a `log` string, and the value is judged
+            # against the project's own logs directory before anything is derived
+            # from it. `case` globbing would not do that — `*` matches `/`, so
+            # `*/.zensu/logs/*.log` accepts a path anywhere on the host.
+            # Both values are translated into the NATIVE namespace before they
+            # cross into node, and what comes BACK is a project-relative suffix,
+            # never a native absolute path: the shell applies basename/dirname to
+            # the result, and on a host whose shell and node namespaces differ
+            # (MSYS) a `C:\...` string has no `/` separators, so the derived stem
+            # would be malformed and every skill-supplied --plan refused.
+            _rq_native_root="$(_tdd_native_path "$_tc_root" 2>/dev/null || printf '%s' "$_tc_root")"
+            _rq_native_receipt="$(_tdd_native_path "$_tc_receipt" 2>/dev/null || printf '%s' "$_tc_receipt")"
+            _rq_rel="$(ZENSU_RQ_RECEIPT="$_rq_native_receipt" ZENSU_RQ_ROOT="$_rq_native_root" node -e '
+              try {
+                const fs = require("fs"), path = require("path");
+                const st = fs.lstatSync(process.env.ZENSU_RQ_RECEIPT);
+                if (st.isSymbolicLink() || !st.isFile() || st.size > 4 * 1024 * 1024) process.exit(0);
+                const j = JSON.parse(fs.readFileSync(process.env.ZENSU_RQ_RECEIPT, "utf8"));
+                if (!j || j.schema !== "edit-landing-v1" || typeof j.log !== "string" || j.log === "") process.exit(0);
+                // The receipt is a gate input the session can write, so it gets the
+                // same treatment the plan reader gets: no symlink, regular file
+                // only, and a bounded read.
+                // Both sides are canonicalized before they are compared. On macOS
+                // a temp root is spelled /var/... by the caller and /private/var/...
+                // by realpath, and an uncanonicalized comparison rejects the very
+                // path it was handed — a containment check that fails open into
+                // "no derived plan" instead of doing its job.
+                const canon = (p) => { try { return fs.realpathSync(p); } catch (e) { return path.resolve(p); } };
+                const root = canon(path.resolve(process.env.ZENSU_RQ_ROOT));
+                const logsDirRaw = path.join(root, ".zensu", "logs");
+                // Canonicalizing a SYMLINKED logs directory would compare the link
+                // target against itself and admit anything the link points at, so
+                // the directory itself is refused rather than resolved through.
+                try { if (fs.lstatSync(logsDirRaw).isSymbolicLink()) process.exit(0); } catch (e) {}
+                const logsDir = canon(logsDirRaw);
+                const relLogs = path.relative(root, logsDir);
+                // Same anchored test the plan check uses seven lines down, including
+                // the isAbsolute arm: on win32 path.relative returns an ABSOLUTE
+                // path when the two sides are on different drives, so the `..`
+                // prefix test alone would pass a logs dir on another drive.
+                if (relLogs === ".." || relLogs.startsWith(".." + path.sep) || path.isAbsolute(relLogs)) process.exit(0);
+                // A project-relative `log` (what the writer now persists) needs no
+                // namespace translation at all. An ABSOLUTE value is legacy or
+                // out-of-project: it is only usable when it already matches the
+                // namespace of this process, so a leading-slash value is rejected rather
+                // than spliced under the current drive by win32 path.resolve.
+                if (path.isAbsolute(j.log) && path.win32 === path && j.log.startsWith("/")) process.exit(0);
+                const raw = path.resolve(root, j.log);
+                const resolved = path.join(canon(path.dirname(raw)), path.basename(raw));
+                const rel = path.relative(logsDir, resolved);
+                // Anchored, not a bare `startsWith("..")`: a real file named
+                // `..bak.log` inside the directory is INSIDE it, and the unanchored
+                // form rejects it. CLAUDE.md names this exact defect elsewhere.
+                if (rel === "" || rel === ".." || rel.startsWith(".." + path.sep) || path.isAbsolute(rel)) process.exit(0);
+                if (!resolved.endsWith(".log")) process.exit(0);
+                // Project-RELATIVE, so the shell never applies basename/dirname to a
+                // foreign-namespace absolute path.
+                process.stdout.write(path.relative(root, resolved).split(path.sep).join("/"));
+              } catch (e) {}
+            ' 2>/dev/null || true)"
+            if [ -n "$_rq_rel" ]; then
+              # `_rq_rel` is project-relative with `/` separators by construction,
+              # so basename/dirname are safe here on every host.
+              _rq_stem="$(basename "$_rq_rel" .log)"
+              _rq_derived="${_tc_root}/.zensu/plans/${_rq_stem}.md"
+              # The DERIVED channel gets the same plans-directory bound the explicit
+              # one gets. Without it the two entry paths enforce different rules for
+              # one gate, and the derived path is the one an unwedged chain takes,
+              # because the recovery renderer emits `--tdd-complete` flag-free.
+              if [ -L "${_tc_root}/.zensu/plans" ]; then
+                _rq_derived=""
+              fi
+              [ "$_rq_explicit" = true ] || _rq_plan="$_rq_derived"
+            fi
+          fi
+          # An explicit --plan is caller-supplied, so it is bounded the same way
+          # the derived one is: inside the project's own plans directory, and —
+          # when a receipt exists to compare against — naming the same stem the
+          # derivation would have. Without this the flag silently defeats the
+          # session anchoring the derivation exists to provide, because any older
+          # plan with one filled row would satisfy the gate.
+          if [ "$_rq_explicit" = true ] && [ -n "$_rq_plan" ]; then
+            # Both sides canonicalized before comparison, for the same reason the
+            # derivation canonicalizes: the caller's spelling of the project root
+            # and the kernel's can differ (macOS /var vs /private/var), and a raw
+            # string compare would reject the session's own plan.
+            _rq_plans_dir="$(cd "$_tc_root" 2>/dev/null && pwd -P)/.zensu/plans"
+            # A SYMLINKED plans directory is refused rather than resolved through:
+            # canonicalizing both sides and comparing them for equality would then
+            # compare the link target with itself and accept a plan anywhere on the
+            # host. Same rule the derived channel applies to .zensu/logs.
+            if [ -L "$_rq_plans_dir" ]; then
+              _rq_reason="${_rq_plans_dir} is a symlink; refusing to resolve a plan through it"
+            else
+              _rq_plans_dir="$(cd "$_rq_plans_dir" 2>/dev/null && pwd -P || printf '%s' "$_rq_plans_dir")"
+              _rq_root_canon="$(cd "$_tc_root" 2>/dev/null && pwd -P || printf '%s' "$_tc_root")"
+              # The canonicalized plans dir must still be UNDER the canonicalized
+              # root: the leaf lstat above does not see a relocated `.zensu`
+              # component, and the derived channel carries the same assertion.
+              case "$_rq_plans_dir" in
+                "$_rq_root_canon"/*) ;;
+                *) _rq_reason="${_rq_plans_dir} resolves outside the session root ${_rq_root_canon}" ;;
+              esac
+              _rq_plan_dir="$(cd "$(dirname "$_rq_plan")" 2>/dev/null && pwd -P || printf '%s' "$(dirname "$_rq_plan")")"
+              if [ -z "$_rq_reason" ] && [ "$_rq_plan_dir" != "$_rq_plans_dir" ]; then
+                _rq_reason="the --plan path is outside ${_rq_plans_dir}: ${_rq_plan}"
+              fi
+            fi
+            # Compared by STEM, not by full path: the derived value is canonical
+            # (realpath) while the explicit one is anchored on CLAUDE_PROJECT_DIR
+            # as given, and on a host where those two spellings differ a path
+            # comparison would reject every correct plan.
+            if [ -z "$_rq_reason" ] && [ -n "$_rq_derived" ] \
+               && [ "$(basename "$_rq_plan")" != "$(basename "$_rq_derived")" ]; then
+              _rq_reason="the --plan path does not name this session's run log sibling ($(basename "$_rq_derived")): ${_rq_plan}. If this generation has not run the Phase 6 step 5b audit yet, the receipt still records the PREVIOUS generation's log — re-run the audit rather than changing the path."
+            fi
+            # The stem bound is UNCONDITIONAL. Without a derived stem there is
+            # nothing to cross-check the caller's assertion against, and falling
+            # through to the directory bound alone would let any older plan in
+            # .zensu/plans/ satisfy the gate — precisely the stale-plan hole the
+            # derivation exists to close, reachable simply by switching the sibling
+            # gate off. Refusing here keeps the documented bound true as written.
+            # ...EXCEPT when the receipt gate was deliberately switched off. That
+            # switch is documented as exempting a session from the receipt
+            # precondition, and no receipt means no derivable stem — refusing here
+            # would make the documented exemption unusable for the shipped
+            # invocation, which always passes --plan. The bound is dropped, not
+            # faked: the weaker state is disclosed on stderr instead.
+            if [ -z "$_rq_reason" ] && [ -z "$_rq_derived" ] \
+               && [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ]; then
+              echo "zensu-log.sh --tdd-complete: REQUIREMENTS GATE STEM UNCHECKED — ZENSU_EDIT_LANDING_GATE=off leaves no receipt, so the --plan path could not be cross-checked against this session's run log. Only the plans-directory bound applies." >&2
+            elif [ -z "$_rq_reason" ] && [ -z "$_rq_derived" ]; then
+              _rq_reason="no run-log stem could be derived for this session, so an explicit --plan cannot be cross-checked against it. Run the Phase 6 step 5b edit-landing audit first (it writes the receipt this check reads), or omit --plan"
+            fi
+          fi
+          # An explicit --plan is judged even when it names nothing: the caller
+          # asserted where the plan is, and silently skipping a typo would leave
+          # the gate looking armed while it never ran. A DERIVED path that is not
+          # there is different — nothing was asserted, so there is nothing to hold
+          # against the chain.
+          if [ -n "$_rq_reason" ]; then
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — ${_rq_reason}. The requirements-table gate judges this session's own plan; pass the plan this chain wrote under .zensu/plans/, or omit --plan and let it be derived from the run log." >&2
+            echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
+            exit 1
+          fi
+          if [ "$_rq_explicit" = true ] || { [ -n "$_rq_plan" ] && [ -f "$_rq_plan" ]; }; then
+            _rq_lib="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-plan-requirements.sh"
+            if [ ! -f "$_rq_lib" ] || [ -L "$_rq_lib" ] || [ ! -r "$_rq_lib" ]; then
+              # A load fault is NOT a verdict about the plan. Reporting it as one
+              # would send the user editing a table that was never read.
+              echo "zensu-log.sh --tdd-complete: the requirements-table check could not run — its library is missing, unreadable, or a symlink: ${_rq_lib}. The plan was NOT judged." >&2
+              echo "Reinstall the plugin, or set ZENSU_REQUIREMENTS_GATE=off for a session the user has explicitly exempted." >&2
+              exit 1
+            fi
+            _rq_verdict="$(bash "$_rq_lib" --plan "$_rq_plan" 2>&1)"
+            _rq_rc=$?
+            case "$_rq_rc" in
+              0) ;;
+              3|4)
+                echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — this session's TDD plan carries no usable \`## Requirements\` table, so /zensu:converge would audit nothing and still close clean:" >&2
+                echo "  ${_rq_verdict}" >&2
+                echo "Fill the table with AC-###/FR-### rows per Phase 2 step 1b, then re-run. Pass --plan <path> when the plan is not the run log's sibling under .zensu/plans/." >&2
+                echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
+                exit 1
+                ;;
+              *)
+                # Exit 2 (unreadable/usage) and anything else mean the table was
+                # never judged. Same refusal direction, deliberately different
+                # wording: the remedy is the path or the file, not the contents.
+                echo "zensu-log.sh --tdd-complete: the requirements-table check could not judge the plan (exit ${_rq_rc}). The table was NOT read, so this is not a verdict about its contents:" >&2
+                echo "  ${_rq_verdict}" >&2
+                echo "Point --plan at a readable plan under .zensu/plans/, or set ZENSU_REQUIREMENTS_GATE=off for a session the user has explicitly exempted." >&2
+                exit 1
+                ;;
+            esac
+          else
+            # Armed, in scope, and nothing was judged. Staying silent here would
+            # reproduce the exact indistinguishability this gate exists to remove:
+            # "the table passed" and "no table was ever looked at" would read the
+            # same to everyone downstream.
+            # Two distinct states reach here, and naming the wrong one sends the
+            # reader to the wrong remedy: nothing was derived at all, or a plan WAS
+            # derived and the file is simply not there.
+            if [ -n "$_rq_plan" ]; then
+              echo "zensu-log.sh --tdd-complete: REQUIREMENTS GATE UNRESOLVED — the plan derived for this session does not exist: ${_rq_plan}. The \`## Requirements\` table was NOT checked. Completion is not blocked on it." >&2
+            else
+              echo "zensu-log.sh --tdd-complete: REQUIREMENTS GATE UNRESOLVED — no --plan was passed and no plan could be derived from this session's edit-landing receipt, so the \`## Requirements\` table was NOT checked. Completion is not blocked on it." >&2
+            fi
           fi
         fi
         if [ "$complete_ctx" = '{}' ]; then

@@ -13,12 +13,12 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
+reconciled to that manifest (135 = 128 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's ten CI group headers sum to 124, and the arithmetic closes at 128
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
 (the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
+§3's eleventh header, the local-only group of 7, gives 131 against 135. Nothing
 machine-checks this document, so treat §3's per-group numbers as descriptive rather than
 authoritative until that sweep happens.
 
@@ -26,7 +26,7 @@ authoritative until that sweep happens.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **134** — 127 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **135** — 128 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -38,8 +38,8 @@ authoritative until that sweep happens.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 134 structure suites + 5 offline evals | none |
-| `--ci` | 127 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 135 structure suites + 5 offline evals | none |
+| `--ci` | 128 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -75,9 +75,10 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (15)
+### TDD engine & phase gate (16)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
-`pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
+`pretool-config-prompts` · `requirements-table-gate` ·
+`smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
 `tdd-mode-toggle` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
 `tdd-skill-review-fanout` ·
@@ -88,8 +89,9 @@ lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 (`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
 retained), the mode precedence at the freeze point (`tdd-mode-toggle` — session
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
-unreadable marker forces nothing), the edit-landing receipt required by
-`--tdd-complete`, and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
+unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
+the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
+anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
 ### Review chain & findings (25)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·

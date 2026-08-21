@@ -33,10 +33,13 @@ has "$TDD" 'AUTOPILOT-RUN: <runId>' && has "$TDD" '--autopilot-return-stage <ret
   && has "$TDD" 'Never follow a delegated begin with the standalone form' \
   && check "D7 TDD preserves exact outer linkage" PASS || check "D7 bound TDD begin" FAIL
 if grep -qF 'auto-merge' "$AUTO" && grep -qF 'auto-deploy' "$AUTO"; then check "D8 durable protocol retains no-merge/deploy boundary" PASS; else check "D8 no merge/deploy" FAIL; fi
-has "$TDD" '--tdd-complete --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
+has "$TDD" '--tdd-complete --plan {plan_file} --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
   && has "$TDD" '--chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
   && check "D9 bound TDD completion and terminus preserve exact generation" PASS \
   || check "D9 exact bound completion/terminus" FAIL
+has "$TDD" 'zensu-log.sh" --tdd-complete --plan {plan_file}`' \
+  && check "D9b the standalone completion spelling carries --plan too" PASS \
+  || check "D9b standalone --plan spelling" FAIL
 has "$TDD" 'Standalone chains keep the unqualified commands' \
   && check "D10 standalone TDD completion protocol remains unchanged" PASS \
   || check "D10 standalone completion unchanged" FAIL

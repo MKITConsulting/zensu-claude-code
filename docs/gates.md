@@ -1,8 +1,11 @@
 # Gates
 
-Four PreToolUse gates keep an agent inside the workflow conventions. All of
-them are convention-nudges with a documented escape hatch, not security
-boundaries — see [Session Control](session-control.md) for the part that is.
+Four PreToolUse gates keep an agent inside the workflow conventions, plus TWO
+completion-time `--tdd-complete` refusals of the same class: the edit-landing
+receipt (discipline patch 10 in [tdd-manager-workflow.md](tdd-manager-workflow.md))
+and §Requirements-Table Gate below, which has its own section here. All six are
+convention-nudges with a documented escape hatch, not security boundaries — see
+[Session Control](session-control.md) for the part that is.
 
 **Two commands stay reachable when the Session Control bind fails**, in every
 bind failure including a record that exists and disagrees, and they are
@@ -132,4 +135,66 @@ Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow 
 
 Additional features: dependency graph for independent-step sequencing, 3-retry IMPL escalation on GREEN-fail with progressive context, completeness audit (mtime discipline + edit landing + build verification), real-time progress log at `.zensu/logs/`.
 
-**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-10, four-channel logging.
+## Requirements-Table Gate
+
+`--tdd-complete` carries two preconditions, and both are refusals rather than reminders. The
+first is the Phase 6 step 5b edit-landing receipt. The second is this one: the session's TDD
+plan must carry a usable `## Requirements` table.
+
+- **Why it is a gate.** [`/zensu:converge`](../skills/converge/SKILL.md) anchors its flow-back
+  audit on that table; without one it takes its documented legacy stop and reports nothing. In
+  [`/zensu:autopilot`](../skills/autopilot/SKILL.md) the CONVERGE stage is the only edge into
+  `OPEN_PR`, so a missing table turns a mandatory gate into a clean-looking no-op. Prose asked
+  for the table and the only check was the warning-level Phase 6 step 6c, which skips silently
+  when it is absent.
+- **The rule**, implemented once in `hooks/lib/zensu-plan-requirements.sh`: a `## Requirements`
+  heading, plus at least one `AC-###`/`FR-###` row whose Requirement cell survives removing
+  every `{...}` placeholder group. A row that merely quotes braces counts; a row that is still
+  the template's `{curly}` placeholder does not. Deprecated rows count — the never-recycle rule
+  keeps them. The Requirement column is located from the table's header row, so a repo override
+  that re-orders the columns is judged correctly. This is **stricter than converge**, not
+  identical to it: converge's own check is its Phase 0 step 2 legacy stop, which keys on the
+  table being *absent*, and its coverage audit EXCLUDES deprecated rows that count here. A plan
+  this gate passes is not automatically one converge can audit in full.
+- **Which plan.** `--plan <path>` when the skill passes it (it does), else derived from the
+  edit-landing receipt's record of the run log it audited: `.zensu/logs/<stem>.log` names
+  `.zensu/plans/<stem>.md`. Both channels are bounded to this session: the derived `log` must
+  resolve inside the project's own `.zensu/logs/`, and an explicit `--plan` must resolve inside
+  `.zensu/plans/` and carry the same stem the derivation would — so neither can be pointed at a file outside
+  the project. The stale-plan half is weaker and worth stating exactly: the derived channel binds
+  THIS session's receipt, and that receipt is an ordinary file the session can rewrite through a
+  Bash redirect, which no gate covers — so the anchoring is only as strong as the receipt. It
+  buys nothing an attacker wants anyway: a model that wanted to defeat this gate would simply
+  fill the table. With no derivable stem the flag is refused rather than
+  accepted on the directory bound alone — except when `ZENSU_EDIT_LANDING_GATE=off` is what
+  removed the receipt, where the bound is dropped and disclosed instead (see the scope-gap
+  bullet below). A `.zensu/plans` or `.zensu/logs` that is itself a symlink is refused
+  rather than resolved through, and every root in the verb comes from
+  `zensu_resolve_project_dir` — which is also what `CLAUDE_PROJECT_DIR` is normalized to for
+  every `--*` verb before any verb body runs, so the two cannot diverge. An explicit `--plan` that
+  names nothing refuses; a derived path that is not there does not, because nothing was asserted
+  — but the gate then prints `REQUIREMENTS GATE UNRESOLVED` rather than passing silently, so
+  "the table passed" and "no table was checked" never read the same.
+- **Refusal wording is typed.** A missing or placeholder-only table refuses as a verdict about
+  the plan; an unreadable path, a usage error, or a missing library refuses with "could not
+  judge the plan" instead — a load fault must never be reported as a judged table.
+- **Scope.** Same as the receipt gate: a resolvable git HEAD plus a non-empty change set. A
+  chain that changed nothing has no plan claim to check. **Known gap, stated rather than
+  implied:** a bound Autopilot chain that produced zero file changes therefore passes this gate
+  untested, still travels its return stage into CONVERGE — the only edge into `OPEN_PR` — and
+  converge then mtime-resolves the plan Phase 2 wrote anyway and takes its legacy stop. "The
+  CONVERGE stage is the only edge into OPEN_PR" must not be read as "that edge is now covered".
+- **Two further scope gaps, named rather than implied.** The change set is the WORKTREE against
+  `HEAD` — there is no baseline range — so a chain that COMMITTED its work mid-run measures zero
+  changes and both gates skip, silently and without even the `REQUIREMENTS GATE UNRESOLVED`
+  line. The sibling edit-landing library does carry a `--baseline` range for exactly that case;
+  this verb does not. And `ZENSU_EDIT_LANDING_GATE=off` leaves no receipt, so no run-log stem can
+  be derived: the explicit `--plan` then keeps only its plans-directory bound and says so on
+  stderr (`REQUIREMENTS GATE STEM UNCHECKED`) rather than refusing, because refusing would make
+  that documented exemption unusable for the shipped invocation, which always passes `--plan`.
+- **Bypass** with `ZENSU_REQUIREMENTS_GATE=off`, which is deliberately a separate switch from
+  `ZENSU_EDIT_LANDING_GATE=off` — exempting a session from one must not disarm the other, and
+  the two gates share one change-set computation precisely so neither inherits the other's
+  switch. Both escapes are recorded in the per-session bypass ledger.
+
+**Full workflow reference:** [docs/tdd-manager-workflow.md](tdd-manager-workflow.md) — Mermaid flow chart, per-step FSM state diagram, hook gate behavior table, environment variables contract, discipline patches 1-11, four-channel logging.
