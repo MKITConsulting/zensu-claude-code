@@ -204,7 +204,10 @@ else
   check "P4b README skills table carries the converge row" FAIL
 fi
 HDR_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
-ROW_N="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README" | grep -cE '^\| `/zensu:[a-z-]+` \|')"
+# Slug class kept in step with the two README-row encodings in test-chain-recover.sh
+# T39 (its grep and its JS regex) — it admits digits, so a skill named like
+# `review-v2` is still counted here.
+ROW_N="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README" | grep -cE '^\| `/zensu:[a-z0-9-]+` \|')"
 if [ -n "$HDR_N" ] && [ "$HDR_N" = "$ROW_N" ]; then
   check "P4c README skills header ($HDR_N) == table rows ($ROW_N)" PASS
 else

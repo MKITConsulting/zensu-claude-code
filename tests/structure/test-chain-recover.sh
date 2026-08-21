@@ -829,29 +829,56 @@ else
   check "T38 the skill is registered and its frontmatter name matches" FAIL
 fi
 
+# NOTE ON HOME: T39 below is the repo-wide skill-registry invariant — header count,
+# row count, the "N skills are registered" figure, both set differences and the
+# unlisted exemption — living in a suite named for chain recovery. Its header-vs-rows
+# half is duplicated in test-converge-skill.sh P4c, and every per-skill suite adds a
+# registration pin of its own. That is three places for one invariant, held together
+# by comments. Extracting it into a dedicated tests/structure/test-skill-registry.sh
+# is the right move; it is deliberately NOT done inside a review-fix round, because
+# moving a checked invariant is a change that needs its own review.
 SKILLS_BLOCK="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README")"
 SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
-SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:[a-z-]+` \|')"
-SKILLS_UNLISTED="$(printf '%s\n' "$SKILLS_BLOCK" | node -e '
+# The slug class admits digits. This grep and both of its siblings spelled [a-z-]+
+# until this change, so a future skill named like `review-v2` would drop out of the
+# row count AND surface as registered-but-unlisted, failing this check twice for a
+# reason neither message names. THREE encodings of this class must move together, all of them reading
+# README.md: this grep, the JS row regex below, and test-converge-skill.sh P4c.
+# (test-gauntlet-loop-skill.sh G13 also spells [a-z0-9-]+, but that is a hook
+# FILENAME class applied to SKILL.md and reads no README row — not a co-moving site.)
+SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:[a-z0-9-]+` \|')"
+# Deliberately registered but kept out of the README table. A second entry here is a
+# real decision, not a typo — see P2h in test-doctor.sh for why doctor is documented
+# under Diagnostics instead.
+README_UNLISTED_SKILLS="doctor"
+# BOTH directions. registered-minus-listed catches a renamed or de-registered skill
+# whose README row went stale. listed-minus-registered catches the mirror case — a
+# row advertising a command plugin.json does not register — which every other
+# conjunct here is blind to, because bumping the header to match repairs the counts.
+SKILLS_SET_DIFF="$(printf '%s\n' "$SKILLS_BLOCK" | node -e '
 const fs = require("node:fs");
 const rows = new Set(
   fs.readFileSync(0, "utf8").split("\n")
-    .map((line) => /^\| `\/zensu:([a-z-]+)` \|/.exec(line))
+    .map((line) => /^\| `\/zensu:([a-z0-9-]+)` \|/.exec(line))
     .filter(Boolean).map((match) => match[1]),
 );
 const manifest = require(process.argv[1]);
 const registered = (manifest.skills || [])
   .map((entry) => entry.replace(/^\.\/skills\//, ""));
-process.stdout.write(registered.filter((name) => !rows.has(name)).sort().join(","));
+const unlisted = registered.filter((name) => !rows.has(name)).sort();
+const unregistered = [...rows].filter((name) => !registered.includes(name)).sort();
+process.stdout.write(unlisted.join(",") + "|" + unregistered.join(","));
 ' "$PLUGIN_JSON" 2>/dev/null)"
+SKILLS_UNLISTED="${SKILLS_SET_DIFF%%|*}"
+SKILLS_UNREGISTERED="${SKILLS_SET_DIFF##*|}"
 REGISTERED_N="$(node -e 'process.stdout.write(String(require(process.argv[1]).skills.length))' "$PLUGIN_JSON" 2>/dev/null)"
 README_REGISTERED_N="$(printf '%s\n' "$SKILLS_BLOCK" | grep -oE '\([0-9]+ skills are registered' | grep -oE '[0-9]+' | head -1)"
 if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:recover-chain' \
   && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ] \
-  && [ "$SKILLS_UNLISTED" = "doctor" ]; then
+  && [ "$SKILLS_UNLISTED" = "$README_UNLISTED_SKILLS" ] && [ -z "$SKILLS_UNREGISTERED" ]; then
   check "T39 README lists the skill; header, table and registered set all agree" PASS
 else
-  check "T39 README lists the skill; header, table and registered set agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N; registered-but-unlisted=[$SKILLS_UNLISTED], must be exactly [doctor] — the diagnostics skill P2h in test-doctor.sh keeps out of the table)" FAIL
+  check "T39 README lists the skill; header, table and registered set agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N; registered-but-unlisted=[$SKILLS_UNLISTED], must be exactly [$README_UNLISTED_SKILLS] — the diagnostics skill P2h in test-doctor.sh keeps out of the table; listed-but-unregistered=[$SKILLS_UNREGISTERED], must be empty — a row here advertises a command the plugin never loads)" FAIL
 fi
 
 SKILL_CODE="$(awk '/^```/{inside=!inside; next} inside{print}' "$SKILL")"

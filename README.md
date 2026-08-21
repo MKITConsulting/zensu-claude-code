@@ -236,12 +236,12 @@ questions outside the Permitted Purpose, contact
 
 ### Third-party references
 
-All prose, hooks, skills and tests in this repository are authored for it; the
-third-party tooling it builds on is declared in `package.json` and never vendored.
-One skill cites external work as the source of a *method* rather than of any text: `/zensu:gauntlet-loop` links to
+One skill cites external work as the source of a *method* rather than of any text:
+`/zensu:gauntlet-loop` links to
 [How to Run a Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) and its prompt
 generator, and to [Claude-of-Duty](https://github.com/mshumer/Claude-of-Duty), in
 `skills/gauntlet-loop/SKILL.md` § Provenance and
 `skills/gauntlet-loop/references/quality-bars.md` § Method sources. No code, prompt
 text, or asset from those sources is vendored here — the entire third-party surface
-is the hyperlinks themselves.
+*of those two sources* is the hyperlinks themselves. Build and test dependencies
+are a separate matter and are declared in `package.json`.

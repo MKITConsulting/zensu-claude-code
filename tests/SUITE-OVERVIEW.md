@@ -14,7 +14,7 @@ listing before any suite runs and refuses to execute at all when they disagree �
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
 reconciled to that manifest (135 = 128 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
+reconciled here:** §3's ten CI group headers sum to 124, and the arithmetic closes at 128
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
 (the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting

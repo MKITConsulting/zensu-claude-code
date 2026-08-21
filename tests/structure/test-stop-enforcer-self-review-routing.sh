@@ -76,8 +76,15 @@ start_session() {
 # anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
 UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
 if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
-  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^. tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
+# LOCALE-INDEPENDENT PARSE. node --test emits its summary as `ℹ pass 29`, and
+# U+2139 is THREE bytes in UTF-8. The earlier `^. pass` branch matched exactly one
+# character, so with LANG/LC_ALL/LC_CTYPE unset macOS sed runs in the C locale, `.`
+# matches one BYTE, the pattern never fires, the count parses as empty and the check
+# reports 0 cases while the unit suite itself passes. Anchor on the trailing text
+# instead of the leading glyph; the `# pass` TAP branch stays first so both output
+# styles still work.
+  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
+  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
   case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
   case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
   # The total is the real floor; the pass floor is lower because the symlink and

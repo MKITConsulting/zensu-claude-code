@@ -28,7 +28,14 @@ UNIT="$PLUGIN_DIR/tests/structure/git-repo-escape.test.js"
 if [ ! -f "$UNIT" ]; then
   check "W3a rule-C unit suite is missing from the checkout ($UNIT) — stage it with the change" FAIL
 elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
-  UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+# LOCALE-INDEPENDENT PARSE. node --test emits its summary as `ℹ pass 29`, and
+# U+2139 is THREE bytes in UTF-8. The earlier `^. pass` branch matched exactly one
+# character, so with LANG/LC_ALL/LC_CTYPE unset macOS sed runs in the C locale, `.`
+# matches one BYTE, the pattern never fires, the count parses as empty and the check
+# reports 0 cases while the unit suite itself passes. Anchor on the trailing text
+# instead of the leading glyph; the `# pass` TAP branch stays first so both output
+# styles still work.
+  UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
   # Exit 0 alone would also accept a file that registers zero cases.
   # Raise this with the file. The win32 cases are the ONLY witnesses of the MSYS
   # namespace fix — no POSIX host executes that branch end-to-end — so a stale

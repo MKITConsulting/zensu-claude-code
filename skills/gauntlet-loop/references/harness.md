@@ -12,8 +12,13 @@ break by accident.
 > normative home is [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"; of that
 > section, `tests/structure/test-gauntlet-loop-skill.sh` G8-G11 pin four claims — the
 > command-tool denial, the `main-v1`-only edit gate and witness, the out-of-protocol
-> reviewer spawn, and the `ExitPlanMode` interception. Nothing pins the restatements
-> in this file, so correct the normative statement first and this one with it.
+> reviewer spawn, and the `ExitPlanMode` interception — and G15 pins two more, the
+> non-Zensu MCP residue and the `agent_type` premise. This file is NOT unpinned:
+> G16, G17 and G18 anchor exact sentences in THIS file, so an edit here fails the
+> suite rather than passing silently. No count is given on purpose — nothing checks
+> one, and the figure this line first carried was already stale when it shipped.
+> Correct the normative statement first and this one
+> with it, and expect the suite to tell you when you have touched a pinned line.
 
 ## Contents
 
@@ -87,23 +92,26 @@ instruction is what removes intent while a grant only removes reach.
 `.*` PreToolUse capability gate denies every command-execution tool to a neutral
 `host-profile-v1` child, and `Explore` is one. That is a hard difference from a bare
 Claude Code session, and it moves work: the lead runs the build, the tests, the dev
-server and the capture, then hands the raw output into the packet. See "Inside the
+server and the capture, then hands the redacted output into the packet. See "Inside the
 Zensu plugin" in [SKILL.md](../SKILL.md).
 
 If the project ships a dedicated read-only reviewer agent type, prefer it. Do
 not use a `general-purpose` critic — a critic that can edit will eventually fix
 what it was asked to judge, and then nobody judged it.
 
-Every agent type the Zensu plugin registers is granted `Read`, `Grep` and `Glob` and
-nothing else — the three reviewer types `zensu:review-aspect`, `zensu:review-judge`
-and `zensu:code-reviewer` among them — and none is a usable gauntlet critic. See
-"Inside the Zensu plugin" in [SKILL.md](../SKILL.md) for the normative statement; the
-short version is that they hold no shell, so they cannot execute an inspection
-recipe, and the reviewer types additionally hard-refuse any spawn that is not a
-complete `REVIEW PACKET v1`. Use `Explore` for every critic in this loop.
+No agent type the Zensu plugin registers is a usable gauntlet critic. The full list
+and its tool grant live in [SKILL.md](../SKILL.md) — this file deliberately does not
+repeat them, because a second copy of an enumeration drifts the moment one is added,
+and the first version of this paragraph was already an incomplete copy on the day it
+shipped. See "Inside the Zensu plugin" there for the normative statement. The
+short version is the packet protocol, not the shell: no subagent here holds one, so
+that cannot be what separates them from an `Explore` critic. The reviewer types
+hard-refuse any spawn that is not a complete `REVIEW PACKET v1`, and
+`zensu:review-aspect` accepts only its five fixed perspectives, so none of them can
+be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 
 The packet handed to a critic contains the goal, the frozen bar, house rules,
-the candidate, the reference, raw gate output and the inspection recipe. It
+the candidate, the reference, redacted gate output and the inspection recipe. It
 contains no builder transcript, no rationale, no "we tried X because Y", and no
 hint about which way the lead is leaning.
 
@@ -143,8 +151,11 @@ Never grade a summary. The tools that make real inspection cheap:
 - **Files, images, PDFs, notebooks:** `Read`.
 
 Inside the Zensu plugin every one of these that needs a shell is **lead-only** — a
-subagent's command tools are denied outright. Run them yourself and put the raw
-output in the packet.
+subagent's command tools are denied outright. Run them yourself and
+put the redacted output in the packet: the redaction rule in
+[SKILL.md](../SKILL.md) is unconditional and the packet is one of the paths it
+covers, because a packet is delivered to a fresh agent and a builder that receives
+one can write.
 
 Freeze the capture conditions in the charter: URL or route, viewport, theme,
 seed, fixture, warm-up, time of day in the sim, everything the result depends
@@ -190,9 +201,14 @@ The point is a page the user can open from a phone without interrupting the run.
   redeploys to the same URL when called again with the same file path. (The harness
   documents such a page as private by default; nothing in this repository verifies
   that, so do not lean on it.) That is the phone-viewable option, and it is an
-  **external write**: get
-  explicit user approval at charter time, and do not reach for it mid-run on the
-  strength of "keep going". Load the `artifact-design` skill before writing the
+  **external write**, which `SKILL.md` lists under `Prohibited without new approval:`.
+  Approval is therefore NOT a single charter-time grant. Charter approval covers the
+  page's existence and location only. The first publish of any newly captured class
+  of evidence — a screenshot, console output, anything derived from network
+  requests, or any excerpt of product source or a diff — needs a fresh confirmation
+  naming that class; a later round
+  republishing the same classes does not. Never reach for it mid-run on the strength
+  of "keep going". Load the `artifact-design` skill before writing the
   page. The page must be self-contained — a strict CSP blocks every external host,
   so inline CSS/JS and embed images as `data:` URIs. Mind the 16 MB ceiling when
   embedding round-by-round screenshots; downscale captures or keep only the last few
@@ -204,7 +220,10 @@ Update it after each round with: the ledger row, the current capture, the
 critics' verdicts, the resolution, and the budget spent. Do not write progress
 files into product source unless the user designated that location.
 
-**Redact before every progress write.** The evidence feeding a round comes from
+**Redaction is unconditional; its normative home is [SKILL.md](../SKILL.md).** That
+rule covers packet, ledger, resolution attachment and progress page alike — this
+paragraph restates it for the publishing channel and adds nothing of its own. The
+evidence feeding a round comes from
 `read_console_messages`, `preview_logs`, `read_network_requests` and live
 screenshots — surfaces that routinely carry session cookies, bearer tokens, API keys
 and the logged-in user's data. Never embed raw network-request headers or bodies.
