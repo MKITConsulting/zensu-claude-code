@@ -1,6 +1,6 @@
 {
   "name": "zensu",
-  "version": "0.18.0",
+  "version": "0.18.2",
   "description": "Product Lifecycle Manager — Features as First-Class Citizens",
   "author": {
     "name": "Zensu",
@@ -19,6 +19,7 @@
     "./agents/pr-review-worker.md"
   ],
   "skills": [
+    "./skills/adopt-session",
     "./skills/autopilot",
     "./skills/bootstrap",
     "./skills/converge",

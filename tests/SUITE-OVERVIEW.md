@@ -8,16 +8,30 @@ Derived by reading `tests/run-all.sh`, `tests/profiles/promptfoo-local-only.v1.j
 source — not from an executed run. Assertion counts are approximations derived from
 each suite's `check()` / `run()` / `expect()` call sites.
 
+**The structure-suite count is owned by `tests/profiles/promptfoo-local-only.v1.json`,
+not by this file.** `run-all.sh` compares that manifest against the actual directory
+listing before any suite runs and refuses to execute at all when they disagree — so a
+new suite file and its manifest entry must land in the same commit, or every mode,
+including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
+reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
+only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
+`test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
+(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
+§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
+machine-checks this document, so treat §3's per-group numbers as descriptive rather than
+authoritative until that sweep happens.
+
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **134** — 127 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **127 structure suites + 5 offline evals = 132 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 134 − 127 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **16 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **135** — 128 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **128 structure suites + 5 offline evals = 133 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 135 − 128 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **5** (41 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
 
@@ -124,15 +138,22 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (18)
+### Skill contracts (19)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
 `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
-`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` · `setup-skill` ·
-`skill-overlays` · `templates` · `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
+`pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
+`session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
+`verify-feature-skill` · `zen-mode` · `zensu-help-skill`
 
 Structural pins on each shipped skill's SKILL.md: required phases, marker wiring,
 persona pools, stable AC-###/FR-### requirement IDs, overlays, and cross-file version
 consistency. Heaviest: `pr-team-review-skill` (~121), `verify-feature-skill` (~117).
+
+`session-trail-verdict` is the one BEHAVIOURAL suite in this group: it builds synthetic
+transcripts under a synthetic `HOME` and asserts what `trail.mjs` actually decides about
+taking a session over, which its structural sibling can only pin as vocabulary. It skips
+loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
+developer's real sessions.
 
 ### Prompt routing & payloads (7)
 `agent-context` · `best-solution-first` · `context-nudge-hook` ·
@@ -178,7 +199,7 @@ root containing whitespace and an apostrophe, and the Windows CI manifest contra
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (16 files)
+## 4. `node --test` unit suites (19 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -190,9 +211,12 @@ that suite's failure.
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
+| `reviewer-spawn-denial-v1.test.js` | 29 | `test-stop-enforcer-self-review-routing.sh` | host-refused reviewer spawn: structural `tool_use_id` keying, the host error flag, the marker prefix, tail/line bounds, degrade-to-none |
 | `plan-payload-v1.test.js` | 20 | `test-plan-payload-fallback.sh` | plan-source precedence table, hardened plan-file reader refusals, O_NOFOLLOW-unavailable fallback |
+| `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
+| `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
 | `windows-observation.test.js` | 11 | Windows safety | observation summarizer |

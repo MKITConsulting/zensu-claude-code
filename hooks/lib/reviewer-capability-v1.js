@@ -453,17 +453,37 @@ function main() {
     // worker that cannot prove its lease must not run. So does a record that
     // EXISTS and disagrees about anything else, which is a security signal that
     // keeps denying for everyone, main thread included.
-    // The read-only diagnostic is the third case, and unlike the two above it is
-    // NOT a relaxable-state question: it holds in EVERY bind failure, including a
-    // record that exists and disagrees. That is the state a mid-session plugin
-    // upgrade produces, and denying it here put /zensu:doctor behind the very
-    // defect it reports — this gate matches every tool, so a deny here is reached
-    // before the Bash gates ever run. It admits exactly one recognized command
-    // for the main thread; hooks/lib/zensu-doctor.sh writes nothing.
+    // The recognized commands are the third case, and unlike the two above they
+    // are NOT a relaxable-state question: they hold in EVERY bind failure,
+    // including a record that exists and disagrees. That is the state a
+    // mid-session plugin upgrade produces, and denying it here put /zensu:doctor
+    // behind the very defect it reports — this gate matches every tool, so a deny
+    // here is reached before the Bash gates ever run. It admits exactly two
+    // recognized commands for the main thread: hooks/lib/zensu-doctor.sh, which
+    // writes nothing, and hooks/lib/zensu-session-adopt.sh, which writes its own
+    // session's record, one workflow history entry and a move of its own stale
+    // review-evidence leases, and carries its own justification in its header. A
+    // remedy the user cannot invoke is not a remedy.
+    //
+    // This gate is the FIFTH denier in the incompatible-runtime state, and the
+    // only one that does NOT route through `zensu_emit_hook_session_deny` —
+    // `isRecognizedInvocation` is false for every non-Bash tool, so an Edit
+    // reaches the catch below. It spells the same lineage cause itself there.
     if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
         && (hookSession.unregisteredSession(payload)
           || hookSession.orphanedProjectRootSession(payload)
-          || doctorInvocation.isDoctorInvocation(payload))) {
+          || doctorInvocation.isRecognizedInvocation(payload))) {
+      return;
+    }
+    // The FIFTH denier in the incompatible-runtime state, and it used to be the
+    // only one left on generic wording — an Edit produced "revalidation failed"
+    // here while the Edit gate said the session could be repaired in place. Two
+    // denies contradicting each other about the one bind failure that HAS an
+    // in-place remedy is exactly what CLAUDE.md forbids, so this branch names the
+    // same cause and remedy the four emitting gates do.
+    const lineage = hookSession.resolveIncompatibleRuntime(payload);
+    if (lineage) {
+      deny(`this session's Session Control record is intact, but the running Zensu installation declares an incompatible lineage — the record was minted by ${lineage.recorded} and ${lineage.executing} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state.`);
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

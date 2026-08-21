@@ -9,7 +9,8 @@ description: >
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
   string is silently ignored by strict === checks), and session state (state
   dir writable, canonical CAS workflow documents valid, each review chain's
-  shape plus any wedged chain and its recovery command, expired pending-review
+  shape plus any wedged chain and its recovery command, any reviewer spawn the
+  host permission layer refused, expired pending-review
   surfaced). The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
@@ -77,9 +78,12 @@ That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
 *incompatible* mid-session plugin change produces (a compatible upgrade now binds
 normally), where every other Bash call denies — and it
-admits only this shape: assignments drawn from a closed allowlist followed by one
-`bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
-doctor goes back to being denied by the very defect it reports.
+admits this diagnostic in only one shape: assignments drawn from a closed
+allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
+Anything else is refused, and the doctor goes back to being denied by the very
+defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
+own separate justification — it WRITES, so it cannot borrow this one; see
+[Session Control](../../docs/session-control.md) "Unbindable sessions".
 
 Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
 assignment when the tool set is not loaded. The root preflight now lives inside
@@ -158,18 +162,19 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   Reaching a failure means the update crossed a **breaking** boundary (a minor
   bump while major is `0`, or a major bump), the executing runtime is **older**
   than the record, a version is not a strict `X.Y.Z`, or the executing root
-  carries no zensu manifest. That cannot be repaired in place — the record is
-  immutable by design and is never rewritten to the new root — so the remedy is a
-  fresh Claude Code session.
-  **Known reporting gap, and you must not paper over it:** the report has no row
-  of its own for that state. `zensu-doctor.sh` asks only whether the recorded
-  project root is gone, so an incompatible runtime falls through to the
-  `unbound` row above and is rendered as *"this session has no valid Session
-  Control record"* — which is false, the record is intact in plugin data. When
-  the user reports a plugin update right before the failure, say so explicitly
-  instead of repeating that row's wording: the record exists and the executing
-  runtime is not a compatible lineage of it. The remedy (a fresh session) is the
-  same either way.
+  carries no zensu manifest.
+- **❌ binding: this session's Session Control record is intact, but the running
+  Zensu installation declares an incompatible lineage** → the state described
+  above, and it has its own row naming BOTH declared versions (`record minted by
+  X, executing Y`). Never report it as a missing record: the record is intact in
+  plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
+  place — run `/zensu:adopt-session` to see whether the running installation may
+  take the record over, then `/zensu:adopt-session --confirm`. Both stay
+  reachable in this state; so does this diagnostic. A refusal names the exact
+  condition that failed, and `workflow-schema-mismatch` in particular means a
+  persisted shape really did change and a fresh session is the only way forward.
+  Adoption re-binds the session from the next tool call onward — do NOT tell the
+  user to restart after a successful one.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares
@@ -195,6 +200,38 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
   a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
+- **⚠️ state: the host permission layer refused the zensu:code-reviewer spawn**
+  → this is NOT a Zensu gate and no Zensu command repairs it. The Stop
+  chain-enforcer saw the refusal in the session transcript and left the note this
+  row reads; the chain cannot close because no review ever ran. Report the
+  remedy the row prints — the `permissions.allow` rule
+  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, or leaving the
+  permission mode that refused it — and say plainly that the user has to apply it,
+  since it is a harness setting no agent can grant itself — and never edit a
+  settings file on their behalf to widen your own permissions. Name only the
+  user-scoped file, the way the row and the Stop reason both do: the project-local
+  spelling sits inside the session root and is a path you could write yourself, so
+  reciting it beside the rule that grants the capability you just lost is the one
+  thing this instruction exists to prevent. Never suggest `--chain-done` or a
+  fresh `/zensu:tdd` generation as the way past it *while the permission is still
+  missing*: both would leave the change unreviewed, and a new generation hits the
+  same refusal. Once the user has applied the rule, re-entering `/zensu:tdd` is
+  exactly what the cap-release message tells them to do. The note is retired
+  automatically once a spawn succeeds or the chain closes, so a standing row means
+  no reviewer has run since. A row whose kind reads `unknown` means this plugin
+  root could not load the classifier module — report the refusal, not the kind.
+  Two neighbouring rows are NOT refusals and must not be reported as one. A
+  "reviewer-spawn refusal note(s) older than Nh" row comes from a session that
+  never ended a turn again and says nothing about the current state; a
+  "reviewer-spawn note(s) this plugin did not write" row failed
+  to vet (unreadable, oversized, an unrecognized kind or schema, an impossible
+  timestamp, or no matching session) — a planted file would otherwise manufacture
+  a recommendation to widen permissions. "No matching session" is the binding
+  check: a note counts only while the workflow document of the session that could
+  have written it still sits beside it. Such a note is also reaped on its own by
+  the next Stop in that project, so this row can clear without anyone acting on
+  it. Offer no cleanup for either row: Phase 3 below is still the only write, and
+  it covers `pending-review.json` alone.
 
 If everything is green, say so in one line and stop — there is nothing to do.
 

@@ -146,26 +146,21 @@ else
   check "CI retains deterministic eval coverage without launching Promptfoo" FAIL
 fi
 
-# The gate value became dynamic when the auditable test-gate skip landed: both jobs now
-# emit gate:$gate and attach gate_skip_reason exactly when it resolves to "skipped". This
-# pin still carried the old hardcoded gate:"passed" literal, so it failed against a shape
-# that is correct — and it shipped because the release that introduced the skip used it,
-# which is precisely the case where nothing re-runs the suite.
-#
-# The skip-reason conditional is pinned ALONGSIDE the base shape, not instead of it.
-# Dropping that clause would let a release record gate:"skipped" with no reason, and the
-# reason is the only thing that keeps a skipped release distinguishable from a verified
-# one forever after. A negative pin on the old literal closes the other direction: a
-# "simplification" back to a hardcoded gate:"passed" would make every skipped release
-# claim it was verified.
+# The gate VERDICT is a jq variable, not a literal: `skip_test_gate` ships a
+# release that can never claim `passed`, so the artifact has to be able to say
+# `skipped`. Pinning `gate:"passed"` outlived that change and has failed every
+# run on main since. What this check exists for is that BOTH jobs emit the SAME
+# shape — so the skip-reason continuation is pinned alongside it, or one job
+# could grow a branch the other lacks and the two artifacts would quietly stop
+# being comparable.
 EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
-EVIDENCE_SKIP_REASON='+ (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)'
-if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
-  && [ "$(grep -Fc "$EVIDENCE_SKIP_REASON" "$WORKFLOWS/release.yml")" -eq 2 ] \
-  && ! grep -Fq 'gate:"passed"' "$WORKFLOWS/release.yml"; then
+EVIDENCE_SKIP_BRANCH='+ (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)'
+EVIDENCE_N="$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")"
+EVIDENCE_SKIP_N="$(grep -Fc "$EVIDENCE_SKIP_BRANCH" "$WORKFLOWS/release.yml")"
+if [ "$EVIDENCE_N" -eq 2 ] && [ "$EVIDENCE_SKIP_N" -eq 2 ]; then
   check "Prepare and publish emit the same deterministic release evidence schema" PASS
 else
-  check "Prepare and publish emit the same deterministic release evidence schema" FAIL
+  check "Prepare and publish emit the same deterministic release evidence schema (shape=$EVIDENCE_N/2 skip-branch=$EVIDENCE_SKIP_N/2)" FAIL
 fi
 
 if jq -e '.devDependencies.promptfoo | type == "string"' "$PACKAGE" >/dev/null 2>&1 \

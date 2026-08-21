@@ -21,6 +21,18 @@ source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
 zensu_hook_is_main_principal "$PAYLOAD" PreToolUse || exit 0
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
 if ! zensu_bind_hook_session "$PAYLOAD"; then
+  # This gate relaxes NO bind failure — nothing in any of them can anchor a write
+  # to a project — but a deny still has to name its cause. The lineage state is
+  # the one with a remedy that repairs the session in place, so it gets its own
+  # reason carrying both versions rather than the generic "start a fresh
+  # session". stdout is the decision channel, so the predicate's output is
+  # captured, never leaked.
+  if ZENSU_LINEAGE="$(zensu_session_incompatible_runtime "$PAYLOAD")" \
+    && [ -n "$ZENSU_LINEAGE" ]; then
+    zensu_emit_hook_session_deny incompatible-runtime \
+      "${ZENSU_LINEAGE%%$'\t'*}" "${ZENSU_LINEAGE##*$'\t'}"
+    exit 0
+  fi
   zensu_emit_hook_session_deny
   exit 0
 fi

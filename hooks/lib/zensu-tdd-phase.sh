@@ -454,7 +454,9 @@ _tdd_write_phase_critical() {
   local phase="$4"
   local reason="$5"
   [ "$phase" = CHAIN_RECOVERED ] && return 1
+  [ "$phase" = RUNTIME_ADOPTED ] && return 1
   case "$reason" in "chain-recovered: "*) return 1 ;; esac
+  case "$reason" in "runtime-adopted: "*) return 1 ;; esac
   local ts="$6"
 
   CONTROL_CORE="$_ZENSU_TDD_CONTROL_CORE" PROJECT_ROOT="$(_tdd_bound_project_root "$state_file" "$session_id")" SID="$session_id" STEP="$step_id" PHASE="$phase" REASON="$reason" TS="$ts" \
@@ -758,7 +760,9 @@ tdd_write_phase() {
   local phase="${3:-}"
   local reason="${4:-}"
   [ "$phase" = CHAIN_RECOVERED ] && return 1
+  [ "$phase" = RUNTIME_ADOPTED ] && return 1
   case "$reason" in "chain-recovered: "*) return 1 ;; esac
+  case "$reason" in "runtime-adopted: "*) return 1 ;; esac
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
   session_id="$(zensu_resolve_session_id "$supplied_session")" || return 1
 

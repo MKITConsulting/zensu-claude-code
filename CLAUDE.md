@@ -213,7 +213,11 @@ that one lease then fails every later lease operation for the session. Closing i
 needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
-so changing it silently fails loudly.
+so changing it silently fails loudly. **Adoption works around it, it does not
+close it:** `discardSupersededLeases` moves every lease naming the previous
+installation OUT of the records directory (into a sibling `superseded/<key>/`,
+because `listRecords` fails on any non-`.json` entry, so setting one aside in
+place would be strictly worse). The count is reported, never absorbed.
 
 `docs/session-control.md` "Unbindable sessions" carries the operator-facing
 account, including the pin this weakens and the two attestation fields that
@@ -221,6 +225,125 @@ state the executing runtime. `tests/session-control/session-control-core-v1.test
 pins the axis and the sibling rule;
 `tests/structure/test-versioned-plugin-upgrade.sh` pins the end-to-end verdicts
 across synthetic installs, including that serving a record never rewrites it.
+
+## Adopting a Record Across a Lineage Break (`adoptableRecord` / `adoptContext`)
+
+The lineage rule above judges DECLARED versions and cannot see whether the
+persisted shapes actually moved. When they did not, its refusal wedges a session
+the running code could read perfectly well — and every write channel is denied,
+so the user cannot repair it. `adoptableRecord` / `adoptContext` in
+`hooks/lib/session-control-core-v1.js` are the one explicit exit.
+
+**The authorising axis is SCHEMA equality, not the version numbers, and that
+gate closes itself.** `validateContext` already enforces the record's
+`schema_version` and `validateWorkflowState` already enforces the workflow
+document's `schema`, so a release that genuinely moves a persisted shape makes
+one of the two unreadable and adoption declines with no new check to remember.
+Do NOT replace either with an explicit version comparison — the self-closing
+property is the whole design, and a hand-written check is the thing that gets
+forgotten.
+
+Seven conditions are ALL required; eight refusal reasons name exactly which one
+failed (condition 6 can fail as either `executing-runtime-unidentified` or
+`executing-runtime-older`):
+`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
+`executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
+sibling bound are NOT relaxed here either — the latter is what keeps a
+`--plugin-dir` checkout from adopting an installed session.
+
+**Two invariants, both learned from the chain-recovery precedent:**
+
+1. **No record field is ever added.** Provenance is a workflow `history` entry
+   under the reserved phase `RUNTIME_ADOPTED`, protected in the same two guard
+   sites as `CHAIN_RECOVERED` (`zensu-log.sh --phase` and `tdd_write_phase` /
+   `_tdd_write_phase_critical`). A field would itself be the breaking bump this
+   feature exists to survive, and would cost a `minor` — which would wedge every
+   session then running.
+2. **No bypass-ledger entry.** The ledger records gate ESCAPES so that everything
+   under "Gates bypassed" is true. Adoption escapes no gate; it re-mints a
+   record. Same rule, same reason, as `--chain-recover`.
+
+The previous record is never overwritten — it is renamed to
+`<key>.superseded-<recorded-version>.json` and stays readable, so "the record is
+immutable" remains literally true. `created_at` is carried over.
+
+**The gate channel is a SECOND recognized command, admitted on a DIFFERENT
+argument.** `hooks/lib/zensu-doctor-invocation.js` admitted exactly one shape
+because `zensu-doctor.sh` writes nothing. `zensu-session-adopt.sh` WRITES, so it
+carries its own justification in its own header, and that header is what the
+recognizer points at. Keep the recognized list at two; a third entry needs its
+justification written down the same way, not a wave at either existing one.
+Moving together: `RECOGNIZED` in the recognizer, `isRecognizedInvocation` (the
+module main and `reviewer-capability-v1.js` both call it; `isDoctorInvocation`
+stays the doctor-only predicate), and `zensu_doctor_allowed`'s contract comment.
+
+**The whole feature needs the SUPERSEDED installation to still be on disk.**
+`validateContext` canonicalizes `context.plugin_root` and `readContextInternal`
+recomputes the digest against it, so an absent recorded root makes `readContext`
+throw — and then `resolveIncompatibleRuntime` answers null, the doctor falls back
+to the `unbound` row whose "no valid record" wording this work exists to remove,
+and `adoptableRecord` refuses as `record-unreadable`. The diagnosis degrades to
+the misleading wording exactly when the repair is impossible. Do not describe the
+lineage row as covering every mid-session upgrade; it covers the ones whose
+previous version was not pruned.
+
+**Three re-encodings move with this, and none of them is checked by a test:**
+
+- the `recorded<TAB>executing` wire format — one producer
+  (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
+  `stop-chain-enforcer.sh`, `pre-bash-zensu-gate.sh`, `pre-edit-tdd-reminder.sh`,
+  `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
+  Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
+  field: adding a third field silently redirects all five rather than failing.
+- the version-shape rule, spelled twice for two different hazards —
+  `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
+  `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
+  doctor report). Identical alternation, deliberate hand-copy; keep them in step.
+- the review-evidence store layout, hardcoded in `discardSupersededLeases` as
+  `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
+  ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
+  destination guard landed — that module's `ensurePrivateDirectory` policy and its
+  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
+  it looks: a core -> lease CALL would cycle (that module requires the binder,
+  which requires this core), but an ENTRY-POINT seam would not, because
+  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
+  that it moves the sweep from the core half to an eighth host obligation. If this
+  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
+  branch is also the silent one: it cannot tell "no lease was ever minted" from a
+  layout that moved, so a layout change makes the sweep a SILENT no-op.
+
+**Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
+`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
+plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
+half is SEVEN separate obligations, and a port that takes only the core delta gets
+`adoptContext` with no reachable caller and keeps the wedge: the entry script, the
+recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
+deny scope at every gate that denies in this state, the skill, and — easy to miss
+— a binder exporting a `privateRecordsDirectory` equivalent that applies the
+symlink/alias/permission/ownership checks, because the entry script resolves the
+records directory through it and never by hand-joining. A port that copies only
+the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
+`zensu-kiro` and `zensu-antigravity` were NOT included in this change.
+
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
+It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
+and four session lifecycles, but no Windows wall clock was taken — unlike the two
+suites this file records a measured figure for. Budget against a measurement
+before trusting the headroom. The caveat lives here and NOT in the manifest:
+`tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
+`{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
+EVERY Windows shard before a single suite runs — a `note` field there is a
+CI-wide outage, not documentation. Note also that shard-2's `profileTimeoutMs` is
+1800000, so a run genuinely approaching 900 s surfaces as a profile abort rather
+than the suite `TIMED_OUT` this ceiling exists to make visible.
+
+Operator-facing accounts that must move with it: `docs/session-control.md`
+"Unbindable sessions", the binding rows in `skills/doctor/SKILL.md`, and
+`skills/adopt-session/SKILL.md`. `tests/structure/test-versioned-plugin-upgrade.sh`
+Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
+allowance with its ordinary-command discrimination, the refusal truth table, the
+end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
 
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
@@ -264,7 +387,7 @@ they are different diagnoses with different remedies:
   alongside an executing root that is a declared-compatible upgrade — deliberate,
   since neither disagreement can anchor a workflow document. An INCOMPATIBLE root,
   a differing `plugin_data`, and every other disagreement stay unrelaxed. See
-  "Runtime Compatibility & Breaking Changes" above.
+  "Runtime Lineage (`version_type` is load-bearing)" above.
 
 **Every gate that relaxes one must consider the other**, and they do NOT all agree by
 design — the split is the contract, so changing a predicate means re-deciding each site.
@@ -297,9 +420,26 @@ properties are easy to get wrong and cost the whole feature:
   the deleted-root and unset-anchor shapes.
 
 Shell wrappers live in `hooks/lib/zensu-session.sh` (`zensu_session_unregistered`,
-`zensu_session_orphaned_project_root`, `..._model`). The orphaned wrapper **prints the
-dead path on stdout**; inside a PreToolUse gate stdout is the JSON decision channel, so a
-caller wanting the predicate alone must discard it explicitly.
+`zensu_session_orphaned_project_root`, `..._model`, plus
+`zensu_session_incompatible_runtime` / `..._model`). The orphaned wrapper **prints the
+dead path on stdout** and the incompatible-runtime pair prints `recorded<TAB>executing`;
+inside a PreToolUse gate stdout is the JSON decision channel, so a caller wanting the
+predicate alone must discard it explicitly, and a caller wanting the value must capture
+it into a variable before emitting anything.
+
+**The third predicate is a DIAGNOSIS, never a third relaxation.** `zensu_session_incompatible_runtime`
+belongs to this roster only because every gate that consults the two above must decide what
+to do about it too — and the answer is the same everywhere: keep denying. A workflow document
+is still reachable in that state, so relaxing would waive a live guarantee rather than a dead
+one. What it changes is the MESSAGE: `zensu_emit_hook_session_deny` gained a fourth scope,
+`incompatible-runtime`, taking the two versions as positional arguments. FIVE gates can deny
+in that state: the four shell gates emit that scope, and `pre-reviewer-capability-gate.sh` —
+the `.*` matcher, where `isRecognizedInvocation` is false for every non-Bash tool — spells the
+same cause and remedy itself in JS, because the shell emitter is not reachable from it. A gate
+left on the generic text tells the user to start a fresh session while its sibling says the session can
+be repaired in place — two denies contradicting each other about the one bind failure that
+has an in-place remedy. The Stop hook is the single exception and RELEASES, because it cannot
+read the chain from an unbound session at all.
 
 `zensu_emit_hook_session_deny` must never assert "no record" as the cause: naming the
 wrong relaxable state sends a user whose worktree was deleted hunting for a record that is
@@ -699,6 +839,258 @@ host-neutral half is everything below the resolution: the single `<!-- zensu-aut
 marker, run-id equality, the owner and stage checks that precede every read, and the digest.
 A port that takes only the module gets the field decision; it still owns its own emission and
 its own exit ladder, which stay in `hooks/plan-approved-delegate.sh`.
+
+## Host-Refused Reviewer Spawn (`hooks/lib/reviewer-spawn-denial-v1.js`)
+
+The Stop chain-enforcer demands a `zensu:code-reviewer` spawn. When the HOST
+permission layer refuses that spawn, the call never executes — so no PreToolUse
+or PostToolUse hook can see it, and without this module the enforcer repeats an
+impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
+
+Five things are coupled and must move together:
+
+- **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  denied by the Claude Code auto mode classifier.` and `Permission for this action
+  has been denied.`). The build is exported and pinned against the module header,
+  so the constant cannot drift away from the provenance note beside it. They are
+  matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
+  that rewords them silently disables the diagnosis — re-verify against the
+  binary, never against memory. The `kind` values are re-encoded in exactly TWO
+  places outside the module: the `case` arms in `hooks/stop-chain-enforcer.sh`
+  that render cause and remedy, and the closed set `reviewerDenialRows` accepts
+  from a note. The hook's PROBE deliberately holds no third copy — it reads `kind`
+  as a field, so a marker added to the module reaches the doctor under its real
+  name with no shell edit, where the old closed set degraded it to the empty
+  string and made the doctor render `unclassified` for a refusal both sides could
+  already name. Adding a marker still means adding a remedy arm; without one the
+  refusal renders unclassified, which is a degraded message rather than a wrong
+  one, because the unknown arm is the safe arm. Reading the field is safe only
+  while the value stays a `case` SELECTOR: interpolate `REVIEWER_DENIAL_KIND` into
+  the reason string and module output becomes operator-visible text.
+- **The CLI's one output line is a parsed contract**, not a display string:
+  `status=<s> kind=<k> tool=<n> spawns=<n> denials=<n>`. The probe matches
+  `status=` in first position, and reads `denials` with `${probe##* denials=}`,
+  which requires THAT field to stay last. `kind` is position-independent by
+  construction. Separators stay load-bearing throughout: every field is anchored
+  on a leading space. The exact-line assertion in
+  `tests/structure/reviewer-spawn-denial-v1.test.js` is the pin.
+- **The sidecar name is re-encoded in the doctor renderer.** The hook writes
+  `.zensu/state/reviewer-spawn-denied-<scv1 session key>.json`;
+  `reviewerDenialRows` in `hooks/lib/zensu-doctor-report.js` matches
+  `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$`. Rename one and doctor goes
+  quiet with everything still green. T25 is the only check that drives both sides
+  end to end.
+- **The unit suite needs a driver.** `tests/run-all.sh` discovers only
+  `tests/structure/test-*.sh`, so `tests/structure/reviewer-spawn-denial-v1.test.js`
+  is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which asserts a
+  case-count floor because exit 0 also accepts a file registering zero cases). A new
+  `*.test.js` with no driver is never executed by the tree runner. That driver
+  charges the unit suite's runtime to this shard's Windows budget
+  (`tests/profiles/windows-ci.v1.json`, `stop-enforcer-self-review-routing`), where
+  a `TIMED_OUT` means the tail of the file never ran. The driver therefore runs
+  FIRST in that file, before any scenario: it needs only `PLUGIN_DIR` and
+  `STATE_DIR`, and at the tail a timeout cost the whole unit suite — the only
+  coverage the scanner's own properties have anywhere.
+- **The note is only this plugin's word when a session backs it.** `reviewerDenialRows`
+  requires `tdd-phase-<same key>.json` beside the note before counting it. The state
+  directory is writable from inside the session, so a note judged purely on its own
+  contents would let anything able to write there mint a row telling the user to widen
+  `permissions.allow` for the very spawn it wants. Change the workflow-document name and
+  the binding silently stops matching; `P1qq` is the pin.
+
+**The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
+Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
+at **985846 ms** and **1274496 ms** — a 29% spread on the same GitHub runner class, so a
+single sample here says nothing about headroom. Budget against the HIGH figure: at
+`timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
+its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
+was killed by it, which is exactly the failure this range exists to prevent.
+
+**The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
+`profileTimeoutMs` is 1800000 and every profile is pinned to that same value
+(`windows-ci-contract.test.js`), which is itself pinned against the job's
+`timeout-minutes: 35`. A suite therefore never receives its configured `timeoutMs` — it
+receives `profileTimeoutMs` MINUS everything its shard already spent. When
+`autopilot-state-machine` (554832 ms) still shared this shard, the routing suite started
+with 1138363 ms and died there while its own cap read 1200000 ms, so raising the cap
+alone would have changed nothing. Do NOT read a suite's `timeoutMs` as its deadline;
+read the shard's remaining budget. Note also that summing a shard's `timeoutMs` values
+and comparing that to `profileTimeoutMs` proves nothing — EVERY shard exceeds it by
+design, because the per-suite values are individual caps and not a shared budget.
+
+**Three conditions decide a refusal, and no one of them is sufficient.** (1) the
+`tool_result` is keyed by `tool_use_id` to an `Agent`/`Task` call whose
+`subagent_type` is the reviewer; (2) the host's own `is_error === true`; (3) the
+result text STARTS with a marker. Keying alone was the original design and it was
+wrong: for an `Agent` call the tool_result body IS the subagent's returned message,
+so a reviewer that merely quotes a denial literal — reviewing this module, for
+instance — was read as a refusal and the chain was abandoned with a real review in
+hand. **It is a diagnostic, never a gate:** an unreadable transcript, an absent
+`transcript_path`, or a missing module must leave every existing routing decision
+byte-identical, which is what T19 pins.
+
+**The only terminus the denial branch teaches is the zero-change one.** In its
+STANDALONE spelling that command verifies its own claim and refuses while any file
+is changed, so a chain with real changes cannot be closed there — that would claim a
+review that never ran, and the branch says so. The Autopilot-BOUND spelling carries
+`--outcome no-changes` into the durable receipt and performs no worktree check at
+all; that is pre-existing in `zensu-log.sh` and is restated as a known gap below,
+because this branch is what promotes the command to the only exit on offer. It also does NOT disclose the Stop cap count:
+a number plus "stop acting" is a wait-it-out recipe. Do not "fix" a wedge here by
+teaching an unqualified `--chain-done`.
+
+**The note must never outlive the chain it describes.** Every path that releases
+Stop without routing the inner chain retires it, because after such a release this
+session's Stop never reaches the routing branches again and nothing else can remove
+a note keyed to its session: the three terminal early exits (no active session,
+implementation not complete, chain closed), both inner-guard escapes
+(`ZENSU_CHAIN=off`, `hooks.chainEnforcer=false`), every release in the Autopilot
+escape branch, and the BLOCKED-outer release that owns the current inner
+generation — plus the cap path once the chain has converged, and the writing path
+itself on a `clear` verdict. Treat that as the rule, not the list: a NEW release
+path added above the routing branches needs the same call. T23/T29/T30/T31/T32 pin
+the ones reachable from the routing suite. The Autopilot-escape sites need a
+durable run, which that suite never builds, so their pins live in
+`tests/structure/test-autopilot-stop-enforcer.sh` instead: S14 covers the
+terminal-stage escape and S15 the audited one, which are different lines. The
+BLOCKED-outer release remains unpinned.
+An `errored` verdict retires NOTHING, deliberately: it means the module could not
+tell whether the spawn was refused, and clearing on it would delete a correct
+diagnosis whenever a retry died of something else.
+
+**A converged chain must never mint a note — and must not inherit one either.**
+The self-review branch retires any note first, because a refusal EARLIER in the
+same session is stale the moment a spawn succeeds, and that branch never consults
+the probe, so nothing below it would clear one. BOTH write sites enforce the
+minting half separately. The routing site is guarded by `REVIEWER_DENIAL_ROUTED`, a
+flag both arms of the routing ladder set and the self-review branch never does.
+Testing the probe's STATUS there instead would test "some branch happened to consult
+the probe" — true today only because one branch can, so a probe call added anywhere
+above for an unrelated message would silently start minting notes on the converged
+path with every check still green. The
+cap-release site sits ABOVE that branch and does consult the probe, so it is guarded
+by `tdd_code_review_done` by hand: a model that re-spawns the reviewer against the
+self-review directive and has THAT refused would otherwise leave doctor reporting
+"no review ran" for a chain that had already converged. A session that never Stops
+again still cannot clear its own note, so `reviewerDenialRows` ages one out against
+the same TTL `pending-review.json` uses — in BOTH directions, since a timestamp in
+the future yields a negative age that never crosses the bound. T23/T27/T29 and
+P1qg/P1qm/P1qn/P1qo are the pins.
+
+**The TTL suppresses the row; `reviewer_denial_notes_reap` removes the file.** The
+clear path sweeps two sets, and it is the ONE place a Stop unlinks a file owned by
+another session — which is why the name is matched against the same
+character-exact shape the writer asserts, never a prefix.
+
+- **Unbound** — no `tdd-phase-<key>.json` beside it. `reviewerDenialRows` already
+  refuses to count these, so removing one destroys no diagnosis anyone reads.
+- **Past the TTL** — read from the same config key the doctor ages against
+  (`zensu_pending_review_ttl_hours`), and `0` DISABLES it on both sides. This is
+  the set that matters: the unbound check alone is nearly inert, because
+  SessionStart writes a baseline workflow document for every session, so the
+  session whose note outlives it still HAS one. Without the age arm the sweep
+  would only ever catch a document somebody deleted by hand.
+
+An unreadable or unparseable note is deliberately NOT reaped. The doctor reports
+it as a note this plugin did not write and tells the user to delete it; unlinking
+it here would silently destroy a file this plugin does not own. The doctor stays
+read-only by contract — the reaping lives in the hook, under the same lease as
+every other write to that directory. T35 is the pin, and it plants a LIVE
+neighbour alongside the two dead files precisely because a sweep that deleted
+every note it could name would satisfy a one-sided check.
+
+**Anything spawned inside the lease must redirect stdin, not only its output.**
+The keeper is a bash coprocess and its control channel is a pipe; a child that
+inherits those descriptors holds the write end open after the parent closes it,
+so the keeper never sees EOF and the release hangs. The reaper's node process
+needs `</dev/null` for that reason alone. The failure does not look like a
+deadlock from the outside — it surfaces as unrelated checks failing two scenarios
+later, because the Stop that held the lease finished in a degraded state. Cheap to
+prevent, expensive to diagnose.
+
+**Both halves of the note run under the workflow document's external lease.** It
+was the only artifact in `.zensu/state/` written with none, and its two halves are
+an unlink and a rename, so a clear could remove a note a concurrent write had just
+published. `reviewer_note_locked` wraps both. The lease is an IMPROVEMENT, never a
+precondition — on failure the operation still runs unlocked, because failing to
+write the note must not change the Stop decision. That fallback is only sound while
+both callbacks ALWAYS return 0, which is what makes a non-zero result unambiguously
+a lease failure rather than a failed operation; give either one a meaningful exit
+status and a failed write starts running twice. The probe runs BEFORE the lease is
+taken: it reads a host-supplied transcript with no deadline above it, and holding
+this directory's lease across that read would make every other writer wait on it.
+The nested clear inside the writer therefore calls the UNLOCKED spelling — the
+lease is not reentrant.
+
+**The note path is anchored on `PROJECT_ROOT`, never on `TDD_STATE_DIR`.** That
+variable is a retired ambient root the repo pins as non-authoritative, and the only
+reader resolves the directory from `CLAUDE_PROJECT_DIR` — honoring an override would
+write the note where `/zensu:doctor` never looks and aim an unlink outside the
+session-bound directory.
+
+**Both sides of the note treat it as untrusted.** The session can write that
+directory, so the writer refuses a symlink, a non-file or a hard link and lands an
+`O_EXCL` temp file by rename; the reader decides shape before opening, caps the size,
+and counts a note as a refusal ONLY when it parses with `schemaVersion === 1`, a
+`kind` the writer itself issues, and a finite timestamp. Anything else is reported as
+a note this plugin did not write — never as a refusal, because a planted empty file
+would otherwise manufacture a row telling the user to widen permissions. The one
+deliberate exception: a plugin root that cannot load the module cannot vet the kind,
+and there the row still renders with the kind degraded to `unknown` (P1qf) — losing
+the label is acceptable, losing the finding is not.
+
+**The model-facing reason names only `~/.claude/settings.json`.** The project-local
+`.claude/settings.local.json` is a path the agent itself can write, and naming it
+beside the exact rule that grants the refused capability is an invitation that prose
+alone would have to talk it out of. The `/zensu:doctor` row withholds it for the SAME
+reason — that row is read by the model too, so "user-facing" does not make it safe.
+Only the docs carry the fuller form.
+
+**Operator-facing accounts that must move with the markers, the block reason, and
+the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
+refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` row
+in `docs/configuration.md`.
+
+**Port-relevant.** Every constant here is host-coupled: a port copies
+`DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
+(`message.content[]`, `tool_use`/`tool_result`, `tool_use_id`, `input.subagent_type`,
+`is_error`) into its own file and re-decides them against its harness — a port that
+takes only the module inherits Claude Code's literals and will silently never fire.
+The host half — which payload field carries the transcript, where the note lives, and
+the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
+`subagentType` so a host with a different reviewer name needs no fork of the walk.
+
+**Known gaps, accepted and deliberate:**
+
+- The verdict has no chain-generation lower bound. After a cap release and a fresh
+  `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
+  so the branch fires again before any new spawn is attempted. The reason text handles
+  it by sanctioning exactly ONE further attempt when the user says they applied the
+  rule; a generation bound (an arming ordinal in `options`) is the real fix and is not
+  implemented. **Why it is not a cheap fix, measured rather than assumed:** the
+  transcript DOES carry a per-entry `timestamp`, but the workflow document carries
+  nothing to compare it against. `_tdd_begin_session_critical` writes no history
+  entry, and `history[].ts` is optional and stays EMPTY in vanilla mode, where the
+  RED/GREEN FSM is never driven — so there is no reliable "when did this generation
+  arm" instant to bound the scan with. Supplying one means a new workflow-state
+  field, which under the runtime-lineage rule above is a schema change and therefore
+  a MINOR release. That price buys the removal of a misroute which is bounded to a
+  single Stop and self-corrects as soon as one spawn is attempted, which is exactly
+  what the reason text already asks for. Re-decide it when a schema change lands for
+  another reason and the field can travel with it.
+- The zero-change terminus this branch offers is worktree-verified only in its
+  STANDALONE spelling. An Autopilot-bound chain routes `--outcome no-changes` through
+  `autopilot_finish_tdd_attempt`, which never reads the worktree. That is pre-existing
+  — the untouched ordinary branch offers the same command — but this branch is the one
+  that tells the model the spawn cannot succeed, which promotes it to the only exit on
+  offer. Closing that gap belongs in `zensu-log.sh`, not here.
+- A denial note is keyed to its own session, so no other session can retire it
+  through the ordinary clear path. `reviewer_denial_notes_reap` is the deliberate
+  exception and the only one: any Stop in that project removes a note that is
+  unbound or past the TTL, which is what bounds a note whose session is gone for
+  good. The row it would have rendered was already suppressed by the same TTL, so
+  the sweep changes which files exist, never which findings are reported.
 
 ## Pull Request Workflow
 

@@ -65,3 +65,6 @@ out/
 # Internal
 OSS_READINESS_REPORT.md
 evals/tdd-manager/**
+
+# Transient fixtures from tests/structure/test-bash-source-write-gate.sh
+tests/.bswgate-tmp.*/
