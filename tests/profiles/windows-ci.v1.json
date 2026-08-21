@@ -204,6 +204,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "best-solution-first",
+          "runner": "bash",
+          "path": "tests/structure/test-best-solution-first.sh",
+          "args": [],
+          "timeoutMs": 300000
+        },
+        {
           "id": "deferred-claim-adoption",
           "runner": "bash",
           "path": "tests/structure/test-deferred-review-claim.sh",
@@ -339,13 +346,6 @@
       "platform": "win32",
       "profileTimeoutMs": 1800000,
       "suites": [
-        {
-          "id": "best-solution-first",
-          "runner": "bash",
-          "path": "tests/structure/test-best-solution-first.sh",
-          "args": [],
-          "timeoutMs": 300000
-        },
         {
           "id": "review-worker-evidence-lease",
           "runner": "bash",

@@ -481,17 +481,29 @@ fi
 # only asserts that its own file still satisfies the shape, never that the two agree.
 # Starts one line BELOW `const rulePath = …`, which is the only line the two legitimately
 # differ on — each names its own rule-file variable.
+#
+# MAX_FILE is compared SEPARATELY because it is declared above that start line, outside the
+# extracted body, and both per-file structural pins grep `const MAX_FILE =` without its
+# value. Without this second comparison one carrier's ceiling could be changed to any number
+# with every check in the tree still green — the exact one-sided divergence the body
+# comparison exists to catch, in the one constant the body comparison cannot see.
 extract_reader() {
   sed -n '/const pre = fs.lstatSync(rulePath);/,/^    }$/p' "$1" | grep -v '^[[:space:]]*//'
 }
+extract_max_file() {
+  grep -F 'const MAX_FILE =' "$1" | grep -v '^[[:space:]]*//' | head -1 | tr -d '[:space:]'
+}
 BSF_READER="$(extract_reader "$BEST_SOLUTION_HOOK")"
 EVD_READER="$(extract_reader "$EVIDENCE_DISCIPLINE_HOOK")"
+BSF_MAX_FILE="$(extract_max_file "$BEST_SOLUTION_HOOK")"
+EVD_MAX_FILE="$(extract_max_file "$EVIDENCE_DISCIPLINE_HOOK")"
 if [ -n "$BSF_READER" ] && [ -n "$EVD_READER" ] \
   && printf '%s\n' "$BSF_READER" | grep -qF 'fs.closeSync(fd)' \
-  && [ "$BSF_READER" = "$EVD_READER" ]; then
+  && [ "$BSF_READER" = "$EVD_READER" ] \
+  && [ -n "$BSF_MAX_FILE" ] && [ "$BSF_MAX_FILE" = "$EVD_MAX_FILE" ]; then
   check "both marker-block carriers share one hardened reader body" PASS
 else
-  check "the two marker-block carriers' hardened readers have diverged (bsf=${#BSF_READER}B evd=${#EVD_READER}B)" FAIL
+  check "the two marker-block carriers diverged (body bsf=${#BSF_READER}B evd=${#EVD_READER}B; MAX_FILE bsf=${BSF_MAX_FILE:-none} evd=${EVD_MAX_FILE:-none})" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
