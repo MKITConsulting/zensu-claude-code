@@ -4,14 +4,29 @@ set -u
 # Structure + functional test for the bypass ledger (visible gate opt-outs).
 # Pins: the state seam (tdd_add_bypass / tdd_record_bypass /
 # tdd_record_bypass_payload / tdd_bypasses / tdd_clear_bypasses, shape
-# enforcement at write AND read, entry cap, clear-on-reset, exports); the
+# enforcement at write AND read, bounded by the closed allowlist + per-name
+# dedup (no cap needed), clear-on-reset, exports, and tdd_bypasses' non-zero
+# return on a document that does not validate -- 1 for invalid, 2 for absent,
+# which makes it the ONE reader of the _tdd_read_validated_state family that
+# signals through its exit status rather than an echoed sentinel); the
 # zensu-log.sh verbs --bypass-note/--bypass-list (shape-validated,
-# active-scoped, dedup, `none` when empty, --tdd-begin reset); parser-owned
+# active-scoped, dedup, `none` ONLY on a validated read, UNREADABLE + exit 3
+# on a document that does not validate, --tdd-begin AND --tdd-reset both
+# reset and both echo the outgoing ledger); parser-owned
 # inline-bypass markers (__bypass__ lines from bash-source-write-parse.js and
 # the zensu-gate embedded parser, __bypass__: verdict from
 # secret-scan-decide.js); the recording call sites in all six hooks;
-# the rendering surfaces (delegate directive incl. unconditional `none`,
-# self-review template, autopilot PR-body line, README docs); the converge
+# the rendering surfaces (delegate directive: `none` ONLY on a validated read,
+# UNREADABLE otherwise, disclosed on the auto-fix-disabled branch too and never
+# duplicated when the terminal stage owns the render;
+# self-review template, autopilot PR-body line, README docs). OUT OF SCOPE,
+# stated so the pins are not read as proving more than they do: an authenticated
+# ledger. Validation is structural, so a document edited in place but left
+# schema-valid still reads `valid` and renders `none` -- P5y at :466 performs
+# exactly that read-modify-write and expects a valid result. Detecting that
+# needs a persisted authenticity signal, which is a workflow-state schema field
+# and therefore a breaking minor; deliberately not paid for here. Also pinned:
+# the converge
 # chain-end offer's runtime behavior on the selfReview-off delegate path (P5x1
 # emission, P5x3 suppression when no chain-end summary is emitted; bound-chain
 # suppression is pinned by P14b in test-post-review-self-review-handoff.sh,
@@ -170,15 +185,16 @@ else
 fi
 
 # P4 — rendering surfaces
-if grep -qF 'Gates bypassed during this session:' "$DELEGATE" && grep -qF 'tdd_bypasses' "$DELEGATE" && grep -qF '[ -z "$BYPASSES" ] && BYPASSES="none"' "$DELEGATE"; then
-  check "P4a delegate bakes the ledger unconditionally (none when clean)" PASS
+if grep -qF 'Gates bypassed during this session:' "$DELEGATE" && grep -qF 'tdd_bypasses' "$DELEGATE" && grep -qF '[ -z "$BYPASSES" ] && BYPASSES="none"' "$DELEGATE" && grep -qF 'BYPASSES="$ZENSU_BYPASS_UNREADABLE_TEXT"' "$DELEGATE" && grep -qF 'BYPASSES="$ZENSU_BYPASS_ABSENT_TEXT"' "$DELEGATE"; then
+  check "P4a delegate bakes the ledger unconditionally (none only on a validated read, UNREADABLE otherwise)" PASS
 else
-  check "P4a delegate bakes the ledger unconditionally (none when clean)" FAIL
+  check "P4a delegate bakes the ledger unconditionally (none only on a validated read, UNREADABLE otherwise)" FAIL
 fi
-if grep -qF -- '--bypass-list' "$SELF_REVIEW_MD" && grep -qF 'Gates bypassed during this session:' "$SELF_REVIEW_MD"; then
-  check "P4b self-review template renders the ledger line" PASS
+if grep -qF -- '--bypass-list' "$SELF_REVIEW_MD" && grep -qF 'Gates bypassed during this session:' "$SELF_REVIEW_MD" \
+  && grep -qF 'it read a valid workflow document that recorded no escape' "$SELF_REVIEW_MD" && grep -qF 'UNREADABLE' "$SELF_REVIEW_MD"; then
+  check "P4b self-review template renders the ledger line, and claims none only on a validated read" PASS
 else
-  check "P4b self-review template renders the ledger line" FAIL
+  check "P4b self-review template renders the ledger line, and claims none only on a validated read" FAIL
 fi
 if grep -qF 'Gates bypassed during build:' "$AUTOPILOT_MD" && grep -qF -- '--bypass-list' "$AUTOPILOT_MD" && grep -qF 'Gates bypassed (build union):' "$AUTOPILOT_MD"; then
   check "P4c autopilot PR body carries the durable build-level ledger line" PASS
@@ -278,7 +294,13 @@ if [ -n "$SBOX" ]; then
   start_session fx2
   run_log --tdd-begin --session fx2 >/dev/null 2>&1
   run_log --bypass-note ZENSU_TDD_GATE --session fx2 >/dev/null 2>&1
-  run_log --tdd-reset --session fx2 >/dev/null 2>&1
+  RESET_ECHO="$(run_log --tdd-reset --session fx2 2>/dev/null)"
+  case "$RESET_ECHO" in
+    *'previous-run bypasses (cleared now): ZENSU_TDD_GATE'*)
+      check "P5c3b --tdd-reset discloses the ledger it is about to clear, as --tdd-begin does" PASS ;;
+    *)
+      check "P5c3b --tdd-reset discloses the ledger it is about to clear (got: $RESET_ECHO)" FAIL ;;
+  esac
   RESET_L="$(run_log --bypass-list --session fx2 2>/dev/null)"
   if [ "$RESET_L" = "none" ]; then
     check "P5c3 --tdd-reset clears the ledger" PASS
@@ -482,10 +504,21 @@ if [ -n "$SBOX" ]; then
   run_log --bypass-note ZENSU_TDD_GATE --session kx >/dev/null 2>&1
   L13b="$(run_log --bypass-list --session kx 2>/dev/null)"
   KX_AFTER="$(shasum -a 256 "$SBOX/.zensu/state/tdd-phase-${KX_KEY}.json" | awk '{print $1}')"
-  if [ "$L13b" = "none" ] && [ "$KX_BEFORE" = "$KX_AFTER" ]; then
-    check "P5y2 malformed pre-seeded state fails closed without revision reset" PASS
+  case "$L13b" in
+    UNREADABLE*)
+      if [ "$KX_BEFORE" = "$KX_AFTER" ]; then
+        check "P5y2 malformed pre-seeded state reports UNREADABLE, never the clean none, without revision reset" PASS
+      else
+        check "P5y2 malformed pre-seeded state reports UNREADABLE but the revision was reset" FAIL
+      fi ;;
+    *)
+      check "P5y2 malformed pre-seeded state must not claim a clean ledger (got: $L13b)" FAIL ;;
+  esac
+  run_log --bypass-list --session kx >/dev/null 2>&1
+  if [ "$?" = 3 ]; then
+    check "P5y3 --bypass-list exits 3 on an unvalidatable document, distinct from the exit 2 identity path" PASS
   else
-    check "P5y2 malformed pre-seeded state fails closed (got: $L13b)" FAIL
+    check "P5y3 --bypass-list exits 3 on an unvalidatable document, distinct from the exit 2 identity path" FAIL
   fi
 
   DWSBOX="$SBOX/denyrepo"
@@ -582,7 +615,32 @@ if [ -n "$SBOX" ]; then
     *)
       check "P5x3 no chain-end summary emitted: the converge offer is suppressed with it" PASS ;;
   esac
-
+  printf '{"hooks":{"selfReview":false,"autoFix":false}}\n' > "$SBOX/config-nosr-noautofix.json"
+  start_session dx
+  DOUT4="$(review_payload dx | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-nosr-noautofix.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  case "$DOUT4" in
+    *'in the ## Open section'*)
+      check "P5x4 autoFix:false + selfReview:false discloses via the TRAILING variant (got the ## Open-anchored one, which this branch never renders)" FAIL ;;
+    *'Auto-fix is disabled'*'end your reply with the literal line: Gates bypassed during this session: ZENSU_TDD_GATE'*)
+      check "P5x4 autoFix:false + selfReview:false still discloses the ledger, via the anchor-free TRAILING variant" PASS ;;
+    *'Auto-fix is disabled'*'Gates bypassed during this session: ZENSU_TDD_GATE'*)
+      check "P5x4 autoFix:false + selfReview:false discloses but not through BYPASS_DIRECTIVE_TRAILING" FAIL ;;
+    *'Auto-fix is disabled'*)
+      check "P5x4 autoFix:false + selfReview:false still discloses the ledger (disabled branch reached, ledger absent)" FAIL ;;
+    *)
+      check "P5x4 autoFix:false + selfReview:false still discloses the ledger (disabled branch not reached)" FAIL ;;
+  esac
+  printf '{"hooks":{"autoFix":false}}\n' > "$SBOX/config-noautofix-sr.json"
+  start_session dy
+  DOUT5="$(review_payload dy | TDD_STATE_DIR="$SBOX/state" CLAUDE_PROJECT_DIR="$SBOX" ZENSU_CONFIG="$SBOX/config-noautofix-sr.json" ZENSU_TDD_GATE= ZENSU_BASH_WRITE_GATE= ZENSU_MCP_GATE= ZENSU_SECRET_SCAN= ZENSU_CHAIN= ZENSU_TEST_WITNESS= bash "$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh" 2>/dev/null)"
+  case "$DOUT5" in
+    *'Gates bypassed during this session:'*)
+      check "P5x5 autoFix:false with selfReview ON does NOT duplicate the ledger the terminal stage renders" FAIL ;;
+    *'Auto-fix is disabled'*)
+      check "P5x5 autoFix:false with selfReview ON does NOT duplicate the ledger the terminal stage renders" PASS ;;
+    *)
+      check "P5x5 autoFix:false with selfReview ON: the disabled branch was never reached, so the absent ledger proves nothing" FAIL ;;
+  esac
   rm -rf "$SBOX" 2>/dev/null
 else
   check "P5 sandbox creation (mktemp)" FAIL

@@ -184,7 +184,17 @@ case "${1:-}" in
       exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    bypass_list="$(tdd_bypasses "$(tdd_state_file "$session_val")")"
+    bypass_rc=0
+    bypass_list="$(tdd_bypasses "$(tdd_state_file "$session_val")")" || bypass_rc=$?
+    if [ "$bypass_rc" -ne 0 ]; then
+      if [ "$bypass_rc" -eq 2 ]; then
+        echo "$ZENSU_BYPASS_ABSENT_TEXT"
+      else
+        echo "$ZENSU_BYPASS_UNREADABLE_TEXT"
+      fi
+      zensu_state_failure_hint --bypass-list "$session_val" >&2
+      exit 3
+    fi
     if [ -n "$bypass_list" ]; then
       echo "$bypass_list"
     else
@@ -474,7 +484,9 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-begin: current-session workflow storage is unsafe" >&2
           exit 1
         }
-        outgoing_bypasses="$(tdd_bypasses "$begin_state_file" 2>/dev/null)"
+        outgoing_rc=0
+        outgoing_bypasses="$(tdd_bypasses "$begin_state_file" 2>/dev/null)" || outgoing_rc=$?
+        [ "$outgoing_rc" -eq 1 ] && outgoing_bypasses="$ZENSU_BYPASS_UNREADABLE_TEXT"
         # Mode precedence, resolved ONCE here and then frozen into this chain
         # generation's `vanilla` flag:
         #   1. the session override /zensu:tdd-mode recorded for this session
@@ -838,6 +850,10 @@ case "${1:-}" in
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
       --tdd-reset)
         reset_state="$(tdd_state_file "$session_val")"
+        reset_rc=0
+        reset_bypasses="$(tdd_bypasses "$reset_state" 2>/dev/null)" || reset_rc=$?
+        [ "$reset_rc" -eq 1 ] && reset_bypasses="$ZENSU_BYPASS_UNREADABLE_TEXT"
+        [ -n "$reset_bypasses" ] && echo "previous-run bypasses (cleared now): $reset_bypasses"
         reset_ctx='{}'
         if [ -e "$reset_state" ] || [ -L "$reset_state" ]; then
           reset_ctx="$(tdd_autopilot_context "$reset_state" "$session_val" 2>/dev/null)" || {

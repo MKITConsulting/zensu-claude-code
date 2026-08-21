@@ -618,6 +618,38 @@ silently governs whether the shipped cleanup passes. Do not "fix" a deny there b
 writing `ZENSU_BASH_WRITE_GATE=off` into a skill: a
 shipped escape prefix teaches the hatch and lands a self-inflicted bypass-ledger entry.
 
+## Bypass Ledger Read Contract (`tdd_bypasses`)
+
+`tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
+that signals an unreadable document through its EXIT STATUS rather than an echoed
+sentinel. Its siblings — `tdd_state_status`, `tdd_get_flag`, `zensu_workflow_allows`,
+`tdd_phase`, `tdd_step`, `tdd_has_red_fail` — all stay total and `return 0` with a
+value (`invalid`, `false`, `INVALID_STATE`, …). The divergence is deliberate: this
+reader's value is rendered VERBATIM into the user-facing
+`Gates bypassed during this session:` line, so a sentinel would be printed as if it
+were a gate name. It returns **1** for a document that does not validate and **2**
+for one that is absent, because a clean ENOENT at `--tdd-begin` is the ordinary
+first-arming case and must not be reported as damage.
+
+Every caller must therefore decide what a non-zero status means for it, and they do
+NOT all agree: `--bypass-list` renders `ZENSU_BYPASS_UNREADABLE_TEXT` /
+`ZENSU_BYPASS_ABSENT_TEXT` and exits 3 (distinct from its pre-existing exit 2 for an
+unavailable session identity); `--tdd-begin`, `--tdd-reset` and the
+`ZENSU_CHAIN=off` Stop release treat only `1` as unreadable and let `2` mean an
+empty ledger; `tdd_add_bypass`'s own dedupe consumes the value inside a `case` word
+and discards the status by design. Both message constants live beside
+`ZENSU_BYPASS_GATE_ALLOWLIST` in `hooks/lib/zensu-tdd-phase.sh` — never hand-copy
+either sentence into a consumer.
+
+**What the ledger proves is narrower than it reads.** Validation is STRUCTURAL:
+`validateWorkflowState` checks shape plus a self-derivable `session_id_hash`, and the
+`bypasses` array carries no MAC and no monotone counter. A document edited in place
+but left schema-valid still reads `valid` and renders `none` — `test-bypass-ledger.sh`
+P5y performs exactly that read-modify-write and expects a valid result. Closing that
+needs a persisted authenticity signal, which is a workflow-state schema field and
+therefore a breaking minor under the Runtime Lineage rule; it is deliberately not
+paid for. Say "what a readable document recorded", never "no gate was escaped".
+
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**

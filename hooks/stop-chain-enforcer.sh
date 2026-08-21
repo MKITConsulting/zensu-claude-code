@@ -790,6 +790,11 @@ zensu_hook_enabled chainEnforcer || INNER_ENABLED=false
 # could ever remove it and /zensu:doctor would warn about it forever.
 if [ "${ZENSU_CHAIN:-}" = "off" ]; then
   tdd_record_bypass "$SESSION_ID" ZENSU_CHAIN 2>/dev/null || true
+  chain_off_rc=0
+  chain_off_bypasses="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)" || chain_off_rc=$?
+  [ "$chain_off_rc" -eq 1 ] && chain_off_bypasses="$ZENSU_BYPASS_UNREADABLE_TEXT"
+  [ -n "$chain_off_bypasses" ] \
+    && echo "Gates bypassed during this session: $chain_off_bypasses" >&2
   reviewer_denial_note_clear
   outer_finish
   exit 0

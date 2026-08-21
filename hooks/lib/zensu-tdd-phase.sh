@@ -2664,6 +2664,8 @@ tdd_has_red_fail() {
 # inside their own transaction instead.
 
 ZENSU_BYPASS_GATE_ALLOWLIST="ZENSU_TDD_GATE ZENSU_BASH_WRITE_GATE ZENSU_MCP_GATE ZENSU_SECRET_SCAN ZENSU_CHAIN ZENSU_TEST_WITNESS"
+ZENSU_BYPASS_UNREADABLE_TEXT="UNREADABLE — workflow state could not be validated; this is NOT a clean ledger"
+ZENSU_BYPASS_ABSENT_TEXT="UNREADABLE — no workflow document exists for this session; this is NOT a clean ledger"
 
 _tdd_bypass_shape_ok() {
   case "${1:-}" in
@@ -2790,7 +2792,8 @@ tdd_bypasses() {
   local result status value
   result="$(_tdd_read_validated_state "$state_file" bypasses "$ZENSU_BYPASS_GATE_ALLOWLIST")"
   status="${result%%$'\n'*}"
-  [ "$status" = "valid" ] || { echo ""; return 0; }
+  [ "$status" = "missing" ] && { echo ""; return 2; }
+  [ "$status" = "valid" ] || { echo ""; return 1; }
   value="${result#*$'\n'}"
   [ "$value" = "$result" ] && value=""
   echo "$value"

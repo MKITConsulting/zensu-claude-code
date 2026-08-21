@@ -130,8 +130,14 @@ standalone handoff run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --claimed-review-ticket "<review-ticket>"`.
 For an Autopilot-bound handoff run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID" --claimed-review-ticket "<review-ticket>" --outcome no-changes`.
-State "No changes — self-review skipped" only after the command succeeds, then
-stop. Every command uses Claude's natively rendered `CLAUDE_PLUGIN_ROOT`
+State "No changes — self-review skipped" only after the command succeeds. This
+branch is a chain terminus and carries the same disclosure duty as the Final
+report, so before stopping also run the `--bypass-list` command from the `## Open`
+section below and render its output as
+`Gates bypassed during this session: <output>`, under the same rules stated
+there. A gate escape needs no file change to be recorded — `ZENSU_TEST_WITNESS`
+and `ZENSU_MCP_GATE` are both reachable without one — so a zero-change chain is
+exactly where an undisclosed escape would otherwise hide. Then stop. Every command uses Claude's natively rendered `CLAUDE_PLUGIN_ROOT`
 directly inside a quoted shell parameter; never paste its value into shell source.
 
 ## Phase 2: Analyze
@@ -304,8 +310,24 @@ is always a row, so `Nothing open.` can never stand above one.
 Always render the bypass-ledger audit line next, in both cases — whether or not
 the table has rows: run
 `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --bypass-list` and render its output as
-`Gates bypassed during this session: <output>` (the verb echoes `none` when the
-ledger is empty).
+`Gates bypassed during this session: <output>`. The verb echoes `none` only when
+it read a valid workflow document that recorded no escape; that is the ONLY
+spelling that may claim a clean ledger. On exit 3 it prints an `UNREADABLE — …`
+line on stdout, and that line is carried verbatim under the same ordered `\` then
+`|` escaping rule as every other carried line. On any OTHER non-zero exit —
+notably exit 2, session identity unavailable — stdout is EMPTY and the diagnosis
+went to stderr; render `UNREADABLE — <the stderr line>` there, never an empty
+value and never `none`. Never substitute `none` for a value you did not read: an
+unread ledger is not a clean ledger.
+
+This line covers the surfaces this stage renders. It is NOT a session-wide
+guarantee, and three paths are known to escape it: `--tdd-reset` and
+`--tdd-begin` clear the ledger (both now echo the outgoing entries, so the trace
+survives in the run log rather than here); a workflow document that is edited but
+still schema-valid renders `none`, because validation is structural and the
+`bypasses` array carries no authenticity signal; and a `ZENSU_CHAIN=off` release
+ends the session before any renderer runs. Do not describe the ledger as proof
+that no gate was escaped — it is proof only of what a readable document recorded.
 
 Then, for a STANDALONE handoff only, when the session plan carries a
 `## Requirements` table, close `## Open` with ONE more line, exactly:
