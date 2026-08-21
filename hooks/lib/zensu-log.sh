@@ -602,18 +602,44 @@ case "${1:-}" in
         # bypass-ledger records below conjoin on this count too: with both switches
         # off the old condition left the count at 0 and silently recorded NEITHER
         # escape, while both docs promise the recording unconditionally.
-        # The git environment is SCRUBBED: `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`
-        # override `-C` discovery, so a one-token prefix on the model's own command
-        # would otherwise leave the count at 0 — disarming BOTH gates and, because
-        # the two ledger records conjoin on the same count, suppressing both bypass
-        # entries with nothing recorded anywhere. The identical unscrubbed shape
-        # still ships for the `--chain-done` zero-change terminus below; that one is
-        # knowingly left alone rather than changed in passing.
+        # The git environment is SCRUBBED. Several variables override `-C` discovery
+        # or empty the untracked listing, so a one-token prefix on the model's own
+        # command would otherwise leave the count at 0 — disarming BOTH gates and,
+        # because the two ledger records conjoin on the same count, suppressing both
+        # bypass entries with nothing recorded anywhere.
+        #
+        # State the strength honestly: this raises the cost of a CARELESS or
+        # inherited prefix, it is not a defence against a determined session. The
+        # same session can write `ZENSU_REQUIREMENTS_GATE=off`, which is documented,
+        # named in the refusal text it just read, and costs it only a ledger line.
+        # The list is also a DENYLIST over an open-ended namespace: every variable
+        # git grows needs an entry here and nothing would notice a gap. It covers
+        # discovery (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+        # `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`), the object
+        # database (`GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+        # `GIT_NAMESPACE`) — `rev-parse --verify HEAD` needs the object FOUND, not
+        # just the ref resolved — and config injection (`GIT_CONFIG`,
+        # `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, and `GIT_CONFIG_COUNT`, which is
+        # the single lever for the numbered `GIT_CONFIG_KEY_n`/`VALUE_n` pairs, so
+        # unsetting it neutralises them without enumerating any). `core.excludesFile`
+        # alone empties `ls-files --others --exclude-standard`.
+        #
+        # The identical unscrubbed shape still ships for the `--chain-done`
+        # zero-change terminus below; that one is knowingly left alone rather than
+        # changed in passing, and it is the higher-consequence half — that terminus
+        # consumes no review ticket.
         # Builtins in a subshell, not `env`: `env` is an external binary, and if it
         # cannot be resolved the `if` below is false, the count stays 0, and every
         # consumer conjoins on it — disarming both gates AND suppressing both ledger
         # records, which is precisely the outcome this wrapper exists to prevent.
-        _tc_git() { ( unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE; git "$@" ); }
+        _tc_git() { (
+          unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_COMMON_DIR \
+                GIT_OBJECT_DIRECTORY GIT_ALTERNATE_OBJECT_DIRECTORIES \
+                GIT_CEILING_DIRECTORIES GIT_DISCOVERY_ACROSS_FILESYSTEM \
+                GIT_NAMESPACE GIT_CONFIG GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM \
+                GIT_CONFIG_COUNT
+          git "$@"
+        ); }
         if _tc_git -C "$_tc_root" rev-parse --verify --quiet HEAD >/dev/null 2>&1; then
           # `grep -c .` already prints 0 on no match and then exits 1, so an `|| echo 0`
           # fallback would append a SECOND line and turn the count into "0\n0" — which
@@ -631,13 +657,30 @@ case "${1:-}" in
           tdd_record_bypass "$session_val" ZENSU_EDIT_LANDING_GATE >/dev/null 2>&1 || true
         fi
         if [ "${ZENSU_EDIT_LANDING_GATE:-on}" != "off" ] && [ "${_tc_changes:-0}" -gt 0 ]; then
-          if [ ! -f "$_tc_receipt" ]; then
-            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session. A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
+          # `! -L` as well as `-f`: `-f` FOLLOWS a symlink, and the derived-channel
+          # reader below refuses one outright (`lstatSync`). Without this the two
+          # halves disagree about what a receipt is — a symlink satisfies the
+          # precondition here and then derives nothing, which routes an explicit
+          # `--plan` into a refusal whose named cause is the audit rather than the
+          # receipt. This is a shape check, not an authenticity check: the receipt
+          # is a file the session can write, so it bounds accidents, not intent.
+          if [ ! -f "$_tc_receipt" ] || [ -L "$_tc_receipt" ]; then
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — no edit-landing receipt for this session (a symlink at that path is refused rather than followed, so it does not count as one). A claimed edit that never landed leaves no diff, so no reviewer would ever see it. Run the Phase 6 step 5b audit first:" >&2
             echo "  bash \"\${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-edit-landing.sh\" --log <run-log> --project \"\${CLAUDE_PROJECT_DIR:-.}\" --session \"<session id>\"" >&2
             echo "Set ZENSU_EDIT_LANDING_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
           fi
         fi
+        # Whether a receipt is EXPECTED at all is decided once, here, and named.
+        # The requirements gate below needs the answer — with no receipt there is no
+        # run-log stem to cross-check an explicit --plan against — and reading the
+        # sibling gate's switch from inside that branch made the gate look as though
+        # it inherits the other's configuration. It does not: the scope of each gate
+        # is its own, and this is the single, named consequence of the sibling being
+        # switched off. One question ("is there a receipt to anchor against?"),
+        # asked in one place.
+        _tc_receipt_expected=1
+        [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ] && _tc_receipt_expected=0
         # Requirements-table gate. /zensu:converge anchors its flow-back audit on
         # the plan's `## Requirements` table. Without a usable one it takes its
         # legacy stop and reports nothing — and /zensu:autopilot's CONVERGE stage,
@@ -676,9 +719,14 @@ case "${1:-}" in
             # plan and the log are created from one {SESSION_TS}_tdd-{slug} stem,
             # so .zensu/logs/<stem>.log names .zensu/plans/<stem>.md. Deriving
             # through the receipt — rather than taking the newest plan by mtime,
-            # as /zensu:converge does — is what anchors this gate to THIS session:
-            # a stale plan left in the project by an earlier session can never
-            # satisfy it.
+            # as /zensu:converge does — is what anchors this gate to THIS session,
+            # AS STRONGLY AS THE RECEIPT CAN BE TRUSTED. A stale plan cannot satisfy
+            # the gate without also rewriting the receipt, and the receipt is an
+            # ordinary file in the project tree that the session can rewrite through
+            # a Bash redirect. So this is anchoring, not enforcement — the same
+            # wording docs/gates.md uses, and the honest one: it buys nothing an
+            # attacker wants anyway, because a model that wanted to defeat this gate
+            # would simply fill the table.
             # The receipt is a file inside the project, so the session can write
             # it: the reader binds the writer's `schema` discriminator rather than
             # accepting any object with a `log` string, and the value is judged
@@ -699,7 +747,20 @@ case "${1:-}" in
                 const st = fs.lstatSync(process.env.ZENSU_RQ_RECEIPT);
                 if (st.isSymbolicLink() || !st.isFile() || st.size > 4 * 1024 * 1024) process.exit(0);
                 const j = JSON.parse(fs.readFileSync(process.env.ZENSU_RQ_RECEIPT, "utf8"));
-                if (!j || j.schema !== "edit-landing-v1" || typeof j.log !== "string" || j.log === "") process.exit(0);
+                // TWO schema versions are accepted, and the discriminator is what
+                // tells them apart rather than the value shape. `edit-landing-v1`
+                // persisted `log` as the caller spelled `--log`; `edit-landing-v2`
+                // persists it project-relative. Holding one schema name over two
+                // value domains would leave this reader guessing from a leading
+                // slash — and a plugin upgrade landing between the step 5b audit and
+                // `--tdd-complete` is explicitly SERVED by the runtime-lineage rule,
+                // so a v1 receipt read by this code is a supported state, not a
+                // corruption. Both are resolved the same way below and judged by
+                // CONTAINMENT, never by spelling.
+                const rqSchemaVersion = !j ? 0
+                  : j.schema === "edit-landing-v2" ? 2
+                  : j.schema === "edit-landing-v1" ? 1 : 0;
+                if (!rqSchemaVersion || typeof j.log !== "string" || j.log === "") process.exit(0);
                 // The receipt is a gate input the session can write, so it gets the
                 // same treatment the plan reader gets: no symlink, regular file
                 // only, and a bounded read.
@@ -722,12 +783,17 @@ case "${1:-}" in
                 // path when the two sides are on different drives, so the `..`
                 // prefix test alone would pass a logs dir on another drive.
                 if (relLogs === ".." || relLogs.startsWith(".." + path.sep) || path.isAbsolute(relLogs)) process.exit(0);
-                // A project-relative `log` (what the writer now persists) needs no
-                // namespace translation at all. An ABSOLUTE value is legacy or
-                // out-of-project: it is only usable when it already matches the
-                // namespace of this process, so a leading-slash value is rejected rather
-                // than spliced under the current drive by win32 path.resolve.
-                if (path.isAbsolute(j.log) && path.win32 === path && j.log.startsWith("/")) process.exit(0);
+                // A project-relative `log` (what a v2 writer persists) needs no
+                // namespace translation at all. An ABSOLUTE value is a v1 receipt or
+                // an out-of-project log, and it is judged by where it RESOLVES, not
+                // by how it is spelled. The previous rule rejected any leading-slash
+                // value on win32 outright; that turned a perfectly readable legacy
+                // receipt into no-derivation, which — because the shipped skill
+                // always passes --plan — became a hard `exit 1` rather than a
+                // warning. A foreign-namespace value still fails, but it fails at the
+                // containment test below, which is the check that can actually tell:
+                // win32 path.resolve splices a POSIX `/d/a/...` under the current
+                // drive, and the spliced result is not inside logsDir.
                 const raw = path.resolve(root, j.log);
                 const resolved = path.join(canon(path.dirname(raw)), path.basename(raw));
                 const rel = path.relative(logsDir, resolved);
@@ -810,10 +876,26 @@ case "${1:-}" in
             # invocation, which always passes --plan. The bound is dropped, not
             # faked: the weaker state is disclosed on stderr instead.
             if [ -z "$_rq_reason" ] && [ -z "$_rq_derived" ] \
-               && [ "${ZENSU_EDIT_LANDING_GATE:-on}" = "off" ]; then
+               && [ "$_tc_receipt_expected" -eq 0 ]; then
               echo "zensu-log.sh --tdd-complete: REQUIREMENTS GATE STEM UNCHECKED — ZENSU_EDIT_LANDING_GATE=off leaves no receipt, so the --plan path could not be cross-checked against this session's run log. Only the plans-directory bound applies." >&2
             elif [ -z "$_rq_reason" ] && [ -z "$_rq_derived" ]; then
-              _rq_reason="no run-log stem could be derived for this session, so an explicit --plan cannot be cross-checked against it. Run the Phase 6 step 5b edit-landing audit first (it writes the receipt this check reads), or omit --plan"
+              # Two causes reach here and they need different remedies, so the
+              # message is split on whether a receipt is actually on disk. It also
+              # must NOT end with "or omit --plan": in exactly this state dropping
+              # the flag does not refuse at all — `_rq_plan` stays empty, the judge
+              # branch below is skipped, and the run exits through
+              # REQUIREMENTS GATE UNRESOLVED, which does not block. The one branch
+              # that fails closed would have been naming the spelling that fails
+              # open, to the model that is reading it.
+              # Both branches keep the same leading clause on purpose — it is the
+              # state, and it is what downstream readers match on — and differ only
+              # in the REMEDY, which is the part that was wrong before: telling an
+              # author to run an audit that has already run sends them nowhere.
+              if [ -f "$_tc_receipt" ]; then
+                _rq_reason="no run-log stem could be derived for this session: the edit-landing receipt is present, but the run log it records does not resolve inside ${_tc_root}/.zensu/logs/, so an explicit --plan cannot be cross-checked against it. Re-run the Phase 6 step 5b edit-landing audit for THIS generation so the receipt names this generation's log"
+              else
+                _rq_reason="no run-log stem could be derived for this session, so an explicit --plan cannot be cross-checked against it. Run the Phase 6 step 5b edit-landing audit first — it writes the receipt this check reads"
+              fi
             fi
           fi
           # An explicit --plan is judged even when it names nothing: the caller
@@ -822,7 +904,12 @@ case "${1:-}" in
           # there is different — nothing was asserted, so there is nothing to hold
           # against the chain.
           if [ -n "$_rq_reason" ]; then
-            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — ${_rq_reason}. The requirements-table gate judges this session's own plan; pass the plan this chain wrote under .zensu/plans/, or omit --plan and let it be derived from the run log." >&2
+            # The generic tail deliberately does NOT offer "omit --plan". For the
+            # no-derivable-stem reason above, omitting the flag is the spelling that
+            # reaches the non-blocking UNRESOLVED arm, so advertising it here turns
+            # this refusal into a documented way around itself. Pointing at the plan
+            # is the remedy that keeps the gate doing its job.
+            echo "zensu-log.sh --tdd-complete: refusing to mark implementation complete — ${_rq_reason}. The requirements-table gate judges this session's own plan; pass the plan this chain wrote under ${_tc_root}/.zensu/plans/." >&2
             echo "Set ZENSU_REQUIREMENTS_GATE=off only for a session the user has explicitly exempted." >&2
             exit 1
           fi
@@ -831,8 +918,18 @@ case "${1:-}" in
             if [ ! -f "$_rq_lib" ] || [ -L "$_rq_lib" ] || [ ! -r "$_rq_lib" ]; then
               # A load fault is NOT a verdict about the plan. Reporting it as one
               # would send the user editing a table that was never read.
+              #
+              # This branch deliberately does NOT name the escape hatch, unlike the
+              # three refusal sites around it. A missing, unreadable or symlinked
+              # gate library is a plugin-INTEGRITY fault: something happened to the
+              # installation that nobody has explained, and the honest instruction is
+              # stop and repair, not skip. The other sites can at least argue the
+              # user might legitimately exempt a session whose plan is genuinely
+              # unjudgeable; this one cannot, and it is the model that reads the
+              # line. An operator who truly must proceed can still set the variable —
+              # they just should not learn it from the integrity failure itself.
               echo "zensu-log.sh --tdd-complete: the requirements-table check could not run — its library is missing, unreadable, or a symlink: ${_rq_lib}. The plan was NOT judged." >&2
-              echo "Reinstall the plugin, or set ZENSU_REQUIREMENTS_GATE=off for a session the user has explicitly exempted." >&2
+              echo "Reinstall the plugin and run /zensu:doctor; the executing installation is not intact." >&2
               exit 1
             fi
             _rq_verdict="$(bash "$_rq_lib" --plan "$_rq_plan" 2>&1)"

@@ -86,7 +86,22 @@ CLEAN_COUNT="$( { git -C "$CLEAN_FIX" diff --name-only HEAD 2>/dev/null
 rm -rf "$CLEAN_FIX"
 [ "$CLEAN_COUNT" -eq 0 ]
 check "W1 the scoping predicate reports zero changes for a clean project (gate out of scope)" "$(verdict $?)"
-awk '/--tdd-complete\)/,/^        ;;/' "$LOG" | grep -qF 'ls-files --others --exclude-standard'
+# Every source pin below reads the same awk range, and that range is now anchored on
+# an EIGHT-SPACE `;;`. The old `/;;/` terminator could never fail to match, so the
+# window was always bounded; a precise terminator can fail — and in awk a range whose
+# end pattern never matches runs to EOF. The window would then swallow `--chain-done`,
+# which carries the IDENTICAL strings by design, so W2 and S2 would match the wrong
+# copy and pass while proving nothing. Bound the window ONCE, here, before anything
+# relies on it. The discriminator is a string that lives only in `--chain-done`
+# (pinned by S5 further down): finding it inside the window proves the range overran.
+TC_WIN() { awk '/--tdd-complete\)/,/^        ;;/' "$LOG"; }
+TC_WIN_LINES="$(TC_WIN | grep -c . 2>/dev/null || true)"
+LOG_LINES="$(grep -c . "$LOG" 2>/dev/null || true)"
+[ "${TC_WIN_LINES:-0}" -gt 0 ] \
+  && [ "${TC_WIN_LINES:-0}" -lt "${LOG_LINES:-0}" ] \
+  && ! TC_WIN | grep -qF 'refusing the unqualified standalone terminus'
+check "W0 the --tdd-complete awk window is non-empty and still bounded (end anchor matches)" "$(verdict $?)"
+TC_WIN | grep -qF 'ls-files --others --exclude-standard'
 check "W2 the gate scopes itself on the same change set the terminus uses" "$(verdict $?)"
 # W1 above replicates the predicate WITHOUT a fallback, so it cannot see the shape that
 # actually broke: `grep -c .` prints 0 and then exits 1 on no match, so pairing it with an

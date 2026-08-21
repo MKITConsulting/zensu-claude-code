@@ -18,9 +18,14 @@ reconciled here:** §3's ten CI group headers sum to 124, and the arithmetic clo
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
 (the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 131 against 135. Nothing
-machine-checks this document, so treat §3's per-group numbers as descriptive rather than
-authoritative until that sweep happens.
+§3's eleventh header, the local-only group of 7, gives 131 against 135. **A second,
+larger drift sits in this same document and is about CI TOPOLOGY, not group arithmetic:**
+§1's Windows row, §7 and §8 all still describe a five-profile layout, while
+`tests/profiles/windows-ci.v1.json` declares **seven** — `windows-shard-1` through
+`windows-shard-7`, 40 suite entries in total. None of the five profile ids §7 names exists
+in that file any more; only the total, 40, still happens to be right. Nothing
+machine-checks this document, so treat §3's per-group numbers and §7's profile table as
+descriptive rather than authoritative until that sweep happens.
 
 ## 1. Totals
 
@@ -30,9 +35,9 @@ authoritative until that sweep happens.
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 40 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
-| Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
+| Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
 ## 2. Run modes (`tests/run-all.sh`)
 
@@ -266,16 +271,22 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-5 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
-`node tests/run-profile.js <profile>`:
+7 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
+`node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
+than described — the previous five-profile layout (`windows-reset-session`,
+`windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
+`windows-native-branches`) no longer exists under any of those names, and only its total
+of 40 survived the reshard:
 
-| Profile | Suites | Focus |
+| Profile | Suites | Members |
 |---|---|---|
-| `windows-reset-session` | 8 | deferred-reset races, self-review handoff, review-marker reconcile, session-control-claude, MSYS module boundaries, safe file read, large-identity upgrade hook |
-| `windows-leases-routing` | 9 | lease refresh, stop-enforcer routing, plan delegate, source-write gate, installed-plugin provisioner, external lease, banner, upgrade process boundaries |
-| `windows-native-state` | 10 | claim adoption, autopilot state machine, pre-edit mirror, capability gate, session-id, versioned upgrade, MSYS runtime, marketplace fixture, coverage-report paths, installer concurrency |
-| `windows-installed-core` | 9 | transfer reset, installed wrapper, evidence lease, session-control-core, portability guards, **split** metadata contract (3 min) vs profile-lifecycle contract (7 min), checkout credentials, Linux sandbox host paths |
-| `windows-native-branches` | 4 | bound payload, file-exists path transport, TDD state junction safety, plan-payload path transport |
+| `windows-shard-1` | 9 | autopilot-bound-payload-windows, autopilot-state-machine, deferred-lease-refresh, deferred-review-fallback, installed-plugin-provisioner, tdd-no-flock-external-lease, upgrade-linux-sandbox-host-paths, windows-ci-metadata-contract, workflow-checkout-credentials |
+| `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
+| `windows-shard-3` | 6 | deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
+| `windows-shard-4` | 3 | deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
+| `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
+| `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
+| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
@@ -293,7 +304,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 5 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 7 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

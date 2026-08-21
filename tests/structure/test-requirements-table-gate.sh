@@ -261,6 +261,111 @@ CAP_EXPORTED="$(node -e 'process.stdout.write(String(require(process.argv[1]).PL
 CAP_LIB="$(grep -oE '\-le [0-9]+' "$REQ" | head -1 | tr -dc '0-9')"
 [ -n "$CAP_EXPORTED" ] && [ "$CAP_EXPORTED" = "$CAP_LIB" ]
 check "L15 the library's size cap equals plan-payload-v1.js's exported PLAN_FILE_MAX_BYTES" "$(verdict $?)"
+
+# ── Row grammar: a decorated id cell is still a row ──────────────────────────
+# The row anchor used to require the cell to hold the id and NOTHING else, so a
+# populated table written `| **AC-001** |` scored zero rows and the gate refused it
+# with "the section holds 0 AC/FR row(s)" — an author staring at filled rows, whose
+# only offered remedy was the env switch. The shipped template writes bare ids, so
+# this never bit the default path; it bit hand-written tables and the repo overrides
+# skills/tdd/SKILL.md explicitly permits.
+mkdir -p "$FIX"
+# printf, NOT an unquoted heredoc: one of the fixtures is a code-span id (`FR-001`),
+# and an unquoted heredoc runs backticks as command substitution — the fixture would
+# silently become an empty cell and the check would pass for the wrong reason.
+write_rows() {
+  printf '%s\n' \
+    "# TDD Plan: $1" \
+    '' \
+    '## Requirements' \
+    '| ID | Requirement | Source |' \
+    '|----|-------------|--------|' \
+    "| $2 | a real requirement | spec |" > "$FIX/$1.md"
+}
+write_rows deco-bold '**AC-001**'
+write_rows deco-suffix 'AC-001a'
+write_rows deco-list 'AC-001, AC-002'
+write_rows deco-link '[AC-001](#ac-001)'
+write_rows deco-code '`FR-001`'
+DECO_FAIL=""
+for d in deco-bold deco-suffix deco-list deco-link deco-code; do
+  bash "$REQ" --plan "$FIX/$d.md" >/dev/null 2>&1 || DECO_FAIL="$DECO_FAIL $d"
+done
+[ -z "$DECO_FAIL" ]
+check "L20 a decorated id cell (bold, suffix, list, link, code) is still a recognized row" "$(verdict $?)"
+# The discriminator for L20: the decoration must be stripped for the ID TEST only.
+# A cell that merely MENTIONS an id inside prose is not an id cell, or every Steps
+# table row would be counted as a requirement.
+cat > "$FIX/deco-prose.md" <<'PLAN'
+# TDD Plan: prose
+
+## Requirements
+| ID | Requirement | Source |
+|----|-------------|--------|
+| see AC-001 below | a real requirement | spec |
+PLAN
+bash "$REQ" --plan "$FIX/deco-prose.md" >/dev/null 2>&1
+[ $? -eq 4 ]
+check "L20b a cell that only MENTIONS an id in prose is not an id cell" "$(verdict $?)"
+
+# ── The fallback column is never the id column ───────────────────────────────
+# With no locatable header the judged column falls back to split index 3. When the
+# override that moved the Requirement column also moved the ID column, index 3 IS
+# the id — and an id is never empty and carries no braces, so every all-placeholder
+# table scored as filled. L12 covers the case where a header IS locatable; this is
+# the one where none is, which is exactly where the guess used to be silent.
+cat > "$FIX/idcol-fallback.md" <<'PLAN'
+# TDD Plan: idcol
+
+## Requirements
+| Criterion | ID |
+|---|---|
+| {acceptance criterion} | AC-001 |
+PLAN
+bash "$REQ" --plan "$FIX/idcol-fallback.md" >/dev/null 2>&1
+[ $? -eq 4 ]
+check "L21 an all-placeholder table whose id sits at the fallback index is EMPTY, not filled" "$(verdict $?)"
+# Positive control: the same shape with the requirement actually written in.
+cat > "$FIX/idcol-filled.md" <<'PLAN'
+# TDD Plan: idcol filled
+
+## Requirements
+| Criterion | ID |
+|---|---|
+| a real requirement | AC-001 |
+PLAN
+bash "$REQ" --plan "$FIX/idcol-filled.md" >/dev/null 2>&1
+check "L21b the same shape with a filled requirement is accepted (L21 is not rejecting the layout)" "$(verdict $?)"
+
+# ── The two exit-4 states print DIFFERENT messages ───────────────────────────
+# Zero recognized rows is a GRAMMAR problem; rows with an empty Requirement column
+# is the placeholder verdict. Telling the first author to "fill the table" points at
+# an edit they already made.
+bash "$REQ" --plan "$FIX/idcol-fallback.md" 2>&1 | grep -qF 'PLAN REQUIREMENTS EMPTY'
+check "L22 an unfilled table reports EMPTY" "$(verdict $?)"
+bash "$REQ" --plan "$FIX/rows-outside.md" 2>&1 | grep -qF 'PLAN REQUIREMENTS UNRECOGNIZED'
+check "L22b a section with no recognizable id row reports UNRECOGNIZED, not EMPTY" "$(verdict $?)"
+# Both remain exit 4 — the caller acts on the code, the author acts on the message.
+bash "$REQ" --plan "$FIX/rows-outside.md" >/dev/null 2>&1
+[ $? -eq 4 ]
+check "L22c UNRECOGNIZED keeps exit 4, so no caller contract moved" "$(verdict $?)"
+
+# ── Fences close only on their own marker ────────────────────────────────────
+# A bare toggle flips on any fence line. A plan whose Context quotes a nested fence
+# then ends with odd parity: the heading is read as fenced and the run dies at exit 2
+# with "unterminated code fence" against a complete table. `## Context` holds
+# {Spec verbatim}, so a spec that demonstrates a fence is the obvious trigger.
+printf '%s\n' '# TDD Plan: nested' '' '## Context' '~~~' '```' 'a nested example' '```' '~~~' '' \
+  '## Requirements' '| ID | Requirement | Source |' '|----|-------------|--------|' \
+  '| AC-001 | a real requirement | spec |' > "$FIX/nested-fence.md"
+bash "$REQ" --plan "$FIX/nested-fence.md" >/dev/null 2>&1
+check "L23 a fence nested inside another fence does not flip parity (no false unterminated-fence refusal)" "$(verdict $?)"
+# The guard must not weaken L16/L19: a fence that is genuinely open is still a parse
+# failure, and a table that lives only inside a fence is still not a table.
+printf '%s\n' '# TDD Plan: still open' '' '## Requirements' '```' '| AC-001 | x | spec |' > "$FIX/still-open.md"
+bash "$REQ" --plan "$FIX/still-open.md" >/dev/null 2>&1
+[ $? -eq 2 ]
+check "L23b a genuinely unterminated fence is still exit 2" "$(verdict $?)"
 rm -rf "$FIX"
 
 echo "== AC-004: a chain that changed nothing is out of scope =="
@@ -344,7 +449,8 @@ for SID in rq-missing rq-placeholder rq-filled rq-explicit rq-explicit-absent \
            rq-escape rq-landing-off rq-no-receipt rq-converse rq-explicit-relative \
            rq-explicit-outside rq-explicit-stem rq-relative-log rq-outside-log \
            rq-wrong-schema rq-malformed rq-clean-tree rq-symlink-plans \
-           rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off; do
+           rq-symlink-logs rq-no-stem rq-stem-unchecked rq-writer-seam rq-both-off \
+           rq-legacy-v1; do
   # shellcheck disable=SC1091
   source "$PLUGIN_DIR/tests/session-control/initialize-baseline.sh" "$SID"
 done
@@ -753,6 +859,113 @@ check "WS1 a receipt written by the real library drives the derivation end to en
 W_LOGVAL="$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(j.log||""))' "$(receipt_for "$SID_W")" 2>/dev/null)"
 [ -n "$W_LOGVAL" ] && [ "${W_LOGVAL#/}" = "$W_LOGVAL" ] && [ "${W_LOGVAL#*:}" = "$W_LOGVAL" ]
 check "WS1b the receipt persists its log PROJECT-RELATIVE, not absolute" "$(verdict $?)"
+# The receipt carries its own schema version, and the reader must accept BOTH. v1
+# persisted the caller's --log spelling, v2 persists a project-relative suffix; a
+# plugin update landing between the step 5b audit and --tdd-complete is explicitly
+# SERVED by the runtime-lineage rule, so a v1 receipt read by this code is supported,
+# not corrupt. D1/D2 already drive a hand-written v1; assert the writer now stamps v2
+# so the two domains stay distinguishable by discriminator rather than by spelling.
+W_SCHEMA="$(node -e 'const j=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));process.stdout.write(String(j.schema||""))' "$(receipt_for "$SID_W")" 2>/dev/null)"
+[ "$W_SCHEMA" = "edit-landing-v2" ]
+check "WS1c the writer stamps edit-landing-v2, so the log domain is named not inferred" "$(verdict $?)"
+# ...and the LEGACY spelling still resolves. Without this, dropping the v1 arm from
+# the reader would pass every other check in this file while wedging exactly the
+# mid-upgrade session the lineage rule promises to serve.
+SID_V1="rq-legacy-v1"
+activate_session "$SID_V1"
+bash "$LOG" --tdd-begin --session "$SID_V1" >/dev/null 2>&1
+V1_STEM="2026-01-01-2121_tdd-legacy-v1"
+mkdir -p "$PROJ/.zensu/logs" "$PROJ/.zensu/plans"
+printf 'S1 IMPL completed — files: tracked.txt\n' > "$PROJ/.zensu/logs/${V1_STEM}.log"
+cp "$BODIES/none.md" "$PROJ/.zensu/plans/${V1_STEM}.md"
+RP_V1="$(receipt_for "$SID_V1")"
+# Guard the destination before writing it. `receipt_for` derives the key from
+# `tdd_state_file`, and an unarmed session yields an EMPTY key — the path then
+# collapses to a relative `edit-landing-.json` that lands in whatever directory
+# the suite happens to be running from, which is the repo root. That is exactly
+# the stray this suite's sibling pins as L92, and it is how this check first went
+# wrong: the fixture was written before the session was registered.
+# Matched on SHAPE, not against "$STATE_DIR": that variable holds the caller's
+# spelling of the temp root while `receipt_for` returns the kernel's canonical one
+# (/var vs /private/var on macOS), so a prefix compare would reject the very path
+# it was handed. The shape below still catches the failure it exists for — an
+# unarmed session yields an empty key, and `edit-landing-.json` matches neither the
+# leading slash nor the `scv1_` segment.
+case "$RP_V1" in
+  /*/.zensu/state/edit-landing-scv1_*.json) ;;
+  *) check "WS1d fixture: receipt_for did not resolve to a keyed path under a state dir ($RP_V1)" FAIL; RP_V1="" ;;
+esac
+[ -n "$RP_V1" ] && printf '{"schema":"edit-landing-v1","session":"%s","log":"%s","clean":true}\n' \
+  "$SID_V1" "$PROJ/.zensu/logs/${V1_STEM}.log" > "$RP_V1"
+ERR_V1="$(bash "$LOG" --tdd-complete --session "$SID_V1" 2>&1 >/dev/null)"
+[ $? -ne 0 ] && printf '%s' "$ERR_V1" | grep -qF 'PLAN REQUIREMENTS MISSING'
+check "WS1d a legacy edit-landing-v1 receipt still drives the derivation (mid-upgrade sessions stay served)" "$(verdict $?)"
+
+echo "== The receipt writer's own refusal arms =="
+# These arms had no driver at all, and reaching them needs the right seam.
+# Stripping PATH does NOT work — it removes `mktemp` too, so the script dies at
+# its first temp file and every assertion below would pass or fail for a reason
+# unrelated to its contract. The session-key fallback is guarded by
+# `[ -f "$(dirname "$0")/session-control-core-v1.js" ]`, so a copy of the script
+# WITHOUT its sibling module reaches the fallback with node still available and
+# the writer still able to write.
+RW_DIR="$(mktemp -d)"
+RW_BIN="$RW_DIR/bin"
+mkdir -p "$RW_BIN"
+cp "$PLUGIN_DIR/hooks/lib/zensu-edit-landing.sh" "$RW_BIN/"
+# A real repo with a real landed change, so the GRADING verdict is clean and the
+# exit code below can only be about receipt plumbing.
+RW_PROJ="$RW_DIR/proj"
+mkdir -p "$RW_PROJ"
+git init -q --template= "$RW_PROJ" >/dev/null 2>&1
+printf 'v1\n' > "$RW_PROJ/tracked.txt"
+printf '.zensu/\n' > "$RW_PROJ/.gitignore"
+git -C "$RW_PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
+  -c commit.gpgsign=false -c core.hooksPath=/dev/null add -A >/dev/null 2>&1
+git -C "$RW_PROJ" -c user.email=t@example.invalid -c user.name=zensu-test \
+  -c commit.gpgsign=false -c core.hooksPath=/dev/null commit -qm base >/dev/null 2>&1
+printf 'v2\n' > "$RW_PROJ/tracked.txt"
+printf 'S1 IMPL completed — files: tracked.txt\n' > "$RW_DIR/run.log"
+RW_GOOD="scv1_$(printf 'a%.0s' $(seq 64))"
+
+/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_GOOD" >/dev/null 2>&1
+[ -f "$RW_PROJ/.zensu/state/edit-landing-${RW_GOOD}.json" ]
+check "RW1 a canonical scv1 key survives the fallback and lands the receipt in the project state dir" "$(verdict $?)"
+RW_OUT_BAD="$(/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session 'scv1_../../escape' 2>&1)"
+printf '%s' "$RW_OUT_BAD" | grep -qF 'session key resolved empty'
+check "RW2 a non-canonical --session is refused by the anchored fallback, not turned into a path" "$(verdict $?)"
+# The whole point of the anchored shape: nothing may land outside the audited
+# project's own state dir. RW1 is the positive control that makes this meaningful
+# — an assertion that "no receipt escaped" proves nothing if none is ever written.
+[ -z "$(find "$RW_DIR" -path "$RW_PROJ/.zensu" -prune -o -name 'edit-landing-*.json' -print 2>/dev/null)" ]
+check "RW2b the refused key wrote no receipt outside the project state dir" "$(verdict $?)"
+# A receipt-plumbing failure is an ENVIRONMENT error (exit 2), never the claim
+# verdict (exit 1) — a caller reads exit 1 as "an edit did not land". Staged by
+# making the destination unwritable while the claim itself really landed.
+RW_GOOD2="scv1_$(printf 'b%.0s' $(seq 64))"
+chmod 500 "$RW_PROJ/.zensu/state"
+/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
+RW_RC_PLUMBING=$?
+chmod 700 "$RW_PROJ/.zensu/state"
+[ "$RW_RC_PLUMBING" -eq 2 ]
+check "RW3 a receipt-plumbing failure exits 2 (environment), not 1 (a claim did not land)" "$(verdict $?)"
+# Discrimination for RW3, in BOTH directions: the same fixture with a writable
+# destination exits 0, and a genuinely unlanded claim exits 1. Without these two,
+# RW3 could be observing a fixture that always exits 2.
+/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/run.log" \
+  --project "$RW_PROJ" --session "$RW_GOOD2" >/dev/null 2>&1
+[ $? -eq 0 ]
+check "RW3a the same fixture with a writable destination exits 0" "$(verdict $?)"
+printf 'S1 IMPL completed — files: never-existed.txt\n' > "$RW_DIR/unlanded.log"
+/bin/bash "$RW_BIN/zensu-edit-landing.sh" --log "$RW_DIR/unlanded.log" \
+  --project "$RW_PROJ" >/dev/null 2>&1
+[ $? -eq 1 ]
+check "RW3b an unlanded claim still exits 1, so the two failure classes stay distinct" "$(verdict $?)"
+chmod -R u+w "$RW_DIR" 2>/dev/null
+rm -rf "$RW_DIR"
 
 echo "== The library-missing branch is a RUNTIME fault, not a plan verdict =="
 # NOT tested behaviorally, and the reason is structural rather than an omission:

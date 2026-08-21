@@ -230,11 +230,20 @@ while the shell half requires exact directory equality for `.zensu/plans/`. Low 
 logs bound only changes the derived stem) but it is a divergence, not one rule in two places.
 **Neither half has ever run on Windows**: `test-requirements-table-gate.sh` is not in
 `tests/profiles/windows-ci.v1.json`, which is a curated set, so the derived channel's Windows
-behavior is unverified in both directions — say "unverified", never "covered". And the
-`edit-landing-v1` discriminator deliberately did NOT change when the receipt's `log` became
-project-relative: old and new receipts are told apart by value shape, because a schema bump would
-be a `minor` release under the runtime-lineage rule above. That trade is recorded here rather
-than left for the reader to infer.
+behavior is unverified in both directions — say "unverified", never "covered".
+
+**The receipt schema moved to `edit-landing-v2`, and the reader accepts BOTH.** Holding the
+discriminator at `v1` while the `log` field became project-relative was tried first and was
+wrong: one schema name then covered two value domains, so the reader had to infer the writer from
+a leading slash — and that inference REFUSED a perfectly readable v1 receipt on win32, which,
+because the shipped skill always passes `--plan`, became a completion-blocking `exit 1` rather
+than a warning. The version cost was never avoidable: under the runtime-lineage rule above a
+persisted shape that moves costs a `minor` release whether or not the NAME moves, so
+`version_type: minor` is required for this change either way — moving the name is simply what
+buys the reader something for that price. Keep this true: `v1` is a SUPPORTED input, not a
+corruption. A plugin update landing between the step 5b audit and `--tdd-complete` is explicitly
+served by the lineage rule, so both branches must stay readable, and both are judged by
+CONTAINMENT rather than by spelling.
 
 Operator-facing accounts that must move with it: `docs/gates.md` §"Requirements-Table Gate",
 the `ZENSU_REQUIREMENTS_GATE` and `ZENSU_EDIT_LANDING_GATE` rows plus the visible-opt-outs

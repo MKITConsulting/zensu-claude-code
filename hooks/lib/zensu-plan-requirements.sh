@@ -42,7 +42,11 @@
 #   --plan  the TDD plan document to judge (required)
 #
 # Exit: 0 the table is present and filled; 2 usage error or unreadable plan;
-# 3 no `## Requirements` section; 4 the section exists but no row is filled in.
+# 3 no `## Requirements` section; 4 the section exists but is not usable — either
+# no row carried a recognizable id, or every recognized row's Requirement column
+# is still empty. Both are exit 4 because both mean the same thing to the caller
+# (converge would audit nothing), but they print DIFFERENT messages: they are
+# different edits, and "fill the table" is the wrong instruction for the first.
 set -u
 
 PLAN_FILE=""
@@ -90,7 +94,25 @@ SUMMARY="$(awk '
   # illustrates the table shape inside a ``` fence reads as having a real table,
   # and an H2 quoted inside a fence closes a real section. Both directions are
   # silent, and a plan documenting this very gate is the obvious trigger.
-  /^[[:space:]]*(```|~~~)/ { fence = !fence; next }
+  #
+  # The opener is REMEMBERED — its character and its run length — because a bare
+  # toggle flips on any marker line and a plan may legitimately nest one fence
+  # inside another (` ``` ` inside a `~~~` block, or a longer run wrapping a
+  # shorter one). A toggle then leaves odd parity, the heading below is read as
+  # fenced, and the run dies at exit 2 with "unterminated code fence" against a
+  # complete table; even parity is worse, because a heading that really was
+  # inside an example reads as a real section. CommonMark closes a fence only
+  # with a run of the SAME character at least as long as the opener.
+  /^[[:space:]]*(```|~~~)/ {
+    fmark = $0
+    sub(/^[[:space:]]*/, "", fmark)
+    fc = substr(fmark, 1, 1)
+    fn = 0
+    while (substr(fmark, fn + 1, 1) == fc) fn++
+    if (!fence) { fence = 1; fchar = fc; flen = fn }
+    else if (fc == fchar && fn >= flen) { fence = 0 }
+    next
+  }
   !fence && /^##[[:space:]]+Requirements[[:space:]]*$/ { heading = 1; in_section = 1; next }
   # Any H1/H2 closes the section. `### Step ...` does not: its third character is
   # `#`, not a space, so a step subsection stays inside the table it belongs to.
@@ -113,19 +135,49 @@ SUMMARY="$(awk '
   # the same override freedom that moves the Requirement column can move the ID
   # column, and an anchor pinned to column 1 would report such a table as having
   # zero rows at all.
-  !fence && in_section && /^\|/ && $0 ~ /\|[[:space:]]*(AC|FR)-[0-9]+[[:space:]]*\|/ {
-    rows++
+  #
+  # The id cell is recognized after INLINE DECORATION is removed, not as a bare
+  # literal. A cell spelled `| **AC-001** |`, `| AC-001a |`, `| AC-001, AC-002 |`
+  # or `| [AC-001](#ac-001) |` is a real row in a real table, and a bare-literal
+  # anchor scores every one of them as zero rows — then refuses a fully populated
+  # plan with "the section holds 0 AC/FR row(s)". Emphasis, code spans, strike
+  # marks and a link wrapper are all removed before the shape is tested; nothing
+  # else about the cell is reinterpreted.
+  !fence && in_section && /^\|/ {
     n = split($0, cell, "|")
-    col = (req_col > 0 ? req_col : 3)
-    if (n >= col) {
-      text = cell[col]
-      # A cell counts as filled only if something remains once every `{...}`
-      # group and all whitespace are removed. `[{]`/`[}]` rather than `\{`/`\}`:
-      # a brace is an interval operator in POSIX ERE, and only the bracket form
-      # is unambiguous across awk implementations.
-      gsub(/[{][^{}]*[}]/, "", text)
-      gsub(/[[:space:]]/, "", text)
-      if (text != "") filled++
+    idcol = 0
+    for (i = 2; i <= n; i++) {
+      probe = cell[i]
+      # Whitespace goes FIRST, before the link-target removal: that removal is
+      # anchored on end-of-string, and a cell is written `| [AC-001](#a) |` with a
+      # trailing space, so an unstripped cell never matches and the id is missed.
+      gsub(/[[:space:]]/, "", probe)
+      # `]` first and `[` last: inside a bracket expression that is the portable
+      # way to mean the literal characters rather than open a nested range.
+      gsub(/[]*_`~[]/, "", probe)
+      sub(/\([^()]*\)$/, "", probe)
+      if (probe ~ /^(AC|FR)-[0-9]+[a-z]?(,(AC|FR)-[0-9]+[a-z]?)*$/) { idcol = i; break }
+    }
+    if (idcol > 0) {
+      rows++
+      # The judged column is NEVER the id column. Split index 3 stays the
+      # fallback for a table with no recognizable header, but an override that
+      # moved the ID column can put the id AT index 3 — and an id is never empty
+      # and carries no braces, so judging it scores every all-placeholder table
+      # as filled. That is exactly the shape exit 4 exists to catch, so the
+      # fallback steps aside to the other visible column instead of guessing.
+      col = req_col
+      if (col == 0 || col == idcol) col = (idcol == 3 ? 2 : 3)
+      if (col != idcol && n >= col) {
+        text = cell[col]
+        # A cell counts as filled only if something remains once every `{...}`
+        # group and all whitespace are removed. `[{]`/`[}]` rather than `\{`/`\}`:
+        # a brace is an interval operator in POSIX ERE, and only the bracket form
+        # is unambiguous across awk implementations.
+        gsub(/[{][^{}]*[}]/, "", text)
+        gsub(/[[:space:]]/, "", text)
+        if (text != "") filled++
+      }
     }
   }
   END { printf "%d %d %d %d", heading + 0, rows + 0, filled + 0, fence + 0 }
@@ -151,6 +203,15 @@ esac
 if [ "$HEADING" -eq 0 ]; then
   echo "PLAN REQUIREMENTS MISSING — ${PLAN_FILE}: no \"## Requirements\" section"
   exit 3
+fi
+# The two exit-4 states are DIFFERENT edits and must not share one message. Zero
+# recognized rows is a grammar problem — the author is looking at rows we did not
+# read — while rows with nothing in the Requirement column is the placeholder
+# verdict this exit was designed for. Telling the first author to "fill the table"
+# points them at an edit they already made.
+if [ "$ROWS" -eq 0 ]; then
+  echo "PLAN REQUIREMENTS UNRECOGNIZED — ${PLAN_FILE}: the section holds no row with a recognizable AC-###/FR-### id. A row is recognized when one cell reduces to the id alone once **bold**, \`code\`, ~~strike~~ and [link](target) decoration is removed; a comma-separated list and a trailing letter (AC-001a) are accepted"
+  exit 4
 fi
 if [ "$FILLED" -eq 0 ]; then
   echo "PLAN REQUIREMENTS EMPTY — ${PLAN_FILE}: the section holds ${ROWS} AC/FR row(s), none with a filled-in requirement"

@@ -29,7 +29,12 @@
 #   --receipt        explicit receipt path ('-' disables the receipt)
 #
 # Exit: 0 when every claim is landed or explicitly exempt; 1 when any claim is
-# NOT LANDED, UNVERIFIED, or PENDING PREDICATE; 2 on a usage/environment error.
+# NOT LANDED, UNVERIFIED, or PENDING PREDICATE; 2 on a usage/environment error —
+# which now includes every RECEIPT REFUSED path (no node, an unwritable or refused
+# receipt destination, a session key that resolved empty). Exit 1 is a verdict about
+# the CLAIMS and must stay one: a caller reads it as "an edit did not land", and a
+# read-only state directory is not that. Grading is checked first, so a run with
+# both an unlanded claim and a broken receipt exits 1.
 set -u
 
 LOG_FILE=""
@@ -41,6 +46,7 @@ SESSION_SEEN=0
 DIRTY_BEFORE=""
 RECEIPT_PATH=""
 RECEIPT_EXPLICIT=0
+RECEIPT_FAILED=0
 
 die() { echo "zensu-edit-landing.sh: $1" >&2; exit 2; }
 
@@ -297,31 +303,33 @@ else
     case "$RECEIPT_PATH" in
       *"/../"*|*/..)
         emit "RECEIPT REFUSED — the derived receipt path contains a parent-directory segment (${RECEIPT_PATH})"
-        RECEIPT_PATH=""; CLEAN=0
+        RECEIPT_PATH=""; RECEIPT_FAILED=1
         ;;
     esac
     case "$RECEIPT_PATH" in
       ""|"$PROJECT_ABS"/.zensu/state/*) ;;
       *)
         emit "RECEIPT REFUSED — the derived receipt path escapes ${PROJECT_ABS}/.zensu/state (${RECEIPT_PATH})"
-        RECEIPT_PATH=""; CLEAN=0
+        RECEIPT_PATH=""; RECEIPT_FAILED=1
         ;;
     esac
   fi
   case "$RECEIPT_PATH" in
     ""|*/edit-landing-.json|edit-landing-.json)
-      # `CLEAN=0` only when a receipt was actually EXPECTED. An invocation that
-      # asked for none (no `--session`, no `--receipt`) arrives here with an empty
-      # path and must still exit 0; one whose key resolved empty asked for a
+      # `RECEIPT_FAILED=1` only when a receipt was actually EXPECTED. An invocation
+      # that asked for none (no `--session`, no `--receipt`) arrives here with an
+      # empty path and must still exit 0; one whose key resolved empty asked for a
       # receipt and got none, and exiting 0 there is what makes `--tdd-complete`
-      # blame a missing receipt instead of naming this cause.
-      [ -n "$RECEIPT_PATH" ] && { emit "RECEIPT REFUSED — the session key resolved empty, so no receipt was written (would have been ${RECEIPT_PATH})"; CLEAN=0; }
+      # blame a missing receipt instead of naming this cause. It is deliberately
+      # NOT `CLEAN=0` — see the exit contract at the foot of this file: the claims
+      # may all have landed perfectly, and saying otherwise names the wrong cause.
+      [ -n "$RECEIPT_PATH" ] && { emit "RECEIPT REFUSED — the session key resolved empty, so no receipt was written (would have been ${RECEIPT_PATH})"; RECEIPT_FAILED=1; }
       RECEIPT_PATH=""
       ;;
     /*) ;;
     *)
       emit "RECEIPT REFUSED — a relative --receipt path would land in the caller's cwd, not the project state dir (${RECEIPT_PATH})"
-      RECEIPT_PATH=""; CLEAN=0
+      RECEIPT_PATH=""; RECEIPT_FAILED=1
       ;;
   esac
   if [ -n "$RECEIPT_PATH" ]; then
@@ -338,7 +346,7 @@ else
     if [ -z "$tmp_receipt" ] || [ -L "$tmp_receipt" ]; then
       [ -n "$tmp_receipt" ] && rm -f "$tmp_receipt" 2>/dev/null
       emit "RECEIPT REFUSED — could not create a temp file beside ${RECEIPT_PATH}; no receipt was written"
-      tmp_receipt=""; CLEAN=0
+      tmp_receipt=""; RECEIPT_FAILED=1
     fi
     if [ -n "$tmp_receipt" ]; then
       # The two string fields are JSON-ENCODED, never interpolated: a session id or
@@ -376,7 +384,21 @@ else
         node -e '
           const e = process.env;
           process.stdout.write(JSON.stringify({
-            schema: "edit-landing-v1",
+            // `edit-landing-v2`, because the MEANING of `log` moved: v1 persisted the
+            // raw `--log` spelling as the caller wrote it, v2 persists a
+            // project-relative suffix. The
+            // receipt is read back by a DIFFERENT process (`zensu-log.sh
+            // --tdd-complete`) that may be a newer or older installation — the
+            // runtime-lineage rule explicitly SERVES a same-minor upgrade landing
+            // between the step 5b audit and completion — so the reader must be able
+            // to tell the two domains apart. Holding the discriminator at v1 left it
+            // guessing from a leading slash, and that guess rejected readable legacy
+            // receipts on win32. The reader accepts BOTH and resolves each by
+            // containment; this bump is what makes that branch explicit rather than
+            // inferred. A shape change like this costs a `minor` release under the
+            // lineage rule, and it costs one whether or not the name moves — the
+            // name moving is what buys the reader something for the price.
+            schema: "edit-landing-v2",
             session: e.ZEL_SESSION,
             log: e.ZEL_LOG,
             claims: Number(e.ZEL_CLAIMS),
@@ -389,18 +411,30 @@ else
             clean: e.ZEL_CLEAN === "true",
           }) + "\n");
         ' > "$tmp_receipt" 2>/dev/null && mv -f "$tmp_receipt" "$RECEIPT_PATH" 2>/dev/null \
-          || { emit "RECEIPT REFUSED — the receipt could not be written to ${RECEIPT_PATH}"; CLEAN=0; }
+          || { emit "RECEIPT REFUSED — the receipt could not be written to ${RECEIPT_PATH}"; RECEIPT_FAILED=1; }
       else
         # No node: the values would have to be interpolated into JSON unescaped, and
         # this file is now a gate input rather than a report. A quote in either value
         # breaks the document or injects a sibling key, so the fallback ANNOUNCES a
         # refusal instead of writing a document it cannot encode safely.
         emit "RECEIPT REFUSED — node is unavailable, so the receipt could not be encoded safely and none was written"
-        CLEAN=0
+        RECEIPT_FAILED=1
       fi
       rm -f "$tmp_receipt" 2>/dev/null
     fi
   fi
 fi
 
-[ "$CLEAN" -eq 1 ]
+# Two DIFFERENT failures, two different exit codes, because the caller acts on them
+# differently. `CLEAN` is the grading verdict over the claims; exit 1 means at least
+# one claimed edit is NOT LANDED / UNVERIFIED / PENDING, and skills/tdd/SKILL.md
+# step 5b tells the model to carry that into the report and the chain-end summary.
+# A receipt-plumbing failure — no node, an unwritable state dir, a refused path — is
+# an ENVIRONMENT error and exits 2, the code this file's header already reserved for
+# one. Folding it into exit 1 made a run in which every claim landed report that a
+# claimed edit had not: the wrong cause, and the slowest kind to diagnose.
+# Grading is reported FIRST: a chain with a real unlanded edit and a broken receipt
+# is a grading failure, not a plumbing one.
+[ "$CLEAN" -eq 1 ] || exit 1
+[ "$RECEIPT_FAILED" -eq 0 ] || exit 2
+exit 0
