@@ -157,10 +157,116 @@ _autopilot_session_id_ok() {
   [ "${#1}" -le 128 ]
 }
 
+# The pointer is keyed by a digest of the owner session id rather than by the
+# id itself: an owner may be 128 characters, and `autopilot-active-<id>.json`
+# under a deep project root would cross Windows' legacy MAX_PATH exactly the
+# way `_autopilot_mktemp_beside` documents for run files. A digest is a fixed
+# 64 characters and cannot carry a path separator.
+_autopilot_owner_key() {
+  local owner="${1:-}" key
+  _autopilot_session_id_ok "$owner" || return 3
+  key="$(OWNER="$owner" node -e '
+    const crypto = require("crypto");
+    process.stdout.write(crypto.createHash("sha256").update(String(process.env.OWNER)).digest("hex"));
+  ' 2>/dev/null </dev/null)" || return 3
+  [ "${#key}" -eq 64 ] || return 3
+  printf '%s\n' "$key"
+}
+
+# The pointer minted before owner scoping. It is never written any more; it is
+# read as a fallback and only ever adopted by the session that owns the run it
+# references. See the `read-active` worker mode.
+_autopilot_legacy_active_path() {
+  printf '%s\n' "${1%/}/autopilot-active.json"
+}
+
+# The owner is REQUIRED. An empty one used to fall back to the shared legacy
+# pointer, which is the exact project-wide artifact this scoping removes; a
+# caller that genuinely wants the pre-scoping spelling calls
+# `_autopilot_legacy_active_path` by name.
+_autopilot_active_path() {
+  local state_dir="${1%/}" owner="${2:-}" key
+  [ -n "$owner" ] || return 3
+  key="$(_autopilot_owner_key "$owner")" || return 3
+  printf '%s/autopilot-active-%s.json\n' "$state_dir" "$key"
+}
+
 autopilot_active_file() {
   local root
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
-  printf '%s\n' "$root/.zensu/state/autopilot-active.json"
+  _autopilot_active_path "$root/.zensu/state" "${2:-}"
+}
+
+# The working tree a run drives. Callers hand in the directory the session is
+# actually working in; git resolves it to the worktree root so two spellings of
+# one tree compare equal, and a non-repository directory falls back to itself.
+# The host-native rendering of an existing directory, or empty when it cannot be
+# produced. Both the workspace key and anything compared against it go through
+# this, so the two never end up in different namespaces on Windows.
+_autopilot_rendered_dir() {
+  local dir="${1:-}" rendered
+  [ -n "$dir" ] && [ -d "$dir" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_ROOT:-}" ] || return 1
+  rendered="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" "$dir" 2>/dev/null </dev/null)" \
+    || return 1
+  [ -n "$rendered" ] || return 1
+  printf '%s\n' "$rendered"
+}
+
+# `fallback` is what a git failure resolves to, and only the GATE path supplies
+# one: it passes the project root, so a missing git binary or a non-repository
+# directory can never turn one session's key into the caller's cwd — the
+# divergence that would make an occupancy gate miss the run it exists to see.
+# A caller that DECLARES a workspace passes no fallback, because substituting
+# the project root there would silently discard the declaration.
+autopilot_workspace_root() {
+  local input="${1:-${CLAUDE_PROJECT_DIR:-.}}" fallback="${2:-}" top rendered
+  # Both children below run INSIDE the project lease on the gate path, and the
+  # lease keeper is a bash coprocess whose control channel is a pipe. A child
+  # that inherits those descriptors holds the write end open after the parent
+  # closes it, so the keeper never sees EOF and the release hangs — the failure
+  # surfaces minutes later as an unrelated suite that never returns. Redirect
+  # stdin, not just the output.
+  local git_bin
+  git_bin="$(command -v git 2>/dev/null)" || git_bin=""
+  if [ -n "$git_bin" ]; then
+    top="$(env -u GIT_DIR -u GIT_WORK_TREE -u GIT_COMMON_DIR -u GIT_CEILING_DIRECTORIES \
+      -u GIT_OBJECT_DIRECTORY -u GIT_INDEX_FILE \
+      "$git_bin" -C "$input" rev-parse --show-toplevel 2>/dev/null </dev/null)" || top=""
+  else
+    top=""
+  fi
+  if [ -z "$top" ]; then
+    top="${fallback:-$input}"
+  fi
+  [ -d "$top" ] || return 2
+  # The project root reaches the worker in the host-native spelling and is then
+  # canonicalized there. The workspace must travel the same way or the two live
+  # in different namespaces on Windows and `workspaceOf`'s legacy fallback
+  # compares across them.
+  rendered="$(_autopilot_rendered_dir "$top")" || rendered=""
+  if [ -n "$rendered" ]; then
+    printf '%s\n' "$rendered"
+    return 0
+  fi
+  (cd -P -- "$top" 2>/dev/null && pwd -P) || return 2
+}
+
+# The workspace this session is working in, resolved the SAME way for the run
+# that records it and for every gate that later compares against it — a split
+# between the two would let a gate silently miss the run it exists to see.
+# A cwd outside the project root is not trusted to name a workspace: a hook
+# invoked from an unrelated directory falls back to the project root rather
+# than carving out a namespace nobody else will look in.
+_autopilot_session_workspace() {
+  local root="${1:-}" here
+  [ -n "$root" ] || return 3
+  here="$(pwd -P 2>/dev/null)" || here=""
+  case "$here" in
+    "$root"|"$root"/*) ;;
+    *) here="$root" ;;
+  esac
+  autopilot_workspace_root "$here" "$root"
 }
 
 autopilot_run_file() {
@@ -246,11 +352,20 @@ _autopilot_node() {
   local mode="${1:-}" native index
   shift || return 3
   local args=("$@") path_indexes=()
+  # The workspace root is deliberately NOT a member of any path_indexes list —
+  # not because the worker never touches it (it does: `workspaceRootIndex` below
+  # canonicalizes and lstats it), but because `_autopilot_native_project_path`
+  # rejects any path outside the project root, and a git worktree may legitimately
+  # live elsewhere. The value travels through three layers instead: git toplevel
+  # (semantic) -> `zensu-host-path.sh` (namespace, so `path.resolve` is correct on
+  # win32) -> `realpathSync.native` in `workspaceRootIndex` (canonical form).
   case "$mode" in
-    read-active) path_indexes=(0 1 2) ;;
+    read-active) path_indexes=(0 1 2 4) ;;
+    read-workspace) path_indexes=(0 1) ;;
     read-run) path_indexes=(0 2) ;;
-    begin) path_indexes=(0 1 2 3 6) ;;
+    begin) path_indexes=(0 1 2 3 6 10) ;;
     apply) path_indexes=(0 1 2 7) ;;
+    release) path_indexes=(0 1 4) ;;
     team-review-receipt-meta) path_indexes=(0) ;;
     increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
     *) return 3 ;;
@@ -276,9 +391,11 @@ const fail = (code, message) => {
 };
 const projectRootIndex = Object.freeze({
   "read-active": 2,
+  "read-workspace": 1,
   "read-run": 2,
   begin: 6,
   apply: 7,
+  release: 4,
   "increment-budget": 5,
   "increment-budget-capped": 5,
 })[mode];
@@ -297,6 +414,25 @@ if (projectRootIndex !== undefined) {
     fail(2, "physical project root is unavailable");
   }
 }
+const workspaceRootIndex = Object.freeze({
+  begin: 9,
+  "read-workspace": 2,
+})[mode];
+if (workspaceRootIndex !== undefined) {
+  const requested = args[workspaceRootIndex];
+  if (typeof requested !== "string" || requested.length === 0
+      || /[\u0000-\u001f]/.test(requested)) {
+    fail(3, "invalid workspace root");
+  }
+  try {
+    const canonical = fs.realpathSync.native(path.resolve(requested));
+    const stat = fs.lstatSync(canonical);
+    if (stat.isSymbolicLink() || !stat.isDirectory()) fail(2, "unsafe workspace root");
+    args[workspaceRootIndex] = canonical;
+  } catch (_) {
+    fail(2, "workspace root is unavailable");
+  }
+}
 const isObject = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const exact = (value, keys) => isObject(value)
   && Object.keys(value).length === keys.length
@@ -304,6 +440,10 @@ const exact = (value, keys) => isObject(value)
 const identifier = value => typeof value === "string"
   && value.length >= 3 && value.length <= 128 && /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(value);
 const nullableIdentifier = value => value === null || identifier(value);
+// Hook session ids predate the durable schema and may be shorter than an
+// `identifier`; this mirrors `_autopilot_session_id_ok` in the shell half.
+const sessionIdentifier = value => typeof value === "string"
+  && value.length >= 1 && value.length <= 128 && /^[A-Za-z0-9_-]+$/.test(value);
 const nonEmpty = (value, max = 512) => typeof value === "string" && value.length > 0 && value.length <= max
   && !/[\u0000-\u001f]/.test(value);
 const sha = value => typeof value === "string" && /^[a-fA-F0-9]{7,64}$/.test(value);
@@ -318,6 +458,24 @@ const STAGES = new Set([
 ]);
 const TERMINAL = new Set(["DONE", "CANCELLED"]);
 const STOP_TERMINAL = new Set(["DONE", "BLOCKED", "CANCELLED"]);
+// The run record predates workspace scoping, so the field is accepted in both
+// shapes rather than added to one strict key set: a record minted by an older
+// installation stays readable, and `readRunInventory` therefore cannot fail an
+// entire project closed on the release that introduces it.
+const STATE_KEYS = ["schemaVersion", "runId", "projectRoot", "ownerSessionId", "stage", "nextActionCode",
+  "approvedPlanSha256", "options", "tdd", "effects", "evidence", "blocked", "bypasses", "stopBudget", "events"];
+const STATE_KEYS_WORKSPACE = [...STATE_KEYS, "workspaceRoot"];
+const workspaceOf = state => (typeof state.workspaceRoot === "string" && state.workspaceRoot.length > 0
+  ? state.workspaceRoot
+  : state.projectRoot);
+// A record without the field held the whole PROJECT before this change, and the
+// new keys are git toplevels — so comparing it against `projectRoot` would make
+// it stop holding its own tree whenever the project root sits below the
+// repository root. It therefore holds every workspace in its project until it
+// is rewritten with the field.
+const holdsWorkspace = (state, workspaceRoot) =>
+  !Object.prototype.hasOwnProperty.call(state, "workspaceRoot")
+  || workspaceOf(state) === workspaceRoot;
 const RETURN_STAGES = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
 const HEAD_UPDATE_STAGES = new Set(["FIX_FINDINGS", "VALIDATE", "COVER"]);
 const NEXT_ACTION = Object.freeze({
@@ -576,10 +734,10 @@ const deliveryInvariants = state => {
 
 let semanticHistoryValid;
 const stateValid = state => {
-  if (!exact(state, ["schemaVersion", "runId", "projectRoot", "ownerSessionId", "stage", "nextActionCode",
-    "approvedPlanSha256", "options", "tdd", "effects", "evidence", "blocked", "bypasses", "stopBudget", "events"])) return false;
+  if (!exact(state, STATE_KEYS) && !exact(state, STATE_KEYS_WORKSPACE)) return false;
   if (state.schemaVersion !== 1 || !identifier(state.runId) || !nonEmpty(state.projectRoot, 4096)
     || !identifier(state.ownerSessionId) || !STAGES.has(state.stage) || state.nextActionCode !== NEXT_ACTION[state.stage]) return false;
+  if (Object.prototype.hasOwnProperty.call(state, "workspaceRoot") && !nonEmpty(state.workspaceRoot, 4096)) return false;
   if (!(state.approvedPlanSha256 === null || sha256(state.approvedPlanSha256))) return false;
   if (!exact(state.options, ["cover", "validate"]) || typeof state.options.cover !== "boolean"
     || typeof state.options.validate !== "boolean") return false;
@@ -682,12 +840,38 @@ const readState = (file, absentCode = 2) => {
   if (!stateValid(state)) fail(2, `state schema invalid: ${path.basename(file)}`);
   return state;
 };
+// The owner-keyed pointer name, and the pre-scoping one. Both spellings live
+// here so the worker can resolve a run's pointer from the run record alone.
+const OWNER_POINTER_PREFIX = "autopilot-active-";
+const LEGACY_POINTER_NAME = "autopilot-active.json";
+const activePointerFor = (stateDir, ownerSessionId, runId) => {
+  const ownerFile = path.join(stateDir, `${OWNER_POINTER_PREFIX}${rawDigest(ownerSessionId)}.json`);
+  if (regularFile(ownerFile)) return readPointer(ownerFile);
+  const legacyFile = path.join(stateDir, LEGACY_POINTER_NAME);
+  if (!regularFile(legacyFile)) return null;
+  const legacy = readPointer(legacyFile);
+  return legacy.runId === runId ? legacy : null;
+};
 const readPointer = file => {
   const pointer = readJson(file);
   if (!pointerValid(pointer)) fail(2, "active pointer schema invalid");
   return pointer;
 };
-const readRunInventory = (stateDir, expectedProjectRoot) => {
+// The skip decision is taken on an attacker-writable file, so it routes through
+// the SAME chokepoint every other read uses. Without this an oversized file is
+// read whole, a symlink is followed off-tree, and a FIFO blocks the read while
+// the project lease is held. `regularFile` fails closed on an unsafe file and
+// returns null on a genuine ENOENT; either way the record stays unattributable
+// and reaches the ordinary fail-closed path instead of being skipped.
+const rawOwnerOf = file => {
+  if (!regularFile(file)) return null;
+  try {
+    const parsed = JSON.parse(fs.readFileSync(file, "utf8"));
+    return isObject(parsed) && typeof parsed.ownerSessionId === "string"
+      ? parsed.ownerSessionId : null;
+  } catch (_) { return null; }
+};
+const readRunInventory = (stateDir, expectedProjectRoot, ownerSessionId = "") => {
   let names;
   try { names = fs.readdirSync(stateDir, { encoding: "utf8" }); }
   catch (_) { fail(2, "cannot inspect Autopilot run inventory"); }
@@ -697,6 +881,13 @@ const readRunInventory = (stateDir, expectedProjectRoot) => {
     const match = envelope.exec(name);
     if (!match) return [];
     if (!identifier(match[1])) fail(2, `invalid run inventory artifact: ${name}`);
+    // A record this caller provably does not own is skipped before validation.
+    // Anything unattributable still fails closed: we cannot prove it is not
+    // ours, so it is judged as before.
+    if (ownerSessionId) {
+      const owner = rawOwnerOf(path.join(stateDir, name));
+      if (owner !== null && owner !== ownerSessionId) return [];
+    }
     const state = readState(path.join(stateDir, name));
     if (state.runId !== match[1] || state.projectRoot !== expectedProjectRoot) {
       fail(2, `run inventory identity mismatch: ${name}`);
@@ -973,24 +1164,64 @@ semanticHistoryValid = state => {
 };
 
 if (mode === "read-active") {
-  const [activeFile, stateDir, expectedProjectRoot] = args;
-  const activeStat = regularFile(activeFile);
-  const inventory = readRunInventory(stateDir, expectedProjectRoot);
+  const [activeFile, stateDir, expectedProjectRoot, expectedOwnerSessionId, legacyActiveFile = ""] = args;
+  if (!sessionIdentifier(expectedOwnerSessionId)) fail(3, "invalid owner session identity");
+  const inventory = readRunInventory(stateDir, expectedProjectRoot, expectedOwnerSessionId);
+  // Only this owner's runs are visible here. A nonterminal run owned by another
+  // session is neither an orphan nor a hidden run from this caller's position —
+  // it is simply not this session's business, which is what lets two sessions
+  // hold concurrent runs in one project root.
+  const owned = inventory.filter(candidate => candidate.ownerSessionId === expectedOwnerSessionId);
+  let pointerFile = activeFile;
+  let activeStat = regularFile(activeFile);
+  // A pointer minted before owner scoping carries no owner in its name. It is
+  // adopted only when the run it references belongs to THIS caller; a legacy
+  // pointer owned by anyone else is ignored rather than obeyed, which is what
+  // releases a project wedged by a session that no longer exists.
+  if (!activeStat && legacyActiveFile) {
+    const legacyStat = regularFile(legacyActiveFile);
+    if (legacyStat) {
+      const legacyPointer = readPointer(legacyActiveFile);
+      const legacyRun = inventory.find(candidate => candidate.runId === legacyPointer.runId);
+      if (legacyRun && legacyRun.ownerSessionId === expectedOwnerSessionId) {
+        pointerFile = legacyActiveFile;
+        activeStat = legacyStat;
+      }
+    }
+  }
   if (!activeStat) {
-    const orphan = inventory.find(state => !TERMINAL.has(state.stage));
+    const orphan = owned.find(state => !TERMINAL.has(state.stage));
     if (orphan) fail(2, `active pointer absent while nonterminal run ${orphan.runId} remains`);
     fail(1, `state file absent: ${path.basename(activeFile)}`);
   }
-  const pointer = readPointer(activeFile);
+  const pointer = readPointer(pointerFile);
   const state = inventory.find(candidate => candidate.runId === pointer.runId);
-  if (!state) fail(2, "active pointer references an absent run");
+  if (!state) fail(2, "active pointer references a run that is absent or owned by another session");
   if (state.runId !== pointer.runId || state.projectRoot !== expectedProjectRoot) {
     fail(2, "active pointer, run, and physical project root disagree");
   }
-  const hidden = inventory.find(candidate => candidate.runId !== pointer.runId
+  if (state.ownerSessionId !== expectedOwnerSessionId) {
+    fail(2, "active pointer references a run owned by another session");
+  }
+  const hidden = owned.find(candidate => candidate.runId !== pointer.runId
     && !TERMINAL.has(candidate.stage));
   if (hidden) fail(2, `active pointer hides nonterminal run ${hidden.runId}`);
   process.stdout.write(`${JSON.stringify(state, null, 2)}\n`);
+  process.exit(0);
+}
+
+// Occupancy is the owner-INDEPENDENT question: does any session hold a live run
+// in this working tree? It is what the standalone-TDD gate, deferred-review
+// adoption, and the contention probe ask — they must not be owner-scoped, or a
+// standalone chain could start underneath another session's durable run.
+if (mode === "read-workspace") {
+  const [stateDir, expectedProjectRoot, workspaceRoot] = args;
+  if (!nonEmpty(workspaceRoot, 4096)) fail(3, "invalid workspace root");
+  const inventory = readRunInventory(stateDir, expectedProjectRoot);
+  const holder = inventory.find(candidate => !TERMINAL.has(candidate.stage)
+    && holdsWorkspace(candidate, workspaceRoot));
+  if (!holder) fail(1, "no nonterminal run holds this workspace");
+  process.stdout.write(`${JSON.stringify(holder, null, 2)}\n`);
   process.exit(0);
 }
 
@@ -1005,27 +1236,47 @@ if (mode === "read-run") {
 }
 
 if (mode === "begin") {
-  const [activeFile, runFile, runOutput, activeOutput, runId, ownerSessionId, projectRoot, coverRaw, validateRaw] = args;
-  if (!identifier(runId) || !identifier(ownerSessionId) || !nonEmpty(projectRoot, 4096)
+  const [activeFile, runFile, runOutput, activeOutput, runId, ownerSessionId, projectRoot, coverRaw, validateRaw,
+    workspaceRoot, legacyActiveFile = ""] = args;
+  // `sessionIdentifier`, not `identifier`: the pointer-name derivation and
+  // `read-active` both use that vocabulary, and an owner containing `.` or `:`
+  // would otherwise be minted here and be unreadable forever after.
+  if (!identifier(runId) || !sessionIdentifier(ownerSessionId) || !nonEmpty(projectRoot, 4096)
+    || !nonEmpty(workspaceRoot, 4096)
     || !["true", "false"].includes(coverRaw) || !["true", "false"].includes(validateRaw)) fail(3, "invalid begin arguments");
   const options = { cover: coverRaw === "true", validate: validateRaw === "true" };
   const stateDir = path.dirname(activeFile);
   const inventory = readRunInventory(stateDir, projectRoot);
-  const activeStat = regularFile(activeFile);
+  const owned = inventory.filter(candidate => candidate.ownerSessionId === ownerSessionId);
+  let pointerFile = activeFile;
+  let activeStat = regularFile(activeFile);
+  if (!activeStat && legacyActiveFile) {
+    const legacyStat = regularFile(legacyActiveFile);
+    if (legacyStat) {
+      const legacyPointer = readPointer(legacyActiveFile);
+      const legacyRun = inventory.find(candidate => candidate.runId === legacyPointer.runId);
+      if (legacyRun && legacyRun.ownerSessionId === ownerSessionId) {
+        pointerFile = legacyActiveFile;
+        activeStat = legacyStat;
+      }
+    }
+  }
   let pointer = null;
   let activeRun = null;
   if (activeStat) {
-    pointer = readPointer(activeFile);
+    pointer = readPointer(pointerFile);
     activeRun = inventory.find(candidate => candidate.runId === pointer.runId);
     if (!activeRun) fail(2, "active pointer references an absent run");
     if (activeRun.projectRoot !== projectRoot) fail(2, "active run belongs to another physical project root");
+    if (activeRun.ownerSessionId !== ownerSessionId) fail(2, "active pointer references a run owned by another session");
   }
 
   // A torn begin can leave the newly written nonterminal run without its
   // pointer, or behind the prior terminal pointer. Only an identity- and
   // option-exact retry of that sole orphan may finish publication. Any other
-  // begin must reject before writing either durable file.
-  const hiddenNonterminal = inventory.filter(candidate => !TERMINAL.has(candidate.stage)
+  // begin must reject before writing either durable file. Scoped to this
+  // owner: another session's live run is not this caller's orphan.
+  const hiddenNonterminal = owned.filter(candidate => !TERMINAL.has(candidate.stage)
     && (!pointer || candidate.runId !== pointer.runId));
   if (hiddenNonterminal.length > 0) {
     const recoverable = hiddenNonterminal.length === 1
@@ -1036,11 +1287,22 @@ if (mode === "begin") {
   if (pointer && pointer.runId !== runId && !TERMINAL.has(activeRun.stage)) {
     fail(4, `active run ${pointer.runId} is not terminal`);
   }
+  // The working tree is the resource two runs would actually collide on —
+  // same branch, same commits, same PR. This exclusion is owner-independent
+  // and replaces the project-wide one; a foreign holder is nameable, so the
+  // refusal points at the command that can release it.
+  const workspaceHolder = inventory.find(candidate => candidate.runId !== runId
+    && !TERMINAL.has(candidate.stage) && holdsWorkspace(candidate, workspaceRoot));
+  if (workspaceHolder) {
+    fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
+      + `release it with: zensu-log.sh --autopilot-release --run ${workspaceHolder.runId} --confirm`);
+  }
 
   const existing = inventory.find(candidate => candidate.runId === runId);
   if (existing) {
     if (existing.runId !== runId || existing.ownerSessionId !== ownerSessionId
-      || existing.projectRoot !== projectRoot || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
+      || existing.projectRoot !== projectRoot || !holdsWorkspace(existing, workspaceRoot)
+      || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
     if (activeStat) {
       if (pointer.runId === runId) process.exit(10);
     }
@@ -1053,6 +1315,7 @@ if (mode === "begin") {
     schemaVersion: 1,
     runId,
     projectRoot,
+    workspaceRoot,
     ownerSessionId,
     stage: "PLANNING",
     nextActionCode: NEXT_ACTION.PLANNING,
@@ -1083,18 +1346,21 @@ if (mode === "begin") {
 }
 
 if (mode === "apply") {
-  const [activeFile, runFile, runOutput, runId, eventId, eventType, payloadJson, expectedProjectRoot,
+  const [stateDir, runFile, runOutput, runId, eventId, eventType, payloadJson, expectedProjectRoot,
     expectedOwnerSessionId = ""] = args;
   if (!identifier(runId) || !identifier(eventId) || !EVENT_TYPES.has(eventType) || eventType === "START") fail(3, "invalid event identity/type");
   let payload;
   try { payload = JSON.parse(payloadJson); } catch (_) { fail(3, "event payload is not JSON"); }
   if (!payloadValid(eventType, payload)) fail(3, `invalid payload for ${eventType}`);
-  const pointer = readPointer(activeFile);
-  if (pointer.runId !== runId) fail(4, "event does not target the active run");
   const state = readState(runFile);
   if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
     fail(2, "run file identity or physical project root mismatch");
   }
+  // The pointer that has to designate this run is its OWNER's, resolved from
+  // the run record rather than from the caller: an event may legitimately be
+  // applied by a hook that supplies no caller identity at all.
+  const pointer = activePointerFor(stateDir, state.ownerSessionId, runId);
+  if (!pointer || pointer.runId !== runId) fail(4, "event does not target the active run");
   if (expectedOwnerSessionId && state.ownerSessionId !== expectedOwnerSessionId) {
     fail(4, "event caller does not own the active run");
   }
@@ -1129,6 +1395,46 @@ if (mode === "apply") {
   process.exit(0);
 }
 
+// Release is the ONE path that cancels a run the caller does not own. It
+// bypasses exactly one check — the ownership comparison — and nothing else:
+// the transition, the ledger bound, the schema check and the atomic write are
+// the ordinary ones. Provenance is the event id, which the writer prefixes
+// `release-`; the CANCEL payload stays the empty object the ledger schema
+// already accepts, so a released run remains readable by any runtime that can
+// read an ordinary cancellation. No state field is added and no bypass-ledger
+// entry is written: this escapes no gate, it terminates a run.
+if (mode === "release") {
+  const [runFile, runOutput, runId, eventId, expectedProjectRoot, callerSessionId] = args;
+  if (!identifier(runId) || !identifier(eventId) || !sessionIdentifier(callerSessionId)) {
+    fail(3, "invalid release arguments");
+  }
+  const state = readState(runFile);
+  if (state.runId !== runId || state.projectRoot !== expectedProjectRoot) {
+    fail(2, "run file identity or physical project root mismatch");
+  }
+  const payload = {};
+  const payloadDigest = digest(payload);
+  // Idempotency is decided before the terminal check so an interrupted
+  // release that already landed reports success rather than "already
+  // terminal", which reads like a refusal.
+  const prior = state.events.find(event => event.eventId === eventId);
+  if (prior) {
+    if (prior.eventType === "CANCEL" && prior.payloadDigest === payloadDigest) process.exit(10);
+    fail(4, `eventId conflict: ${eventId}`);
+  }
+  if (TERMINAL.has(state.stage)) fail(3, "terminal run cannot be released");
+  if (state.ownerSessionId === callerSessionId) {
+    fail(4, "caller owns this run; cancel it through the ordinary event path");
+  }
+  if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
+  const fromStage = state.stage;
+  transition(state, "CANCEL", payload);
+  state.events.push({ eventId, eventType: "CANCEL", payloadDigest, payload, fromStage, toStage: state.stage });
+  if (!stateValid(state)) fail(2, "transition produced invalid state");
+  writeOutput(runOutput, state);
+  process.exit(0);
+}
+
 if (mode === "team-review-receipt-meta") {
   const [runFile, expectedRunId, eventId] = args;
   const state = readState(runFile);
@@ -1151,11 +1457,11 @@ if (mode === "team-review-receipt-meta") {
 }
 
 if (mode === "increment-budget") {
-  const [activeFile, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
+  const [stateDir, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
     expectedOwnerSessionId = ""] = args;
-  const pointer = readPointer(activeFile);
-  if (pointer.runId !== runId) fail(4, "budget does not target the active run");
   const state = readState(runFile);
+  const pointer = activePointerFor(stateDir, state.ownerSessionId, runId);
+  if (!pointer || pointer.runId !== runId) fail(4, "budget does not target the active run");
   if (state.runId !== runId || state.projectRoot !== expectedProjectRoot
     || state.stage !== expectedStage || STOP_TERMINAL.has(state.stage)) {
     fail(4, "stop budget stage is stale or terminal");
@@ -1171,13 +1477,13 @@ if (mode === "increment-budget") {
 }
 
 if (mode === "increment-budget-capped") {
-  const [activeFile, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
+  const [stateDir, runFile, runOutput, runId, expectedStage, expectedProjectRoot,
     expectedOwnerSessionId, capRaw, blockCode] = args;
   const cap = Number(capRaw);
   if (!natural(cap) || !identifier(blockCode)) fail(3, "invalid capped-budget arguments");
-  const pointer = readPointer(activeFile);
-  if (pointer.runId !== runId) fail(4, "capped budget does not target the active run");
   const state = readState(runFile);
+  const pointer = activePointerFor(stateDir, state.ownerSessionId, runId);
+  if (!pointer || pointer.runId !== runId) fail(4, "capped budget does not target the active run");
   if (state.runId !== runId || state.projectRoot !== expectedProjectRoot
     || state.stage !== expectedStage || STOP_TERMINAL.has(state.stage)) {
     fail(4, "capped stop budget stage is stale or terminal");
@@ -1218,14 +1524,21 @@ NODE
 
 _autopilot_begin_critical() {
   local root="$1" run_id="$2" owner_session_id="$3" cover="$4" validate="$5"
+  local workspace_root="${6:-}"
+  [ -n "$workspace_root" ] || workspace_root="$(_autopilot_session_workspace "$root")" || return 2
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
-  local active_file="$state_dir/autopilot-active.json"
+  local active_file legacy_file
+  active_file="$(_autopilot_active_path "$state_dir" "$owner_session_id")" || return 3
+  legacy_file="$(_autopilot_legacy_active_path "$state_dir")" || return 3
   local run_tmp active_tmp rc
+  # `_autopilot_storage_safe` covers the legacy pointer by name; the
+  # owner-keyed one is validated here, at the only site that writes it.
+  CLAUDE_PROJECT_DIR="$root" _tdd_path_safe "$active_file" regular-or-absent || return 2
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   active_tmp="$(_autopilot_mktemp_beside "$active_file")" || { rm -f "$run_tmp"; return 5; }
   _autopilot_node begin "$active_file" "$run_file" "$run_tmp" "$active_tmp" \
-    "$run_id" "$owner_session_id" "$root" "$cover" "$validate"
+    "$run_id" "$owner_session_id" "$root" "$cover" "$validate" "$workspace_root" "$legacy_file"
   rc=$?
   if [ "$rc" -eq 10 ]; then
     rm -f "$run_tmp" "$active_tmp"
@@ -1240,7 +1553,7 @@ _autopilot_begin_critical() {
 }
 
 autopilot_begin_run() {
-  local run_id="${1:-}" owner_session_id="${2:-}" root cover validate
+  local run_id="${1:-}" owner_session_id="${2:-}" root cover validate workspace_root session_workspace root_rendered
   _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$owner_session_id" || return 3
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   cover="${4:-false}"
@@ -1249,9 +1562,35 @@ autopilot_begin_run() {
     true:true|true:false|false:true|false:false) ;;
     *) return 3 ;;
   esac
+  # Default the workspace to the working tree the caller is standing in. A
+  # session that begins from the project root therefore keeps exactly the
+  # pre-change exclusion; a session working inside a worktree gets its own.
+  workspace_root="${6:-}"
+  if [ -n "$workspace_root" ]; then
+    workspace_root="$(autopilot_workspace_root "$workspace_root")" || return 2
+    # A declared workspace that names neither the session's own resolved tree
+    # nor a directory under the project root would record a key nothing else
+    # can claim while the run's commits still land elsewhere, which defeats the
+    # only remaining collision guard. Accepted narrowing: a git worktree
+    # OUTSIDE the project root can no longer be declared.
+    session_workspace="$(_autopilot_session_workspace "$root")" || return 2
+    # Both sides of the containment test must be in ONE namespace: the workspace
+    # arrives host-rendered, so the project root is rendered by the same helper
+    # rather than compared in its shell spelling.
+    root_rendered="$(_autopilot_rendered_dir "$root")" || root_rendered="$root"
+    if [ "$workspace_root" != "$session_workspace" ]; then
+      case "$workspace_root" in
+        "$root_rendered"|"$root_rendered"/*) ;;
+        *) return 3 ;;
+      esac
+    fi
+  else
+    workspace_root="$(_autopilot_session_workspace "$root")" || return 2
+  fi
+  case "$workspace_root" in *[$'\n\r']*) return 3 ;; esac
   _autopilot_prepare_storage "$root" || return 2
   _autopilot_locked_run "$root" "$run_id" _autopilot_begin_critical \
-    "$root" "$run_id" "$owner_session_id" "$cover" "$validate"
+    "$root" "$run_id" "$owner_session_id" "$cover" "$validate" "$workspace_root"
 }
 
 _autopilot_attest_team_review_publication_critical() {
@@ -1283,10 +1622,9 @@ _autopilot_apply_critical() {
   local caller_session_id="${6:-}"
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
-  local active_file="$state_dir/autopilot-active.json"
   local run_tmp rc
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
-  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" "$event_type" "$payload_json" "$root" "$caller_session_id"
+  _autopilot_node apply "$state_dir" "$run_file" "$run_tmp" "$run_id" "$event_id" "$event_type" "$payload_json" "$root" "$caller_session_id"
   rc=$?
   if [ "$rc" -eq 10 ]; then
     rm -f "$run_tmp"
@@ -1331,20 +1669,61 @@ autopilot_read_run() {
 }
 
 _autopilot_read_active_critical() {
-  local root="$1" state_dir="$1/.zensu/state"
-  _autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root"
+  local root="$1" owner="$2" state_dir="$1/.zensu/state" active_file legacy_file
+  active_file="$(_autopilot_active_path "$state_dir" "$owner")" || return 3
+  legacy_file="$(_autopilot_legacy_active_path "$state_dir")" || return 3
+  _autopilot_node read-active "$active_file" "$state_dir" "$root" "$owner" "$legacy_file"
+}
+
+_autopilot_read_workspace_critical() {
+  local root="$1" workspace="$2" state_dir="$1/.zensu/state"
+  _autopilot_node read-workspace "$state_dir" "$root" "$workspace"
 }
 
 autopilot_read_active() {
-  local root
+  local root owner="${2:-}"
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_session_id_ok "$owner" || return 3
   _autopilot_read_storage_ready "$root" || return $?
   # Read the pointer and full run inventory under the same project-wide lock
   # as begin. A healthy begin publishes run then pointer with two renames; a
   # concurrent hook must wait for both rather than diagnosing that brief,
   # intentional window as an orphan. If begin crashes, the lock is released
   # and the durable partial publication is then classified fail-closed.
-  _autopilot_locked_run "$root" "" _autopilot_read_active_critical "$root"
+  _autopilot_locked_run "$root" "" _autopilot_read_active_critical "$root" "$owner"
+}
+
+_autopilot_release_critical() {
+  local root="$1" run_id="$2" event_id="$3" caller_session_id="$4"
+  local state_dir="$root/.zensu/state"
+  local run_file="$state_dir/autopilot-run-${run_id}.json"
+  local run_tmp rc
+  run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
+  _autopilot_node release "$run_file" "$run_tmp" "$run_id" "$event_id" "$root" "$caller_session_id"
+  rc=$?
+  if [ "$rc" -eq 10 ]; then
+    rm -f "$run_tmp"
+    return 0
+  fi
+  if [ "$rc" -ne 0 ]; then
+    rm -f "$run_tmp"
+    return "$rc"
+  fi
+  _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp"; return 5; }
+}
+
+# Cancel a nonterminal run owned by ANOTHER session. It runs under the same
+# project lock as every other writer, so it cannot race a live owner mid-event;
+# the owner's own pointer is left untouched and simply comes to designate a
+# terminal run, which every reader already handles.
+autopilot_release_run() {
+  local run_id="${1:-}" event_id="${2:-}" root caller_session_id="${4:-}"
+  _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" || return 3
+  _autopilot_session_id_ok "$caller_session_id" || return 3
+  root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  _autopilot_read_storage_ready "$root" "$run_id" || return $?
+  _autopilot_locked_run "$root" "$run_id" _autopilot_release_critical \
+    "$root" "$run_id" "$event_id" "$caller_session_id"
 }
 
 # Chain ids share the 128-character durable identifier contract, while the
@@ -1417,12 +1796,19 @@ _autopilot_team_review_payload_target() {
 
 _autopilot_team_review_payload_identity_critical() {
   local root="$1" run_id="$2" operation_key="$3" head_sha="$4" provider="$5"
-  local state_dir="$root/.zensu/state" expected_key state
+  local state_dir="$root/.zensu/state" expected_key state owner
   case "$provider" in github|gitlab) ;; *) return 3 ;; esac
   expected_key="$(autopilot_team_review_operation_key "$run_id" "$head_sha")" || return $?
   [ "$operation_key" = "$expected_key" ] || return 4
-  state="$(_autopilot_node read-active \
-    "$state_dir/autopilot-active.json" "$state_dir" "$root")" || return $?
+  # The pointer that must still designate this run is its OWNER's, and the
+  # owner is a property of the run rather than of whoever is attesting.
+  owner="$(_autopilot_node read-run "$state_dir/autopilot-run-${run_id}.json" "$run_id" "$root" \
+    | node -e '
+      try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).ownerSessionId); }
+      catch (_) { process.exit(2); }
+    ' 2>/dev/null)" || return 2
+  [ -n "$owner" ] || return 2
+  state="$(_autopilot_read_active_critical "$root" "$owner")" || return $?
   printf '%s' "$state" | RUN_ID="$run_id" OPERATION_KEY="$operation_key" \
     HEAD_SHA="$head_sha" PROVIDER="$provider" node -e '
       let state;
@@ -1811,28 +2197,21 @@ autopilot_store_team_review_payload() {
 
 # Starting a standalone inner generation must serialize with every durable
 # outer begin/start. The decision and inner write therefore share the canonical
-# Outer -> Inner lock order. BLOCKED is resumable and still owns the project;
-# only a genuinely absent inventory or a DONE/CANCELLED pointer permits this
-# unbound generation.
+# Outer -> Inner lock order. BLOCKED is resumable and still owns the WORKSPACE;
+# only a workspace no nonterminal run holds permits this unbound generation.
+# The question is owner-INDEPENDENT on purpose: a standalone chain must not
+# start underneath another session's durable run in the same working tree.
 _autopilot_begin_standalone_tdd_critical() {
-  local root="$1" session_id="$2" vanilla="$3" state_dir="$1/.zensu/state"
-  local state read_rc stage
-  if state="$(_autopilot_node read-active \
-      "$state_dir/autopilot-active.json" "$state_dir" "$root" 2>/dev/null)"; then
+  local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}"
+  local read_rc
+  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
+  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0)
-      stage="$(printf '%s' "$state" | node -e '
-        try {
-          const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
-          process.stdout.write(s.stage);
-        } catch (_) { process.exit(3); }
-      ' 2>/dev/null)" || return 2
-      case "$stage" in DONE|CANCELLED) ;; *) return 4 ;; esac
-      ;;
+    0) return 4 ;;
     1) ;;
     *) return "$read_rc" ;;
   esac
@@ -1840,15 +2219,16 @@ _autopilot_begin_standalone_tdd_critical() {
 }
 
 autopilot_begin_standalone_tdd() {
-  local root session_id="${2:-}" vanilla="${3:-false}"
+  local root session_id="${2:-}" vanilla="${3:-false}" workspace
   [ "$#" -eq 3 ] || return 3
   [ -n "$session_id" ] && [ "${#session_id}" -le 128 ] || return 3
   case "$session_id" in *[!A-Za-z0-9_-]*) return 3 ;; esac
   case "$vanilla" in true|false) ;; *) return 3 ;; esac
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  workspace="$(_autopilot_session_workspace "$root")" || return 2
   _autopilot_prepare_storage "$root" || return 2
   _autopilot_locked_run "$root" "" _autopilot_begin_standalone_tdd_critical \
-    "$root" "$session_id" "$vanilla"
+    "$root" "$session_id" "$vanilla" "$workspace"
 }
 
 # Deferred-review adoption has the same ownership boundary as a standalone TDD
@@ -1858,26 +2238,15 @@ autopilot_begin_standalone_tdd() {
 # decides, and adoption must finish its claim+seed before the Outer lock releases.
 _autopilot_adopt_pending_review_critical() {
   local root="$1" session_id="$2" vanilla="$3" ttl_hours="$4" owner_pid="$5"
-  local state_dir="$1/.zensu/state" state read_rc stage adopt_rc
-  if state="$(_autopilot_node read-active \
-      "$state_dir/autopilot-active.json" "$state_dir" "$root" 2>/dev/null)"; then
+  local workspace="${6:-}" read_rc adopt_rc
+  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
+  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0)
-      stage="$(printf '%s' "$state" | node -e '
-        try {
-          const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
-          process.stdout.write(s.stage);
-        } catch (_) { process.exit(3); }
-      ' 2>/dev/null)" || return 2
-      case "$stage" in
-        DONE|CANCELLED) ;;
-        *) return 4 ;;
-      esac
-      ;;
+    0) return 4 ;;
     1) ;;
     *) return "$read_rc" ;;
   esac
@@ -1902,22 +2271,16 @@ _autopilot_adopt_pending_review_critical() {
 # stable foreign plain claim, then check Outer again as the TOCTOU fence. A run
 # published after that final absent/terminal read linearizes after this Stop.
 _autopilot_deferred_contention_result() {
-  local root="$1" session_id="$2" ttl_hours="$3" state read_rc stage
+  local root="$1" session_id="$2" ttl_hours="$3" workspace="${4:-}" read_rc
+  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
   _autopilot_storage_safe "$root" "" || return 2
-  if state="$(_autopilot_node read-active \
-      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0)
-      stage="$(printf '%s' "$state" | node -e '
-        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
-        catch (_) { process.exit(3); }
-      ' 2>/dev/null)" || return 2
-      case "$stage" in DONE|CANCELLED) ;; *) return 4 ;; esac
-      ;;
+    0) return 4 ;;
     1) ;;
     # This unlocked read may observe begin's durable run before its active
     # pointer is published. Storage safety was proven above, so this is
@@ -1929,20 +2292,13 @@ _autopilot_deferred_contention_result() {
   tdd_pending_review_owned_by_other "$session_id" "$ttl_hours" || return 8
 
   _autopilot_storage_safe "$root" "" || return 2
-  if state="$(_autopilot_node read-active \
-      "$root/.zensu/state/autopilot-active.json" "$root/.zensu/state" "$root" 2>/dev/null)"; then
+  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0)
-      stage="$(printf '%s' "$state" | node -e '
-        try { process.stdout.write(JSON.parse(require("fs").readFileSync(0,"utf8")).stage); }
-        catch (_) { process.exit(3); }
-      ' 2>/dev/null)" || return 2
-      case "$stage" in DONE|CANCELLED) return 6 ;; *) return 4 ;; esac
-      ;;
+    0) return 4 ;;
     1) return 6 ;;
     # The final fence can see the same valid run->pointer publication window.
     # Without a conclusive absent/terminal/active result, retry under Outer.
@@ -1953,7 +2309,7 @@ _autopilot_deferred_contention_result() {
 
 autopilot_adopt_pending_review() {
   local root session_id="${2:-}" vanilla="${3:-false}" ttl_hours="${4:-0}"
-  local owner_pid="${5:-$$}" lock_attempt=0 rc contention_rc
+  local owner_pid="${5:-$$}" lock_attempt=0 rc contention_rc workspace
   [ "$#" -eq 4 ] || [ "$#" -eq 5 ] || return 3
   _autopilot_session_id_ok "$session_id" || return 3
   case "$vanilla" in true|false) ;; *) return 3 ;; esac
@@ -1961,6 +2317,7 @@ autopilot_adopt_pending_review() {
   case "$owner_pid" in ''|*[!0-9]*) return 3 ;; esac
   [ "$owner_pid" -gt 0 ] || return 3
   root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  workspace="$(_autopilot_session_workspace "$root")" || return 2
   _autopilot_prepare_storage "$root" || return 2
   # The Core lease has a deliberately bounded per-acquisition wait.
   # A burst of Stop hooks can legitimately queue many slow Outer->pending->Inner
@@ -1969,7 +2326,7 @@ autopilot_adopt_pending_review() {
   # results have distinct codes and are never retried here.
   while [ "$lock_attempt" -lt 5 ]; do
     if _autopilot_locked_run "$root" "" _autopilot_adopt_pending_review_critical \
-        "$root" "$session_id" "$vanilla" "$ttl_hours" "$owner_pid"; then
+        "$root" "$session_id" "$vanilla" "$ttl_hours" "$owner_pid" "$workspace"; then
       return 0
     else
       rc=$?
@@ -1978,7 +2335,7 @@ autopilot_adopt_pending_review() {
     # but do not retry them as though the Outer project lock were contended.
     [ "$rc" -eq 7 ] && return 1
     [ "$rc" -eq 1 ] || return "$rc"
-    _autopilot_deferred_contention_result "$root" "$session_id" "$ttl_hours"
+    _autopilot_deferred_contention_result "$root" "$session_id" "$ttl_hours" "$workspace"
     contention_rc=$?
     case "$contention_rc" in
       4|6) return "$contention_rc" ;;
@@ -1994,10 +2351,9 @@ _autopilot_increment_budget_critical() {
   local root="$1" run_id="$2" expected_stage="$3" caller_session_id="${4:-}"
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
-  local active_file="$state_dir/autopilot-active.json"
   local run_tmp result rc
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
-  result="$(_autopilot_node increment-budget "$active_file" "$run_file" "$run_tmp" "$run_id" "$expected_stage" "$root" "$caller_session_id")"
+  result="$(_autopilot_node increment-budget "$state_dir" "$run_file" "$run_tmp" "$run_id" "$expected_stage" "$root" "$caller_session_id")"
   rc=$?
   if [ "$rc" -ne 0 ]; then
     rm -f "$run_tmp"
@@ -2023,9 +2379,9 @@ _autopilot_increment_budget_capped_critical() {
   local root="$1" run_id="$2" expected_stage="$3" caller_session_id="$4"
   local cap="$5" block_code="$6" state_dir="$1/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
-  local active_file="$state_dir/autopilot-active.json" run_tmp result rc
+  local run_tmp result rc
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
-  result="$(_autopilot_node increment-budget-capped "$active_file" "$run_file" "$run_tmp" \
+  result="$(_autopilot_node increment-budget-capped "$state_dir" "$run_file" "$run_tmp" \
     "$run_id" "$expected_stage" "$root" "$caller_session_id" "$cap" "$block_code")"
   rc=$?
   if [ "$rc" -ne 0 ]; then
@@ -2131,8 +2487,7 @@ _autopilot_reconcile_stop_inner_critical() {
 _autopilot_reconcile_stop_critical() {
   local root="$1" caller_session_id="$2" state_dir="$1/.zensu/state"
   local state meta run_id owner stage attempt chain_id return_stage state_file
-  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
-    || return $?
+  state="$(_autopilot_read_active_critical "$root" "$caller_session_id")" || return $?
   meta="$(printf '%s' "$state" | node -e '
     try {
       const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
@@ -2213,8 +2568,7 @@ _autopilot_increment_inner_budget_outer_critical() {
   local state meta run_id owner stage events attempt chain_id return_stage tdd_session
   local state_file state_dir_inner
   local result_file result rc
-  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
-    || return $?
+  state="$(_autopilot_read_active_critical "$root" "$session_id")" || return $?
   meta="$(printf '%s' "$state" | node -e '
     try {
       const s=JSON.parse(require("fs").readFileSync(0,"utf8"));
@@ -2304,15 +2658,14 @@ _autopilot_verify_inner_binding() {
 _autopilot_begin_tdd_critical() {
   local root="$1" run_id="$2" event_id="$3" session_id="$4" vanilla="$5"
   local attempt="$6" return_stage="$7" chain_id="$8"
-  local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  local state_dir="$root/.zensu/state" run_file run_tmp payload rc
   local native_run_tmp env_exclusions
   run_file="$state_dir/autopilot-run-${run_id}.json"
-  active_file="$state_dir/autopilot-active.json"
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" node -e '
     process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID}));
   ')" || { rm -f "$run_tmp"; return 5; }
-  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" \
+  _autopilot_node apply "$state_dir" "$run_file" "$run_tmp" "$run_id" "$event_id" \
     TDD_STARTED "$payload" "$root" "$session_id"
   rc=$?
   if [ "$rc" -eq 10 ]; then
@@ -2376,14 +2729,13 @@ autopilot_begin_tdd_attempt() {
 _autopilot_finish_tdd_critical() {
   local root="$1" run_id="$2" event_id="$3" session_id="$4" attempt="$5"
   local chain_id="$6" outcome="$7" claimed_seen="$8" claimed_ticket="${9:-}"
-  local state_dir="$root/.zensu/state" run_file active_file run_tmp payload rc
+  local state_dir="$root/.zensu/state" run_file run_tmp payload rc
   run_file="$state_dir/autopilot-run-${run_id}.json"
-  active_file="$state_dir/autopilot-active.json"
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
   payload="$(ATTEMPT="$attempt" CHAIN_ID="$chain_id" SID="$session_id" OUTCOME="$outcome" node -e '
     process.stdout.write(JSON.stringify({attempt:Number(process.env.ATTEMPT),chainId:process.env.CHAIN_ID,sessionId:process.env.SID,outcome:process.env.OUTCOME}));
   ')" || { rm -f "$run_tmp"; return 5; }
-  _autopilot_node apply "$active_file" "$run_file" "$run_tmp" "$run_id" "$event_id" \
+  _autopilot_node apply "$state_dir" "$run_file" "$run_tmp" "$run_id" "$event_id" \
     TDD_CHAIN_DONE "$payload" "$root" "$session_id"
   rc=$?
   if [ "$rc" -eq 10 ]; then
@@ -2532,8 +2884,7 @@ _autopilot_terminal_inner_matches_critical() {
 _autopilot_terminal_owns_inner_critical() {
   local root="$1" run_id="$2" session_id="$3" attempt="$4"
   local return_stage="$5" chain_id="$6" state_dir="$1/.zensu/state" state state_file
-  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
-    || return $?
+  state="$(_autopilot_read_active_critical "$root" "$session_id")" || return $?
   printf '%s' "$state" | RUN_ID="$run_id" SID="$session_id" ATTEMPT="$attempt" \
     RETURN_STAGE="$return_stage" CHAIN_ID="$chain_id" node -e '
       try {
@@ -2577,8 +2928,7 @@ _autopilot_reset_inner_critical() {
   # Reset is also the terminal Stop release linearization point. Read the
   # current pointer while the project lock is held; a historical terminal run
   # file must never authorize clearing or releasing a newer active run.
-  state="$(_autopilot_node read-active "$state_dir/autopilot-active.json" "$state_dir" "$root")" \
-    || return $?
+  state="$(_autopilot_read_active_critical "$root" "$session_id")" || return $?
   printf '%s' "$state" | SID="$session_id" RUN_ID="$run_id" ATTEMPT="$attempt" \
     CHAIN_ID="$chain_id" node -e '
       try {

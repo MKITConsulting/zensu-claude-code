@@ -19,6 +19,7 @@
     "structure/test-autopilot-inner-termination.sh": 24,
     "structure/test-autopilot-plan-delegate.sh": 57,
     "structure/test-autopilot-post-review-max-rounds.sh": 51,
+    "structure/test-autopilot-release-cli.sh": 90,
     "structure/test-autopilot-review-rearm.sh": 41,
     "structure/test-autopilot-session-resume.sh": 42,
     "structure/test-autopilot-skill.sh": 1,
@@ -85,6 +86,7 @@
     "structure/test-self-review-markers.sh": 11,
     "structure/test-self-review-skill.sh": 1,
     "structure/test-session-control-claude.sh": 15,
+    "structure/test-session-control-core.sh": 55,
     "structure/test-session-control-sandbox-hook-integration.sh": 1,
     "structure/test-session-id-v1.sh": 10,
     "structure/test-session-start-banner.sh": 2,
@@ -129,7 +131,6 @@
     "structure/test-zen-mode.sh": 20,
     "structure/test-zensu-help-skill.sh": 1,
     "structure/test-zensu-plm-arg-guidance.sh": 1,
-    "structure/test-zensu-runtime-controller.sh": 17,
-    "structure/test-session-control-core.sh": 55
+    "structure/test-zensu-runtime-controller.sh": 17
   }
 }

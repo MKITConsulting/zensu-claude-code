@@ -115,7 +115,10 @@ fi
 arm outer-owned || { echo "O2 fixture failed" >&2; exit 1; }
 OWNED_PROJECT="$ARMED_PROJECT"
 OWNED_STATE="$(tdd_state_file "$ARMED_KEY")"
-autopilot_begin_run outer-owned-run outer-owned-owner "$OWNED_PROJECT" >/dev/null 2>&1 \
+# The outer run must be owned by the session under test: a run owned by
+# another session is not this session's outer run and legitimately leaves
+# its chain unbound.
+autopilot_begin_run outer-owned-run "$ARMED_KEY" "$OWNED_PROJECT" >/dev/null 2>&1 \
   || { echo "O2 fixture: outer run could not be started" >&2; exit 1; }
 OUT2="$(run_hook "$OWNED_PROJECT" "$ARMED_TICKET")"
 if [ -z "$OUT2" ]; then
@@ -127,6 +130,27 @@ if ! ticket_consumed "$OWNED_STATE"; then
   check "O2a the one-shot review ticket survives the refusal unconsumed" PASS
 else
   check "O2a review ticket was consumed despite the refusal" FAIL
+fi
+
+# --- O2b a nonterminal outer run owned by ANOTHER session ---
+# The read at this site is owner-scoped, so a foreign run leaves this chain
+# unbound and the claim proceeds. Pin that decision explicitly: the alternative
+# — refusing here too — is what the owner-independent arm-time gate does, and
+# the two must not be confused for one another.
+arm outer-foreign || { echo "O2b fixture failed" >&2; exit 1; }
+FOREIGN_PROJECT="$ARMED_PROJECT"
+FOREIGN_STATE="$(tdd_state_file "$ARMED_KEY")"
+autopilot_begin_run outer-foreign-run outer_foreign_other_session "$FOREIGN_PROJECT" >/dev/null 2>&1 \
+  || { echo "O2b fixture: foreign outer run could not be started" >&2; exit 1; }
+OUT2B="$(run_hook "$FOREIGN_PROJECT" "$ARMED_TICKET")"
+# "The claim proceeded" means the UNBOUND routing directive was emitted — the
+# one that hands the terminus to --code-review-done — and not an Autopilot-bound
+# one. Asserting only that some text appeared would not tell those apart.
+if printf '%s' "$OUT2B" | grep -qF -- '--code-review-done' \
+  && ! printf '%s' "$OUT2B" | grep -qF 'ZENSU_AUTOPILOT'; then
+  check "O2b a foreign session's nonterminal outer run leaves this chain unbound" PASS
+else
+  check "O2b foreign outer run (out='$OUT2B')" FAIL
 fi
 
 # --- O3 the hook must not read an ambient project dir anywhere ---

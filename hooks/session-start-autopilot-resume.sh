@@ -133,6 +133,16 @@ AUTOPILOT_STATE_HINT=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
   AUTOPILOT_STATE_HINT=true
 fi
+# The pointer is owner-keyed now; the name above is only the pre-scoping one,
+# which is never written any more. Probe the current spelling too rather than
+# leaning on the run-file glob below to compensate.
+for _zensu_autopilot_pointer_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-active-*.json; do
+  if [ -e "$_zensu_autopilot_pointer_hint" ] || [ -L "$_zensu_autopilot_pointer_hint" ]; then
+    AUTOPILOT_STATE_HINT=true
+    break
+  fi
+done
+unset _zensu_autopilot_pointer_hint
 for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
   if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
     AUTOPILOT_STATE_HINT=true
@@ -152,7 +162,7 @@ SESSION_ID="$(zensu_resolve_session_id "$SESSION_ID" 2>/dev/null)" || exit 0
 # consistency check. Keep this project-local even when the hook's cwd differs.
 source "$AUTOPILOT_STATE_LIB"
 ACTIVE_STATE=""
-if ACTIVE_STATE="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+if ACTIVE_STATE="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
   READ_RC=0
 else
   READ_RC=$?
@@ -322,8 +332,15 @@ if (stage === 'DONE' || stage === 'CANCELLED') {
   process.exit(0);
 }
 
+// Defense in depth, and UNREACHABLE through the ordinary path: this emitter is
+// fed by `autopilot_read_active`, which is owner-scoped and fails before
+// returning a state whose owner differs. The branch is kept so a state that
+// arrives by some other route can never be rendered as a run belonging to this session.
+// It deliberately does NOT advertise the release command: a line that cannot
+// render is no place to publish the one run id that command takes — the
+// `--autopilot-begin` refusal is what names it.
 if (ownerSessionId !== currentSessionId) {
-  emit(`ZENSU_AUTOPILOT_RESUME OWNER_MISMATCH runId=${runId} stage=${stage}. This nonterminal durable run belongs to another top-level session. Do not resume, mutate, replace, or repeat its effects here. Continue, resume, or cancel it only from its owner session; if that session cannot be recovered, stop and request explicit manual state repair.`);
+  emit(`ZENSU_AUTOPILOT_RESUME OWNER_MISMATCH runId=${runId} stage=${stage}. This nonterminal durable run belongs to another top-level session. Do not resume, mutate, replace, or repeat its effects here. Continue or cancel it from its owner session.`);
   process.exit(0);
 }
 

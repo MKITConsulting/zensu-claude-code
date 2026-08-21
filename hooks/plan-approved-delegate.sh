@@ -56,6 +56,18 @@ AUTOPILOT_STATE_HINT=false
 if [ -n "$ACTIVE_POINTER_HINT" ] && { [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; }; then
   AUTOPILOT_STATE_HINT=true
 fi
+# The pointer is owner-keyed now; the name above is only the pre-scoping one,
+# which is never written any more. Probe the current spelling too rather than
+# leaning on the run-file glob below to compensate.
+if [ -n "$PROJECT_ROOT" ]; then
+  for _zensu_autopilot_pointer_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-active-*.json; do
+    if [ -e "$_zensu_autopilot_pointer_hint" ] || [ -L "$_zensu_autopilot_pointer_hint" ]; then
+      AUTOPILOT_STATE_HINT=true
+      break
+    fi
+  done
+  unset _zensu_autopilot_pointer_hint
+fi
 if [ -n "$PROJECT_ROOT" ]; then
   for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
     if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
@@ -132,8 +144,36 @@ emit_autopilot_blocked() {
 # standalone behavior; corruption (rc 2+) is a visible, fail-closed blocker.
 if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
   source "$AUTOPILOT_STATE_LIB"
+  # The active run is now the CALLER's, so the owner identity is needed before
+  # the read rather than after it. When it cannot be resolved the hook can make
+  # no correct Autopilot decision at all: it stays fail-closed wherever durable
+  # run artifacts exist, and falls through to the standalone policy only in a
+  # project that has never run Autopilot.
+  AUTOPILOT_OWNER=""
+  if [ -r "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh" ]; then
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    AUTOPILOT_OWNER="$(zensu_resolve_session_id "$(read_field session_id)" 2>/dev/null)" \
+      || AUTOPILOT_OWNER=""
+  fi
   ACTIVE_JSON=""
-  if ACTIVE_JSON="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+  if [ -z "$AUTOPILOT_OWNER" ]; then
+    # `AUTOPILOT_STATE_HINT` was already computed from the same artifacts; a
+    # directory that exists but cannot be searched is NOT "this project never
+    # ran Autopilot", so it takes the fail-closed arm rather than the
+    # standalone policy.
+    # Traversal is the execute bit, not the read bit: with `.zensu/state`
+    # readable but not searchable every `[ -e ]` probe above fails, so the hint
+    # stays false while the directory plainly holds durable artifacts. Both bits
+    # take the fail-closed arm, and so does an unsearchable `.zensu` itself.
+    if [ "$AUTOPILOT_STATE_HINT" = true ] \
+      || { [ -d "$PROJECT_ROOT/.zensu/state" ] \
+        && { [ ! -r "$PROJECT_ROOT/.zensu/state" ] || [ ! -x "$PROJECT_ROOT/.zensu/state" ]; }; } \
+      || { [ -e "$PROJECT_ROOT/.zensu" ] && [ ! -x "$PROJECT_ROOT/.zensu" ]; }; then
+      emit_autopilot_blocked SESSION_CONTEXT_UNAVAILABLE
+      exit 0
+    fi
+    ACTIVE_RC=1
+  elif ACTIVE_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$AUTOPILOT_OWNER" 2>/dev/null)"; then
     ACTIVE_RC=0
   else
     ACTIVE_RC=$?

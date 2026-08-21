@@ -121,9 +121,10 @@ BEFORE_OWNER="$(digest "$RUN_FILE")"
 provision_session "$PROJECT" other_session foreign || exit 1
 FOREIGN_DATA="$PROVISIONED_DATA"
 OUT_OWNER="$(invoke "$(payload "$PLAN" other_session)" "$PROJECT" "$CFG_OFF" "$FOREIGN_DATA")"
-if printf '%s' "$OUT_OWNER" | grep -qF 'OWNER_SESSION_MISMATCH' && [ "$(digest "$RUN_FILE")" = "$BEFORE_OWNER" ]; then
-  check "P6 foreign session cannot approve or mutate the run" PASS
-else check "P6 foreign session cannot approve or mutate the run" FAIL; fi
+if ! printf '%s' "$OUT_OWNER" | grep -qF 'ZENSU_AUTOPILOT' \
+  && [ "$(digest "$RUN_FILE")" = "$BEFORE_OWNER" ]; then
+  check "P6 a foreign session neither drives nor mutates another session's run" PASS
+else check "P6 a foreign session neither drives nor mutates another session's run" FAIL; fi
 
 BAD_PROJECT="$TMP/bad-project"; mkdir -p "$BAD_PROJECT"
 provision_session "$BAD_PROJECT" bad_plan_session bad || exit 1
@@ -153,7 +154,7 @@ ORPHAN_PROJECT="$TMP/orphan-project"; mkdir -p "$ORPHAN_PROJECT"
 provision_session "$ORPHAN_PROJECT" orphan_plan_owner orphan || exit 1
 ORPHAN_OWNER="$PROVISIONED_KEY"; ORPHAN_DATA="$PROVISIONED_DATA"
 autopilot_begin_run orphan_plan_run "$ORPHAN_OWNER" "$ORPHAN_PROJECT" >/dev/null
-rm -f "$(autopilot_active_file "$ORPHAN_PROJECT")"
+rm -f "$(autopilot_active_file "$ORPHAN_PROJECT" "$ORPHAN_OWNER")"
 ORPHAN_OUT="$(invoke "$(payload 'ordinary plan during orphan crash' orphan_plan_owner)" "$ORPHAN_PROJECT" "$CFG_OFF" "$ORPHAN_DATA")"
 if printf '%s' "$ORPHAN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$ORPHAN_OUT" | grep -qF 'AskUserQuestion'; then
@@ -161,21 +162,75 @@ if printf '%s' "$ORPHAN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
 else check "P7c orphan nonterminal run cannot look standalone" FAIL; fi
 
 HIDDEN_PROJECT="$TMP/hidden-orphan-project"; mkdir -p "$HIDDEN_PROJECT"
-provision_session "$HIDDEN_PROJECT" old_plan_owner hidden-old || exit 1
-OLD_PLAN_OWNER="$PROVISIONED_KEY"
-autopilot_begin_run old_plan_terminal "$OLD_PLAN_OWNER" "$HIDDEN_PROJECT" >/dev/null
-autopilot_apply_event old_plan_terminal cancel-old-plan CANCEL '{}' "$HIDDEN_PROJECT" >/dev/null
-OLD_PLAN_POINTER="$TMP/old-plan-pointer.json"
-cp "$(autopilot_active_file "$HIDDEN_PROJECT")" "$OLD_PLAN_POINTER"
 provision_session "$HIDDEN_PROJECT" hidden_plan_owner hidden-new || exit 1
 HIDDEN_OWNER="$PROVISIONED_KEY"; HIDDEN_DATA="$PROVISIONED_DATA"
+autopilot_begin_run old_plan_terminal "$HIDDEN_OWNER" "$HIDDEN_PROJECT" >/dev/null
+autopilot_apply_event old_plan_terminal cancel-old-plan CANCEL '{}' "$HIDDEN_PROJECT" >/dev/null
+OLD_PLAN_POINTER="$TMP/old-plan-pointer.json"
+cp "$(autopilot_active_file "$HIDDEN_PROJECT" "$HIDDEN_OWNER")" "$OLD_PLAN_POINTER"
 autopilot_begin_run hidden_plan_run "$HIDDEN_OWNER" "$HIDDEN_PROJECT" >/dev/null
-cp "$OLD_PLAN_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT")"
+cp "$OLD_PLAN_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT" "$HIDDEN_OWNER")"
 HIDDEN_OUT="$(invoke "$(payload 'ordinary plan behind terminal pointer' hidden_plan_owner)" "$HIDDEN_PROJECT" "$CFG_OFF" "$HIDDEN_DATA")"
 if printf '%s' "$HIDDEN_OUT" | grep -qF 'CORRUPT_ACTIVE_STATE' \
   && ! printf '%s' "$HIDDEN_OUT" | grep -qF 'AskUserQuestion'; then
   check "P7d terminal pointer cannot hide a newer nonterminal run from plan routing" PASS
 else check "P7d hidden nonterminal run cannot inherit standalone plan policy" FAIL; fi
+
+# --- P8a-P8c the empty-owner fail-closed arm --------------------------------
+# What these pin is that the hook FAILS CLOSED — a PLAN_GATE_BLOCKED receipt
+# rather than the standalone autoTdd policy — in a project that plainly holds
+# durable Autopilot artifacts, including one whose only artifact is the
+# owner-keyed pointer. Measured, not assumed: an unresolvable session id is
+# refused by `zensu_bind_hook_session` before the owner arm is reached, so the
+# code is RUNTIME_UNAVAILABLE and the SESSION_CONTEXT_UNAVAILABLE arm below it
+# is defense in depth rather than the live path. The fail-closed DIRECTION is
+# the property, and a fall-through is what would break it.
+UNRESOLVED_PROJECT="$TMP/unresolved-owner"; mkdir -p "$UNRESOLVED_PROJECT"
+provision_session "$UNRESOLVED_PROJECT" unresolved_plan_owner unresolved || exit 1
+UNRESOLVED_OWNER="$PROVISIONED_KEY"; UNRESOLVED_DATA="$PROVISIONED_DATA"
+autopilot_begin_run unresolved_plan_run "$UNRESOLVED_OWNER" "$UNRESOLVED_PROJECT" >/dev/null 2>&1 \
+  || { echo "P8a fixture: run could not be started" >&2; exit 1; }
+# An empty session id cannot resolve to a Session Control identity.
+UNRESOLVED_OUT="$(invoke "$(payload 'ordinary plan with an unresolvable owner' '')" \
+  "$UNRESOLVED_PROJECT" "$CFG_OFF" "$UNRESOLVED_DATA")"
+if printf '%s' "$UNRESOLVED_OUT" | grep -qF 'PLAN_GATE_BLOCKED' \
+  && ! printf '%s' "$UNRESOLVED_OUT" | grep -qF 'AskUserQuestion'; then
+  check "P8a an unresolvable owner fails closed while durable run artifacts exist" PASS
+else check "P8a unresolvable owner (out='$(printf '%s' "$UNRESOLVED_OUT" | head -c 120)')" FAIL; fi
+
+# Only the owner-keyed pointer is present — no run file. The pre-scoping probe
+# would miss it, so this is what bites the glob added for the new pointer name.
+POINTER_ONLY_PROJECT="$TMP/pointer-only"; mkdir -p "$POINTER_ONLY_PROJECT/.zensu/state"
+provision_session "$POINTER_ONLY_PROJECT" pointer_only_owner pointer-only || exit 1
+POINTER_ONLY_DATA="$PROVISIONED_DATA"
+printf '%s\n' '{"schemaVersion":1,"runId":"pointer_only_run"}' \
+  > "$POINTER_ONLY_PROJECT/.zensu/state/autopilot-active-$(node -e 'const c=require("crypto");process.stdout.write(c.createHash("sha256").update("pointer_only_owner").digest("hex"))').json"
+POINTER_ONLY_OUT="$(invoke "$(payload 'ordinary plan beside a lone pointer' '')" \
+  "$POINTER_ONLY_PROJECT" "$CFG_OFF" "$POINTER_ONLY_DATA")"
+if printf '%s' "$POINTER_ONLY_OUT" | grep -qF 'PLAN_GATE_BLOCKED' \
+  && ! printf '%s' "$POINTER_ONLY_OUT" | grep -qF 'AskUserQuestion'; then
+  check "P8b a lone owner-keyed pointer counts as durable state for the fail-closed arm" PASS
+else check "P8b lone pointer (out='$(printf '%s' "$POINTER_ONLY_OUT" | head -c 120)')" FAIL; fi
+
+# A state directory that exists but cannot be traversed is not "this project
+# never ran Autopilot" either. Skipped where the mode cannot be established
+# (running as root, or a filesystem that ignores the bit).
+UNSEARCHABLE_PROJECT="$TMP/unsearchable"; mkdir -p "$UNSEARCHABLE_PROJECT/.zensu/state"
+provision_session "$UNSEARCHABLE_PROJECT" unsearchable_owner unsearchable || exit 1
+UNSEARCHABLE_DATA="$PROVISIONED_DATA"
+chmod 600 "$UNSEARCHABLE_PROJECT/.zensu/state" 2>/dev/null || true
+if [ -x "$UNSEARCHABLE_PROJECT/.zensu/state" ]; then
+  chmod 700 "$UNSEARCHABLE_PROJECT/.zensu/state" 2>/dev/null || true
+  check "P8c this host cannot make a directory unsearchable, so the arm was not exercised" PASS
+else
+  UNSEARCHABLE_OUT="$(invoke "$(payload 'ordinary plan behind an unsearchable state dir' '')" \
+    "$UNSEARCHABLE_PROJECT" "$CFG_OFF" "$UNSEARCHABLE_DATA")"
+  chmod 700 "$UNSEARCHABLE_PROJECT/.zensu/state" 2>/dev/null || true
+  if printf '%s' "$UNSEARCHABLE_OUT" | grep -qF 'PLAN_GATE_BLOCKED' \
+    && ! printf '%s' "$UNSEARCHABLE_OUT" | grep -qF 'AskUserQuestion'; then
+    check "P8c an unsearchable state directory takes the fail-closed arm" PASS
+  else check "P8c unsearchable state dir (out='$(printf '%s' "$UNSEARCHABLE_OUT" | head -c 120)')" FAIL; fi
+fi
 
 STANDALONE="$TMP/standalone"; mkdir -p "$STANDALONE"
 provision_session "$STANDALONE" standalone_sid standalone || exit 1
@@ -203,7 +258,7 @@ if [ -z "$CANCEL_OFF" ] && printf '%s' "$CANCEL_ON" | grep -qF 'AskUserQuestion'
   && ! printf '%s' "$CANCEL_ON" | grep -qF 'PLAN_GATE_BLOCKED'; then
   check "P10 CANCELLED pointer falls through to standalone plan policy" PASS
 else check "P10 CANCELLED pointer does not own later plans" FAIL; fi
-rm -f "$(autopilot_active_file "$CANCEL_PROJECT")"
+rm -f "$(autopilot_active_file "$CANCEL_PROJECT" "$CANCEL_OWNER")"
 CANCEL_HISTORY_OFF="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$CFG_OFF" "$CANCEL_LATER_DATA")"
 CANCEL_HISTORY_ON="$(invoke "$(payload 'ordinary plan after detached terminal history' later_plan_session)" "$CANCEL_PROJECT" "$DEFAULT_CFG" "$CANCEL_LATER_DATA")"
 if [ -z "$CANCEL_HISTORY_OFF" ] && printf '%s' "$CANCEL_HISTORY_ON" | grep -qF 'AskUserQuestion' \

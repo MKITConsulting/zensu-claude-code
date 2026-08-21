@@ -215,10 +215,12 @@ case "${1:-}" in
     session_val=""
     cover_val=false
     validate_val=true
+    workspace_val=""
     seen_run=false
     seen_session=false
     seen_cover=false
     seen_validate=false
+    seen_workspace=false
     shift
     while [ $# -gt 0 ]; do
       case "$1" in
@@ -238,6 +240,10 @@ case "${1:-}" in
           [ "$seen_validate" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --validate" >&2; exit 2; }
           seen_validate=true; validate_val="$2"; shift 2
           ;;
+        --workspace)
+          [ "$seen_workspace" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-begin: duplicate/missing --workspace" >&2; exit 2; }
+          seen_workspace=true; workspace_val="$2"; shift 2
+          ;;
         *) echo "zensu-log.sh --autopilot-begin: unknown argument '$1'" >&2; exit 2 ;;
       esac
     done
@@ -248,6 +254,10 @@ case "${1:-}" in
     fi
     case "$cover_val" in true|false) ;; *) echo "zensu-log.sh --autopilot-begin: --cover must be true or false" >&2; exit 2 ;; esac
     case "$validate_val" in true|false) ;; *) echo "zensu-log.sh --autopilot-begin: --validate must be true or false" >&2; exit 2 ;; esac
+    if [ "$seen_workspace" = true ] && { [ -z "$workspace_val" ] || [ ! -d "$workspace_val" ]; }; then
+      echo "zensu-log.sh --autopilot-begin: --workspace must name an existing directory" >&2
+      exit 2
+    fi
     if [ -z "$session_val" ]; then
       export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-begin --run $run_val}"
     fi
@@ -257,7 +267,7 @@ case "${1:-}" in
       exit 2
     }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val"
+    autopilot_begin_run "$run_val" "$session_val" "${CLAUDE_PROJECT_DIR:-.}" "$cover_val" "$validate_val" "$workspace_val"
     exit $?
     ;;
   --autopilot-event)
@@ -295,6 +305,17 @@ case "${1:-}" in
       echo "zensu-log.sh --autopilot-event requires --run, --event, and --event-id" >&2
       exit 2
     }
+    # The release derives its event id from the run alone, so that id cannot be
+    # varied. A caller that squats it through this path would make the release
+    # command fail with an eventId conflict for that run forever, with no other
+    # exit. Reserve the namespace here, the way CHAIN_RECOVERED and
+    # RUNTIME_ADOPTED are reserved for their own writers.
+    case "$event_id_val" in
+      release-*)
+        echo "zensu-log.sh --autopilot-event: the 'release-' event-id namespace is reserved for --autopilot-release" >&2
+        exit 2
+        ;;
+    esac
     case "$event_val" in
       TDD_STARTED|TDD_CHAIN_DONE)
         echo "zensu-log.sh --autopilot-event: $event_val is internal; use the generation-bound TDD commands" >&2
@@ -314,8 +335,61 @@ case "${1:-}" in
     ;;
   --autopilot-status)
     [ $# -eq 1 ] || { echo "zensu-log.sh --autopilot-status accepts no arguments" >&2; exit 2; }
+    # Status is the caller's OWN run. A run held by another session in another
+    # working tree is deliberately invisible here.
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    session_val="$(zensu_resolve_session_id "")" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-    autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}"
+    autopilot_read_active "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
+    exit $?
+    ;;
+  --autopilot-release)
+    # Cancel a nonterminal run owned by ANOTHER session, so that a working tree
+    # a vanished session still holds becomes usable again. Explicit --confirm
+    # only: this mutates state this session does not own.
+    run_val=""
+    seen_run=false
+    confirmed=false
+    shift
+    while [ $# -gt 0 ]; do
+      case "$1" in
+        --run)
+          [ "$seen_run" = false ] && [ $# -ge 2 ] || { echo "zensu-log.sh --autopilot-release: duplicate/missing --run" >&2; exit 2; }
+          seen_run=true; run_val="$2"; shift 2
+          ;;
+        --confirm)
+          [ "$confirmed" = false ] || { echo "zensu-log.sh --autopilot-release: duplicate --confirm" >&2; exit 2; }
+          confirmed=true; shift
+          ;;
+        *) echo "zensu-log.sh --autopilot-release: unknown argument '$1'" >&2; exit 2 ;;
+      esac
+    done
+    [ "$seen_run" = true ] || { echo "zensu-log.sh --autopilot-release requires --run <id>" >&2; exit 2; }
+    [ "$confirmed" = true ] || {
+      echo "zensu-log.sh --autopilot-release requires --confirm: this cancels a run owned by another session" >&2
+      exit 2
+    }
+    export ZENSU_OWN_CMD="${ZENSU_OWN_CMD:-bash $0 --autopilot-release --run $run_val}"
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+    session_val="$(zensu_resolve_session_id "")" || {
+      echo "zensu-log.sh: Session Control session identity unavailable" >&2
+      exit 2
+    }
+    source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
+    # The event id is derived from the RUN alone, not from the caller: a repeat
+    # release — by this session or by another one that saw the same refusal —
+    # then lands on the same ledger entry and reports success, instead of
+    # meeting "terminal run cannot be released", which reads as a refusal.
+    # Caller provenance lives in the log line, not in the id.
+    event_val="$(RUN_ID="$run_val" node -e '
+      const crypto = require("crypto");
+      process.stdout.write(`release-${crypto.createHash("sha256")
+        .update(String(process.env.RUN_ID)).digest("hex")}`);
+    ')" || { echo "zensu-log.sh --autopilot-release: cannot derive the release event id" >&2; exit 2; }
+    autopilot_release_run "$run_val" "$event_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
     exit $?
     ;;
   --tdd-begin|--tdd-complete|--review-ticket|--current-review-ticket|--review-rearm|--chain-done|--code-review-done|--self-review-fixed|--tdd-reset|--chain-status|--chain-recover|--workflow-begin|--workflow-end)

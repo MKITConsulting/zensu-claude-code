@@ -21,6 +21,7 @@
   "skills": [
     "./skills/adopt-session",
     "./skills/autopilot",
+    "./skills/autopilot-release",
     "./skills/bootstrap",
     "./skills/converge",
     "./skills/cover",

@@ -172,11 +172,14 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
 ' 2>/dev/null)" || exit 0
 if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   [ "$PREFLIGHT_CONTEXT" = '{}' ] || exit 0
-  # Only an absent or terminal Outer generation permits an unbound claim. Any
-  # nonterminal generation still owns the project, regardless of session; a
-  # corrupt read is authoritative and must fail closed before ticket mutation.
+  # Only an absent or terminal Outer generation OF THIS SESSION permits an
+  # unbound claim. The read is owner-scoped: a nonterminal run owned by another
+  # session is invisible here, and owner-independent workspace occupancy is
+  # enforced earlier, when the inner chain is armed
+  # (`_autopilot_begin_standalone_tdd_critical`). A corrupt read is
+  # authoritative and must fail closed before ticket mutation.
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     PREFLIGHT_OUTER_RC=0
   else
     PREFLIGHT_OUTER_RC=$?
@@ -208,7 +211,7 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       } catch (_) { process.exit(3); }
     ' 2>/dev/null || exit 0
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)" || exit 0
+  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)" || exit 0
   OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '

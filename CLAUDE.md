@@ -326,6 +326,152 @@ Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
 end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
 
+## Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
+
+A durable Autopilot run is scoped by TWO independent axes, and confusing them is the
+mistake this section exists to prevent.
+
+- **Who may see and drive it — the OWNER session.** The active pointer is
+  `.zensu/state/autopilot-active-<sha256(ownerSessionId)>.json`, built by
+  `_autopilot_active_path`. `autopilot_read_active` takes the owner and filters the
+  inventory by it: another session's run is not an orphan, not a hidden run, and not a
+  conflict — it is invisible.
+- **What it may collide on — the WORKSPACE.** The run records `workspaceRoot`, the git
+  working tree it drives. `begin` refuses when any nonterminal run in the inventory holds
+  the same `workspaceRoot`, REGARDLESS of owner, because that is the resource two runs
+  would actually corrupt: one branch, one commit history, one pull request.
+
+Before this split there was one pointer per project root, so two sessions sharing a project
+root serialized even when they drove different worktrees, and a run left nonterminal by a
+session that no longer exists blocked the project forever.
+
+**`read-active` and `read-workspace` are two questions, and collapsing them re-opens a real
+hole.** "What is MY run" is owner-scoped: the resume hook, `plan-approved-delegate.sh`, the
+three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, and
+`--autopilot-status`. "Does ANY session hold this working tree" is owner-INDEPENDENT and
+must stay so: `_autopilot_begin_standalone_tdd_critical`,
+`_autopilot_adopt_pending_review_critical`, and both fences in
+`_autopilot_deferred_contention_result`. All four call
+`_autopilot_read_workspace_critical` DIRECTLY, because each is already inside the
+project lease; there is deliberately no public wrapper, and one that existed
+without a caller carried a second, divergent defaulting policy. Owner-scoping that second group would let a
+standalone `/zensu:tdd` chain arm underneath another session's durable run in the same tree.
+The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
+and then asks the first question, because the pointer that must still designate that run is
+its owner's, not the attesting caller's.
+
+**One resolver decides the workspace for the writer and for every gate.**
+`_autopilot_session_workspace` resolves cwd → git toplevel → canonical path, and falls back
+to the project root when cwd is outside it. `autopilot_begin_run` and all three occupancy
+gates call it. Two different spellings would make a gate silently miss the run it exists to
+see. `--autopilot-begin --workspace <path>` overrides it, but only for a tree that is either the session's own resolved tree or a directory under the project root; anything else refuses with rc 3. Accepted narrowing: a git worktree OUTSIDE the project root can no longer be declared.
+`workspaceRoot` is deliberately NOT a member of any `path_indexes` list in `_autopilot_node`:
+it is a comparison key rather than a path the worker opens, and it may legitimately sit
+outside the project root, which `_autopilot_native_project_path` rejects by design.
+
+**The field is accepted in BOTH key shapes on purpose.** `stateValid` admits `STATE_KEYS`
+and `STATE_KEYS_WORKSPACE`, and `workspaceOf` reads a record without the field as
+`workspaceRoot === projectRoot`. A single strict key set would make every run minted before
+the upgrade invalid, `readRunInventory` fails the FIRST invalid record, and the whole project
+would then fail closed — strictly worse than the wedge this work removes.
+
+**The FORWARD direction is the one that is not solved, and concurrency makes it normal.**
+`begin` writes `workspaceRoot` while still declaring `schemaVersion: 1`, so an installation
+WITHOUT this change reads an unknown key at a version it claims to support and rejects the
+record. Two mitigations, and the residue between them is stated rather than glossed. First, the
+blast radius is bounded: `read-active` now passes its owner into `readRunInventory`, which skips
+a record it can prove belongs to someone else BEFORE validating it, so one session's
+unreadable record no longer fails every session in the project. Anything unattributable — a
+record that will not parse at all — still fails closed, because it cannot be proven to be
+someone else's. Second, `begin` and `read-workspace` deliberately pass NO owner and stay strict:
+they genuinely need every record. The residue: an older installation running `begin` in a
+project where a newer one is live still fails closed, and that is not tested because the suite
+has no second installation to run it from. The lineage rule does not cover this — it governs
+Session Control record binding, not the project-local run inventory — so a MINOR release is the
+only thing standing between the two.
+
+**The `--confirm` on `--autopilot-release` is prose-backed, not consent-backed.** It is an argv
+token the model can supply to itself, exactly like `zensu-session-adopt.sh --confirm`, and the
+"wait for the user to say yes" control lives in `skills/autopilot-release/SKILL.md`, not in a
+gate. Say so plainly rather than describing the flag as user confirmation. What bounds the
+damage MECHANICALLY is that it escapes no gate and cannot forge `DONE` — the worker only ever
+applies `CANCEL`. Everything else is prose: the skill tells the model to take the run id from a
+refusal, but nothing enforces that, and any nonterminal run in the project is releasable by id
+from an enumerable directory. Nor is liveness checked: a run whose owner session is very much
+alive is cancelled just as readily. `.zensu/state/` is already writable from inside a session by
+an ungated shell redirect, so the flag is not the narrowest channel to that directory either.
+
+**The legacy pointer is adopted only by its own owner.** `autopilot-active.json` is never
+written any more. When the owner-keyed pointer is absent it is read as a fallback and honored
+only if the run it references belongs to the caller; a legacy pointer owned by anyone else is
+ignored, and that is precisely the unwedge. `activePointerFor` re-implements the same
+resolution inside the worker for `apply` and both budget modes, which receive the state
+DIRECTORY rather than a pointer path and derive the owner from the run record.
+
+**`--autopilot-release` bypasses exactly one check.** It applies a real `CANCEL` under the
+project lock with the ownership comparison skipped, and refuses a terminal run, a caller that
+owns the run, and an exhausted ledger. Provenance is the derived event id (`release-<sha256>`),
+NOT a payload field: `payloadValid` requires `CANCEL` to carry the empty object, so a marked
+payload would make the released run unreadable to any runtime that has not taken this change.
+**No bypass-ledger entry** — the ledger records gate ESCAPES so that everything under "Gates
+bypassed" is true, and this escapes no gate. Same rule, same reason, as `--chain-recover`.
+
+**Version.** The pointer layout and the run schema both move, so this is a **`minor`** release
+under "Runtime Lineage (`version_type` is load-bearing)" above. The version is never set by
+hand; the release pipeline owns it.
+
+**Known gaps, accepted:**
+
+- A refusal names the holding run but the release is a separate, user-confirmed step. It has
+  to be: the run belongs to a session that may still be alive.
+- **`OWNER_SESSION_MISMATCH` in `plan-approved-delegate.sh` is now unreachable, and the plan
+  it used to refuse falls through to the standalone policy instead.** A foreign session that
+  approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
+  reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
+  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
+  Restoring it needs the marker before the read, and the marker is only resolved inside the
+  payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
+  not be duplicated in shell. The exit-6 arm and its `BLOCK_CODE` are deliberately left in
+  place rather than deleted, so a future evaluator that can answer "this marker names a run
+  you do not own" has its receipt waiting. What the foreign caller now gets is NOTHING: the
+  branch is skipped before any payload source is resolved, so it cannot be used as an
+  existence oracle either — which is what F20/F20a, F32/F32a and F45c in
+  `tests/structure/test-plan-payload-fallback.sh` pin, alongside P6 in
+  `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
+  the refusal receipt and now assert the silence instead; F45c in particular no longer pins
+  an ORDERING between the ownership and origin refusals, because neither is reachable.
+- `/zensu:doctor` still carries NO Autopilot row of any kind, so a held workspace is visible
+  only in the `--autopilot-begin` refusal and in `/zensu:autopilot-release`. Do not claim
+  doctor visibility until that row exists.
+- The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
+  the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
+  a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
+  `tests/structure/test-autopilot-plan-delegate.sh`, which therefore pin the fail-closed DIRECTION
+  (a `PLAN_GATE_BLOCKED` receipt rather than the standalone policy) and not the specific code.
+- `_autopilot_storage_safe` validates the legacy pointer by name; the owner-keyed one is
+  checked at `_autopilot_begin_critical`, the only site that writes it. Reads are protected
+  by `regularFile`, which rejects symlinks and hard links.
+
+Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
+`_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
+`_autopilot_read_workspace_critical`, `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
+`begin` / `apply` / `release` / budget worker modes with their `path_indexes`,
+`projectRootIndex` and `workspaceRootIndex` entries, the worker's own second re-encoding of the
+pointer name (`activePointerFor`, `OWNER_POINTER_PREFIX`, `LEGACY_POINTER_NAME`), the SEVEN hook
+`read-active` call sites enumerated above, the three `ACTIVE_POINTER_HINT` probes that name both
+pointer spellings, `hooks/lib/zensu-log.sh` (the `--workspace` flag, the owner-aware
+`--autopilot-status`, and the `--autopilot-release` verb with its derived event id),
+`skills/autopilot/SKILL.md`, `skills/autopilot-release/SKILL.md`, and the plugin manifest's
+skill list. Operator-facing accounts that must move with it: `README.md`'s skill table,
+`docs/tdd-manager-workflow.md` §"Autopilot run scope" and the `session-start-autopilot-resume.sh`
+row in `docs/configuration.md`.
+`tests/structure/test-autopilot-state-machine.sh` pins the pointer, the two refusals and the
+legacy fallback; `test-autopilot-adversarial-recovery.sh` X1a pins the `begin`, `read-active`,
+`release` and `read-workspace` `path_indexes` literals. It does NOT pin every mode in the table
+— `read-run`, `apply`, `team-review-receipt-meta` and the two budget modes are unpinned, so a
+change to one of those fails behaviorally or not at all.
+
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
 The plugin drives Zensu through the typed `zensu` CLI (the MCP server still exists for the Zensu web app, but is no longer wired into the plugin). The write-gate now intercepts `zensu <noun> <verb>` Bash invocations rather than MCP tool calls.

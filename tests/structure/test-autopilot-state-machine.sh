@@ -87,7 +87,7 @@ HEAD_SHA_2="cccccccccccccccccccccccccccccccccccccccc"
 HEAD_SHA_3="dddddddddddddddddddddddddddddddddddddddd"
 HEAD_SHA_4="eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
 RUN_FILE="$PROJECT/.zensu/state/autopilot-run-${RUN}.json"
-ACTIVE_FILE="$PROJECT/.zensu/state/autopilot-active.json"
+ACTIVE_FILE="$(autopilot_active_file "$PROJECT" "$OWNER")"
 
 json_ok() {
   local file="$1" expression="$2"
@@ -165,7 +165,7 @@ apply() {
 
 if autopilot_begin_run "$RUN" "$OWNER" "$PROJECT" >/dev/null \
   && [ -f "$RUN_FILE" ] && [ -f "$ACTIVE_FILE" ] \
-  && autopilot_read_active "$PROJECT" > "$ROOT/active-read.json" \
+  && autopilot_read_active "$PROJECT" "$OWNER" > "$ROOT/active-read.json" \
   && json_ok "$ROOT/active-read.json" 'value.schemaVersion === 1 && value.runId === "run_primary_001" && value.ownerSessionId === "session_owner_001" && value.stage === "PLANNING" && value.nextActionCode === "AWAIT_PLAN_APPROVAL" && value.stopBudget.stage === "PLANNING" && value.stopBudget.count === 0 && value.tdd.attempt === 0 && value.tdd.returnStage === null'; then
   check "B1 begin writes a valid project-local PLANNING state" PASS
 else
@@ -645,7 +645,7 @@ LEGACY_PROJECT="$ROOT/legacy-v1-project"
 LEGACY_STATE_DIR="$LEGACY_PROJECT/.zensu/state"
 LEGACY_RUN_FILE="$LEGACY_STATE_DIR/autopilot-run-${RUN}.json"
 mkdir -p "$LEGACY_STATE_DIR"
-cp "$ACTIVE_FILE" "$LEGACY_STATE_DIR/autopilot-active.json"
+cp "$ACTIVE_FILE" "$(autopilot_active_file "$LEGACY_PROJECT" "$OWNER")"
 cp "$RUN_FILE" "$LEGACY_RUN_FILE"
 LEGACY_PROJECT_PHYSICAL="$(native_directory "$LEGACY_PROJECT")"
 LEGACY_PROJECT_PHYSICAL="$LEGACY_PROJECT_PHYSICAL" node -e '
@@ -695,7 +695,7 @@ mv "$RECEIPT_BACKUP" "$REVIEW_PAYLOAD_SNAPSHOT"
 apply "evt_findings_clear_001" "FINDINGS_CLEARED" "{\"headSha\":\"$HEAD_SHA\",\"unresolvedCount\":0}" || true
 apply "evt_validate_001" "VALIDATION_PASSED" "{\"headSha\":\"$HEAD_SHA\"}" || true
 
-if autopilot_read_active "$PROJECT" > "$ROOT/review-status.json" \
+if autopilot_read_active "$PROJECT" "$OWNER" > "$ROOT/review-status.json" \
   && json_ok "$ROOT/review-status.json" 'value.runId === "run_primary_001" && value.ownerSessionId === "session_owner_001" && value.stage === "DELIVER" && value.nextActionCode === "DELIVER_PR" && value.tdd.attempt === 1 && value.tdd.returnStage === "GATES" && value.effects.prOpen.status === "completed" && value.effects.teamReview.status === "completed" && value.effects.teamReview.operationKey.startsWith("team-review:v1:") && value.evidence.pr.headSha === "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" && value.evidence.review.marker.startsWith("<!-- zensu-review:v1:") && value.evidence.review.headSha === value.evidence.pr.headSha && value.evidence.review.payloadDigest === value.evidence.review.marker.split(":")[3] && value.evidence.review.partCount === 1 && value.evidence.review.provider === "github" && value.evidence.gates.passed === true && value.evidence.validation.passed === true'; then
   check "T6 happy path reaches DELIVER with durable evidence" PASS
 else
@@ -990,7 +990,7 @@ fi
 
 cp "$ACTIVE_FILE" "$ROOT/active-valid.json"
 node -e 'const fs=require("fs"),p=process.argv[1],j=JSON.parse(fs.readFileSync(p));j.unexpected=true;fs.writeFileSync(p,JSON.stringify(j));' "$ACTIVE_FILE"
-autopilot_read_active "$PROJECT" >/dev/null 2>&1
+autopilot_read_active "$PROJECT" "$OWNER" >/dev/null 2>&1
 READ_CORRUPT_RC=$?
 cp "$ROOT/active-valid.json" "$ACTIVE_FILE"
 if [ "$READ_CORRUPT_RC" -eq 2 ]; then
@@ -1006,7 +1006,12 @@ fi
 SEMANTIC_PROJECT="$ROOT/semantic-history-project"
 mkdir -p "$SEMANTIC_PROJECT"
 SEMANTIC_RUN="run_semantic_history_003"
-SEMANTIC_OWNER="session_semantic_history_003"
+SEMANTIC_OWNER_RAW="session_semantic_history_003"
+# The run must be owned by the KEY the status command resolves for this raw id:
+# `read-active` skips a record it can prove belongs to another owner before
+# validating it, so a raw-string owner would make the corrupt record invisible
+# and the status call would report absence instead of corruption.
+SEMANTIC_OWNER="$(node "$PLUGIN_DIR/hooks/lib/session-control-core-v1.js" session-key "$SEMANTIC_OWNER_RAW")"
 autopilot_begin_run "$SEMANTIC_RUN" "$SEMANTIC_OWNER" "$SEMANTIC_PROJECT" >/dev/null
 SEMANTIC_FILE="$(autopilot_run_file "$SEMANTIC_RUN" "$SEMANTIC_PROJECT")"
 FILE="$SEMANTIC_FILE" PLAN_SHA="$PLAN_SHA" node -e '
@@ -1040,7 +1045,7 @@ SEMANTIC_READ_RC=$?
   export CLAUDE_PROJECT_DIR="$SEMANTIC_PROJECT"
   export ZENSU_TEST_PLUGIN_DATA="$ROOT/semantic-plugin-data"
   # shellcheck disable=SC1090
-  source "$BASELINE" "$SEMANTIC_OWNER" || exit 90
+  source "$BASELINE" "$SEMANTIC_OWNER_RAW" || exit 90
   MODEL_KEY="$(bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --session-key 2>/dev/null)" || exit 91
   [ "$MODEL_KEY" = "$ZENSU_SESSION_KEY" ] || exit 92
   bash "$PLUGIN_DIR/hooks/lib/zensu-log.sh" --autopilot-status >/dev/null 2>&1
@@ -1054,7 +1059,7 @@ fi
 
 MISSING_PROJECT="$ROOT/missing-project"
 mkdir -p "$MISSING_PROJECT"
-autopilot_read_active "$MISSING_PROJECT" >/dev/null 2>&1
+autopilot_read_active "$MISSING_PROJECT" session_missing_003 >/dev/null 2>&1
 READ_MISSING_RC=$?
 if [ "$READ_MISSING_RC" -eq 1 ]; then
   check "S4 read_active distinguishes an absent run from corruption" PASS
@@ -1066,7 +1071,7 @@ DANGLING_PROJECT="$ROOT/dangling-project"
 mkdir -p "$DANGLING_PROJECT"
 autopilot_begin_run run_dangling_003 session_dangling_003 "$DANGLING_PROJECT" >/dev/null
 rm -f "$(autopilot_run_file run_dangling_003 "$DANGLING_PROJECT")"
-autopilot_read_active "$DANGLING_PROJECT" >/dev/null 2>&1
+autopilot_read_active "$DANGLING_PROJECT" session_dangling_003 >/dev/null 2>&1
 DANGLING_RC=$?
 if [ "$DANGLING_RC" -eq 2 ]; then
   check "S4b a valid pointer with a missing run file is corrupt, never absent" PASS
@@ -1081,12 +1086,16 @@ publish_begin_window() {
   local root="$1" run_id="$2" owner="$3" ready="$4" release="$5"
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
-  local active_file="$state_dir/autopilot-active.json"
-  local run_tmp active_tmp
+  local active_file legacy_file
+  active_file="$(_autopilot_active_path "$state_dir" "$owner")" || return 1
+  legacy_file="$(_autopilot_legacy_active_path "$state_dir")" || return 1
+  local run_tmp active_tmp workspace
+  workspace="$(autopilot_workspace_root "$root")" || return 1
   run_tmp="$(mktemp "${run_file}.XXXXXX" 2>/dev/null)" || return 1
   active_tmp="$(mktemp "${active_file}.XXXXXX" 2>/dev/null)" || { rm -f "$run_tmp"; return 1; }
   _autopilot_node begin "$active_file" "$run_file" "$run_tmp" "$active_tmp" \
-    "$run_id" "$owner" "$root" false true || { rm -f "$run_tmp" "$active_tmp"; return 1; }
+    "$run_id" "$owner" "$root" false true "$workspace" "$legacy_file" \
+    || { rm -f "$run_tmp" "$active_tmp"; return 1; }
   _tdd_atomic_replace_regular "$run_tmp" "$run_file" || { rm -f "$run_tmp" "$active_tmp"; return 1; }
   printf '%s\n' ready > "$ready"
   while [ ! -f "$release" ]; do sleep 0.01; done
@@ -1117,7 +1126,7 @@ WINDOW_OK=true
 if [ ! -f "$WINDOW_READY" ]; then
   WINDOW_OK=false
 else
-  autopilot_read_active "$WINDOW_PROJECT" > "$WINDOW_READ" 2>/dev/null &
+  autopilot_read_active "$WINDOW_PROJECT" "$WINDOW_OWNER" > "$WINDOW_READ" 2>/dev/null &
   WINDOW_READ_PID=$!
   sleep 0.1
   kill -0 "$WINDOW_READ_PID" 2>/dev/null || WINDOW_OK=false
@@ -1141,12 +1150,15 @@ BEGIN_ORPHAN_OWNER=session_begin_orphan_003
 mkdir -p "$BEGIN_ORPHAN_PROJECT"
 autopilot_begin_run "$BEGIN_ORPHAN_RUN" "$BEGIN_ORPHAN_OWNER" "$BEGIN_ORPHAN_PROJECT" >/dev/null
 BEGIN_ORPHAN_FILE="$(autopilot_run_file "$BEGIN_ORPHAN_RUN" "$BEGIN_ORPHAN_PROJECT")"
-rm -f "$(autopilot_active_file "$BEGIN_ORPHAN_PROJECT")"
+rm -f "$(autopilot_active_file "$BEGIN_ORPHAN_PROJECT" "$BEGIN_ORPHAN_OWNER")"
 BEGIN_ORPHAN_BEFORE="$(file_digest "$BEGIN_ORPHAN_FILE")"
-if ! autopilot_begin_run run_competing_orphan_003 session_competing_orphan_003 \
+# Same owner on purpose: only an owned nonterminal orphan reaches the
+# orphan-recovery decision. A different owner would be refused by the workspace
+# holder check instead, and this case would then pass with that branch deleted.
+if ! autopilot_begin_run run_competing_orphan_003 "$BEGIN_ORPHAN_OWNER" \
     "$BEGIN_ORPHAN_PROJECT" >/dev/null 2>&1 \
   && [ "$(file_digest "$BEGIN_ORPHAN_FILE")" = "$BEGIN_ORPHAN_BEFORE" ] \
-  && [ ! -e "$BEGIN_ORPHAN_PROJECT/.zensu/state/autopilot-active.json" ] \
+  && [ ! -e "$(autopilot_active_file "$BEGIN_ORPHAN_PROJECT" "$BEGIN_ORPHAN_OWNER")" ] \
   && [ ! -e "$BEGIN_ORPHAN_PROJECT/.zensu/state/autopilot-run-run_competing_orphan_003.json" ]; then
   check "S4d a different begin cannot hide a pointerless nonterminal orphan" PASS
 else
@@ -1160,11 +1172,11 @@ autopilot_begin_run "$BEGIN_ORPHAN_RUN" "$BEGIN_ORPHAN_OWNER" \
   "$BEGIN_ORPHAN_PROJECT" true true >/dev/null 2>&1 && BEGIN_RETRY_REJECTS=false
 if [ "$BEGIN_RETRY_REJECTS" = true ] \
   && [ "$(file_digest "$BEGIN_ORPHAN_FILE")" = "$BEGIN_ORPHAN_BEFORE" ] \
-  && [ ! -e "$BEGIN_ORPHAN_PROJECT/.zensu/state/autopilot-active.json" ] \
+  && [ ! -e "$(autopilot_active_file "$BEGIN_ORPHAN_PROJECT" "$BEGIN_ORPHAN_OWNER")" ] \
   && autopilot_begin_run "$BEGIN_ORPHAN_RUN" "$BEGIN_ORPHAN_OWNER" \
     "$BEGIN_ORPHAN_PROJECT" >/dev/null \
   && [ "$(file_digest "$BEGIN_ORPHAN_FILE")" = "$BEGIN_ORPHAN_BEFORE" ] \
-  && autopilot_read_active "$BEGIN_ORPHAN_PROJECT" > "$ROOT/begin-orphan-healed.json" \
+  && autopilot_read_active "$BEGIN_ORPHAN_PROJECT" "$BEGIN_ORPHAN_OWNER" > "$ROOT/begin-orphan-healed.json" \
   && json_ok "$ROOT/begin-orphan-healed.json" \
     'value.runId === "run_begin_orphan_003" && value.stage === "PLANNING"'; then
   check "S4e only an identity- and option-exact retry heals a pointerless orphan" PASS
@@ -1176,25 +1188,25 @@ HIDDEN_BEGIN_PROJECT="$ROOT/hidden-begin-project"
 HIDDEN_OLD_RUN=run_hidden_old_terminal_003
 HIDDEN_NEW_RUN=run_hidden_orphan_003
 mkdir -p "$HIDDEN_BEGIN_PROJECT"
-autopilot_begin_run "$HIDDEN_OLD_RUN" session_hidden_old_003 "$HIDDEN_BEGIN_PROJECT" >/dev/null
+autopilot_begin_run "$HIDDEN_OLD_RUN" session_hidden_003 "$HIDDEN_BEGIN_PROJECT" >/dev/null
 autopilot_apply_event "$HIDDEN_OLD_RUN" cancel-hidden-old CANCEL '{}' \
   "$HIDDEN_BEGIN_PROJECT" >/dev/null
 HIDDEN_OLD_POINTER="$ROOT/hidden-old-pointer.json"
-cp "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT")" "$HIDDEN_OLD_POINTER"
-autopilot_begin_run "$HIDDEN_NEW_RUN" session_hidden_new_003 "$HIDDEN_BEGIN_PROJECT" >/dev/null
+cp "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT" session_hidden_003)" "$HIDDEN_OLD_POINTER"
+autopilot_begin_run "$HIDDEN_NEW_RUN" session_hidden_003 "$HIDDEN_BEGIN_PROJECT" >/dev/null
 HIDDEN_NEW_FILE="$(autopilot_run_file "$HIDDEN_NEW_RUN" "$HIDDEN_BEGIN_PROJECT")"
-cp "$HIDDEN_OLD_POINTER" "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT")"
-HIDDEN_POINTER_BEFORE="$(file_digest "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT")")"
+cp "$HIDDEN_OLD_POINTER" "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT" session_hidden_003)"
+HIDDEN_POINTER_BEFORE="$(file_digest "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT" session_hidden_003)")"
 HIDDEN_RUN_BEFORE="$(file_digest "$HIDDEN_NEW_FILE")"
 if ! autopilot_begin_run run_hidden_competing_003 session_hidden_competing_003 \
     "$HIDDEN_BEGIN_PROJECT" >/dev/null 2>&1 \
-  && [ "$(file_digest "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT")")" = "$HIDDEN_POINTER_BEFORE" ] \
+  && [ "$(file_digest "$(autopilot_active_file "$HIDDEN_BEGIN_PROJECT" session_hidden_003)")" = "$HIDDEN_POINTER_BEFORE" ] \
   && [ "$(file_digest "$HIDDEN_NEW_FILE")" = "$HIDDEN_RUN_BEFORE" ] \
   && [ ! -e "$HIDDEN_BEGIN_PROJECT/.zensu/state/autopilot-run-run_hidden_competing_003.json" ] \
-  && autopilot_begin_run "$HIDDEN_NEW_RUN" session_hidden_new_003 \
+  && autopilot_begin_run "$HIDDEN_NEW_RUN" session_hidden_003 \
     "$HIDDEN_BEGIN_PROJECT" >/dev/null \
   && [ "$(file_digest "$HIDDEN_NEW_FILE")" = "$HIDDEN_RUN_BEFORE" ] \
-  && autopilot_read_active "$HIDDEN_BEGIN_PROJECT" > "$ROOT/hidden-begin-healed.json" \
+  && autopilot_read_active "$HIDDEN_BEGIN_PROJECT" session_hidden_003 > "$ROOT/hidden-begin-healed.json" \
   && json_ok "$ROOT/hidden-begin-healed.json" \
     'value.runId === "run_hidden_orphan_003" && value.stage === "PLANNING"'; then
   check "S4f exact retry heals an orphan hidden behind terminal history" PASS
@@ -1215,7 +1227,7 @@ fi
 
 ACTIVE_HARDLINK="$ROOT/active-hardlink.json"
 ln "$ACTIVE_FILE" "$ACTIVE_HARDLINK"
-autopilot_read_active "$PROJECT" >/dev/null 2>&1
+autopilot_read_active "$PROJECT" "$OWNER" >/dev/null 2>&1
 READ_HARDLINK_RC=$?
 rm -f "$ACTIVE_HARDLINK"
 if [ "$READ_HARDLINK_RC" -eq 2 ]; then
@@ -1234,7 +1246,7 @@ fi
 COPIED_PROJECT="$ROOT/copied-project"
 mkdir -p "$COPIED_PROJECT"
 cp -R "$PROJECT/.zensu" "$COPIED_PROJECT/.zensu"
-autopilot_read_active "$COPIED_PROJECT" >/dev/null 2>&1
+autopilot_read_active "$COPIED_PROJECT" "$OWNER" >/dev/null 2>&1
 COPIED_ACTIVE_RC=$?
 autopilot_read_run "$RUN2" "$COPIED_PROJECT" >/dev/null 2>&1
 COPIED_RUN_RC=$?
@@ -1247,12 +1259,192 @@ fi
 INVALID_ARTIFACT_PROJECT="$ROOT/invalid-run-artifact"
 mkdir -p "$INVALID_ARTIFACT_PROJECT/.zensu/state"
 printf '%s\n' '{}' > "$INVALID_ARTIFACT_PROJECT/.zensu/state/autopilot-run-xx.json"
-autopilot_read_active "$INVALID_ARTIFACT_PROJECT" >/dev/null 2>&1
+autopilot_read_active "$INVALID_ARTIFACT_PROJECT" session_invalid_003 >/dev/null 2>&1
 INVALID_ARTIFACT_RC=$?
 if [ "$INVALID_ARTIFACT_RC" -eq 2 ]; then
   check "S9 exact run-file envelope with an invalid id is corrupt inventory" PASS
 else
   check "S9 invalid-id run artifact cannot be ignored as absent (rc=$INVALID_ARTIFACT_RC)" FAIL
+fi
+
+# --- Concurrency: one project root, two working trees ---
+# The exclusion is per working tree, not per project, so two sessions driving
+# different trees may hold live runs at the same time.
+CONC_PROJECT="$ROOT/concurrent-project"
+mkdir -p "$CONC_PROJECT/tree-a" "$CONC_PROJECT/tree-b"
+CONC_A="$(cd "$CONC_PROJECT/tree-a" && pwd -P)"
+CONC_B="$(cd "$CONC_PROJECT/tree-b" && pwd -P)"
+CONC_OK=true
+autopilot_begin_run run_conc_a session_conc_a "$CONC_PROJECT" false true "$CONC_A" >/dev/null \
+  || CONC_OK=false
+autopilot_begin_run run_conc_b session_conc_b "$CONC_PROJECT" false true "$CONC_B" >/dev/null \
+  || CONC_OK=false
+autopilot_read_active "$CONC_PROJECT" session_conc_a > "$ROOT/conc-a.json" || CONC_OK=false
+autopilot_read_active "$CONC_PROJECT" session_conc_b > "$ROOT/conc-b.json" || CONC_OK=false
+json_ok "$ROOT/conc-a.json" 'value.runId === "run_conc_a" && value.stage === "PLANNING"' || CONC_OK=false
+json_ok "$ROOT/conc-b.json" 'value.runId === "run_conc_b" && value.stage === "PLANNING"' || CONC_OK=false
+[ "$(autopilot_active_file "$CONC_PROJECT" session_conc_a)" \
+  != "$(autopilot_active_file "$CONC_PROJECT" session_conc_b)" ] || CONC_OK=false
+if [ "$CONC_OK" = true ]; then
+  check "W1 two sessions hold concurrent runs in one project with distinct working trees" PASS
+else
+  check "W1 concurrent runs in distinct working trees" FAIL
+fi
+
+# Each owner sees only its own run: the sibling is neither an orphan nor a
+# hidden run from the other session's position.
+CONC_B_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$CONC_B")"
+# A third owner holds no run at all, so its read must report absence (rc=1)
+# rather than seeing either sibling — that is the invisibility this label names.
+autopilot_read_active "$CONC_PROJECT" session_conc_observer >/dev/null 2>&1
+CONC_OBSERVER_RC=$?
+if json_ok "$ROOT/conc-a.json" 'value.ownerSessionId === "session_conc_a"' \
+  && json_ok "$ROOT/conc-b.json" 'value.ownerSessionId === "session_conc_b"' \
+  && [ "$CONC_OBSERVER_RC" -eq 1 ] \
+  && json_ok "$(autopilot_run_file run_conc_b "$CONC_PROJECT")" \
+    "value.workspaceRoot === $CONC_B_JSON"; then
+  check "W2 the run records its working tree and stays invisible to the sibling owner" PASS
+else
+  check "W2 workspace recorded and sibling run invisible" FAIL
+fi
+
+CONC_REFUSAL_OK=true
+CONC_REFUSAL="$(autopilot_begin_run run_conc_c session_conc_c "$CONC_PROJECT" false true "$CONC_A" 2>&1)" \
+  && CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF 'workspace held by nonterminal run run_conc_a' || CONC_REFUSAL_OK=false
+printf '%s' "$CONC_REFUSAL" | grep -qF -- '--autopilot-release --run run_conc_a --confirm' || CONC_REFUSAL_OK=false
+[ ! -e "$CONC_PROJECT/.zensu/state/autopilot-run-run_conc_c.json" ] || CONC_REFUSAL_OK=false
+if [ "$CONC_REFUSAL_OK" = true ]; then
+  check "W3 a third session is refused the held working tree and told how to release it" PASS
+else
+  check "W3 same-workspace begin refused with the release command" FAIL
+fi
+
+# --- Release: the one path that ends a run the caller does not own ---
+RELEASE_OK=true
+autopilot_release_run run_conc_b release_owner_evt "$CONC_PROJECT" session_conc_b >/dev/null 2>&1 \
+  && RELEASE_OK=false
+autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
+  || RELEASE_OK=false
+json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
+  'value.stage === "CANCELLED" && value.events[value.events.length - 1].eventId === "release_evt_001"' \
+  || RELEASE_OK=false
+# AC-006's two record-side halves: the release adds no state field and records
+# no bypass. The CLI-minted `release-` id shape is pinned in
+# tests/structure/test-autopilot-release-cli.sh A3, which is the only place the
+# verb actually runs.
+json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
+  'Array.isArray(value.bypasses) && value.bypasses.length === 0' || RELEASE_OK=false
+json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
+  'Object.keys(value).sort().join(",") === ["schemaVersion","runId","projectRoot","workspaceRoot","ownerSessionId","stage","nextActionCode","approvedPlanSha256","options","tdd","effects","evidence","blocked","bypasses","stopBudget","events"].sort().join(",")' \
+  || RELEASE_OK=false
+RELEASE_AFTER="$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")"
+autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
+  || RELEASE_OK=false
+[ "$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")" = "$RELEASE_AFTER" ] || RELEASE_OK=false
+autopilot_release_run run_conc_a release_evt_002 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
+  && RELEASE_OK=false
+if [ "$RELEASE_OK" = true ]; then
+  check "W4 release cancels a foreign nonterminal run, is idempotent, and refuses owner or terminal" PASS
+else
+  check "W4 release truth table" FAIL
+fi
+
+# Re-assert the precondition so a W4 failure does not surface here as a second,
+# unexplained failure.
+W5_RELEASED=false
+json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" 'value.stage === "CANCELLED"' \
+  && W5_RELEASED=true
+if [ "$W5_RELEASED" = true ] \
+  && autopilot_begin_run run_conc_d session_conc_d "$CONC_PROJECT" false true "$CONC_A" >/dev/null 2>&1 \
+  && json_ok "$(autopilot_run_file run_conc_d "$CONC_PROJECT")" 'value.stage === "PLANNING"'; then
+  check "W5 the released working tree accepts a new run" PASS
+else
+  check "W5 released working tree accepts a new run (holder released=$W5_RELEASED)" FAIL
+fi
+
+# --- The owner filter, and what it must NOT skip ---
+# A record that is provably another owner's is skipped BEFORE validation, so a
+# corrupt sibling cannot fail this owner's read. A record that cannot be
+# attributed is not skipped: it stays fail-closed.
+FILTER_OK=true
+printf '%s\n' '{"ownerSessionId":"session_conc_b","corrupt":true}' \
+  > "$CONC_PROJECT/.zensu/state/autopilot-run-foreign_corrupt.json"
+autopilot_read_active "$CONC_PROJECT" session_conc_d >/dev/null 2>&1 || FILTER_OK=false
+printf '%s\n' '{"schemaVersion":1,"corrupt":true}' \
+  > "$CONC_PROJECT/.zensu/state/autopilot-run-unattributable.json"
+autopilot_read_active "$CONC_PROJECT" session_conc_d >/dev/null 2>&1
+[ "$?" -eq 2 ] || FILTER_OK=false
+rm -f "$CONC_PROJECT/.zensu/state/autopilot-run-foreign_corrupt.json" \
+  "$CONC_PROJECT/.zensu/state/autopilot-run-unattributable.json"
+if [ "$FILTER_OK" = true ]; then
+  check "W8 a corrupt record of another owner is skipped, an unattributable one still fails closed" PASS
+else
+  check "W8 owner-filtered inventory validation" FAIL
+fi
+
+# --- A record minted before the workspace field holds its whole project -------
+# Its pre-change meaning was project-wide, and the new keys are git toplevels,
+# so reading it as `projectRoot` would let a second run start in a tree it holds.
+LEGACY_HOLD_PROJECT="$ROOT/legacy-hold-project"
+mkdir -p "$LEGACY_HOLD_PROJECT/sub-tree"
+LEGACY_HOLD_OK=true
+autopilot_begin_run run_legacy_hold session_legacy_hold "$LEGACY_HOLD_PROJECT" >/dev/null 2>&1 \
+  || LEGACY_HOLD_OK=false
+LEGACY_HOLD_FILE="$(autopilot_run_file run_legacy_hold "$LEGACY_HOLD_PROJECT")"
+LEGACY_HOLD_FILE="$LEGACY_HOLD_FILE" node -e '
+  const fs=require("fs"),p=process.env.LEGACY_HOLD_FILE,j=JSON.parse(fs.readFileSync(p,"utf8"));
+  delete j.workspaceRoot;fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");
+' || LEGACY_HOLD_OK=false
+# Any workspace in the project is held, including one the record never named.
+autopilot_begin_run run_legacy_hold_2 session_legacy_hold_2 "$LEGACY_HOLD_PROJECT" \
+  false true "$(cd "$LEGACY_HOLD_PROJECT/sub-tree" && pwd -P)" >/dev/null 2>&1 \
+  && LEGACY_HOLD_OK=false
+[ ! -e "$LEGACY_HOLD_PROJECT/.zensu/state/autopilot-run-run_legacy_hold_2.json" ] || LEGACY_HOLD_OK=false
+if [ "$LEGACY_HOLD_OK" = true ]; then
+  check "W9 a record without the workspace field holds every tree in its project" PASS
+else
+  check "W9 legacy record holds its whole project" FAIL
+fi
+
+# --- Legacy pointer: adopted by its own owner only ---
+LEGACY_PTR_PROJECT="$ROOT/legacy-pointer-project"
+mkdir -p "$LEGACY_PTR_PROJECT"
+LEGACY_PTR_OK=true
+autopilot_begin_run run_legacy_ptr session_legacy_ptr "$LEGACY_PTR_PROJECT" >/dev/null 2>&1 \
+  || LEGACY_PTR_OK=false
+mv "$(autopilot_active_file "$LEGACY_PTR_PROJECT" session_legacy_ptr)" \
+  "$LEGACY_PTR_PROJECT/.zensu/state/autopilot-active.json" || LEGACY_PTR_OK=false
+autopilot_read_active "$LEGACY_PTR_PROJECT" session_legacy_ptr > "$ROOT/legacy-ptr.json" \
+  || LEGACY_PTR_OK=false
+json_ok "$ROOT/legacy-ptr.json" 'value.runId === "run_legacy_ptr"' || LEGACY_PTR_OK=false
+autopilot_read_active "$LEGACY_PTR_PROJECT" session_legacy_other >/dev/null 2>&1
+[ "$?" -eq 1 ] || LEGACY_PTR_OK=false
+if [ "$LEGACY_PTR_OK" = true ]; then
+  check "W6 a pre-scoping pointer is inherited by its own owner and ignored by anyone else" PASS
+else
+  check "W6 legacy pointer adoption is owner-bound" FAIL
+fi
+
+# A run minted before the workspace field must stay readable, and compare as
+# though its working tree were the project root.
+LEGACY_WS_PROJECT="$ROOT/legacy-workspace-project"
+mkdir -p "$LEGACY_WS_PROJECT"
+LEGACY_WS_OK=true
+autopilot_begin_run run_legacy_ws session_legacy_ws "$LEGACY_WS_PROJECT" >/dev/null 2>&1 \
+  || LEGACY_WS_OK=false
+LEGACY_WS_FILE="$(autopilot_run_file run_legacy_ws "$LEGACY_WS_PROJECT")"
+LEGACY_WS_FILE="$LEGACY_WS_FILE" node -e '
+  const fs=require("fs"),p=process.env.LEGACY_WS_FILE,j=JSON.parse(fs.readFileSync(p,"utf8"));
+  delete j.workspaceRoot;fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");
+' || LEGACY_WS_OK=false
+autopilot_read_active "$LEGACY_WS_PROJECT" session_legacy_ws >/dev/null 2>&1 || LEGACY_WS_OK=false
+autopilot_begin_run run_legacy_ws_2 session_legacy_ws_2 "$LEGACY_WS_PROJECT" \
+  false true "$(cd "$LEGACY_WS_PROJECT" && pwd -P)" >/dev/null 2>&1 && LEGACY_WS_OK=false
+if [ "$LEGACY_WS_OK" = true ]; then
+  check "W7 a run without the workspace field stays readable and holds the project root" PASS
+else
+  check "W7 legacy run record compares as project-root workspace" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"

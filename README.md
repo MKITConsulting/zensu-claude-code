@@ -79,9 +79,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (25)
+### Skills (26)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (26 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (27 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -109,6 +109,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
 | `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
+| `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`

@@ -18,7 +18,7 @@
 #   F17 symlink (POSIX)              -> PLAN_FILE_SYMLINK_REJECTED
 #   F18 file plan, marker missing    -> PLAN_MARKER_MISSING_OR_AMBIGUOUS
 #   F19 file plan, foreign marker    -> PLAN_MARKER_RUN_MISMATCH
-#   F20 foreign session, path only   -> OWNER_SESSION_MISMATCH, file untouched
+#   F20 foreign session, path only   -> no receipt at all, file untouched
 #   F21 non-string plan              -> PLAN_PAYLOAD_FIELD_TYPE_REJECTED, no fallback
 #   F21a non-string planFilePath     -> PLAN_PAYLOAD_FIELD_TYPE_REJECTED
 #   F22 multi-byte UTF-8 plan file   -> digest still equals the file bytes
@@ -31,7 +31,7 @@
 #   F29 response plan, foreign run   -> PLAN_MARKER_RUN_MISMATCH
 #   F30 non-string response fields   -> PLAN_PAYLOAD_FIELD_TYPE_REJECTED
 #   F31 null/array/string response   -> INVALID_PLAN_PAYLOAD (never text-scanned)
-#   F32 foreign session + response   -> OWNER_SESSION_MISMATCH, file untouched
+#   F32 foreign session + response   -> no receipt at all, file untouched
 #   F33 captured real harness shape  -> approves through the response source
 #   F34 "saved to:" line in the plan -> that path is never used
 #   F35-F41 response filePath refusals -> the hardened reader guards source 4 too
@@ -811,14 +811,16 @@ fi
 # ownership, so the hook is not an existence oracle for unauthorized callers.
 provision_session "$REFUSE_PROJECT" foreign_plan_session foreign || { echo "F20 fixture failed" >&2; exit 1; }
 OUT20="$(invoke "$(payload foreign_plan_session __ABSENT__ "$PLAN_FILE")" "$REFUSE_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
-if printf '%s' "$OUT20" | grep -qF 'code=OWNER_SESSION_MISMATCH' \
+if ! printf '%s' "$OUT20" | grep -qF 'ZENSU_AUTOPILOT' \
   && [ "$(digest "$REFUSE_RUN_FILE")" = "$REFUSE_BEFORE" ]; then
-  check "F20 a foreign session is refused on ownership, before the path is read" PASS
+  check "F20 a foreign session gets no Autopilot receipt and the path is never read" PASS
 else
   check "F20 foreign session (out='$(printf '%s' "$OUT20" | head -c 200)')" FAIL
 fi
 OUT20B="$(invoke "$(payload foreign_plan_session __ABSENT__ "$TMP/no-such-plan.md")" "$REFUSE_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
-if [ "$OUT20B" = "$OUT20" ]; then
+# Both operands must be the SAME stated value, not merely equal to each other:
+# two empty strings would satisfy a bare equality without proving anything.
+if [ "$OUT20B" = "$OUT20" ] && [ -z "$OUT20" ]; then
   check "F20a an unauthorized caller learns nothing about whether the path exists" PASS
 else
   check "F20a receipt differs by path existence for an unauthorized caller" FAIL
@@ -827,15 +829,15 @@ fi
 # --- F32 the response source does not reopen the ownership hole F20 closes ---
 OUT32="$(invoke "$(payload_response foreign_plan_session __ABSENT__ "$PLAN_FILE")" \
   "$REFUSE_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
-if printf '%s' "$OUT32" | grep -qF 'code=OWNER_SESSION_MISMATCH' \
+if ! printf '%s' "$OUT32" | grep -qF 'ZENSU_AUTOPILOT' \
   && [ "$(digest "$REFUSE_RUN_FILE")" = "$REFUSE_BEFORE" ]; then
-  check "F32 a foreign session naming a response filePath is refused on ownership" PASS
+  check "F32 a response filePath from a foreign session is never read either" PASS
 else
   check "F32 foreign response session (out='$(printf '%s' "$OUT32" | head -c 200)')" FAIL
 fi
 OUT32B="$(invoke "$(payload_response foreign_plan_session __ABSENT__ "$TMP/no-such-plan.md")" \
   "$REFUSE_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
-if [ "$OUT32B" = "$OUT32" ]; then
+if [ "$OUT32B" = "$OUT32" ] && [ -z "$OUT32" ]; then
   check "F32a the response source is no existence oracle either" PASS
 else
   check "F32a response receipt differs by path existence for an unauthorized caller" FAIL
@@ -1052,11 +1054,30 @@ OUT45C="$(invoke "$(payload_response_origin origin_foreign_session true \
   '# Foreign and agent-authored
 
 <!-- zensu-autopilot:originowner_run -->')" "$ORIGIN_OWNER_PROJECT" "$CFG_OFF" "$PROVISIONED_DATA")"
-if printf '%s' "$OUT45C" | grep -qF 'code=OWNER_SESSION_MISMATCH' \
-  && ! printf '%s' "$OUT45C" | grep -qF 'PLAN_RESPONSE_AGENT_ORIGIN_REJECTED'; then
-  check "F45c ownership is still refused before the caller origin is judged" PASS
+if ! printf '%s' "$OUT45C" | grep -qF 'PLAN_RESPONSE_AGENT_ORIGIN_REJECTED' \
+  && ! printf '%s' "$OUT45C" | grep -qF 'ZENSU_AUTOPILOT'; then
+  check "F45c a foreign caller is never told the response origin was judged" PASS
 else
-  check "F45c origin refusal preempted ownership (out='$(printf '%s' "$OUT45C" | head -c 200)')" FAIL
+  check "F45c origin refusal leaked to a foreign caller (out='$(printf '%s' "$OUT45C" | head -c 200)')" FAIL
+fi
+
+# --- F45d the ordering F45c used to pin, kept as a source-order assertion.
+# With the owner-scoped read a foreign caller never reaches the evaluator at
+# all, so exit 6 is unreachable and no behavioral case can observe whether the
+# ownership check still precedes the caller-origin check. The evaluator's own
+# comment claims that order; this is what keeps the claim checkable.
+HOOK_SRC="$PLUGIN_DIR/hooks/plan-approved-delegate.sh"
+OWNER_LINE="$(grep -n 'ACTIVE_OWNER!==process.env.SESSION_ID' "$HOOK_SRC" | head -1 | cut -d: -f1)"
+ORIGIN_LINE="$(grep -n 'origin.isAgent===true' "$HOOK_SRC" | head -1 | cut -d: -f1)"
+# The second ordering the same comment claims: the origin verdict is decided
+# BEFORE any payload source is read. No behavioural case can observe it either,
+# because every fixture that reaches the evaluator carries a valid plan.
+WALK_LINE="$(grep -n 'resolveApprovedPlan(input,SOURCES)' "$HOOK_SRC" | head -1 | cut -d: -f1)"
+if [ -n "$OWNER_LINE" ] && [ -n "$ORIGIN_LINE" ] && [ -n "$WALK_LINE" ] \
+  && [ "$OWNER_LINE" -lt "$ORIGIN_LINE" ] && [ "$ORIGIN_LINE" -lt "$WALK_LINE" ]; then
+  check "F45d ownership precedes the origin check, and the origin check precedes the source walk" PASS
+else
+  check "F45d evaluator ordering (owner=$OWNER_LINE origin=$ORIGIN_LINE walk=$WALK_LINE)" FAIL
 fi
 
 # --- F49 a hard link is refused like a symlink. O_NOFOLLOW does not see one, so
