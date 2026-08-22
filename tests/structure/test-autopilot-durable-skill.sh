@@ -33,10 +33,31 @@ has "$TDD" 'AUTOPILOT-RUN: <runId>' && has "$TDD" '--autopilot-return-stage <ret
   && has "$TDD" 'Never follow a delegated begin with the standalone form' \
   && check "D7 TDD preserves exact outer linkage" PASS || check "D7 bound TDD begin" FAIL
 if grep -qF 'auto-merge' "$AUTO" && grep -qF 'auto-deploy' "$AUTO"; then check "D8 durable protocol retains no-merge/deploy boundary" PASS; else check "D8 no merge/deploy" FAIL; fi
-has "$TDD" '--tdd-complete --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
+has "$TDD" '--tdd-complete --plan {plan_file} --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
   && has "$TDD" '--chain-done --autopilot-run "$RUN_ID" --autopilot-attempt "$ATTEMPT" --chain-id "$CHAIN_ID"' \
   && check "D9 bound TDD completion and terminus preserve exact generation" PASS \
   || check "D9 exact bound completion/terminus" FAIL
+has "$TDD" 'zensu-log.sh" --tdd-complete --plan {plan_file}`' \
+  && check "D9b the standalone completion spelling carries --plan too" PASS \
+  || check "D9b standalone --plan spelling" FAIL
+# D9/D9b are whole-file `grep -qF` presence pins, and `--tdd-complete` is spelled on
+# several lines of this skill — the mandatory command protocol AND Phase 6 step 10.1
+# both carry both variants. So EITHER site could lose `--plan` while both checks stay
+# green, and step 10.1 is the one the model actually executes at completion time; a
+# regression there routes every chain through the weaker derived channel silently.
+# Assert the PROPERTY instead of a count: no invocation anywhere may omit the flag.
+# A count would be its own trap — the literal legitimately appears more than twice.
+if grep -oE 'zensu-log\.sh" --tdd-complete[^`]*' "$TDD" | grep -qv -- '--plan {plan_file}'; then
+  check "D9c every --tdd-complete invocation in the skill carries --plan" FAIL
+else
+  # An empty haystack would satisfy the absence above for the wrong reason, so the
+  # anchor's own presence is established first — the vacuity this repo has hit before.
+  if [ "$(grep -cE 'zensu-log\.sh" --tdd-complete' "$TDD")" -ge 2 ]; then
+    check "D9c every --tdd-complete invocation in the skill carries --plan" PASS
+  else
+    check "D9c the --tdd-complete anchor this check greps still exists" FAIL
+  fi
+fi
 has "$TDD" 'Standalone chains keep the unqualified commands' \
   && check "D10 standalone TDD completion protocol remains unchanged" PASS \
   || check "D10 standalone completion unchanged" FAIL
