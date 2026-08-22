@@ -6,6 +6,10 @@ WRAPPER="$PLUGIN_DIR/scripts/claude-promptfoo-wrapper.sh"
 RENDERER_TEST="$PLUGIN_DIR/tests/structure/claude-stream-render.test.js"
 WATCHER="$PLUGIN_DIR/scripts/fixture-mutation-watch.js"
 OWNED_PROCESS_TEST="$PLUGIN_DIR/tests/structure/owned-process.test.js"
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
+
 
 PASS=0; FAIL=0
 check() {
@@ -30,8 +34,8 @@ fi
 
 OWNED_PROCESS_OUT="$(node --test "$OWNED_PROCESS_TEST" 2>&1)"
 OWNED_PROCESS_RC=$?
-if [ "$OWNED_PROCESS_RC" = 0 ]; then
-  check "owned process groups clean normal-exit and late-fork descendants" PASS
+if [ "$OWNED_PROCESS_RC" = 0 ] && unit_cases_meet_floor_text "$OWNED_PROCESS_OUT" 2; then
+  check "owned process groups clean normal-exit and late-fork descendants ($(unit_cases_report_text "$OWNED_PROCESS_OUT"))" PASS
 else
   check "owned process group regressions pass (rc=$OWNED_PROCESS_RC, out=${OWNED_PROCESS_OUT:0:400})" FAIL
 fi
@@ -175,8 +179,8 @@ case "$(uname -s)" in
   MINGW*|MSYS*|CYGWIN*)
     RENDERER_TEST_OUTPUT="$(node --test "$RENDERER_TEST" 2>&1)"
     RENDERER_TEST_RC=$?
-    if [ "$RENDERER_TEST_RC" = "0" ]; then
-      check "P7-S12b stream renderer behavior enforces framing and resource limits" PASS
+    if [ "$RENDERER_TEST_RC" = "0" ] && unit_cases_meet_floor_text "$RENDERER_TEST_OUTPUT" 6; then
+      check "P7-S12b stream renderer behavior enforces framing and resource limits ($(unit_cases_report_text "$RENDERER_TEST_OUTPUT"))" PASS
     else
       check "P7-S12b stream renderer behavior (rc=$RENDERER_TEST_RC, out=${RENDERER_TEST_OUTPUT:0:500})" FAIL
     fi
@@ -314,8 +318,8 @@ esac
 
 RENDERER_TEST_OUTPUT="$(node --test "$RENDERER_TEST" 2>&1)"
 RENDERER_TEST_RC=$?
-if [ "$RENDERER_TEST_RC" = "0" ]; then
-  check "P7-S12b stream renderer behavior enforces framing and resource limits" PASS
+if [ "$RENDERER_TEST_RC" = "0" ] && unit_cases_meet_floor_text "$RENDERER_TEST_OUTPUT" 6; then
+  check "P7-S12b stream renderer behavior enforces framing and resource limits ($(unit_cases_report_text "$RENDERER_TEST_OUTPUT"))" PASS
 else
   check "P7-S12b stream renderer behavior enforces framing and resource limits (rc=$RENDERER_TEST_RC, out=${RENDERER_TEST_OUTPUT:0:500})" FAIL
 fi

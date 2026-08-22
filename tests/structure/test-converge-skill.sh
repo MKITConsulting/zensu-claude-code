@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# Shared README skill-slug class (see the file header for the three sites it unifies).
+. "$(dirname "$0")/lib-skill-registry.sh"
+
 # Structure test for the /zensu:converge flow-back audit skill (P1-2).
 # Pins: the skill exists with the namespaced H1 + frontmatter name; the
 # read-only default, user-confirmation-before-edit, and never-auto-apply
@@ -207,7 +210,7 @@ HDR_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head 
 # Slug class kept in step with the two README-row encodings in test-chain-recover.sh
 # T39 (its grep and its JS regex) — it admits digits, so a skill named like
 # `review-v2` is still counted here.
-ROW_N="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README" | grep -cE '^\| `/zensu:[a-z0-9-]+` \|')"
+ROW_N="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README" | grep -cE "^\| \`/zensu:$SKILL_SLUG_CLASS\` \|")"
 if [ -n "$HDR_N" ] && [ "$HDR_N" = "$ROW_N" ]; then
   check "P4c README skills header ($HDR_N) == table rows ($ROW_N)" PASS
 else

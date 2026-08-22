@@ -20,6 +20,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 
 PASS=0; FAIL=0
 check() {
@@ -76,26 +77,12 @@ start_session() {
 # anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
 UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
 if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
-# LOCALE-INDEPENDENT PARSE. node --test emits its summary as `ℹ pass 29`, and
-# U+2139 is THREE bytes in UTF-8. The earlier `^. pass` branch matched exactly one
-# character, so with LANG/LC_ALL/LC_CTYPE unset macOS sed runs in the C locale, `.`
-# matches one BYTE, the pattern never fires, the count parses as empty and the check
-# reports 0 cases while the unit suite itself passes. Anchor on the trailing text
-# instead of the leading glyph; the `# pass` TAP branch stays first so both output
-# styles still work.
-#
-# One assumption the widened branch introduces, recorded because it is load-bearing:
-# `^.*[[:space:]]pass N$` matches ANY line ending in whitespace + `pass` + digits, so
-# `tail -1` selecting the SUMMARY depends on node emitting its summary block last —
-# a property of the reporter, not of this suite, and this capture is `2>&1`. A field
-# test (awk on `NF==3 && $2=="pass"`) would cover both dialects in one expression and
-# drop the dependency; it is not taken here only because the sibling W3a check in
-# test-bash-source-write-gate.sh spells the same two-branch sed and the two are worth
-# keeping identical. Change both together or neither.
-  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
-  case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
+  # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
+  # and the reporter-ordering caveat. This block used to carry its own copy of that
+  # expression, byte-identical to the one in test-bash-source-write-gate.sh W3a;
+  # both now delegate, so the next correction to it has exactly one site.
+  UNIT_PASS="$(unit_summary_field pass "$UNIT_OUT")"
+  UNIT_TOTAL="$(unit_summary_field tests "$UNIT_OUT")"
   # The total is the real floor; the pass floor is lower because the symlink and
   # FIFO cases skip themselves where the platform cannot create one.
   if [ "$UNIT_TOTAL" -ge 29 ] && [ "$UNIT_PASS" -ge 27 ]; then

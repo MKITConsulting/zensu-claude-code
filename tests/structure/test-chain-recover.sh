@@ -18,6 +18,9 @@ SKILL="$ROOT/skills/recover-chain/SKILL.md"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 README="$ROOT/README.md"
 PASS=0; FAIL=0
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
 check() {
   local label="$1" result="$2"
   if [ "$result" = PASS ]; then echo "  PASS  $label"; PASS=$((PASS+1));
@@ -40,10 +43,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1; then
-  check "P1 the classifier unit suite passes (node --test chain-recovery-v1.test.js)" PASS
+if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1 \
+  && unit_cases_meet_floor "$WORK/unit.out" 21; then
+  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the classifier unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 21 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
 fi
 export CLAUDE_PLUGIN_ROOT="$ROOT"
@@ -845,11 +849,11 @@ SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]
 # reason neither message names. The class had THREE hand-maintained encodings, all of
 # them reading README.md. Two of them live in this function, so they now share ONE
 # spelling: the grep below and the JS row regex both take SKILL_SLUG_CLASS. The third,
-# test-converge-skill.sh P4c, is in another file and still has to move by hand — that
-# is what the NOTE above defers to a dedicated registry suite.
+# test-converge-skill.sh P4c, now takes the same constant from lib-skill-registry.sh.
+# The INVARIANT is still not shared — that is what the NOTE above defers.
 # (test-gauntlet-loop-skill.sh G13 also spells [a-z0-9-]+, but that is a hook
 # FILENAME class applied to SKILL.md and reads no README row — not a co-moving site.)
-SKILL_SLUG_CLASS='[a-z0-9-]+'
+. "$(dirname "$0")/lib-skill-registry.sh"   # SKILL_SLUG_CLASS, shared with test-converge-skill.sh P4c
 SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE "^\| \`/zensu:$SKILL_SLUG_CLASS\` \|")"
 # Deliberately registered but kept out of the README table. A second entry here is a
 # real decision, not a typo — see P2h in test-doctor.sh for why doctor is documented

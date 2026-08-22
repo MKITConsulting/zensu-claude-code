@@ -1308,6 +1308,31 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   good. The row it would have rendered was already suppressed by the same TTL, so
   the sweep changes which files exist, never which findings are reported.
 
+## Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12
+
+**Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
+commit.** `tests/structure/test-gauntlet-loop-skill.sh` G12 scans `skills/gauntlet-loop/`
+for any gate-disable prefix, because a prompt carrier that teaches one hands the model a
+hatch that lands no bypass-ledger entry. A negative scan is only as wide as its
+alternation, so G12 builds its pattern from a hardcoded `ESCAPE_STEMS` list, and its
+`G12a` arm re-derives the set from `hooks/`, `docs/` and this file and FAILS when the two
+disagree.
+
+That makes the coupling run in an unobvious direction: an ordinary change under `docs/`
+or `hooks/` that adds — or removes the last occurrence of — such a literal turns a suite
+named for the gauntlet-loop skill red, and the remedy is to edit `ESCAPE_STEMS`, not the
+file you were working on. The message names both sets so the diagnosis is in the failure
+itself, but nothing points at it from the side that changes.
+
+It is not hypothetical. `ZENSU_REQUIREMENTS_GATE=off` arrived with the
+plan-requirements completion gate and was caught on the next merge, by exactly this arm.
+
+Two properties worth keeping when touching G12: the derivation carries the same quote
+tolerance as the pattern it validates (the gates compare after shell quote removal, so
+`ZENSU_CHAIN='off'` disables one at runtime and a bare `=off` derivation is blind to it),
+and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure used
+to read as agreement while the control block still printed PASS.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

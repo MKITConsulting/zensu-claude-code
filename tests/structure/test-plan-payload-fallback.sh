@@ -880,12 +880,17 @@ fi
 # suite can. Driven from here the way test-chain-recover.sh drives its own.
 PLAN_LIB="$PLUGIN_DIR/hooks/lib/plan-payload-v1.js"
 PLAN_UNIT="$PLUGIN_DIR/tests/structure/plan-payload-v1.test.js"
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
+
 PLAN_UNIT_OUT="$TMP/plan-unit.out"
 if [ -f "$PLAN_LIB" ] && [ -f "$PLAN_UNIT" ] \
-  && ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" node --test "$PLAN_UNIT" > "$PLAN_UNIT_OUT" 2>&1; then
-  check "F11b the plan-payload module unit suite passes" PASS
+  && ZENSU_PLAN_PAYLOAD_UNIT_TARGET="$PLAN_LIB" node --test "$PLAN_UNIT" > "$PLAN_UNIT_OUT" 2>&1 \
+  && unit_cases_meet_floor "$PLAN_UNIT_OUT" 20; then
+  check "F11b the plan-payload module unit suite passes ($(unit_cases_report "$PLAN_UNIT_OUT"))" PASS
 else
-  check "F11b the plan-payload module unit suite failed or is missing" FAIL
+  check "F11b the plan-payload module unit suite failed, is missing, or registered fewer than 20 cases ($(unit_cases_report "$PLAN_UNIT_OUT"))" FAIL
   [ -f "$PLAN_UNIT_OUT" ] && grep -B2 -A 20 '^not ok' "$PLAN_UNIT_OUT" | head -40
 fi
 
