@@ -37,15 +37,22 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
 
 - It does not resume, retry, or advance the run. The only transition it makes is `CANCEL`.
 - It is scoped by RUN ID within this project, not by working tree. It does not read
-  `workspaceRoot`, so any nonterminal foreign run in this project is releasable by id — take the
-  id from a refusal, never from a guess.
-- It does not release a run **this** session owns. Cancel that one the ordinary way, through
-  `--autopilot-event --event CANCEL`; the release refuses it.
+  `workspaceRoot`, but it releases only a run that holds the working tree you are standing in
+  (exit `6` otherwise). A run id is an ordinary filename in a listable directory, so the id is
+  not a scope control and "take it from a refusal" is about relevance, not availability — the
+  tree you stand in is the scope.
+- It does not release a run **this** session owns while that session's own pointer still
+  designates it. Cancel that one the ordinary way, through `--autopilot-event --event CANCEL`.
+  The one exception is the state that path cannot leave: a run left pointerless by a torn
+  `begin`, where `--autopilot-event` refuses with "event does not target the active run". The
+  release accepts the owner there, because otherwise the run has no exit at all.
 - It records no bypass-ledger entry. The ledger records gate ESCAPES so that everything
   under "Gates bypassed" is true, and this escapes no gate — it ends a run.
-- It does not check whether the owning session is still alive. A live foreign run is cancelled
-  just as readily as an abandoned one, and the durable record does not name who cancelled it.
-  That is why the id must come from a refusal and why the user's yes is required.
+- It refuses while the owning session still looks active (exit `7`): that session's workflow
+  document `.zensu/state/tdd-phase-<owner>.json` is aged against the same staleness bound
+  `/zensu:doctor` uses. That is a heuristic, not proof of death — an owner that never wrote a
+  workflow document is not covered, and the durable record still does not name who cancelled a
+  run. The user's yes remains the real control.
 
 ## Step 1 — report, do not act
 
@@ -85,9 +92,13 @@ Exit codes: `0` released (or already released — the id is derived from the run
 any caller is a no-op); `1` this project holds no durable Autopilot state at all; `2` a malformed
 invocation (a missing `--run`, a missing or duplicated `--confirm`, an unknown argument) **or**
 unreadable/unsafe durable state; `3` a malformed run id, or a run that is already terminal; `4` the
-caller owns the run, the run's ledger is exhausted, or the derived event id collides with an
-existing entry; `5` the durable write could not be staged or replaced. On `1` or `5`, report the
-code and stop — neither is repaired by retrying the release.
+caller owns the run AND that session's pointer still designates it, the run's ledger is
+exhausted, or the derived event id collides with an existing entry; `5` the durable write could
+not be staged or replaced; `6` the run does not hold the working tree you are standing in —
+release it from the tree it holds, which is the tree whose refusal named the id; `7` the owning
+session still looks active, so releasing it would end a live run. On `1` or `5`, report the code
+and stop — neither is repaired by retrying the release. On `7`, do not retry: either the owner
+is genuinely working, or it must go stale first.
 
 ## Step 3 — confirm the outcome
 

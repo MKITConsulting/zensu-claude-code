@@ -1476,5 +1476,184 @@ else
   check "W7 legacy run record compares as project-root workspace" FAIL
 fi
 
+# --- Containment: a tree that contains another is the same resource ---
+# The occupancy key is a git toplevel resolved from the CALLING process's cwd,
+# and the writer and the gates are different processes. A worktree under the
+# project root therefore answers a different toplevel than the root does, and a
+# string comparison reports the held tree as free in BOTH directions. Both are
+# asserted here because a one-sided check passes with half the predicate gone.
+CT_ROOT="$ROOT/containment"
+mkdir -p "$CT_ROOT"
+ct_project() {
+  local dir="$1" branch="$2"
+  mkdir -p "$dir/.claude/worktrees" || return 1
+  git -C "$dir" init -q >/dev/null 2>&1 || return 1
+  git -C "$dir" -c user.email=t@example.invalid -c user.name=t \
+    commit -q --allow-empty -m init >/dev/null 2>&1 || return 1
+  git -C "$dir" worktree add -q "$dir/.claude/worktrees/w" -b "$branch" >/dev/null 2>&1 || return 1
+}
+CT_READY=true
+CT_P1="$CT_ROOT/p1"
+CT_P2="$CT_ROOT/p2"
+mkdir -p "$CT_P1" "$CT_P2"
+command -v git >/dev/null 2>&1 || CT_READY=false
+[ "$CT_READY" = true ] && { ct_project "$CT_P1" ct-one || CT_READY=false; }
+[ "$CT_READY" = true ] && { ct_project "$CT_P2" ct-two || CT_READY=false; }
+
+# Anti-vacuity: the two spellings must genuinely be different toplevels, or a
+# passing comparison below would prove nothing about the containment rule.
+if [ "$CT_READY" = true ]; then
+  CT_TOP_ROOT="$(cd "$CT_P1" && git rev-parse --show-toplevel 2>/dev/null)"
+  CT_TOP_TREE="$(cd "$CT_P1/.claude/worktrees/w" && git rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$CT_TOP_ROOT" ] && [ -n "$CT_TOP_TREE" ] && [ "$CT_TOP_ROOT" != "$CT_TOP_TREE" ] \
+    || CT_READY=false
+fi
+
+if [ "$CT_READY" = true ]; then
+  ( cd "$CT_P1" && autopilot_begin_run run_ct1_root session_ct1_root "$CT_P1" false true "" ) >/dev/null 2>&1
+  CT1_HOLD_RC=$?
+  ( cd "$CT_P1/.claude/worktrees/w" && autopilot_begin_run run_ct1_sub session_ct1_sub "$CT_P1" false true "" ) >/dev/null 2>&1
+  CT1_RC=$?
+  if [ "$CT1_HOLD_RC" -eq 0 ] && [ "$CT1_RC" -eq 4 ]; then
+    check "W10 a run holding the project root also holds a worktree below it" PASS
+  else
+    check "W10 root holder must refuse a nested worktree (hold=$CT1_HOLD_RC refusal=$CT1_RC, want 0/4)" FAIL
+  fi
+
+  ( cd "$CT_P2/.claude/worktrees/w" && autopilot_begin_run run_ct2_sub session_ct2_sub "$CT_P2" false true "" ) >/dev/null 2>&1
+  CT2_HOLD_RC=$?
+  ( cd "$CT_P2" && autopilot_begin_run run_ct2_root session_ct2_root "$CT_P2" false true "" ) >/dev/null 2>&1
+  CT2_RC=$?
+  if [ "$CT2_HOLD_RC" -eq 0 ] && [ "$CT2_RC" -eq 4 ]; then
+    check "W11 a run holding a nested worktree also holds the project root above it" PASS
+  else
+    check "W11 nested holder must refuse the project root (hold=$CT2_HOLD_RC refusal=$CT2_RC, want 0/4)" FAIL
+  fi
+else
+  check "W10 containment fixture unavailable (git missing or toplevels coincide)" FAIL
+  check "W11 containment fixture unavailable (git missing or toplevels coincide)" FAIL
+fi
+
+# --- The standalone-TDD occupancy gate ---
+# `_autopilot_begin_standalone_tdd_critical` is the gate that keeps an unbound
+# /zensu:tdd chain from arming underneath a live durable run in the same tree.
+# Nothing drove it before, so its refusal could not be observed at all — and it
+# discarded the holder record that names the only command able to release it.
+# Two SIBLING worktrees, neither containing the other. A plain directory pair
+# cannot express this: with no git toplevel both fall back to the project root
+# and collapse onto one occupancy key.
+GATE_P="$ROOT/standalone-gate"
+GATE_READY=true
+mkdir -p "$GATE_P/.claude/worktrees"
+command -v git >/dev/null 2>&1 || GATE_READY=false
+if [ "$GATE_READY" = true ]; then
+  git -C "$GATE_P" init -q >/dev/null 2>&1 || GATE_READY=false
+  git -C "$GATE_P" -c user.email=t@example.invalid -c user.name=t \
+    commit -q --allow-empty -m init >/dev/null 2>&1 || GATE_READY=false
+  git -C "$GATE_P" worktree add -q "$GATE_P/.claude/worktrees/wa" -b gate-a >/dev/null 2>&1 || GATE_READY=false
+  git -C "$GATE_P" worktree add -q "$GATE_P/.claude/worktrees/wb" -b gate-b >/dev/null 2>&1 || GATE_READY=false
+fi
+GATE_HOLD_RC=1
+GATE_HELD_RC=0
+GATE_FREE_RC=4
+GATE_ERR="$ROOT/standalone-gate-refusal.txt"
+: > "$GATE_ERR"
+if [ "$GATE_READY" = true ]; then
+  ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_run run_gate_holder session_gate_holder "$GATE_P" false true "" ) >/dev/null 2>&1
+  GATE_HOLD_RC=$?
+  ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_other false ) >/dev/null 2>"$GATE_ERR"
+  GATE_HELD_RC=$?
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_free false ) >/dev/null 2>&1
+  GATE_FREE_RC=$?
+fi
+
+if [ "$GATE_HOLD_RC" -eq 0 ] && [ "$GATE_HELD_RC" -eq 4 ]; then
+  check "W12 a standalone chain is refused in a tree held by another session's run" PASS
+else
+  check "W12 standalone gate must refuse a held tree (hold=$GATE_HOLD_RC refusal=$GATE_HELD_RC, want 0/4)" FAIL
+fi
+
+# The refusal must carry the run id, because --autopilot-status is owner-scoped
+# and structurally cannot show a foreign run: without this the user is told to
+# release a run whose id no command will disclose.
+if [ "$GATE_HOLD_RC" -eq 0 ] \
+  && grep -qF -- 'run_gate_holder' "$GATE_ERR" \
+  && grep -qF -- '--autopilot-release --run run_gate_holder --confirm' "$GATE_ERR"; then
+  check "W13 the standalone refusal names the holding run and the release command" PASS
+else
+  check "W13 standalone refusal must disclose the holder and its release command" FAIL
+fi
+
+# Positive control. Without it a resolver drift that over-blocks every standalone
+# chain in the project would leave W12 green and the suite silent. rc 4 is the
+# gate's only verdict, so "not 4" is exactly the occupancy decision under test;
+# any other non-zero comes from tdd_begin_session, which is not this gate.
+if [ "$GATE_HOLD_RC" -eq 0 ] && [ "$GATE_FREE_RC" -ne 4 ]; then
+  check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
+else
+  check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/not-4)" FAIL
+fi
+
+# --- Release: liveness, tree scoping, and the owner's exit from a torn begin ---
+REL_P="$ROOT/release-guards"
+REL_READY=true
+mkdir -p "$REL_P/.claude/worktrees"
+command -v git >/dev/null 2>&1 || REL_READY=false
+if [ "$REL_READY" = true ]; then
+  git -C "$REL_P" init -q >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" -c user.email=t@example.invalid -c user.name=t \
+    commit -q --allow-empty -m init >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/ra" -b rel-a >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rb" -b rel-b >/dev/null 2>&1 || REL_READY=false
+fi
+
+# S6 — a run left pointerless by a torn begin: `apply` refuses it (no pointer
+# designates it) and `release` refuses the owner, so today the owner has no exit
+# at all. The release must be permitted in exactly that state.
+REL_TORN_RC=1
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/ra" && autopilot_begin_run run_rel_torn session_rel_torn "$REL_P" false true "" ) >/dev/null 2>&1 \
+    && rm -f "$(autopilot_active_file "$REL_P" session_rel_torn)"
+  ( cd "$REL_P/.claude/worktrees/ra" && autopilot_release_run run_rel_torn evt_rel_torn "$REL_P" session_rel_torn ) >/dev/null 2>&1
+  REL_TORN_RC=$?
+fi
+if [ "$REL_READY" = true ] && [ "$REL_TORN_RC" -eq 0 ]; then
+  check "W15 the owner may release a run no pointer designates" PASS
+else
+  check "W15 owner exit from a torn begin (rc=$REL_TORN_RC, want 0)" FAIL
+fi
+
+# S5a — the release is scoped to the caller's own working tree. Run ids are
+# ordinary filenames in a listable directory, so "take the id from a refusal"
+# bounds nothing; the tree the caller stands in does.
+REL_SCOPE_RC=0
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/ra" && autopilot_begin_run run_rel_scope session_rel_scope "$REL_P" false true "" ) >/dev/null 2>&1
+  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_scope evt_rel_scope "$REL_P" session_rel_other ) >/dev/null 2>&1
+  REL_SCOPE_RC=$?
+fi
+# rc 6 specifically, not merely non-zero: a bare "it failed" assertion passes on
+# any unrelated pre-existing failure and would prove nothing about this guard.
+if [ "$REL_READY" = true ] && [ "$REL_SCOPE_RC" -eq 6 ]; then
+  check "W16 a release is refused for a run outside the caller's own working tree" PASS
+else
+  check "W16 release must be scoped to the caller's tree (rc=$REL_SCOPE_RC, want 6)" FAIL
+fi
+
+# S5b — liveness. The owner's workflow document is the staleness signal this
+# repository already has; a release must refuse while it is fresh.
+REL_LIVE_RC=0
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_begin_run run_rel_live session_rel_live "$REL_P" false true "" ) >/dev/null 2>&1
+  printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_live.json"
+  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_live evt_rel_live "$REL_P" session_rel_other ) >/dev/null 2>&1
+  REL_LIVE_RC=$?
+fi
+if [ "$REL_READY" = true ] && [ "$REL_LIVE_RC" -eq 7 ]; then
+  check "W17 a release is refused while the owning session's workflow document is fresh" PASS
+else
+  check "W17 release must refuse a live owner (rc=$REL_LIVE_RC, want 7)" FAIL
+fi
+
 printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

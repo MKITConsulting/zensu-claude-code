@@ -370,10 +370,21 @@ it is a comparison key rather than a path the worker opens, and it may legitimat
 outside the project root, which `_autopilot_native_project_path` rejects by design.
 
 **The field is accepted in BOTH key shapes on purpose.** `stateValid` admits `STATE_KEYS`
-and `STATE_KEYS_WORKSPACE`, and `workspaceOf` reads a record without the field as
-`workspaceRoot === projectRoot`. A single strict key set would make every run minted before
+and `STATE_KEYS_WORKSPACE`, and `mayHoldWorkspace` short-circuits on an ABSENT field, so a
+record minted before the upgrade holds EVERY workspace in its project — not its `projectRoot`,
+which is what an earlier draft of this paragraph claimed and what the deleted `workspaceOf`
+fallback would have implemented. A single strict key set would make every run minted before
 the upgrade invalid, `readRunInventory` fails the FIRST invalid record, and the whole project
 would then fail closed — strictly worse than the wedge this work removes.
+
+**The occupancy comparison is CONTAINMENT, not equality, and it runs in both directions.**
+The key is a git toplevel resolved from the CALLING process's cwd, and the writer and the
+gates are different processes: a session that begins a run from the project root and later
+reaches a gate from a worktree BELOW it produces two different keys for one branch. `contains`
+answers "held" whenever either tree contains the other, which also covers the git-failure
+fallback — that path yields the project root while a working resolve yields the repository
+toplevel above it. Equality alone reported such a pair as free, and a standalone `/zensu:tdd`
+chain then armed underneath a live durable run.
 
 **The FORWARD direction is the one that is not solved, and concurrency makes it normal.**
 `begin` writes `workspaceRoot` while still declaring `schemaVersion: 1`, so an installation

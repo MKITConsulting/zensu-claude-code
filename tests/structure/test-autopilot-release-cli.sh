@@ -116,6 +116,11 @@ else
 fi
 
 # --- A3 the confirmed release cancels and mints the derived event id ---------
+# The release refuses a live owner, so a fixture that means "the owning session
+# is gone" has to say so. `activate_session` minted the owner's workflow document
+# seconds ago; backdate it past any staleness bound instead of releasing a run
+# whose owner is, as far as the code can tell, still working.
+find "$PROJECT/.zensu/state" -name 'tdd-phase-*.json' -exec touch -t 200001010000 {} + 2>/dev/null
 run_verb "$PROJECT" release_cli_releaser --autopilot-release --run release_cli_run --confirm >/dev/null 2>&1
 A3_RC=$?
 if [ "$A3_RC" -eq 0 ] \

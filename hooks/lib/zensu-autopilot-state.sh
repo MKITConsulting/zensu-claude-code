@@ -242,7 +242,7 @@ autopilot_workspace_root() {
   [ -d "$top" ] || return 2
   # The project root reaches the worker in the host-native spelling and is then
   # canonicalized there. The workspace must travel the same way or the two live
-  # in different namespaces on Windows and `workspaceOf`'s legacy fallback
+  # in different namespaces on Windows and `mayHoldWorkspace`'s containment test
   # compares across them.
   rendered="$(_autopilot_rendered_dir "$top")" || rendered=""
   if [ -n "$rendered" ]; then
@@ -365,7 +365,7 @@ _autopilot_node() {
     read-run) path_indexes=(0 2) ;;
     begin) path_indexes=(0 1 2 3 6 10) ;;
     apply) path_indexes=(0 1 2 7) ;;
-    release) path_indexes=(0 1 4) ;;
+    release) path_indexes=(0 1 4 6) ;;
     team-review-receipt-meta) path_indexes=(0) ;;
     increment-budget|increment-budget-capped) path_indexes=(0 1 2 5) ;;
     *) return 3 ;;
@@ -417,6 +417,7 @@ if (projectRootIndex !== undefined) {
 const workspaceRootIndex = Object.freeze({
   begin: 9,
   "read-workspace": 2,
+  release: 7,
 })[mode];
 if (workspaceRootIndex !== undefined) {
   const requested = args[workspaceRootIndex];
@@ -465,17 +466,24 @@ const STOP_TERMINAL = new Set(["DONE", "BLOCKED", "CANCELLED"]);
 const STATE_KEYS = ["schemaVersion", "runId", "projectRoot", "ownerSessionId", "stage", "nextActionCode",
   "approvedPlanSha256", "options", "tdd", "effects", "evidence", "blocked", "bypasses", "stopBudget", "events"];
 const STATE_KEYS_WORKSPACE = [...STATE_KEYS, "workspaceRoot"];
-const workspaceOf = state => (typeof state.workspaceRoot === "string" && state.workspaceRoot.length > 0
-  ? state.workspaceRoot
-  : state.projectRoot);
+const workspaceOf = state => state.workspaceRoot;
+// One tree CONTAINING the other makes them ONE resource: a worktree under the
+// project root drives the same branch, history and pull request. The key is a
+// git toplevel resolved from the CALLING process's cwd, and the writer and the
+// gates are different processes, so an equality alone answers "free" in
+// whichever direction the two spellings disagree — including the git-failure
+// fallback, which yields the project root while a working resolve yields the
+// repository toplevel above it.
+const contains = (outer, inner) => outer === inner || inner.startsWith(`${outer}/`);
 // A record without the field held the whole PROJECT before this change, and the
 // new keys are git toplevels — so comparing it against `projectRoot` would make
 // it stop holding its own tree whenever the project root sits below the
 // repository root. It therefore holds every workspace in its project until it
 // is rewritten with the field.
-const holdsWorkspace = (state, workspaceRoot) =>
+const mayHoldWorkspace = (state, workspaceRoot) =>
   !Object.prototype.hasOwnProperty.call(state, "workspaceRoot")
-  || workspaceOf(state) === workspaceRoot;
+  || contains(workspaceOf(state), workspaceRoot)
+  || contains(workspaceRoot, workspaceOf(state));
 const RETURN_STAGES = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
 const HEAD_UPDATE_STAGES = new Set(["FIX_FINDINGS", "VALIDATE", "COVER"]);
 const NEXT_ACTION = Object.freeze({
@@ -1219,7 +1227,7 @@ if (mode === "read-workspace") {
   if (!nonEmpty(workspaceRoot, 4096)) fail(3, "invalid workspace root");
   const inventory = readRunInventory(stateDir, expectedProjectRoot);
   const holder = inventory.find(candidate => !TERMINAL.has(candidate.stage)
-    && holdsWorkspace(candidate, workspaceRoot));
+    && mayHoldWorkspace(candidate, workspaceRoot));
   if (!holder) fail(1, "no nonterminal run holds this workspace");
   process.stdout.write(`${JSON.stringify(holder, null, 2)}\n`);
   process.exit(0);
@@ -1292,7 +1300,7 @@ if (mode === "begin") {
   // and replaces the project-wide one; a foreign holder is nameable, so the
   // refusal points at the command that can release it.
   const workspaceHolder = inventory.find(candidate => candidate.runId !== runId
-    && !TERMINAL.has(candidate.stage) && holdsWorkspace(candidate, workspaceRoot));
+    && !TERMINAL.has(candidate.stage) && mayHoldWorkspace(candidate, workspaceRoot));
   if (workspaceHolder) {
     fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
       + `release it with: zensu-log.sh --autopilot-release --run ${workspaceHolder.runId} --confirm`);
@@ -1301,7 +1309,7 @@ if (mode === "begin") {
   const existing = inventory.find(candidate => candidate.runId === runId);
   if (existing) {
     if (existing.runId !== runId || existing.ownerSessionId !== ownerSessionId
-      || existing.projectRoot !== projectRoot || !holdsWorkspace(existing, workspaceRoot)
+      || existing.projectRoot !== projectRoot || !mayHoldWorkspace(existing, workspaceRoot)
       || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
     if (activeStat) {
       if (pointer.runId === runId) process.exit(10);
@@ -1404,8 +1412,10 @@ if (mode === "apply") {
 // read an ordinary cancellation. No state field is added and no bypass-ledger
 // entry is written: this escapes no gate, it terminates a run.
 if (mode === "release") {
-  const [runFile, runOutput, runId, eventId, expectedProjectRoot, callerSessionId] = args;
-  if (!identifier(runId) || !identifier(eventId) || !sessionIdentifier(callerSessionId)) {
+  const [runFile, runOutput, runId, eventId, expectedProjectRoot, callerSessionId,
+    stateDir, callerWorkspace, ownerActivityTtlHours] = args;
+  if (!identifier(runId) || !identifier(eventId) || !sessionIdentifier(callerSessionId)
+    || !nonEmpty(stateDir, 4096) || !nonEmpty(callerWorkspace, 4096)) {
     fail(3, "invalid release arguments");
   }
   const state = readState(runFile);
@@ -1423,8 +1433,41 @@ if (mode === "release") {
     fail(4, `eventId conflict: ${eventId}`);
   }
   if (TERMINAL.has(state.stage)) fail(3, "terminal run cannot be released");
+  // A run id is an ordinary filename in a listable directory, so "take the id
+  // from a refusal" is not a scope control. The tree the caller stands in is:
+  // the refusal that hands out the id is workspace-derived, so scoping here
+  // costs the documented workflow nothing and removes enumerate-and-kill.
+  if (!mayHoldWorkspace(state, callerWorkspace)) {
+    fail(6, "run does not hold the caller's working tree; release it from the tree it holds");
+  }
   if (state.ownerSessionId === callerSessionId) {
-    fail(4, "caller owns this run; cancel it through the ordinary event path");
+    // The ordinary CANCEL path resolves the owner pointer and refuses when none
+    // designates the run, so refusing the owner here too leaves a torn `begin`
+    // with no exit at all. Refuse only while that path can still work.
+    const ownerPointer = activePointerFor(stateDir, state.ownerSessionId, runId);
+    if (ownerPointer && ownerPointer.runId === runId) {
+      fail(4, "caller owns this run; cancel it through the ordinary event path");
+    }
+  } else {
+    // Liveness, from a signal this repository already keeps: the owner IS the
+    // Session Control key, so its workflow document names the owning session and
+    // its mtime says when that session last acted. No state field is added.
+    const ttlHours = Number(ownerActivityTtlHours);
+    if (Number.isFinite(ttlHours) && ttlHours > 0) {
+      let ownerActivity = null;
+      try {
+        const candidate = fs.statSync(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));
+        if (candidate.isFile()) ownerActivity = candidate;
+      } catch (_) {
+        ownerActivity = null;
+      }
+      if (ownerActivity) {
+        const ageMs = Date.now() - ownerActivity.mtimeMs;
+        if (ageMs < ttlHours * 3600000) {
+          fail(7, "the owning session is still active; ask it to cancel, or wait for it to go stale");
+        }
+      }
+    }
   }
   if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
   const fromStage = state.stage;
@@ -1695,11 +1738,13 @@ autopilot_read_active() {
 
 _autopilot_release_critical() {
   local root="$1" run_id="$2" event_id="$3" caller_session_id="$4"
+  local caller_workspace="$5" ttl_hours="$6"
   local state_dir="$root/.zensu/state"
   local run_file="$state_dir/autopilot-run-${run_id}.json"
   local run_tmp rc
   run_tmp="$(_autopilot_mktemp_beside "$run_file")" || return 5
-  _autopilot_node release "$run_file" "$run_tmp" "$run_id" "$event_id" "$root" "$caller_session_id"
+  _autopilot_node release "$run_file" "$run_tmp" "$run_id" "$event_id" "$root" "$caller_session_id" \
+    "$state_dir" "$caller_workspace" "$ttl_hours"
   rc=$?
   if [ "$rc" -eq 10 ]; then
     rm -f "$run_tmp"
@@ -1718,12 +1763,16 @@ _autopilot_release_critical() {
 # terminal run, which every reader already handles.
 autopilot_release_run() {
   local run_id="${1:-}" event_id="${2:-}" root caller_session_id="${4:-}"
+  local caller_workspace ttl_hours
   _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" || return 3
   _autopilot_session_id_ok "$caller_session_id" || return 3
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  caller_workspace="$(_autopilot_session_workspace "$root")" || return 2
+  ttl_hours="$(zensu_pending_review_ttl_hours 2>/dev/null)" || ttl_hours=""
+  case "$ttl_hours" in *[!0-9]*|'') ttl_hours=0 ;; esac
   _autopilot_read_storage_ready "$root" "$run_id" || return $?
   _autopilot_locked_run "$root" "$run_id" _autopilot_release_critical \
-    "$root" "$run_id" "$event_id" "$caller_session_id"
+    "$root" "$run_id" "$event_id" "$caller_session_id" "$caller_workspace" "$ttl_hours"
 }
 
 # Chain ids share the 128-character durable identifier contract, while the
@@ -2201,17 +2250,37 @@ autopilot_store_team_review_payload() {
 # only a workspace no nonterminal run holds permits this unbound generation.
 # The question is owner-INDEPENDENT on purpose: a standalone chain must not
 # start underneath another session's durable run in the same working tree.
+# `read-workspace` already returns the holding record; rendering it here is the
+# only way the run id reaches the user. `--autopilot-status` is owner-scoped and
+# structurally cannot show a foreign run, and no verb lists holders — so a
+# refusal that discards this record names a remedy nobody can carry out.
+_autopilot_workspace_refusal() {
+  local holder="${1:-}" env_exclusions
+  [ -n "$holder" ] || return 1
+  env_exclusions="$(_autopilot_msys_env_exclusions HOLDER_JSON)" || return 1
+  MSYS2_ENV_CONV_EXCL="$env_exclusions" HOLDER_JSON="$holder" node -e '
+    let value;
+    try { value = JSON.parse(String(process.env.HOLDER_JSON || "")); } catch { process.exit(1); }
+    if (!value || typeof value.runId !== "string" || typeof value.stage !== "string") process.exit(1);
+    process.stdout.write(`workspace held by nonterminal run ${value.runId} (stage ${value.stage}); `
+      + `release it with: zensu-log.sh --autopilot-release --run ${value.runId} --confirm\n`);
+  ' 2>/dev/null </dev/null
+}
+
 _autopilot_begin_standalone_tdd_critical() {
   local root="$1" session_id="$2" vanilla="$3" workspace="${4:-}"
-  local read_rc
+  local read_rc holder
   [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
-  if _autopilot_read_workspace_critical "$root" "$workspace" >/dev/null 2>&1; then
+  if holder="$(_autopilot_read_workspace_critical "$root" "$workspace" 2>/dev/null)"; then
     read_rc=0
   else
     read_rc=$?
   fi
   case "$read_rc" in
-    0) return 4 ;;
+    0)
+      _autopilot_workspace_refusal "$holder" >&2 || true
+      return 4
+      ;;
     1) ;;
     *) return "$read_rc" ;;
   esac
