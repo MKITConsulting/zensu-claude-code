@@ -474,14 +474,28 @@ const workspaceOf = state => state.workspaceRoot;
 // whichever direction the two spellings disagree — including the git-failure
 // fallback, which yields the project root while a working resolve yields the
 // repository toplevel above it.
-const contains = (outer, inner) => outer === inner || inner.startsWith(`${outer}/`);
+// `path.relative`, not a `/` literal: both operands are canonicalized with
+// `fs.realpathSync.native`, which spells win32 paths with backslashes, so a
+// hardcoded separator would silently degrade this back to the equality it
+// replaces on the one platform the namespace hazard lives on. Total over
+// non-strings on purpose — `.startsWith` on a malformed record would throw,
+// node would exit 1, and the standalone gate reads 1 as "no holder".
+const contains = (outer, inner) => {
+  if (!(typeof outer === "string" && typeof inner === "string")) return false;
+  const rel = path.relative(outer, inner);
+  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
+};
 // A record without the field held the whole PROJECT before this change, and the
 // new keys are git toplevels — so comparing it against `projectRoot` would make
 // it stop holding its own tree whenever the project root sits below the
 // repository root. It therefore holds every workspace in its project until it
 // is rewritten with the field.
+// A record that cannot state its tree holds every tree, exactly as a record
+// that never carried the field does. Failing closed here is what keeps a
+// malformed value from reading as "the tree is free".
 const mayHoldWorkspace = (state, workspaceRoot) =>
   !Object.prototype.hasOwnProperty.call(state, "workspaceRoot")
+  || typeof workspaceOf(state) !== "string"
   || contains(workspaceOf(state), workspaceRoot)
   || contains(workspaceRoot, workspaceOf(state));
 const RETURN_STAGES = new Set(["GATES", "CONVERGE", "FIX_FINDINGS", "VALIDATE", "COVER"]);
@@ -1462,8 +1476,11 @@ if (mode === "release") {
         ownerActivity = null;
       }
       if (ownerActivity) {
+        // Bounded in BOTH directions: a future mtime yields a negative age that
+        // never crosses the bound, which would make the run permanently
+        // unreleasable — and the mtime is operator-settable.
         const ageMs = Date.now() - ownerActivity.mtimeMs;
-        if (ageMs < ttlHours * 3600000) {
+        if (ageMs >= 0 && ageMs < ttlHours * 3600000) {
           fail(7, "the owning session is still active; ask it to cancel, or wait for it to go stale");
         }
       }

@@ -1655,5 +1655,33 @@ else
   check "W17 release must refuse a live owner (rc=$REL_LIVE_RC, want 7)" FAIL
 fi
 
+# --- R1: the containment predicate must be separator-correct and total ---
+# A POSIX host cannot observe either defect behaviourally, so these are source
+# pins. `realpathSync.native` yields `D:\a\proj` on win32, so a hardcoded `/`
+# boundary makes `contains` degrade to the equality it replaced — the exact
+# pre-change behaviour this work removes. And `.startsWith` on a non-string
+# throws; node exits 1, which the standalone gate reads as "no holder" and arms
+# the chain, so the predicate must be total rather than partial.
+R1_OK=true
+grep -qF 'const contains = (outer, inner) =>' "$LIB" || R1_OK=false
+grep -qF 'path.relative(outer, inner)' "$LIB" || R1_OK=false
+grep -qF 'typeof outer === "string" && typeof inner === "string"' "$LIB" || R1_OK=false
+grep -qF 'inner.startsWith(`${outer}/`)' "$LIB" && R1_OK=false
+if [ "$R1_OK" = true ]; then
+  check "W18 containment compares with path.relative and is total over non-strings" PASS
+else
+  check "W18 containment must be separator-correct and total" FAIL
+fi
+
+# The liveness bound must exclude a future timestamp: a negative age never
+# crosses the bound, so a skewed or planted mtime would make the run
+# permanently unreleasable. This repository already states that rule for the
+# reviewer-denial note TTL; the same bound applies here.
+if grep -qF 'ageMs >= 0 && ageMs < ttlHours * 3600000' "$LIB"; then
+  check "W19 the owner-liveness bound rejects a future timestamp" PASS
+else
+  check "W19 owner-liveness must bound the age in both directions" FAIL
+fi
+
 printf '%s\n' "----" "test-autopilot-state-machine: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
