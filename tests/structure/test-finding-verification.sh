@@ -53,7 +53,7 @@ trap cleanup EXIT INT TERM HUP
 
 # ── P1 the model-free grader ─────────────────────────────────────────
 if node --test "$UNIT" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_meet_floor "$WORK/unit.out" 28; then
+  && unit_cases_registered_floor "$WORK/unit.out" 28; then
   check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
   check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 28 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL

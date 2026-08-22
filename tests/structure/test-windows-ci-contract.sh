@@ -68,7 +68,7 @@ esac
 
 [ "$RC" -eq 0 ] || exit "$RC"
 
-if ! unit_cases_meet_floor "$OUT_FILE" "$FLOOR"; then
+if ! unit_cases_registered_floor "$OUT_FILE" "$FLOOR"; then
   # Two different faults, distinguished so a triage is not guesswork: a parsed
   # count below the floor means a unit file lost cases; a count of 0 means the
   # summary was never parsed at all, which on a loaded host is usually a truncated

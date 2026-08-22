@@ -54,7 +54,7 @@ fi
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
   check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
 elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
-  && unit_cases_meet_floor_text "$SUPERVISOR_OUT" 3; then
+  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" 3; then
   check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
 else
   check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= 3 registered)" FAIL

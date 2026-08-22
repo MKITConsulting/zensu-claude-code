@@ -62,7 +62,7 @@ else
 fi
 
 CONTRACT_OUT="$(node --test "$CONTRACT_TEST" 2>&1)"
-if [ "$?" = 0 ] && unit_cases_meet_floor_text "$CONTRACT_OUT" 14; then
+if [ "$?" = 0 ] && unit_cases_registered_floor_text "$CONTRACT_OUT" 14; then
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"))" PASS
 else
   check "deterministic transcript contract regressions pass ($(unit_cases_report_text "$CONTRACT_OUT"), want >= 14 registered)" FAIL

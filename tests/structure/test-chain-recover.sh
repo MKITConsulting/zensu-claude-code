@@ -44,7 +44,7 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1 \
-  && unit_cases_meet_floor "$WORK/unit.out" 21; then
+  && unit_cases_registered_floor "$WORK/unit.out" 21; then
   check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
   check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 21 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL

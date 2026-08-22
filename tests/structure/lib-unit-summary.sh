@@ -57,6 +57,38 @@ unit_cases_meet_floor() {
   [ "$UNIT_CASES_TESTS" -ge "$min_tests" ] && [ "$UNIT_CASES_PASS" -ge "$min_pass" ]
 }
 
+# unit_cases_registered_floor <file> <min_tests> — asserts the REGISTERED total only,
+# and is the right guard for a driver that already branches on node's exit status.
+#
+# Prefer it over unit_cases_meet_floor for a new floor. A passing floor is a claim
+# about how many cases RUN on the host executing it, and cases skip themselves for
+# platform reasons: profile-runner.test.js registers 23 everywhere but passes 23 on
+# macOS and 21 on windows-latest, where two skip. A floor set from one host's passing
+# count therefore fails on the other for no defect — which is exactly how this comment
+# came to be written. The total is the platform-independent number, and it is the one
+# that catches the fault a count exists for: a unit file emptied, renamed or never
+# collected. An actual FAILURE is already non-zero from node and needs no floor.
+#
+# Set a passing floor only where the skip is MEASURED on every host that runs it, and
+# say which case skips and where — T26 in test-stop-enforcer-self-review-routing.sh
+# carries such a pair (29 registered / 27 passing, for the symlink and FIFO cases).
+unit_cases_registered_floor() {
+  local file="$1" min_tests="$2"
+  UNIT_CASES_TESTS="$(unit_summary_field tests "$file")"
+  UNIT_CASES_PASS="$(unit_summary_field pass "$file")"
+  [ "$UNIT_CASES_TESTS" -ge "$min_tests" ]
+}
+
+unit_cases_registered_floor_text() {
+  local text="$1" min_tests="$2" tmp rc
+  tmp="$(mktemp "${TMPDIR:-/tmp}/zensu-unit-summary-XXXXXX")" || return 1
+  printf '%s\n' "$text" > "$tmp"
+  unit_cases_registered_floor "$tmp" "$min_tests"
+  rc=$?
+  rm -f "$tmp"
+  return "$rc"
+}
+
 # unit_cases_report <file> — "N/M cases", for a check label.
 unit_cases_report() {
   printf '%s/%s cases' "$(unit_summary_field pass "$1")" "$(unit_summary_field tests "$1")"

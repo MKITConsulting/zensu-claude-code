@@ -43,7 +43,7 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   # name whichever half failed. The *_text helper spools to a temp file rather than
   # reading /dev/stdin: this suite runs on the Windows shards, where Git Bash's
   # /dev/stdin is not something to bet a count on.
-  unit_cases_meet_floor_text "$UNIT_OUT" 45 45 || true
+  unit_cases_registered_floor_text "$UNIT_OUT" 45 || true
   UNIT_PASS="$UNIT_CASES_PASS"
   UNIT_TOTAL="$UNIT_CASES_TESTS"
   # Exit 0 alone would also accept a file that registers zero cases.

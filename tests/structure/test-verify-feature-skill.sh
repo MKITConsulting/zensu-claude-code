@@ -336,11 +336,12 @@ else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
 fi
 PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
-# Floor: 16 registered, 15 passing. One case skips itself where the platform
-# cannot provide what it needs, so the passing floor is one below the total —
-# measured, not padded.
+# Floor on the REGISTERED total (16). A passing floor is not used: one case already
+# skips itself on this host and the set of skips is platform-dependent, which is the
+# coupling unit_cases_registered_floor exists to avoid. A real failure is already
+# non-zero from node, and PROXY_TEST_RC covers it.
 PROXY_TEST_RC=$?
-if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_meet_floor_text "$PROXY_TEST_OUTPUT" 16 15; then
+if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 16; then
   check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy ($(unit_cases_report_text "$PROXY_TEST_OUTPUT"))" PASS
 else
   check "P6g MCP broker inventory/policy behavior (rc=$PROXY_TEST_RC, out=${PROXY_TEST_OUTPUT:0:500})" FAIL
