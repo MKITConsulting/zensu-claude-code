@@ -27,11 +27,11 @@
 #
 # Fail-silent by construction: an unknown event, a malformed payload, a missing
 # node, or a rule file that is absent, symlinked, swapped between the pre-check and
-# the open, oversized, short-read or malformed exits 0 with no output, so it can
-# never block a prompt or a spawn. Note what that means for an unswitchable rule:
-# the injection is DROPPED, not truncated, and nothing reports it — the build-time
-# pins in tests/structure/test-evidence-discipline.sh are what make that a hard
-# failure. The plugin-root guard is the one deliberate
+# the open, oversized in FILE or in BLOCK, short-read or malformed exits 0 with no
+# output, so it can never block a prompt or a spawn. Note what that means for an
+# unswitchable rule: the injection is DROPPED, not truncated, and nothing reports it —
+# the build-time pins in tests/structure/test-evidence-discipline.sh are what make that
+# a hard failure. The plugin-root guard is the one deliberate
 # exception: it is the sibling hooks' guard plus CDPATH= and -- hardening, so a
 # mismatched inherited CLAUDE_PLUGIN_ROOT still refuses with exit 2.
 set -u
@@ -58,6 +58,7 @@ command -v node >/dev/null 2>&1 || exit 0
 ZENSU_EVIDENCE_RULE_FILE="$ZENSU_EVIDENCE_RULE_FILE" node -e '
   const OPEN = "<!-- zensu:evidence-discipline -->";
   const CLOSE = "<!-- /zensu:evidence-discipline -->";
+  const MAX_BLOCK = 4000;
   const MAX_FILE = 1048576;
   try {
     const fs = require("fs");
@@ -119,7 +120,15 @@ ZENSU_EVIDENCE_RULE_FILE="$ZENSU_EVIDENCE_RULE_FILE" node -e '
     if (open < 0 || lines.indexOf(OPEN, open + 1) !== -1) process.exit(0);
     if (lines[open + 2] !== CLOSE) process.exit(0);
     const block = String(lines[open + 1] || "").replace(/^>\s*/, "").trim();
-    if (!block) process.exit(0);
+    // MAX_FILE caps the FILE; without this the same file, well under that ceiling, can
+    // still carry one enormous marker line — and this carrier injects it into every
+    // session and every subagent as a directive that cannot be switched off. Shared
+    // value with the sibling carrier user-prompt-best-solution-first.sh, and three checks
+    // bind them: H4e in tests/structure/test-evidence-discipline.sh (which fails first),
+    // B2h in tests/structure/test-best-solution-first.sh, and the cross-carrier equality in
+    // tests/structure/test-windows-portability-guards.sh. Raising it here means re-arguing
+    // the bound on the sibling too, not following it.
+    if (!block || block.length > MAX_BLOCK) process.exit(0);
 
     const directive = "Zensu evidence discipline — binding for every process in this "
       + "session, main thread and subagents alike, and not switchable off. " + block;

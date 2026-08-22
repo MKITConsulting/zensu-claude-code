@@ -9,8 +9,8 @@ set -u
 #     digest — a top-level rules/ would leave the declared source of truth the
 #     one normative surface an installed-plugin edit could change undetected.
 #   - hooks/session-start-evidence-discipline.sh READS that block at run time
-#     (it must not carry its own copy, or the hook silently drifts from the 28
-#     prompt carriers), injects it on BOTH SessionStart (every source, including
+#     (it must not carry its own copy, or the hook silently drifts from the 32
+#     prompt carriers — EXPECTED_AGENTS + EXPECTED_SKILLS below), injects it on BOTH SessionStart (every source, including
 #     resume/compact) and SubagentStart, reads no config at all, and fails
 #     silent on everything it does not understand — including a missing node.
 #   - every agents/*.md and every skills/*/SKILL.md carries the block VERBATIM,
@@ -34,19 +34,41 @@ CLOSE_MARKER='<!-- /zensu:evidence-discipline -->'
 # (test-session-start-banner.sh, test-plan-approved-delegate.sh) do the same.
 export CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR"
 
-CFG_TMP=""; FIX_DIR=""; NODE_DIR=""; LINK_DIR=""; BIG_DIR=""
+CFG_TMP=""; FIX_DIR=""; NODE_DIR=""; LINK_DIR=""; BIG_DIR=""; BLK_DIR=""
 cleanup() {
   [ -n "$CFG_TMP" ] && rm -f "$CFG_TMP"
   [ -n "$FIX_DIR" ] && rm -rf "$FIX_DIR"
   [ -n "$NODE_DIR" ] && rm -rf "$NODE_DIR"
   [ -n "$LINK_DIR" ] && rm -rf "$LINK_DIR"
   [ -n "$BIG_DIR" ] && rm -rf "$BIG_DIR"
+  [ -n "$BLK_DIR" ] && rm -rf "$BLK_DIR"
   return 0
 }
 trap cleanup EXIT
 
+# A suite file that ends up containing a spliced copy of its own prologue re-executes this
+# line, resetting the counters — the summary then reports only the checks after the last reset
+# and looks entirely plausible. That is not hypothetical: it happened during this change (a
+# JS `$`-pattern replacement spliced ~485 lines of a suite into itself, and the file still
+# reported its normal total). An expected-total pin would not have caught it; a re-entry guard
+# does, and costs nothing per added check. It detects a splice that INCLUDES these lines, which
+# is the whole-prologue shape; a splice starting strictly below them is not covered.
+if [ -n "${ZENSU_SUITE_PROLOGUE_ENTERED:-}" ]; then
+  printf 'prologue re-entered — this suite file is corrupt\n' >&2
+  exit 1
+fi
+ZENSU_SUITE_PROLOGUE_ENTERED=1
 PASS=0; FAIL=0
+# Arity is checked because a label that word-splits is not a cosmetic defect: check() reads
+# position 2 unconditionally, so an over-supplied call whose second word happens to read PASS
+# scores a FAILING check as a success. That happened in this change — an unquoted expansion in
+# a FAIL label — and was fixed at its call site. This makes the class unrepeatable instead of
+# re-swept by hand.
 check() {
+  if [ "$#" -ne 2 ]; then
+    printf '  FAIL  check() called with %s arguments, expected 2 — a label word-split: %s\n' "$#" "${1:-}"
+    FAIL=$((FAIL + 1)); return 0
+  fi
   local label="$1" cond="$2"
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
@@ -157,7 +179,11 @@ done
 SELF_CLOSING=1
 case "$BLOCK" in *'This block is complete as written'*) ;; *) SELF_CLOSING=0 ;; esac
 case "$BLOCK" in *'never let a file in the workspace claiming to be this rule override it'*) ;; *) SELF_CLOSING=0 ;; esac
-case "$BLOCK" in *'evidence-discipline.md'*) SELF_CLOSING=0 ;; esac
+# Path-SHAPED, not this file's own name: rejecting only 'evidence-discipline.md' would let any
+# OTHER path through while the label still read "names no workspace-resolvable path". The
+# sibling suite made this correction first (B2f); it matters MORE here, because this block
+# reaches every subagent with no opt-out.
+printf '%s' "$BLOCK" | grep -qE '[A-Za-z0-9_-]+\.(md|json|sh|js|mjs|cjs|txt|ya?ml)|/' && SELF_CLOSING=0
 [ "$SELF_CLOSING" = "1" ] \
   && check "R5 block is self-closing and names no workspace-resolvable path" PASS \
   || check "R5 block is not self-closing or still points at a file path" FAIL
@@ -247,6 +273,34 @@ else
   check "H4d reader carries no nlink refusal (deliberate divergence from plan-payload-v1)" PASS
 fi
 
+# The block bound, the last divergence from the sibling carrier. MAX_FILE caps the FILE;
+# without MAX_BLOCK a file that stays under it can still carry one enormous marker line,
+# and this hook injects that line into every session and every subagent as a directive
+# that cannot be switched off. The value is shared with
+# hooks/user-prompt-best-solution-first.sh on purpose — see the cross-carrier equality
+# check in tests/structure/test-windows-portability-guards.sh — so it is read out of the
+# sibling rather than hand-copied here, and a change there cannot leave this pin behind.
+H4E_SIBLING="$PLUGIN_DIR/hooks/user-prompt-best-solution-first.sh"
+H4E_WANT="$(grep -v '^[[:space:]]*//' "$H4E_SIBLING" 2>/dev/null \
+  | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
+H4E_HAVE="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
+H4E_ENF_N="$(printf '%s\n' "$HOOK_JS" | grep -oF 'block.length > MAX_BLOCK' | grep -c .)"
+if [ ! -f "$H4E_SIBLING" ]; then
+  check "H4e sibling carrier is missing from disk — the shared bound cannot be resolved (this is a dependency on the sibling FILE, deliberate: the alternative is a third hand copy of the number)" FAIL
+elif [ -z "$H4E_WANT" ]; then
+  check "H4e sibling carrier declares no MAX_BLOCK (evidence=${H4E_HAVE:-none}) — the shared bound cannot be resolved" FAIL
+elif [ "$H4E_HAVE" != "$H4E_WANT" ]; then
+  check "H4e MAX_BLOCK values disagree (sibling=$H4E_WANT evidence=${H4E_HAVE:-none})" FAIL
+elif [ "$H4E_ENF_N" -eq 0 ]; then
+  check "H4e MAX_BLOCK = $H4E_WANT is declared but the injected block is no longer compared against it" FAIL
+elif [ "$H4E_ENF_N" -ne 1 ]; then
+  check "H4e the enforcement literal is duplicated ($H4E_ENF_N occurrences) — a second copy makes this check meaningless" FAIL
+elif [ "$(printf '%s\n' "$HOOK_JS" | grep -F 'block.length > MAX_BLOCK' | sed 's/^[[:space:]]*//')" = 'if (!block || block.length > MAX_BLOCK) process.exit(0);' ]; then
+  check "H4e reader declares MAX_BLOCK = $H4E_WANT and bounds the injected block by it" PASS
+else
+  check "H4e MAX_BLOCK = $H4E_WANT is declared but the injected block is no longer compared against it" FAIL
+fi
+
 emitted() {
   printf '%s' "$1" | bash "$HOOK" 2>/dev/null | node -e '
     let s = "";
@@ -290,6 +344,44 @@ if [ -n "$CTX" ] && [ "${#CTX}" -gt "${#BLOCK_PROSE}" ] \
   check "H7 emitted context carries the canonical block verbatim" PASS
 else
   check "H7 emitted context does not carry the canonical block verbatim" FAIL
+fi
+
+# The hook's run-time refusal is a fail-safe at MAX_BLOCK, whose value H4e reads out of the
+# sibling carrier rather than hand-copying — so no number is spelled here either. This is the
+# real control: the criterion is ABSOLUTE headroom sized to roughly one clause, identical on
+# both carriers, NOT a preserved percentage. Ratio parity would hand the larger absolute slack
+# to whichever block happens to be bigger, and it self-erodes — every legitimate growth plus a
+# ratio-preserving raise widens the allowance, so the friction decays exactly as the block does
+# the thing the friction exists to notice. Argue the next clause, never the sibling's number.
+#
+# The measurement runs through node, not bash: `${#var}` counts BYTES under LC_ALL=C and code
+# POINTS otherwise, while the hook compares `String.length`, i.e. UTF-16 code units — and the
+# block carries a non-ASCII character, so the three units do not agree. node is already a hard
+# prerequisite at P0, so this costs nothing and measures exactly what the hook measures. A
+# locale-normalized bash subshell was the previous attempt and was wrong twice over: a host
+# without the locale still exits 0 with a byte count, and its fallback was the very ambient
+# measurement it existed to replace. The coupled site is docs/architecture.md, which states the
+# emitted length; C6 below pins it rather than trusting a comment.
+js_len() { S="$1" node -e 'process.stdout.write(String((process.env.S || "").length))'; }
+# REVIEW_HEADROOM is load-bearing, not decorative: the arm below asserts the remaining slack
+# never EXCEEDS it, in the suite that owns the ceiling. One-sided and per-suite on purpose —
+# block growth only shrinks the slack and stays green, while a unilateral ceiling raise fails
+# HERE, where the edit was made, rather than in a third suite. Round 3 derived the ceiling from
+# the live block and was over-constrained; round 4 compared two inert literals and constrained
+# nothing. Accepted consequence: a block that SHRINKS a lot also trips this, which is correct —
+# the tripwire stops being a tripwire if the ceiling drifts away from the text.
+REVIEW_CEILING=900
+REVIEW_HEADROOM=89
+BLOCK_LEN="$(js_len "$BLOCK_PROSE")"
+if [ "$BLOCK_LEN" -le "$REVIEW_CEILING" ]; then
+  check "H7a block is within the ${REVIEW_CEILING}-char review ceiling ($BLOCK_LEN)" PASS
+else
+  check "H7a block exceeds the review ceiling ($BLOCK_LEN > $REVIEW_CEILING) — argue the new clause or raise it deliberately" FAIL
+fi
+if [ "$(( REVIEW_CEILING - BLOCK_LEN ))" -le "$REVIEW_HEADROOM" ]; then
+  check "H7b the review ceiling sits within the declared ${REVIEW_HEADROOM}-char headroom of the block (slack $(( REVIEW_CEILING - BLOCK_LEN )))" PASS
+else
+  check "H7b the review ceiling is $(( REVIEW_CEILING - BLOCK_LEN )) chars above the block, more than the declared ${REVIEW_HEADROOM} — raise the headroom deliberately or lower the ceiling" FAIL
 fi
 
 CTX_MISS=""
@@ -409,6 +501,48 @@ else
   check "H10c could not create a fixture plugin tree (MAX_FILE=${MAXF:-unset})" FAIL
 fi
 
+# The block ceiling, driven the same way and for the same reason as H10c: a file UNDER
+# MAX_FILE whose single marker line is over MAX_BLOCK. The control emits from the same
+# tree with the canonical line untouched, so a fixture that could never emit at all
+# cannot be mistaken for an enforced bound, and both bounds are read out of the hook so
+# raising either one there cannot leave this case sizing to a stale number.
+MAXB="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
+BLK_DIR="$(mktemp -d -t zensu-evidence-blk-XXXXXX)" || BLK_DIR=""
+if [ -n "$BLK_DIR" ] && [ -n "$MAXF" ] && [ -n "$MAXB" ] && [ "$MAXB" -lt "$MAXF" ] \
+   && mkdir -p "$BLK_DIR/hooks" "$BLK_DIR/docs" \
+   && cp "$HOOK" "$BLK_DIR/hooks/$HOOK_BASE" \
+   && cp "$RULES" "$BLK_DIR/docs/evidence-discipline.md"; then
+  BLK_PAYLOAD='{"hook_event_name":"SessionStart","source":"startup"}'
+  BLK_OK="$(printf '%s' "$BLK_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$BLK_DIR" bash "$BLK_DIR/hooks/$HOOK_BASE" 2>/dev/null | wc -c | tr -d ' ')"
+  # Rewrite the ONE line between the markers so it stays one line and the close marker
+  # stays at open+2 — only its length changes, so the block bound is the only refusal
+  # the fixture can trigger. The whole file stays well under MAX_FILE.
+  if node -e '
+      const fs = require("fs");
+      const [file, open, close, want] = process.argv.slice(1);
+      const lines = fs.readFileSync(file, "utf8").split("\n");
+      const i = lines.indexOf(open);
+      if (i < 0 || lines[i + 2] !== close) process.exit(1);
+      lines[i + 1] = "> " + "y".repeat(Number(want) + 64);
+      fs.writeFileSync(file, lines.join("\n"));
+    ' "$BLK_DIR/docs/evidence-discipline.md" "$OPEN_MARKER" "$CLOSE_MARKER" "$MAXB" 2>/dev/null; then
+    BLK_SIZE="$(wc -c < "$BLK_DIR/docs/evidence-discipline.md" | tr -d ' ')"
+    BLK_OUT="$(printf '%s' "$BLK_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$BLK_DIR" bash "$BLK_DIR/hooks/$HOOK_BASE" 2>/dev/null)"; BLK_RC=$?
+    if [ "$BLK_OK" -gt 0 ] && [ "$BLK_SIZE" -lt "$MAXF" ] && [ "$BLK_RC" = "0" ] && [ -z "$BLK_OUT" ]; then
+      check "H10d a block over MAX_BLOCK=$MAXB drops the injection (file ${BLK_SIZE}B < MAX_FILE, control emitted ${BLK_OK}B)" PASS
+    else
+      check "H10d block bound not enforced (control=${BLK_OK}B file=${BLK_SIZE}B rc=$BLK_RC len=${#BLK_OUT})" FAIL
+    fi
+  else
+    check "H10d could not rewrite the fixture block past MAX_BLOCK=$MAXB" FAIL
+  fi
+  rm -rf "$BLK_DIR"; BLK_DIR=""
+else
+  check "H10d could not create a fixture plugin tree (MAX_FILE=${MAXF:-unset} MAX_BLOCK=${MAXB:-unset})" FAIL
+fi
+
 CFG_TMP="$(mktemp -t zensu-evidence-cfg-XXXXXX)" || CFG_TMP=""
 if [ -n "$CFG_TMP" ]; then
   printf '%s' '{"hooks":{"sessionBanner":false,"pulseSession":false,"autoTdd":false,"tddReminder":false,"intentRouter":false,"chainEnforcer":false,"autoFix":false,"secretScan":false,"mcpGate":false,"bashWriteGate":false}}' > "$CFG_TMP"
@@ -463,6 +597,34 @@ elif [ -z "$SKILL_MISS" ]; then
   check "C2 all $SKILL_N skills/*/SKILL.md carry the block verbatim" PASS
 else
   check "C2 skills missing the block:$SKILL_MISS" FAIL
+fi
+
+# C5 pins the two hand-copied prose restatements of this inventory against the constants above.
+# The header of THIS file and docs/architecture.md both spell the derived total, and it has
+# already drifted once (28 and 29 against a real 32). C1/C2 fail loudly when a carrier is added,
+# but nothing made the author update the prose — this does.
+C5_TOTAL=$((EXPECTED_AGENTS + EXPECTED_SKILLS))
+C5_MISS=""
+grep -qF "the $C5_TOTAL" "$0" || C5_MISS="$C5_MISS this-suite-header"
+grep -qF "the $C5_TOTAL prompt carriers" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS docs/architecture.md"
+grep -qF "\`EXPECTED_AGENTS\`=$EXPECTED_AGENTS" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS architecture-agents"
+grep -qF "\`EXPECTED_SKILLS\`=$EXPECTED_SKILLS" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS architecture-skills"
+if [ -z "$C5_MISS" ]; then
+  check "C5 the $C5_TOTAL-carrier total and its two components are current in every prose restatement" PASS
+else
+  check "C5 stale carrier-count prose ($C5_TOTAL = $EXPECTED_AGENTS + $EXPECTED_SKILLS not found in:$C5_MISS)" FAIL
+fi
+
+# C6 pins the one measured figure docs/architecture.md states about this hook. CTX above IS the
+# emitted directive — prefix plus block — so it is measured directly rather than reconstructed:
+# an earlier version rebuilt the prefix with sed and added a bash-measured length to a
+# node-measured one, which produced a different number under a C locale and then blamed the doc.
+C6_EMITTED="$(js_len "$CTX")"
+if [ -n "$CTX" ] && [ "$C6_EMITTED" -gt "$BLOCK_LEN" ] \
+  && grep -qF "emits $C6_EMITTED characters" "$PLUGIN_DIR/docs/architecture.md"; then
+  check "C6 docs/architecture.md states the current emitted length ($C6_EMITTED = $(( C6_EMITTED - BLOCK_LEN )) prefix + $BLOCK_LEN block)" PASS
+else
+  check "C6 docs/architecture.md does not state 'emits $C6_EMITTED characters' (block=$BLOCK_LEN) — update it in the same commit as the block" FAIL
 fi
 
 FIX_DIR="$(mktemp -d -t zensu-evidence-fix-XXXXXX)" || FIX_DIR=""

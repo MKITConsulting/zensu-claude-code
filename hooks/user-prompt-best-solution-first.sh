@@ -31,8 +31,10 @@
 # rule applies to subagents too, which is the whole point of the second event.
 #
 # Fail-silent by construction: an unknown event, a malformed payload, a missing node,
-# or an absent/symlinked/malformed/oversized block exits 0 with no output, so it can never
-# block a prompt or a spawn. Note what that means for a malformed block specifically — the
+# a config library that is absent, symlinked, or fails to load, or a rule file that is
+# absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in
+# BLOCK, short-read, or malformed exits 0 with no output, so it can never block a prompt or
+# a spawn. Note what that means for a malformed block specifically — the
 # injection is DROPPED, not truncated, and nothing reports it; the build-time pins in
 # tests/structure/test-best-solution-first.sh are what make that shape a hard failure.
 # The plugin-root guard is the one deliberate exception: it is the sibling hooks' guard
@@ -136,6 +138,11 @@ ZENSU_BEST_SOLUTION_RULE_FILE="$ZENSU_BEST_SOLUTION_RULE_FILE" node -e '
     const block = String(lines[open + 1] || "").replace(/^>\s*/, "").trim();
     // The block is injected on every prompt and at every spawn, so its size is a per-turn
     // multiplier. Refuse rather than silently ship an unbounded context tax.
+    // MAX_BLOCK is a SHARED value: session-start-evidence-discipline.sh declares the same one,
+    // and three checks bind them — B2h here, H4e in the evidence suite, and the cross-carrier
+    // equality in tests/structure/test-windows-portability-guards.sh. This block is the larger
+    // of the two, so the pressure to raise the number lands here; raising it means re-arguing
+    // the bound on the UNSWITCHABLE carrier too, not following this one.
     if (!block || block.length > MAX_BLOCK) process.exit(0);
 
     const directive = "Zensu best-solution-first — binding for every process in this "

@@ -44,10 +44,23 @@ HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 HOOK_BASENAME="user-prompt-best-solution-first.sh"
 OPEN_MARKER='<!-- zensu:best-solution-first -->'
 CLOSE_MARKER='<!-- /zensu:best-solution-first -->'
-# The hook's run-time refusal is a fail-safe at 4000; REVIEW_CEILING is the real control
-# and sits just above the current block, so the next clause has to be argued in review.
+# The hook's run-time refusal is a fail-safe at `MAX_BLOCK`; REVIEW_CEILING is the real control.
+# The criterion is ABSOLUTE headroom of roughly one clause, IDENTICAL on both carriers — not a
+# preserved percentage, which would hand the larger slack to whichever block happens to be
+# bigger and would widen with every legitimate growth. 1741 = the 1652-character block plus the
+# same 89 characters test-evidence-discipline.sh allows over its 811. The equality is not left
+# to prose: the cross-carrier check in tests/structure/test-windows-portability-guards.sh
+# asserts it, because that suite already owns everything the two carriers must share.
 MAX_BLOCK=4000
-REVIEW_CEILING=1800
+# REVIEW_HEADROOM is load-bearing, not decorative: the arm below asserts the remaining slack
+# never EXCEEDS it, in the suite that owns the ceiling. One-sided and per-suite on purpose —
+# block growth only shrinks the slack and stays green, while a unilateral ceiling raise fails
+# HERE, where the edit was made, rather than in a third suite. Round 3 derived the ceiling from
+# the live block and was over-constrained; round 4 compared two inert literals and constrained
+# nothing. Accepted consequence: a block that SHRINKS a lot also trips this, which is correct —
+# the tripwire stops being a tripwire if the ceiling drifts away from the text.
+REVIEW_CEILING=1741
+REVIEW_HEADROOM=89
 
 # The hook binds its own plugin root; without this a stray ambient value makes
 # every drive-the-hook check fail with a misleading label. Sibling suites
@@ -67,8 +80,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# A suite file that ends up containing a spliced copy of its own prologue re-executes this
+# line, resetting the counters — the summary then reports only the checks after the last reset
+# and looks entirely plausible. That is not hypothetical: it happened during this change (a
+# JS `$`-pattern replacement spliced ~485 lines of a suite into itself, and the file still
+# reported its normal total). An expected-total pin would not have caught it; a re-entry guard
+# does, and costs nothing per added check. It detects a splice that INCLUDES these lines, which
+# is the whole-prologue shape; a splice starting strictly below them is not covered.
+if [ -n "${ZENSU_SUITE_PROLOGUE_ENTERED:-}" ]; then
+  printf 'prologue re-entered — this suite file is corrupt\n' >&2
+  exit 1
+fi
+ZENSU_SUITE_PROLOGUE_ENTERED=1
 PASS=0; FAIL=0
+# Arity is checked because a label that word-splits is not a cosmetic defect: check() reads
+# position 2 unconditionally, so an over-supplied call whose second word happens to read PASS
+# scores a FAILING check as a success. That happened in this change — an unquoted expansion in
+# a FAIL label — and was fixed at its call site. This makes the class unrepeatable instead of
+# re-swept by hand.
 check() {
+  if [ "$#" -ne 2 ]; then
+    printf '  FAIL  check() called with %s arguments, expected 2 — a label word-split: %s\n' "$#" "${1:-}"
+    FAIL=$((FAIL + 1)); return 0
+  fi
   local label="$1" cond="$2"
   if [ "$cond" = "PASS" ]; then echo "  PASS  $label"; PASS=$((PASS+1));
   else echo "  FAIL  $label"; FAIL=$((FAIL+1)); fi
@@ -263,7 +297,7 @@ fi
 # spawn cannot change without a matching literal here, in the same commit.
 # Hashed through node, not shasum/sha256sum: node is already required at P0, while
 # neither hashing binary is guaranteed on every supported host. This suite runs in
-# windows-shard-7, and a check that goes red because a tool is missing fails for a
+# windows-shard-4, and a check that goes red because a tool is missing fails for a
 # reason unrelated to what it tests — the exact defect class this suite was written
 # to catch.
 BLOCK_SHA="$(BLOCK_TEXT="$BLOCK" node -e '
@@ -280,10 +314,18 @@ elif [ "$BLOCK_SHA" = "$EXPECTED_BLOCK_SHA" ]; then
 else
   check "B2f1 injected block CHANGED ($BLOCK_SHA != $EXPECTED_BLOCK_SHA) — update this literal deliberately, in the same commit" FAIL
 fi
-if [ "${#BLOCK}" -le "$REVIEW_CEILING" ]; then
-  check "B2g block is within the ${REVIEW_CEILING}-char review ceiling (${#BLOCK})" PASS
+# node, not ${#BLOCK}: bash counts bytes under LC_ALL=C and this block carries em dashes,
+# while the hook compares String.length. Same measure as test-evidence-discipline.sh H7a.
+B2G_LEN="$(S="$BLOCK" node -e 'process.stdout.write(String((process.env.S || "").length))')"
+if [ "$B2G_LEN" -le "$REVIEW_CEILING" ]; then
+  check "B2g block is within the ${REVIEW_CEILING}-char review ceiling ($B2G_LEN)" PASS
 else
-  check "B2g block exceeds the review ceiling (${#BLOCK} > $REVIEW_CEILING) — argue the new clause or raise it deliberately" FAIL
+  check "B2g block exceeds the review ceiling ($B2G_LEN > $REVIEW_CEILING) — argue the new clause or raise it deliberately" FAIL
+fi
+if [ "$(( REVIEW_CEILING - B2G_LEN ))" -le "$REVIEW_HEADROOM" ]; then
+  check "B2g1 the review ceiling sits within the declared ${REVIEW_HEADROOM}-char headroom of the block (slack $(( REVIEW_CEILING - B2G_LEN )))" PASS
+else
+  check "B2g1 the review ceiling is $(( REVIEW_CEILING - B2G_LEN )) chars above the block, more than the declared ${REVIEW_HEADROOM} — raise the headroom deliberately or lower the ceiling" FAIL
 fi
 # The suite's fail-safe number is a hand copy; bind it to the hook's literal so raising
 # one without the other cannot leave B2g's label describing a bound that is not enforced.
@@ -658,7 +700,8 @@ fi
 # Git Bash is where this degenerates — `ln -s` falls back to a copy of
 # dirname.exe under a name Windows will not load, so the hook cannot resolve its
 # root and refuses with exit 2 long before the node probe. Scoring that as a
-# fail-silent defect is exactly what turned windows-shard-7 red once; the guard
+# fail-silent defect is exactly what turned this suite's Windows shard red once (it
+# ran in windows-shard-7 then, windows-shard-4 now); the guard
 # below detects it instead, mirroring test-evidence-discipline.sh H10.
 NODELESS_BIN="$(mk_dir)"
 if [ -n "$NODELESS_BIN" ]; then

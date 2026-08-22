@@ -195,7 +195,22 @@ contract.
 `windows-ci-contract` · `windows-portability-guards`
 
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
-root containing whitespace and an apostrophe, and the Windows CI manifest contract.
+root containing whitespace and an apostrophe, the Windows CI manifest contract, and — in
+`test-windows-portability-guards.sh` — the per-file secure-open inventory plus the
+marker-block-carrier contract that binds the two rule-injecting hooks to one reader, one `MAX_FILE` and one
+`MAX_BLOCK`. Those three read the two hook files and sit directly beneath the per-file
+secure-open pins, so the adjacency is real. A FOURTH arm in the same suite compares the two
+suites' declared `REVIEW_HEADROOM` — it reads no hook and nothing platform-related, so it is a
+policy invariant lodged here rather than an extension of the reader contract. The Windows-PR
+constraint recorded below does NOT bind it: it has no platform dimension, so POSIX `run-all.sh`
+plus the weekly Windows Safety shard cover it wherever it lives. Relocating it is an open item
+WITH A CONSTRAINT: `test-evidence-discipline.sh` is the natural semantic owner but is absent
+from `windows-ci.v1.json`, so moving the contract there would silently drop it from the
+Windows PR shard — the exact regression the check's own comment records as having happened
+once. `test-best-solution-first.sh` (windows-shard-4) is the only destination that preserves
+that coverage as-is; anything else has to add the suite to `windows-ci.v1.json` in the same
+commit.
+
 
 ### Promptfoo local-only (7 — skipped under `--ci`)
 `claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
@@ -297,7 +312,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 5
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 7
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
@@ -336,3 +351,13 @@ preflight gate fails the whole run — that gate, not this file, is the enforcem
 This overview is descriptive: update the group lists and totals in §1/§3 when suites are
 added or removed.
 
+## Suite-prologue re-entry guard (cross-suite convention)
+
+`test-evidence-discipline.sh`,
+`test-best-solution-first.sh` and `test-windows-portability-guards.sh` each set
+`ZENSU_SUITE_PROLOGUE_ENTERED` and refuse a second pass through their own prologue. A suite
+file containing a spliced copy of itself otherwise resets `PASS`/`FAIL` and reports a
+plausible total; that happened for real. It is a three-way hand copy in the three suites this
+convention started in — every other `tests/structure/test-*.sh` is still unguarded. Adopting
+it corpus-wide is an open item; at a fourth adopter, hoist the block into a sourced helper
+instead of taking another copy.

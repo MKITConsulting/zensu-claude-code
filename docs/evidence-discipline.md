@@ -65,8 +65,10 @@ Three carriers, deliberately redundant, because each one alone has a hole:
    run time rather than carrying its own copy, so the hook can never drift from the canonical
    text. It reads no configuration and has no opt-out flag, so a project that disables the
    banner, the reminders, or the routers still receives it. It fails silent — a malformed
-   payload, an unknown event, a missing `node`, or an unreadable block exits `0` with no
-   output, so it can never block a prompt or a subagent spawn.
+   payload, an unknown event, a missing `node`, or a rule file that is absent, symlinked,
+   swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or
+   malformed exits `0` with no output, so it never blocks a prompt or a subagent spawn. The one
+   loud branch is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2`.
 2. **`agents/*.md`** carry the block in the agent prompt, so a spawned reviewer holds the
    rule even where hook context is advisory.
 3. **`skills/*/SKILL.md`** carry the block in the skill body, so an invoked workflow holds

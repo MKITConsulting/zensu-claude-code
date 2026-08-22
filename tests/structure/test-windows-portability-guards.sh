@@ -39,8 +39,29 @@ CORE_SNAPSHOT_BLOCK="$(awk '
   capture
 ' "$CORE")"
 AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
+# A suite file that ends up containing a spliced copy of its own prologue re-executes this
+# line, resetting the counters — the summary then reports only the checks after the last reset
+# and looks entirely plausible. That is not hypothetical: it happened during this change (a
+# JS `$`-pattern replacement spliced ~485 lines of a suite into itself, and the file still
+# reported its normal total). An expected-total pin would not have caught it; a re-entry guard
+# does, and costs nothing per added check. It detects a splice that INCLUDES these lines, which
+# is the whole-prologue shape; a splice starting strictly below them is not covered.
+if [ -n "${ZENSU_SUITE_PROLOGUE_ENTERED:-}" ]; then
+  printf 'prologue re-entered — this suite file is corrupt\n' >&2
+  exit 1
+fi
+ZENSU_SUITE_PROLOGUE_ENTERED=1
 PASS=0; FAIL=0
+# Arity is checked because a label that word-splits is not a cosmetic defect: check() reads
+# position 2 unconditionally, so an over-supplied call whose second word happens to read PASS
+# scores a FAILING check as a success. That happened in this change — an unquoted expansion in
+# a FAIL label — and was fixed at its call site. This makes the class unrepeatable instead of
+# re-swept by hand.
 check() {
+  if [ "$#" -ne 2 ]; then
+    printf '  FAIL  check() called with %s arguments, expected 2 — a label word-split: %s\n' "$#" "${1:-}"
+    FAIL=$((FAIL + 1)); return 0
+  fi
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
@@ -482,28 +503,144 @@ fi
 # Starts one line BELOW `const rulePath = …`, which is the only line the two legitimately
 # differ on — each names its own rule-file variable.
 #
-# MAX_FILE is compared SEPARATELY because it is declared above that start line, outside the
-# extracted body, and both per-file structural pins grep `const MAX_FILE =` without its
-# value. Without this second comparison one carrier's ceiling could be changed to any number
-# with every check in the tree still green — the exact one-sided divergence the body
-# comparison exists to catch, in the one constant the body comparison cannot see.
+# MAX_FILE and MAX_BLOCK are compared SEPARATELY because both are declared above that start
+# line, outside the extracted body, and every per-file structural pin greps `const MAX_FILE =`
+# without its value. Without those comparisons one carrier's ceiling could be changed to any
+# number with every check in the tree still green. The two bound different things: MAX_FILE the
+# file, MAX_BLOCK the single line that is actually injected.
+#
+# The range ENDS on the enforcement rather than on the `finally` brace so the comparison covers
+# the hardened reader, the marker-position parse AND the bound's use. It ended at the brace
+# once, and a probe confirmed the cost: with the enforcement deleted from the evidence carrier
+# this suite still reported 41 PASS / 0 FAIL. That gap was Windows-PR-shard only —
+# `test-evidence-discipline.sh` is absent from tests/profiles/windows-ci.v1.json, so it never
+# runs on the Windows PR shard, but it IS in `ciStructureTests` (pinned by M1 in that suite),
+# which tests/run-windows-safety-shard.js maps into the weekly Windows Safety structure shards,
+# and tests/profiles/windows-native-structure.v1.json records that as the reason for the PR-gate
+# exclusion. On POSIX `tests/run-all.sh` globs every structure suite, so H4e caught it there.
+#
+# Where the range deliberately STOPS: everything below the enforcement — the directive text and
+# the emission — legitimately differs per carrier and is covered behaviourally instead, by
+# test-evidence-discipline.sh H5-H7 and test-best-solution-first.sh B3a/B3b (the directive
+# text) plus B3c (the emitted object shape).
+#
+# TRADE, stated because it is easy to miss: comment stripping runs before range selection, so
+# comment TEXT inside the range is no longer compared. Three in-range comment blocks used to be
+# byte-identical across the carriers and a one-sided edit to any of them used to fail this
+# check; it no longer does. The equality now DEPENDS on the strip — the two carriers' in-range
+# comments are deliberately different lengths.
+#
+# The end address is a SUBSTRING match, so a trailing `// … block.length > MAX_BLOCK …` on a
+# code line survives the full-line strip and truncates the range there. Added to BOTH carriers
+# that keeps the bodies equal and satisfies a mere `grep` for the needle — a probe confirmed it:
+# both enforcements deleted plus that comment gave 41 PASS / 0 FAIL again. The LAST-LINE
+# assertions below are what close it: a truncated body ends on the comment line, not on the
+# enforcement statement, so the equality can no longer stand in for coverage.
 extract_reader() {
-  sed -n '/const pre = fs.lstatSync(rulePath);/,/^    }$/p' "$1" | grep -v '^[[:space:]]*//'
+  grep -v '^[[:space:]]*//' "$1" \
+    | sed -n '/const pre = fs.lstatSync(rulePath);/,/block.length > MAX_BLOCK/p'
 }
 extract_max_file() {
   grep -F 'const MAX_FILE =' "$1" | grep -v '^[[:space:]]*//' | head -1 | tr -d '[:space:]'
 }
+extract_max_block() {
+  grep -F 'const MAX_BLOCK =' "$1" | grep -v '^[[:space:]]*//' | head -1 | tr -d '[:space:]'
+}
+# Uniqueness counts, because every extractor above is steerable. `head -1` takes the FIRST
+# spelling and the sed range ends on the FIRST match of an unanchored substring, so a SECOND
+# declaration or enforcement placed above the real one — in a `/* */` block the full-line `//`
+# filter does not match, in dead code, or in a string — drives all three while the real code
+# below is free to change. That includes the shadow zone between `const rulePath` and
+# `const pre`, which is inside the hook's `try` and therefore a legal place to rebind the value
+# the enforcement reads.
+#
+# What these counts do NOT cover, stated rather than implied: they match a declaration keyword
+# followed by the name, so a rebinding spelled some other way still slips past, and they count
+# per line. The residue is closed BEHAVIOURALLY, not here — test-evidence-discipline.sh H10d and
+# test-best-solution-first.sh B7g drive each real hook against an oversized block. A probe
+# confirmed the split: a `let MAX_BLOCK = 999999999;` shadow on both carriers left this suite at
+# 42 PASS / 0 FAIL while H10d went red.
+count_decl() { grep -v '^[[:space:]]*//' "$1" | grep -cE "(^|[^A-Za-z0-9_])(const|let|var)[[:space:]]+$2[[:space:]]*="; }
+count_literal() { grep -v '^[[:space:]]*//' "$1" | grep -oF "$2" | grep -c .; }
+strip_indent() { printf '%s' "${1#"${1%%[![:space:]]*}"}"; }
+# Compared without indentation on purpose: an identical reindent of both embedded JS bodies is
+# semantically empty and must not render as "the carriers diverged".
+ENFORCE_STMT='if (!block || block.length > MAX_BLOCK) process.exit(0);'
 BSF_READER="$(extract_reader "$BEST_SOLUTION_HOOK")"
 EVD_READER="$(extract_reader "$EVIDENCE_DISCIPLINE_HOOK")"
 BSF_MAX_FILE="$(extract_max_file "$BEST_SOLUTION_HOOK")"
 EVD_MAX_FILE="$(extract_max_file "$EVIDENCE_DISCIPLINE_HOOK")"
-if [ -n "$BSF_READER" ] && [ -n "$EVD_READER" ] \
-  && printf '%s\n' "$BSF_READER" | grep -qF 'fs.closeSync(fd)' \
-  && [ "$BSF_READER" = "$EVD_READER" ] \
-  && [ -n "$BSF_MAX_FILE" ] && [ "$BSF_MAX_FILE" = "$EVD_MAX_FILE" ]; then
-  check "both marker-block carriers share one hardened reader body" PASS
+BSF_MAX_BLOCK="$(extract_max_block "$BEST_SOLUTION_HOOK")"
+EVD_MAX_BLOCK="$(extract_max_block "$EVIDENCE_DISCIPLINE_HOOK")"
+BSF_LAST="$(strip_indent "$(printf '%s\n' "$BSF_READER" | tail -1)")"
+EVD_LAST="$(strip_indent "$(printf '%s\n' "$EVD_READER" | tail -1)")"
+BSF_ENF_N="$(count_literal "$BEST_SOLUTION_HOOK" 'block.length > MAX_BLOCK')"
+EVD_ENF_N="$(count_literal "$EVIDENCE_DISCIPLINE_HOOK" 'block.length > MAX_BLOCK')"
+BSF_BDECL_N="$(count_decl "$BEST_SOLUTION_HOOK" MAX_BLOCK)"
+EVD_BDECL_N="$(count_decl "$EVIDENCE_DISCIPLINE_HOOK" MAX_BLOCK)"
+BSF_FDECL_N="$(count_decl "$BEST_SOLUTION_HOOK" MAX_FILE)"
+BSF_MAX_BLOCK_N="$(printf '%s' "$BSF_MAX_BLOCK" | sed -n 's/.*=\([0-9]*\);*$/\1/p')"
+EVD_MAX_BLOCK_N="$(printf '%s' "$EVD_MAX_BLOCK" | sed -n 's/.*=\([0-9]*\);*$/\1/p')"
+EVD_FDECL_N="$(count_decl "$EVIDENCE_DISCIPLINE_HOOK" MAX_FILE)"
+# Named arms, not one conjunction: several of these can fail with the two carriers byte-identical,
+# and "the carriers diverged" would then name a fault that did not occur. Absence is split from
+# duplication throughout, because 0 and 2 have opposite causes and opposite remedies. The two
+# range-end arms run BEFORE the guarded-close arm: a truncated range must be reported as a range
+# fault, not as missing content that the truncation merely pushed out of scope.
+if [ -z "$BSF_READER" ] || [ -z "$EVD_READER" ]; then
+  check "a carrier's reader body could not be extracted (bsf=${#BSF_READER}B evd=${#EVD_READER}B) — the range start moved" FAIL
+elif [ "$BSF_ENF_N" -eq 0 ] || [ "$EVD_ENF_N" -eq 0 ]; then
+  check "the enforcement is absent from a carrier (bsf=$BSF_ENF_N evd=$EVD_ENF_N) — the bound is no longer applied" FAIL
+elif [ "$BSF_ENF_N" -ne 1 ] || [ "$EVD_ENF_N" -ne 1 ]; then
+  check "the enforcement literal is duplicated (bsf=$BSF_ENF_N evd=$EVD_ENF_N) — a second copy steers the extracted range" FAIL
+elif [ "$BSF_BDECL_N" -ne 1 ] || [ "$EVD_BDECL_N" -ne 1 ]; then
+  check "MAX_BLOCK is not declared exactly once (bsf=$BSF_BDECL_N evd=$EVD_BDECL_N) — 0 removes the bound, 2 shadows it past head -1" FAIL
+elif [ "$BSF_FDECL_N" -ne 1 ] || [ "$EVD_FDECL_N" -ne 1 ]; then
+  check "MAX_FILE is not declared exactly once (bsf=$BSF_FDECL_N evd=$EVD_FDECL_N) — 0 removes the bound, 2 shadows it past head -1" FAIL
+elif [ "$BSF_LAST" != "$ENFORCE_STMT" ]; then
+  check "the best-solution-first reader range no longer ends on the enforcement (ends on [${BSF_LAST}])" FAIL
+elif [ "$EVD_LAST" != "$ENFORCE_STMT" ]; then
+  check "the evidence-discipline reader range no longer ends on the enforcement (ends on [${EVD_LAST}])" FAIL
+elif ! printf '%s\n' "$BSF_READER" | grep -qF 'fs.closeSync(fd)'; then
+  check "the shared reader lost its guarded close" FAIL
+elif [ "$BSF_READER" != "$EVD_READER" ]; then
+  check "the two marker-block carriers' reader bodies differ (bsf=${#BSF_READER}B evd=${#EVD_READER}B)" FAIL
+elif [ -z "$BSF_MAX_FILE" ] || [ "$BSF_MAX_FILE" != "$EVD_MAX_FILE" ]; then
+  check "MAX_FILE differs between the carriers (bsf=${BSF_MAX_FILE:-none} evd=${EVD_MAX_FILE:-none})" FAIL
+elif [ -z "$BSF_MAX_BLOCK" ] || [ "$BSF_MAX_BLOCK" != "$EVD_MAX_BLOCK" ]; then
+  check "MAX_BLOCK differs between the carriers (bsf=${BSF_MAX_BLOCK:-none} evd=${EVD_MAX_BLOCK:-none})" FAIL
 else
-  check "the two marker-block carriers diverged (body bsf=${#BSF_READER}B evd=${#EVD_READER}B; MAX_FILE bsf=${BSF_MAX_FILE:-none} evd=${EVD_MAX_FILE:-none})" FAIL
+  check "both marker-block carriers share one hardened reader body" PASS
+fi
+
+# The review ceilings are the second thing the two carriers must keep in step. What must match is
+# the intended HEADROOM, and it is compared as a DECLARED CONSTANT in each suite — deliberately
+# NOT as ceiling-minus-live-block. That earlier shape reduced algebraically to a constraint on the
+# two prose documents' length difference that no file states: a one-character edit to either rule
+# text, well inside its own ceiling, turned this suite red while the owning suite correctly
+# accepted it. Measured, not assumed — 88 against 89 on a single added character. A ceiling is a
+# budget the block may grow into; pinning it to the block would make that budget unreachable.
+suite_const() { sed -n "s/^$2=\([0-9]*\).*/\1/p" "$1" | head -1; }
+suite_const_n() { grep -c "^$2=" "$1"; }
+HDR_BSF_SUITE="$ROOT/tests/structure/test-best-solution-first.sh"
+HDR_EVD_SUITE="$ROOT/tests/structure/test-evidence-discipline.sh"
+HDR_BSF_H="$(suite_const "$HDR_BSF_SUITE" REVIEW_HEADROOM)"
+HDR_EVD_H="$(suite_const "$HDR_EVD_SUITE" REVIEW_HEADROOM)"
+HDR_BSF_C="$(suite_const "$HDR_BSF_SUITE" REVIEW_CEILING)"
+HDR_EVD_C="$(suite_const "$HDR_EVD_SUITE" REVIEW_CEILING)"
+HDR_N="$(( $(suite_const_n "$HDR_BSF_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_BSF_SUITE" REVIEW_CEILING) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_CEILING) ))"
+if [ -z "$HDR_BSF_H" ] || [ -z "$HDR_EVD_H" ] || [ -z "$HDR_BSF_C" ] || [ -z "$HDR_EVD_C" ]; then
+  check "a review-ceiling constant could not be resolved (headroom bsf=${HDR_BSF_H:-none} evd=${HDR_EVD_H:-none}; ceiling bsf=${HDR_BSF_C:-none} evd=${HDR_EVD_C:-none})" FAIL
+elif [ "$HDR_N" -ne 4 ]; then
+  check "the review-ceiling constants are not declared exactly once each (4 expected, $HDR_N found) — head -1 would read a decoy while the suite uses the last assignment" FAIL
+elif [ "$HDR_BSF_H" != "$HDR_EVD_H" ]; then
+  check "the declared review headroom differs (bsf=$HDR_BSF_H evd=$HDR_EVD_H) — the criterion is absolute headroom, identical on both carriers, not a ratio" FAIL
+elif [ -z "$BSF_MAX_BLOCK_N" ] || [ -z "$EVD_MAX_BLOCK_N" ]; then
+  check "a carrier's MAX_BLOCK value is not a bare integer (bsf=${BSF_MAX_BLOCK:-none} evd=${EVD_MAX_BLOCK:-none}) — the ceiling comparison cannot run, and an unguarded -ge would fall through to PASS" FAIL
+elif [ "$HDR_BSF_C" -ge "$BSF_MAX_BLOCK_N" ] || [ "$HDR_EVD_C" -ge "$EVD_MAX_BLOCK_N" ]; then
+  check "a review ceiling is not below its MAX_BLOCK fail-safe (bsf $HDR_BSF_C vs $BSF_MAX_BLOCK_N; evd $HDR_EVD_C vs $EVD_MAX_BLOCK_N) — the tripwire would be inert" FAIL
+else
+  check "both carriers declare the same review headroom ($HDR_BSF_H chars) below their MAX_BLOCK fail-safe" PASS
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

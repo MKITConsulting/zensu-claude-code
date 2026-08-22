@@ -102,8 +102,9 @@ leg. That is acceptable for a presentation rule and would not be for evidence di
 which is exactly why that one reads no configuration at all.
 
 The hook fails silent by construction. An unknown event, a malformed payload, a missing
-`node`, or an absent, symlinked, malformed or oversized block exits `0` with no output, so it
-can never block a prompt or a subagent spawn. The plugin-root identity guard is the one
+`node`, a config library that is absent, symlinked, or fails to load, or a rule file that is
+absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in BLOCK,
+short-read, or malformed exits `0` with no output, so it can never block a prompt or a subagent spawn. The plugin-root identity guard is the one
 deliberate exception: a mismatched inherited `CLAUDE_PLUGIN_ROOT` refuses with exit `2`,
 exactly as its sibling hooks do.
 
