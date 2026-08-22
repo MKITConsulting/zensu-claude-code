@@ -13,34 +13,38 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
-only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
-`test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
-(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
-machine-checks this document, so treat §3's per-group numbers as descriptive rather than
-authoritative until that sweep happens.
+reconciled to that manifest (136 = 129 + 7), **and as of this change §3 is too**: its ten
+CI group headers now sum to 129, the eleventh (local-only) adds 7, and every one of the 136
+manifest suites appears in exactly one group. The four that previously appeared nowhere —
+`test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
+and `test-session-control-core.sh` — are listed now. §7's profile table was re-derived from
+`tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
+membership are the JSON's own; the entry total is **41**, not the 40 that survived the
+reshard, because this change adds one suite to `windows-shard-4`.
+
+**Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
+at this commit, not an invariant: the next suite added without touching §3 silently breaks
+it again, and no test will say so. Re-derive rather than trust when the numbers matter.
 
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **135** — 128 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **128 structure suites + 5 offline evals = 133 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 135 − 128 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **136** — 129 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **129 structure suites + 5 offline evals = 134 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 136 − 129 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **5** (41 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 41 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
-| Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
+| Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
 ## 2. Run modes (`tests/run-all.sh`)
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 134 structure suites + 5 offline evals | none |
-| `--ci` | 127 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 136 structure suites + 5 offline evals | none |
+| `--ci` | 129 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -77,9 +81,10 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (15)
+### TDD engine & phase gate (16)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
-`pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
+`pretool-config-prompts` · `requirements-table-gate` ·
+`smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
 `tdd-mode-toggle` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
 `tdd-skill-review-fanout` ·
@@ -90,8 +95,9 @@ lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 (`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
 retained), the mode precedence at the freeze point (`tdd-mode-toggle` — session
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
-unreadable marker forces nothing), the edit-landing receipt required by
-`--tdd-complete`, and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
+unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
+the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
+anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
 ### Review chain & findings (26)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
@@ -268,16 +274,22 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-5 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
-`node tests/run-profile.js <profile>`:
+7 bounded profiles, 41 suite entries, run as a blocking PR matrix in `ci.yml` via
+`node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
+than described — the previous five-profile layout (`windows-reset-session`,
+`windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
+`windows-native-branches`) no longer exists under any of those names, and only its total
+of 40 survived the reshard, and this branch's new suite takes it to 41:
 
-| Profile | Suites | Focus |
+| Profile | Suites | Members |
 |---|---|---|
-| `windows-reset-session` | 8 | deferred-reset races, self-review handoff, review-marker reconcile, session-control-claude, MSYS module boundaries, safe file read, large-identity upgrade hook |
-| `windows-leases-routing` | 9 | lease refresh, stop-enforcer routing, plan delegate, source-write gate, installed-plugin provisioner, external lease, banner, upgrade process boundaries |
-| `windows-native-state` | 10 | claim adoption, autopilot state machine, pre-edit mirror, capability gate, session-id, versioned upgrade, MSYS runtime, marketplace fixture, coverage-report paths, installer concurrency |
-| `windows-installed-core` | 9 | transfer reset, installed wrapper, evidence lease, session-control-core, portability guards, **split** metadata contract (3 min) vs profile-lifecycle contract (7 min), checkout credentials, Linux sandbox host paths |
-| `windows-native-branches` | 4 | bound payload, file-exists path transport, TDD state junction safety, plan-payload path transport |
+| `windows-shard-1` | 9 | autopilot-bound-payload-windows, autopilot-state-machine, deferred-lease-refresh, deferred-review-fallback, installed-plugin-provisioner, tdd-no-flock-external-lease, upgrade-linux-sandbox-host-paths, windows-ci-metadata-contract, workflow-checkout-credentials |
+| `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
+| `windows-shard-3` | 6 | deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
+| `windows-shard-4` | 4 | best-solution-first, deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
+| `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
+| `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
+| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
@@ -295,7 +307,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 5 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 7 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

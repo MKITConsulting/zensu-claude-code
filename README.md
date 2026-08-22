@@ -203,7 +203,7 @@ supported.
 |----------|---------------|
 | [Architecture](docs/architecture.md) | The three layers, the workflow diagram, evidence discipline, typical flows |
 | [Review chain](docs/review-chain.md) | The reviewer agents, custom repo personas, skill overlays, templates |
-| [Gates](docs/gates.md) | The write gates, the secret scan, and the TDD phase gate |
+| [Gates](docs/gates.md) | The write gates, the secret scan, the TDD phase gate, and the completion-time requirements-table gate |
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |

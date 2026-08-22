@@ -65,6 +65,7 @@
     "test-promptfoo-local-only.sh",
     "test-readme-hook-count-sync.sh",
     "test-release-session-control-gate.sh",
+    "test-requirements-table-gate.sh",
     "test-reset-review-limit-skill.sh",
     "test-reset-review-limit-transaction.sh",
     "test-review-aspect-agent.sh",
