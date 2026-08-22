@@ -3,11 +3,47 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import {
+  ledgerPaths, writeEdge, readEdges, dedupeEdges,
+  makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
+  readLabels as readLabelsFile, writeLabels, emptyLabels, boundLabel,
+  isSafeHostSessionId, EDGE_REFUSALS, boundText,
+} from './session-lineage-v1.mjs';
 
 const HOME = os.homedir();
-const PROJECTS = path.join(HOME, '.claude', 'projects');
-const SESSIONS = path.join(HOME, '.claude', 'sessions');
-const HANDOFFS = path.join(HOME, '.claude', 'handoffs');
+// The config root is resolved, not hardcoded: an instance started with its own
+// CLAUDE_CONFIG_DIR writes its registry, transcripts AND lineage ledger there, so
+// a reader pinned to ~/.claude reports "no sessions found" for that user and — far
+// worse once the ledger exists — writes edges into a root nobody reads back.
+// These stay `let` because `--config-dir` is only known after parseArgs; every
+// consumer is a function the dispatcher calls, so `resolveRoots()` below runs first.
+// The derivation lives in ONE place: a second copy at module load would only be
+// overwritten, and a root added there and forgotten here reproduces exactly the
+// hazard the paragraph above describes.
+let CONFIG_ROOT;
+let PROJECTS;
+let SESSIONS;
+let HANDOFFS;
+let LEDGER_DIR;
+let LABELS_FILE;
+
+function defaultConfigRoot() {
+  const env = process.env.CLAUDE_CONFIG_DIR;
+  if (env && env.trim()) return path.resolve(env.trim());
+  return path.join(HOME, '.claude');
+}
+
+function resolveRoots(configDir) {
+  CONFIG_ROOT = configDir && configDir.trim() ? path.resolve(configDir.trim()) : defaultConfigRoot();
+  PROJECTS = path.join(CONFIG_ROOT, 'projects');
+  SESSIONS = path.join(CONFIG_ROOT, 'sessions');
+  HANDOFFS = path.join(CONFIG_ROOT, 'handoffs');
+  const led = ledgerPaths(CONFIG_ROOT);
+  LEDGER_DIR = led.edges;
+  LABELS_FILE = led.labels;
+}
+resolveRoots(null);
 // Records that could not be read at all. Counted rather than swallowed: a
 // silently short answer is indistinguishable from an idle machine, and the
 // skill's own docs route "no sessions found" to a different cause.
@@ -21,7 +57,11 @@ const HEAD_BYTES = 256 * 1024;
 const TAIL_BYTES = 768 * 1024;
 
 function parseArgs(argv) {
-  const out = { _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false };
+  const out = {
+    _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
+    configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
+    daysExplicit: false,
+  };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--json') out.json = true;
@@ -29,14 +69,24 @@ function parseArgs(argv) {
     else if (a === '--force') out.force = true;
     else if (a === '--live') out.live = true;
     else if (a === '--no-git') out.git = false;
+    else if (a === '--diagnose') out.diagnose = true;
+    else if (a === '--backfill') out.backfill = true;
+    else if (a === '--apply') out.apply = true;
+    else if (a === '--no-record') out.record = false;
+    // A real flag, not a positional: parseArgs rejects every unknown `--token`,
+    // so reading `--self` off the positional list could never have worked.
+    else if (a === '--self') out.self = true;
+    else if (a === '--config-dir') out.configDir = stringOperand(a, argv[++i]);
+    else if (a === '--where') out.where = stringOperand(a, argv[++i]);
+    else if (a === '--reason') out.reason = stringOperand(a, argv[++i]);
     // Both operands are validated. An unvalidated `--prompts` was the worse of
     // the two: `Number("--json")` is NaN, `Math.max(1, NaN)` is NaN, and
     // `slice(-NaN)` is `slice(0)` — the ENTIRE prompt history, with the
     // "(N earlier omitted)" self-report suppressed by the same NaN. The mistake
     // ran towards maximum disclosure and reported nothing.
-    else if (a === '--days') out.days = numericOperand(a, argv[++i]);
+    else if (a === '--days') { out.days = numericOperand(a, argv[++i]); out.daysExplicit = true; }
     else if (a === '--prompts') out.prompts = numericOperand(a, argv[++i]);
-    else if (a === '--repo') out.repo = argv[++i];
+    else if (a === '--repo') out.repo = stringOperand(a, argv[++i]);
     else if (a.startsWith('--')) fail(`unknown flag: ${a}`);
     else out._.push(a);
   }
@@ -47,6 +97,16 @@ function numericOperand(flag, raw) {
   const n = Number(raw);
   if (raw === undefined || raw === '' || !Number.isFinite(n)) fail(`${flag} needs a number (got ${raw === undefined ? 'nothing' : `"${raw}"`})`);
   return n;
+}
+
+// Validated for the same reason numericOperand is: an operand swallowed from a
+// following flag (`--where --json`) would otherwise become the value silently, and
+// for --config-dir that means writing the ledger into a directory named "--json".
+function stringOperand(flag, raw) {
+  if (raw === undefined || raw === '' || raw.startsWith('--')) {
+    fail(`${flag} needs a value (got ${raw === undefined ? 'nothing' : `"${raw}"`})`);
+  }
+  return raw;
 }
 
 function fail(msg, code = 1) {
@@ -116,27 +176,65 @@ function mainRootFromGitFile(gitFile) {
   return gitdir.slice(0, idx);
 }
 
-const CCD_STORE = path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
+// The desktop store's top-level directory is the ACCOUNT UUID, not a "desktop
+// instance". Measured 2026-08-21 on macOS, three independent ways: one directory
+// equalled `oauthAccount.accountUuid` in ~/.claude.json; another equalled
+// `lastKnownAccountUuid` in Claude/config.json AND held the running session's own
+// record; and ant-device-registry.json — a per-account artifact — is keyed on
+// exactly that set of UUIDs. So the account that owns a session IS derivable, which
+// the SKILL's blanket "no account provenance exists" claim got wrong: that claim
+// holds for the registry and the transcripts, and only for those.
+//
+// ONLY the macOS path is verified. The Windows and Linux candidates below are
+// INFERRED from the usual Electron userData locations and have never been observed;
+// `lineage --diagnose` prints every probe so a wrong guess is visible in one command,
+// and $ZENSU_CCD_STORE overrides the list without a code change.
+function ccdStoreCandidates() {
+  const out = [];
+  // An explicit override is AUTHORITATIVE, not merely first: falling through to a
+  // guessed path when the named one is absent would silently attribute sessions to
+  // accounts read out of a store the operator did not choose, and the fallback would
+  // be invisible in every output except --diagnose.
+  const env = process.env.ZENSU_CCD_STORE;
+  if (env && env.trim()) return [{ source: 'ZENSU_CCD_STORE (authoritative)', dir: path.resolve(env.trim()) }];
+  out.push({ source: 'macOS (verified)', dir: path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions') });
+  const appData = process.env.APPDATA;
+  if (appData && appData.trim()) out.push({ source: 'Windows APPDATA (unverified)', dir: path.join(appData.trim(), 'Claude', 'claude-code-sessions') });
+  const localAppData = process.env.LOCALAPPDATA;
+  if (localAppData && localAppData.trim()) out.push({ source: 'Windows LOCALAPPDATA (unverified)', dir: path.join(localAppData.trim(), 'Claude', 'claude-code-sessions') });
+  const xdg = process.env.XDG_CONFIG_HOME;
+  if (xdg && xdg.trim()) out.push({ source: 'XDG_CONFIG_HOME (unverified)', dir: path.join(xdg.trim(), 'Claude', 'claude-code-sessions') });
+  out.push({ source: 'Linux ~/.config (unverified)', dir: path.join(HOME, '.config', 'Claude', 'claude-code-sessions') });
+  return out;
+}
+
+function ccdStore() {
+  for (const c of ccdStoreCandidates()) {
+    if (dirExists(c.dir)) return c;
+  }
+  return null;
+}
 let CCD_CACHE = null;
 
 function ccdIndex() {
   if (CCD_CACHE) return CCD_CACHE;
   const map = new Map();
   CCD_CACHE = map;
-  if (!dirExists(CCD_STORE)) return map;
-  const walk = (dir, depth, instance) => {
+  const store = ccdStore();
+  if (!store) return map;
+  const walk = (dir, depth, accountUuid) => {
     if (depth > 3) return;
     let es;
     try { es = fs.readdirSync(dir, { withFileTypes: true }); } catch { SKIPPED += 1; return; }
     for (const e of es) {
       const p = path.join(dir, e.name);
-      if (e.isDirectory()) { walk(p, depth + 1, instance || e.name); continue; }
+      if (e.isDirectory()) { walk(p, depth + 1, accountUuid || e.name); continue; }
       if (!/^local_.*\.json$/.test(e.name)) continue;
       let o;
       try { o = JSON.parse(fs.readFileSync(p, 'utf8')); } catch { continue; }
       if (!o || !o.cliSessionId) continue;
       map.set(o.cliSessionId, {
-        instance: instance || '?',
+        accountUuid: accountUuid || null,
         archived: o.isArchived === true,
         title: o.title || null,
         model: o.model || null,
@@ -146,13 +244,249 @@ function ccdIndex() {
       });
     }
   };
-  walk(CCD_STORE, 0, null);
+  walk(store.dir, 0, null);
   return map;
 }
 
 function appTag(app) {
   if (!app) return '';
-  return `${app.archived ? '[ARCHIVED] ' : ''}inst ${app.instance.slice(0, 8)}`;
+  const acct = app.accountUuid ? accountLabel(app.accountUuid) : 'account ?';
+  return `${app.archived ? '[ARCHIVED] ' : ''}${acct}`;
+}
+
+// ── Account labels ──────────────────────────────────────────────────────────
+// The account UUID is derivable; a human-readable name for it is not — the only
+// email on disk is `oauthAccount.emailAddress` in ~/.claude.json, and that names
+// whichever account wrote the file LAST, not the account of any given session. So
+// the label is user-supplied and purely cosmetic: the GROUPING is automatic and
+// cannot be typo'd, the label only makes it readable.
+let LABEL_CACHE = null;
+
+let LABELS_UNREADABLE = false;
+let LABELS_SCHEMA_MISMATCH = false;
+
+function readLabels() {
+  if (LABEL_CACHE) return LABEL_CACHE;
+  const { labels, unreadable, schemaMismatch } = readLabelsFile(LABELS_FILE);
+  LABELS_UNREADABLE = unreadable;
+  LABELS_SCHEMA_MISMATCH = !!schemaMismatch;
+  if (unreadable || schemaMismatch) SKIPPED += 1;
+  LABEL_CACHE = labels;
+  return LABEL_CACHE;
+}
+
+// The uuid prefix stays beside the label, never instead of it: two accounts
+// sharing a label must still be distinguishable in a rendered chain.
+function accountLabel(key) {
+  if (!key) return 'account ?';
+  const l = Object.prototype.hasOwnProperty.call(readLabels().accounts, key) ? readLabels().accounts[key] : undefined;
+  return l ? `${l} (${String(key).slice(0, 8)})` : `account ${String(key).slice(0, 8)}`;
+}
+
+function windowLabel(appPid) {
+  const w = readLabels().windows;
+  const l = Object.prototype.hasOwnProperty.call(w, String(appPid)) ? w[String(appPid)] : undefined;
+  return l ? `window ${appPid} (${l})` : `window pid ${appPid}`;
+}
+
+// ── Window identity ─────────────────────────────────────────────────────────
+// A second, INDEPENDENT route to "which window": each account runs its own
+// Claude.app main process, and a CLI session is a descendant of exactly one of
+// them (measured 2026-08-21: 13084 -> 13083 Contents/Helpers/disclaimer -> 79209
+// Claude.app/Contents/MacOS/Claude). This matters because the desktop store is the
+// ONLY source of accountUuid, and its path outside macOS is unverified — when the
+// store is unreachable, this still groups sessions by window correctly.
+let PROC_TABLE = null;
+
+function processTable() {
+  if (PROC_TABLE) return PROC_TABLE;
+  PROC_TABLE = new Map();
+  // One table read rather than a `ps` per ancestor: the walk is at most a handful
+  // of hops, but on Windows each hop would be a separate PowerShell start-up.
+  let out = '';
+  try {
+    if (process.platform === 'win32') {
+      // An absolute root only: a relative %SystemRoot% would make the interpreter
+      // path relative to the process cwd, which is the repository directory.
+      const sysRoot = process.env.SystemRoot;
+      const root = sysRoot && path.isAbsolute(sysRoot) ? sysRoot : 'C:\\Windows';
+      const shell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command',
+        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)" }'],
+      { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+    } else {
+      // Absolute path and a pinned environment, as hooks/lib/session-control-core-v1.js
+      // does for the same probe: the argument vector is a fixed literal, so the only
+      // exposure left is program resolution and an inherited environment.
+      out = execFileSync('/bin/ps', ['-Ao', 'pid=,ppid=,comm='], {
+        encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
+        env: { PATH: '/usr/bin:/bin', LC_ALL: 'C', LANG: 'C', TZ: 'UTC' },
+      });
+    }
+  } catch { return PROC_TABLE; }
+  for (const line of out.split('\n')) {
+    const t = line.trim();
+    if (!t) continue;
+    const m = process.platform === 'win32'
+      ? t.split('\t')
+      : /^(\d+)\s+(\d+)\s+(.*)$/.exec(t)?.slice(1);
+    if (!m || m.length < 3) continue;
+    const pid = Number(m[0]);
+    const ppid = Number(m[1]);
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
+    PROC_TABLE.set(pid, { ppid, comm: String(m[2]).trim() });
+  }
+  return PROC_TABLE;
+}
+
+// The HIGHEST ancestor whose command names Claude, excluding the CLI process
+// itself. Highest rather than nearest: the chain passes through a helper
+// (`Contents/Helpers/disclaimer`) that also matches, and it is the app process at
+// the top that owns the window. A session with no such ancestor — a terminal or
+// IDE launch — answers null, which is the honest result, not a fallback to itself.
+function windowOf(pid) {
+  const table = processTable();
+  if (!table.size || !Number.isFinite(pid)) return null;
+  let cur = table.get(pid);
+  let found = null;
+  for (let hop = 0; hop < 12 && cur && cur.ppid > 1; hop += 1) {
+    const next = table.get(cur.ppid);
+    if (!next) break;
+    if (/claude/i.test(next.comm)) found = cur.ppid;
+    cur = next;
+  }
+  return found;
+}
+
+// ── Lineage ledger ──────────────────────────────────────────────────────────
+// The schema, the store layout and the chain walk live in session-lineage-v1.mjs.
+// These wrappers only bind the module to this process's resolved roots and to the
+// module-scope SKIPPED counter, so the record shape has exactly one owner.
+let LEDGER_DIR_ERROR = null;
+let LEDGER_SCHEMA_NEWER = false;
+// Per-record refusals, kept apart from the whole-directory failure: they are the
+// narrow half of the same hazard -- one dropped record is one pair missing from
+// the duplicate guard -- and the remedies differ.
+let LEDGER_REFUSED = 0;
+
+function ledgerWrite(edge) {
+  return writeEdge(LEDGER_DIR, edge, Date.now(), CONFIG_ROOT);
+}
+
+// A refused record is COUNTED, never dropped silently, and a directory that could
+// not be read at all is reported separately: a lineage that quietly loses a link
+// reads exactly like a session nobody ever took over, which is the one wrong
+// answer this whole feature exists to prevent.
+function ledgerRead() {
+  const { edges, refused, directoryError } = readEdges(LEDGER_DIR);
+  LEDGER_DIR_ERROR = directoryError;
+  LEDGER_REFUSED = refused.length;
+  if (directoryError) SKIPPED += 1;
+  for (const r of refused) {
+    SKIPPED += 1;
+    if (r.reason === EDGE_REFUSALS.SCHEMA_NEWER) LEDGER_SCHEMA_NEWER = true;
+  }
+  return edges;
+}
+
+
+// ── Edge construction ───────────────────────────────────────────────────────
+// The running session identifies itself from its own environment rather than by
+// guessing from the registry: CLAUDE_PID and CLAUDE_CODE_SESSION_ID are set for
+// every session, and CLAUDE_CODE_HOST_SESSION_ID is the desktop record's file name
+// — the direct join to this session's own account.
+function selfIdentity() {
+  const pid = Number(process.env.CLAUDE_PID);
+  const sessionId = (process.env.CLAUDE_CODE_SESSION_ID || '').trim() || null;
+  const hostSessionId = (process.env.CLAUDE_CODE_HOST_SESSION_ID || '').trim() || null;
+  let accountUuid = null;
+  if (sessionId) {
+    const app = ccdIndex().get(sessionId);
+    if (app) accountUuid = app.accountUuid;
+  }
+  if (!accountUuid && hostSessionId) accountUuid = accountForHostSession(hostSessionId);
+  const cwd = process.cwd();
+  const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;
+  return makeEndpoint({
+    sessionId,
+    accountUuid,
+    appPid: Number.isFinite(pid) ? windowOf(pid) : null,
+    pid: Number.isFinite(pid) ? pid : null,
+    cwd,
+    worktree: wt,
+    branch: git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']),
+    title: null,
+  });
+}
+
+// The desktop record is keyed on cliSessionId, so a session whose transcript this
+// tool cannot see is invisible to ccdIndex(). CLAUDE_CODE_HOST_SESSION_ID names the
+// record file directly, which is the one lookup that does not need the transcript.
+function accountForHostSession(hostSessionId) {
+  // Refused before it becomes a path component: `..` normalises out of the store,
+  // and because the probe returns the first matching account directory, any
+  // always-present path would make one account answer for every session — and
+  // that answer is then persisted as provenance.
+  if (!isSafeHostSessionId(hostSessionId)) return null;
+  const store = ccdStore();
+  if (!store) return null;
+  const want = `${hostSessionId}.json`;
+  let accounts;
+  try { accounts = fs.readdirSync(store.dir, { withFileTypes: true }); } catch { SKIPPED += 1; return null; }
+  for (const a of accounts) {
+    if (!a.isDirectory()) continue;
+    const accountDir = path.join(store.dir, a.name);
+    let workspaces;
+    try { workspaces = fs.readdirSync(accountDir, { withFileTypes: true }); } catch { continue; }
+    for (const w of workspaces) {
+      if (!w.isDirectory()) continue;
+      try {
+        if (fs.existsSync(path.join(accountDir, w.name, want))) return a.name;
+      } catch { /* keep probing */ }
+    }
+  }
+  return null;
+}
+
+function endpointFromRow(row) {
+  const pid = row && row.live && Number.isFinite(row.live.pid) ? row.live.pid : null;
+  return makeEndpoint({
+    sessionId: row && row.sessionId,
+    accountUuid: (row && row.app && row.app.accountUuid) || null,
+    appPid: pid ? windowOf(pid) : null,
+    pid,
+    cwd: row && row.cwd,
+    worktree: row && row.wt,
+    branch: row && row.branch,
+    title: row && row.title,
+  });
+}
+
+// `workRoot` is the HANDED-OVER work, never the recording process's directory.
+// The documented takeover route runs from a window in a different repo, so
+// deriving the repo from the recorder filed the edge under the taker's repo and
+// made the default, repo-scoped `lineage` render nothing where the work lives.
+function buildEdge(fromRow, to, reason, recordedBy, inferred) {
+  return buildLedgerEdge({
+    from: endpointFromRow(fromRow),
+    to,
+    workRoot: (fromRow && fromRow.wt) || to.worktree || null,
+    repoRootOf: (root) => nearestRepoRoot(root, new Map()),
+    reason,
+    recordedBy,
+    inferred,
+    at: new Date().toISOString(),
+  });
+}
+
+function liveState(sessionId, live) {
+  return live.has(sessionId) ? 'LIVE' : 'not running';
+}
+
+function endpointLabel(ep) {
+  if (ep.accountUuid) return accountLabel(ep.accountUuid);
+  if (ep.appPid) return windowLabel(ep.appPid);
+  return 'account unknown';
 }
 
 function liveRegistry() {
@@ -374,7 +708,10 @@ function extractStopCauseIn(text) {
   // obvious one leaves three siblings able to break a line in a persisted file.
   // `oneLine` is not available at this point in the file, and would be the wrong
   // tool anyway: these are short identifiers, not prose.
-  const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(/\s+/g, ' ').trim().slice(0, n));
+  // Same class as boundText, not `\s` alone: these four land in a PERSISTED file,
+  // and ESC is exactly what `\s` lets through. Not boundText itself — that returns
+  // null on empty, and the `?? null` below depends on `undefined` passing through.
+  const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(/[\p{Cc}\p{Cf}\u2028\u2029\s]+/gu, ' ').trim().slice(0, n));
   return {
     error: flat(err.error, 64) || 'api_error',
     // `?? null` so the key is always present: `flat` passes `undefined` through,
@@ -801,7 +1138,19 @@ function detectBase(cwd) {
   return null;
 }
 
+// Memoized on the options that actually decide the scan. One process runs one
+// command, and a second identical pass fired every SKIPPED increment twice — so
+// `show` reported double what `show --json` did for the same machine state.
+const INDEX_CACHE = new Map();
 function buildIndex(opts) {
+  const key = JSON.stringify([opts.repo || null, opts.all, opts.days, opts.live, opts.git]);
+  if (INDEX_CACHE.has(key)) return INDEX_CACHE.get(key);
+  const built = buildIndexUncached(opts);
+  INDEX_CACHE.set(key, built);
+  return built;
+}
+
+function buildIndexUncached(opts) {
   const live = liveRegistry();
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   if (!opts.all && !ctx) fail('not inside a git repository — use --all or --repo <path>');
@@ -888,10 +1237,19 @@ function rel(p, base) {
   return base && p.startsWith(`${base}${path.sep}`) ? p.slice(base.length + 1) : p;
 }
 
+// Delegates to the ledger module rather than re-spelling the bound: `\s` does not
+// match ESC or the rest of Cc/Cf, so a private copy here disagreed with boundText
+// about what can forge a line — and this is the bound on RENDERED terminal output,
+// fed from third-party transcripts. boundText returns null on an empty result;
+// this caller wants the empty string.
 function oneLine(s, n) {
+  // The falsy guard is kept rather than folded into boundText: boundText returns
+  // "0" for the number 0 and "false" for false, where this renderer has always
+  // produced the empty string. No call site passes either today -- every one
+  // hands over a string or null -- so dropping it would have changed nothing
+  // visible now and something visible later, which is the worse of the two.
   if (!s) return '';
-  const t = String(s).replace(/\s+/g, ' ').trim();
-  return t.length > n ? `${t.slice(0, n - 1)}…` : t;
+  return boundText(s, n) || '';
 }
 
 function cmdList(opts) {
@@ -928,7 +1286,27 @@ function cmdList(opts) {
 function cmdInstances(opts) {
   const live = liveRegistry();
   const rows = [...live.values()].sort((a, b) => (a.startedAt || 0) - (b.startedAt || 0));
-  if (opts.json) return print(JSON.stringify({ rows, skipped: SKIPPED }, null, 2));
+  // The lineage is rendered HERE because the window that ran out of quota cannot
+  // ask anything — one `instances` call from any working window has to answer
+  // "where did that session go" for every session on the machine.
+  const edges = dedupeEdges(ledgerRead());
+  const lineageOf = (sessionId) => {
+    const out = [];
+    for (const e of edges) {
+      if (e.from.sessionId === sessionId) out.push(`→ continued in ${e.to.sessionId.slice(0, 8)} (${endpointLabel(e.to)})${e.inferred ? ' [inferred]' : ''}`);
+      if (e.to.sessionId === sessionId) out.push(`← taken over from ${e.from.sessionId.slice(0, 8)} (${endpointLabel(e.from)})${e.inferred ? ' [inferred]' : ''}`);
+    }
+    return out;
+  };
+  if (opts.json) {
+    return print(JSON.stringify({
+      rows: rows.map((r) => ({ ...r, lineage: lineageOf(r.sessionId) })),
+      edgeCount: edges.length,
+      ledgerError: LEDGER_DIR_ERROR,
+      schemaNewer: LEDGER_SCHEMA_NEWER,
+      skipped: SKIPPED,
+    }, null, 2));
+  }
   const memo = new Map();
   const groups = new Map();
   for (const s of rows) {
@@ -938,18 +1316,19 @@ function cmdInstances(opts) {
     if (!groups.has(root)) groups.set(root, []);
     groups.get(root).push(s);
   }
-  const insts = new Set();
-  for (const s of rows) { const a = ccdIndex().get(s.sessionId); if (a) insts.add(a.instance); }
+  const accounts = new Set();
+  for (const s of rows) { const a = ccdIndex().get(s.sessionId); if (a && a.accountUuid) accounts.add(a.accountUuid); }
   print(`LIVE CLAUDE CODE SESSIONS: ${rows.length} (every session process on this machine)`);
-  print(`DESKTOP INSTANCES INVOLVED: ${insts.size}${insts.size ? ` — ${[...insts].map((i) => i.slice(0, 8)).join(', ')}` : ''}\n`);
+  print(`ACCOUNTS INVOLVED: ${accounts.size}${accounts.size ? ` — ${[...accounts].map((i) => accountLabel(i)).join(', ')}` : ''}\n`);
   for (const [root, list] of [...groups.entries()].sort()) {
     print(`${root}  (${list.length})`);
     for (const s of list) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${oneLine(String(s.sessionId), 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
+      print(`  ${String(s.pid).padStart(6)}  ${String(s.sessionId).slice(0, 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
       print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
+      for (const l of lineageOf(s.sessionId)) print(`          ${l}`);
     }
     print('');
   }
@@ -1002,8 +1381,10 @@ function hydrate(row) {
   try { return { ...row, ...summarize(row.transcript, st.size, true) }; } catch { SKIPPED += 1; return row; }
 }
 
-function siblings(opts, row) {
-  const { rows } = buildIndex({ ...opts, live: false });
+// Takes the rows the caller already built. A second buildIndex() pass fired every
+// SKIPPED increment twice, so `show` reported double what `show --json` did for
+// the identical machine state.
+function siblings(rows, row) {
   return rows.filter((r) => r.wt === row.wt && r.sessionId !== row.sessionId);
 }
 
@@ -1020,7 +1401,7 @@ function cmdShow(opts) {
   // line directly above the TAKEOVER verdict a reader acts on.
   print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(r.live.entrypoint, 40)}  name "${oneLine(r.live.name, 92)}"` : ''}`);
   if (r.app) {
-    print(`OWNER    desktop instance ${r.app.instance}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
+    print(`OWNER    account ${r.app.accountUuid || '(not resolvable)'}${r.app.accountUuid ? ` (${accountLabel(r.app.accountUuid)})` : ''}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
     print(`CONFIG   model ${oneLine(r.app.model, 40) || '?'}   effort ${oneLine(r.app.effort, 40) || '?'}   permissions ${oneLine(r.app.permissionMode, 40) || '?'}`);
   }
   print(`WORKTREE ${r.wt}${r.cwdExists ? '' : '   !! MISSING'}`);
@@ -1031,7 +1412,7 @@ function cmdShow(opts) {
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
   if (r.truncated) print('NOTE     transcript is large — head+tail only, middle not scanned');
-  const sib = siblings(opts, r);
+  const sib = siblings(buildIndex({ ...opts, live: false }).rows, r);
   if (sib.length) print(`SIBLINGS ${sib.map((s) => `${s.sessionId.slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
@@ -1148,7 +1529,12 @@ function cmdTakeover(opts) {
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch).replace(/\.md$/, '.takeover.md');
   const tv = activityVerdict(r, opts.force);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, skipped: SKIPPED }, null, 2));
+  // Recorded before the --json branch on purpose: a caller that asked for JSON is
+  // taking the session over just as much as one reading the markdown, and an edge
+  // that only exists on the text path would be missing exactly when a tool drives
+  // this command.
+  const lineage = recordTakeoverEdge(opts, r);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${r.title || path.basename(r.wt)}`);
   L.push('');
@@ -1156,7 +1542,7 @@ function cmdTakeover(opts) {
   L.push('');
   L.push('## Source');
   L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
-  if (r.app) L.push(`- owning desktop instance: \`${r.app.instance}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
+  if (r.app) L.push(`- owning account: \`${r.app.accountUuid || '(not resolvable)'}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
     L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
@@ -1241,9 +1627,44 @@ function cmdTakeover(opts) {
   if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and take a single go/no-go before the first edit${tv.authorized ? ' — the authorization above was given when this brief was written, not here' : '; on yes, re-run this command with `--force`'}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
   else if (tv.measuredLevel === 'PROBABLY_FREE') L.push(`4. ${tv.measuredReason} Taking over is fine; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
   print(`TAKEOVER_TARGET: ${target}`);
+  // ABOVE the fence, with the other provenance lines. SKILL.md instructs the model
+  // to treat anything after `--- END ---` as untrusted text that happened to be in
+  // the stream, so a write announcement emitted there is one the reader is told to
+  // disbelieve — and this tool announcing its own write is the one line that must
+  // land.
+  print(`LINEAGE  ${lineage.message}`);
   print('--- BEGIN TAKEOVER MARKDOWN ---');
   print(L.join('\n'));
   print('--- END TAKEOVER MARKDOWN ---');
+}
+
+// The edge is recorded HERE, automatically, because forgetting this step is the
+// exact failure the ledger exists to fix — a takeover that leaves no trace is
+// indistinguishable from one that never happened. It is announced on its own line
+// rather than done quietly: a read command that writes must say so. `--no-record`
+// opts out for a genuine read-only inspection, and a session with no
+// CLAUDE_CODE_SESSION_ID (a bare `node trail.mjs` outside Claude Code) records
+// nothing rather than inventing an endpoint.
+function recordTakeoverEdge(opts, row) {
+  if (!opts.record) return { recorded: false, reason: 'opted-out', message: 'not recorded (--no-record)' };
+  const me = selfIdentity();
+  if (!me.sessionId) {
+    return { recorded: false, reason: 'no-self-session-id', message: 'not recorded — this process has no CLAUDE_CODE_SESSION_ID, so the continuing session cannot be named' };
+  }
+  if (me.sessionId === row.sessionId) {
+    return { recorded: false, reason: 'self-target', message: 'not recorded — the target is this same session' };
+  }
+  const reason = opts.reason || (row.stopCause && row.stopCause.error) || 'manual';
+  let file;
+  try { file = ledgerWrite(buildEdge(row, me, reason, 'takeover', false)); } catch (e) {
+    return { recorded: false, reason: 'write-failed', message: `NOT RECORDED — ${e && e.message ? e.message : 'write failed'}` };
+  }
+  return {
+    recorded: true,
+    reason,
+    file: path.basename(file),
+    message: `recorded ${row.sessionId.slice(0, 8)} → ${me.sessionId.slice(0, 8)} (reason: ${reason}) in ${path.basename(file)}`,
+  };
 }
 
 function handoffPath(r, ctx, liveBranch) {
@@ -1330,6 +1751,375 @@ function cmdHandoff(opts) {
   print('--- END HANDOFF MARKDOWN ---');
 }
 
+// ── lineage / adopt / label ─────────────────────────────────────────────────
+
+function cmdLabel(opts) {
+  // `--self` is a parsed flag, so the label text is the FIRST positional there
+  // and the SECOND when a key is named explicitly.
+  const positional = opts._.slice(1);
+  let target = '';
+  let text = '';
+  let kind = 'account';
+  if (opts.self) {
+    const me = selfIdentity();
+    if (me.accountUuid) { target = me.accountUuid; kind = 'account'; }
+    else if (me.appPid) { target = String(me.appPid); kind = 'window'; }
+    if (!target) fail('--self could not resolve this session\'s account or window — run `lineage --diagnose`');
+    text = positional.join(' ').trim();
+  } else {
+    target = String(positional[0] || '').trim();
+    text = positional.slice(1).join(' ').trim();
+    // A pid is not a uuid; the key kind is decided by shape rather than guessed.
+    kind = /^\d+$/.test(target) ? 'window' : 'account';
+  }
+  if (!target) fail('usage: label <accountUuid|appPid|--self> <text>');
+  if (target === '__proto__' || target === 'constructor' || target === 'prototype') {
+    fail(`refusing "${target}" as a label key — it names an object member, not an account`);
+  }
+  if (!text) fail('usage: label <accountUuid|appPid|--self> <text>');
+  // Bounded like every other rendered value: this label is machine-wide and is
+  // interpolated into numbered chain lines every other session reads, so an
+  // unbounded one could fabricate a line there.
+  const bounded = boundLabel(text);
+  if (!bounded) fail('label text is empty after trimming');
+  const current = readLabels();
+  // Refused rather than merged: the reader returns an EMPTY map for a file it
+  // could not parse, so writing on top of that would replace every existing label
+  // with the one being set.
+  if (LABELS_UNREADABLE) {
+    fail(`${LABELS_FILE} exists but could not be read — refusing to overwrite it; move it aside and re-run`);
+  }
+  // A newer schema reduces to an empty map on read, which is exactly what a write
+  // would then replace the real labels with.
+  if (LABELS_SCHEMA_MISMATCH) {
+    fail(`${LABELS_FILE} was written by a different label schema — refusing to overwrite it; update the plugin or move it aside`);
+  }
+  // Object.assign onto the module's own maps: an object-literal spread would give
+  // them Object.prototype back, and a `__proto__` key would then hit the inherited
+  // setter, store nothing, and still be reported as written.
+  const next = emptyLabels();
+  Object.assign(next.accounts, current.accounts);
+  Object.assign(next.windows, current.windows);
+  // Two namespaces: an account uuid is stable, an OS pid is reused after its
+  // process exits. One flat map let a pid-keyed label silently rename an
+  // unrelated window later, with no way to tell the two kinds apart in the file.
+  if (kind === 'window') next.windows[target] = bounded;
+  else next.accounts[target] = bounded;
+  try {
+    writeLabels(LABELS_FILE, next, CONFIG_ROOT);
+  } catch (e) {
+    fail(`could not write ${LABELS_FILE}: ${e && e.message ? e.message : 'write failed'}`);
+  }
+  LABEL_CACHE = next;
+  if (opts.json) return print(JSON.stringify({ labelled: target, kind, text: bounded, file: LABELS_FILE, skipped: SKIPPED }, null, 2));
+  print(`labelled ${kind} ${target} → "${bounded}"   (${LABELS_FILE})`);
+}
+
+function cmdAdopt(opts) {
+  const row = resolve(opts, opts._[1]);
+  const me = selfIdentity();
+  if (!me.sessionId) {
+    fail('this process has no CLAUDE_CODE_SESSION_ID, so it cannot record itself as the continuing session');
+  }
+  if (me.sessionId === row.sessionId) fail('refusing to record a session as its own continuation');
+  const edge = buildEdge(row, me, opts.reason || 'manual', 'adopt', false);
+  // Guarded exactly as the takeover path is: the same unwritable-ledger condition
+  // must not kill one verb with a stack trace while its sibling reports it.
+  let file;
+  try { file = ledgerWrite(edge); } catch (e) {
+    fail(`could not record the handover: ${e && e.message ? e.message : 'write failed'}`);
+  }
+  if (opts.json) return print(JSON.stringify({ recorded: edge, file, skipped: SKIPPED }, null, 2));
+  print(`RECORDED  ${row.sessionId.slice(0, 8)} (${endpointLabel(edge.from)}) → ${me.sessionId.slice(0, 8)} (${endpointLabel(edge.to)})`);
+  print(`          reason: ${edge.reason}   worktree: ${edge.to.worktree || '(unknown)'}`);
+  print(`          ${path.join(LEDGER_DIR, file ? path.basename(file) : '')}`);
+}
+
+function lineageDiagnose(opts) {
+  const probes = ccdStoreCandidates().map((c) => ({ ...c, exists: dirExists(c.dir) }));
+  const resolved = probes.find((p) => p.exists) || null;
+  const edges = ledgerRead();
+  if (opts.json) {
+    return print(JSON.stringify({
+      configRoot: CONFIG_ROOT,
+      configRootSource: opts.configDir ? '--config-dir' : (process.env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR' : 'default'),
+      ledgerDir: LEDGER_DIR,
+      labelsFile: LABELS_FILE,
+      edgeCount: edges.length,
+      ledgerError: LEDGER_DIR_ERROR,
+      schemaNewer: LEDGER_SCHEMA_NEWER,
+      store: resolved,
+      probes,
+      platform: process.platform,
+      skipped: SKIPPED,
+    }, null, 2));
+  }
+  print(`PLATFORM     ${process.platform}`);
+  print(`CONFIG ROOT  ${CONFIG_ROOT}   (${opts.configDir ? '--config-dir' : (process.env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR' : 'default ~/.claude')})`);
+  print(`LEDGER       ${LEDGER_DIR}   (${edges.length} edge record(s))`);
+  if (LEDGER_DIR_ERROR) print(`LEDGER ERROR ${LEDGER_DIR_ERROR} — the count above is NOT a measurement of what exists.`);
+  if (LEDGER_SCHEMA_NEWER) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  print(`LABELS       ${LABELS_FILE}`);
+  print('');
+  print('DESKTOP STORE PROBES (first existing wins; only the macOS path is verified):');
+  for (const p of probes) print(`  ${p.exists ? 'FOUND  ' : 'absent '} ${p.source}\n           ${p.dir}`);
+  print('');
+  if (!resolved) {
+    print('No desktop store found, so no session can be attributed to an account.');
+    print('Chains still render and still group by window (process ancestry).');
+    print('If this machine DOES run the Claude desktop app, point ZENSU_CCD_STORE at its');
+    print('claude-code-sessions directory — the Windows and Linux paths above are inferred,');
+    print('not measured, and this is the command that shows which one was tried.');
+  }
+}
+
+function lineageBackfill(opts) {
+  // Unbounded unless the caller narrowed it explicitly. This verb exists to
+  // reconstruct handovers from BEFORE the ledger, and the 21-day default excluded
+  // exactly those while reporting "0 candidates" on a machine that has them.
+  const days = opts.daysExplicit ? opts.days : 0;
+  const { rows } = buildIndex({ ...opts, days, live: false });
+  const existing = ledgerRead();
+  const known = new Set(existing.map((e) => `${e.from.sessionId}>${e.to.sessionId}`));
+  // The duplicate guard below is exactly as good as this read. An unreadable
+  // directory yields an EMPTY `known` set, so every edge that IS already recorded
+  // re-proposes and --apply mints a second copy machine-wide. The dry run still
+  // renders — only the write is refused, and it says which half failed.
+  // Per-RECORD refusals count too, not only the whole-directory failure: readEdges
+  // drops an unreadable, malformed or wrong-schema record, and each one is a pair
+  // missing from `known` above. The gate names which of the two it is, because the
+  // remedies differ -- fix the directory, versus find the one bad record.
+  const refusedCount = LEDGER_REFUSED;
+  const applyBlocked = Boolean(opts.apply && (LEDGER_DIR_ERROR || refusedCount > 0));
+  const applyRefusal = LEDGER_DIR_ERROR ? 'ledger-unreadable' : 'records-refused';
+  const stalled = rows.filter((r) => r.stopCause && r.stopCause.final);
+  const candidates = [];
+  for (const s of stalled) {
+    // Ordered by START, not by last activity: `mtime` is the transcript's last
+    // write, so a session that was already running when the other stalled would
+    // satisfy `mtime > s.mtime` and be minted as a causal handover that never
+    // happened. A successor whose start precedes the stall is skipped outright.
+    // Ordered by last activity, and the start guard applies ONLY where a start is
+    // actually observable. `r.live` is null for every finished session — the whole
+    // population this verb reconstructs — so the previous `startedAt(r) >= s.mtime`
+    // conjunct rejected nothing there while wrongly excluding a live window that
+    // was already open when the stall happened. Stated rather than implied: a
+    // transcript's first timestamp is not read here, so the "started after the
+    // stall" claim is NOT established for finished sessions.
+    const successor = rows
+      .filter((r) => r.wt === s.wt && r.sessionId !== s.sessionId && r.mtime > s.mtime)
+      .sort((a, b) => a.mtime - b.mtime)[0];
+    if (!successor) continue;
+    const fromAcct = (s.app && s.app.accountUuid) || null;
+    const toAcct = (successor.app && successor.app.accountUuid) || null;
+    // Same account is a resumption, not a handover — and two unknown accounts are
+    // not evidence of a DIFFERENT one, so they are excluded too. A heuristic that
+    // guessed here would mint edges nobody can distinguish from measured ones.
+    if (!fromAcct || !toAcct || fromAcct === toAcct) continue;
+    if (known.has(`${s.sessionId}>${successor.sessionId}`)) continue;
+    candidates.push({ from: s, to: successor });
+  }
+  if (opts.json && !opts.apply) {
+    return print(JSON.stringify({
+      dryRun: true,
+      windowDays: days,
+      candidates: candidates.map((c) => ({
+        from: c.from.sessionId, to: c.to.sessionId, worktree: c.to.wt,
+        cause: c.from.stopCause.error || 'rate_limit',
+      })),
+      ledgerError: LEDGER_DIR_ERROR,
+      schemaNewer: LEDGER_SCHEMA_NEWER,
+      skipped: SKIPPED,
+    }, null, 2));
+  }
+  if (!opts.apply) {
+    print(`BACKFILL DRY RUN — ${candidates.length} candidate edge(s), nothing written.`);
+    print(`WINDOW ${days > 0 ? `${days} day(s)` : 'unbounded'}`);
+    print('Each is a GUESS: a session that stalled on an API limit, and the next session on the');
+    print('same worktree under a different account. Re-run with --apply to record them; they are');
+    print('then marked inferred and rendered as such, so a guess never reads like a measurement.\n');
+    for (const c of candidates) {
+      print(`  ${c.from.sessionId.slice(0, 8)} (${endpointLabel(endpointFromRow(c.from))}) → ${c.to.sessionId.slice(0, 8)} (${endpointLabel(endpointFromRow(c.to))})`);
+      // The absolute worktree and the same cause fallback the write uses: this is
+      // the only review surface before --apply mints machine-wide inferred edges,
+      // so it has to show what will actually be recorded.
+      print(`      worktree: ${c.to.wt}   cause: ${c.from.stopCause.error || 'rate_limit'}`);
+    }
+    if (!candidates.length) print('  (none)');
+    return;
+  }
+  if (applyBlocked) {
+    if (opts.json) {
+      return print(JSON.stringify({
+        dryRun: false, applied: false, refusal: applyRefusal,
+        written: 0, files: [], writeError: null, refusedRecords: refusedCount,
+        ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED,
+      }, null, 2));
+    }
+    if (LEDGER_DIR_ERROR) print(`BACKFILL REFUSED — the ledger could not be read (${LEDGER_DIR_ERROR}).`);
+    else print(`BACKFILL REFUSED — ${refusedCount} ledger record(s) could not be read.`);
+    print('Nothing was written. The already-recorded edges could not be listed in full, so a');
+    print('candidate above may already exist and --apply would mint a duplicate of it.');
+    print(`Fix the ledger (${LEDGER_DIR}) and re-run; \`lineage --diagnose\` names what failed.`);
+    return;
+  }
+  const written = [];
+  let writeError = null;
+  for (const c of candidates) {
+    const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', true);
+    // Reported, not abandoned: a batch that dies mid-way had already written real
+    // records, and claiming none were written is the wrong half of the truth.
+    try { written.push(path.basename(ledgerWrite(edge))); } catch (e) {
+      writeError = e && e.message ? e.message : 'write failed';
+      break;
+    }
+  }
+  if (opts.json) return print(JSON.stringify({ dryRun: false, applied: true, refusal: null, written: written.length, files: written, writeError, refusedRecords: refusedCount, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+  print(`BACKFILL APPLIED — ${written.length} inferred edge(s) recorded in ${LEDGER_DIR}`);
+  if (writeError) print(`BACKFILL INCOMPLETE — stopped after ${written.length} edge(s): ${writeError}`);
+}
+
+function cmdLineage(opts) {
+  if (opts.diagnose) return lineageDiagnose(opts);
+  if (opts.backfill) return lineageBackfill(opts);
+  const edges = dedupeEdges(ledgerRead());
+  const live = liveRegistry();
+  const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
+  // Absolute roots only. A basename arm made ~/work/clientA/api and
+  // ~/work/clientB/api share one lineage scope — the collision SKILL.md already
+  // documents for brief targets.
+  // Canonicalized on both sides. A record stores the path as it was resolved when
+  // the edge was written, and on macOS /var and /private/var name the same
+  // directory — an uncanonical comparison silently scoped a repo's own handovers
+  // out of its own listing.
+  const canon = (v) => {
+    if (!v) return null;
+    try { return fs.realpathSync.native(v); } catch { return path.resolve(v); }
+  };
+  const ctxRoot = ctx ? canon(ctx.root) : null;
+  const ctxTrees = ctx ? new Set([...ctx.worktrees].map(canon)) : null;
+  const inScope = (e) => {
+    if (!ctx) return true;
+    if (!e.repo || !e.repo.root) return false;
+    const r = canon(e.repo.root);
+    // Containment as well as equality: nearestRepoRoot answers with a NESTED repo
+    // or submodule when one exists, so an exact-match rule scoped a repo's own
+    // handovers out of its own listing. The clientA/api vs clientB/api
+    // discrimination survives, because both sides are absolute and canonical.
+    return r === ctxRoot || ctxTrees.has(r) || (ctxRoot && r.startsWith(`${ctxRoot}${path.sep}`));
+  };
+  // Collapsed for every COUNT and every rendered line: the store is deliberately
+  // append-only and re-running `takeover` is a documented routine step, so raw
+  // record counts would report one handover twice.
+  const scoped = dedupeEdges(edges.filter(inScope));
+  const me = selfIdentity();
+
+  if (opts.where) {
+    const want = String(opts.where).trim().toLowerCase();
+    // The same floor resolve() applies. Without it `--where " "` trims to an empty
+    // prefix that startsWith matches for every edge, and the command then prints a
+    // confident CONTINUED IN for a blank query.
+    if (want.length < 6) fail('--where needs a session id or a prefix of at least 6 characters');
+    const match = edges.filter((e) => e.from.sessionId.toLowerCase().startsWith(want) || e.to.sessionId.toLowerCase().startsWith(want));
+    // Both endpoints per edge: preferring `from` hid the case where a single edge
+    // has two endpoints sharing the queried prefix, and the walk then answered for
+    // one of two candidates without saying so.
+    const distinctSet = new Set();
+    for (const e of match) {
+      if (e.from.sessionId.toLowerCase().startsWith(want)) distinctSet.add(e.from.sessionId);
+      if (e.to.sessionId.toLowerCase().startsWith(want)) distinctSet.add(e.to.sessionId);
+    }
+    const distinct = [...distinctSet];
+    if (distinct.length > 1) {
+      print(`ambiguous --where "${opts.where}" — ${distinct.length} candidates:\n`);
+      for (const sid of distinct) print(`  ${sid}`);
+      flush();
+      process.exit(2);
+    }
+    if (!match.length) {
+      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+      print(`No lineage recorded for "${opts.where}".`);
+      print('Either that session was never handed over, or the handover predates the ledger.');
+      print(`Try: node ${scriptPath()} lineage --backfill`);
+      return;
+    }
+    // Walked from the QUERIED session, not from the predecessor of the matched
+    // edge: starting at the `from` made a predecessor's newest branch the answer,
+    // so a question about one session was answered with a sibling's continuation.
+    const start = distinct[0];
+    const walk = walkChain(start, edges);
+    const links = walk.links;
+    // A leaf has no outgoing edge, so the answer is the INCOMING edge's real
+    // endpoint — a fabricated one printed "CONTINUED IN <the id you asked about>"
+    // with an unknown worktree and no chain, discarding what the ledger holds.
+    const incoming = edges.filter((e) => e.to.sessionId === start)
+      .sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')))
+      .pop();
+    const last = links.length ? links[links.length - 1].to
+      : (incoming ? incoming.to : makeEndpoint({ sessionId: start }));
+    const isLeaf = !links.length;
+    if (opts.json) {
+      return print(JSON.stringify({ query: opts.where, found: true, start, current: last, live: liveState(last.sessionId, live), links, forks: walk.forks, truncated: walk.truncated, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+    }
+    print(`${isLeaf ? 'THIS IS THE END OF THE CHAIN' : 'CONTINUED IN'}  ${last.sessionId.slice(0, 8)}   ${endpointLabel(last)}   ${liveState(last.sessionId, live)}`);
+    print(`WORKTREE      ${last.worktree || '(unknown)'}${last.branch ? `   branch ${last.branch}` : ''}`);
+    if (last.pid) print(`PID           ${last.pid}${last.appPid ? `   window pid ${last.appPid}` : ''}`);
+    print('');
+    printChain(links, live, me, walk.forks);
+    if (walk.truncated) print('  ! chain truncated at the hop bound — it is longer than shown');
+    return;
+  }
+
+  if (opts.json) {
+    const chains = chainRoots(scoped).map((root) => {
+      const w = walkChain(root, scoped);
+      return { root, links: w.links, forks: w.forks };
+    });
+    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+  }
+  print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
+  print(`RECORDED HANDOVERS: ${scoped.length}\n`);
+  if (!scoped.length) {
+    if (LEDGER_DIR_ERROR) {
+      print(`The ledger could not be read (${LEDGER_DIR_ERROR}) — this is NOT evidence that no handover was recorded.`);
+      print(`Check ${LEDGER_DIR}, then re-run.`);
+      return;
+    }
+    if (LEDGER_SCHEMA_NEWER) {
+      print('The ledger holds records written by a NEWER schema than this build can read.');
+      print('Update the plugin rather than treating this as an empty history.');
+      return;
+    }
+    print('No handover has been recorded yet.');
+    print(`Past ones can be reconstructed as GUESSES: node ${scriptPath()} lineage --backfill`);
+    return;
+  }
+  for (const root of chainRoots(scoped)) {
+    const { links, forks } = walkChain(root, scoped);
+    if (!links.length) continue;
+    const wt = links[0].to.worktree || links[0].from.worktree;
+    print(`CHAIN  ${links[0].repo && links[0].repo.name ? links[0].repo.name : '(unknown repo)'}${wt ? `   ${path.basename(wt)}` : ''}`);
+    printChain(links, live, me, forks);
+    print('');
+  }
+}
+
+function printChain(links, live, me, forks = []) {
+  if (!links.length) return;
+  for (const f of forks) {
+    print(`  ! ${f.at.slice(0, 8)} was taken over more than once — following ${f.taken.slice(0, 8)}, also recorded: ${f.alsoTo.map((s2) => s2.slice(0, 8)).join(', ')}`);
+  }
+  const seq = [links[0].from, ...links.map((l) => l.to)];
+  seq.forEach((ep, i) => {
+    const edge = i === 0 ? null : links[i - 1];
+    const here = me.sessionId && ep.sessionId === me.sessionId ? '   ← HERE' : '';
+    const inferred = edge && edge.inferred ? '   [inferred — a guess from --backfill, not a recorded handover]' : '';
+    print(`  ${String(i + 1).padStart(2)}. ${ep.sessionId.slice(0, 8)}   ${endpointLabel(ep).padEnd(26)} ${liveState(ep.sessionId, live).padEnd(12)}${here}`);
+    if (ep.worktree) print(`      ${ep.worktree}${ep.branch ? `   ${ep.branch}` : ''}`);
+    if (edge) print(`      handed over ${String(edge.recordedAt || '').slice(0, 16)}   reason: ${edge.reason}${inferred}`);
+  });
+}
+
 let buffer = [];
 function print(s) { buffer.push(s); }
 // Emitted from the dispatcher, not from one command: every command path can
@@ -1345,7 +2135,10 @@ function flush() {
   process.stdout.write(`${buffer.join('\n')}${note}\n`);
   buffer = [];
 }
-function scriptPath() { return new URL(import.meta.url).pathname; }
+// fileURLToPath, not URL.pathname: the latter is percent-encoded and carries a
+// leading slash before a Windows drive letter, so the printed hint was unusable
+// there and on any path containing a space.
+function scriptPath() { return fileURLToPath(import.meta.url); }
 
 const argv = process.argv.slice(2);
 const opts = parseArgs(argv);
@@ -1354,11 +2147,18 @@ const cmd = opts._[0] || 'list';
 // handoff ignores --json and always emits markdown, so suppressing the note
 // there would drop the count on every channel at once.
 JSON_MODE = opts.json && cmd !== 'handoff';
+// Roots are resolved before any command runs, never at module load: --config-dir
+// is only known once argv is parsed, and a command that read the default root first
+// would write its ledger into ~/.claude while reading sessions from elsewhere.
+resolveRoots(opts.configDir);
 if (cmd === 'list') cmdList(opts);
 else if (cmd === 'instances') cmdInstances(opts);
 else if (cmd === 'show') cmdShow(opts);
 else if (cmd === 'handoff') cmdHandoff(opts);
 else if (cmd === 'limited') cmdLimited(opts);
 else if (cmd === 'takeover') cmdTakeover(opts);
-else fail(`unknown command: ${cmd} (list | instances | show | handoff | limited | takeover)`);
+else if (cmd === 'lineage') cmdLineage(opts);
+else if (cmd === 'adopt') cmdAdopt(opts);
+else if (cmd === 'label') cmdLabel(opts);
+else fail(`unknown command: ${cmd} (list | instances | show | handoff | limited | takeover | lineage | adopt | label)`);
 flush();

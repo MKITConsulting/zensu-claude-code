@@ -1377,6 +1377,80 @@ SECOND copy of the rule, which is what the bug was. The suite is local-only
 instrumented runs at the same setting could not reproduce it. Say "the observed shapes are
 closed", never "the watcher cannot false-positive".
 
+## Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)
+
+`/zensu:session-trail` records every takeover as one edge in a **machine-wide,
+multi-writer** store, and this module is the single source of truth for its schema,
+its layout, its refusal table and the chain walk. It is the reason the skill has a
+write channel at all — before it, `trail.mjs` had none, and SKILL.md said so.
+
+**The store is a DIRECTORY of one record per edge, never a shared append-only file.**
+Six windows write it concurrently and atomic append behaves differently on Windows
+than on POSIX; an exclusive `wx` create of a uniquely named record needs no lock and
+cannot interleave. `labels.json` is the one exception and lands by O_EXCL temp plus
+rename — it is a read-modify-write, so **concurrent labels can still lose an update**;
+the rename removes only the torn-file half of the hazard.
+
+**Two identity routes, deliberately independent.** The account comes from the desktop
+store, whose top-level directory IS the `accountUuid` (measured 2026-08-21 three ways:
+`oauthAccount.accountUuid` in `~/.claude.json`, `lastKnownAccountUuid` in
+`Claude/config.json`, and `ant-device-registry.json`'s key set). The window comes from
+the process ancestry up to the owning `Claude.app` process. Only the macOS path is
+MEASURED; the Windows and Linux candidates are probed and can win — `ccdStoreCandidates`
+tries `$XDG_CONFIG_HOME/Claude` and `~/.config/Claude` there — they are UNVERIFIED, not
+unreachable. Where no candidate exists the account is `null` and the ancestry still
+groups by window. `ZENSU_CCD_STORE` overrides the probe list and is AUTHORITATIVE, and
+`lineage --diagnose` prints every candidate with its verdict.
+
+**The edge's `repo` comes from the HANDED-OVER work, never from the recording
+process's cwd.** The documented takeover route runs from a window in a different repo,
+so deriving it from the recorder filed the edge under the taker's repo and made the
+default repo-scoped `lineage` render nothing where the work lives — an empty answer
+indistinguishable from "no handover happened".
+
+**Sites that move with the schema:** the module, `trail.mjs`'s wrappers, the `v1`
+segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
+and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
+
+**Known gap, stated rather than fixed:** `ledgerPaths` partitions the store by
+`v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges `schemaVersion` inside a
+record. The partition wins — a v2 build reads an empty `v2/edges` and reports no
+history rather than refusing v1 records — so `SCHEMA_NEWER`/`SCHEMA_OLDER` are
+reachable only from a hand-planted record. Closing this means either dropping the
+derived segment or having `readEdges` enumerate sibling `v*` directories.
+
+**`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is UNMEASURED.**
+It is `timeoutMs: 900000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`,
+chosen because the suite grew to 70 checks plus a `node --test` suite plus two
+`git init`s and, on win32, one PowerShell spawn per node process. The only wall clock
+taken is **31 s on macOS** (measured 2026-08-22, idle machine, at 66 checks; the suite is 70 now). An earlier
+note here said ~4 s; that figure predated the suite roughly doubling and is corrected
+rather than left standing, because it was the number the 900000 ceiling was reasoned
+against. Budget against the first green Windows run, not against the
+ceiling. **The shard budget binds FIRST and is the tighter of the two:** `windows-shard-3`
+carries a `profileTimeoutMs` of 1800000 and this suite sits there at 900000 ALONGSIDE
+`deferred-reset-races` at the same 900000, plus five more suites whose caps sum to a
+further 1260000. Two 900000 caps under
+one 1800000 profile means whichever runs second cannot receive its own ceiling — the same
+failure §Host-Refused Reviewer Spawn records verbatim ("read the shard's remaining budget",
+not the suite's `timeoutMs`). Take the first green Windows figure for BOTH suites before
+trusting the placement; a shard abort truncates the tail of the second one silently. The
+caveat lives here and NOT in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` rejects
+any key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
+manifest load.
+
+**The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
+`$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore
+skips itself whole on Windows, where `os.homedir()` reads `USERPROFILE`. Both suites
+also unset `CLAUDE_CONFIG_DIR`, because `trail.mjs` honours it and `$HOME` is only a
+fallback — with it exported, a fixture read would resolve against the developer's
+real config root and a `takeover` would write a real edge there. In the lineage suite
+the unset is BELT, not the mechanism: `--config-dir` already outranks the variable in
+`resolveRoots`, and the unset is what keeps that true for a check added later without
+the flag. Exactly ONE invocation there omits it — the L10 case, whose whole subject is
+that the variable is honoured — and `L28` pins that it stays exactly one, because a
+second exemption is indistinguishable from a forgotten `env -u`.
+
 ## Pull Request Workflow
 
 **Never commit or push to a closed or merged PR's branch.** Once a PR is merged or closed, its branch is dead — additional commits there belong on a new branch with a new PR.

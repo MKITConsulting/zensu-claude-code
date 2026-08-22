@@ -104,7 +104,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
-| `/zensu:session-trail` | See what your other Claude Code instances are doing, and take a session over |
+| `/zensu:session-trail` | See what your other Claude Code instances are doing, take a session over, and trace where a session was continued across windows and accounts |
 | `/zensu:zen-mode` | Low-noise responses for working at reduced capacity. On by default |
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |

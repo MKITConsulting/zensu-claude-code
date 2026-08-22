@@ -23,6 +23,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -432,6 +433,25 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The session-lineage ledger reader is the third hardened open in a requireable
+# module, and the FIRST one outside hooks/. Same reason it is listed: every count
+# pin above is per-file and therefore blind to a NEW file carrying a secure open,
+# so a file that is merely correct today has nothing keeping it correct. The
+# properties are the ones that make the read safe against a store the session can
+# write: the flag is resolved once in the Windows-safe spelling, the descriptor --
+# not the path -- carries the regular-file and size assertions, and the size cap
+# is applied to the fstat result rather than to a prior lstat.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'const st = fs.fstatSync(fd);' "$SESSION_LINEAGE")" -eq 1 ] \
+  && grep -qF 'if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;' "$SESSION_LINEAGE" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$SESSION_LINEAGE" \
+  && ! grep -qF 'fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW' "$SESSION_LINEAGE"; then
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" PASS
+else
+  check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" FAIL
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

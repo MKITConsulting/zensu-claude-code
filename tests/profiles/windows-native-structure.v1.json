@@ -21,6 +21,7 @@
     "tests/structure/test-reviewer-capability-gate.sh",
     "tests/structure/test-session-control-claude.sh",
     "tests/structure/test-session-start-banner.sh",
+    "tests/structure/test-session-trail-lineage.sh",
     "tests/structure/test-stop-enforcer-self-review-routing.sh",
     "tests/structure/test-tdd-state-path-safety.sh",
     "tests/structure/test-vcs-review-marker-reconcile.sh",

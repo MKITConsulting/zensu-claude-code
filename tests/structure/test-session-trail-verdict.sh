@@ -62,7 +62,16 @@ trap 'rm -rf "$FAKE"' EXIT
 # V0 — the premise. A homedir that is not the fixture root means every lookup
 # below would run against the developer's real ~/.claude, so this SKIPs the
 # suite rather than letting it pass or fail for the wrong reason.
-RESOLVED_HOME="$(HOME="$FAKE" node -e 'process.stdout.write(require("node:os").homedir())' 2>/dev/null)"
+# CLAUDE_CONFIG_DIR is unset for every invocation below, and --config-dir names the
+# sandbox explicitly. Since trail.mjs began honouring that variable, $HOME is only a
+# FALLBACK: with it exported, every fixture read here would resolve against the
+# developer's real config root and the two takeover calls would write real ledger
+# edges there, all while V0 still passed.
+FAKE_CFG="$FAKE/.claude"
+trailrun() { env -u CLAUDE_CONFIG_DIR HOME="$FAKE" USERPROFILE="$FAKE" node "$TRAIL_MJS" "$@" --config-dir "$FAKE_CFG"; }
+# USERPROFILE too: the probe has to measure the environment trailrun uses, or it
+# skips all 33 checks on Windows for a redirection every invocation does supply.
+RESOLVED_HOME="$(HOME="$FAKE" USERPROFILE="$FAKE" node -e 'process.stdout.write(require("node:os").homedir())' 2>/dev/null)"
 if [ "$RESOLVED_HOME" != "$FAKE" ]; then
   skip "all session-trail verdict behaviour checks (os.homedir() does not follow \$HOME here: got '${RESOLVED_HOME:-<empty>}')"
   report; exit 0
@@ -219,7 +228,7 @@ archive() { # <sessionId>
 # is already the hard requirement, jq is not.
 field() { # <sessionId> <dotted-path> [extra trail.mjs flags...]
   local sid="$1" key="$2"; shift 2
-  HOME="$FAKE" node "$TRAIL_MJS" show "$sid" --all --no-git --json "$@" 2>/dev/null \
+  trailrun show "$sid" --all --no-git --json "$@" 2>/dev/null \
     | HOME="$FAKE" node -e '
 const key = process.argv[1];
 let s = "";
@@ -382,7 +391,7 @@ fi
 # must never be rendered against every busy row on the machine. The BUSY count is
 # a POSITIVE CONTROL: without it an empty, crashed or row-less survey scores zero
 # CONTESTED and the check passes having exercised nothing.
-LIST_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" list --all --no-git --force 2>/dev/null)"
+LIST_OUT="$(trailrun list --all --no-git --force 2>/dev/null)"
 LIST_BUSY="$(printf '%s\n' "$LIST_OUT" | grep -c 'BUSY')"
 LIST_FORCED="$(printf '%s\n' "$LIST_OUT" | grep -c 'CONTESTED')"
 if [ "$LIST_BUSY" -gt 0 ] && [ "$LIST_FORCED" = "0" ]; then
@@ -395,7 +404,7 @@ fi
 # round-1 fix was missing: it was applied to the visible text only, so the machine
 # payload kept stamping CONTESTED on every row while the terminal looked correct.
 survey_json_contested() { # <command>
-  HOME="$FAKE" node "$TRAIL_MJS" "$1" --all --no-git --force --json 2>/dev/null \
+  trailrun "$1" --all --no-git --force --json 2>/dev/null \
     | HOME="$FAKE" node -e '
 let s = "";
 process.stdin.on("data", (d) => { s += d; });
@@ -435,7 +444,7 @@ fi
 # output is PERSISTED and read by another instance, and neither was exercised at
 # all: a `measuredLevel` → `level` slip there would have recorded an authorization
 # as if it were the measurement, with every other check green.
-TAKEOVER_JSON="$(HOME="$FAKE" node "$TRAIL_MJS" takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --json 2>/dev/null \
+TAKEOVER_JSON="$(trailrun takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --no-record --json 2>/dev/null \
   | HOME="$FAKE" node -e '
 let s = "";
 process.stdin.on("data", (d) => { s += d; });
@@ -448,8 +457,8 @@ process.stdin.on("end", () => {
 # The MARKDOWN body, not just the JSON payload: `--json` returns before the brief
 # is built, so a `measuredLevel` -> `level` slip in the file that actually gets
 # written to ~/.claude/handoffs/ is invisible to the payload check.
-TAKEOVER_MD="$(HOME="$FAKE" node "$TRAIL_MJS" takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
-HANDOFF_MD="$(HOME="$FAKE" node "$TRAIL_MJS" handoff bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
+TAKEOVER_MD="$(trailrun takeover bbbbbbbb-0000-0000-0000-000000000002 --all --force --no-record 2>/dev/null)"
+HANDOFF_MD="$(trailrun handoff bbbbbbbb-0000-0000-0000-000000000002 --all --force 2>/dev/null)"
 # The line labelled "measured" must carry the MEASURED reason. Asserting only the
 # level cannot see a `measuredReason` -> `reason` slip, because the authorization
 # sentence sits on its own separate line either way.
@@ -536,8 +545,8 @@ fi
 # V16b — the human-readable carrier. Every other check reads --json, so the four
 # verdict-guidance lines were pinned as strings but never as attached to the right
 # level: exchanging two guards left both suites green.
-SHOW_BUSY="$(HOME="$FAKE" node "$TRAIL_MJS" show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git 2>/dev/null)"
-SHOW_FORCED="$(HOME="$FAKE" node "$TRAIL_MJS" show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git --force 2>/dev/null)"
+SHOW_BUSY="$(trailrun show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git 2>/dev/null)"
+SHOW_FORCED="$(trailrun show bbbbbbbb-0000-0000-0000-000000000002 --all --no-git --force 2>/dev/null)"
 V16B_BAD=""
 case "$SHOW_BUSY" in *"TAKEOVER BUSY"*) ;; *) V16B_BAD="$V16B_BAD no-busy-line" ;; esac
 case "$SHOW_BUSY" in *"hazard report, not a refusal"*) ;; *) V16B_BAD="$V16B_BAD busy-advice-missing" ;; esac
@@ -549,8 +558,8 @@ case "$SHOW_FORCED" in *"hazard report, not a refusal"*) V16B_BAD="$V16B_BAD con
 # The other two levels, because a probe showed the FREE and PROBABLY_FREE entries
 # could be swapped with every check still green: their advice was pinned as text
 # in the table but never as attached to the level that emits it.
-SHOW_FREE="$(HOME="$FAKE" node "$TRAIL_MJS" show ffffffff-0000-0000-0000-000000000006 --all --no-git 2>/dev/null)"
-SHOW_PF="$(HOME="$FAKE" node "$TRAIL_MJS" show aaaaaaaa-0000-0000-0000-000000000001 --all --no-git 2>/dev/null)"
+SHOW_FREE="$(trailrun show ffffffff-0000-0000-0000-000000000006 --all --no-git 2>/dev/null)"
+SHOW_PF="$(trailrun show aaaaaaaa-0000-0000-0000-000000000001 --all --no-git 2>/dev/null)"
 case "$SHOW_FREE" in *"TAKEOVER FREE"*) ;; *) V16B_BAD="$V16B_BAD no-free-line" ;; esac
 case "$SHOW_FREE" in *"Nothing holds this worktree"*) ;; *) V16B_BAD="$V16B_BAD free-advice-missing" ;; esac
 case "$SHOW_FREE" in *"Proceed, but tell the user not to type"*) V16B_BAD="$V16B_BAD free-shows-probably-free-advice" ;; esac

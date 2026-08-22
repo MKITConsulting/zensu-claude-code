@@ -182,6 +182,13 @@
           "timeoutMs": 180000
         },
         {
+          "id": "session-trail-lineage",
+          "runner": "bash",
+          "path": "tests/structure/test-session-trail-lineage.sh",
+          "args": [],
+          "timeoutMs": 900000
+        },
+        {
           "id": "vcs-review-marker-reconcile",
           "runner": "bash",
           "path": "tests/structure/test-vcs-review-marker-reconcile.sh",
