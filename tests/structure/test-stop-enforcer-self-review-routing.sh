@@ -82,7 +82,7 @@ if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"
   case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
   # The total is the real floor; the pass floor is lower because the symlink and
   # FIFO cases skip themselves where the platform cannot create one.
-  if [ "$UNIT_TOTAL" -ge 33 ] && [ "$UNIT_PASS" -ge 31 ]; then
+  if [ "$UNIT_TOTAL" -ge 37 ] && [ "$UNIT_PASS" -ge 35 ]; then
     check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
   else
     check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases" FAIL
@@ -544,6 +544,33 @@ if [ -f "$SIDECAR7B" ] \
   check "T36a the real capture mints the sidecar /zensu:doctor reads" PASS
 else
   check "T36a the real capture mints the sidecar /zensu:doctor reads" FAIL
+fi
+
+# The OTHER arm of the retry sanction, which nothing in this tree asserted. T15a
+# pins that ONE further attempt is offered; the withdrawal that fires once the
+# scanner reports two or more refusals was untested in both directions, and it is
+# the arm that carries the whole point of counting: without it this branch
+# re-licenses a retry on every blocked Stop and becomes the naive loop its own
+# reason text forbids two sentences earlier. The observed session took three
+# refusals, so this is the arm that should have governed its 2nd and 3rd Stop.
+# Reuses SID7B rather than arming a session of its own — one extra Stop, no extra
+# session, on a chain far below the release cap.
+TRANSCRIPT_DENIED2="$STATE_DIR/transcript-denied-twice.jsonl"
+cat >"$TRANSCRIPT_DENIED2" <<'DENIED2_EOF'
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t1","name":"Agent","input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"Permission for this action was denied by the Claude Code auto mode classifier. Reason: Blocked by classifier."}]}}
+{"type":"assistant","message":{"content":[{"type":"tool_use","id":"t2","name":"Agent","input":{"subagent_type":"zensu:code-reviewer","prompt":"PRE-MERGED FINDINGS (fan-out)"}}]}}
+{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"t2","is_error":true,"content":"Permission for this action was denied by the Claude Code auto mode classifier. Reason: Blocked by classifier."}]}}
+DENIED2_EOF
+OUT7C="$(stop_run '{"session_id":"'"$SID7B_RAW"'","transcript_path":"'"$TRANSCRIPT_DENIED2"'"}')"
+REASON7C="$(printf '%s' "$OUT7C" | reason)"
+if [ "$(printf '%s' "$OUT7C" | decision)" = "block" ] \
+  && printf '%s' "$REASON7C" | grep -qF 'refused by the HOST permission layer, not by a Zensu gate' \
+  && printf '%s' "$REASON7C" | grep -qF 'A retry has already been spent and was refused again' \
+  && ! printf '%s' "$REASON7C" | grep -qF 'make exactly ONE further spawn attempt'; then
+  check "T37 a second refusal withdraws the retry sanction instead of re-offering it" PASS
+else
+  check "T37 a second refusal withdraws the retry sanction instead of re-offering it" FAIL
 fi
 
 # The observed gap this capture came from was NOT a detection failure: the

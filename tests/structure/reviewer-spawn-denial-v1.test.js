@@ -508,3 +508,90 @@ test('the captured host toolDenialKind is present and unused by the scanner', ()
   const body = src.slice(src.indexOf('const fs = require'));
   assert.ok(!body.includes('toolDenialKind'), 'the scanner must not read the host field');
 });
+
+// --- The positive direction of the two clamps ------------------------------
+//
+// Both existing clamp cases put the denial OUTSIDE the retained window and
+// assert `none`, so together they prove only that the scanner discards what it
+// must. Neither proves it still FINDS a denial that is INSIDE the window, which
+// is the shape every real session has: the captured 2.1.237 transcript was
+// 5.5 MB with its refusal at roughly offset 5.08 MB, comfortably inside the last
+// MAX_TAIL_BYTES. Break the tail read to return nothing and both existing cases
+// stay green, because "found nothing" is what they already expect.
+
+test('a denial inside the retained tail of an oversized transcript still reports blocked', () => {
+  seq += 1;
+  const file = path.join(tmpRoot, 'huge-tail-' + seq + '.jsonl');
+  const filler = JSON.stringify(assistantText('x'.repeat(4096))) + '\n';
+  fs.writeFileSync(file, '');
+  const chunk = filler.repeat(256);
+  let written = 0;
+  while (written < denial.MAX_TAIL_BYTES + chunk.length) {
+    fs.appendFileSync(file, chunk);
+    written += chunk.length;
+  }
+  fs.appendFileSync(file, JSON.stringify(toolUse('t1', REVIEWER)) + '\n'
+    + JSON.stringify(toolResult('t1', CLASSIFIER_TEXT, true)) + '\n');
+  assert.ok(fs.statSync(file).size > denial.MAX_TAIL_BYTES, 'precondition: the byte clamp engages');
+  const report = denial.scanTranscript(file);
+  assert.equal(report.status, 'blocked');
+  assert.equal(report.kind, 'auto-mode-classifier');
+  assert.equal(report.spawns, 1);
+  assert.equal(report.denials, 1);
+});
+
+// The line clamp's own positive direction. Kept separate from the byte clamp
+// above because they are separate bounds: this file stays well under
+// MAX_TAIL_BYTES, so the only thing that can discard the denial is MAX_LINES.
+test('a denial inside the last MAX_LINES records still reports blocked', () => {
+  seq += 1;
+  const file = path.join(tmpRoot, 'many-lines-tail-' + seq + '.jsonl');
+  const filler = '{"type":"assistant","message":{"content":[]}}\n'.repeat(denial.MAX_LINES + 10);
+  fs.writeFileSync(file, filler
+    + JSON.stringify(toolUse('t1', REVIEWER)) + '\n'
+    + JSON.stringify(toolResult('t1', CLASSIFIER_TEXT, true)) + '\n');
+  assert.ok(fs.statSync(file).size < denial.MAX_TAIL_BYTES, 'precondition: inside the byte bound');
+  const report = denial.scanTranscript(file);
+  assert.equal(report.status, 'blocked');
+  assert.equal(report.denials, 1);
+});
+
+// `denials` is not decoration. hooks/stop-chain-enforcer.sh WITHDRAWS the
+// one-further-attempt sanction once it reads 2 or more, so a count that
+// saturated at 1 would re-license a retry on every blocked Stop — the naive loop
+// the reason text forbids two sentences earlier. Every existing case asserts 0
+// or 1, so nothing pinned the accumulation itself.
+test('every refusal in the scanned window is counted, not just the last', () => {
+  const file = transcript([
+    toolUse('t1', REVIEWER),
+    toolResult('t1', CLASSIFIER_TEXT, true),
+    toolUse('t2', REVIEWER),
+    toolResult('t2', CLASSIFIER_TEXT, true),
+  ]);
+  const report = denial.scanTranscript(file);
+  assert.equal(report.status, 'blocked');
+  assert.equal(report.spawns, 2);
+  assert.equal(report.denials, 2);
+});
+
+// The flag is the port seam the module header names: a host whose reviewer
+// carries a different subagent type needs no fork of the walk. The OPTION on
+// scanTranscript is covered above, but nothing drove main()'s argv parsing, so
+// deleting that branch outright left every case in this file green.
+test('the CLI --subagent-type flag selects what counts as the reviewer', () => {
+  const other = 'acme:reviewer';
+  const file = transcript([
+    toolUse('t1', other),
+    toolResult('t1', CLASSIFIER_TEXT, true),
+  ]);
+  const { execFileSync } = require('node:child_process');
+  const script = path.join(__dirname, '..', '..', 'hooks', 'lib', 'reviewer-spawn-denial-v1.js');
+  const byDefault = execFileSync(process.execPath, [script, '--transcript', file], { encoding: 'utf8' });
+  assert.match(byDefault, /^status=none /, 'the default reviewer must not match this spawn');
+  const selected = execFileSync(
+    process.execPath,
+    [script, '--transcript', file, '--subagent-type', other],
+    { encoding: 'utf8' },
+  );
+  assert.match(selected, /^status=blocked kind=auto-mode-classifier tool=Agent spawns=1 denials=1\n$/);
+});
