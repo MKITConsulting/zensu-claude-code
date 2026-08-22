@@ -1273,7 +1273,10 @@ fi
 CONC_PROJECT="$ROOT/concurrent-project"
 mkdir -p "$CONC_PROJECT/tree-a" "$CONC_PROJECT/tree-b"
 CONC_A="$(cd "$CONC_PROJECT/tree-a" && pwd -P)"
-CONC_B="$(cd "$CONC_PROJECT/tree-b" && pwd -P)"
+CONC_ALIAS="$ROOT/concurrent-alias"
+CONC_ALIASED=false
+make_directory_symlink "$CONC_PROJECT" "$CONC_ALIAS" && CONC_ALIASED=true
+CONC_B="$CONC_ALIAS/tree-b"
 CONC_OK=true
 autopilot_begin_run run_conc_a session_conc_a "$CONC_PROJECT" false true "$CONC_A" >/dev/null \
   || CONC_OK=false
@@ -1293,12 +1296,16 @@ fi
 
 # Each owner sees only its own run: the sibling is neither an orphan nor a
 # hidden run from the other session's position.
-CONC_B_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$CONC_B")"
+CONC_B_NATIVE="$(native_directory "$CONC_B")" || CONC_B_NATIVE=""
+CONC_B_JSON="$(node -e 'process.stdout.write(JSON.stringify(process.argv[1]))' "$CONC_B_NATIVE")"
 # A third owner holds no run at all, so its read must report absence (rc=1)
 # rather than seeing either sibling — that is the invisibility this label names.
 autopilot_read_active "$CONC_PROJECT" session_conc_observer >/dev/null 2>&1
 CONC_OBSERVER_RC=$?
-if json_ok "$ROOT/conc-a.json" 'value.ownerSessionId === "session_conc_a"' \
+if [ "$CONC_ALIASED" = true ] \
+  && [ -n "$CONC_B_NATIVE" ] \
+  && [ "$CONC_B" != "$CONC_B_NATIVE" ] \
+  && json_ok "$ROOT/conc-a.json" 'value.ownerSessionId === "session_conc_a"' \
   && json_ok "$ROOT/conc-b.json" 'value.ownerSessionId === "session_conc_b"' \
   && [ "$CONC_OBSERVER_RC" -eq 1 ] \
   && json_ok "$(autopilot_run_file run_conc_b "$CONC_PROJECT")" \
@@ -1306,6 +1313,28 @@ if json_ok "$ROOT/conc-a.json" 'value.ownerSessionId === "session_conc_a"' \
   check "W2 the run records its working tree and stays invisible to the sibling owner" PASS
 else
   check "W2 workspace recorded and sibling run invisible" FAIL
+fi
+
+CONC_SPELLING_OK=true
+if [ "$CONC_ALIASED" = true ] && [ -n "$CONC_B_NATIVE" ] && [ "$CONC_B" != "$CONC_B_NATIVE" ]; then
+  CONC_HOLDER_BEFORE="$(file_digest "$(autopilot_run_file run_conc_b "$CONC_PROJECT")" 2>/dev/null || true)"
+  CONC_POINTER_BEFORE="$(file_digest "$(autopilot_active_file "$CONC_PROJECT" session_conc_b)" 2>/dev/null || true)"
+  { [ -n "$CONC_HOLDER_BEFORE" ] && [ -n "$CONC_POINTER_BEFORE" ]; } || CONC_SPELLING_OK=false
+  CONC_SPELLING="$(autopilot_begin_run run_conc_e session_conc_e "$CONC_PROJECT" false true "$CONC_B" 2>&1)" \
+    && CONC_SPELLING_OK=false
+  printf '%s' "$CONC_SPELLING" | grep -qF 'workspace held by nonterminal run run_conc_b' || CONC_SPELLING_OK=false
+  [ ! -e "$CONC_PROJECT/.zensu/state/autopilot-run-run_conc_e.json" ] || CONC_SPELLING_OK=false
+  [ "$(file_digest "$(autopilot_run_file run_conc_b "$CONC_PROJECT")" 2>/dev/null || true)" = "$CONC_HOLDER_BEFORE" ] \
+    || CONC_SPELLING_OK=false
+  [ "$(file_digest "$(autopilot_active_file "$CONC_PROJECT" session_conc_b)" 2>/dev/null || true)" = "$CONC_POINTER_BEFORE" ] \
+    || CONC_SPELLING_OK=false
+else
+  CONC_SPELLING_OK=false
+fi
+if [ "$CONC_SPELLING_OK" = true ]; then
+  check "W2b a held working tree is refused when addressed by a spelling other than the recorded one" PASS
+else
+  check "W2b other-spelling begin refused with the holder record unchanged" FAIL
 fi
 
 CONC_REFUSAL_OK=true
