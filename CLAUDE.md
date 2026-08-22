@@ -1419,25 +1419,44 @@ history rather than refusing v1 records — so `SCHEMA_NEWER`/`SCHEMA_OLDER` are
 reachable only from a hand-planted record. Closing this means either dropping the
 derived segment or having `readEdges` enumerate sibling `v*` directories.
 
-**`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is UNMEASURED.**
-It is `timeoutMs: 900000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`,
-chosen because the suite grew to 70 checks plus a `node --test` suite plus two
-`git init`s and, on win32, one PowerShell spawn per node process. The only wall clock
-taken is **31 s on macOS** (measured 2026-08-22, idle machine, at 66 checks; the suite is 70 now). An earlier
-note here said ~4 s; that figure predated the suite roughly doubling and is corrected
-rather than left standing, because it was the number the 900000 ceiling was reasoned
-against. Budget against the first green Windows run, not against the
-ceiling. **The shard budget binds FIRST and is the tighter of the two:** `windows-shard-3`
-carries a `profileTimeoutMs` of 1800000 and this suite sits there at 900000 ALONGSIDE
-`deferred-reset-races` at the same 900000, plus five more suites whose caps sum to a
-further 1260000. Two 900000 caps under
-one 1800000 profile means whichever runs second cannot receive its own ceiling — the same
-failure §Host-Refused Reviewer Spawn records verbatim ("read the shard's remaining budget",
-not the suite's `timeoutMs`). Take the first green Windows figure for BOTH suites before
-trusting the placement; a shard abort truncates the tail of the second one silently. The
-caveat lives here and NOT in the manifest: `tests/run-profile.js`'s `SUITE_KEYS` rejects
-any key outside `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at
-manifest load.
+**`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED.**
+It is `timeoutMs: 900000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`.
+First green-shard measurement, run 32598374524 on `win25-vs2026`: **273905 ms at 70
+checks** — 30% of its own cap, against **31 s on macOS** (measured 2026-08-22, idle
+machine, at 66 checks). Windows is roughly 9x slower here, which is the ratio to
+budget new checks against. An earlier note in this section claimed ~4 s on macOS;
+that figure predated the suite roughly doubling and was what the 900000 ceiling had
+originally been reasoned against.
+**The shard budget binds FIRST and is the tighter of the two:** `windows-shard-3`
+carries a `profileTimeoutMs` of 1800000, and that same run consumed **1213416 ms**
+of it across seven suites — `deferred-reset-races` alone took 584150 ms at the same
+900000 cap, plus five more suites whose caps sum to a further 1260000. Two 900000
+caps under one 1800000 profile means whichever runs second cannot receive its own
+ceiling; the same failure §Host-Refused Reviewer Spawn records verbatim ("read the
+shard's remaining budget", not the suite's `timeoutMs`). At 1213416 of 1800000 there
+is roughly 33% headroom left, and a shard abort truncates the tail of the second
+suite silently. The caveat lives here and NOT in the manifest:
+`tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
+`{id, runner, path, args, timeoutMs}` and aborts every Windows shard at manifest load.
+
+**Two fixture defects in that suite were invisible on POSIX and cost a whole CI
+round**, and both are the MSYS/native split this file already documents for
+`bash-source-write-parse.js`. Neither was a product defect — the product is native
+on both hosts — but both made real checks fail for a reason unrelated to their
+subject:
+
+- **`$$` is not a pid `process.kill(pid, 0)` can see.** Under Git Bash it is an MSYS
+  pid from a different namespace, so the shell's own pid never reads as live and
+  every liveness-dependent check (`L8b`, `L16`, `L24`) failed on that premise rather
+  than on its own. The suite now spawns a detached node helper and takes the pid
+  NODE reports, which is in the namespace the product consults on every host, and
+  retires it in the EXIT trap. `L0b` is the premise check that named this on the
+  first Windows run instead of letting three checks fail opaquely — keep it.
+- **A hand-written fixture record must carry the spelling production writes.** `L25`
+  interpolated a shell path into an edge record while node's `process.cwd()` reports
+  the native one, so repo scoping found nothing. Every path a shell writes into a
+  fixture here goes through `hostpath` (`cygpath -m`), the same helper the path
+  comparisons already used.
 
 **The suite isolates by `--config-dir` and `$ZENSU_CCD_STORE`, deliberately not by
 `$HOME`.** Its sibling `test-session-trail-verdict.sh` redirects HOME and therefore

@@ -76,7 +76,7 @@ if [ -z "$FAKE" ]; then
   check "L0 could not create the synthetic root" FAIL
   report; exit 1
 fi
-trap 'rm -rf "$FAKE"' EXIT
+trap 'rm -rf "$FAKE"; [ -n "${LIVE_SLEEPER:-}" ] && kill "$LIVE_SLEEPER" 2>/dev/null; true' EXIT
 
 CFG="$FAKE/cfg"
 STORE="$FAKE/store"
@@ -196,7 +196,14 @@ SID_C="33333333-0000-0000-0000-00000000000c"
 SID_D="44444444-0000-0000-0000-00000000000d"
 SID_E="55555555-0000-0000-0000-00000000000e"
 
-LIVE_PID="$$"
+LIVE_SLEEPER="$(node -e '
+const { spawn } = require("node:child_process");
+const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 1800000)"], { stdio: "ignore", detached: true });
+process.stdout.write(String(child.pid));
+child.unref();
+' 2>/dev/null)"
+case "$LIVE_SLEEPER" in ''|*[!0-9]*) LIVE_SLEEPER="" ;; esac
+LIVE_PID="${LIVE_SLEEPER:-$$}"
 DEAD_PID=2147483647
 
 # One shared worktree name across A/B/C: a handover continues the SAME work, and
@@ -637,7 +644,7 @@ if [ -d "$REPO_A/.git" ] && [ -d "$REPO_B/.git" ]; then
   reset_ledger
   mkdir -p "$CFG/zensu/session-lineage/v1/edges"
   printf '{"schemaVersion":1,"from":{"sessionId":"%s","worktree":"%s"},"to":{"sessionId":"%s","worktree":"%s"},"repo":{"name":"alpha","root":"%s"},"reason":"rate_limit","inferred":false,"recordedAt":"2026-01-01T00:00:00.000Z","recordedBy":"adopt"}' \
-    "$SID_A" "$REPO_A" "$SID_B" "$REPO_A" "$REPO_A" > "$CFG/zensu/session-lineage/v1/edges/1000000001-bbbbbbbb.json"
+    "$SID_A" "$(hostpath "$REPO_A")" "$SID_B" "$(hostpath "$REPO_A")" "$(hostpath "$REPO_A")" > "$CFG/zensu/session-lineage/v1/edges/1000000001-bbbbbbbb.json"
   IN_A="$(cd "$REPO_A" && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --json --config-dir "$CFG" 2>&1)"
   IN_B="$(cd "$REPO_B" && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --json --config-dir "$CFG" 2>&1)"
   [ "$(jq_field "$IN_A" edgeCount)" = "1" ] && check "L25 a repo-scoped lineage finds the handover in the repo the work belongs to" PASS || check "L25 repo-scoped lineage finds the handover (got $(jq_field "$IN_A" edgeCount))" FAIL
