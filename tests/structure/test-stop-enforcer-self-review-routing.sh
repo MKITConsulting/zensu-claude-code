@@ -82,7 +82,7 @@ if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"
   case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
   # The total is the real floor; the pass floor is lower because the symlink and
   # FIFO cases skip themselves where the platform cannot create one.
-  if [ "$UNIT_TOTAL" -ge 29 ] && [ "$UNIT_PASS" -ge 27 ]; then
+  if [ "$UNIT_TOTAL" -ge 33 ] && [ "$UNIT_PASS" -ge 31 ]; then
     check "T26 reviewer-spawn-denial-v1 unit suite passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
   else
     check "T26 reviewer-spawn-denial-v1 unit suite registered only $UNIT_PASS/$UNIT_TOTAL cases" FAIL
@@ -494,6 +494,77 @@ if [ "$PRE22" = "present" ] \
   check "T22 a successful reviewer result quoting the denial literal is not a refusal" PASS
 else
   check "T22 a successful reviewer result quoting the denial literal is not a refusal (pre=$PRE22)" FAIL
+fi
+
+# --- Scenario 7b: the same routing, driven by a REAL host capture ------------
+# Every fixture above is hand-authored, so together they can only pin what this
+# repo BELIEVES the host emits. fixtures/reviewer-spawn-denied-transcript.v1.jsonl
+# is a redaction of two entries taken verbatim out of a real Claude Code 2.1.237
+# session whose zensu:code-reviewer spawns the auto mode classifier refused: the
+# tool_use/tool_result pair, the is_error flag and the full refusal body are the
+# original bytes. The synthetic TRANSCRIPT_DENIED above is a faithful reduction
+# of exactly this, and this scenario is what proves that claim rather than
+# asserting it — a host rewording that the hand-authored envelope would keep
+# passing fails here.
+#
+# Deliberately placed beside scenario 7 rather than at the tail of the file: on a
+# TIMED_OUT Windows shard the tail is what silently goes unverified, and this is
+# the only check in the suite reading bytes the host actually produced. It costs
+# one session and one Stop. The recorded Windows range (985846-1274496 ms against
+# a 1500000 ms cap) PREDATES this scenario and does not cover it — the slow sample
+# already sat at 85% of the cap, so treat the headroom as unmeasured until a green
+# Windows run reports a new figure.
+#
+# It is NOT a re-run of T13 with a different file. T13 proves the branch renders
+# the right cause and remedy; this proves the branch is reachable AT ALL from the
+# shape the host really writes.
+SID7B_RAW="stop-reviewer-denied-capture"
+start_session "$SID7B_RAW"
+SID7B="$STARTED_SESSION_KEY"
+SID7B_PROJECT="$STARTED_PROJECT_ROOT"
+bash "$LOG" --tdd-begin --session "$SID7B" >/dev/null
+bash "$LOG" --tdd-complete --session "$SID7B" >/dev/null
+TRANSCRIPT_CAPTURE="$PLUGIN_DIR/tests/structure/fixtures/reviewer-spawn-denied-transcript.v1.jsonl"
+OUT7B="$(stop_run '{"session_id":"'"$SID7B_RAW"'","transcript_path":"'"$TRANSCRIPT_CAPTURE"'"}')"
+REASON7B="$(printf '%s' "$OUT7B" | reason)"
+if [ "$(printf '%s' "$OUT7B" | decision)" = "block" ] \
+  && printf '%s' "$REASON7B" | grep -qF 'refused by the HOST permission layer, not by a Zensu gate' \
+  && printf '%s' "$REASON7B" | grep -qF 'auto mode classifier' \
+  && printf '%s' "$REASON7B" | grep -qF '"Agent(zensu:code-reviewer)" to permissions.allow' \
+  && ! printf '%s' "$REASON7B" | grep -qF 'Resume the /zensu:tdd Phase 6 review sequence'; then
+  check "T36 the real 2.1.237 host refusal routes to the denial branch" PASS
+else
+  check "T36 the real 2.1.237 host refusal routes to the denial branch" FAIL
+fi
+SIDECAR7B="$SID7B_PROJECT/.zensu/state/reviewer-spawn-denied-$SID7B.json"
+if [ -f "$SIDECAR7B" ] \
+  && node -e 'const s=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));
+    process.exit(s.schemaVersion===1&&s.kind==="auto-mode-classifier"
+      &&s.subagentType==="zensu:code-reviewer"&&Number.isFinite(s.detectedAtMs)?0:1)' "$SIDECAR7B"; then
+  check "T36a the real capture mints the sidecar /zensu:doctor reads" PASS
+else
+  check "T36a the real capture mints the sidecar /zensu:doctor reads" FAIL
+fi
+
+# The observed gap this capture came from was NOT a detection failure: the
+# session ran a plugin installation that predated this module entirely, so the
+# probe's own guard returned before node was ever invoked and every Stop kept the
+# ordinary directive. That is the intended fail-open direction and the reason
+# /zensu:doctor stayed silent, so it is pinned here rather than left implicit.
+# Structural, not behavioral: the functional bite needs a full plugin-tree copy
+# this file's Windows budget cannot afford (same reason T33 is structural). What
+# it catches is the guard being dropped or reordered below the invocation, which
+# would turn a pre-module installation from silently undiagnosed into a probe
+# that runs `node` on a path it has not shape-checked.
+PROBE_SRC="$(awk '/^reviewer_spawn_denial_probe\(\) \{/,/^\}/' "$PLUGIN_DIR/hooks/stop-chain-enforcer.sh")"
+PROBE_LIB_TEST="$(printf '%s' "$PROBE_SRC" | grep -n '\[ -f "\$lib" \]' | head -1 | cut -d: -f1)"
+PROBE_NODE_CALL="$(printf '%s' "$PROBE_SRC" | grep -n 'node "\$lib"' | head -1 | cut -d: -f1)"
+if [ -n "$PROBE_SRC" ] && [ -n "$PROBE_LIB_TEST" ] && [ -n "$PROBE_NODE_CALL" ] \
+  && [ "$PROBE_LIB_TEST" -lt "$PROBE_NODE_CALL" ] \
+  && printf '%s' "$PROBE_SRC" | grep -qF '[ -f "$lib" ] && [ ! -L "$lib" ] || return 0'; then
+  check "T36b a plugin installation without the module fails open, before any node call" PASS
+else
+  check "T36b a plugin installation without the module fails open, before any node call" FAIL
 fi
 
 # --- Scenario 8: the note must not outlive the chain it describes ------------

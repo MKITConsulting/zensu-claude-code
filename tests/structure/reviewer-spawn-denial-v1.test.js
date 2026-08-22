@@ -430,3 +430,81 @@ test('the CLI prints one parsable status line and never fails', () => {
   const noArgs = execFileSync(process.execPath, [script], { encoding: 'utf8' });
   assert.match(noArgs, /^status=none /);
 });
+
+// --- The committed real-host capture -------------------------------------
+//
+// Every case above drives a HAND-AUTHORED envelope, which can only ever pin what
+// this repo believes the host emits. The fixture below is a redaction of two
+// entries taken verbatim out of a real Claude Code 2.1.237 session in which three
+// consecutive `zensu:code-reviewer` spawns were refused by the auto mode
+// classifier: the `tool_use`/`tool_result` pair, the host's `is_error` flag and
+// the full refusal body are the original bytes; only the prompt, the ids, the
+// cwd and the branch are placeholders. It is the analogue of
+// fixtures/exitplanmode-posttooluse-payload.v1.json — the shape this scanner was
+// built against, captured rather than assumed.
+//
+// It cannot observe live harness drift; only a fresh capture can. What it DOES
+// catch is a change to this module that stops matching what the host really
+// wrote, which no synthetic envelope can prove.
+const CAPTURE = path.join(__dirname, 'fixtures', 'reviewer-spawn-denied-transcript.v1.jsonl');
+
+test('the committed real-host classifier refusal reports blocked', () => {
+  const report = denial.scanTranscript(CAPTURE);
+  assert.equal(report.status, 'blocked');
+  assert.equal(report.kind, 'auto-mode-classifier');
+  assert.equal(report.toolName, 'Agent');
+  assert.equal(report.subagentType, REVIEWER);
+  assert.equal(report.spawns, 1);
+  assert.equal(report.denials, 1);
+});
+
+// A redaction that gutted the capture would leave the case above passing for the
+// wrong reason — or failing with no hint why. These are the three conditions the
+// contract keys on, asserted against the file itself.
+test('the committed capture still carries all three conditions verbatim', () => {
+  const lines = fs.readFileSync(CAPTURE, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2, 'the capture is exactly the spawn and its result');
+  const [use, res] = lines.map((l) => JSON.parse(l));
+  assert.equal(use.version, '2.1.237', 'the capture names the build it came from');
+  assert.equal(res.version, '2.1.237');
+
+  const call = use.message.content[0];
+  assert.equal(call.type, 'tool_use');
+  assert.ok(denial.SPAWN_TOOL_NAMES.includes(call.name));
+  assert.equal(call.input.subagent_type, REVIEWER);
+
+  const result = res.message.content[0];
+  assert.equal(result.type, 'tool_result');
+  assert.equal(result.tool_use_id, call.id, 'condition 1: the result is keyed to the spawn');
+  assert.equal(result.is_error, true, "condition 2: the host's own error flag");
+  assert.equal(typeof result.content, 'string', 'the host writes the body as a bare string');
+  const marker = denial.DENIAL_MARKERS.find((m) => result.content.startsWith(m.text));
+  assert.ok(marker, 'condition 3: the body STARTS with a marker');
+  assert.equal(marker.kind, 'auto-mode-classifier');
+});
+
+// The prefix rule is the whole reason a substring search was rejected, and this
+// is the only place it is measured against bytes the host actually produced: the
+// marker sits at offset 0 and the real body runs on for hundreds of characters
+// of advice past it, including a sentence that names permissions.
+test('the captured refusal carries the marker as a strict prefix with a long tail', () => {
+  const res = JSON.parse(fs.readFileSync(CAPTURE, 'utf8').trim().split('\n')[1]);
+  const body = res.message.content[0].content;
+  const marker = denial.DENIAL_MARKERS[0].text;
+  assert.equal(body.indexOf(marker), 0);
+  assert.ok(body.length > marker.length + 400, 'the host tail is far longer than the contract');
+  assert.ok(body.startsWith(marker + ' Reason: '), 'the tail begins with the uncontracted Reason');
+});
+
+// The host writes a `toolDenialKind` beside `message`, and the module header
+// records that it was seen and declined. Pinning it here keeps that note honest:
+// the capture proves the field exists, and the verdict above proves nothing in
+// this module depends on it.
+test('the captured host toolDenialKind is present and unused by the scanner', () => {
+  const res = JSON.parse(fs.readFileSync(CAPTURE, 'utf8').trim().split('\n')[1]);
+  assert.equal(res.toolDenialKind, 'automode-blocked');
+  const src = fs.readFileSync(
+    path.join(__dirname, '..', '..', 'hooks', 'lib', 'reviewer-spawn-denial-v1.js'), 'utf8');
+  const body = src.slice(src.indexOf('const fs = require'));
+  assert.ok(!body.includes('toolDenialKind'), 'the scanner must not read the host field');
+});
