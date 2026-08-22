@@ -729,6 +729,441 @@ else
   check "R28 the shipped --truncate recipe works with CLAUDE_PROJECT_DIR unset (rc=$RC)" FAIL
 fi
 
+# ── R44: the DESTRUCTIVE mode binds even with no CLAUDE_PROJECT_DIR ──
+# `resolveArtifactTarget` skips its binding block when `expectedRoot` is
+# undefined, and `append` maps an empty CLAUDE_PROJECT_DIR to exactly that, so
+# containment reduces to SHAPE: any absolute --log resolving to a real
+# <anyroot>/.zensu/logs/<name>.log is an accepted destination. Since the shipped
+# recipe runs with that variable unset (R28), unbound is the DEFAULT path, and
+# the redirect-carrying form this verb replaced WAS judged against the session
+# root by the source-write gate — so the change narrowed an existing control.
+#
+# The bind is scoped to `--truncate` on purpose, and the scope was measured
+# rather than assumed: applying cwd-or-ancestor to every mode broke R1/R2/R3/R3a
+# and R9, which call append with an absolute --log from an unrelated cwd, as do
+# the log commands of the chain that wrote this check. An unbound append adds a
+# line to a foreign audit log; an unbound --truncate DESTROYS one, and only the
+# second is worth denying a working call shape over. The additive residual is
+# therefore open by decision, and is documented as a bound rather than dropped.
+#
+# R28 is the discrimination partner: the shipped --truncate recipe runs from the
+# project root with a relative path, so the cwd IS the derived root.
+S3_A="$WORK/xproj/a/.zensu/logs"
+S3_B="$WORK/xproj/b/.zensu/logs"
+mkdir -p "$S3_A" "$S3_B"
+printf 'PRE-EXISTING AUDIT CONTENT OF PROJECT B\n' > "$S3_B/2026-01-01-0044_tdd-b.log"
+( cd "$WORK/xproj/a" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
+  bash "$LOG_HELPER" append --truncate \
+  --log "$S3_B/2026-01-01-0044_tdd-b.log" \
+  --message "WRITTEN FROM PROJECT A" >/dev/null 2>&1 )
+RC44=$?
+if [ "$RC44" -ne 0 ] && ! grep -qF 'WRITTEN FROM PROJECT A' "$S3_B/2026-01-01-0044_tdd-b.log" \
+  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_tdd-b.log"; then
+  check "R44 --truncate with no CLAUDE_PROJECT_DIR refuses a foreign project log" PASS
+else
+  check "R44 --truncate with no CLAUDE_PROJECT_DIR refuses a foreign project log (rc=$RC44)" FAIL
+fi
+
+# ── R44b: the additive mode is deliberately NOT bound — stated, not hidden
+# This pins the accepted residual so that closing it later is a deliberate change
+# rather than an accident, and so that the bound cannot quietly widen either.
+( cd "$WORK/xproj/a" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
+  bash "$LOG_HELPER" append \
+  --log "$S3_B/2026-01-01-0044_tdd-b.log" \
+  --message "ADDITIVE FROM PROJECT A" >/dev/null 2>&1 )
+RC44B=$?
+if [ "$RC44B" -eq 0 ] && grep -qF 'ADDITIVE FROM PROJECT A' "$S3_B/2026-01-01-0044_tdd-b.log" \
+  && grep -qF 'PRE-EXISTING' "$S3_B/2026-01-01-0044_tdd-b.log"; then
+  check "R44b append (additive) across projects is an accepted, documented residual" PASS
+else
+  check "R44b append (additive) across projects is an accepted, documented residual (rc=$RC44B)" FAIL
+fi
+
+# ── R44a: the same bind accepts a project root ABOVE the cwd ─────────
+# The rule is cwd-or-ancestor, not cwd-equality: running the append from a
+# subdirectory of the project is ordinary and must keep working, or the fix would
+# trade one broken default for another.
+S3_SUB="$WORK/xproj/a/src/deep"
+mkdir -p "$S3_SUB"
+( cd "$S3_SUB" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
+  bash "$LOG_HELPER" append --truncate \
+  --log "$S3_A/2026-01-01-0044_tdd-a.log" \
+  --message "FROM A SUBDIRECTORY" >/dev/null 2>&1 )
+RC44A=$?
+if [ "$RC44A" -eq 0 ] && grep -qF 'FROM A SUBDIRECTORY' "$S3_A/2026-01-01-0044_tdd-a.log"; then
+  check "R44a append accepts a project root that is an ancestor of the cwd" PASS
+else
+  check "R44a append accepts a project root that is an ancestor of the cwd (rc=$RC44A)" FAIL
+fi
+
+# ── R45: a write that lands in an orphaned inode is REPORTED ─────────
+# writeArtifactLine judged the descriptor before the write and never again, so a
+# rename arriving between the checks and the write sent the line to an inode no
+# path names any more — and the function still answered written: true. The caller
+# then exits 0 and the model believes the CHECKPOINT landed, while the sweeper
+# reports a clean reason because nothing recorded a loss. This is the mirror of
+# the window the header documents for redactFile, and it was neither guarded nor
+# mentioned. The race is staged deterministically by wrapping fs.writeFileSync:
+# a wall-clock race would be untestable, and the point under test is the
+# POST-write verification, not the scheduler. The control arm is the
+# discrimination partner — without it a re-verify that always refused would pass.
+OUT45="$(node -e '
+  const fs = require("node:fs");
+  const dir = process.argv[3];
+  function run(name, stage) {
+    const p = dir + "/2026-01-01-0045_tdd-" + name + ".log";
+    fs.writeFileSync(p, "");
+    const real = fs.writeFileSync;
+    let done = false;
+    if (stage) {
+      fs.writeFileSync = function (handle) {
+        const r = real.apply(fs, arguments);
+        if (!done && typeof handle === "number") {
+          done = true;
+          fs.renameSync(p, p + ".rotated");
+        }
+        return r;
+      };
+    }
+    try {
+      const m = require(process.argv[1]);
+      return m.writeArtifactLine(p, "CHECKPOINT S4\n", { expectedRoot: process.argv[2] });
+    } finally {
+      fs.writeFileSync = real;
+    }
+  }
+  const ctl = run("ctl", false);
+  const raced = run("raced", true);
+  const bad = [];
+  if (ctl.written !== true || ctl.reason !== "written") bad.push("control=" + JSON.stringify(ctl));
+  if (raced.written !== false || raced.reason !== "concurrent-write") bad.push("raced=" + JSON.stringify(raced));
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$PROJ/.zensu/logs" 2>&1)"
+if [ "$OUT45" = "OK" ]; then
+  check "R45 a write into a renamed-away inode reports concurrent-write" PASS
+else
+  check "R45 a write into a renamed-away inode reports concurrent-write (bad: $OUT45)" FAIL
+fi
+
+# ── R46: a failed replace must not destroy what was there ────────────
+# `replace` opened the target, ran ftruncateSync(fd, 0) and only then wrote, so a
+# write that failed after the truncate left the artifact EMPTY with no recovery
+# path — the destructive half had already committed. The recipe that uses this
+# mode creates the run log, so the content at risk is a session audit trail. The
+# temp+fsync+rename spelling redactFile already uses makes the publish atomic:
+# the previous bytes stay addressable until the rename, and a failure before it
+# changes nothing. The failure is staged by throwing from fs.writeFileSync, which
+# is the one call both the old and the new spelling make with a numeric handle,
+# so the same stage exercises both trees. The control arm proves replace still
+# replaces — a mode that silently stopped writing would satisfy the first arm.
+OUT46="$(node -e '
+  const fs = require("node:fs");
+  const dir = process.argv[3];
+  function run(name, stage) {
+    const p = dir + "/2026-01-01-0046_tdd-" + name + ".log";
+    fs.writeFileSync(p, "OLD CONTENT\n");
+    const real = fs.writeFileSync;
+    if (stage) {
+      fs.writeFileSync = function (handle) {
+        if (typeof handle === "number") throw Object.assign(new Error("staged"), { code: "ENOSPC" });
+        return real.apply(fs, arguments);
+      };
+    }
+    let res;
+    try {
+      const m = require(process.argv[1]);
+      res = m.writeArtifactLine(p, "NEW CONTENT\n", { expectedRoot: process.argv[2], mode: "replace" });
+    } finally {
+      fs.writeFileSync = real;
+    }
+    const leftover = fs.readdirSync(dir).filter(function (n) { return n.indexOf("zensu-redact-") !== -1; });
+    return { res: res, body: fs.readFileSync(p, "utf8"), leftover: leftover.length };
+  }
+  const ctl = run("ctl", false);
+  const hurt = run("hurt", true);
+  const bad = [];
+  if (ctl.res.written !== true || ctl.body !== "NEW CONTENT\n") bad.push("control=" + JSON.stringify(ctl));
+  if (hurt.res.written !== false || hurt.res.reason !== "write-failed") bad.push("verdict=" + JSON.stringify(hurt.res));
+  if (hurt.body !== "OLD CONTENT\n") bad.push("body=" + JSON.stringify(hurt.body));
+  if (ctl.leftover !== 0 || hurt.leftover !== 0) bad.push("leftover=" + ctl.leftover + "/" + hurt.leftover);
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$PROJ/.zensu/logs" 2>&1)"
+if [ "$OUT46" = "OK" ]; then
+  check "R46 a failed replace leaves the previous artifact intact and no temp behind" PASS
+else
+  check "R46 a failed replace leaves the previous artifact intact and no temp behind (bad: $OUT46)" FAIL
+fi
+
+# ── R47: redact does no replacement work when nothing can match ──────
+# append redacts at write time, so the Bash sweep answers no-op for the narrative
+# log on essentially every pass — and it paid the full set of replacement passes
+# to say so, once per in-window tool call, over a file that only grows. The
+# pre-check is a substring scan for the root spellings and the three literal
+# residual prefixes; only a text that could match reaches a regex.
+#
+# The probe counts REPLACEMENT PASSES rather than every String.replace call: the
+# spelling construction and escapeRegExp use replace too, and counting those
+# would measure the wrong thing. A pass is identified by its replacement
+# argument, which is always one of the three placeholders.
+#
+# The two dirty arms are the discrimination partners in both directions — they
+# assert a nonzero pass count AND the redacted output, so a pre-check that
+# returned early for everything would fail here rather than look like a win.
+OUT47="$(node -e '
+  const m = require(process.argv[1]);
+  const opts = { projectRoot: process.argv[2], home: process.argv[3] };
+  const real = String.prototype.replace;
+  let passes = 0;
+  String.prototype.replace = function (pattern, replacement) {
+    if (replacement === "<project>" || replacement === "~" || replacement === "<home>") passes += 1;
+    return real.apply(this, arguments);
+  };
+  function count(text) {
+    passes = 0;
+    const out = m.redact(text, opts);
+    return { passes: passes, out: out };
+  }
+  const CLEAN = "GREEN — PASS (1 attempt, 79 tests) exit=0 result=all green";
+  const clean = count(CLEAN);
+  const dirty = count("cd " + process.argv[2] + " && npm test");
+  const resid = count("cd /Users/otherdev/x && ls");
+  String.prototype.replace = real;
+  const bad = [];
+  if (clean.passes !== 0) bad.push("clean-passes=" + clean.passes);
+  if (clean.out !== CLEAN) bad.push("clean-out=" + JSON.stringify(clean.out));
+  if (dirty.passes === 0) bad.push("dirty-passes=0");
+  if (dirty.out !== "cd <project> && npm test") bad.push("dirty-out=" + JSON.stringify(dirty.out));
+  if (resid.passes === 0) bad.push("resid-passes=0");
+  if (resid.out !== "cd <home>/x && ls") bad.push("resid-out=" + JSON.stringify(resid.out));
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$FAKE_HOME" 2>&1)"
+if [ "$OUT47" = "OK" ]; then
+  check "R47 redact runs no replacement pass over a text nothing can match" PASS
+else
+  check "R47 redact runs no replacement pass over a text nothing can match (bad: $OUT47)" FAIL
+fi
+
+# ── R48: the sweep does not stat an entry it can reject for free ─────
+# lstatSync ran for every extension-matching NAME, including directories and
+# other non-files, and the mtime cutoff was applied only after it. readdir with
+# withFileTypes carries the type, so an entry that cannot be an artifact is
+# rejected without a syscall. This does NOT make the window bound the
+# enumeration — a regular file still costs one stat to read its mtime, and the
+# three prose sites that claimed otherwise are corrected in this step rather than
+# left standing. The cap in the next step is what bounds the work.
+#
+# The tree carries a DIRECTORY named like a log on purpose: it is the entry the
+# old spelling paid a syscall to reject. The returned set is asserted alongside
+# the count, so a sweep that stopped enumerating would fail rather than look
+# cheap.
+SWEEP_COST="$WORK/sweepcost"
+mkdir -p "$SWEEP_COST/.zensu/logs" "$SWEEP_COST/.zensu/plans"
+: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-fresh.log"
+: > "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-old.log"
+mkdir -p "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-adir.log"
+: > "$SWEEP_COST/.zensu/logs/notes.txt"
+touch -t 202601010000 "$SWEEP_COST/.zensu/logs/2026-01-01-0048_tdd-old.log"
+OUT48="$(node -e '
+  const fs = require("node:fs");
+  const root = process.argv[2];
+  const m = require(process.argv[1]);
+  const real = fs.lstatSync;
+  let stats = 0;
+  fs.lstatSync = function (p) {
+    if (String(p).indexOf(root) === 0) stats += 1;
+    return real.apply(fs, arguments);
+  };
+  let out;
+  try {
+    out = m.sweepTargets(root, { windowSeconds: 300 });
+  } finally {
+    fs.lstatSync = real;
+  }
+  const bad = [];
+  if (stats !== 2) bad.push("stats=" + stats);
+  if (out.length !== 1 || !out[0].endsWith("2026-01-01-0048_tdd-fresh.log")) {
+    bad.push("targets=" + JSON.stringify(out));
+  }
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$SWEEP_COST" 2>&1)"
+if [ "$OUT48" = "OK" ]; then
+  check "R48 the sweep rejects a non-file entry without a stat" PASS
+else
+  check "R48 the sweep rejects a non-file entry without a stat (bad: $OUT48)" FAIL
+fi
+
+# ── R49: the sweep processes a bounded number of artifacts ───────────
+# A `git checkout` refreshes every tracked artifact mtime at once, so the next
+# tool call would redact all of them synchronously inside a PostToolUse hook,
+# with no cap and no declared timeout. The cap is per invocation and ordered
+# newest first, so the artifacts most likely to hold a fresh unredacted append
+# are the ones processed; the rest are picked up by later passes while their
+# mtime is still in the window.
+#
+# The uncapped arm is the discrimination partner: it proves the enumeration
+# still sees all 30, so the cap is what bounds the result rather than a sweep
+# that quietly stopped finding things.
+OUT49="$(node -e '
+  const fs = require("node:fs");
+  const root = process.argv[2];
+  const logs = root + "/.zensu/logs";
+  fs.mkdirSync(logs, { recursive: true });
+  fs.mkdirSync(root + "/.zensu/plans", { recursive: true });
+  const now = Date.now();
+  const names = [];
+  for (let i = 0; i < 30; i += 1) {
+    const name = "2026-01-01-00" + (i < 10 ? "0" + i : String(i)) + "_tdd-cap.log";
+    const full = logs + "/" + name;
+    fs.writeFileSync(full, "x\n");
+    const stamp = (now - i * 1000) / 1000;
+    fs.utimesSync(full, stamp, stamp);
+    names.push(name);
+  }
+  const m = require(process.argv[1]);
+  const capped = m.sweepTargets(root, { windowSeconds: 300 });
+  const all = m.sweepTargets(root, { windowSeconds: 300, maxTargets: 100 });
+  const base = capped.map(function (p) { return p.slice(p.lastIndexOf("/") + 1); });
+  const bad = [];
+  if (capped.length !== 25) bad.push("capped=" + capped.length);
+  if (all.length !== 30) bad.push("uncapped=" + all.length);
+  if (base[0] !== names[0]) bad.push("first=" + base[0]);
+  const kept = names.slice(25).filter(function (n) { return base.indexOf(n) !== -1; });
+  if (kept.length) bad.push("kept-oldest=" + kept.join(","));
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$WORK/sweepcap" 2>&1)"
+if [ "$OUT49" = "OK" ]; then
+  check "R49 the sweep caps its targets per invocation, newest mtime first" PASS
+else
+  check "R49 the sweep caps its targets per invocation, newest mtime first (bad: $OUT49)" FAIL
+fi
+
+# ── R50: a bind refusal is reported, not silent ──────────────────────
+# A session bind failure disabled the whole PostToolUse net for the session and
+# exited 0 with nothing on stderr, while this hook header promises that a refusal
+# leaving an artifact un-redacted is written to stderr. Silence there is the
+# worst shape the failure can take: every artifact ships unredacted and nothing
+# records why. The control arm uses the activated session and asserts the note is
+# ABSENT, so a hook that printed it unconditionally would fail here.
+UNBOUND_PLAN="$PROJ/.zensu/plans/2026-01-01-0050_tdd-unbound.md"
+printf '# Plan\nRun: cd "%s" && ls\n' "$FOREIGN_USER" > "$UNBOUND_PLAN"
+ERR50="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
+  "$(json_str "$UNBOUND_PLAN")" "$(json_str "sess-never-activated-$$")" \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+ERR50B="$(printf '{"hook_event_name":"PostToolUse","tool_name":"Write","tool_input":{"file_path":%s},"tool_response":{},"session_id":%s}' \
+  "$(json_str "$UNBOUND_PLAN")" "$(json_str "$SESSION")" \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+if printf '%s' "$ERR50" | grep -qF 'session bind refused' \
+  && ! printf '%s' "$ERR50B" | grep -qF 'session bind refused'; then
+  check "R50 an unbindable session reports the disabled redactor on stderr" PASS
+else
+  check "R50 an unbindable session reports the disabled redactor on stderr (unbound=[$ERR50] bound=[$ERR50B])" FAIL
+fi
+
+# ── R51: the sweep redacts with the same root set the writers use ────
+# `append` and the witness hook each pass [own authority, CLAUDE_PROJECT_DIR];
+# the sweep passed the record root alone. A third redactor with a DIFFERENT root
+# set can rewrite a narrative claim in a way the witness entry was not, and the
+# crosscheck matches those two by equality — so the divergence mints an EVIDENCE
+# GAP that no later sweep can repair, because both files are already written.
+# The union is the fix: redactFile adds the artifact-derived root itself, so
+# passing CLAUDE_PROJECT_DIR alongside the record root makes the sweep apply the
+# union of both writers' sets rather than a set of its own.
+#
+# Two halves. The structural half pins the root set at the one place it is
+# spelled, because a behavioral arm can only observe the divergence on a host
+# where the two authorities disagree — which the fixture deliberately does not
+# arrange. The behavioral half runs the sweep BETWEEN the append and the
+# crosscheck, which is the interleaving nothing exercised: R8 checks the two
+# writers against each other with no sweep in between.
+if printf '%s' "$HOOK_PROGRAM" | grep -qF 'CLAUDE_PROJECT_DIR'; then
+  check "R51 the sweep passes CLAUDE_PROJECT_DIR alongside the record root" PASS
+else
+  check "R51 the sweep passes CLAUDE_PROJECT_DIR alongside the record root" FAIL
+fi
+
+SWEPT_LOG="$PROJ/.zensu/logs/2026-01-01-0051_tdd-swept.log"
+SWEPT_CMD="cd \"$PROJ\" && npm run build"
+printf '{"hook_event_name":"PostToolUse","tool_name":"Bash","tool_input":{"command":%s},"tool_response":{"stdout":%s,"interrupted":false},"session_id":%s}' \
+  "$(json_str "$SWEPT_CMD")" "$(json_str "built in $PROJ")" "$(json_str "$SESSION")" \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" STATE_DIR="$PROJ/.zensu/state" bash "$WITNESS_HOOK" >/dev/null 2>&1
+HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$LOG_HELPER" append \
+  --log "$SWEPT_LOG" \
+  --message "AUDIT — cmd=\"$SWEPT_CMD\" exit=0 result=\"PASS\"" >/dev/null 2>&1
+sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
+if [ -f "$SWEPT_LOG" ] && [ -f "$WITNESS" ] \
+  && node "$CROSSCHECK" --log "$SWEPT_LOG" --witness "$WITNESS" >/dev/null 2>&1; then
+  check "R51a a sweep between the append and the crosscheck keeps the claim corroborated" PASS
+else
+  check "R51a a sweep between the append and the crosscheck keeps the claim corroborated" FAIL
+fi
+
+# ── R52: the scanner guard acts on its own predicate ─────────────────
+# The guard warned "the line will be written unscanned" for a scanner that is
+# missing OR a symlink, and then did nothing: a symlinked-but-valid scanner was
+# still required, still ran, and REFUSED the line. Both halves were wrong at
+# once — the warning claimed an outcome that did not happen, and the refusal
+# arrived after a message saying it would not. A branch that warns about an
+# outcome it does not produce is worse than no branch, because it trains the
+# reader to ignore it.
+#
+# The fix makes the guard consequential: the scanner path is dropped, so the
+# node side takes its own fail-open branch and says so. The control arm runs the
+# identical message against the unmodified plugin root and must still be
+# REFUSED, or the step would have disabled the control instead of fixing it.
+#
+# The key is assembled at runtime rather than written literally: a literal here
+# would be a credential-shaped string in a tracked file, which is exactly what
+# the sibling write-gate exists to stop.
+SCAN_COPY="$WORK/plugin-symlinked-scanner"
+mkdir -p "$SCAN_COPY"
+cp -R "$PLUGIN_DIR/hooks" "$SCAN_COPY/hooks"
+rm -f "$SCAN_COPY/hooks/lib/secret-patterns.js"
+ln -s "$PLUGIN_DIR/hooks/lib/secret-patterns.js" "$SCAN_COPY/hooks/lib/secret-patterns.js"
+FAKE_KEY="AKIA$(head -c 16 /dev/zero | tr '\0' 'Z')"
+SCAN_LOG="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scan.log"
+ERR52="$(HOME="$FAKE_HOME" CLAUDE_PLUGIN_ROOT="$SCAN_COPY" \
+  bash "$SCAN_COPY/hooks/lib/zensu-log.sh" append \
+  --log "$SCAN_LOG" --message "CHECKPOINT key=$FAKE_KEY done" 2>&1 >/dev/null)"
+RC52=$?
+SCAN_CTL="$PROJ/.zensu/logs/2026-01-01-0052_tdd-scanctl.log"
+HOME="$FAKE_HOME" bash "$LOG_HELPER" append \
+  --log "$SCAN_CTL" --message "CHECKPOINT key=$FAKE_KEY done" >/dev/null 2>&1
+RC52B=$?
+if [ "$RC52" -eq 0 ] && [ -f "$SCAN_LOG" ] \
+  && printf '%s' "$ERR52" | grep -qF 'credential scan unavailable' \
+  && [ "$RC52B" -ne 0 ] && [ ! -f "$SCAN_CTL" ]; then
+  check "R52 a symlinked scanner is dropped, not warned about and then used" PASS
+else
+  check "R52 a symlinked scanner is dropped, not warned about and then used (rc=$RC52 ctl=$RC52B err=[$ERR52])" FAIL
+fi
+
+# ── R53: the scan opt-out lands a bypass-ledger entry ────────────────
+# Every sibling gate records `ZENSU_*=off` in the bypass ledger, and the ledger
+# is what the chain-end report renders under "Gates bypassed". The new `append`
+# chokepoint honoured `ZENSU_SECRET_SCAN=off` and recorded nothing, so a session
+# that turned the credential scan off reported as a session that never did.
+# Under-reporting there is worse than a missing feature: the report is read as a
+# complete list.
+#
+# The before/after pair is the discrimination: the ledger is cumulative, so
+# asserting presence alone would pass on an entry some earlier check left behind.
+SCAN_OFF_LOG="$PROJ/.zensu/logs/2026-01-01-0053_tdd-scanoff.log"
+SESSION_KEY53="$(session_key "$SESSION")"
+LEDGER_BEFORE="$(bash "$LOG_HELPER" --bypass-list --session "$SESSION" 2>/dev/null)"
+HOME="$FAKE_HOME" ZENSU_SECRET_SCAN=off ZENSU_SESSION_KEY="$SESSION_KEY53" \
+  bash "$LOG_HELPER" append \
+  --log "$SCAN_OFF_LOG" --message "CHECKPOINT scan disabled for this call" >/dev/null 2>&1
+RC53=$?
+LEDGER_AFTER="$(bash "$LOG_HELPER" --bypass-list --session "$SESSION" 2>/dev/null)"
+if [ "$RC53" -eq 0 ] && [ -f "$SCAN_OFF_LOG" ] \
+  && ! printf '%s' "$LEDGER_BEFORE" | grep -qF 'ZENSU_SECRET_SCAN' \
+  && printf '%s' "$LEDGER_AFTER" | grep -qF 'ZENSU_SECRET_SCAN'; then
+  check "R53 ZENSU_SECRET_SCAN=off at the append chokepoint is recorded in the bypass ledger" PASS
+else
+  check "R53 ZENSU_SECRET_SCAN=off at the append chokepoint is recorded in the bypass ledger (rc=$RC53 before=[$LEDGER_BEFORE] after=[$LEDGER_AFTER])" FAIL
+fi
+
 # ── R29: the module refuses a shape it used to accept silently ───────
 OUT29="$(node -e '
   const m = require(process.argv[1]);
@@ -1038,6 +1473,68 @@ if [ "$OUT41" = "OK" ]; then
   check "R41 an in-project directory named home/Users/root survives the residual rules" PASS
 else
   check "R41 an in-project directory named home/Users/root survives (bad: $OUT41)" FAIL
+fi
+
+# ── R42: the residual rules replace the PATH and nothing after it ────
+# SEGMENT excluded only the separators, whitespace and the two quote characters,
+# so `;`, `:`, `)` and `.` were all valid segment characters and the greedy
+# quantifier ran past the end of the path. The replacement then swallowed the
+# punctuation and everything up to the next separator, DELETING text from an
+# artifact a consuming repo commits as evidence. Redaction that removes more than
+# the identifier is a fidelity defect, not a redaction gap: `cd /home/x;ls` lost
+# the command that followed the `cd`.
+OUT42="$(node -e '
+  const m = require(process.argv[1]);
+  const o = { projectRoot: process.argv[2], home: process.argv[3] };
+  const cases = [
+    ["cd /home/runner;ls -la", "cd <home>;ls -la"],
+    ["PATH=/Users/otherdev:/usr/bin", "PATH=<home>:/usr/bin"],
+    ["[notes](/home/runner)", "[notes](<home>)"],
+    ["the checkout at /home/runner.", "the checkout at <home>."],
+    ["run /home/runner, then stop", "run <home>, then stop"],
+    ["cmd=\"ls /home/otherdev\"", "cmd=\"ls <home>\""],
+    ["/homework/notes.md", "/homework/notes.md"],
+    ["src/home/index.ts", "src/home/index.ts"],
+  ];
+  const bad = cases.filter(([i, w]) => m.redact(i, o) !== w)
+    .map(([i, w]) => i + " => " + m.redact(i, o) + " (want " + w + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$FAKE_HOME" 2>/dev/null)"
+if [ "$OUT42" = "OK" ]; then
+  check "R42 the residual rules replace the path and leave every following character intact" PASS
+else
+  check "R42 the residual rules replace the path and leave every following character intact (bad: $OUT42)" FAIL
+fi
+
+# ── R43: a mixed-separator path redacts like a pure one ──────────────
+# RESIDUAL_RULES[0] used SEP_POSIX for the prefix AND the segment separator while
+# RESIDUAL_RULES[1] used SEP_WIN for both, so neither could cross forms: the rule
+# matched the prefix, the optional segment group failed on the other separator,
+# and BOUNDARY succeeded on it. The output then LOOKED redacted while still
+# naming the developer, which is worse than a miss — the assertable guarantee
+# ("the file contains no /Users/") was satisfied by a string that still carried
+# the identifier. The pure-separator rows are the discrimination partners: they
+# prove the rule was never neutered into a no-op.
+OUT43="$(node -e '
+  const m = require(process.argv[1]);
+  const o = { projectRoot: process.argv[2], home: process.argv[3] };
+  const cases = [
+    ["C:/Users\\bob", "C:<home>"],
+    ["C:\\Users/bob", "C:<home>"],
+    ["C:\\Users\\bob", "C:<home>"],
+    ["/Users/bob/x", "<home>/x"],
+    ["\\/Users\\/bob", "<home>"],
+    ["/Users\\/bob", "<home>"],
+    ["C:\\\\Users\\\\bob", "C:<home>"],
+  ];
+  const bad = cases.filter(([i, w]) => m.redact(i, o) !== w)
+    .map(([i, w]) => JSON.stringify(i) + " => " + JSON.stringify(m.redact(i, o)) + " (want " + JSON.stringify(w) + ")");
+  process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+' "$REDACT" "$PROJ" "$FAKE_HOME" 2>/dev/null)"
+if [ "$OUT43" = "OK" ]; then
+  check "R43 a mixed-separator path leaves no user segment behind" PASS
+else
+  check "R43 a mixed-separator path leaves no user segment behind (bad: $OUT43)" FAIL
 fi
 
 # ── R26: a SKIP on a POSIX host is a defect, not a pass ──────────────

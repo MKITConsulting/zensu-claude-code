@@ -37,9 +37,21 @@ set -u
 # Both the sweep's candidate set and the containment check live in
 # `hooks/lib/zensu-artifact-redact-v1.js` — the module declares itself the owner
 # of the artifact layout, so this hook consumes that table rather than
-# re-spelling it. The mtime window is what keeps the sweep cheap in a repo
-# holding hundreds of tracked plans; artifacts from earlier runs are out of reach
-# on purpose, since this is a writer-side fix and not a history rewrite. There is
+# re-spelling it. The mtime window bounds the WORK — which artifacts are read
+# and redacted — and not the enumeration: an entry's mtime is not knowable
+# without a stat, so a candidate regular file costs one syscall before the cutoff
+# can reject it. An earlier revision of this header claimed the window is what
+# keeps the sweep cheap in a repo holding hundreds of tracked plans, which was
+# not true. What bounds the sweep is `SWEEP_MAX_TARGETS` in the module.
+# Artifacts from earlier runs are out of reach on purpose, since this is a
+# writer-side fix and not a history rewrite.
+#
+# Bounds, stated rather than implied. This net is disabled entirely while the
+# session cannot bind its Session Control record — an unregistered session, or a
+# record whose project root is gone — and while the caller is not the main
+# principal. The first is reported on stderr; the second is not, for the reason
+# given at the guard. It is also bounded by `SWEEP_MAX_TARGETS` per invocation
+# and by the mtime window, so an artifact nothing touches again is not reached. There is
 # deliberately NO command-text pre-filter: `printf … >> "$LOG"` carries no
 # `.zensu` substring, and a net that the one spelling it exists to catch can
 # evade is not a net.
@@ -60,9 +72,22 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 
 INPUT="$(cat 2>/dev/null || true)"
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-agent-context.sh"
+# The principal check stays SILENT on purpose. A subagent tool call is the
+# ordinary outcome of a `.*`-shaped matcher, not a refusal, and a note here would
+# print on every one of them. Nothing is left un-redacted by it either: an
+# artifact a subagent wrote is reached by the next main-thread pass, which is
+# exactly why both matchers sweep.
 zensu_hook_is_main_principal "$INPUT" PostToolUse || exit 0
 source "$CLAUDE_PLUGIN_ROOT/hooks/lib/zensu-session.sh"
-zensu_bind_hook_session "$INPUT" || exit 0
+# A bind refusal is a different thing and is REPORTED. It disables this net for
+# the whole session — every artifact then ships with whatever the model wrote —
+# and the header above promises that a refusal leaving an artifact un-redacted
+# reaches stderr. Exiting 0 in silence made that promise false in the one state
+# where it matters most.
+if ! zensu_bind_hook_session "$INPUT"; then
+  echo "zensu: artifact redactor unavailable (session bind refused) — .zensu artifacts are not redacted for this call" >&2
+  exit 0
+fi
 
 if ! command -v node >/dev/null 2>&1; then
   echo "zensu: artifact redactor unavailable (node is not on PATH)" >&2
@@ -148,8 +173,19 @@ printf '%s' "$INPUT" | \
       // is not a fault when the tool NAMED it — see the provenance check below.
       let result;
       try {
+        // BOTH candidate roots, the same pair `zensu-log.sh append` and
+        // `post-bash-witness.sh` pass. A sweep with a root set of its own is a
+        // THIRD redactor: it can rewrite a narrative claim in a way the witness
+        // entry was not, and `zensu-evidence-crosscheck.js` matches those two by
+        // EQUALITY — so the divergence mints an evidence gap that no later sweep
+        // can repair, because both files are already written. `redactFile` adds
+        // the artifact-derived root itself, so this pair makes the sweep apply
+        // the UNION of what the two writers applied.
+        //
+        // `expectedRoot` is deliberately NOT widened with it: that is the
+        // containment bound, and it stays the record root alone.
         result = mod.redactFile(target, {
-          projectRoot: project,
+          projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ""].filter(Boolean),
           expectedRoot: project,
           base: project,
         });

@@ -125,7 +125,34 @@ function isWitnessName(name) {
 
 // How far back the Bash sweep looks. A consuming repo can hold hundreds of
 // tracked plans; an append worth catching is seconds old.
+//
+// What the window bounds is the WORK — which artifacts are read and redacted —
+// and NOT the enumeration. An earlier revision of this comment, of the hook
+// header and of the `docs/configuration.md` row all said the window is what
+// keeps the sweep cheap, and none of the three was true: an entry's mtime is
+// not knowable without a stat, so every candidate regular file costs one
+// syscall before the cutoff can reject it. `sweepTargets` rejects what it can
+// reject for free (wrong extension, and — through `withFileTypes` — anything
+// that is not a regular file), and `SWEEP_MAX_TARGETS` bounds the rest.
 const SWEEP_WINDOW_SECONDS = 300;
+
+// How many artifacts one sweep may process. A `git checkout` refreshes every
+// tracked artifact mtime at once, so without a cap the next tool call redacts
+// all of them synchronously inside a PostToolUse hook, which declares no
+// timeout of its own.
+//
+// Newest first, because a fresh unredacted append is what the sweep exists to
+// catch and the newest mtime is the best available proxy for it. Nothing is
+// lost by the cap on its own terms: an artifact left over stays in the window
+// for the next pass, and the file the tool call just WROTE is prepended by
+// `hooks/post-artifact-redact.sh` as the named target, so it can never be the
+// one the cap drops.
+//
+// Accepted bound, stated rather than implied: a checkout that refreshes more
+// than this many artifacts inside one window, followed by fewer tool calls than
+// it takes to drain them, leaves the tail unswept until something touches it
+// again. Bounding a hook's synchronous work is worth that.
+const SWEEP_MAX_TARGETS = 25;
 
 // 8 MiB. A narrative log that large is pathological; refusing to load it is
 // better than an out-of-memory kill inside a PostToolUse hook. The refusal is
@@ -145,19 +172,58 @@ const BOUNDARY = '(?![A-Za-z0-9_.\\-])';
 // optional-segment form also catches a bare `/Users` and a trailing `/Users/`,
 // which a `+` quantifier would leave behind.
 //
-// Two properties of the segment class are load-bearing. It excludes quotes, so
-// `cmd="ls /home/otherdev"` keeps its closing `"` — consuming it desynchronizes
-// the claim from the witness entry and produces the very EVIDENCE GAP the
-// witness redaction exists to prevent. And every alternative carries BOUNDARY,
-// so `/homework/notes.md` is left alone instead of becoming `<home>work/…`.
-const SEGMENT = '[^/\\\\\\s"\']*';
-// The separator is matched in its ESCAPED spellings too. A JSON-encoded command
-// — which is exactly what the witness writes, and what a `cmd="…"` field carries
-// — renders a Windows path as `C:\\Users\\bob`, and matching a single
-// separator there consumed the prefix but left `bob` behind: output that LOOKS
-// redacted and still names the developer. Same for an escaped solidus.
-const SEP_POSIX = '\\\\?\\/';
-const SEP_WIN = '\\\\{1,2}';
+// Three properties of the segment class are load-bearing.
+//
+// It excludes quotes, so `cmd="ls /home/otherdev"` keeps its closing `"` —
+// consuming it desynchronizes the claim from the witness entry and produces the
+// very EVIDENCE GAP the witness redaction exists to prevent.
+//
+// It excludes the STRUCTURAL characters a path never contains but prose around
+// one routinely does. An earlier spelling excluded only the separators,
+// whitespace and quotes, so `;`, `:`, `,`, `)` and `]` were all valid segment
+// characters and the greedy quantifier ran past the end of the path: `cd
+// /home/runner;ls -la` redacted to `cd <home> -la`, DELETING the command that
+// followed. That is a fidelity defect rather than a redaction gap — the output
+// removes more than the identifier — and it lands in an artifact consuming repos
+// commit as evidence.
+//
+// The trade-off here was decided deliberately: excluding structural characters
+// keeps a NON-ASCII user segment working (`/Users/josé` still redacts whole),
+// where narrowing to a `[A-Za-z0-9_.-]` name alphabet — which would agree with
+// BOUNDARY by construction — would have left the `é` behind, i.e. a partial name
+// in the published artifact. Readability of the rule was not worth that.
+//
+// It refuses to END on a `.`, which is why the class is written as a run of
+// permitted characters closing on a non-dot one. A trailing period is far more
+// often the end of a sentence than part of a directory name, and BOUNDARY counts
+// `.` as a name character — so consuming it would have eaten `the checkout at
+// /home/runner.` down to `… <home>`. An interior dot is untouched, so
+// `/Users/first.last` still redacts whole.
+const SEGMENT_CHAR = '[^/\\\\\\s"\';:,()\\[\\]{}|&<>]';
+const SEGMENT = '(?:' + SEGMENT_CHAR + '*(?![.])' + SEGMENT_CHAR + ')?';
+// ONE separator alternation, used in BOTH positions of every rule. The escaped
+// spellings are matched too: a JSON-encoded command — which is exactly what the
+// witness writes, and what a `cmd="…"` field carries — renders a Windows path as
+// `C:\\Users\\bob`, and matching a single separator there consumed the prefix but
+// left `bob` behind. Same for an escaped solidus.
+//
+// It is one alternation rather than a POSIX rule and a Windows rule because two
+// rules could not CROSS forms: with `SEP_POSIX` in both positions of one and
+// `SEP_WIN` in both of the other, a mixed spelling matched the prefix, failed the
+// optional-segment group on the other separator, and satisfied BOUNDARY on it —
+// so `C:/Users\bob` became `C:<home>\bob`. Output that LOOKS redacted and still
+// names the developer is worse than a miss: it satisfies the assertable
+// guarantee ("the file contains no `/Users/`") while publishing the identifier.
+// Unifying also closes a gap the split left open — `\home` and `\root` had no
+// Windows alternative at all.
+//
+// ALTERNATION ORDER IS LOAD-BEARING: the escaped solidus comes first. JS
+// alternation is first-match, not longest-match, so with `\\{1,2}` leading, the
+// backslash of an escaped `\/` matched as a Windows separator on its own, the
+// segment then started at `/` — which the segment class excludes — and matched
+// empty. `\/Users\/bob` collapsed to `<home>/bob`, leaving the name behind
+// through the very spelling the escaped forms exist to catch.
+const SEP_ANY = '(?:\\\\?\\/|\\\\{1,2})';
 // Rule 3 additionally refuses to fire immediately after a placeholder rules 1-2
 // just emitted. `LEFT` excludes only segment-name characters, and `>` and `~` are
 // not among them — so `<project>/home/config.yml`, a perfectly ordinary in-project
@@ -166,10 +232,26 @@ const SEP_WIN = '\\\\{1,2}';
 // could match the longer `/Users/m/proj`.
 const NOT_AFTER_PLACEHOLDER = '(?<!' + PROJECT_PLACEHOLDER + ')(?<!'
   + RESIDUAL_PLACEHOLDER + ')(?<!' + HOME_PLACEHOLDER + ')';
+// BOUNDARY guards the NO-segment alternative only, and that placement is the
+// point. Its job is to stop `/home` matching inside `/homework`, which is a
+// question about what follows the PREFIX. Once a separator and a segment have
+// matched, the segment class itself defines where the match stops — appending
+// BOUNDARY there as well is what let the greedy old class run past `runner` and
+// still satisfy the lookahead on the space that followed.
+//
+// The prefix literals are named ONCE and interpolated into the rules, because
+// `redact`'s fast path scans for the same literals to decide whether any rule
+// could fire. A prefix spelled twice would eventually be added to one side only,
+// and the failure direction there is silent: the fast path would skip a text the
+// rules would have redacted.
+const RESIDUAL_HOME_PREFIXES = ['Users', 'home'];
+const RESIDUAL_ROOT_PREFIX = 'root';
+const RESIDUAL_PREFIXES = [...RESIDUAL_HOME_PREFIXES, RESIDUAL_ROOT_PREFIX];
 const RESIDUAL_RULES = [
-  new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_POSIX + '(?:Users|home)(?:' + SEP_POSIX + SEGMENT + ')?' + BOUNDARY, 'g'),
-  new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_WIN + 'Users(?:' + SEP_WIN + SEGMENT + ')?' + BOUNDARY, 'g'),
-  new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_POSIX + 'root' + BOUNDARY, 'g'),
+  new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_ANY
+    + '(?:' + RESIDUAL_HOME_PREFIXES.join('|') + ')'
+    + '(?:' + SEP_ANY + SEGMENT + '|' + BOUNDARY + ')', 'g'),
+  new RegExp(NOT_AFTER_PLACEHOLDER + LEFT + SEP_ANY + RESIDUAL_ROOT_PREFIX + BOUNDARY, 'g'),
 ];
 
 // Windows has no O_NOFOLLOW, and the OR-zero coercion form is the one
@@ -248,24 +330,57 @@ function asRootList(value) {
   return list.filter((v) => typeof v === 'string' && v.trim() !== '');
 }
 
-function replaceRoots(text, roots, placeholder) {
-  let out = text;
+// Every spelling of every supplied root, longest first. Split out of the
+// replacement so `redact` can compute it ONCE and use it for both the fast-path
+// scan and the passes themselves.
+function rootSpellingList(roots) {
   const spellings = new Set();
   for (const root of asRootList(roots)) {
     for (const spelling of rootSpellings(root)) spellings.add(spelling);
   }
-  for (const spelling of [...spellings].sort((a, b) => b.length - a.length)) {
+  return [...spellings].sort((a, b) => b.length - a.length);
+}
+
+function replaceSpellings(text, spellings, placeholder) {
+  let out = text;
+  for (const spelling of spellings) {
     out = out.replace(new RegExp(LEFT + escapeRegExp(spelling) + BOUNDARY, 'g'), placeholder);
   }
   return out;
 }
 
+// A text can only be changed by a root spelling it CONTAINS or by one of the
+// three literal residual prefixes. Both are plain substring questions, and a
+// substring scan is what the regex engine would do first anyway — minus the
+// lookbehind, the lookahead and the alternation it evaluates at every candidate
+// position.
+//
+// This is a cost fix, not a behavior change: the pre-check is strictly weaker
+// than the rules, so anything it admits is decided by the rules exactly as
+// before, and anything it rejects could not have matched. The literals come from
+// the same constants the rules are built from, so the two cannot drift apart.
+//
+// It is worth having because the common case is the empty one. `zensu-log.sh
+// append` already redacts at write time, so the Bash sweep's answer for the
+// narrative log is `no-op` on essentially every pass — and that answer used to
+// cost the full set of passes over a file that only grows, once per in-window
+// tool call. It does NOT remove the read: the sweep still loads the artifact to
+// ask the question. Bounding that is what the sweep's own cap is for.
+function redactionPossible(text, spellings, home) {
+  for (const spelling of spellings) if (text.includes(spelling)) return true;
+  for (const spelling of home) if (text.includes(spelling)) return true;
+  for (const prefix of RESIDUAL_PREFIXES) if (text.includes(prefix)) return true;
+  return false;
+}
+
 function redact(text, options = {}) {
   if (typeof text !== 'string' || text === '') return text;
-  const { projectRoot, home } = options;
+  const projectSpellings = rootSpellingList(options.projectRoot);
+  const homeSpellings = rootSpellingList(options.home);
+  if (!redactionPossible(text, projectSpellings, homeSpellings)) return text;
   let out = text;
-  out = replaceRoots(out, projectRoot, PROJECT_PLACEHOLDER);
-  out = replaceRoots(out, home, HOME_PLACEHOLDER);
+  out = replaceSpellings(out, projectSpellings, PROJECT_PLACEHOLDER);
+  out = replaceSpellings(out, homeSpellings, HOME_PLACEHOLDER);
   for (const rule of RESIDUAL_RULES) out = out.replace(rule, RESIDUAL_PLACEHOLDER);
   return out;
 }
@@ -343,6 +458,12 @@ function resolveArtifactTarget(filePath, expectedRoot, base) {
     });
     if (!matches) return { ok: false, reason: 'foreign-project' };
   }
+  // NOTE: no cwd-derived fallback bind belongs HERE. `redactFile` and the sweep
+  // legitimately resolve with no `expectedRoot` and a caller root that is not an
+  // ancestor of the process cwd, so constraining the shared resolver would deny
+  // them; the one caller that lacked an authority is the `append` WRITER, and
+  // `zensu-log.sh` binds it there against the same `target.projectRoot` this
+  // function returns.
 
   return {
     ok: true,
@@ -361,21 +482,31 @@ function sweepTargets(projectRoot, options = {}) {
   const windowSeconds = typeof options.windowSeconds === 'number'
     ? options.windowSeconds : SWEEP_WINDOW_SECONDS;
   const cutoff = nowMs - windowSeconds * 1000;
+  const maxTargets = Number.isInteger(options.maxTargets) && options.maxTargets >= 0
+    ? options.maxTargets : SWEEP_MAX_TARGETS;
   const out = [];
   if (typeof projectRoot !== 'string' || projectRoot.trim() === '') return out;
   for (const [bucket, extension] of Object.entries(ARTIFACT_BUCKETS)) {
     const dir = path.join(projectRoot, ARTIFACT_DIR, bucket);
     let entries;
     try {
-      entries = fs.readdirSync(dir);
+      entries = fs.readdirSync(dir, { withFileTypes: true });
     } catch (_) {
       continue;
     }
-    for (const name of entries) {
+    for (const entry of entries) {
+      const name = entry.name;
       if (!name.endsWith(extension)) continue;
       // The witness is redacted by its own writer, is gitignored and never
       // committed, and is the largest file in the directory.
       if (bucket === 'logs' && isWitnessName(name)) continue;
+      // The dirent carries the type, so a directory or a symlink named like an
+      // artifact is rejected without a syscall. A filesystem that does not report
+      // `d_type` answers UNKNOWN and every predicate below is false — the entry
+      // then falls through to the stat, which is the right answer there: skipping
+      // it would silently drop real artifacts on that host.
+      if (entry.isDirectory() || entry.isSymbolicLink() || entry.isFIFO()
+        || entry.isSocket() || entry.isCharacterDevice() || entry.isBlockDevice()) continue;
       const full = path.join(dir, name);
       let stat;
       try {
@@ -385,10 +516,14 @@ function sweepTargets(projectRoot, options = {}) {
       }
       if (!stat.isFile()) continue;
       if (stat.mtimeMs < cutoff) continue;
-      out.push(full);
+      out.push({ full, mtimeMs: stat.mtimeMs });
     }
   }
-  return out.sort();
+  // Path is the tie-break, not decoration: a checkout stamps many artifacts with
+  // the same mtime, and without it the capped SET would depend on readdir order.
+  out.sort((a, b) => (b.mtimeMs - a.mtimeMs)
+    || (a.full < b.full ? -1 : (a.full > b.full ? 1 : 0)));
+  return out.slice(0, maxTargets).map((entry) => entry.full);
 }
 
 // O_NOFOLLOW binds the FINAL component only; an intermediate directory can still
@@ -526,6 +661,11 @@ function redactFile(filePath, options = {}) {
 // closes the hole and the window together: the object checked is the object
 // written. O_TRUNC is deliberately NOT in the open flags — it would truncate
 // before the nlink check could refuse.
+//
+// The two modes are two different writes and no longer share an open. `append`
+// stays an in-place O_APPEND write to the judged descriptor. `replace` publishes
+// through `replaceArtifactFile` below, because an in-place truncate commits its
+// destructive half before the new bytes exist.
 function writeArtifactLine(filePath, line, options = {}) {
   const target = resolveArtifactTarget(filePath, options.expectedRoot, options.base);
   if (!target.ok) return { written: false, reason: target.reason };
@@ -540,9 +680,9 @@ function writeArtifactLine(filePath, line, options = {}) {
   if (isWitnessName(path.basename(target.path))) {
     return { written: false, reason: 'witness-artifact' };
   }
-  const replace = options.mode === 'replace';
+  if (options.mode === 'replace') return replaceArtifactFile(target, line);
   const flags = fs.constants.O_WRONLY | fs.constants.O_CREAT | platformNoFollow() | NON_BLOCK
-    | (replace ? 0 : fs.constants.O_APPEND);
+    | fs.constants.O_APPEND;
   let fd;
   try {
     fd = fs.openSync(target.path, flags, 0o644);
@@ -550,8 +690,29 @@ function writeArtifactLine(filePath, line, options = {}) {
     if (!stat.isFile()) { fs.closeSync(fd); return { written: false, reason: 'not-a-file' }; }
     if (stat.nlink !== 1) { fs.closeSync(fd); return { written: false, reason: 'hard-link' }; }
     if (!sameInode(stat, target)) { fs.closeSync(fd); return { written: false, reason: 'moved' }; }
-    if (replace) fs.ftruncateSync(fd, 0);
     fs.writeFileSync(fd, line);
+    // Judged before the write and never again, the checks above prove only where
+    // the line was GOING. A rename landing between them and the write sends it to
+    // an inode no path names any more, and the earlier spelling still answered
+    // `written: true` — so `zensu-log.sh append` exited 0 and the CHECKPOINT was
+    // believed while nothing held it, with the sweeper reporting a clean reason
+    // because nothing recorded a loss.
+    //
+    // Re-running the same comparison AFTER the write cannot prevent that: the
+    // bytes are already in the orphan and this writer has no way to move them.
+    // What it buys is the report — `concurrent-write` is a TRANSIENT reason, so
+    // the caller retries and the line lands. It is still check-then-use, one
+    // window later; only `openat`-style semantics would close it, and Node does
+    // not expose them.
+    //
+    // An `fstat` that THROWS here falls to the catch and is reported as
+    // `write-failed`. That is the deliberate answer: the line may or may not be
+    // held by a path, and a caller that must not lose it is better served by a
+    // loud refusal it retries than by a success it cannot verify.
+    if (!sameInode(fs.fstatSync(fd), target)) {
+      fs.closeSync(fd);
+      return { written: false, reason: 'concurrent-write' };
+    }
     // The handle is deliberately NOT cleared before this close. That is a real
     // difference from `redactFile`, not an oversight there: statements that can
     // throw FOLLOW its close, so clearing is what keeps its catch from
@@ -572,6 +733,82 @@ function writeArtifactLine(filePath, line, options = {}) {
     if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) { /* closing */ } }
     const linkErrno = err && (err.code === 'ELOOP' || err.code === 'EMLINK');
     return { written: false, reason: linkErrno ? 'symlink' : 'write-failed' };
+  }
+  return { written: true, reason: 'written' };
+}
+
+// `mode: 'replace'` — the destructive half of the log verb, published by rename.
+//
+// The in-place spelling ran `ftruncateSync(fd, 0)` and only then wrote, so a
+// write that failed after the truncate left the artifact EMPTY with no recovery
+// path: the destroy had committed and the create had not. The file at risk is the
+// run log a consuming repo commits as its audit trail, and the shipped Phase-2
+// recipe is what creates it, so the loss window sat on the normal path.
+//
+// Writing an O_EXCL temp beside it, fsyncing, and renaming makes the publish
+// atomic — the previous bytes stay addressable until the rename, and every
+// failure before it changes nothing on disk. This is the same discipline
+// `redactFile` uses, spelled the same way on purpose.
+//
+// The refusals are unchanged and are still judged on a DESCRIPTOR: the target is
+// opened read-only with O_NOFOLLOW first, so a symlink, a hard link, a directory
+// and a swapped inode all refuse exactly as before. ENOENT is the one tolerated
+// open failure — creating the log is this mode's ordinary Phase-2 case.
+//
+// The pre-rename re-check narrows the same window `redactFile` documents and
+// does not close it: a write landing between the `lstat` and the `rename` goes
+// to the inode the rename orphans. Closing that needs the external lease the
+// other `.zensu` writers take. Stated rather than implied.
+function replaceArtifactFile(target, line) {
+  let fd;
+  let prior = null;
+  let mode = 0o644;
+  try {
+    fd = fs.openSync(target.path, fs.constants.O_RDONLY | platformNoFollow() | NON_BLOCK);
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile()) { fs.closeSync(fd); return { written: false, reason: 'not-a-file' }; }
+    if (stat.nlink !== 1) { fs.closeSync(fd); return { written: false, reason: 'hard-link' }; }
+    if (!sameInode(stat, target)) { fs.closeSync(fd); return { written: false, reason: 'moved' }; }
+    fs.closeSync(fd);
+    fd = undefined;
+    prior = { size: stat.size, mtimeMs: stat.mtimeMs };
+    mode = stat.mode & 0o777;
+  } catch (err) {
+    if (fd !== undefined) { try { fs.closeSync(fd); } catch (_) { /* closing */ } }
+    if (!err || err.code !== 'ENOENT') {
+      const linkErrno = err && (err.code === 'ELOOP' || err.code === 'EMLINK');
+      return { written: false, reason: linkErrno ? 'symlink' : 'write-failed' };
+    }
+  }
+
+  const tmp = `${target.path}.zensu-redact-${process.pid}-${crypto.randomBytes(6).toString('hex')}`;
+  let out;
+  try {
+    out = fs.openSync(tmp, fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_EXCL, mode);
+    // writeFileSync loops internally; a bare writeSync returns a short count
+    // rather than throwing when the filesystem fills mid-write, and the rename
+    // would then publish a truncated artifact.
+    fs.writeFileSync(out, line);
+    fs.fsyncSync(out);
+    fs.closeSync(out);
+    out = undefined;
+    let now = null;
+    try { now = fs.lstatSync(target.path); } catch (_) { now = null; }
+    // Absence and presence are both states worth defending: a target that
+    // APPEARED since the open is someone else's file, and one that VANISHED is no
+    // longer the object that was judged.
+    const moved = prior === null
+      ? now !== null
+      : (now === null || now.size !== prior.size || now.mtimeMs !== prior.mtimeMs);
+    if (moved) {
+      fs.unlinkSync(tmp);
+      return { written: false, reason: 'concurrent-write' };
+    }
+    fs.renameSync(tmp, target.path);
+  } catch (_) {
+    if (out !== undefined) { try { fs.closeSync(out); } catch (_ignored) { /* closing */ } }
+    try { fs.unlinkSync(tmp); } catch (_ignored) { /* best effort */ }
+    return { written: false, reason: 'write-failed' };
   }
   return { written: true, reason: 'written' };
 }
@@ -673,6 +910,7 @@ module.exports = {
   ARTIFACT_DIR,
   WITNESS_PREFIX,
   SWEEP_WINDOW_SECONDS,
+  SWEEP_MAX_TARGETS,
   CLEAN_REASONS,
   PROJECT_PLACEHOLDER,
   HOME_PLACEHOLDER,
