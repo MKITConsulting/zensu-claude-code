@@ -304,12 +304,8 @@ fi
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 
 BYPASS_RC=0
-BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)" || BYPASS_RC=$?
-case "$BYPASS_RC" in
-  0) [ -z "$BYPASSES" ] && BYPASSES="none" ;;
-  2) BYPASSES="$ZENSU_BYPASS_ABSENT_TEXT" ;;
-  *) BYPASSES="$ZENSU_BYPASS_UNREADABLE_TEXT" ;;
-esac
+BYPASSES="$(zensu_bypass_display "$(tdd_state_file "$SESSION_ID")" text)" || BYPASS_RC=$?
+[ "$BYPASS_RC" -eq 0 ] && [ -z "$BYPASSES" ] && BYPASSES="none"
 BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): as the last line of the ## Open section, include the literal line: Gates bypassed during this session: '"$BYPASSES"
 BYPASS_DIRECTIVE_TRAILING=$'\n\nBypass ledger (from chain state): end your reply with the literal line: Gates bypassed during this session: '"$BYPASSES"
 

@@ -321,13 +321,12 @@ value and never `none`. Never substitute `none` for a value you did not read: an
 unread ledger is not a clean ledger.
 
 This line covers the surfaces this stage renders. It is NOT a session-wide
-guarantee, and three paths are known to escape it: `--tdd-reset` and
-`--tdd-begin` clear the ledger (both now echo the outgoing entries, so the trace
-survives in the run log rather than here); a workflow document that is edited but
-still schema-valid renders `none`, because validation is structural and the
-`bypasses` array carries no authenticity signal; and a `ZENSU_CHAIN=off` release
-ends the session before any renderer runs. Do not describe the ledger as proof
-that no gate was escaped — it is proof only of what a readable document recorded.
+guarantee. The authoritative residual list is the "What the ledger does and does
+not prove" paragraph in `docs/configuration.md`; do not restate it here. The one
+residual that matters for THIS line: a workflow document that is edited but still
+schema-valid renders `none`, because validation is structural and the `bypasses`
+array carries no authenticity signal. Do not describe the ledger as proof that no
+gate was escaped — it is proof only of what a readable document recorded.
 
 Then, for a STANDALONE handoff only, when the session plan carries a
 `## Requirements` table, close `## Open` with ONE more line, exactly:
