@@ -842,11 +842,15 @@ SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]
 # The slug class admits digits. This grep and both of its siblings spelled [a-z-]+
 # until this change, so a future skill named like `review-v2` would drop out of the
 # row count AND surface as registered-but-unlisted, failing this check twice for a
-# reason neither message names. THREE encodings of this class must move together, all of them reading
-# README.md: this grep, the JS row regex below, and test-converge-skill.sh P4c.
+# reason neither message names. The class had THREE hand-maintained encodings, all of
+# them reading README.md. Two of them live in this function, so they now share ONE
+# spelling: the grep below and the JS row regex both take SKILL_SLUG_CLASS. The third,
+# test-converge-skill.sh P4c, is in another file and still has to move by hand — that
+# is what the NOTE above defers to a dedicated registry suite.
 # (test-gauntlet-loop-skill.sh G13 also spells [a-z0-9-]+, but that is a hook
 # FILENAME class applied to SKILL.md and reads no README row — not a co-moving site.)
-SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:[a-z0-9-]+` \|')"
+SKILL_SLUG_CLASS='[a-z0-9-]+'
+SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE "^\| \`/zensu:$SKILL_SLUG_CLASS\` \|")"
 # Deliberately registered but kept out of the README table. A second entry here is a
 # real decision, not a typo — see P2h in test-doctor.sh for why doctor is documented
 # under Diagnostics instead.
@@ -857,9 +861,11 @@ README_UNLISTED_SKILLS="doctor"
 # conjunct here is blind to, because bumping the header to match repairs the counts.
 SKILLS_SET_DIFF="$(printf '%s\n' "$SKILLS_BLOCK" | node -e '
 const fs = require("node:fs");
+// The slug class arrives from the shell so this regex and the grep above cannot drift.
+const rowRe = new RegExp("^\\| `\\/zensu:(" + process.argv[2] + ")` \\|");
 const rows = new Set(
   fs.readFileSync(0, "utf8").split("\n")
-    .map((line) => /^\| `\/zensu:([a-z0-9-]+)` \|/.exec(line))
+    .map((line) => rowRe.exec(line))
     .filter(Boolean).map((match) => match[1]),
 );
 const manifest = require(process.argv[1]);
@@ -868,7 +874,7 @@ const registered = (manifest.skills || [])
 const unlisted = registered.filter((name) => !rows.has(name)).sort();
 const unregistered = [...rows].filter((name) => !registered.includes(name)).sort();
 process.stdout.write(unlisted.join(",") + "|" + unregistered.join(","));
-' "$PLUGIN_JSON" 2>/dev/null)"
+' "$PLUGIN_JSON" "$SKILL_SLUG_CLASS" 2>/dev/null)"
 SKILLS_UNLISTED="${SKILLS_SET_DIFF%%|*}"
 SKILLS_UNREGISTERED="${SKILLS_SET_DIFF##*|}"
 REGISTERED_N="$(node -e 'process.stdout.write(String(require(process.argv[1]).skills.length))' "$PLUGIN_JSON" 2>/dev/null)"

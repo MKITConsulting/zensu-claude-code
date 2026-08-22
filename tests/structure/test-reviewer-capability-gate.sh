@@ -97,6 +97,24 @@ payload() {
   '
 }
 
+# ONE definition of the environment every gate invocation runs under, shared by
+# decision() and by the deny-REASON probe further down. The scrub is what stops a
+# developer's ambient ZENSU_* state from poisoning an assertion, and it was previously
+# hand-copied: a change to this unset list would have reached one caller and not the
+# other, so two assertions about the SAME payload would have run under different
+# environments and disagreed for an environmental reason rather than a policy one.
+gate_env() {
+  env \
+    -u ZENSU_CLAUDE_PLUGIN_ROOT \
+    -u ZENSU_SESSION_KEY \
+    -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST \
+    -u ZENSU_PROJECT_ROOT \
+    CLAUDE_PLUGIN_ROOT="$1" \
+    CLAUDE_PLUGIN_DATA="$2" \
+    bash "$GATE" 2>/dev/null
+}
+
 decision() {
   local out status hook_root="$PLUGIN" hook_data="$PLUGIN_DATA"
   case "${GATE_TEST_MODE:-valid}" in
@@ -105,15 +123,7 @@ decision() {
     wrong-root) hook_root="$OTHER" ;;
     wrong-data) hook_data="$OTHER" ;;
   esac
-  out="$(env \
-    -u ZENSU_CLAUDE_PLUGIN_ROOT \
-    -u ZENSU_SESSION_KEY \
-    -u ZENSU_SESSION_CONTEXT \
-    -u ZENSU_RUNTIME_DIGEST \
-    -u ZENSU_PROJECT_ROOT \
-    CLAUDE_PLUGIN_ROOT="$hook_root" \
-    CLAUDE_PLUGIN_DATA="$hook_data" \
-    bash "$GATE" 2>/dev/null)"
+  out="$(gate_env "$hook_root" "$hook_data")"
   status=$?
   if [ "$status" -eq 2 ]; then printf deny; return; fi
   if [ "$status" -ne 0 ]; then printf invalid; return; fi
@@ -226,11 +236,9 @@ assert_case "general-purpose builder keeps project writes" allow general-purpose
 # same token. Adding Explore to REVIEWER_TYPES would keep them green while the
 # skill's `host-profile-v1` claim went false, because a reviewer is denied a shell
 # too. Assert the REASON for one of them, which names the principal.
-EXPLORE_REASON="$(payload Explore Bash '{"command":"pwd"}' | env \
-  -u ZENSU_CLAUDE_PLUGIN_ROOT -u ZENSU_SESSION_KEY -u ZENSU_SESSION_CONTEXT \
-  -u ZENSU_RUNTIME_DIGEST -u ZENSU_PROJECT_ROOT \
-  CLAUDE_PLUGIN_ROOT="$PLUGIN" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA" \
-  bash "$GATE" 2>/dev/null | node -e '
+# Runs through the SAME gate_env decision() uses, so this reason and the verdict rows
+# above can never disagree because of the environment they were invoked under.
+EXPLORE_REASON="$(payload Explore Bash '{"command":"pwd"}' | gate_env "$PLUGIN" "$PLUGIN_DATA" | node -e '
     let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
       try { process.stdout.write(String(JSON.parse(s).hookSpecificOutput?.permissionDecisionReason || "")); }
       catch (_) { process.stdout.write(""); }

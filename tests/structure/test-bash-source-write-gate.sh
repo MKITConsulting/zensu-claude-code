@@ -35,7 +35,24 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
 # reports 0 cases while the unit suite itself passes. Anchor on the trailing text
 # instead of the leading glyph; the `# pass` TAP branch stays first so both output
 # styles still work.
+  # The widened branch matches ANY line ending in whitespace + `pass` + digits, so
+  # `tail -1` winning the summary rests on node emitting its summary block last. That
+  # ordering is a property of the reporter, not of this suite — it is load-bearing and
+  # is stated here rather than left implicit.
   UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+  # The TOTAL is parsed as well, the way test-stop-enforcer-self-review-routing.sh T26
+  # parses it. A pass floor alone cannot tell "45 cases ran and passed" from "60
+  # registered, 15 silently skipped, 45 passed" — a registered-but-skipped case is
+  # exactly what a total floor catches and a pass floor cannot.
+  #
+  # Unlike T26 the two floors are EQUAL here, deliberately: this suite currently
+  # reports 45 registered / 45 passing / 0 skipped, so there is no measured skip to
+  # allow for and lowering the pass floor on the strength of a hypothetical one would
+  # weaken a floor for nothing. The win32 cases ARE platform-conditional, so if one of
+  # them ever starts skipping, lower the pass floor in the same commit and say which
+  # case and which host — the way T26 records its own 29/27 split.
+  UNIT_TOTAL="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
+  case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
   # Exit 0 alone would also accept a file that registers zero cases.
   # Raise this with the file. The win32 cases are the ONLY witnesses of the MSYS
   # namespace fix — no POSIX host executes that branch end-to-end — so a stale
@@ -47,10 +64,10 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
     grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
   done
-  if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
-    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS cases, win32 witnesses present)" PASS
+  if [ -n "$UNIT_PASS" ] && [ "$UNIT_TOTAL" -ge 45 ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
+    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS of $UNIT_TOTAL cases, win32 witnesses present)" PASS
   else
-    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing cases (want >= 45) win32_symbols=$UNIT_SYMS" FAIL
+    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing of '${UNIT_TOTAL}' registered (want total >= 45, pass >= 45) win32_symbols=$UNIT_SYMS" FAIL
   fi
 else
   check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL

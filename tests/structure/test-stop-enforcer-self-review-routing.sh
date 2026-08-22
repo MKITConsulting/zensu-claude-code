@@ -83,6 +83,15 @@ if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"
 # reports 0 cases while the unit suite itself passes. Anchor on the trailing text
 # instead of the leading glyph; the `# pass` TAP branch stays first so both output
 # styles still work.
+#
+# One assumption the widened branch introduces, recorded because it is load-bearing:
+# `^.*[[:space:]]pass N$` matches ANY line ending in whitespace + `pass` + digits, so
+# `tail -1` selecting the SUMMARY depends on node emitting its summary block last —
+# a property of the reporter, not of this suite, and this capture is `2>&1`. A field
+# test (awk on `NF==3 && $2=="pass"`) would cover both dialects in one expression and
+# drop the dependency; it is not taken here only because the sibling W3a check in
+# test-bash-source-write-gate.sh spells the same two-branch sed and the two are worth
+# keeping identical. Change both together or neither.
   UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
   UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
   case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac

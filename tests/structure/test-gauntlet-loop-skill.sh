@@ -52,6 +52,12 @@ EDIT_GATE="$PLUGIN_DIR/hooks/pre-edit-tdd-reminder.sh"
 WITNESS="$PLUGIN_DIR/hooks/post-bash-witness.sh"
 REVIEW_DELEGATE="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
+# Sibling suite, read as EVIDENCE rather than as a test: G15's nested-spawn residue is
+# a claim about what the gate allows, and that suite is where the allowance is driven
+# behaviorally. Pinning its row here keeps the skill's prose and the proof together.
+CAPABILITY_GATE_TEST="$PLUGIN_DIR/tests/structure/test-reviewer-capability-gate.sh"
+AGENT_MDS="$PLUGIN_DIR/agents/code-reviewer.md $PLUGIN_DIR/agents/review-aspect.md $PLUGIN_DIR/agents/review-judge.md"
+MANIFEST_JSON="$PLUGIN_DIR/tests/profiles/promptfoo-local-only.v1.json"
 
 GERMAN_RE='\b(und|oder|nicht|wird|werden|dieser|diese|kann|muss|sollte|beim|einen|eine|durch|damit|wenn|dann|auch|noch|schon|jetzt|bitte|kein|keine|ohne|zwischen)\b'
 
@@ -74,8 +80,14 @@ finish() {
   [ "$FAIL" -eq 0 ]
 }
 
+# Every file any later check reads. Four of these used to sit outside this loop — the
+# three agent definitions G16 greps, and the CI manifest G14 parses — and each one
+# degraded fail-closed but reported the WRONG cause: a deleted agents/review-judge.md
+# surfaced as "G16 review-chain rationale does not discriminate", pointing the reader
+# at prose. A missing file is named here instead.
 for f in "$SKILL_MD" "$HARNESS_MD" "$BARS_MD" "$PLUGIN_JSON" "$README_MD" \
-  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$WITNESS" "$REVIEW_DELEGATE" "$HOOKS_JSON"; do
+  "$CAPABILITY_LIB" "$PRINCIPAL_LIB" "$EDIT_GATE" "$WITNESS" "$REVIEW_DELEGATE" "$HOOKS_JSON" \
+  "$CAPABILITY_GATE_TEST" "$MANIFEST_JSON" $AGENT_MDS; do
   if [ ! -f "$f" ]; then
     check "G0 required file exists: $f" FAIL
     finish
@@ -97,13 +109,29 @@ else
   check "G1 frontmatter must use 'description: >' with a '[Zensu] ' prefixed body" FAIL
 fi
 
+# G1a: the frontmatter name against the registered directory. The registration chain
+# pins the manifest PATH (G4), the README ROW (G5), the H1 (G2) and, in
+# test-chain-recover.sh T39, the manifest DIRECTORY names — the `name:` field itself is
+# asserted by none of them, so a typo there leaves every one of those green while the
+# README, the H1 and the docs advertise a command the host does not expose.
+# test-chain-recover.sh T38 pins exactly this for recover-chain; this is the same rule.
+FM_NAME="$(sed -n 's/^name: *\([a-z0-9-][a-z0-9-]*\) *$/\1/p' "$SKILL_MD" | head -1)"
+if [ -n "$FM_NAME" ] && [ "$FM_NAME" = "$(basename "$SKILL_DIR")" ]; then
+  check "G1a frontmatter name matches the registered directory" PASS
+else
+  check "G1a frontmatter name (${FM_NAME:-<unset>}) must equal the directory plugin.json registers ($(basename "$SKILL_DIR"))" FAIL
+fi
+
 if grep -qxF '# /zensu:gauntlet-loop' "$SKILL_MD"; then
   check "G2 H1 names the slash command" PASS
 else
   check "G2 H1 must be '# /zensu:gauntlet-loop'" FAIL
 fi
 
-TMP_DIR="$(mktemp -d -t zensu-gauntlet-XXXXXX)" || TMP_DIR=""
+# Explicit template rather than `mktemp -d -t`: GNU documents -t as deprecated and
+# reads its argument relative to $TMPDIR, while BSD/macOS treats it as a prefix and
+# appends its own suffix. The sibling suites spell it this way.
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zensu-gauntlet-XXXXXX")" || TMP_DIR=""
 if [ -n "$TMP_DIR" ]; then
   # The control corpus is an INDEPENDENT literal list, NOT a split of GERMAN_RE.
   # Deriving both the corpus and the expected count from the same string makes the
@@ -114,15 +142,17 @@ if [ -n "$TMP_DIR" ]; then
   # first version of G3 had the defect that rule exists to prevent.
   : > "$TMP_DIR/control.md"
   GERMAN_STEMS='und oder nicht wird werden dieser diese kann muss sollte beim einen eine durch damit wenn dann auch noch schon jetzt bitte kein keine ohne zwischen'
-  GERMAN_TOTAL=0
-  for stem in $GERMAN_STEMS; do
+  for stem in $(printf '%s\n' $GERMAN_STEMS | LC_ALL=C sort -u); do
     printf 'token %s token\n' "$stem" >> "$TMP_DIR/control.md"
-    GERMAN_TOTAL=$((GERMAN_TOTAL+1))
   done
   GERMAN_HITS="$(grep -ciE "$GERMAN_RE" "$TMP_DIR/control.md" || true)"
   # Arity: the alternation and the independent list must describe the same number of
   # stems. This is what a lost `|` breaks, and nothing else in the check can see it.
-  GERMAN_ARITY="$(printf '%s' "$GERMAN_RE" | sed -e 's/^\\b(//' -e 's/)\\b$//' | tr '|' '\n' | grep -c .)"
+  # BOTH sides are deduplicated. Counting raw entries let a duplicate mask a deletion:
+  # replacing one stem with a second copy of another keeps both counts and the hit
+  # count identical while the replaced stem is no longer detected anywhere.
+  GERMAN_TOTAL="$(printf '%s\n' $GERMAN_STEMS | LC_ALL=C sort -u | grep -c .)"
+  GERMAN_ARITY="$(printf '%s' "$GERMAN_RE" | sed -e 's/^\\b(//' -e 's/)\\b$//' | tr '|' '\n' | LC_ALL=C sort -u | grep -c .)"
   if [ "$GERMAN_ARITY" != "$GERMAN_TOTAL" ]; then
     check "G3 alternation describes $GERMAN_ARITY stems but the control list carries $GERMAN_TOTAL — they have drifted" FAIL
   elif [ "$GERMAN_TOTAL" -gt 0 ] && [ "$GERMAN_HITS" = "$GERMAN_TOTAL" ]; then
@@ -186,6 +216,15 @@ fi
 SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
 HARNESS_FLAT="$(tr '\n' ' ' < "$HARNESS_MD" | tr -s ' ')"
 flat_has() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+# RULE for every anchor in this file, in both directions. `flat_has` is UNANCHORED —
+# it matches anywhere in the flattened file — so it can only ever prove that a phrase
+# is PRESENT, never that a sentence means what it meant when the anchor was written.
+# A fragment that omits the polarity-bearing verb is satisfied by a sentence that
+# INVERTS the claim, and its paired negative does not fire because that is a different
+# string. So: anchor a claim on enough of its own sentence that it cannot be
+# re-pointed, and when the property is the ABSENCE of an addition — a fifth value in a
+# closed vocabulary, a seventh name in an enumeration — use `grep -qxF` on the whole
+# line instead, the way G19 pins the DECISION declaration.
 
 # G8 asserts the WHOLE enumeration on both sides. Pinning only 'Bash' let the module
 # be narrowed to a single name while the skill kept promising six.
@@ -196,11 +235,38 @@ grep -qF "host-profile-v1 cannot invoke command-execution tools" "$CAPABILITY_LI
 # Scope the module assertion to the COMMAND_TOOLS declaration. A whole-file grep
 # stays green when five names are parked in an unused constant while the denial
 # itself narrows to one.
-COMMAND_TOOLS_DECL="$(grep -F 'const COMMAND_TOOLS' "$CAPABILITY_LIB")"
+# Anchored on the assignment, not the identifier: a bare `const COMMAND_TOOLS` prefix
+# also captures a sibling `const COMMAND_TOOLS_LEGACY = [...]`, which could satisfy all
+# six probes on its own — the same parked-constant hole this scoping exists to close.
+# The capture is one LINE, so a reflow of that declaration fails all six at once. That
+# direction is fail-closed but the message misleads, which is why the arity conjunct
+# below reports the count it actually saw.
+COMMAND_TOOLS_DECL="$(grep -F 'const COMMAND_TOOLS =' "$CAPABILITY_LIB")"
 for t in $COMMAND_TOOL_NAMES; do
   case "$COMMAND_TOOLS_DECL" in *"'$t'"*) ;; *) G8_MISS="$G8_MISS module:$t" ;; esac
   flat_has "\`$t\`" "$SKILL_FLAT" || G8_MISS="$G8_MISS skill:$t"
 done
+# ARITY, not just membership. Both loops above are subset checks, so a SEVENTH entry in
+# COMMAND_TOOLS leaves every conjunct green — here, in G15 (which pins only the phrase
+# 'a six-name DENYLIST'), and in test-reviewer-capability-gate.sh (per-name behavioral
+# rows with no count) — while SKILL.md keeps telling the reader the denylist has six.
+# This file already cross-checks an arity twice, for GERMAN_RE and for ESCAPE_STEMS;
+# the one enumeration whose count reaches a prompt carrier had neither.
+COMMAND_TOOL_ARITY="$(printf '%s' "$COMMAND_TOOLS_DECL" | grep -o "'[A-Za-z_][A-Za-z_]*'" | LC_ALL=C sort -u | grep -c .)"
+[ "$COMMAND_TOOL_ARITY" = 6 ] || G8_MISS="$G8_MISS module-arity:$COMMAND_TOOL_ARITY"
+# The REGISTRATION, parsed the way G4 and G11 parse theirs. The skill's headline names
+# hooks/hooks.json registering this gate on the PreToolUse matcher `.*`, and nothing
+# here asserted it: unregistering the hook, or moving it to a narrower matcher, left
+# every conjunct above true while the central containment claim went false.
+G8_REGISTERED="$(node -e '
+const h = require(process.argv[1]);
+const pre = (h.hooks && h.hooks.PreToolUse) || [];
+const entry = pre.find((e) => e.matcher === ".*");
+const hit = entry && (entry.hooks || []).some(
+  (x) => typeof x.command === "string" && x.command.includes("pre-reviewer-capability-gate.sh"));
+process.stdout.write(hit ? "yes" : "no");
+' "$HOOKS_JSON" 2>/dev/null)"
+[ "$G8_REGISTERED" = yes ] || G8_MISS="$G8_MISS manifest-registration"
 flat_has 'no builder and no critic in this loop can run' "$SKILL_FLAT" \
   || G8_MISS="$G8_MISS skill-claim"
 flat_has 'command-execution tool' "$SKILL_FLAT" || G8_MISS="$G8_MISS skill-category"
@@ -218,7 +284,13 @@ grep -qF 'zensu_hook_is_main_principal "$PAYLOAD" PreToolUse' "$EDIT_GATE" \
 grep -qF 'zensu_hook_is_main_principal "$INPUT" PostToolUse' "$WITNESS" \
   || G9_MISS="$G9_MISS witness-guard"
 flat_has 'binds the LEAD ONLY' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-scope"
-flat_has 'no spawned agent is ever `main-v1`' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-principal"
+# The anchor spans the claim AND the bound it inherits. An earlier spelling pinned the
+# unbounded absolute "no spawned agent is ever `main-v1`", which the section's own
+# agent_type paragraph refutes twelve lines earlier — so the suite was freezing an
+# overclaim in place. Requiring the qualifier is what stops that returning.
+flat_has 'no spawn the host identifies as a subagent is `main-v1`' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-principal"
+flat_has 'no spawned agent is ever `main-v1`' "$SKILL_FLAT" && G9_MISS="$G9_MISS skill-unbounded-absolute"
+flat_has 'this bullet and the one above invert together' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-premise-consequence"
 flat_has 'is NOT phase-gated' "$SKILL_FLAT" || G9_MISS="$G9_MISS skill-consequence"
 if [ -z "$G9_MISS" ]; then
   check "G9 skill states the main-v1-only scope of the edit gate and the witness" PASS
@@ -274,22 +346,40 @@ ESCAPE_RE="ZENSU_($(printf '%s|' $ESCAPE_STEMS | sed 's/|$//'))=[\"']?off"
 # the real failure — a stem MISSING from the list, which is how ZENSU_CHAIN=off
 # slipped the first version — stays invisible. Re-derive the set from the sources
 # the comment used to only name.
-ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/CLAUDE.md" 2>/dev/null \
-  | sed -e 's/^ZENSU_//' -e 's/=off$//' | sort -u | tr '\n' ' ')"
-ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | sort -u | tr '\n' ' ')"
-if [ -n "$ESCAPE_TREE" ] && [ "$ESCAPE_TREE" != "$ESCAPE_LIST_SORTED" ]; then
-  check "G12 gate-disable stems have drifted — tree has [$ESCAPE_TREE], list has [$ESCAPE_LIST_SORTED]" FAIL
+# Quote tolerance on BOTH sides. ESCAPE_RE deliberately accepts ZENSU_X='off' because
+# the gates compare after shell quote removal; deriving with a quote-INTOLERANT pattern
+# left this check blind to exactly the spelling that tolerance was added for. Sorted
+# under LC_ALL=C so the two sides can never disagree on collation.
+ESCAPE_TREE="$(grep -rhoE 'ZENSU_[A-Z_]+=["'"'"']?off' "$PLUGIN_DIR/hooks" "$PLUGIN_DIR/docs" "$PLUGIN_DIR/CLAUDE.md" 2>/dev/null \
+  | sed -e 's/^ZENSU_//' -e 's/=["'"'"']\{0,1\}off$//' | LC_ALL=C sort -u | tr '\n' ' ')"
+ESCAPE_LIST_SORTED="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | tr '\n' ' ')"
+# THREE arms under an id of its own, and an empty derivation FAILS rather than skips.
+# The control block below is a closed loop by construction, so this comparison is the
+# ONLY thing that can catch a stem MISSING from the list — the miss that let
+# ZENSU_CHAIN=off through the first version. `grep -r` failures are swallowed by
+# 2>/dev/null, so an empty tree used to read as agreement while the control block still
+# printed PASS. It also reported nothing on success, which made "ran and agreed"
+# indistinguishable from "never ran", and on drift it fell through to a second G12
+# line, so one id printed both a FAIL and a PASS.
+if [ -z "$ESCAPE_TREE" ]; then
+  check "G12a gate-disable stem derivation found nothing under hooks/, docs/ and CLAUDE.md — the drift check cannot run" FAIL
+elif [ "$ESCAPE_TREE" != "$ESCAPE_LIST_SORTED" ]; then
+  check "G12a gate-disable stems have drifted — tree has [$ESCAPE_TREE], list has [$ESCAPE_LIST_SORTED]" FAIL
+else
+  check "G12a gate-disable stem list matches the tree" PASS
 fi
 if [ -n "$TMP_DIR" ]; then
   # One control line per stem, and the hit count must equal the stem count. A single
   # hand-written line proved only the branch it happened to use, so a decayed branch
   # kept reporting PASS while no longer checking anything.
+  # Deduplicated, matching the LC_ALL=C sort -u that G12a compares against — counting
+  # raw entries here while the drift check counts distinct ones made the two halves
+  # disagree about whether a duplicate stem is one stem or two.
   : > "$TMP_DIR/escape.md"
-  ESCAPE_TOTAL=0
-  for stem in $ESCAPE_STEMS; do
+  for stem in $(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u); do
     printf 'run it with ZENSU_%s=off to get past the gate\n' "$stem" >> "$TMP_DIR/escape.md"
-    ESCAPE_TOTAL=$((ESCAPE_TOTAL+1))
   done
+  ESCAPE_TOTAL="$(printf '%s\n' $ESCAPE_STEMS | LC_ALL=C sort -u | grep -c .)"
   ESCAPE_HITS="$(grep -cE "$ESCAPE_RE" "$TMP_DIR/escape.md" || true)"
   if [ "$ESCAPE_TOTAL" -gt 0 ] && [ "$ESCAPE_HITS" = "$ESCAPE_TOTAL" ]; then
     if grep -rqE "$ESCAPE_RE" "$SKILL_DIR"; then
@@ -327,15 +417,26 @@ done
 # claims against, so losing one silently unmoors a claim from its enforcement.
 REQUIRED_HOOKS='hooks/lib/reviewer-capability-v1.js hooks/pre-edit-tdd-reminder.sh hooks/post-bash-witness.sh plan-approved-delegate.sh'
 HOOK_UNNAMED=""
+# Each required path is checked TWICE, and the two halves answer different questions.
+# `flat_has` proves the residency section still NAMES it; the -f test proves the file
+# is still THERE. Only the first was asserted before, and it uses a different mechanism
+# from the extraction loop above — so an extractor that yielded nothing left HOOK_MISS
+# empty and this check reported "all 0 hook and lib names resolve on disk" as a PASS
+# while the named-path guard stayed green. The class is `[a-z0-9-]+`, so one rename
+# introducing `_` or a capital drops a token out of the loop with no diagnostic.
 for req in $REQUIRED_HOOKS; do
-  flat_has "$req" "$SKILL_FLAT" || HOOK_UNNAMED="$HOOK_UNNAMED $req"
+  flat_has "$req" "$SKILL_FLAT" || HOOK_UNNAMED="$HOOK_UNNAMED $req(unnamed)"
+  case "$req" in
+    hooks/*) [ -f "$PLUGIN_DIR/$req" ] || HOOK_UNNAMED="$HOOK_UNNAMED $req(missing)" ;;
+    *)       [ -f "$PLUGIN_DIR/hooks/$req" ] || HOOK_UNNAMED="$HOOK_UNNAMED $req(missing)" ;;
+  esac
 done
-if [ -n "$HOOK_UNNAMED" ]; then
-  check "G13 the residency section no longer names:$HOOK_UNNAMED" FAIL
-elif [ -z "$HOOK_MISS" ]; then
-  check "G13 all $HOOK_N hook and lib names in the skill resolve on disk" PASS
+# Both failure sets are reported together. The arms used to be exclusive, so a run that
+# dropped a required name AND named a nonexistent path showed only the first.
+if [ -n "$HOOK_UNNAMED" ] || [ -n "$HOOK_MISS" ]; then
+  check "G13 required hook paths:${HOOK_UNNAMED:- ok} · unresolved names:${HOOK_MISS:- none}" FAIL
 else
-  check "G13 skill names hook paths that do not exist:$HOOK_MISS" FAIL
+  check "G13 all $HOOK_N hook and lib names in the skill resolve on disk" PASS
 fi
 
 # ── G14: registered in the CI structure manifest ────────────────────────────
@@ -381,6 +482,28 @@ flat_has 'from a non-Zensu server is not denied' "$SKILL_FLAT" || G15_MISS="$G15
 flat_has 'neither `agent_type` nor `agent_id` classifies as `main-v1` and is unrestricted by this gate' "$SKILL_FLAT" \
   || G15_MISS="$G15_MISS skill-agent-type-premise"
 flat_has 'a six-name DENYLIST, not an' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-denylist-shape"
+# Residue conjuncts, moved here from G18 where a break in one was reported as a
+# redaction defect. This check owns what the denylist does NOT cover.
+#
+# The write-reach anchor deliberately spans the polarity-bearing verb as well as the
+# object. `flat_has` matches anywhere in the flattened file, so the bare fragment
+# 'including outside the project root' is satisfied by a sentence that INVERTS the
+# claim ("must never write files including outside the project root") while its
+# paired negative below — a different string — stays quiet. Anchor a claim on enough
+# of its own sentence that it cannot be re-pointed.
+flat_has 'They may still read, and may write files including outside the project root' "$SKILL_FLAT" \
+  || G15_MISS="$G15_MISS skill-write-reach"
+flat_has 'They may still read and write project files.' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-write-reach-understated"
+flat_has 'only other tool-name branch matches' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-branch-overclaim"
+# The THIRD residue. Nested spawn is denied by nothing in the module — `Agent` appears
+# in none of neutralViolation's sets — and test-reviewer-capability-gate.sh pins that
+# allowance, so a builder can start its own fan-out outside the packet discipline.
+# The skill said "TWO things fall outside it" while three did.
+grep -qF 'neutral nested-agent capability stays host-governed' "$CAPABILITY_GATE_TEST" \
+  || G15_MISS="$G15_MISS sibling-nested-agent-row"
+flat_has 'THREE things fall outside it' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-residue-arity"
+flat_has 'keeps its nested-spawn capability' "$SKILL_FLAT" || G15_MISS="$G15_MISS skill-nested-spawn"
+flat_has 'TWO things fall outside it' "$SKILL_FLAT" && G15_MISS="$G15_MISS skill-stale-residue-arity"
 if [ -z "$G15_MISS" ]; then
   check "G15 skill states the residue the six-name denylist does not cover" PASS
 else
@@ -450,19 +573,18 @@ for raw in 'raw output into the packet' 'raw hard-gate evidence' 'raw critic ver
   flat_has "$raw" "$SKILL_FLAT" && G18_MISS="$G18_MISS skill-raw:${raw// /-}"
   flat_has "$raw" "$HARNESS_FLAT" && G18_MISS="$G18_MISS harness-raw:${raw// /-}"
 done
-# Round-2 additions. Each pairs a claim the review found overstated with the
-# corrected wording, so the overstatement cannot come back.
-flat_has 'including outside the project root' "$SKILL_FLAT" || G18_MISS="$G18_MISS skill-write-reach"
-flat_has 'They may still read and write project files.' "$SKILL_FLAT" && G18_MISS="$G18_MISS skill-write-reach-understated"
-flat_has 'unrestricted by this gate' "$SKILL_FLAT" || G18_MISS="$G18_MISS skill-gate-scope"
-flat_has 'only other tool-name branch matches' "$SKILL_FLAT" && G18_MISS="$G18_MISS skill-branch-overclaim"
 flat_has 'or any excerpt of product source or a diff' "$HARNESS_FLAT" || G18_MISS="$G18_MISS harness-publish-classes"
 flat_has 'Redact before every progress write.' "$HARNESS_FLAT" && G18_MISS="$G18_MISS harness-progress-scoped-heading"
-# The self-declaration carries NO count on purpose. It read "four anchors" while the
-# three checks anchored eleven sentences in that file, and nothing here can check a
-# figure — so a count in prose is a claim that only ever drifts further.
-flat_has 'G16, G17 and G18 anchor exact sentences in THIS file' "$HARNESS_FLAT" || G18_MISS="$G18_MISS harness-self-declaration"
-flat_has 'pin four anchors in THIS file' "$HARNESS_FLAT" && G18_MISS="$G18_MISS harness-stale-anchor-count"
+# Three residue conjuncts that used to sit here — the builder's write reach, the gate
+# scope and the branch overclaim — moved to G15, which owns the denylist-residue
+# claims. They had nothing to do with redaction, so a break in one was reported under
+# this check's label as a redaction defect. A fourth was deleted outright: the
+# `unrestricted by this gate` anchor is a strict substring of G15's agent-type anchor
+# over the same flattened file, so it could never fail while G15 passed.
+#
+# The two harness self-declaration pins were dropped with the sentence they pinned.
+# An inventory of which check pins what does not belong in a file the model loads at
+# runtime — it made a test rename an edit to a shipped prompt.
 if [ -z "$G18_MISS" ]; then
   check "G18 redaction is unconditional and stated at the writing step" PASS
 else
@@ -515,9 +637,18 @@ for lit in 'Hard gates' 'Outcome gate' 'Reference bar' 'Holdouts' '`hard`' '`dir
   flat_has "$lit" "$BARS_FLAT" || G20_MISS="$G20_MISS ${lit}"
 done
 flat_has 'Separate hard gates from directional' "$SKILL_FLAT" || G20_MISS="$G20_MISS skill-consumer"
-# README cites these two headings by name; pin them so a rename cannot leave that
-# citation stale with the suite green.
-grep -qxF '## Method sources' "$BARS_MD" || G20_MISS="$G20_MISS bars-method-sources-heading"
+# The SCOUT packet's authority bound. SKILL.md states the mandatory-lines rule for the
+# builder, the critic, the resolution delivery and the integrator — the scout is the
+# one spawn SKILL.md DELEGATES to this file, so its bound lives only here and nothing
+# pinned it. Deleting the paragraph left the whole suite green while the single
+# outward-facing spawn lost the rule that keeps it bounded.
+flat_has "carries the step-4 builder template's two mandatory lines verbatim" "$BARS_FLAT" \
+  || G20_MISS="$G20_MISS bars-scout-mandatory-lines"
+# Every heading, not just the two the README cites. The intra-file table of contents
+# links all four, so renaming any of them dangles a link silently.
+for h in '## Selection test' '## Bar patterns by artifact' '## Scout output' '## Method sources'; do
+  grep -qxF "$h" "$BARS_MD" || G20_MISS="$G20_MISS bars-heading:${h// /-}"
+done
 grep -qxF '## Provenance' "$SKILL_MD" || G20_MISS="$G20_MISS skill-provenance-heading"
 if [ -z "$G20_MISS" ]; then
   check "G20 quality-bars.md defines the vocabulary SKILL.md consumes" PASS

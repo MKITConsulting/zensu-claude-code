@@ -9,16 +9,12 @@ break by accident.
 > rest — is a property of the Claude Code harness, not of this plugin, and no suite in
 > this repository pins any of them; treat them as known-unverified here and check the
 > harness if one is missing. The Zensu-specific paragraphs below restate claims whose
-> normative home is [SKILL.md](../SKILL.md) §"Inside the Zensu plugin"; of that
-> section, `tests/structure/test-gauntlet-loop-skill.sh` G8-G11 pin four claims — the
-> command-tool denial, the `main-v1`-only edit gate and witness, the out-of-protocol
-> reviewer spawn, and the `ExitPlanMode` interception — and G15 pins two more, the
-> non-Zensu MCP residue and the `agent_type` premise. This file is NOT unpinned:
-> G16, G17 and G18 anchor exact sentences in THIS file, so an edit here fails the
-> suite rather than passing silently. No count is given on purpose — nothing checks
-> one, and the figure this line first carried was already stale when it shipped.
-> Correct the normative statement first and this one
-> with it, and expect the suite to tell you when you have touched a pinned line.
+> normative home is [SKILL.md](../SKILL.md) §"Inside the Zensu plugin". Correct the
+> normative statement first and this one with it. Sentences here are pinned by
+> `tests/structure/test-gauntlet-loop-skill.sh`, which fails rather than passing
+> silently when you touch one — the inventory of which check pins what lives in that
+> suite's header, deliberately not here: a model running this loop cannot act on a
+> check id, and a test that renames a check must not have to edit a shipped prompt.
 
 ## Contents
 
@@ -90,10 +86,12 @@ instruction is what removes intent while a grant only removes reach.
 
 **Inside the Zensu plugin an `Explore` critic cannot run commands at all.** The
 `.*` PreToolUse capability gate denies every command-execution tool to a neutral
-`host-profile-v1` child, and `Explore` is one. That is a hard difference from a bare
+`host-profile-v1` child, and `Explore` is one *while the host reports its
+`agent_type`* — [SKILL.md](../SKILL.md) §"Inside the Zensu plugin" states why this
+plugin cannot establish that it always does, and that bound applies here unchanged.
+Under it, this is a hard difference from a bare
 Claude Code session, and it moves work: the lead runs the build, the tests, the dev
-server and the capture, then hands the redacted output into the packet. See "Inside the
-Zensu plugin" in [SKILL.md](../SKILL.md).
+server and the capture, then hands the redacted output into the packet.
 
 If the project ships a dedicated read-only reviewer agent type, prefer it. Do
 not use a `general-purpose` critic — a critic that can edit will eventually fix
@@ -111,7 +109,9 @@ hard-refuse any spawn that is not a complete `REVIEW PACKET v1`, and
 be aimed at an arbitrary artifact. Use `Explore` for every critic in this loop.
 
 The packet handed to a critic contains the goal, the frozen bar, house rules,
-the candidate, the reference, redacted gate output and the inspection recipe. It
+the candidate, the reference, redacted gate output and the NON-SHELL half of the
+inspection recipe — every shell-borne step travels only as the lead's redacted
+output, because a critic here holds no shell to re-run it with. It
 contains no builder transcript, no rationale, no "we tried X because Y", and no
 hint about which way the lead is leaning.
 
@@ -220,16 +220,13 @@ Update it after each round with: the ledger row, the current capture, the
 critics' verdicts, the resolution, and the budget spent. Do not write progress
 files into product source unless the user designated that location.
 
-**Redaction is unconditional; its normative home is [SKILL.md](../SKILL.md).** That
-rule covers packet, ledger, resolution attachment and progress page alike — this
-paragraph restates it for the publishing channel and adds nothing of its own. The
-evidence feeding a round comes from
-`read_console_messages`, `preview_logs`, `read_network_requests` and live
-screenshots — surfaces that routinely carry session cookies, bearer tokens, API keys
-and the logged-in user's data. Never embed raw network-request headers or bodies.
-Strip console output containing credentials. Look at each screenshot before it goes
-in. And keep third-party reference captures **local** — scratch directory and critic
-packet only, never embedded in a page published to an external host.
+**Redaction is unconditional; its normative home is [SKILL.md](../SKILL.md)**, which
+covers packet, ledger, resolution attachment and progress page alike and names the
+capture surfaces the rule exists for. Read it there rather than here — an earlier
+version of this paragraph re-authored the rule in its own words and the two spellings
+had already drifted apart. Publishing adds nothing to that rule except reach: keep
+third-party reference captures **local** — scratch directory and critic packet only,
+never embedded in a page published to an external host.
 
 ## Workflow: deterministic fan-out
 
