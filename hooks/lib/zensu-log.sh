@@ -1559,6 +1559,26 @@ case "$cmd" in
           // `resolveArtifactTarget` because `redactFile` and the sweep resolve
           // with no expectedRoot and a caller root that need not be an ancestor
           // of the cwd, so the same check in the shared resolver denies them.
+          //
+          // WHAT THIS ANCHOR IS WORTH, stated because the paragraph above rejects
+          // `CLAUDE_PROJECT_DIR` as "an env var the caller sets" and then anchors
+          // on something the caller sets more freely still. The anchor is the
+          // PROCESS CWD, and `cd` selects it in the same command with no write
+          // channel for `bash-source-write-parse.js` to recognize — so
+          // `cd <sibling> && … append --truncate --log <sibling>/.zensu/logs/x.log`
+          // satisfies this check and is judged by no gate at any point.
+          //
+          // So this bounds an ACCIDENTAL cross-project truncate — the drifted-cwd
+          // shape, which is the one that actually happens — and not a deliberate
+          // one. It does NOT restore what the pre-change redirect form had: that
+          // was judged against the session root, an authority outside the command,
+          // while this is state the command sets in its own first token. Anchoring
+          // on the `project_root` of the Session Control record — the authority
+          // `hooks/post-bash-witness.sh` uses — is the stronger spelling and is
+          // deliberately NOT taken here, because this verb carries no session bind
+          // and adding one would make every log line depend on a bind that the
+          // append path exists to work without. R44c pins the passing shape as a
+          // residual so that narrowing it later is a decision, not a discovery.
           const replaceMode = process.env.ZENSU_APPEND_TRUNCATE === "1";
           if (expected === undefined && replaceMode) {
             // BOTH sides are canonicalized. `resolveArtifactTarget` returns

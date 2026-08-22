@@ -376,12 +376,21 @@ function replaceSpellings(text, spellings, placeholder) {
 // before, and anything it rejects could not have matched. The literals come from
 // the same constants the rules are built from, so the two cannot drift apart.
 //
-// It is worth having because the common case is the empty one. `zensu-log.sh
-// append` already redacts at write time, so the Bash sweep's answer for the
-// narrative log is `no-op` on essentially every pass — and that answer used to
-// cost the full set of passes over a file that only grows, once per in-window
-// tool call. It does NOT remove the read: the sweep still loads the artifact to
-// ask the question. Bounding that is what the sweep's own cap is for.
+// It is worth having because the sweep's answer for the narrative log is `no-op`
+// on essentially every pass — `zensu-log.sh append` already redacted at write
+// time — and that answer used to cost the full set of passes over a file that
+// only grows, once per in-window tool call.
+//
+// TWO BOUNDS ON THAT SAVING, and the second all but removes it for the very
+// artifact the paragraph names. It does NOT remove the read: the sweep still
+// loads the artifact to ask the question, and `SWEEP_MAX_TARGETS` is what bounds
+// that. And the short-circuit only fires for text containing NONE of the three
+// residual literals — two of which, `home` and `root`, are ordinary English
+// words. A TDD narrative log for this repository says "project root" and "repo
+// root" constantly, and any artifact a residual rule has already touched contains
+// `<home>`, whose substring is `home`. Those texts admit and run every pass
+// anyway. The reliable saving is on artifacts that mention none of the three;
+// claiming it for the run log would be claiming the case that defeats it.
 function redactionPossible(text, spellings, home) {
   for (const spelling of spellings) if (text.includes(spelling)) return true;
   for (const spelling of home) if (text.includes(spelling)) return true;
@@ -513,9 +522,19 @@ function sweepTargets(projectRoot, options = {}) {
     for (const entry of entries) {
       const name = entry.name;
       if (!name.endsWith(extension)) continue;
-      // The witness is redacted by its own writer, is gitignored and never
-      // committed, and is the largest file in the directory.
-      if (bucket === 'logs' && isWitnessName(name)) continue;
+      // The witness is redacted by its own writer and is the largest file in the
+      // directory. It is gitignored in THIS repository only — a consuming repo has
+      // to add `.zensu/state/` and `.zensu/logs/witness-*.log` itself — so "never
+      // committed" is NOT the reason it is skipped here, and saying so would
+      // re-assert the claim docs/tdd-manager-workflow.md exists to retract.
+      // EITHER bucket, not just `logs`. `redactFile` refuses any `witness-`
+      // basename wherever it sits and answers `witness-artifact`, and that reason
+      // is deliberately in none of the three exported sets — so a swept path
+      // carrying it fell through the hook's partition and printed "artifact left
+      // UNREDACTED (sweep)" once per tool call for the whole window, about a file
+      // the design refuses on purpose. Scoping the skip to `logs` made the module
+      // header's "excluded from EVERY path" false for the enumeration alone.
+      if (isWitnessName(name)) continue;
       // The dirent carries the type, so a directory or a symlink named like an
       // artifact is rejected without a syscall. A filesystem that does not report
       // `d_type` answers UNKNOWN and every predicate below is false — the entry
@@ -739,6 +758,19 @@ function writeArtifactLine(filePath, line, options = {}) {
     // `write-failed`. That is the deliberate answer: the line may or may not be
     // held by a path, and a caller that must not lose it is better served by a
     // loud refusal it retries than by a success it cannot verify.
+    //
+    // ONE CONSEQUENCE IN THE OTHER DIRECTION, stated rather than implied.
+    // `sameInode` answers false on ANY `lstatSync` throw, not only on a genuine
+    // inode mismatch — a concurrent `chmod` on the parent, an EIO — so a
+    // TRANSIENT stat fault over a line that DID land is reported here as
+    // `concurrent-write`. That reason tells the caller to retry, and the retry
+    // then duplicates the entry in an audit log a consuming repo commits.
+    // Narrow, and the trade is deliberate: the check cannot tell "the path names
+    // a different inode" from "I could not ask", and of the two wrong answers a
+    // duplicated line is recoverable by reading while a silently orphaned one is
+    // not. Splitting the two verdicts would mean giving `sameInode` a third
+    // value at all three of its call sites; do that only with a reason to.
+    // Do NOT read the sentence above as "the line did not land" — it may have.
     if (!sameInode(fs.fstatSync(fd), target)) {
       fs.closeSync(fd);
       return { written: false, reason: 'concurrent-write' };
@@ -925,13 +957,22 @@ function main(argv) {
 }
 
 // The exported surface is exactly what has a consumer in `hooks/` or in
-// `tests/structure/test-artifact-redaction.sh`. Six names were exported with none
-// — `projectRootFromArtifactPath`, `ARTIFACT_BUCKETS`, `ARTIFACT_DIR` and the
-// three placeholder constants — and they are internal again. Dead API surface is
-// not free here: an export reads as a contract a port has to honour, and the
-// layout constants in particular invited a caller to re-derive a path this module
-// exists to own. Everything below is imported somewhere; adding a name here
-// without a caller is how that grew back last time.
+// `tests/structure/test-artifact-redaction.sh`, and that sentence is checkable
+// rather than aspirational — NINE names have been removed for failing it:
+// `projectRootFromArtifactPath`, `ARTIFACT_BUCKETS`, `ARTIFACT_DIR`, the three
+// placeholder constants, and then `SWEEP_WINDOW_SECONDS`, `SWEEP_MAX_TARGETS` and
+// `MAX_BYTES`. The last three were the ones the first pass missed: the hook and
+// the docs NAME them in prose, and a name in a comment reads like a consumer at a
+// glance, but nothing imports them. The suite drives the sweep through the
+// `windowSeconds` and `maxTargets` OPTIONS and the oversize case through a
+// literal, so the defaults were exported for no caller at all.
+//
+// Dead API surface is not free here: an export reads as a contract a port has to
+// honour, and a tuning constant exported as contract is the worst of the two —
+// the layout constants invited a caller to re-derive a path this module exists to
+// own, and these invited one to depend on a number this host is free to change.
+// Everything below is imported somewhere; adding a name here without a caller is
+// how that grew back twice.
 module.exports = {
   redact,
   redactFile,
@@ -945,9 +986,6 @@ module.exports = {
   sweepTargets,
   msysSpelling,
   WITNESS_PREFIX,
-  SWEEP_WINDOW_SECONDS,
-  SWEEP_MAX_TARGETS,
-  MAX_BYTES,
 };
 
 if (require.main === module) {

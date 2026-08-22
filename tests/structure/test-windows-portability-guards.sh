@@ -456,6 +456,16 @@ fi
 # sends the line to an orphaned inode and the old spelling reported that as
 # success. That call site is asserted separately below, so raising the count
 # alone cannot satisfy this check.
+#
+# The pre-rename re-stat is TWO spellings and both are asserted, because the
+# `stat`-based one holds only `redactFile`. `replaceArtifactFile` compares against
+# `prior` instead, and while only the first literal was here, deleting that whole
+# guard left every assertion in this block green: the `concurrent-write` reason is
+# still minted by `redactFile` and both `fsyncSync` calls are untouched. The
+# `prior === null` arm is asserted separately for the same reason — it is the half
+# that defends a target APPEARING between the tolerated ENOENT and the rename, and
+# nothing else in this file or in the behavioral suite reaches it. R45 covers the
+# post-write re-check of writeArtifactLine in APPEND mode, not this one.
 if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$ARTIFACT_REDACT")" -eq 1 ] \
   && [ "$(grep -cF 'const NON_BLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$ARTIFACT_REDACT")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | noFollow | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
@@ -469,6 +479,8 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   && grep -qF 'expected.dev === stat.dev && expected.ino === stat.ino' "$ARTIFACT_REDACT" \
   && grep -qF "err.code === 'ELOOP' || err.code === 'EMLINK'" "$ARTIFACT_REDACT" \
   && grep -qF 'now.size !== stat.size || now.mtimeMs !== stat.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== prior.size || now.mtimeMs !== prior.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'prior === null' "$ARTIFACT_REDACT" \
   && grep -qF "reason: 'concurrent-write'" "$ARTIFACT_REDACT" \
   && ! grep -qF 'fs.constants.O_TRUNC' "$ARTIFACT_REDACT" \
   && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$ARTIFACT_REDACT"; then

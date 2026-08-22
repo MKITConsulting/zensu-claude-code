@@ -799,6 +799,30 @@ else
   check "R44 --truncate with no CLAUDE_PROJECT_DIR refuses a foreign project log (rc=$RC44)" FAIL
 fi
 
+# ── R44c: the destructive bind is anchored on the PROCESS CWD ────────
+# R44 proves the check refuses when the cwd is a different project. This is its
+# discrimination partner in the other direction, and it pins a RESIDUAL rather
+# than a guarantee: a caller that runs the verb FROM the foreign project selects
+# the anchor itself, so the same truncate succeeds. `cd` carries no write channel
+# for the source-write gate to recognize, so nothing else judges that shape
+# either. The control therefore bounds an ACCIDENTAL cross-project truncate — the
+# drifted-cwd case — and not a deliberate one, which is exactly what the comment
+# at the check now says. Pinning it means narrowing it later is a decision rather
+# than a discovery.
+S3_B_LOG="$S3_B/2026-01-01-0044_tdd-b-residual.log"
+printf 'PRE-EXISTING B CONTENT\n' > "$S3_B_LOG"
+( cd "$WORK/xproj/b" && env -u CLAUDE_PROJECT_DIR HOME="$FAKE_HOME" \
+  bash "$LOG_HELPER" append --truncate \
+  --log "$S3_B_LOG" \
+  --message "TRUNCATED FROM INSIDE B" >/dev/null 2>&1 )
+RC44C=$?
+if [ "$RC44C" -eq 0 ] && grep -qF 'TRUNCATED FROM INSIDE B' "$S3_B_LOG" \
+  && ! grep -qF 'PRE-EXISTING B CONTENT' "$S3_B_LOG"; then
+  check "R44c --truncate from inside the target project succeeds (accepted residual: the anchor is the cwd)" PASS
+else
+  check "R44c --truncate from inside the target project succeeds (rc=$RC44C)" FAIL
+fi
+
 # ── R44b: the additive mode is deliberately NOT bound — stated, not hidden
 # This pins the accepted residual so that closing it later is a deliberate change
 # rather than an accident, and so that the bound cannot quietly widen either.
@@ -1243,6 +1267,33 @@ if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
 else
   check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/SKILL.md" FAIL
 fi
+
+# ── R55: the sweep never enumerates a witness name in EITHER bucket ──
+# The exclusion was scoped `bucket === 'logs'`, while `redactFile` refuses any
+# `witness-` basename in either bucket and answers `witness-artifact`. That reason
+# is in none of the three exported sets, and the hook's named-path carve-out does
+# not apply to a swept path — so a `witness-*.md` under `.zensu/plans/` made every
+# main-thread tool call print "artifact left UNREDACTED (sweep)" for a file the
+# design deliberately and correctly refuses, for the whole sweep window. An
+# implicit residual class reporting a routine outcome as the worst one is exactly
+# what the three-set partition exists to prevent.
+#
+# The file is hand-placed on purpose: `{ts}_tdd-{slug}.md` cannot produce that
+# name, so this is reachable without being routine. The second assertion is the
+# discrimination partner — the file must still be REFUSED (left unredacted on
+# disk), or a sweep that simply redacted it would satisfy the first arm while
+# destroying the one file the crosscheck cannot survive losing.
+WITNESS_PLAN="$PROJ/.zensu/plans/witness-probe-r55.md"
+printf 'PLANTED %s\n' "$FOREIGN_USER" > "$WITNESS_PLAN"
+ERR55="$(sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+if ! printf '%s' "$ERR55" | grep -qF 'witness-probe-r55.md' \
+  && grep -qF "$FOREIGN_USER" "$WITNESS_PLAN"; then
+  check "R55 a witness name in the plans bucket is skipped by the sweep, not reported as a fault" PASS
+else
+  check "R55 a witness name in the plans bucket is skipped by the sweep (err=[$ERR55])" FAIL
+fi
+rm -f "$WITNESS_PLAN"
 
 # ── R29: the module refuses a shape it used to accept silently ───────
 OUT29="$(node -e '

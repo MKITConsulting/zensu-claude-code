@@ -46,12 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `.zensu/logs/` turned the verb into an append/truncate primitive on any file on the
   same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor
   (`isFile`, `nlink === 1`, and the expected dev/ino re-derived from the canonical
-  parent), truncates through `ftruncate` AFTER those checks rather than `O_TRUNC` at
-  open, and refuses any bucket but `logs` and any name starting with `witness-` — so
+  parent), keeps `O_TRUNC` out of the open flags so the `nlink` check can still refuse,
+  and refuses any bucket but `logs` and any name starting with `witness-` — so
   the log verb can never destroy a committed plan or the evidence the crosscheck
-  matches against.
+  matches against. The destructive `mode: 'replace'` does not truncate in place at all:
+  it validates through a read-only descriptor, writes an `O_EXCL` temp, `fsync`s and
+  renames, so a failed write leaves the previous bytes addressable.
   `hooks/post-bash-witness.sh` redacts the witness `cmd` — **not** for the witness's own
-  sake, which is gitignored and never committed, but because
+  sake — it is gitignored in THIS repo only, and a consuming repo must add `.zensu/state/` and `.zensu/logs/witness-*.log` itself — but because
   `zensu-evidence-crosscheck.js` matches a claim against a witness entry by EQUALITY.
   Its `tail` is deliberately left raw: nothing compares it, its only reader is the
   failure-marker scan, and redaction there is purely subtractive, so a `failed` token
@@ -60,8 +62,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   root from different authorities and must substitute identically.
   New PostToolUse hook `hooks/post-artifact-redact.sh` is the net under both: BOTH
   registered matchers sweep the artifacts modified in the last 5 minutes — which catches
-  a hand-rolled `printf >>` and a subagent-written artifact, without re-reading the
-  hundreds of tracked plans a consuming repo can hold — and the write matchers
+  a hand-rolled `printf >>` and a subagent-written artifact. In the steady state that
+  window also keeps the hundreds of tracked plans a consuming repo can hold out of the
+  read set, but the window is NOT what bounds the sweep and this note no longer implies
+  it is: a `git checkout` refreshes every tracked artifact mtime at once and puts all of
+  them inside it. `SWEEP_MAX_TARGETS` (25 per invocation, newest mtime first) is the
+  bound, and an mtime is not knowable without a stat, so the enumeration was never
+  bounded by the window either. The write matchers
   additionally redact the tool's own `file_path`, which is the only way an artifact
   outside that window is reached. `witness-*.log` is excluded, and a refusal names
   whether the target was swept or written. Every path exits 0 — a
@@ -120,7 +127,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   written first, and its first 19 checks measured 1 PASS / 18 FAIL against the pre-change
   tree — so its sensitivity is proven rather than assumed: **1 PASS / 18 FAIL is the RED
   reading of those first 19 checks, never a count of the shipped suite.** The suite as
-  shipped is **89 checks**, grown across the review rounds and the PR #255 team review. Its shape answers two ways a pin like this
+  shipped is **91 checks**, grown across the review rounds and the PR #255 team review. Its shape answers two ways a pin like this
   goes vacuous: every "carries no `/Users/`" arm is paired with a content assertion, since
   an emptied artifact satisfies the absence check; and every guard check asserts the exit
   status AND that the on-disk shape the guard protects still holds, since a writer that

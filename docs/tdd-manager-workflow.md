@@ -241,8 +241,11 @@ flowchart LR
     State --> Code
 ```
 
-The plan + log files form a local, per-run audit pair for the active session;
-they are gitignored and not repository provenance. Mutable state files are
+The plan + log files form a per-run audit pair for the active session: gitignored in
+THIS repository, and deliberately committed as an audit trail in many consuming repos —
+see [Publication safety](#publication-safety-of-the-plan-and-log), which is why they are
+written to be publishable. An earlier revision of this sentence called them "not
+repository provenance", which is the premise that whole section retracts. Mutable state files are
 also ephemeral per session and live project-locally under `.zensu/state/`; the
 immutable session record lives separately under
 `CLAUDE_PLUGIN_DATA/session-control/v1/records/`. State filenames use the
@@ -448,7 +451,7 @@ Every `/zensu:tdd` run uses four channels:
 | **Plan** | Design decisions, step table, Preconditions, audit checklist | Per session. **Publication-safe by construction** — gitignored in THIS repo, deliberately committed as an audit trail in many consuming repos | Markdown, English-only |
 | **Log** | Execution trace: phase markers (`RED_WRITE`, `RED_FAIL`, `IMPL`, `GREEN_PASS`, `REFACTOR`), attempt counts, audit results | Per session. **Publication-safe by construction** — same split as the plan | Append-only timestamped text, English-only |
 | **State** | Current FSM phase per session, history array | Ephemeral per session | JSON |
-| **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail, interrupted flag) | Ephemeral per session — **local only, gitignored, never committed** (consumed solely by the in-session Phase 6 cross-check); under promptfoo it lives in the per-test isolated dir | Append-only timestamped text, JSON-escaped fields |
+| **Witness** | Independent record of every Bash tool invocation (cmd, exit code, stdout tail, interrupted flag) | Ephemeral per session — **local only, and gitignored in THIS repo only**; a consuming repo must add `.zensu/state/` and `.zensu/logs/witness-*.log` itself, or this file publishes unredacted (consumed solely by the in-session Phase 6 cross-check); under promptfoo it lives in the per-test isolated dir | Append-only timestamped text, JSON-escaped fields |
 
 The agent appends to the log via:
 
@@ -627,7 +630,7 @@ are intentionally not part of the state transaction.
 
 ### Witness channel — anti-hallucination evidence
 
-The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. Its `cmd` is redacted on the RAW string before the JSON encoding, by the same function the narrative log uses; the `tail` is deliberately left raw — see [Publication safety](#publication-safety-of-the-plan-and-log) for both halves of that rule. The hook records lines only while that exact Session Control key's chain-state `active` flag is set; it never scans for or adopts another session's state. Disable it with `ZENSU_TEST_WITNESS=off`. The **witness** is local-only and gitignored everywhere — single-session anti-hallucination evidence with no audit value past the run that produced it. The narrative `.log` and the plan are a different case: gitignored in THIS repository (`.gitignore` ignores `.zensu/*` except `config.json`), and deliberately committed as an audit trail in many consuming repos, which is what the redaction above exists to make safe.
+The witness log at `${CLAUDE_PROJECT_DIR:-.}/.zensu/logs/witness-<scv1-session-key>.log` is written automatically by the `hooks/post-bash-witness.sh` PostToolUse hook on every Bash tool call. Its `cmd` is redacted on the RAW string before the JSON encoding, by the same function the narrative log uses; the `tail` is deliberately left raw — see [Publication safety](#publication-safety-of-the-plan-and-log) for both halves of that rule. The hook records lines only while that exact Session Control key's chain-state `active` flag is set; it never scans for or adopts another session's state. Disable it with `ZENSU_TEST_WITNESS=off`. The **witness** is single-session anti-hallucination evidence with no audit value past the run that produced it, and it is gitignored **in THIS repository** — not everywhere. An earlier revision of this sentence said everywhere, and that was the claim the whole [Publication safety](#publication-safety-of-the-plan-and-log) section exists to retract: the plugin ships nothing that makes it true in a consuming repo, where this file sits in the exact directory and matches the exact glob consumers are told to commit, with a raw `tail=` and no credential scan. A consuming repo has to add `.zensu/state/` and `.zensu/logs/witness-*.log` itself. The narrative `.log` and the plan are a different case: gitignored in THIS repository (`.gitignore` ignores `.zensu/*` except `config.json`), and deliberately committed as an audit trail in many consuming repos, which is what the redaction above exists to make safe.
 
 Each line has the form:
 

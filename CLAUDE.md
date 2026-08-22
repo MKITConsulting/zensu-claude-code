@@ -62,10 +62,24 @@ escapes the gate itself teaches — so a heuristic false positive is not a wedge
 because a first draft of this paragraph got it wrong.** `pre-write-secret-scan.sh`
 carries TWO ledger sites: it records the AMBIENT `ZENSU_SECRET_SCAN=off` directly,
 before the decider runs at all, and it records the INLINE per-command prefix
-through the decider's `__bypass__` verdict. `append` reads only the ambient
-variable and records neither — so an exported opt-out silences this scan while the
-sibling gate ledgers it on the next matched call, and an inline prefix on the
-`append` command silences this scan while the decider may or may not see it.
+through the decider's `__bypass__` verdict. `append` now carries a ledger site of its
+own, at the log-write chokepoint, best-effort in a subshell so a ledger write can never
+cost a log line. **State its channel by MECHANISM, not by outcome — an earlier revision
+of this paragraph got the outcome exactly backwards.** It tests its own PROCESS
+ENVIRONMENT (`[ "${ZENSU_SECRET_SCAN:-}" = "off" ]`), and a shell assignment written in
+front of a command is exported into that command's environment, so the verb cannot tell
+an inline prefix on its own invocation from an exported one and records BOTH. R53 is
+the pin, and it uses the inline spelling. What it never records is a prefix on some
+OTHER command — only the decider sees those, and this verb never consults it. The
+direction of the old error is worth naming: the ledger recorded MORE than the
+documentation claimed, so no rendered entry was ever false. One bound travels with the
+new site and is not cosmetic: the
+identity comes from `zensu_resolve_session_id ""`, which reads `ZENSU_SESSION_KEY`, so
+an `append` run outside a Zensu-started session records nothing. This verb deliberately
+carries no session bind and there is no second source for that identity.
+A prefix on some OTHER command neither silences this scan nor is recorded here — it
+never enters this process. What remains open is narrower: whether the DECIDER ledgers
+an inline prefix on the `append` command itself.
 "May or may not" is the honest word: `detectChannels` is not tokenized and not
 quote-aware, so a `>` anywhere in the `--message` text — `"RED -> GREEN"` is
 enough — makes it report a redirect and the escape IS ledgered. The absence of an
@@ -88,7 +102,8 @@ MODEL-authored, so a guarantee that holds only while the model follows a recipe 
 not a guarantee.
 
 **The witness is redacted for SYMMETRY, not for its own safety.** It is gitignored
-and never committed. `zensu-evidence-crosscheck.js` matches a claim against a
+in THIS repository, and the plugin ships nothing that makes that true in a consuming
+one — say "in this repo", never "everywhere". `zensu-evidence-crosscheck.js` matches a claim against a
 witness entry by EQUALITY, so redacting one side only turns every claim naming an
 absolute path into an `EVIDENCE GAP`. Each writer passes its OWN authority plus
 `CLAUDE_PROJECT_DIR` when that is set — never the other writer's, so agreement
@@ -108,8 +123,13 @@ different objects — and `[ -L ]` is blind to a HARD link, which
 Planting one inside `.zensu/logs/` turned the verb into an append/truncate
 primitive on any file on the same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor (`isFile`,
 `nlink === 1`, and the expected dev/ino re-derived from the canonical parent, which
-closes the same swap one component higher), and truncates through `ftruncate` AFTER
-those checks rather than through `O_TRUNC`, which would truncate at open. It is
+closes the same swap one component higher), and never truncates in place. `O_TRUNC`
+stays out of the open flags, because truncating at open would run BEFORE the `nlink`
+check could refuse. The destructive mode publishes by RENAME instead: an earlier
+spelling ran `ftruncate` after those checks, which committed the destroy before the
+new bytes existed and left the artifact empty on a failed write, so `mode: 'replace'`
+now routes to `replaceArtifactFile`, which validates the target through a read-only
+descriptor, writes an `O_EXCL` temp beside it, `fsync`s, re-checks, and renames. It is
 named for what it can do: `mode: 'replace'` destroys, and it refuses any bucket but
 `logs` and any `witness-` name, so the log verb cannot reach a committed plan or the
 crosscheck's evidence.
@@ -134,9 +154,19 @@ second authority to disagree with — while the witness passes both without a
 check, deliberately, because losing the equality match is worse than an ambiguous
 placeholder in a gitignored file.
 
-**Coupled sites that move together:** the module's `ARTIFACT_BUCKETS` / `ARTIFACT_DIR`
-/ `WITNESS_PREFIX` / `SWEEP_WINDOW_SECONDS` (the hook consumes them, it does not
-re-spell them); the `WITNESS_PREFIX` ↔ `post-bash-witness.sh`'s own
+**Coupled sites that move together:** the module's `ARTIFACT_BUCKETS` / `ARTIFACT_DIR`,
+which are module-INTERNAL — `post-artifact-redact.sh` consumes the layout TRANSITIVELY,
+by calling `sweepTargets` and `resolveArtifactTarget` rather than joining
+`.zensu/plans` and `.zensu/logs` itself, and it never imported either constant; an
+earlier revision of this clause said it consumed them directly, and the module header
+now records the same correction. `SWEEP_WINDOW_SECONDS` and `SWEEP_MAX_TARGETS` are
+NAMED in the hook's own header prose and imported by nothing — it calls
+`mod.sweepTargets(project)` with no options and the module defaults apply internally —
+so that coupling is documentation-only and breaks SILENTLY, which is the same trap the
+module header now records in its own words;
+`WITNESS_PREFIX`'s only consumer outside the module is R19 in
+`tests/structure/test-artifact-redaction.sh`, which the next clause already names.
+Then: the `WITNESS_PREFIX` ↔ `post-bash-witness.sh`'s own
 `witness-${SANITIZED_SESSION}.log` spelling, pinned by R19; the `Edit|Write|MultiEdit`
 matcher spelling in FIVE places — `hooks/hooks.json`, `docs/configuration.md`,
 `docs/tdd-manager-workflow.md`, R0c, and the JS disjunction in
@@ -163,15 +193,23 @@ made a routine race report as the worst outcome the hook can produce.
 
 **The invariant is per-artifact, not per-directory.** `writeArtifactLine` refuses
 any `witness-` name, and `hooks/post-bash-witness.sh` still writes its log with a
-plain shell `>>`. That is deliberate — the witness is gitignored, never committed
-and rewritten every run — but it means "the write happens inside the module" is a
-property of the two PUBLISHABLE artifacts only.
+plain shell `>>`. That is deliberate — the witness is rewritten every run and is
+gitignored in THIS repository — but it means "the write happens inside the module" is
+a property of the two PUBLISHABLE artifacts only. Do NOT restate it as "never
+committed": a consuming repo only gets that by adding `.zensu/state/` and `.zensu/logs/witness-*.log` itself.
 
 **Operator-facing accounts that must move with it:** `docs/tdd-manager-workflow.md`
 §"Publication safety of the plan and log" (which carries the narrative, including
 the `SWEEP_WINDOW_SECONDS` value as prose), both hook rows in
 `docs/configuration.md` — the `post-artifact-redact.sh` row, which is the ONE row
-carrying the sweep window as prose, and the redaction paragraph of the
+carrying BOTH sweep values as prose (`SWEEP_WINDOW_SECONDS` as "last 5 minutes" and
+`SWEEP_MAX_TARGETS` as a bare `(25)`, so raising the cap silently falsifies a shipped
+operator-facing doc). R49 in `tests/structure/test-artifact-redaction.sh` encodes that
+same value twice more and breaks LOUDLY rather than silently, which is why it is named
+here and not in the silent-coupling paragraph below — and raising the cap to the
+fixture count or above does not merely fail it, it destroys its discrimination, because
+the capped and uncapped arms then agree. A new cap needs a fixture count above it. Then
+the redaction paragraph of the
 `post-bash-witness.sh` row, which has already drifted once by claiming the `tail`
 is redacted and carries no window at all — plus `docs/tdd-manager-workflow.md`'s §1 artifact paragraph, its
 four-channel table and its §"Witness channel" paragraph (the line that drifted),
