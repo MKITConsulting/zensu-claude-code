@@ -105,6 +105,22 @@ is covered by (C) when it escapes the session root. Like the CLI gate this is a
 `ZENSU_BASH_WRITE_GATE=off` (or `ZENSU_MCP_GATE=off`) prefix, or disable it via `hooks.bashWriteGate:false`.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
 
+**The expected *legitimate* hit of rule (C) is a cross-worktree takeover.** A session that continues
+work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
+files and run tests there — on the main thread no Edit-matcher hook compares a path against the
+project root, and the all-tool capability gate that does compare exempts the main principal — but its
+first `git add`/`git commit` denies, because the session root is minted at SessionStart and nothing
+re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
+`git worktree add .claude/worktrees/<name>` every worktree sits inside the main checkout and a session
+anchored there commits in all of them. The blocked shapes are a sibling worktree, another repository,
+and the main checkout addressed from inside a worktree. The route is a session whose own anchor
+contains that worktree (`cd -- <cwd> && claude --resume <id>` as `show` prints it — check the `WORKTREE`
+and `CWD` rows first, since a session started in a subdirectory anchors inside the worktree rather than
+at its root — or the handoff brief opened by an instance
+already running there), not the escape prefix above: the host's permission layer commonly refuses an
+inline `ZENSU_BASH_WRITE_GATE=off` as well. Flow 3 of `skills/session-trail/SKILL.md` carries the
+routing rule.
+
 ## Secret Scan
 
 A third PreToolUse gate (`pre-write-secret-scan.sh`) inspects **what** is about to be written,

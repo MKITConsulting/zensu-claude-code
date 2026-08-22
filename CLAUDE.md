@@ -822,7 +822,44 @@ enumerated there. The parser header must NAME every accepted gap — W192 matche
 gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
 security boundary" framing to survive. `docs/gates.md` §"Source-Write Gate", the
 hook-reference row and the `bashWriteGate` config row in `docs/configuration.md` point at
-the tables rather than listing them, for the same reason; they are not pinned.
+the tables rather than listing them, for the same reason; their VERB CONTENT is not
+pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T29 in
+`tests/structure/test-session-trail-skill.sh` — `cross-worktree takeover`,
+`session-trail` and `does **not** cover a nested worktree`. The last IS the
+containment claim, so rewording it fails the suite. That file is no longer wholly
+unpinned; see the section below.
+
+**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
+in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
+`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
+`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
+difference is what decides where an edit is owed. All of them state the CONTAINMENT
+rule. The environment variables are named by `writeAnchor`'s header, `writesLines`'
+emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+header (A, B and C), `writesLines` (B/C), flow 3 (B and C) and `docs/gates.md`
+(C only). `writeAnchorCaution` and the Limits bullet name neither — deliberately,
+because the caution is persisted into a brief a stranger reads and the bullet is a
+one-line index entry. A change to
+`within()`, to how `project_root` is minted (`claude-session-control-v1.js`
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
+six wrong with both session-trail suites green — they drive `trail.mjs` against its
+own definition and grep the prose for literals. `writeAnchor` holds a HAND-COPY of
+`within` because the parser defines it inside its own function scope and exports
+nothing; it is one more copy of that predicate, held in step by nothing. Do not
+trust an ordinal here — an earlier wording said "sixth" and was already wrong,
+because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
+inside a `node -e`. Read the enumeration below, not a count. THREE
+narrowings are deliberate and stated at the copy, and they do NOT share a direction:
+only rule (C)'s `isTemp` carve-out errs toward WARNING. The other two err toward
+`allowed`: rule (A) fires on an IN-ANCHOR target — a raw shell overwrite of tracked
+source — which is exactly where this answers `allowed`, and the third realpaths BOTH
+sides while the gate realpaths only its roots and resolves a `cd` operand lexically. That asymmetry is the property to re-check before letting the hand-copy
+drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
+`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+STATIC containment sentence, deliberately unmeasured because a brief is read by a
+session it was not measured against. A correction to that WORDING does not reach
+files already written.
 
 The `worktree`/`remove|move` literals appear three times — the `GIT_READONLY_FORMS`
 entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
@@ -942,9 +979,12 @@ paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 same wrapped invocation is gated by one Bash gate and not its sibling.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and the same
-predicate exists in `session-control-core-v1.js` and `review-evidence-lease-v1.js`,
-with an UNANCHORED `startsWith("..")` variant in `finding-verify-v1.js` that has the
-`..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
+predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
+`skills/session-trail/scripts/trail.mjs` (`writeAnchor`, the only copy OUTSIDE
+`hooks/lib`, and the only one a user reads as a verdict rather than as a deny) and
+`hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
+native-path validator), with an UNANCHORED `startsWith("..")` variant in
+`finding-verify-v1.js` that has the `..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
 against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the

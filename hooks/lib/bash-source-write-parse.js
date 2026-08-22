@@ -743,7 +743,12 @@ function main() {
     const i = b.lastIndexOf(".");
     return i > 0 ? b.slice(i + 1).toLowerCase() : "";
   }
-  // Same containment predicate hooks/lib/reviewer-capability-v1.js uses. The
+  // Same containment predicate hooks/lib/reviewer-capability-v1.js uses, and that
+  // session-control-core-v1.js, review-evidence-lease-v1.js,
+  // skills/session-trail/scripts/trail.mjs (`writeAnchor`) and an inline copy in
+  // hooks/lib/zensu-tdd-phase.sh's `node -e` each hand-copy. It is
+  // defined inside this function and exported nowhere, so there is nothing to
+  // import — a consumer copies it or does without. The
   // `..` test must be anchored on a separator and on the exact `..`: a bare
   // startsWith("..") also rejects a legitimately nested `..bak`, whose relative
   // path is `..bak`, and the empty relative path means "is the root itself".

@@ -85,6 +85,199 @@ function repoContext(startDir) {
   return { root, name: path.basename(root), worktrees };
 }
 
+// Strip a trailing separator, but never turn a filesystem ROOT into something
+// else: on win32 `C:\` would become `C:`, a drive-RELATIVE spelling that
+// `path.relative` then resolves against that drive's current directory instead of
+// its root. `path.parse().root` is the portable test; a length check only ever
+// covered POSIX `/`.
+function canonicalDir(p) {
+  const abs = path.resolve(p);
+  let real = abs;
+  try { real = fs.realpathSync.native(abs); } catch { /* an absent path keeps its lexical spelling */ }
+  return path.parse(real).root === real ? real : real.replace(/[\\/]+$/, '');
+}
+
+// The Bash source-write gate compares every write target against the session's
+// IMMUTABLE Session Control project root — hooks/lib/claude-hook-session-v1.js
+// exports it as ZENSU_PROJECT_ROOT and hooks/pre-bash-source-write-gate.sh hands
+// that value to the parser as CLAUDE_PROJECT_DIR. It is minted at SessionStart
+// and never moves, so a takeover into ANOTHER worktree can edit and run tests
+// but cannot commit: rules (B) and (C) refuse every source write and every
+// working-tree git verb whose target escapes that root. Nothing re-anchors a
+// session, so the constraint has to be reported BEFORE the first edit rather
+// than discovered as a deny afterwards.
+//
+// The comparison is CONTAINMENT, never equality, because that is the test the
+// gate performs: `within(projectRoot, p)` in hooks/lib/bash-source-write-parse.js,
+// applied by rule (B) to a write target and by rule (C) to the addressed
+// repository. A worktree NESTED inside the anchor is therefore writable — which
+// is the layout this repo mandates (`git worktree add .claude/worktrees/<name>`),
+// so an equality test would report the ordinary case as denied. The `..` test is
+// anchored on a separator and on the exact `..`, because a bare startsWith("..")
+// also rejects a legitimately nested `..bak`. This is a HAND-COPY of that
+// predicate — the parser defines `within` inside its own function scope and
+// exports nothing, so there is no seam to call, and nothing pins the two in step.
+//
+// Three narrowings, stated rather than hidden. Rule (C) also exempts a target
+// under a temp root (`isTemp`), so a worktree in `/tmp` is writable while this
+// reports it covered=false. Only that FIRST one errs toward warning, which is the
+// safe direction for a line whose remedy is "start a session over there". The
+// other two err toward `allowed`, and that is why the split is written down.
+// Rule (A) can still deny an in-anchor raw shell overwrite of tracked source,
+// which this never reports — and it fires on an IN-ANCHOR target, precisely where
+// this answers `allowed`. The third is the same direction:
+// it canonicalizes BOTH sides through `realpathSync`, while the gate realpaths only
+// its comparison roots and resolves a `cd` operand LEXICALLY. A target whose
+// literal spelling escapes the anchor but whose realpath lands inside therefore
+// reads covered=true here and denies at the gate. Reporting it is the honest
+// remedy; matching it would mean giving up symlink tolerance everywhere else.
+//
+// The caller root is read ONLY from the environment. It is deliberately not
+// derived from `process.cwd()`: the gate's anchor is the SessionStart cwd, so a
+// git toplevel of the current directory measures the wrong subject twice over —
+// after a `cd` into the target it reports the target itself (rendering the very
+// takeover being diagnosed as writable), and for a session started in a
+// subdirectory it reports the repo root rather than that subdirectory. Both
+// produce a confident "allowed" for writes the gate refuses. `--repo` is not a
+// source either: that flag selects which repo to scan, not where this session is
+// anchored.
+//
+// The fail-safe direction is DENIED. When no channel resolves, `covered` is null
+// and every renderer presents it as unknown-assume-denied — answering "writable"
+// off a measurement that was never taken is the one wrong answer. In an ordinary
+// subprocess neither variable is normally present, so `unknown` is the expected
+// reading and the routing advice below it is what carries the value.
+function writeAnchor(targetWt) {
+  const fromEnv = [
+    ['env:ZENSU_PROJECT_ROOT', process.env.ZENSU_PROJECT_ROOT],
+    ['env:CLAUDE_PROJECT_DIR', process.env.CLAUDE_PROJECT_DIR]
+  ].find(([, v]) => v && String(v).trim());
+  const callerRoot = fromEnv ? String(fromEnv[1]).trim() : null;
+  const source = fromEnv ? fromEnv[0] : 'unknown';
+  const targetRoot = targetWt || null;
+  if (!callerRoot || !targetRoot) return { callerRoot, targetRoot, covered: null, source };
+  const rel = path.relative(canonicalDir(callerRoot), canonicalDir(targetRoot));
+  const covered = rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  return { callerRoot, targetRoot, covered, source };
+}
+
+// Rendered as its own block rather than folded into the TAKEOVER advice, because
+// it is a SECOND and independent hazard attached to the same go/no-go: the
+// verdict measures whether a human is still typing in that window, this measures
+// whether this session may write there at all. Both roots are bounded like every
+// other path in this renderer, through `flatPath` — the newline that would
+// fabricate a line directly under a verdict is removed, and the spelling is left
+// otherwise EXACT because SKILL.md flow 3 tells the reader to compare this root
+// against the WORKTREE line above it.
+function writesLines(w) {
+  if (w.covered === true) return ['WRITES   allowed — the target worktree is inside this session\'s anchor.'];
+  const target = flatPath(w.targetRoot) || '(unknown)';
+  // Name the reason rather than echoing `source`, which is the literal string
+  // "unknown" in the case this branch exists for — "was not measured (unknown)"
+  // tells a reader nothing they can act on. The reason is computed INSIDE the
+  // branch that renders it, so the head and the reason cannot disagree. The
+  // missing-target arm is defensive only: `buildIndex` skips a row with no cwd
+  // and falls back to it otherwise, so `r.wt` is never falsy and no behavioral
+  // fixture can reach it — do not write one.
+  const head = w.covered === false
+    ? `WRITES   denied here — this session is anchored to ${flatPath(w.callerRoot)}, which does not contain that worktree.`
+    : `WRITES   unknown — this session's anchor was not measured (${w.callerRoot
+        ? 'the target session has no recorded worktree'
+        : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case'}); assume denied and check yourself.`;
+  return [
+    head,
+    `         Bash git and source writes into ${target} are refused by the Zensu`,
+    '         source-write gate (rules B/C) unless that path is INSIDE this session\'s',
+    '         anchor. Edits and tests still work either way; a takeover that must',
+    '         COMMIT needs a session whose own anchor contains that worktree.'
+  ];
+}
+
+// The shared control class, defined once so `flatPath` and `briefShellArg` cannot
+// drift apart — a lockstep the suite also pins by DERIVING one from the other.
+// TAB is deliberately excluded: it is ordinary in a path and moves no cursor.
+// The range excludes TAB (\u0009) and NOTHING ELSE — an earlier spelling wrote it
+// as \u0000-\u0008 plus \u000b-\u001f, which silently also dropped LF (\u000a) out
+// of the class and un-did the whole bound. W8/W8b caught it in one run.
+const CONTROL_RUN = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]+/g;
+
+// A control-strip for paths a reader must COMPARE rather than merely read:
+// `oneLine`'s clip would append an ellipsis and yield a different path, and
+// collapsing every `\s+` would alter one containing consecutive spaces. This
+// removes exactly what can fabricate or REWRITE a line. That is wider than the
+// line breaks `\s` covers: a CSI sequence (`\x1b[1A`, `\x1b[2K`) moves the cursor
+// and overwrites a row the reader already trusted, which is strictly worse than a
+// `\v`. `CONTROL_RUN` is the shared class — every C0 and C1 control except TAB,
+// plus U+2028/U+2029 — and ordinary spaces are deliberately NOT collapsed, which
+// is what keeps the spelling comparable. Used by every PLAIN-TEXT renderer —
+// `show`, `list`, `limited`, `instances` and `resolve`'s ambiguous-candidate list —
+// and never by a brief. Extend this roster when a renderer is added: an enumeration
+// that silently omits a caller is the failure this file kept paying for.
+function flatPath(p) {
+  return String(p == null ? '' : p).replace(CONTROL_RUN, ' ');
+}
+
+// Every brief line that interpolates a transcript-derived PATH routes through
+// this. `oneLine` collapses the newline that would otherwise end the bullet and
+// fabricate a line of its own — including one spelled exactly like the brief's
+// `--- END TAKEOVER MARKDOWN ---` marker — and the backtick swap stops a crafted
+// path from closing its code span and letting the remainder render as prose
+// inside a bolded advisory. The briefs are PERSISTED and read by an instance that
+// need not have this skill loaded, so the bound has to live at the renderer.
+//
+// The `- worktree:` bullets and the other path carriers predate the write-anchor
+// caution and were unbounded; they are routed through here rather than left as a
+// noted gap, because the caution's own test could not otherwise distinguish "the
+// new line is safe" from "the brief is safe".
+//
+// This bounds MARKDOWN, and nothing else. It is deliberately NOT used for EITHER
+// runnable `cd` line — the takeover brief's `## How to continue` step 1 and the
+// handoff brief's ```bash fence: clipping at 200 would silently yield a DIFFERENT,
+// shorter path that `cd` still accepts, and swapping a backtick for an apostrophe
+// does the same. In the TAKEOVER brief the `- worktree:` bullet renders the very
+// same value, so a clipped operand would disagree with that bullet elsewhere in
+// the same brief and a reader could not tell which spelling is real. (The handoff
+// brief's bullet and its operand are deliberately different values — `r.wt` vs
+// `r.cwd` — so there the harm is simply that the operand is not the path.)
+// All FOUR runnable lines use `briefShellArg` — the two brief ones and the two
+// `printResume` prints, which flow 3 now names as the remedy for a blocked commit.
+function briefPath(p) {
+  return oneLine(p, 200).replace(/`/g, "'") || '(unknown)';
+}
+
+// The FOUR carriers that must stay UNCLIPPED and be safe to paste: the takeover
+// brief's `## How to continue` step 1 and the handoff brief's `## Continue this
+// work` block, both inside a ```bash fence, plus `printResume`'s two `show`
+// prints, which are plain terminal output. The skill tells a reader all four are
+// runnable. Single-quoting is what neutralizes `$( )`, `;`, `&&` and
+// `|` — the metacharacters `briefPath`'s backtick swap leaves live — and the
+// POSIX `'\''` idiom closes and reopens the quote around an embedded apostrophe.
+// No length clip: a shortened path is a DIFFERENT path that `cd` still accepts.
+//
+// The full LINE-BREAK class is collapsed — the same one `flatPath` removes — and
+// that is the one place exactness yields. Two reasons, one per caller: inside a
+// brief, a line beginning ``` would close the fence; and `printResume`'s two
+// prints are plain terminal output, where a `\v` or `\f` moves the cursor down a
+// row and visually splits the `cd -- '…'` line, further down the same `show`
+// output as a WORKTREE value that IS stripped. Neither is a shell-injection path — the bytes stay inside the
+// quotes — but a spoofed display of a runnable line is worth the same treatment.
+// No path carrying a line break could be `cd`-ed on one line anyway. Everything
+// else survives verbatim.
+function briefShellArg(p) {
+  return `'${String(p == null ? '' : p).replace(CONTROL_RUN, ' ').replace(/'/g, "'\\''")}'`;
+}
+
+// The brief's caution is deliberately STATIC where the `show` line is measured.
+// A brief is written by one session for a DIFFERENT one to open, so a verdict
+// measured against the writer's anchor would be reported to a reader it was never
+// about. This sentence is true for whoever opens the file, which is the same
+// reason the untrusted-text warning is written into the artifact rather than left
+// in the skill.
+function writeAnchorCaution(wt) {
+  const p = briefPath(wt);
+  return `- **Before editing:** this brief describes work in \`${p}\`. A session whose own project root does not CONTAIN \`${p}\` can edit files there but cannot commit — the Zensu source-write gate refuses git writes outside the session anchor. Open this work from a session whose own anchor contains that worktree.`;
+}
+
 function nearestRepoRoot(cwd, memo) {
   if (memo.has(cwd)) return memo.get(cwd);
   let dir = cwd;
@@ -152,7 +345,7 @@ function ccdIndex() {
 
 function appTag(app) {
   if (!app) return '';
-  return `${app.archived ? '[ARCHIVED] ' : ''}inst ${app.instance.slice(0, 8)}`;
+  return `${app.archived ? '[ARCHIVED] ' : ''}inst ${oneLine(app.instance, 8)}`;
 }
 
 function liveRegistry() {
@@ -368,12 +561,14 @@ function extractStopCauseIn(text) {
   const msg = typeof c === 'string'
     ? c
     : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text).join(' ') : '';
-  // ALL FOUR transcript-derived fields are bounded here, not just `message`.
+  // EVERY transcript-derived field is bounded here, not just `message`.
   // Every one of them is interpolated raw into the takeover brief's `## Source`
   // block, and a JSON-parsed value can hold a real newline — so bounding only the
-  // obvious one leaves three siblings able to break a line in a persisted file.
-  // `oneLine` is not available at this point in the file, and would be the wrong
-  // tool anyway: these are short identifiers, not prose.
+  // obvious one leaves the siblings able to break a line in a persisted file.
+  // `resumedUntil` was the one that escaped this rule while the comment claimed
+  // otherwise; count the fields below rather than trusting a number in prose.
+  // A local helper rather than `oneLine`: these are short identifiers, not prose,
+  // and the clip is applied without the ellipsis a truncated identifier must not carry.
   const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(/\s+/g, ' ').trim().slice(0, n));
   return {
     error: flat(err.error, 64) || 'api_error',
@@ -385,7 +580,7 @@ function extractStopCauseIn(text) {
     message: flat(msg, 2000) || '',
     final: laterTurns === 0,
     laterTurns,
-    resumedUntil: lastTurnAt,
+    resumedUntil: flat(lastTurnAt, 40) ?? null,
   };
 }
 
@@ -908,18 +1103,21 @@ function cmdList(opts) {
   if (!rows.length) return print('no sessions found');
   for (const r of rows) {
     const g = opts.git ? gitState(r.wt, false) : null;
+    // The branch is transcript-derived on the `!g` arm and git-derived on the
+    // other; both reach a survey row that has no other bound. `show` already
+    // collapses it with `oneLine(..., 120)`.
     const gitPart = g
-      ? `${g.branch || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
-      : (r.branch || '?');
+      ? `${flatPath(g.branch) || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
+      : (flatPath(r.branch) || '?');
     const pr = r.pr ? `PR #${r.pr.number}` : 'PR —';
     // `measuredLevel`, not `level`: this command takes no selector, so rendering
     // an authorization here would show one session's approval against every busy
     // row in scope. A survey reports what was measured.
     const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}`);
+    print(`${statusOf(r).padEnd(4)}  ${flatPath(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
-    if (!r.cwdExists) print(`      !! worktree directory missing: ${r.cwd}`);
+    if (!r.cwdExists) print(`      !! worktree directory missing: ${flatPath(r.cwd)}`);
     print('');
   }
   print(`next: node ${scriptPath()} show <session-id|worktree|branch|PR#|text>`);
@@ -941,14 +1139,14 @@ function cmdInstances(opts) {
   const insts = new Set();
   for (const s of rows) { const a = ccdIndex().get(s.sessionId); if (a) insts.add(a.instance); }
   print(`LIVE CLAUDE CODE SESSIONS: ${rows.length} (every session process on this machine)`);
-  print(`DESKTOP INSTANCES INVOLVED: ${insts.size}${insts.size ? ` — ${[...insts].map((i) => i.slice(0, 8)).join(', ')}` : ''}\n`);
+  print(`DESKTOP INSTANCES INVOLVED: ${insts.size}${insts.size ? ` — ${[...insts].map((i) => flatPath(i).slice(0, 8)).join(', ')}` : ''}\n`);
   for (const [root, list] of [...groups.entries()].sort()) {
-    print(`${root}  (${list.length})`);
+    print(`${flatPath(root)}  (${list.length})`);
     for (const s of list) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${oneLine(String(s.sessionId), 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
+      print(`  ${String(s.pid).padStart(6)}  ${oneLine(String(s.sessionId), 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${flatPath(wt)}`);
       print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
     }
     print('');
@@ -983,7 +1181,7 @@ function resolve(opts, selectorRaw) {
       const byWorktree = new Set(t.map((r) => r.cwd));
       if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${r.sessionId.slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${r.worktree}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
+      for (const r of t) print(`  ${flatPath(r.sessionId).slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
       flush();
       process.exit(2);
     }
@@ -1012,40 +1210,42 @@ function cmdShow(opts) {
   const r = hydrate(base);
   const g = opts.git ? gitState(r.wt, true) : null;
   const v = activityVerdict(r, opts.force);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, skipped: SKIPPED }, null, 2));
-  print(`SESSION  ${r.sessionId}`);
+  const w = writeAnchor(r.wt);
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, skipped: SKIPPED }, null, 2));
+  print(`SESSION  ${flatPath(r.sessionId)}`);
   print(`TITLE    ${oneLine(r.title, 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
   // instance's JSON, and a newline in `name` or `entrypoint` would fabricate a
   // line directly above the TAKEOVER verdict a reader acts on.
   print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(r.live.entrypoint, 40)}  name "${oneLine(r.live.name, 92)}"` : ''}`);
   if (r.app) {
-    print(`OWNER    desktop instance ${r.app.instance}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
+    print(`OWNER    desktop instance ${oneLine(r.app.instance, 64)}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
     print(`CONFIG   model ${oneLine(r.app.model, 40) || '?'}   effort ${oneLine(r.app.effort, 40) || '?'}   permissions ${oneLine(r.app.permissionMode, 40) || '?'}`);
   }
-  print(`WORKTREE ${r.wt}${r.cwdExists ? '' : '   !! MISSING'}`);
-  if (r.cwd !== r.wt) print(`CWD      ${r.cwd}   (session started in a subdirectory)`);
+  print(`WORKTREE ${flatPath(r.wt)}${r.cwdExists ? '' : '   !! MISSING'}`);
+  if (r.cwd !== r.wt) print(`CWD      ${flatPath(r.cwd)}   (session started in a subdirectory)`);
   print(`BRANCH   ${oneLine((g && g.branch) || r.branch, 120) || '?'}`);
-  print(`LAST     ${ago(r.mtime)} ago   transcript ${r.transcript}`);
+  print(`LAST     ${ago(r.mtime)} ago   transcript ${flatPath(r.transcript)}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
   if (r.truncated) print('NOTE     transcript is large — head+tail only, middle not scanned');
   const sib = siblings(opts, r);
-  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${s.sessionId.slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
+  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${flatPath(s.sessionId).slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
   for (const advice of (ADVICE[v.level] || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
     print(`         ${advice}`);
   }
+  for (const line of writesLines(w)) print(line);
   print('\n--- PROMPT TIMELINE ---');
   const ps = r.prompts || [];
   const shown = ps.slice(-Math.max(1, opts.prompts));
   if (ps.length > shown.length) print(`(${ps.length - shown.length} earlier prompts omitted — raise with --prompts N)`);
-  for (const p of shown) print(`[${(p.at || '').slice(0, 16)}] ${oneLine(p.text, 300)}`);
+  for (const p of shown) print(`[${oneLine(p.at, 40).slice(0, 16)}] ${oneLine(p.text, 300)}`);
   if (r.assistantTail && r.assistantTail.length) {
     print('\n--- LAST ASSISTANT OUTPUT ---');
-    for (const a of r.assistantTail) print(`[${(a.at || '').slice(0, 16)}] ${oneLine(a.text, 400)}`);
+    for (const a of r.assistantTail) print(`[${oneLine(a.at, 40).slice(0, 16)}] ${oneLine(a.text, 400)}`);
   }
   if (g) {
     print('\n--- GIT ---');
@@ -1057,15 +1257,15 @@ function cmdShow(opts) {
   }
   if (r.touched && r.touched.length) {
     print('\n--- FILES THE SESSION TOUCHED (from transcript) ---');
-    for (const t of r.touched) print(`  ${String(t.hits).padStart(3)}x  ${rel(t.path, r.wt)}`);
+    for (const t of r.touched) print(`  ${String(t.hits).padStart(3)}x  ${flatPath(rel(t.path, r.wt))}`);
   }
   print('\n--- CONTINUE ELSEWHERE ---');
   printResume(r);
 }
 
 function printResume(r) {
-  print(`  cd ${r.cwd} && claude --resume ${r.sessionId}`);
-  print(`  cd ${r.cwd} && claude --resume ${r.sessionId} --fork-session`);
+  print(`  cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);
+  print(`  cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)} --fork-session`);
   if (r.pr) print(`  claude --from-pr ${r.pr.number}`);
   if (!r.cwdExists) print('  # worktree missing — recreate it first: git worktree add <path> <branch>');
 }
@@ -1118,7 +1318,7 @@ function cmdLimited(opts) {
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
+    print(`${statusOf(r).padEnd(4)}  ${flatPath(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
     print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
@@ -1150,19 +1350,20 @@ function cmdTakeover(opts) {
   const tv = activityVerdict(r, opts.force);
   if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, skipped: SKIPPED }, null, 2));
   const L = [];
-  L.push(`# Takeover: ${r.title || path.basename(r.wt)}`);
+  L.push(`# Takeover: ${briefPath(r.title || path.basename(r.wt))}`);
   L.push('');
   L.push('> Reconstructed from the source session\'s transcript on disk. That session contributed nothing to this document and did not need to be running.');
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
-  if (r.app) L.push(`- owning desktop instance: \`${r.app.instance}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
+  L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
+  if (r.app) L.push(`- owning desktop instance: \`${briefPath(r.app.instance)}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
     L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
   }
-  L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
-  L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
+  L.push(`- worktree: \`${briefPath(r.wt)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
+  L.push(writeAnchorCaution(r.wt));
+  L.push(`- branch: \`${briefPath((g && g.branch) || r.branch || '?')}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.stopCause && r.stopCause.final) {
@@ -1179,7 +1380,7 @@ function cmdTakeover(opts) {
   L.push(first ? clip(first.text, 4000) : '_no user prompt found in the scanned range_');
   L.push('');
   if (r.compaction) {
-    L.push(`## State at last compaction (${(r.compaction.at || '').slice(0, 16)})`);
+    L.push(`## State at last compaction (${oneLine(r.compaction.at, 40).slice(0, 16)})`);
     L.push(clip(r.compaction.text, 8000));
     L.push('');
   }
@@ -1191,7 +1392,7 @@ function cmdTakeover(opts) {
     L.push('## Plan documents in the worktree');
     L.push('_Read these first — they are written plans on disk, independent of the transcript._');
     for (const p of (own.length ? own : plans.slice(0, 3))) {
-      L.push(`- \`${p.path}\` (modified ${new Date(p.mtime).toISOString().slice(0, 16)}${inWindow(p) ? ', **touched during this session**' : ''})`);
+      L.push(`- \`${briefPath(p.path)}\` (modified ${new Date(p.mtime).toISOString().slice(0, 16)}${inWindow(p) ? ', **touched during this session**' : ''})`);
     }
     if (!own.length) L.push('- _none of these fall inside the session\'s active window; they may belong to other work_');
     L.push('');
@@ -1209,13 +1410,13 @@ function cmdTakeover(opts) {
   L.push('## Recent instructions (verbatim, newest last)');
   const recent = (r.prompts || []).slice(-Math.max(1, opts.prompts));
   for (const p of recent) {
-    L.push(`### \`${(p.at || '').slice(0, 16)}\``);
+    L.push(`### \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\``);
     L.push(clip(p.text, 2500));
   }
   L.push('');
   L.push('## What it said last');
   for (const a of (r.assistantTail || [])) {
-    L.push(`### \`${(a.at || '').slice(0, 16)}\``);
+    L.push(`### \`${briefPath(oneLine(a.at, 40).slice(0, 16))}\``);
     L.push(clip(a.text, 6000));
   }
   L.push('');
@@ -1232,10 +1433,18 @@ function cmdTakeover(opts) {
   }
   L.push('');
   L.push('## Files the session touched');
-  for (const t of (r.touched || [])) L.push(`- \`${rel(t.path, r.wt)}\` (${t.hits}x)`);
+  for (const t of (r.touched || [])) L.push(`- \`${briefPath(rel(t.path, r.wt))}\` (${t.hits}x)`);
   L.push('');
   L.push('## How to continue');
-  L.push(`1. \`cd ${r.wt}\` — work in this worktree, not a fresh checkout of the branch.`);
+  // Fenced, not a code span: `briefShellArg` deliberately does NOT swap backticks
+  // (that would change the path bytes, which is the whole point of this helper),
+  // so a crafted path would close a single-backtick span and render the rest as
+  // prose inside a numbered instruction. A fence cannot be closed from mid-line.
+  L.push('1. Work in this worktree, not a fresh checkout of the branch:');
+  L.push('');
+  L.push('```bash');
+  L.push(`cd -- ${briefShellArg(r.wt)}`);
+  L.push('```');
   L.push('2. Re-verify before trusting anything above: this is a snapshot, and the working tree may have moved since.');
   L.push('3. Restate the remaining work as a short plan and get the user\'s confirmation before editing.');
   if (tv.measuredLevel === 'BUSY') L.push(`4. ⚠️ **Hazard, not a veto** — ${tv.measuredReason} State it to the user in one line and take a single go/no-go before the first edit${tv.authorized ? ' — the authorization above was given when this brief was written, not here' : '; on yes, re-run this command with `--force`'}. Then take it over; tell the user not to type in that window, and check whether it still owns dev servers or ports.`);
@@ -1273,13 +1482,17 @@ function cmdHandoff(opts) {
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch);
   const L = [];
-  L.push(`# Handoff: ${r.title || path.basename(r.cwd)}`);
+  L.push(`# Handoff: ${briefPath(r.title || path.basename(r.cwd))}`);
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
-  L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
-  L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
-  L.push(`- transcript: \`${r.transcript}\``);
+  // Hoisted out of the template: a nested interpolation is structurally invisible
+  // to the raw-carrier scan, and `entrypoint` is another process's registry value.
+  const liveSuffix = r.live ? `, pid ${r.live.pid}, ${briefPath(r.live.entrypoint)}` : '';
+  L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${liveSuffix})`);
+  L.push(`- worktree: \`${briefPath(r.wt)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
+  L.push(writeAnchorCaution(r.wt));
+  L.push(`- branch: \`${briefPath((g && g.branch) || r.branch || '?')}\``);
+  L.push(`- transcript: \`${briefPath(r.transcript)}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.truncated) L.push('- note: transcript large, only head+tail scanned');
@@ -1288,7 +1501,7 @@ function cmdHandoff(opts) {
   const hp = r.prompts || [];
   const hpShown = hp.slice(-30);
   if (hp.length > hpShown.length) L.push(`- _(${hp.length - hpShown.length} earlier prompts omitted)_`);
-  for (const p of hpShown) L.push(`- \`${(p.at || '').slice(0, 16)}\` ${oneLine(p.text, 400)}`);
+  for (const p of hpShown) L.push(`- \`${briefPath(oneLine(p.at, 40).slice(0, 16))}\` ${oneLine(p.text, 400)}`);
   L.push('');
   L.push('## Git state');
   if (!g) L.push('- worktree directory is gone; git state unavailable');
@@ -1301,7 +1514,7 @@ function cmdHandoff(opts) {
   }
   L.push('');
   L.push('## Files the session touched');
-  for (const t of (r.touched || [])) L.push(`- \`${rel(t.path, r.wt)}\` (${t.hits}x)`);
+  for (const t of (r.touched || [])) L.push(`- \`${briefPath(rel(t.path, r.wt))}\` (${t.hits}x)`);
   L.push('');
   L.push('## Open threads');
   L.push('<!-- FILL: unresolved questions, failing checks, decisions still pending -->');
@@ -1311,7 +1524,7 @@ function cmdHandoff(opts) {
   L.push('');
   L.push('## Continue this work');
   L.push('```bash');
-  L.push(`cd ${r.cwd} && claude --resume ${r.sessionId}`);
+  L.push(`cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);
   L.push('```');
   if (r.live) {
     // `measuredReason`, not `reason`: a label that says "measured" must not carry
