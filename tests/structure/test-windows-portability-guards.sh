@@ -438,21 +438,34 @@ fi
 # The artifact redactor is the third requireable module carrying a hardened
 # open, and it is enrolled here for the same reason the plan-payload reader is:
 # every count pin in this file is per-file, so a NEW file with a secure open is
-# invisible to all of them. It carries TWO such opens — the read in redactFile
-# and the write in writeArtifactLine — and both judge the DESCRIPTOR (fstat),
-# which is what makes the symlink and hard-link refusals unraceable. The absent
-# O_TRUNC is part of the contract: truncating at open would run BEFORE the
-# nlink check could refuse a hard link. The dev/ino comparison and the pre-rename
-# re-stat are pinned here for
+# invisible to all of them. It carries THREE descriptor-judged opens of the
+# artifact — the read in redactFile, the append in writeArtifactLine, and the
+# read that validates the target before replaceArtifactFile publishes by rename —
+# and all three fstat the DESCRIPTOR, which is what makes the symlink and
+# hard-link refusals unraceable. The third arrived when `replace` stopped
+# truncating in place: an ftruncate commits the destroy before the new bytes
+# exist, so that mode now writes an O_EXCL temp and renames, and the counts below
+# moved with it. The absent O_TRUNC is still part of the contract: truncating at
+# open would run BEFORE the nlink check could refuse a hard link. The dev/ino
+# comparison and the pre-rename re-stat are pinned here for
 # the same reason the opens are: its REJECT direction is a race no behavioral
 # suite can stage, so the structural pin is the only place it can be held.
+#
+# `fs.fstatSync(fd)` is FOUR, not three: writeArtifactLine fstats a second time
+# AFTER its write, because a rename landing between the checks and the write
+# sends the line to an orphaned inode and the old spelling reported that as
+# success. That call site is asserted separately below, so raising the count
+# alone cannot satisfy this check.
 if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$ARTIFACT_REDACT")" -eq 1 ] \
   && [ "$(grep -cF 'const NON_BLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$ARTIFACT_REDACT")" -eq 1 ] \
   && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | noFollow | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
-  && [ "$(grep -cF '| platformNoFollow() | NON_BLOCK' "$ARTIFACT_REDACT")" -eq 1 ] \
-  && [ "$(grep -cF 'fs.fstatSync(fd)' "$ARTIFACT_REDACT")" -eq 2 ] \
-  && [ "$(grep -cF 'stat.nlink !== 1' "$ARTIFACT_REDACT")" -eq 2 ] \
-  && [ "$(grep -cF '!sameInode(stat, target)' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | platformNoFollow() | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF '| platformNoFollow() | NON_BLOCK' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.fstatSync(fd)' "$ARTIFACT_REDACT")" -eq 4 ] \
+  && [ "$(grep -cF '!sameInode(fs.fstatSync(fd), target)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'stat.nlink !== 1' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF '!sameInode(stat, target)' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.fsyncSync(out)' "$ARTIFACT_REDACT")" -eq 2 ] \
   && grep -qF 'expected.dev === stat.dev && expected.ino === stat.ino' "$ARTIFACT_REDACT" \
   && grep -qF "err.code === 'ELOOP' || err.code === 'EMLINK'" "$ARTIFACT_REDACT" \
   && grep -qF 'now.size !== stat.size || now.mtimeMs !== stat.mtimeMs' "$ARTIFACT_REDACT" \

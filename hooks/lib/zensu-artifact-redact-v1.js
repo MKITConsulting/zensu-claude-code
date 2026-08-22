@@ -49,7 +49,18 @@
 // The rule is TEXTUAL and that bound is real: a path spelled through a symlink
 // or a shell alias that does not match a known root is not caught, and a git
 // repository root ABOVE the project root is redacted only insofar as $HOME
-// covers it. Both roots are matched in their given AND `realpath` spellings,
+// covers it.
+//
+// It is also a rule about PATHS, and identifiers reach these artifacts by other
+// routes. A developer or organisation login appearing outside a path survives
+// untouched — a `git config user.name`, an author line quoted from `git log`, an
+// email address, a `github.com/<org>/<repo>` URL, a branch name carrying a
+// person's name, a hostname in a `cmd=` field. Rule 1 removes the login when it
+// is a directory segment of the project root and rule 3 removes it when it is the
+// home segment; neither can see it anywhere else. That is a refusal to guess, not
+// an oversight: a name has no pattern, and a regex that tried would either miss
+// most of them or eat ordinary words out of the audit trail. The authoring rules
+// in `skills/tdd/SKILL.md` carry this half, and they have to. Both roots are matched in their given AND `realpath` spellings,
 // which closes the one alias that shows up on every macOS run (`/var/folders/…`
 // against `/private/var/folders/…`).
 //
@@ -106,8 +117,13 @@ const PROJECT_PLACEHOLDER = '<project>';
 const HOME_PLACEHOLDER = '~';
 const RESIDUAL_PLACEHOLDER = '<home>';
 
-// The artifact layout, owned here. hooks/post-artifact-redact.sh consumes this
-// table rather than re-spelling it, so a layout move is one edit.
+// The artifact layout, owned here. Its consumers are IN THIS FILE —
+// `sweepTargets` builds the two bucket directories from it and
+// `projectRootFromArtifactPath` validates against it — and
+// `hooks/post-artifact-redact.sh` consumes it TRANSITIVELY, by calling those
+// functions instead of joining `.zensu/plans` and `.zensu/logs` itself. An
+// earlier revision of this comment said the hook consumes the table directly; it
+// does not, and never imported it.
 const ARTIFACT_BUCKETS = { plans: '.md', logs: '.log' };
 const ARTIFACT_DIR = '.zensu';
 
@@ -526,15 +542,22 @@ function sweepTargets(projectRoot, options = {}) {
   return out.slice(0, maxTargets).map((entry) => entry.full);
 }
 
-// O_NOFOLLOW binds the FINAL component only; an intermediate directory can still
-// be swapped for a symlink between `resolveArtifactTarget`'s realpath and the
-// open. Re-deriving the expected location from the CANONICAL parent and
-// comparing dev/ino against the descriptor catches that one component higher.
+// What this check DELIVERS, stated without the claim it used to carry: the path
+// still names the inode the descriptor holds. It re-derives the location from
+// `target.realParent` — the canonicalized parent — rather than from the caller's
+// spelling, so a `.zensu/logs` that is a symlink is resolved once and compared
+// against its real destination.
 //
-// Stated plainly, because an earlier revision of the surrounding prose claimed
-// more than this delivers: it is still check-then-use. It narrows the window
-// from a one-shot symlink plant to a rename race against a real directory; only
-// `openat`-style semantics, which Node does not expose, would close it.
+// It does NOT catch an intermediate-directory swap in the ordinary case, which an
+// earlier revision of this comment claimed. When nothing moved, `realParent` IS
+// the lexical parent, so this lstats the same location the open used and both
+// sides move together — a swap that redirects the path redirects this lookup with
+// it. What it catches is the pair DISAGREEING: the name now resolving to a
+// different inode than the one opened, which is the rename/replace race.
+//
+// And it is still check-then-use either way: the answer is true at the moment of
+// the lstat, not at the moment of the write. Only `openat`-style semantics, which
+// Node does not expose, would close that.
 function sameInode(stat, target) {
   if (!target || typeof target.realParent !== 'string') return false;
   try {
@@ -661,6 +684,13 @@ function redactFile(filePath, options = {}) {
 // closes the hole and the window together: the object checked is the object
 // written. O_TRUNC is deliberately NOT in the open flags — it would truncate
 // before the nlink check could refuse.
+//
+// IT PERFORMS NO REDACTION. The line is written exactly as handed in. That is the
+// one trap a second caller is most likely to hit in a file that calls itself the
+// single source of truth for publication safety: the containment, the symlink
+// refusal and the hard-link refusal are all about WHERE the bytes land, never
+// about what they say. `zensu-log.sh append` calls `redact` itself before calling
+// this, and any other caller must do the same.
 //
 // The two modes are two different writes and no longer share an open. `append`
 // stays an in-place O_APPEND write to the judged descriptor. `replace` publishes
@@ -894,6 +924,14 @@ function main(argv) {
 
 }
 
+// The exported surface is exactly what has a consumer in `hooks/` or in
+// `tests/structure/test-artifact-redaction.sh`. Six names were exported with none
+// — `projectRootFromArtifactPath`, `ARTIFACT_BUCKETS`, `ARTIFACT_DIR` and the
+// three placeholder constants — and they are internal again. Dead API surface is
+// not free here: an export reads as a contract a port has to honour, and the
+// layout constants in particular invited a caller to re-derive a path this module
+// exists to own. Everything below is imported somewhere; adding a name here
+// without a caller is how that grew back last time.
 module.exports = {
   redact,
   redactFile,
@@ -901,20 +939,14 @@ module.exports = {
   defaultHome,
   NON_ARTIFACT_REASONS,
   TRANSIENT_REASONS,
+  CLEAN_REASONS,
   rootSpellings,
-  projectRootFromArtifactPath,
   resolveArtifactTarget,
   sweepTargets,
   msysSpelling,
-  ARTIFACT_BUCKETS,
-  ARTIFACT_DIR,
   WITNESS_PREFIX,
   SWEEP_WINDOW_SECONDS,
   SWEEP_MAX_TARGETS,
-  CLEAN_REASONS,
-  PROJECT_PLACEHOLDER,
-  HOME_PLACEHOLDER,
-  RESIDUAL_PLACEHOLDER,
   MAX_BYTES,
 };
 

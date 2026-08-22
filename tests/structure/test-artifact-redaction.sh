@@ -460,6 +460,41 @@ else
   skip "R16b symlinked --log refusal (host did not create a real symlink)"
 fi
 
+# ── R16c: the MODULE's own symlink refusal, not the shell pre-check ──
+# R16b above drives the shell helper, which refuses a symlinked `--log` in its
+# own `[ -L ]` pre-check and therefore returns before `writeArtifactLine` opens
+# anything: delete `O_NOFOLLOW` from the module and R16b still passes. This check
+# calls the writer directly, so the refusal it observes is the descriptor-level
+# one — the `symlink` reason is only reachable through the ELOOP the open flag
+# produces. Without the flag the open succeeds and the refusal degrades to
+# `moved` (the dev/ino comparison catches it one layer later), which is a
+# different guarantee with a different failure mode.
+SYM_TARGET="$WORK/outside-16c.txt"
+printf 'UNTOUCHED\n' > "$SYM_TARGET"
+SYM_LOG="$PROJ/.zensu/logs/2026-01-01-0016_tdd-modsym.log"
+rm -f "$SYM_LOG"
+if ln -s "$SYM_TARGET" "$SYM_LOG" 2>/dev/null && [ -L "$SYM_LOG" ]; then
+  OUT16C="$(node -e '
+    const fs = require("node:fs");
+    const m = require(process.argv[1]);
+    const res = m.writeArtifactLine(process.argv[3], "pwned3\n", { expectedRoot: process.argv[2] });
+    const body = fs.readFileSync(process.argv[4], "utf8");
+    const bad = [];
+    if (res.written !== false) bad.push("written=" + res.written);
+    if (res.reason !== "symlink") bad.push("reason=" + res.reason);
+    if (body !== "UNTOUCHED\n") bad.push("body=" + JSON.stringify(body));
+    process.stdout.write(bad.length ? bad.join(" | ") : "OK");
+  ' "$REDACT" "$PROJ" "$SYM_LOG" "$SYM_TARGET" 2>&1)"
+  if [ "$OUT16C" = "OK" ]; then
+    check "R16c writeArtifactLine itself refuses a symlinked artifact path" PASS
+  else
+    check "R16c writeArtifactLine itself refuses a symlinked artifact path (bad: $OUT16C)" FAIL
+  fi
+  rm -f "$SYM_LOG"
+else
+  skip "R16c module-level symlink refusal (host did not create a real symlink)"
+fi
+
 # ── R17: the sweep's narrowings and its project binding ──────────────
 FRESH_WITNESS="$PROJ/.zensu/logs/witness-sweep-probe.log"
 OLD_LOG="$PROJ/.zensu/logs/2026-01-01-0009_tdd-old.log"
@@ -1162,6 +1197,51 @@ if [ "$RC53" -eq 0 ] && [ -f "$SCAN_OFF_LOG" ] \
   check "R53 ZENSU_SECRET_SCAN=off at the append chokepoint is recorded in the bypass ledger" PASS
 else
   check "R53 ZENSU_SECRET_SCAN=off at the append chokepoint is recorded in the bypass ledger (rc=$RC53 before=[$LEDGER_BEFORE] after=[$LEDGER_AFTER])" FAIL
+fi
+
+# ── R54: the SHIPPED Phase 2 recipe is executed, not re-typed ────────
+# R28 asserts a hand-typed twin of the Phase 2 create command, so a flag that
+# drifts in `skills/tdd/SKILL.md` — the file every run actually reads — is
+# invisible to the suite while R28 stays green against the copy in the test. This
+# arm extracts the line from the shipped skill, substitutes only the documented
+# `{curly}` placeholders, and runs it. It is deliberately anchored on the flag
+# spelling rather than a line number, so a moved section does not silently make
+# the extraction match nothing: an empty extraction FAILS here.
+#
+# The residue guard names the three placeholders by hand rather than matching a
+# generic `{word}`: the recipe legitimately contains `${CLAUDE_PLUGIN_ROOT}` and
+# `${CLAUDE_PLUGIN_DATA}`, which a generic pattern reads as unsubstituted.
+RECIPE_RAW="$(grep -m1 -F 'append --truncate --log {log_file}' "$PLUGIN_DIR/skills/tdd/SKILL.md")"
+RECIPE_CMD="${RECIPE_RAW#2. \`}"
+RECIPE_CMD="${RECIPE_CMD%\`}"
+RECIPE_PROJ="$WORK/recipe-proj"
+mkdir -p "$RECIPE_PROJ"
+RECIPE_LOG_REL='.zensu/logs/2026-01-01-0054_tdd-recipe.log'
+# The replacement is built in its own single-quoted variable: writing the
+# `${CLAUDE_PROJECT_DIR:-.}` spelling inline inside `${var//pat/repl}` needs
+# backslashes, and bash does NOT strip them from a replacement string — the
+# recipe then ran with a literal `$\{` and wrote nothing.
+RECIPE_LOG_SPELL='"${CLAUDE_PROJECT_DIR:-.}/'"$RECIPE_LOG_REL"'"'
+RECIPE_CMD="${RECIPE_CMD//\{log_file\}/$RECIPE_LOG_SPELL}"
+RECIPE_CMD="${RECIPE_CMD//\{title\}/Recipe extraction}"
+RECIPE_CMD="${RECIPE_CMD//\{N\}/3}"
+if [ -n "$RECIPE_RAW" ] && printf '%s' "$RECIPE_CMD" | grep -qF 'zensu-log.sh' \
+  && ! printf '%s' "$RECIPE_CMD" | grep -qE '\{log_file\}|\{title\}|\{N\}'; then
+  ( cd "$RECIPE_PROJ" && env HOME="$FAKE_HOME" \
+      CLAUDE_PROJECT_DIR="$RECIPE_PROJ" \
+      CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" \
+      CLAUDE_PLUGIN_DATA="${ZENSU_TEST_PLUGIN_DATA:-$WORK/plugin-data}" \
+      SESSION_EPOCH=1767225600 \
+      bash -c "$RECIPE_CMD" ) >/dev/null 2>&1
+  RC54=$?
+  if [ "$RC54" -eq 0 ] && [ -f "$RECIPE_PROJ/$RECIPE_LOG_REL" ] \
+    && grep -qF 'TDD STARTED — Recipe extraction | steps: 3' "$RECIPE_PROJ/$RECIPE_LOG_REL"; then
+    check "R54 the shipped Phase 2 recipe, extracted and executed, creates the run log" PASS
+  else
+    check "R54 the shipped Phase 2 recipe, extracted and executed, creates the run log (rc=$RC54)" FAIL
+  fi
+else
+  check "R54 the shipped Phase 2 recipe could be extracted from skills/tdd/SKILL.md" FAIL
 fi
 
 # ── R29: the module refuses a shape it used to accept silently ───────

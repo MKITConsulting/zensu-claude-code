@@ -170,10 +170,10 @@ property of the two PUBLISHABLE artifacts only.
 **Operator-facing accounts that must move with it:** `docs/tdd-manager-workflow.md`
 §"Publication safety of the plan and log" (which carries the narrative, including
 the `SWEEP_WINDOW_SECONDS` value as prose), both hook rows in
-`docs/configuration.md` — the `post-artifact-redact.sh` row and the redaction
-paragraph of the `post-bash-witness.sh` row, which has already drifted once by
-claiming the `tail` is redacted, and both of which also carry the sweep window as
-prose — plus `docs/tdd-manager-workflow.md`'s §1 artifact paragraph, its
+`docs/configuration.md` — the `post-artifact-redact.sh` row, which is the ONE row
+carrying the sweep window as prose, and the redaction paragraph of the
+`post-bash-witness.sh` row, which has already drifted once by claiming the `tail`
+is redacted and carries no window at all — plus `docs/tdd-manager-workflow.md`'s §1 artifact paragraph, its
 four-channel table and its §"Witness channel" paragraph (the line that drifted),
 `docs/architecture.md`'s Graceful-Degradation bullet and its flagless-hook list,
 `skills/tdd/SKILL.md` Principle 3 and Phase 2, and `templates/tdd-plan.md`.

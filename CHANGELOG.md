@@ -118,8 +118,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   redacted.
   Pinned by new `tests/structure/test-artifact-redaction.sh`. The suite was
   written first, and its first 19 checks measured 1 PASS / 18 FAIL against the pre-change
-  tree — so its sensitivity is proven rather than assumed. It grew to 66 checks across six
-  review rounds; that figure is the RED reading of the original 19, not of the shipped set. Its shape answers two ways a pin like this
+  tree — so its sensitivity is proven rather than assumed: **1 PASS / 18 FAIL is the RED
+  reading of those first 19 checks, never a count of the shipped suite.** The suite as
+  shipped is **89 checks**, grown across the review rounds and the PR #255 team review. Its shape answers two ways a pin like this
   goes vacuous: every "carries no `/Users/`" arm is paired with a content assertion, since
   an emptied artifact satisfies the absence check; and every guard check asserts the exit
   status AND that the on-disk shape the guard protects still holds, since a writer that

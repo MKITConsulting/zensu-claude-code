@@ -532,8 +532,23 @@ Three writers apply it:
 | `hooks/post-bash-witness.sh` | the witness `cmd=` field only — see below |
 | `hooks/post-artifact-redact.sh` | the plan (the named `file_path` on PostToolUse `Edit\|Write\|MultiEdit`), plus a bounded sweep on BOTH matchers that catches a hand-rolled `printf >>` and a subagent-written artifact |
 
-The witness is gitignored and never committed, so it needs no publication safety
-of its own. Its `cmd` is redacted for **symmetry**: `zensu-evidence-crosscheck.js`
+The witness is gitignored **in this repository**, and the plugin ships nothing that
+makes that true in a consuming one. It writes to
+`.zensu/logs/witness-<session-key>.log` — the exact directory, and a name matching
+the exact glob, that consuming repos are told to commit — while being the one file
+there with a raw `tail=`, no credential scan and an explicit exclusion from every
+redaction path. `.zensu/state/` has the same exposure. Nothing in the plugin reads,
+writes or checks a consuming repo's `.gitignore`, so this is a rule the consuming
+repo has to carry itself:
+
+```gitignore
+# Zensu — commit the audit trail, never the ephemeral session state.
+.zensu/state/
+.zensu/logs/witness-*.log
+```
+
+With those two lines in place the witness needs no publication safety of its own.
+Without them it is published unredacted, and no part of this design notices. Its `cmd` is redacted for **symmetry**: `zensu-evidence-crosscheck.js`
 matches a claim against a witness entry by equality, so redacting one side only
 would turn every claim whose command names an absolute path into an
 `EVIDENCE GAP`. Its `tail` is deliberately left RAW. Nothing compares it — the
@@ -572,9 +587,10 @@ coverage of the surrounding shell command, which never carried the message.
 `writeArtifactLine` — which in fact refuses any `witness-` name outright, so the
 "the write happens inside the module" invariant is a property of the two
 publishable artifacts, not of everything under `.zensu/logs/`. The witness is
-gitignored, never committed, and rewritten every run, so the descriptor-judged
-write buys it nothing; saying so here keeps the invariant from being read as
-directory-wide.
+rewritten every run and gitignored **in this repository**, so the
+descriptor-judged write buys it nothing here; saying so keeps the invariant from
+being read as directory-wide. A consuming repo only gets that property by adding
+the two `.gitignore` lines above — the plugin cannot add them for it.
 
 **This is writer-side only. No committed OBJECT is rewritten.** The ~436
 already-committed lines carrying absolute paths across four consuming repos stay
