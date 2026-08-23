@@ -2241,6 +2241,50 @@ else
   check "P1bw skill no longer states the permission check's own bound:$DOC_DRIFT" FAIL
 fi
 
+# The deny-first clause is the one phrase TWO rows depend on, and a whole-file grep
+# cannot tell which of them the skill documents. `a deny rule outranks an allow rule`
+# is emitted by DENY_FIRST_CAVEAT — consumed by the PROACTIVE ask and exposure rows —
+# and it used to occur exactly once in the skill: inside the REACTIVE refused-spawn
+# bullet, which P1qr legitimately governs. So P1be reported "emitted and documented"
+# for a caveat whose only documentation belonged to a different row, and rewording the
+# reactive bullet would have failed both pins while naming the wrong drift. Each bullet
+# is now asserted against the region it governs, so the two cannot stand in for each
+# other. An EMPTY region is a FAIL, not a pass: a renamed bullet would otherwise make
+# the arm vacuous while reading green.
+skill_bullet() { # skill_bullet <literal prefix of the bullet line> -> that bullet's lines
+  awk -v pfx="$1" 'index($0,pfx)==1 {f=1; print; next} f && /^- \*\*/ {exit} f {print}' "$SKILL_MD"
+}
+DENY_FIRST_CLAUSE='a deny rule outranks an allow rule'
+PERM_BULLET="$(skill_bullet '- **⚠️ permissions:')"
+STATE_BULLET="$(skill_bullet '- **⚠️ state: the host permission layer refused')"
+BULLET_MISS=""
+[ -n "$PERM_BULLET" ]  || BULLET_MISS="$BULLET_MISS [permissions bullet not found]"
+[ -n "$STATE_BULLET" ] || BULLET_MISS="$BULLET_MISS [refused-spawn bullet not found]"
+case "$PERM_BULLET" in *"$DENY_FIRST_CLAUSE"*) ;; *) BULLET_MISS="$BULLET_MISS [proactive rows]" ;; esac
+case "$STATE_BULLET" in *"$DENY_FIRST_CLAUSE"*) ;; *) BULLET_MISS="$BULLET_MISS [reactive row]" ;; esac
+if [ -z "$BULLET_MISS" ]; then
+  check "P1bx both bullets document the deny-first caveat in their own region" PASS
+else
+  check "P1bx deny-first caveat missing from the region that governs it:$BULLET_MISS" FAIL
+fi
+
+# The reviewer identity is hand-copied across the hooks tree and the only defence used
+# to be a by-hand check whose census named one of at least eight sites. A comment cannot
+# be made reliable here, but ONE pair can be made machine-checked: this file's constant
+# against the module that actually exports it. A rename that updates the exporter and
+# forgets this file — the pair most likely to diverge, since the require is lazy and no
+# load ever compares them — now fails here instead of silently emitting a row naming an
+# agent type that no longer exists. The remaining six files stay unpinned by design; the
+# source comment says so and points at the grep rather than at a list.
+RA="$(sed -n "s/^var REVIEWER_AGENT = '\(.*\)';$/\1/p" "$REPORT" | head -1)"
+if [ -z "$RA" ]; then
+  check "P1by could not extract REVIEWER_AGENT from the renderer — the pin is vacuous, not clean" FAIL
+elif grep -qF "const REVIEWER_SUBAGENT_TYPE = '$RA';" "$PLUGIN_DIR/hooks/lib/reviewer-spawn-denial-v1.js"; then
+  check "P1by REVIEWER_AGENT ('$RA') matches the exporting REVIEWER_SUBAGENT_TYPE" PASS
+else
+  check "P1by REVIEWER_AGENT ('$RA') has drifted from REVIEWER_SUBAGENT_TYPE in reviewer-spawn-denial-v1.js" FAIL
+fi
+
 # --- TTL honored from ZDOC_TTL_HOURS (canonical getter value) --------------
 # age ~3548h: default TTL 6 would call it expired; the injected max TTL 8760
 # (!= 6) keeps it fresh — proving ZDOC_TTL_HOURS is the value that is honored.

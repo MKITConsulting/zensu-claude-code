@@ -45,8 +45,19 @@ var SETTINGS_MAX_BYTES = 1048576;
 // A hand-copy of REVIEWER_SUBAGENT_TYPE in hooks/lib/reviewer-spawn-denial-v1.js,
 // which exports it. Deliberate, not an oversight: that module is required lazily
 // inside reviewerDenialRows and a load failure there degrades one row, while a
-// top-level require would take the whole report down with it. The twin literal
-// in stop-chain-enforcer.sh's DENIAL_RULE is a third copy of the same identity.
+// top-level require would take the whole report down with it.
+//
+// Do NOT read the sentence above as a census of the tree. An earlier version named
+// stop-chain-enforcer.sh's DENIAL_RULE as "a third copy" and CLAUDE.md turned that
+// into "the three copies — check them by hand", which made the by-hand instruction
+// unfollowable: the literal really lives in EIGHT files under hooks/ (26 occurrences,
+// measured 2026-08-23), and two of them are functional comparisons a rename breaks
+// silently — post-review-tdd-delegate.sh's SUBAGENT_TYPE test and
+// claude-principal-v1.js's list entry. An enumeration in a comment goes stale the next
+// time one is added, so the instruction is a GREP, not a list: before renaming this
+// identity, `grep -rn 'zensu:code-reviewer' hooks/` and change every site.
+// One pair IS machine-checked — P1by pins THIS constant against the exporting one, so
+// the two spellings cannot drift apart unnoticed. The other six files are not pinned.
 var REVIEWER_AGENT = 'zensu:code-reviewer';
 // The Claude Code build (2.1.235) whose settings shape and permission-rule
 // grammar the check below was read against. Recorded for the same reason

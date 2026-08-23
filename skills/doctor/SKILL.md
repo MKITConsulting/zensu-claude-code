@@ -153,7 +153,11 @@ classifier will refuse a spawn, not only when the whole table is green.
   (**move**, not remove — the row says so) — and tell
   the user they must apply it themselves: **never edit a settings file to widen
   your own permissions, and never name a project-local settings path as the place
-  to do it.** When a `deny` row is present it OUTRANKS the refused-spawn state row
+  to do it.** Both allow-ward remedies here carry their own precedence caveat, and
+  it is the row's literal wording: `a deny rule outranks an allow rule` and the deny
+  has to go first. Relay it with the remedy — an allow rule added while a deny stands
+  takes no effect at all, including a deny in a settings source this check never
+  opens. When a `deny` row is present it OUTRANKS the refused-spawn state row
   below: `deny` is evaluated before `allow`, so relaying that row's allow-rule
   remedy while the `deny` entry stands recommends a change that cannot take
   effect. An `autoMode.allow` entry is classifier guidance in prose, not a

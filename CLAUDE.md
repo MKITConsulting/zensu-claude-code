@@ -867,8 +867,17 @@ Eight things are coupled and must move together:
   `hooks/lib/zensu-doctor-report.js` copies it rather than importing it: that
   module is required LAZILY inside `reviewerDenialRows`, so a load failure
   degrades one row, while a top-level require would take the whole report down.
-  `DENIAL_RULE` in `stop-chain-enforcer.sh` is a third copy of the same identity.
-  **The three copies are NOT pinned against each other — check them by hand**, in
+  `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
+  do five further files. **Do not treat any enumeration of them as complete.** The
+  literal lives in EIGHT files under `hooks/` (26 occurrences, measured 2026-08-23),
+  including two functional comparisons a rename breaks silently:
+  `post-review-tdd-delegate.sh`'s `SUBAGENT_TYPE` test and `claude-principal-v1.js`'s
+  list entry. A census in prose goes stale the next time a site is added, which is why
+  the instruction is a GREP and not a list: **before renaming this identity, run
+  `grep -rn 'zensu:code-reviewer' hooks/` and change every site.** ONE pair is
+  machine-checked — `test-doctor.sh` P1by pins `REVIEWER_AGENT` against the exporting
+  `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
+  and nothing at load time compares them. **The other six files are NOT pinned**, in
   the same sense `WRAP` is unpinned above. Rename the agent in one place only and
   the surviving copies keep telling the user to allow a subagent name nothing
   spawns, with every check green.
