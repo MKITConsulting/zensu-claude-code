@@ -1343,16 +1343,24 @@ permission layer refuses that spawn, the call never executes — so no PreToolUs
 or PostToolUse hook can see it, and without this module the enforcer repeats an
 impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
 
-Five things are coupled and must move together:
+Six things are coupled and must move together:
 
 - **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
-  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.240: `Permission for this action was
   denied by the Claude Code auto mode classifier.` and `Permission for this action
   has been denied.`). The build is exported and pinned against the module header,
   so the constant cannot drift away from the provenance note beside it. They are
   matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
   that rewords them silently disables the diagnosis — re-verify against the
-  binary, never against memory. The `kind` values are re-encoded in exactly TWO
+  binary, never against memory. Re-verified 2026-08-22 with `strings` over
+  2.1.237, 2.1.239 and 2.1.240: byte-identical in all three, each stored WITH the
+  trailing `Reason: ` the prefix rule declines to contract, and no third
+  refusal-result literal exists to add. The same transcript entry also carries a
+  host-native `toolDenialKind` beside `message` (observed `automode-blocked`); it
+  is deliberately NOT read — an undocumented, unversioned field whose absence
+  would be indistinguishable from a clean spawn — and the module header plus a
+  unit case record that it was seen and declined rather than missed.
+  The `kind` values are re-encoded in exactly TWO
   places outside the module: the `case` arms in `hooks/stop-chain-enforcer.sh`
   that render cause and remedy, and the closed set `reviewerDenialRows` accepts
   from a note. The hook's PROBE deliberately holds no third copy — it reads `kind`
@@ -1394,6 +1402,18 @@ Five things are coupled and must move together:
   contents would let anything able to write there mint a row telling the user to widen
   `permissions.allow` for the very spawn it wants. Change the workflow-document name and
   the binding silently stops matching; `P1qq` is the pin.
+- **One fixture is a real host capture, and it is the only one that can falsify the
+  hand-authored envelopes.** `tests/structure/fixtures/reviewer-spawn-denied-transcript.v1.jsonl`
+  is a redaction of two entries taken verbatim out of a Claude Code 2.1.237 session whose
+  `zensu:code-reviewer` spawns the classifier refused: the `tool_use`/`tool_result` pair,
+  `is_error`, the full refusal body and `toolDenialKind` are the original bytes; the
+  prompt, ids, cwd and branch are placeholders. Every other transcript in both suites is
+  written by this repo and therefore pins only what this repo BELIEVES the host emits.
+  Driven at the unit layer (four cases, including a shape guard so a gutted redaction
+  fails loudly) and end-to-end by T36/T36a, which sit beside scenario 7 rather than at
+  the tail for the Windows-budget reason below. Like
+  `fixtures/exitplanmode-posttooluse-payload.v1.json`, it CANNOT observe live harness
+  drift — only a fresh capture can.
 
 **The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
 Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
@@ -1402,6 +1422,12 @@ single sample here says nothing about headroom. Budget against the HIGH figure: 
 `timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
 its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
 was killed by it, which is exactly the failure this range exists to prevent.
+**That range no longer covers the file.** Scenario 7b (T36/T36a, the real-host capture)
+added a session and a Stop after the range was taken, and the ceiling was NOT raised —
+85% of cap was already the slow sample's share. Treat the remaining headroom as
+UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
+`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
+budget below would surface such a run as a profile abort rather than a suite timeout.
 
 **The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
@@ -1559,6 +1585,21 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
 
 **Known gaps, accepted and deliberate:**
 
+- **The whole diagnosis is inert on an installation that predates it, and that is the
+  first thing to check before suspecting the scanner.** The probe's
+  `[ -f "$lib" ] && [ ! -L "$lib" ] || return 0` returns before `node` is ever invoked,
+  leaving the verdict `none` and routing byte-identical — the correct fail-open
+  direction for a diagnostic, and indistinguishable from "no refusal happened". The
+  module first shipped in **v0.18.2**; a session on 0.18.1 or earlier gets the ordinary
+  `Resume the /zensu:tdd Phase 6 review sequence` directive on every Stop until the cap
+  releases, and `/zensu:doctor` stays silent because no note is ever minted. Measured
+  2026-08-22: three classifier-refused `zensu:code-reviewer` spawns, seven Stop
+  interceptions, zero notes — and the shipped scanner run against that same transcript
+  afterwards answered `status=blocked kind=auto-mode-classifier spawns=3 denials=3`. The
+  detection was never wrong; the code was not installed. Nothing surfaces the version
+  skew, so diagnose it by checking whether the executing plugin root actually contains
+  `hooks/lib/reviewer-spawn-denial-v1.js` before touching the marker set. T36b pins the
+  guard and its position ahead of the invocation.
 - The verdict has no chain-generation lower bound. After a cap release and a fresh
   `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
   so the branch fires again before any new spawn is attempted. The reason text handles
@@ -1587,6 +1628,75 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   unbound or past the TTL, which is what bounds a note whose session is gone for
   good. The row it would have rendered was already suppressed by the same TTL, so
   the sweep changes which files exist, never which findings are reported.
+
+## Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12
+
+**Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
+commit.** `tests/structure/test-gauntlet-loop-skill.sh` G12 scans `skills/gauntlet-loop/`
+for any gate-disable prefix, because a prompt carrier that teaches one hands the model a
+hatch that lands no bypass-ledger entry. A negative scan is only as wide as its
+alternation, so G12 builds its pattern from a hardcoded `ESCAPE_STEMS` list, and its
+`G12a` arm re-derives the set from `hooks/`, `docs/` and this file and FAILS when the two
+disagree.
+
+That makes the coupling run in an unobvious direction: an ordinary change under `docs/`
+or `hooks/` that adds — or removes the last occurrence of — such a literal turns a suite
+named for the gauntlet-loop skill red, and the remedy is to edit `ESCAPE_STEMS`, not the
+file you were working on. The message names both sets so the diagnosis is in the failure
+itself, but nothing points at it from the side that changes.
+
+It is not hypothetical. `ZENSU_REQUIREMENTS_GATE=off` arrived with the
+plan-requirements completion gate and was caught on the next merge, by exactly this arm.
+
+Two properties worth keeping when touching G12: the derivation carries the same quote
+tolerance as the pattern it validates (the gates compare after shell quote removal, so
+`ZENSU_CHAIN='off'` disables one at runtime and a bare `=off` derivation is blind to it),
+and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure used
+to read as agreement while the control block still printed PASS.
+
+## Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)
+
+The promptfoo wrapper attests `tracked_clean` for the immutable eval fixture from TWO
+independent signals: a manifest comparison (`scripts/fixture-manifest.js`, also polled every
+10 ms) and a filesystem-event marker. **The marker is not redundant** — it is the only thing
+that catches a TRANSIENT mutation, written and restored byte-for-byte before the run ends,
+which is what `test-claude-promptfoo-wrapper.sh` P13-S6 pins.
+
+**Both watch backends now share ONE decision, `classifyFixtureEvent`.** They did not, and
+the divergence was the bug: the per-directory backend gated `.git` behind a manifest delta
+while the recursive one (`fs.watch(root, {recursive:true})`, FSEvents on macOS) marked any
+path outright. Under load that made the wrapper attest dirty against its own `git init` +
+`git add` + `git commit` seeding, which runs BEFORE the watcher starts — P13-S8 failed with
+rc=3 on 8 of 8 concurrent runs and 0 of 8 idle. Three further event shapes were measured the
+same way and are gated for the same reason: the watched ROOT's own basename (what libuv
+reports for an event on the watched directory itself), a directory that CONTAINS a run-owned
+subtree (`.zensu`, whose children the wrapper permits the run to write, coalesced upward),
+and garbled names FSEvents emits under coalescing (`.git/ä`).
+
+**The gated classes are adjudicated by the MANIFEST; ordinary fixture paths are NOT, and
+that split is load-bearing.** A manifest gate on an ordinary path would destroy transient
+detection outright — the manifest is equal by definition in exactly that case. Ordinary paths
+are separated by the entry's own `ctimeMs`/`mtimeMs` against the watcher's start instead: a
+denied write leaves the inode untouched, a restore does not, and an unreadable entry marks
+(a deletion is a mutation). Do NOT "simplify" that branch onto `gateOnManifest` — it reads as
+one consistent rule and silently removes the feature P13-S6 exists for. The ctime half of the
+argument is POSIX only; on Windows that field is the creation time and settable, which is
+acceptable solely because the `init_git` path requires `sandbox-exec`/`bwrap` and exits 69
+without one.
+
+Moving together: `RUN_OWNED` (the ancestor set is DERIVED from it, never hand-listed),
+`EXCLUDED_PATHS` and `gitControlSnapshot` in `fixture-manifest.js` (what a manifest delta can
+still see is what makes gating `.git` safe), and the registered-case floor in the shell
+driver. `tests/structure/fixture-mutation-watch.test.js` carries the four measured shapes and
+pins the single-implementation property at SOURCE level — a rule pin alone cannot catch a
+SECOND copy of the rule, which is what the bug was. The suite is local-only
+(`tests/profiles/promptfoo-local-only.v1.json`, and in the `excluded` list of
+`windows-native-structure.v1.json`), so none of this runs in GitHub Actions.
+
+**Known gap, measured and not closed.** Under the harness that failed 8 of 8 before the fix,
+128 runs at a heavier setting produced ONE failure whose cause was not established; 224
+instrumented runs at the same setting could not reproduce it. Say "the observed shapes are
+closed", never "the watcher cannot false-positive".
 
 ## Pull Request Workflow
 
