@@ -53,8 +53,14 @@ fi
 PROJECT_ROOT="$(zensu_resolve_project_dir)" || exit 0
 ACTIVE_POINTER_HINT="${PROJECT_ROOT:+$PROJECT_ROOT/.zensu/state/autopilot-active.json}"
 AUTOPILOT_STATE_HINT=false
+# The paths the globs below already walk, kept so the nonterminal check further
+# down never has to enumerate the directory a second time. It must not: the plan
+# gate is forbidden any directory-listing API, so that the approved plan can
+# never be inferred from the filesystem.
+AUTOPILOT_STATE_FILES=""
 if [ -n "$ACTIVE_POINTER_HINT" ] && { [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; }; then
   AUTOPILOT_STATE_HINT=true
+  AUTOPILOT_STATE_FILES="$ACTIVE_POINTER_HINT"
 fi
 # The pointer is owner-keyed now; the name above is only the pre-scoping one,
 # which is never written any more. Probe the current spelling too rather than
@@ -63,7 +69,8 @@ if [ -n "$PROJECT_ROOT" ]; then
   for _zensu_autopilot_pointer_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-active-*.json; do
     if [ -e "$_zensu_autopilot_pointer_hint" ] || [ -L "$_zensu_autopilot_pointer_hint" ]; then
       AUTOPILOT_STATE_HINT=true
-      break
+      AUTOPILOT_STATE_FILES="${AUTOPILOT_STATE_FILES}${AUTOPILOT_STATE_FILES:+
+}$_zensu_autopilot_pointer_hint"
     fi
   done
   unset _zensu_autopilot_pointer_hint
@@ -72,7 +79,8 @@ if [ -n "$PROJECT_ROOT" ]; then
   for _zensu_autopilot_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
     if [ -e "$_zensu_autopilot_hint" ] || [ -L "$_zensu_autopilot_hint" ]; then
       AUTOPILOT_STATE_HINT=true
-      break
+      AUTOPILOT_STATE_FILES="${AUTOPILOT_STATE_FILES}${AUTOPILOT_STATE_FILES:+
+}$_zensu_autopilot_hint"
     fi
   done
 fi
@@ -162,22 +170,21 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
   # an unreadable directory, a record that will not parse, a pointer naming a
   # run with no record — counts as nonterminal, so the arm still fails closed.
   autopilot_undecided_or_nonterminal() {
-    STATE_DIR="$PROJECT_ROOT/.zensu/state" node -e '
+    STATE_FILES="$AUTOPILOT_STATE_FILES" node -e '
       const fs = require("fs");
       const path = require("path");
-      const dir = process.env.STATE_DIR;
       const TERMINAL = new Set(["DONE", "CANCELLED"]);
-      let names;
-      try { names = fs.readdirSync(dir, { encoding: "utf8" }); }
-      catch (_) { process.exit(0); }
+      const files = String(process.env.STATE_FILES || "").split("\n").filter(Boolean);
+      if (files.length === 0) process.exit(0);
       const stages = new Map();
       const pointers = [];
-      for (const name of names) {
+      for (const file of files) {
+        const name = path.basename(file);
         const isRun = /^autopilot-run-.+\.json$/.test(name);
-        const isPointer = /^autopilot-active(-[^/]*)?\.json$/.test(name);
-        if (!isRun && !isPointer) continue;
+        const isPointer = /^autopilot-active(-.*)?\.json$/.test(name);
+        if (!isRun && !isPointer) process.exit(0);
         let parsed;
-        try { parsed = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); }
+        try { parsed = JSON.parse(fs.readFileSync(file, "utf8")); }
         catch (_) { process.exit(0); }
         if (!parsed || typeof parsed !== "object") process.exit(0);
         if (isRun) {

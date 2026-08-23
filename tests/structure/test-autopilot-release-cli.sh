@@ -83,11 +83,15 @@ json_ok() {
   ' 2>/dev/null
 }
 
-# Expectations must be spelled the way the RUNTIME records a directory, not the
-# way this shell sees it. On MSYS `pwd -P` answers /d/a/... and
-# `fs.realpathSync.native` answers D:\a\..., while everything the library
-# persists goes through this renderer and comes back as D:/a/... — three
-# namespaces, and a raw comparison picks the wrong one twice.
+# There are THREE spellings of one directory on Windows and each expectation
+# has to pick the right one. Measured on windows-shard-3: MSYS `pwd -P` answers
+# /c/Users/..., this renderer answers C:/Users/..., and node's
+# `fs.realpathSync.native` answers C:\Users\... . Which one is correct depends
+# on WHICH LAYER produced the value being compared: the shell resolver
+# (`autopilot_workspace_root`) ends in this renderer, while a value that reached
+# the run record was canonicalized inside node and is therefore backslashed.
+# Collapsing the two onto one helper broke A6 on Windows while every POSIX host
+# stayed green.
 native_dir() {
   bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$1" 2>/dev/null </dev/null \
     || (cd -P -- "$1" 2>/dev/null && pwd -P)
@@ -198,7 +202,9 @@ WS_TREE_A="$WS_PROJECT/tree-a"
 run_verb "$WS_PROJECT" ws_cli_owner --autopilot-begin --run ws_cli_run --workspace "$WS_TREE_A" >/dev/null 2>&1
 A6_RC=$?
 WS_RUN_FILE="$WS_PROJECT/.zensu/state/autopilot-run-ws_cli_run.json"
-WS_TREE_A_JSON="$(WS_TREE_A_NATIVE="$(native_dir "$WS_TREE_A")" node -e 'process.stdout.write(JSON.stringify(String(process.env.WS_TREE_A_NATIVE)))' </dev/null)"
+# The RECORD is canonicalized in node, so this expectation stays in node's
+# namespace. Do not "unify" it with native_dir — see the note beside that helper.
+WS_TREE_A_JSON="$(node -e 'process.stdout.write(JSON.stringify(require("fs").realpathSync.native(process.argv[1])))' "$WS_TREE_A")"
 if [ "$A6_RC" -eq 0 ] && [ -f "$WS_RUN_FILE" ] \
   && json_ok "$WS_RUN_FILE" "value.workspaceRoot === $WS_TREE_A_JSON"; then
   check "A6 --workspace reaches the record as the run's working tree" PASS
