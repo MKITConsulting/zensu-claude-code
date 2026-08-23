@@ -1317,7 +1317,8 @@ if (mode === "begin") {
     && !TERMINAL.has(candidate.stage) && mayHoldWorkspace(candidate, workspaceRoot));
   if (workspaceHolder) {
     fail(4, `workspace held by nonterminal run ${workspaceHolder.runId} (stage ${workspaceHolder.stage}); `
-      + `release it with: zensu-log.sh --autopilot-release --run ${workspaceHolder.runId} --confirm`);
+      + `ask that session to cancel it, or once it is idle release it with: `
+      + `zensu-log.sh --autopilot-release --run ${workspaceHolder.runId} --confirm`);
   }
 
   const existing = inventory.find(candidate => candidate.runId === runId);
@@ -2276,7 +2277,8 @@ _autopilot_workspace_refusal() {
     try { value = JSON.parse(String(process.env.HOLDER_JSON || "")); } catch { process.exit(1); }
     if (!value || typeof value.runId !== "string" || typeof value.stage !== "string") process.exit(1);
     process.stdout.write(`workspace held by nonterminal run ${value.runId} (stage ${value.stage}); `
-      + `release it with: zensu-log.sh --autopilot-release --run ${value.runId} --confirm\n`);
+      + `ask that session to cancel it, or once it is idle release it with: `
+      + `zensu-log.sh --autopilot-release --run ${value.runId} --confirm\n`);
   ' 2>/dev/null </dev/null
 }
 

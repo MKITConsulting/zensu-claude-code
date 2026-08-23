@@ -39,8 +39,11 @@ the working tree stays refused permanently, because `CANCEL` requires the owner.
 - It is scoped by RUN ID within this project, not by working tree. It does not read
   `workspaceRoot`, but it releases only a run that holds the working tree you are standing in
   (exit `6` otherwise). A run id is an ordinary filename in a listable directory, so the id is
-  not a scope control and "take it from a refusal" is about relevance, not availability — the
-  tree you stand in is the scope.
+  not a scope control and "take it from a refusal" is about relevance, not availability.
+  **Exit `6` is an accident guard, not an authorization boundary.** Anything that can run this
+  command can also change directory into the holding tree, and the refusal itself names that
+  tree — so it stops a mistake, never a caller who means to release the run. Do not cite it as
+  a control that confines one session's reach.
 - It does not release a run **this** session owns while that session's own pointer still
   designates it. Cancel that one the ordinary way, through `--autopilot-event --event CANCEL`.
   The one exception is the state that path cannot leave: a run left pointerless by a torn
@@ -98,7 +101,10 @@ not be staged or replaced; `6` the run does not hold the working tree you are st
 release it from the tree it holds, which is the tree whose refusal named the id; `7` the owning
 session still looks active, so releasing it would end a live run. On `1` or `5`, report the code
 and stop — neither is repaired by retrying the release. On `7`, do not retry: either the owner
-is genuinely working, or it must go stale first.
+is genuinely working, or it must go stale first. Exit `7` is reachable only while
+`hooks.pendingReviewTtlHours` is above zero; at `0` the liveness check does not run and the
+release proceeds against a live owner, which the command discloses on stderr as
+`owner liveness unchecked`.
 
 ## Step 3 — confirm the outcome
 

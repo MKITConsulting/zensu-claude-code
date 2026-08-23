@@ -1580,7 +1580,8 @@ fi
 # release a run whose id no command will disclose.
 if [ "$GATE_HOLD_RC" -eq 0 ] \
   && grep -qF -- 'run_gate_holder' "$GATE_ERR" \
-  && grep -qF -- '--autopilot-release --run run_gate_holder --confirm' "$GATE_ERR"; then
+  && grep -qF -- '--autopilot-release --run run_gate_holder --confirm' "$GATE_ERR" \
+  && grep -qF -- 'ask that session to cancel it' "$GATE_ERR"; then
   check "W13 the standalone refusal names the holding run and the release command" PASS
 else
   check "W13 standalone refusal must disclose the holder and its release command" FAIL
@@ -1641,6 +1642,7 @@ if [ "$REL_READY" = true ]; then
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rd" -b rel-d >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rs" -b rel-s >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rt" -b rel-t >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rp" -b rel-p >/dev/null 2>&1 || REL_READY=false
 fi
 
 # S6 — a run left pointerless by a torn begin: `apply` refuses it (no pointer
@@ -1792,6 +1794,86 @@ if [ "$REL_READY" = true ] && [ "$REL_TTL0_RC" -eq 0 ] \
   check "W24 a zero TTL disables the liveness refusal and says so" PASS
 else
   check "W24 a zero TTL must disable the check and disclose it (rc=$REL_TTL0_RC, want 0 + disclosure)" FAIL
+fi
+
+REL_PTR_RC=0
+REL_PTR_MADE=false
+REL_PTR_ERR="$ROOT/rel-ptr.err"
+: > "$REL_PTR_ERR"
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rp" && autopilot_begin_run run_rel_ptr session_rel_ptr "$REL_P" false true "" ) >/dev/null 2>&1
+  REL_PTR_FILE="$(autopilot_active_file "$REL_P" session_rel_ptr)"
+  printf '%s\n' '{}' > "$REL_P/.zensu/state/decoy-pointer.json"
+  rm -f "$REL_PTR_FILE"
+  if ln -sfn "$REL_P/.zensu/state/decoy-pointer.json" "$REL_PTR_FILE" 2>/dev/null && [ -L "$REL_PTR_FILE" ]; then
+    REL_PTR_MADE=true
+    ( cd "$REL_P/.claude/worktrees/rp" && autopilot_release_run run_rel_ptr evt_rel_ptr "$REL_P" session_rel_ptr ) >/dev/null 2>"$REL_PTR_ERR"
+    REL_PTR_RC=$?
+  fi
+fi
+# The owner branch turns a refusal into a permission on the ABSENCE of this
+# pointer, and the directory holding it is writable from inside a session. A
+# liveness check cannot be added there — the owner IS the caller, and refusing a
+# live owner would remove the torn-begin exit W15 exists for — so the guarantee
+# that remains is that an unsafe pointer must never READ as absent.
+if [ "$REL_READY" != true ]; then
+  check "W26 release fixture unavailable" FAIL
+elif [ "$REL_PTR_MADE" != true ]; then
+  check "W26 skipped: this host cannot create a symlink" PASS
+elif [ "$REL_PTR_RC" -eq 2 ] && grep -qF 'unsafe state file' "$REL_PTR_ERR"; then
+  check "W26 an unsafe owner pointer fails closed instead of reading as absent" PASS
+else
+  check "W26 an unsafe owner pointer must fail closed (rc=$REL_PTR_RC, want 2)" FAIL
+fi
+
+RACE_P="$ROOT/race-guards"
+RACE_READY=true
+RACE_A_RC=99
+RACE_B_RC=99
+mkdir -p "$RACE_P/.claude/worktrees"
+command -v git >/dev/null 2>&1 || RACE_READY=false
+if [ "$RACE_READY" = true ]; then
+  git -C "$RACE_P" init -q >/dev/null 2>&1 || RACE_READY=false
+  git -C "$RACE_P" -c user.email=t@example.invalid -c user.name=t \
+    commit -q --allow-empty -m init >/dev/null 2>&1 || RACE_READY=false
+  git -C "$RACE_P" worktree add -q "$RACE_P/.claude/worktrees/ca" -b race-a >/dev/null 2>&1 || RACE_READY=false
+fi
+if [ "$RACE_READY" = true ]; then
+  _autopilot_prepare_storage "$RACE_P" >/dev/null 2>&1
+  RACE_A_OUT="$ROOT/race-a.rc"
+  RACE_B_OUT="$ROOT/race-b.rc"
+  (
+    cd "$RACE_P/.claude/worktrees/ca" || exit 99
+    autopilot_begin_run run_race_a session_race_a "$RACE_P" false true "" >/dev/null 2>&1
+    printf '%s' "$?" > "$RACE_A_OUT"
+  ) &
+  (
+    cd "$RACE_P/.claude/worktrees/ca" || exit 99
+    autopilot_begin_run run_race_b session_race_b "$RACE_P" false true "" >/dev/null 2>&1
+    printf '%s' "$?" > "$RACE_B_OUT"
+  ) &
+  wait
+  RACE_A_RC="$(cat "$RACE_A_OUT" 2>/dev/null || echo 99)"
+  RACE_B_RC="$(cat "$RACE_B_OUT" 2>/dev/null || echo 99)"
+fi
+RACE_WINNERS=0
+RACE_REFUSALS=0
+for RACE_RC in "$RACE_A_RC" "$RACE_B_RC"; do
+  case "$RACE_RC" in
+    0) RACE_WINNERS=$((RACE_WINNERS + 1)) ;;
+    4) RACE_REFUSALS=$((RACE_REFUSALS + 1)) ;;
+  esac
+done
+# Every other occupancy check in this suite drives a holder that was already
+# committed before the second call started, which proves the READ and not the
+# lock. Two begins launched together in one tree are the case the changeset is
+# named after: the project lease must order them, so exactly one may win.
+if [ "$RACE_READY" != true ]; then
+  check "W27 concurrency fixture unavailable" FAIL
+elif [ "$RACE_WINNERS" -eq 1 ] && [ "$RACE_REFUSALS" -eq 1 ]; then
+  check "W27 two begins racing for one working tree yield exactly one winner" PASS
+else
+  check "W27 concurrent begins must yield one winner and one refusal (a=$RACE_A_RC b=$RACE_B_RC)" FAIL
 fi
 
 # --- R1: the containment predicate must be separator-correct and total ---
