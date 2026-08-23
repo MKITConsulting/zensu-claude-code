@@ -107,6 +107,54 @@ else
   check "F7 delegated provider/auth blockers never enter an interactive ask path" FAIL
 fi
 
+# F8 — the standalone completion contract. A run that pushes and then asks whether to
+# resolve the threads it just fixed is the failure this section exists to remove, so the
+# closed list of legal stops and the prohibition on permission questions are both pinned.
+# The negative half ("These are NOT stops") is pinned separately: keeping only the closed
+# list would leave a reader free to invent a stop the list does not mention.
+CONTRACT="$(awk '
+  /^## Completion contract \(standalone\)/ { inside=1 }
+  inside && /^## Procedure/ { exit }
+  inside { print }
+' "$SKILL")"
+CONTRACT_BAD=""
+[ -n "$CONTRACT" ] || CONTRACT_BAD="$CONTRACT_BAD no-section"
+for LIT in 'Steps 4–7 are ONE unit' \
+           'Never ask permission for a step this procedure already prescribes' \
+           'Legal early stops are a CLOSED list' \
+           'These are NOT stops' \
+           'A legal stop still lands what is already finished' \
+           'At most one question per run'; do
+  printf '%s' "$CONTRACT" | grep -qF -- "$LIT" || CONTRACT_BAD="$CONTRACT_BAD ${LIT// /_}"
+done
+if [ -z "$CONTRACT_BAD" ]; then
+  check "F8 standalone completion contract closes the mid-run stop channel" PASS
+else
+  check "F8 standalone completion contract:$CONTRACT_BAD" FAIL
+fi
+
+# F9 — push → resolve continuity, pinned at the two steps that own it plus the loop
+# clause that used to sanction an open-ended early stop. Anchored on the step bodies
+# rather than on the file, so moving a sentence out of its step fails here.
+LAND_STEP="$(awk '/^5\. \*\*Land the changes/ { inside=1 } inside { print } inside && /^6\. \*\*Resolve the threads/ { exit }' "$SKILL")"
+RESOLVE_STEP="$(awk '/^6\. \*\*Resolve the threads/ { inside=1 } inside { print } inside && /^7\. \*\*Report back/ { exit }' "$SKILL")"
+CONTINUITY_BAD=""
+printf '%s' "$LAND_STEP" | grep -qF -- 'The push is not a checkpoint' \
+  || CONTINUITY_BAD="$CONTINUITY_BAD land-step"
+printf '%s' "$RESOLVE_STEP" | grep -qF -- 'A pushed-but-unresolved' \
+  || CONTINUITY_BAD="$CONTINUITY_BAD resolve-step"
+has "$SKILL" 'Never end a turn between the push and' \
+  || CONTINUITY_BAD="$CONTINUITY_BAD turn-boundary"
+has "$SKILL" 'Nothing else is a legal stop' \
+  || CONTINUITY_BAD="$CONTINUITY_BAD loop-clause"
+has "$SKILL" 'this offer is the ONLY user-facing prompt' \
+  || CONTINUITY_BAD="$CONTINUITY_BAD next-step"
+if [ -z "$CONTINUITY_BAD" ]; then
+  check "F9 push and thread resolution stay one uninterrupted unit" PASS
+else
+  check "F9 push/resolve continuity:$CONTINUITY_BAD" FAIL
+fi
+
 echo "----"
 echo "test-pr-fix-findings-skill: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]
