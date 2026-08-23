@@ -2116,7 +2116,7 @@ fi
 # since P1as2/P1as3 catch only a deny<->ask swap — still left every check green while
 # `ask` should have left the fatal set. This derives the order from the ladder body
 # and compares it to the declared array, so the two cannot drift apart silently.
-LADDER_BODY="$(sed -n '/^function permissionExposureLadder/,/^}/p' "$REPORT")"
+LADDER_BODY="$(sed -n '/^function classifyPermissionExposure/,/^}/p' "$REPORT")"
 LADDER_SEEN="$(printf '%s\n' "$LADDER_BODY" | grep -oE 'perms\.(deny|ask|allow)\b' | sed 's/perms\.//' | awk '!seen[$0]++' | tr '\n' ' ')"
 LADDER_DECL="$(grep -oE "var RULE_LADDER = \[[^]]*\]" "$REPORT" | grep -oE "'[a-z]+'" | tr -d "'" | tr '\n' ' ')"
 if [ -z "$LADDER_DECL" ] || [ -z "$LADDER_SEEN" ]; then
@@ -2170,7 +2170,28 @@ if [ -z "$CFG_UNEMITTED" ] && [ -z "$CFG_DRIFT" ]; then
 else
   check "P1bgg config rows vs skill (not emitted:$CFG_UNEMITTED not documented:$CFG_DRIFT)" FAIL
 fi
-PERM_ROWS="$EXPOSED_OUT$DENY_OUT$ASK_OUT$AM_OUT$BAD_OUT$UNJ_OUT$SHAPE_OUT$QUIET_OUT$NOHOME_OUT$SHORT_OUT$THROW_OUT$DENY_OBJ_OUT$OTHER_AGENT_OUT$AMA_SPLIT_OUT"
+# The config off-switch. It suppresses the ROW and never the file the check opens: a
+# ZDOC_/ZENSU_ path override was refused on the injection axis, and a boolean concedes
+# nothing there. Two properties matter more than the suppression itself. Disabling must
+# not produce SILENCE — silence is the one verdict this check cannot qualify, and hiding
+# the rows under a config key would reintroduce exactly the defect the feature removed.
+# And a QUOTED "false" must not disable, because every boolean in this tree is read
+# strictly and the doctor's own quoted-boolean row is what explains that to the user.
+CFG_PERMOFF="$SBOX/cfg-permcheck-off.json"
+printf '{"hooks":{"reviewerSpawnPermissionCheck":false}}\n' > "$CFG_PERMOFF"
+PERMOFF_OUT="$( HOME="$H_EXPOSED"; run_report "$SBOX/plug" "$CFG_PERMOFF" "$EMPTY_PROJECT" )"
+case "$PERMOFF_OUT" in *'✅  permissions: the reviewer-spawn permission check is switched off by hooks.reviewerSpawnPermissionCheck'*'not an all-clear'*)
+  check "P1bz the off-switch reports the skipped check instead of falling silent" PASS ;;
+  *) check "P1bz off-switch row (got: $PERMOFF_OUT)" FAIL ;; esac
+case "$PERMOFF_OUT" in *'permission mode "auto" is set'*)
+  check "P1bz1 the off-switch did not suppress the exposure row" FAIL ;;
+  *) check "P1bz1 the exposure row is suppressed while the check is switched off" PASS ;; esac
+CFG_PERMQ="$SBOX/cfg-permcheck-quoted.json"
+printf '{"hooks":{"reviewerSpawnPermissionCheck":"false"}}\n' > "$CFG_PERMQ"
+case "$( HOME="$H_EXPOSED"; run_report "$SBOX/plug" "$CFG_PERMQ" "$EMPTY_PROJECT" )" in *'permission mode "auto" is set'*)
+  check "P1bz2 a quoted \"false\" does not disable the check" PASS ;;
+  *) check "P1bz2 a quoted \"false\" wrongly disabled the check" FAIL ;; esac
+PERM_ROWS="$EXPOSED_OUT$DENY_OUT$ASK_OUT$AM_OUT$BAD_OUT$UNJ_OUT$SHAPE_OUT$QUIET_OUT$NOHOME_OUT$SHORT_OUT$THROW_OUT$DENY_OBJ_OUT$OTHER_AGENT_OUT$AMA_SPLIT_OUT$PERMOFF_OUT"
 PERM_UNEMITTED=""; PERM_DRIFT=""
 while IFS= read -r perm_phrase; do
   [ -n "$perm_phrase" ] || continue
@@ -2189,6 +2210,7 @@ cannot judge
 Move the rule to permissions.allow
 has not verified
 has a shape this check cannot judge
+switched off by hooks.reviewerSpawnPermissionCheck
 a deny rule outranks an allow rule
 no agent may edit a settings file to widen its own permissions
 no reviewer-spawn exposure found

@@ -588,45 +588,54 @@ function settingsShape(raw) {
 // because a reader who cannot see WHICH key is malformed cannot repair the file. Two
 // malformed carriers therefore still render two rows — they differ, and dropping one
 // would hide a real defect.
-function shapeRow(err) {
-  line(WARN, 'permissions: ~/.claude/settings.json has a shape this check cannot judge — ' + err
-    + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
+// These BUILD text and no longer emit it. Every row this check can produce is reached
+// through ROW_TEXT below, so the roster of rows is a table a reader can enumerate rather
+// than a set of emission points scattered through a branch ladder.
+function shapeRowText(err) {
+  return 'permissions: ~/.claude/settings.json has a shape this check cannot judge — ' + err
+    + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.';
 }
-function deferredShapeRow(err, scope) {
-  line(WARN, 'permissions: ~/.claude/settings.json has a shape this check cannot judge — ' + err
+function deferredShapeRowText(err, scope) {
+  return 'permissions: ~/.claude/settings.json has a shape this check cannot judge — ' + err
     + '; the ' + scope + ' could not be determined. That is a missing part of the check, not an '
-    + 'all-clear.');
+    + 'all-clear.';
 }
-// Reused verbatim by the ask row and the exposure row. It shares its second
-// clause — "a deny rule outranks an allow rule, so the deny has to go first" —
-// with FIVE copies, none of which consumes this constant: the DENY row, the
-// reactive row further down, DENIAL_REMEDY in hooks/stop-chain-enforcer.sh, the
-// refused-spawn bullet in skills/doctor/SKILL.md, and `unjudgeableRow` below.
-// Each states the same deny-before-allow precedence. TWO of these five carry the
-// trailing clause verbatim — the reactive row and DENIAL_REMEDY — and a third, the
-// SKILL.md bullet, carries only its first half. With this constant that is the three
-// CLAUDE.md counts on its own base.
+// Reused verbatim by the ask row and the exposure row. Its second clause is now the
+// constant DENY_OUTRANKS below, so the two IN-FILE copies — this caveat and the
+// reactive row — SHARE one source instead of being byte-identical by hand. That was
+// the remaining defect in this class: a shared constant sitting beside an unconsumed
+// copy is worse than either honest duplication or one source, because a reader who
+// rewords the constant reasonably believes both rows changed. They do now.
+//
+// It still shares that clause with THREE copies this file cannot reach: DENIAL_REMEDY
+// in hooks/stop-chain-enforcer.sh, the refused-spawn bullet in skills/doctor/SKILL.md,
+// and the DENY row here, which states the same precedence in its own words rather than
+// with this clause. Each states the same deny-before-allow precedence.
 // `unjudgeableRow` deliberately does NOT reuse this constant: it tells the reader
 // to go and READ the entry, while this text tells them to REMOVE a deny, so
 // pasting it there would give the wrong instruction.
-// CLAUDE.md counts the same class as SIX INCLUDING the constant. Five besides,
-// six including — one membership, two bases. Keep both; do not "fix" one into the
-// other. FOUR of the six carry a machine-pinned literal, and the pins work precisely
-// BECAUSE the clause is shared verbatim rather than paraphrased: the constant (P1be),
-// the reactive row (P1qr), DENIAL_REMEDY (the Stop routing suite), and the SKILL.md
-// bullet (the grep -qF side of both doctor pins). The DENY row is pinned too, by its
-// own clause: P1bv and P1bm3 match 'Deny is evaluated before ask and allow' literally,
-// so five of the six are caught by something. `unjudgeableRow` ALONE is the copy
-// nothing catches — greps for its own sentence return nothing — so it is the one to
-// check by hand after any reword.
+// EVERY remaining member is machine-held, and the pins work precisely BECAUSE the
+// clause is shared verbatim rather than paraphrased: DENY_OUTRANKS reaches the report
+// through both in-file rows and is matched by P1be and P1qr; the SKILL.md bullets are
+// matched by the grep -qF side of those pins and, per REGION, by P1bx; and
+// DENIAL_REMEDY is matched by test-stop-enforcer-self-review-routing.sh, which greps
+// 'A deny rule outranks an allow rule, so the deny has to go first' — note the CAPITAL
+// A, because that copy opens a sentence. A review of this PR read that capital as
+// evidence the copy escapes the case-sensitive needles; it does not, it has a needle of
+// its own. The DENY row is held by its own clause instead: P1bv and P1bm3 match
+// 'Deny is evaluated before ask and allow' literally.
+// `unjudgeableRow` deliberately does NOT reuse DENY_OUTRANKS: it tells the reader to go
+// and READ the entry, while this text tells them to REMOVE a deny, so pasting it there
+// would give the wrong instruction. It is the one member whose own sentence no grep
+// matches — check it by hand after any reword.
 //
 // Both allow-ward rows recommend an allow rule, and such a rule takes no effect
 // behind a deny this check could not see or could not judge — a wildcard
 // spelling, a deny in a settings source this file never opens. Saying so costs
 // one clause and is true regardless of spelling, which is why it is preferred
 // over guessing at the host's rule grammar.
-var DENY_FIRST_CAVEAT = ' Remove any deny rule that names the Agent tool first — a deny rule '
-  + 'outranks an allow rule, so the deny has to go first.';
+var DENY_OUTRANKS = 'a deny rule outranks an allow rule, so the deny has to go first';
+var DENY_FIRST_CAVEAT = ' Remove any deny rule that names the Agent tool first — ' + DENY_OUTRANKS + '.';
 // RESIDUAL, recorded because it is a channel and not a defect: the top-level handler at
 // the bottom of this file interpolates `String(e.message)`. No reader here lets a parse
 // throw escape to it — each one catches and maps into its own closed vocabulary — so no
@@ -776,11 +785,11 @@ function hasUnreadableEntry(rules) {
 // is a string this check read and declined to judge, while an unreadable ENTRY names
 // nothing at all — telling the user the second is the first would be a false statement
 // about their file, which is the failure class this whole feature exists to avoid.
-function unjudgeableRow(cause) {
-  line(WARN, 'permissions: ' + cause + ' Read the entry yourself before adding any '
+function unjudgeableRowText(cause) {
+  return 'permissions: ' + cause + ' Read the entry yourself before adding any '
     + 'permissions.allow rule: deny and ask are both evaluated before allow, so an entry that does '
     + 'block would make an allow rule take no effect. You have to apply this yourself — '
-    + SELF_PERMISSION_BAR + '.');
+    + SELF_PERMISSION_BAR + '.';
 }
 // A FOURTH predicate, and deliberately not another spelling of the other three:
 // this one scans `autoMode.allow`, which holds classifier guidance in PROSE
@@ -796,33 +805,80 @@ function mentionsReviewerAgent(rules) {
   }
   return false;
 }
-// The ladder proper. It emits a row when it has something to say and stays silent
-// otherwise; permissionExposureRows below turns that silence into a statement, so no
-// branch here has to remember to close itself out.
-function permissionExposureLadder(file) {
-  var r = readSettingsJson(file);
-  if (r.missing) return;
-  if (!r.ok) {
-    line(WARN, 'permissions: ~/.claude/settings.json ' + (r.io ? ('could not be read — ' + r.err) : 'could not be parsed')
-      + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
-    return;
-  }
-  var shape = settingsShape(r.data);
+// The DECISION, and it holds no row text at all. It answers WHICH verdicts hold, in
+// emission order; the caller turns each into a row through ROW_TEXT. That split is what
+// removed the navigation comments this code used to need: the fact that the auto-mode
+// verdict and the autoMode.allow verdict can BOTH hold is now visible in the return type
+// — the list simply has two members — instead of being asserted in prose above an `else`,
+// and the inventory of early exits is the run of single-member returns you can read off
+// the page rather than a paragraph enumerating them.
+function classifyPermissionExposure(shape) {
   if (!shape.ok) {
-    // NOT "could not be read": this branch is reached only after the file was
-    // read and parsed successfully, and naming the wrong cause sends the user
-    // hunting for a filesystem problem that does not exist.
-    shapeRow(shape.err);
-    return;
+    // NOT "could not be read": this verdict is reached only after the file was read and
+    // parsed successfully, and naming the wrong cause sends the user hunting for a
+    // filesystem problem that does not exist.
+    return [{ kind: 'shape', err: shape.err }];
   }
   var perms = shape.permissions;
-  var autoMode = shape.autoMode;
   var mode = typeof perms.defaultMode === 'string' ? perms.defaultMode : '';
   // Claude Code evaluates deny, then ask, then allow, and the first match wins —
   // so a deny is reported even when an allow rule for the same spawn is present,
   // and neither depends on the permission mode.
-  if (matchesDenyOrAskRule(perms.deny)) {
-    line(WARN, 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
+  if (matchesDenyOrAskRule(perms.deny)) return [{ kind: 'deny' }];
+  if (matchesDenyOrAskRule(perms.ask)) return [{ kind: 'ask' }];
+  // Before the fall-through: an entry that plainly names this spawn but is not a spelling
+  // this check verified. Saying nothing here would drop straight to the exposure verdict,
+  // which recommends an allow rule that such an entry may outrank. The weaker 'shaped'
+  // verdict names a DIFFERENT agent, or none — it is reported because an Agent/Task rule
+  // of unknown reach may still outrank that allow rule, not because it was found to
+  // mention this spawn.
+  var mention = reviewerSpawnMention(perms.deny, perms.ask);
+  if (mention === 'named') return [{ kind: 'named' }];
+  if (mention === 'shaped') return [{ kind: 'shaped' }];
+  // AFTER the spelling predicate, so a list holding a readable, matching string still
+  // reaches the verdict that names its real cause.
+  if (hasUnreadableEntry(perms.deny) || hasUnreadableEntry(perms.ask)) return [{ kind: 'unreadable' }];
+  // Resolved BEFORE the deferred branches, not inside them. A user who already holds the
+  // rule must not be told to add it, and that has to hold on a deferred failure too. Safe
+  // even when `permissions.allow` is itself the malformed key: the predicate opens with an
+  // Array.isArray guard and simply answers false.
+  var granted = matchesAllowRule(perms.allow);
+  var verdicts = [];
+  // TWO independent carriers, and each verdict is gated by the one its own claim rests on.
+  // That is why a malformed `autoMode.allow` no longer deletes the exposure verdict. The
+  // OTHER suppression stays by decision: a real grant still suppresses the autoMode prose
+  // correction, because that row exists to correct a user who mistook prose guidance for a
+  // grant, and a user holding the real grant has nothing to correct. P1au3 pins that
+  // suppression as intended; do not "restore" it.
+  if (shape.deferredExposure) {
+    verdicts.push({ kind: 'deferred', err: shape.deferredExposure,
+      scope: 'auto-mode exposure of the reviewer spawn' });
+  } else if (!granted && mode === 'auto') {
+    verdicts.push({ kind: 'auto-exposure' });
+  }
+  // Its OWN deferred carrier comes first: when `autoMode.allow` is unreadable this verdict
+  // cannot make its claim about it, and saying nothing there would be the silence this
+  // check exists to remove. Deliberately not gated on `granted` — the shape of the file is
+  // a fact regardless of who holds which rule.
+  if (shape.deferredAutoMode) {
+    verdicts.push({ kind: 'deferred', err: shape.deferredAutoMode,
+      scope: 'autoMode.allow guidance row' });
+  } else if (!granted && mentionsReviewerAgent(shape.autoMode.allow)) {
+    verdicts.push({ kind: 'automode-prose' });
+  }
+  // What this still does NOT say, unchanged: a deny in a spelling this check declined to
+  // judge can sit in the same file and outrank a grant, and no verdict reports that — the
+  // deny-first caveat is not reachable from a granted state.
+  return verdicts;
+}
+// The TEXT, keyed by verdict kind, and the only place a row is worded. Adding a row means
+// adding a kind here and returning it above; neither half can grow a branch the other does
+// not know about.
+var ROW_TEXT = {
+  shape: function (v) { return shapeRowText(v.err); },
+  deferred: function (v) { return deferredShapeRowText(v.err, v.scope); },
+  deny: function () {
+    return 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Deny is evaluated before ask and allow, so the review chain can never '
       + 'spawn its reviewer and every /zensu:tdd run wedges at the review step. Remove that entry '
       // Self-contained on purpose. This used to point at "the refused-spawn row
@@ -831,101 +887,68 @@ function permissionExposureLadder(file) {
       // whether or not the other row prints.
       + 'yourself if the block was not intended: while it stands, adding a permissions.allow rule for '
       + 'this spawn changes nothing — including the "Agent(' + REVIEWER_AGENT + ')" rule that a '
-      + 'refused-spawn report recommends. You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.');
-    return;
-  }
-  if (matchesDenyOrAskRule(perms.ask)) {
-    line(WARN, 'permissions: a permissions.ask entry in ~/.claude/settings.json matches the '
+      + 'refused-spawn report recommends. You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.';
+  },
+  ask: function () {
+    return 'permissions: a permissions.ask entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Ask is evaluated before allow, so the spawn prompts every time and a '
       + 'turn that cannot answer the prompt refuses it. Move the rule to permissions.allow yourself if '
       + 'you meant to grant it.' + DENY_FIRST_CAVEAT
-      + ' You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.');
-    return;
-  }
-  // Before the fall-through: an entry that plainly names this spawn but is not a
-  // spelling this check verified. Saying nothing here would drop straight to the
-  // exposure row, which recommends an allow rule that such an entry may outrank.
-  var mention = reviewerSpawnMention(perms.deny, perms.ask);
-  if (mention === 'named') {
-    unjudgeableRow('a permissions.deny or permissions.ask entry in ~/.claude/settings.json names '
+      + ' You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.';
+  },
+  named: function () {
+    return unjudgeableRowText('a permissions.deny or permissions.ask entry in ~/.claude/settings.json names '
       + REVIEWER_AGENT + ' in a spelling this check has not verified, so it cannot judge whether '
       + 'that entry blocks the spawn.');
-    return;
-  }
-  // The weaker claim, and the only one the shape-only arms can support. Such an entry
-  // names a DIFFERENT agent, or none at all — it is reported because an Agent/Task rule
-  // of unknown reach may still outrank the allow rule the exposure row recommends, not
-  // because it was found to mention this spawn.
-  if (mention === 'shaped') {
-    unjudgeableRow('a permissions.deny or permissions.ask entry in ~/.claude/settings.json scopes '
+  },
+  shaped: function () {
+    return unjudgeableRowText('a permissions.deny or permissions.ask entry in ~/.claude/settings.json scopes '
       + 'the Agent or Task tool in a spelling this check has not verified, so it cannot judge '
       + 'whether that entry blocks the ' + REVIEWER_AGENT + ' spawn.');
-    return;
-  }
-  // Evaluated AFTER the spelling predicate so a list holding a readable, matching
-  // string still reaches the row that names its real cause.
-  if (hasUnreadableEntry(perms.deny) || hasUnreadableEntry(perms.ask)) {
-    unjudgeableRow('permissions.deny or permissions.ask in ~/.claude/settings.json contains an '
+  },
+  unreadable: function () {
+    return unjudgeableRowText('permissions.deny or permissions.ask in ~/.claude/settings.json contains an '
       + 'entry this check cannot read — it is not a string, so this check cannot judge whether it '
       + 'blocks the spawn.');
-    return;
-  }
-  // Only now: the deferred half of the shape check. Reporting it earlier would
-  // have swallowed the deny/ask rows above, which do not depend on any of it.
-  //
-  // Resolved BEFORE the deferred branch, not inside it. A user who already holds
-  // the rule must not be told to add it, and that has to hold on a deferred
-  // failure too — where the old inline return was unreachable. Safe even when
-  // `permissions.allow` is itself the malformed key: the predicate opens with an
-  // Array.isArray guard and simply answers false.
-  var granted = matchesAllowRule(perms.allow);
-  // Each row is now gated by the carrier it actually depends on, and NEITHER branch
-  // returns. The old single `deferred` set plus an early `return granted` produced two
-  // suppressions, and exactly ONE of them was lifted here: a malformed `autoMode.allow`
-  // no longer deletes the exposure row. The other one STAYS, by decision — a real grant
-  // still suppresses the autoMode prose correction below, because that row exists to
-  // correct a user who mistook prose guidance for a grant, and a user who holds the real
-  // grant has nothing to correct. P1au3 pins that suppression as intended; do not
-  // "restore" it. The conditions are spelled out per row, so adding a row cannot silently
-  // inherit another row's suppression.
-  //
-  // What this still does NOT say, unchanged: a deny in a spelling this check declined
-  // to judge can sit in the same file and outrank a grant, and no row reports that —
-  // the deny-first caveat is not reachable from a granted state.
-  if (shape.deferredExposure) {
-    deferredShapeRow(shape.deferredExposure, 'auto-mode exposure of the reviewer spawn');
-  } else if (!granted) {
-    if (mode === 'auto') {
-      line(WARN, 'permissions: permission mode "auto" is set in ~/.claude/settings.json and no '
-        + 'permissions.allow entry there spells either "Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" '
-        + '— the auto-mode classifier can refuse the reviewer spawn, and a refused spawn leaves the review '
-        + 'chain with no review it can close on. Add "Agent(' + REVIEWER_AGENT + ')" to permissions.allow in '
-        + '~/.claude/settings.json yourself; ' + SELF_PERMISSION_BAR + '.'
-        + DENY_FIRST_CAVEAT
-        + ' This row reports an exposure, never a prediction: the classifier decides per session context, and '
-        + 'settings sources this check does not read may already grant it. The reverse holds too — the '
-        + 'permission mode can be in effect for a session without being written into this file, so the '
-        + 'absence of this row is not evidence that auto mode is inactive.');
-    }
-  }
-  // Self-contained: it used to end "the permissions.allow rule named above",
-  // which dangles whenever the row above did not print — the same defect the
-  // deny row was corrected for. Suppressed by a real grant, and by every earlier
-  // `return` in this function — unset HOME, absent file, unreadable file, fatal
-  // shape, deny, ask, could-not-judge all return before it is reached.
-  //
-  // Its OWN deferred carrier comes first: when `autoMode.allow` is unreadable this row
-  // cannot make its claim about it, and saying nothing there would be the silence this
-  // check exists to remove. It is deliberately not gated on `granted` — the shape of
-  // the file is a fact regardless of who holds which rule.
-  if (shape.deferredAutoMode) {
-    deferredShapeRow(shape.deferredAutoMode, 'autoMode.allow guidance row');
-  } else if (!granted && mentionsReviewerAgent(autoMode.allow)) {
-    line(WARN, 'permissions: an autoMode.allow entry in ~/.claude/settings.json mentions '
+  },
+  'auto-exposure': function () {
+    return 'permissions: permission mode "auto" is set in ~/.claude/settings.json and no '
+      + 'permissions.allow entry there spells either "Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" '
+      + '— the auto-mode classifier can refuse the reviewer spawn, and a refused spawn leaves the review '
+      + 'chain with no review it can close on. Add "Agent(' + REVIEWER_AGENT + ')" to permissions.allow in '
+      + '~/.claude/settings.json yourself; ' + SELF_PERMISSION_BAR + '.'
+      + DENY_FIRST_CAVEAT
+      + ' This row reports an exposure, never a prediction: the classifier decides per session context, and '
+      + 'settings sources this check does not read may already grant it. The reverse holds too — the '
+      + 'permission mode can be in effect for a session without being written into this file, so the '
+      + 'absence of this row is not evidence that auto mode is inactive.';
+  },
+  // Self-contained: it used to end "the permissions.allow rule named above", which
+  // dangles whenever the row above did not print — the same defect the deny row was
+  // corrected for. Which verdicts precede it is now read off classifyPermissionExposure
+  // rather than restated here.
+  'automode-prose': function () {
+    return 'permissions: an autoMode.allow entry in ~/.claude/settings.json mentions '
       + REVIEWER_AGENT + ', but autoMode.allow carries classifier guidance in prose — it is not a '
       + 'permission rule and does not grant the spawn. Only a permissions.allow entry spelling '
-      + '"Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" does.');
+      + '"Agent(' + REVIEWER_AGENT + ')" or the bare "Agent" does.';
   }
+};
+// Read, classify, render — three steps, and the branch ladder lives in exactly one of
+// them. It emits when it has something to say and stays silent otherwise;
+// permissionExposureRowsInner below turns that silence into a statement, so no branch
+// here has to remember to close itself out.
+function permissionExposureLadder(file) {
+  var r = readSettingsJson(file);
+  if (r.missing) return;
+  if (!r.ok) {
+    line(WARN, 'permissions: ~/.claude/settings.json ' + (r.io ? ('could not be read — ' + r.err) : 'could not be parsed')
+      + '; the reviewer-spawn permission check did not run. That is a missing check, not an all-clear.');
+    return;
+  }
+  classifyPermissionExposure(settingsShape(r.data)).forEach(function (v) {
+    line(WARN, ROW_TEXT[v.kind](v));
+  });
 }
 // The check speaks on EVERY path. Silence used to be its default verdict and the one
 // verdict it could not qualify: the not-an-all-clear doctrine hung entirely off rows
@@ -944,15 +967,59 @@ function permissionExposureLadder(file) {
 // newest and least-exercised code in it. No reachable throw is known: the reader wraps
 // its own I/O and parse, and every predicate is guarded by Array.isArray plus a typeof
 // test. This buys the cost of being wrong once, and it costs one row.
-function permissionExposureRows() {
+// The OFF-SWITCH, and it is a CONFIG BOOLEAN rather than a path override on purpose.
+// claudeSettingsFile above refuses a ZDOC_/ZENSU_ override because an agent-writable
+// channel could aim a check ABOUT the agent's own permissions at a file that shows a
+// grant. That argument is about INJECTION and it holds; it never answered SUPPRESSION,
+// which is a real complaint from a real population: a user whose permissions come from a
+// source that OUTRANKS the one file this check reads — managed settings, or the
+// project-local carrier docs/configuration.md documents and this file deliberately never
+// spells (see claudeSettingsFile; P1bc pins the absence) — with `defaultMode: "auto"` in
+// their user file otherwise gets a permanent warning telling them to edit a file that is
+// overridden, and no way to silence it. This
+// closes that without conceding anything on the injection axis: it suppresses the ROW and
+// can never redirect WHICH file is opened.
+//
+// Disabling does NOT produce silence, and that is the whole design. Silence is the one
+// verdict this check cannot qualify — removing it is what the feature is for — so an
+// off-switch that simply hid the rows would reintroduce the defect under a config key.
+// The check reports that it was switched off instead, and says the row is not an
+// all-clear, exactly as every other did-not-run row does.
+//
+// Strict `=== false`, matching every other boolean this tree reads: a QUOTED "false" does
+// NOT disable, and the doctor's own quoted-boolean row is what tells the user why.
+// Precedence follows configFiles(): the project config is read last and wins over the
+// global one, in both directions, so a project may re-enable what a global config turned
+// off. Reads the SAME cfgReads the config block already gathered — a second readJson pass
+// would double the non-blocking opens the FIFO hardening exists for.
+function reviewerSpawnCheckDisabled(cfgReads) {
+  var disabled = false;
+  cfgReads.forEach(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    if (!data || typeof data !== 'object') return;
+    var hooks = data.hooks;
+    if (!hooks || typeof hooks !== 'object') return;
+    if (hooks.reviewerSpawnPermissionCheck === false) disabled = true;
+    else if (hooks.reviewerSpawnPermissionCheck === true) disabled = false;
+  });
+  return disabled;
+}
+function permissionExposureRows(disabled) {
   try {
-    permissionExposureRowsInner();
+    permissionExposureRowsInner(disabled);
   } catch (e) {
     line(WARN, 'permissions: the reviewer-spawn permission check failed to run. That is a missing '
       + 'check, not an all-clear.');
   }
 }
-function permissionExposureRowsInner() {
+function permissionExposureRowsInner(disabled) {
+  if (disabled) {
+    line(OK, 'permissions: the reviewer-spawn permission check is switched off by '
+      + 'hooks.reviewerSpawnPermissionCheck in .zensu/config.json, so it did not run. That is a '
+      + 'skipped check, not an all-clear. Turn it back on if your permissions are not governed by '
+      + 'a settings source that outranks ~/.claude/settings.json.');
+    return;
+  }
   var file = claudeSettingsFile();
   if (!file) {
     // NOT the clean row. The check could not even locate its input, and an unset HOME
@@ -1046,7 +1113,7 @@ function configBlock() {
   if (!anyPresent) {
     line(OK, 'config: no config file present — built-in defaults apply');
   }
-  permissionExposureRows();
+  permissionExposureRows(reviewerSpawnCheckDisabled(cfgReads));
 }
 
 function ttlHours() {
@@ -1245,8 +1312,8 @@ function reviewerDenialRows(entries, dir, nowMs) {
       // row: that row reads one file, so a deny in any source it cannot see
       // leaves this remedy standing alone. stop-chain-enforcer.sh words the same
       // remedy with the same caveat.
-      + 'first removing any deny rule that names the Agent tool — a deny rule outranks an allow rule, '
-      + 'so the deny has to go first — or leave the permission mode that refused it, then re-run the '
+      + 'first removing any deny rule that names the Agent tool — ' + DENY_OUTRANKS
+      + ' — or leave the permission mode that refused it, then re-run the '
       + 'review from the owning session. '
       + 'You have to apply this yourself — ' + SELF_PERMISSION_BAR + '. '
       + 'This note is retired automatically once a spawn succeeds or the chain closes.');

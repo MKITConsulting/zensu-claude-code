@@ -163,6 +163,18 @@ classifier will refuse a spawn, not only when the whole table is green.
   effect. An `autoMode.allow` entry is classifier guidance in prose, not a
   permission rule; if the row says so, the user's earlier attempt did not grant
   anything.
+- **✅ permissions: … switched off by hooks.reviewerSpawnPermissionCheck** → the check did
+  NOT run. It is green because nothing is wrong, not because nothing was found, and the
+  row says so itself — relay that distinction rather than folding this row into an
+  all-clear. The switch exists for a user whose permissions come from a source that
+  outranks `~/.claude/settings.json` — managed settings, or a project-local carrier this
+  skill deliberately does not name, for the same reason the rows do not: never point the
+  model at a settings path it could write itself. For such a user the exposure row would
+  otherwise be a permanent warning about a file that is overridden. It suppresses the ROW
+  only and can never
+  redirect which file the check opens. If the user asks why the check is silent, this row
+  is the answer, and turning it back on is a `.zensu/config.json` edit they make
+  themselves.
 - **❌ config: … (the whole file is ignored, defaults apply)** → a LOADER verdict, and the
   strongest of the three config-failure rows: the doctor established that the config loader
   gets nothing from this file. Relay it as such. The `defaults apply` half appears only when

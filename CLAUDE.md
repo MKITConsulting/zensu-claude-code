@@ -1213,6 +1213,26 @@ Ten things are coupled and must move together:
   so a suite without one is environment-dependent. P1bi separately requires every
   settings key the ladder reads to be shape-vetted, which is the coupling that
   reopens the original defect if it drifts.
+  **The proactive ladder is now decision-then-text, and the two halves must move
+  together**: `classifyPermissionExposure` answers WHICH verdicts hold — in emission
+  order, as a LIST, so the fact that the auto-mode verdict and the `autoMode.allow`
+  verdict can both hold is visible in the return value instead of asserted in prose —
+  and `ROW_TEXT` is the only place a row is worded. Adding a row means adding a kind to
+  both; neither half can grow a branch the other does not know about. `P1bd2` slices
+  `classifyPermissionExposure` (not the ladder) to derive the deny/ask/allow order, so
+  moving the decision to another function makes that pin report an underivable order
+  rather than passing vacuously.
+  **The check has an off-switch, and it is a boolean, never a path override**:
+  `hooks.reviewerSpawnPermissionCheck` (default `true`), read from the SAME `cfgReads`
+  the Config block already gathered — a second `readJson` pass would double the
+  non-blocking opens the FIFO hardening exists for. It suppresses the ROW and can never
+  redirect which file is opened, which is what keeps `claudeSettingsFile`'s refusal of a
+  `ZDOC_`/`ZENSU_` override intact: that argument is about INJECTION and it still holds,
+  while this closes the SUPPRESSION complaint it never answered. **Disabling does not
+  produce silence** — it emits one ✅ row naming the flag and saying the check was
+  skipped, because silence is the one verdict this check cannot qualify and hiding the
+  rows under a config key would reinstate the defect the feature removed. `P1bz`/`P1bz1`
+  pin both halves and `P1bz2` pins that a quoted `"false"` does not disable it.
   **The proactive ladder has no unit seam**: this renderer exports nothing and
   ends in `process.exit(0)`, so `settingsShape`, the rule predicates
   (`matchesDenyOrAskRule` and `matchesAllowRule` — deliberately TWO named predicates and
