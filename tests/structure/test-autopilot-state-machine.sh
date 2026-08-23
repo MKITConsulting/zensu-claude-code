@@ -1557,13 +1557,15 @@ GATE_HOLD_RC=1
 GATE_HELD_RC=0
 GATE_FREE_RC=4
 GATE_ERR="$ROOT/standalone-gate-refusal.txt"
+GATE_FREE_ERR="$ROOT/standalone-gate-free.txt"
 : > "$GATE_ERR"
+: > "$GATE_FREE_ERR"
 if [ "$GATE_READY" = true ]; then
   ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_run run_gate_holder session_gate_holder "$GATE_P" false true "" ) >/dev/null 2>&1
   GATE_HOLD_RC=$?
   ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_other false ) >/dev/null 2>"$GATE_ERR"
   GATE_HELD_RC=$?
-  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_free false ) >/dev/null 2>&1
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_free false ) >/dev/null 2>"$GATE_FREE_ERR"
   GATE_FREE_RC=$?
 fi
 
@@ -1585,13 +1587,43 @@ else
 fi
 
 # Positive control. Without it a resolver drift that over-blocks every standalone
-# chain in the project would leave W12 green and the suite silent. rc 4 is the
-# gate's only verdict, so "not 4" is exactly the occupancy decision under test;
-# any other non-zero comes from tdd_begin_session, which is not this gate.
-if [ "$GATE_HOLD_RC" -eq 0 ] && [ "$GATE_FREE_RC" -ne 4 ]; then
+# chain in the project would leave W12 green and the suite silent. "not 4" alone
+# does not discriminate: the gate also answers 2 for an unreadable occupancy read
+# and 3 for a rejected argument, and this fixture's call fails at
+# tdd_begin_session anyway, so a bare "not 4" passes on any of them. Exclude
+# every code the gate itself can return, and require its refusal to be absent.
+if [ "$GATE_HOLD_RC" -eq 0 ] \
+  && [ "$GATE_FREE_RC" -ne 4 ] && [ "$GATE_FREE_RC" -ne 3 ] && [ "$GATE_FREE_RC" -ne 2 ] \
+  && ! grep -qF -- '--autopilot-release --run' "$GATE_FREE_ERR"; then
   check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
 else
-  check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/not-4)" FAIL
+  check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL
+fi
+
+GATE_LEGACY_RC=0
+GATE_LEGACY_STRIPPED=false
+if [ "$GATE_READY" = true ] && [ "$GATE_HOLD_RC" -eq 0 ]; then
+  if F="$GATE_P/.zensu/state/autopilot-run-run_gate_holder.json" node -e '
+    const fs = require("fs");
+    const file = process.env.F;
+    const record = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (!Object.prototype.hasOwnProperty.call(record, "workspaceRoot")) process.exit(3);
+    delete record.workspaceRoot;
+    fs.writeFileSync(file, `${JSON.stringify(record, null, 2)}\n`);
+  ' </dev/null >/dev/null 2>&1; then
+    GATE_LEGACY_STRIPPED=true
+    ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_legacy false ) >/dev/null 2>&1
+    GATE_LEGACY_RC=$?
+  fi
+fi
+# The legacy arm of mayHoldWorkspace had no behavioural test: a record predating
+# the field holds EVERY tree, so a sibling the run demonstrably does not hold
+# must still be refused. Without this the arm could be deleted and W12/W14 stay
+# green, because both drive records that DO carry the key.
+if [ "$GATE_LEGACY_STRIPPED" = true ] && [ "$GATE_LEGACY_RC" -eq 4 ]; then
+  check "W25 a run record without workspaceRoot holds every tree" PASS
+else
+  check "W25 a legacy record must fail closed over every tree (stripped=$GATE_LEGACY_STRIPPED rc=$GATE_LEGACY_RC, want true/4)" FAIL
 fi
 
 # --- Release: liveness, tree scoping, and the owner's exit from a torn begin ---
@@ -1607,54 +1639,69 @@ if [ "$REL_READY" = true ]; then
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rb" -b rel-b >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rl" -b rel-l >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rd" -b rel-d >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rs" -b rel-s >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rt" -b rel-t >/dev/null 2>&1 || REL_READY=false
 fi
 
 # S6 — a run left pointerless by a torn begin: `apply` refuses it (no pointer
 # designates it) and `release` refuses the owner, so today the owner has no exit
 # at all. The release must be permitted in exactly that state.
 REL_TORN_RC=1
+REL_TORN_BEGIN_RC=1
+REL_TORN_POINTER_GONE=false
 if [ "$REL_READY" = true ]; then
-  ( cd "$REL_P/.claude/worktrees/ra" && autopilot_begin_run run_rel_torn session_rel_torn "$REL_P" false true "" ) >/dev/null 2>&1 \
-    && rm -f "$(autopilot_active_file "$REL_P" session_rel_torn)"
+  ( cd "$REL_P/.claude/worktrees/ra" && autopilot_begin_run run_rel_torn session_rel_torn "$REL_P" false true "" ) >/dev/null 2>&1
+  REL_TORN_BEGIN_RC=$?
+  if [ "$REL_TORN_BEGIN_RC" -eq 0 ]; then
+    rm -f "$(autopilot_active_file "$REL_P" session_rel_torn)"
+    [ -e "$(autopilot_active_file "$REL_P" session_rel_torn)" ] || REL_TORN_POINTER_GONE=true
+  fi
   ( cd "$REL_P/.claude/worktrees/ra" && autopilot_release_run run_rel_torn evt_rel_torn "$REL_P" session_rel_torn ) >/dev/null 2>&1
   REL_TORN_RC=$?
 fi
-if [ "$REL_READY" = true ] && [ "$REL_TORN_RC" -eq 0 ]; then
+if [ "$REL_READY" = true ] && [ "$REL_TORN_BEGIN_RC" -eq 0 ] && [ "$REL_TORN_POINTER_GONE" = true ] \
+  && [ "$REL_TORN_RC" -eq 0 ]; then
   check "W15 the owner may release a run no pointer designates" PASS
 else
-  check "W15 owner exit from a torn begin (rc=$REL_TORN_RC, want 0)" FAIL
+  check "W15 owner exit from a torn begin (begin=$REL_TORN_BEGIN_RC pointerGone=$REL_TORN_POINTER_GONE rc=$REL_TORN_RC, want 0/true/0)" FAIL
 fi
 
 # S5a — the release is scoped to the caller's own working tree. Run ids are
 # ordinary filenames in a listable directory, so "take the id from a refusal"
 # bounds nothing; the tree the caller stands in does.
 REL_SCOPE_RC=0
+REL_SCOPE_ERR="$ROOT/rel-scope.err"
+: > "$REL_SCOPE_ERR"
 if [ "$REL_READY" = true ]; then
   ( cd "$REL_P/.claude/worktrees/ra" && autopilot_begin_run run_rel_scope session_rel_scope "$REL_P" false true "" ) >/dev/null 2>&1
-  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_scope evt_rel_scope "$REL_P" session_rel_other ) >/dev/null 2>&1
+  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_scope evt_rel_scope "$REL_P" session_rel_other ) >/dev/null 2>"$REL_SCOPE_ERR"
   REL_SCOPE_RC=$?
 fi
 # rc 6 specifically, not merely non-zero: a bare "it failed" assertion passes on
 # any unrelated pre-existing failure and would prove nothing about this guard.
-if [ "$REL_READY" = true ] && [ "$REL_SCOPE_RC" -eq 6 ]; then
+if [ "$REL_READY" = true ] && [ "$REL_SCOPE_RC" -eq 6 ] \
+  && grep -qF 'release it from the tree it holds' "$REL_SCOPE_ERR"; then
   check "W16 a release is refused for a run outside the caller's own working tree" PASS
 else
-  check "W16 release must be scoped to the caller's tree (rc=$REL_SCOPE_RC, want 6)" FAIL
+  check "W16 release must be scoped to the caller's tree (rc=$REL_SCOPE_RC, want 6 + named cause)" FAIL
 fi
 
 # S5b — liveness. The owner's workflow document is the staleness signal this
 # repository already has; a release must refuse while it is fresh.
 REL_LIVE_RC=0
+REL_LIVE_ERR="$ROOT/rel-live.err"
+: > "$REL_LIVE_ERR"
 if [ "$REL_READY" = true ]; then
   ( cd "$REL_P/.claude/worktrees/rb" && autopilot_begin_run run_rel_live session_rel_live "$REL_P" false true "" ) >/dev/null 2>&1
   printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_live.json"
-  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_live evt_rel_live "$REL_P" session_rel_other ) >/dev/null 2>&1
+  ( cd "$REL_P/.claude/worktrees/rb" && autopilot_release_run run_rel_live evt_rel_live "$REL_P" session_rel_other ) >/dev/null 2>"$REL_LIVE_ERR"
   REL_LIVE_RC=$?
 fi
-if [ "$REL_READY" = true ] && [ "$REL_LIVE_RC" -eq 7 ]; then
+if [ "$REL_READY" = true ] && [ "$REL_LIVE_RC" -eq 7 ] \
+  && grep -qF 'the owning session is still active' "$REL_LIVE_ERR"; then
   check "W17 a release is refused while the owning session's workflow document is fresh" PASS
 else
-  check "W17 release must refuse a live owner (rc=$REL_LIVE_RC, want 7)" FAIL
+  check "W17 release must refuse a live owner (rc=$REL_LIVE_RC, want 7 + named cause)" FAIL
 fi
 
 REL_LINK_MADE=false
@@ -1705,6 +1752,46 @@ if grep -qF 'const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${
   check "W22 the liveness beacon is read through the regularFile chokepoint" PASS
 else
   check "W22 the liveness beacon must not be read with a link-following stat" FAIL
+fi
+
+REL_STALE_RC=1
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rs" && autopilot_begin_run run_rel_stale session_rel_stale "$REL_P" false true "" ) >/dev/null 2>&1
+  printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_stale.json"
+  touch -t 200001010000 "$REL_P/.zensu/state/tdd-phase-session_rel_stale.json" 2>/dev/null
+  ( cd "$REL_P/.claude/worktrees/rs" && autopilot_release_run run_rel_stale evt_rel_stale "$REL_P" session_rel_other ) >/dev/null 2>&1
+  REL_STALE_RC=$?
+fi
+# The negative control for W17. Without it every assertion about exit 7 is
+# satisfied by a guard that refuses unconditionally, and the isFile() and
+# ttlHours>0 conditions can both be deleted with the suite still green.
+if [ "$REL_READY" = true ] && [ "$REL_STALE_RC" -eq 0 ]; then
+  check "W23 a release is permitted once the owning session's document is stale" PASS
+else
+  check "W23 release must be permitted for a stale owner (rc=$REL_STALE_RC, want 0)" FAIL
+fi
+
+REL_TTL0_RC=1
+REL_TTL0_ERR="$ROOT/rel-ttl0.err"
+: > "$REL_TTL0_ERR"
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rt" && autopilot_begin_run run_rel_ttl0 session_rel_ttl0 "$REL_P" false true "" ) >/dev/null 2>&1
+  printf '%s\n' '{}' > "$REL_P/.zensu/state/tdd-phase-session_rel_ttl0.json"
+  REL_TTL_SAVED="$(declare -f zensu_pending_review_ttl_hours)"
+  zensu_pending_review_ttl_hours() { echo 0; }
+  ( cd "$REL_P/.claude/worktrees/rt" && autopilot_release_run run_rel_ttl0 evt_rel_ttl0 "$REL_P" session_rel_other ) >/dev/null 2>"$REL_TTL0_ERR"
+  REL_TTL0_RC=$?
+  eval "$REL_TTL_SAVED"
+fi
+# pendingReviewTtlHours=0 disables the liveness refusal for a demonstrably live
+# owner. That is the repository's established meaning of 0, so it stays — but it
+# must not be silent, or an operator reads exit 6 as a boundary that is no longer
+# being enforced at all.
+if [ "$REL_READY" = true ] && [ "$REL_TTL0_RC" -eq 0 ] \
+  && grep -qF 'owner liveness unchecked' "$REL_TTL0_ERR"; then
+  check "W24 a zero TTL disables the liveness refusal and says so" PASS
+else
+  check "W24 a zero TTL must disable the check and disclose it (rc=$REL_TTL0_RC, want 0 + disclosure)" FAIL
 fi
 
 # --- R1: the containment predicate must be separator-correct and total ---

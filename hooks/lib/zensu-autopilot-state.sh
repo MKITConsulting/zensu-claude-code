@@ -1478,6 +1478,8 @@ if (mode === "release") {
           fail(7, "the owning session is still active; ask it to cancel, or wait for it to go stale");
         }
       }
+    } else {
+      process.stderr.write("[zensu-autopilot-state] owner liveness unchecked: pendingReviewTtlHours is 0\n");
     }
   }
   if (state.events.length >= MAX_EVENTS) fail(4, "event ledger exhausted");
