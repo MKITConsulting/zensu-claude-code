@@ -7,10 +7,18 @@ PASS=0
 FAIL=0
 SKIPPED=0
 
+# SKIP is a THIRD verdict, not a quiet PASS. The tally already carried a SKIPPED
+# counter that nothing incremented, so a row that could not run on this host had only
+# two options: claim a pass it had not earned, or fail for a reason unrelated to the
+# contract it names. Both are worse than saying so. Anything that is neither PASS nor
+# SKIP is still a failure — the default stays fail-closed.
 check() {
   if [ "$2" = PASS ]; then
     printf '  PASS  %s\n' "$1"
     PASS=$((PASS + 1))
+  elif [ "$2" = SKIP ]; then
+    printf '  SKIP  %s\n' "$1"
+    SKIPPED=$((SKIPPED + 1))
   else
     printf '  FAIL  %s\n' "$1"
     FAIL=$((FAIL + 1))
@@ -25,33 +33,65 @@ check() {
 # the source-write-gate suite lost its tail at check ~210 and the plan-payload
 # suite at ~61 of 70, both green for everything before the kill. Same placement,
 # same reason, as the routing suite's unit driver.
-# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
-# in review-evidence-lease-v1.js: the core cannot require that module (it requires
-# the binder, which requires the core), so the two are held in step by hand — and
-# by this pin, the way within() <-> isInside is held. Without it a widened lease id
-# shape would make the sweep silently set aside every new-format lease, green.
-# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
-CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
+# THE SEAM, replacing two byte-for-byte hand-copy pins that used to stand here.
+# Those pins asserted that `LEASE_RECORD_ID_RE` and `LEASE_RECORD_MAX_BYTES` in the
+# core still equalled their owners in review-evidence-lease-v1.js. Review of PR #252
+# recorded what that bought and what it did not: both compared source SPELLINGS
+# rather than behaviour (`8388608` in the owner turned them red with nothing wrong),
+# neither checked that the two sides applied the constant to the same quantity, and
+# three FURTHER copied elements — the store layout, ensurePrivateDirectory and the
+# ownership predicate — were never pinned at all. CLAUDE.md's own rule for that
+# function ("if it needs a fourth correction, take the seam") had already fired.
+#
+# So the copies are gone. The core cannot require the owner — review-evidence-lease-v1.js
+# requires claude-hook-session-v1.js, which requires session-control-core-v1.js, so
+# that direction is a CYCLE — and the sweep therefore moved OUT of the core into
+# review-evidence-sweep-v1.js, which may require the owner freely. What is pinned now
+# is that arrangement, not a pair of strings: the core defines neither literal and no
+# longer carries the sweep, and the sweep gets both from the owner.
+#
+# WORKING TREE, not HEAD: every side of this pin is read from $ROOT.
+CORE_SRC="$ROOT/hooks/lib/session-control-core-v1.js"
+SWEEP_SRC="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
+OWNER_SRC="$ROOT/hooks/lib/review-evidence-lease-v1.js"
+if [ -f "$SWEEP_SRC" ] \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$CORE_SRC" \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$SWEEP_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$CORE_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$SWEEP_SRC" \
+  && grep -qF "require('./review-evidence-lease-v1.js')" "$SWEEP_SRC"; then
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" PASS
 else
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" FAIL
 fi
 
-# The SECOND constant the sweep hand-copies from that module, pinned the same way
-# and for the same reason. The size cap decides which entries the sweep will READ
-# and which it sends straight to the move branch; listRecords holds its records to
-# the owner's value. Let the two drift and a lease between the caps is either moved
-# though that reader would accept it, or kept though it would not — the wedge the
-# sweep exists to clear, arriving silently.
-# WORKING TREE, not HEAD: both sides of this pin are read from $ROOT.
-CORE_LEASE_CAP="$(grep -oE "const LEASE_RECORD_MAX_BYTES = [^;]*;" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_CAP="$(grep -oE "const MAX_RECORD_BYTES = [^;]*;" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_CAP" ] && [ "$CORE_LEASE_CAP" = "$OWNER_LEASE_CAP" ]; then
-  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte" PASS
+# The other half of the seam: the owner actually EXPORTS what the sweep consumes.
+# Without this a copy could come back as a re-declaration in the sweep and the pin
+# above would still pass on the core alone.
+if grep -qE '^  LEASE_ID_RE,' "$OWNER_SRC" \
+  && grep -qE '^  MAX_RECORD_BYTES,' "$OWNER_SRC" \
+  && grep -qE '^  REVIEW_EVIDENCE_SEGMENTS,' "$OWNER_SRC" \
+  && grep -qE '^  ensurePrivateDirectory,' "$OWNER_SRC" \
+  && grep -qE '^  leaseRecordIsOwned,' "$OWNER_SRC"; then
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" PASS
 else
-  check "the MAX_RECORD_BYTES hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_CAP' owner='$OWNER_LEASE_CAP')" FAIL
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" FAIL
+fi
+
+# The sweep is no longer part of adoptContext, so an adoption is only complete once
+# the ENTRY POINT has also run it. A host that takes the core delta alone gets a
+# re-minted record with the superseded leases still wedging every lease operation.
+#
+# The caller is the REPORT MODULE, not the shell script: the payload that invokes it
+# moved out of the `node -e` string in the same change. Both halves are pinned, so
+# neither the call nor the script that runs it can quietly disappear.
+REPORT_SRC="$ROOT/hooks/lib/session-adopt-report-v1.js"
+if ! grep -qF 'discardSupersededLeases' "$CORE_SRC" \
+  && grep -qF 'sweepLeases.discardSupersededLeases' "$REPORT_SRC" \
+  && grep -qF 'session-adopt-report-v1.js' "$ROOT/hooks/lib/zensu-session-adopt.sh"; then
+  check "the adoption entry point owns the sweep call now that the core does not" PASS
+else
+  check "the adoption entry point owns the sweep call now that the core does not" FAIL
 fi
 
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
@@ -926,6 +966,37 @@ else
   sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
 fi
 
+# WORKING TREE, not HEAD — same split again. The superseded-lease sweep moved out
+# of session-control-core-v1.js into its own module (requiring the lease owner from
+# the core is a require cycle), which finally gives it a unit driver: its refusal
+# arms used to cost a full synthetic install plus a session lifecycle each, and
+# three of its return shapes were not reachable from here at all. Driven from this
+# file for the same reason the two above are — tests/run-all.sh discovers only
+# test-*.sh, so an undriven *.test.js never executes anywhere.
+SWEEP_UNIT="$ROOT/tests/structure/session-control-lease-sweep.test.js"
+if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" 20; then
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
+else
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 20 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/sweep-unit.out" 2>/dev/null | head -40
+fi
+
+# WORKING TREE, not HEAD — same split. The adoption REPORT moved out of a
+# single-quoted `node -e` shell payload into its own module, which is what finally
+# gives safe() a driver: it had no test in either direction, so deleting its whole
+# guard condition and returning the text unchanged left the suite green.
+REPORT_UNIT="$ROOT/tests/structure/session-adopt-report.test.js"
+if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/report-unit.out" 10; then
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
+else
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 10 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/report-unit.out" 2>/dev/null | head -40
+fi
+
 # The non-sibling case is the one that cannot be inferred from the version
 # numbers: it is what keeps a working checkout declaring a compatible version
 # from adopting an installed session's record. servesRecordedRuntime requires
@@ -1489,6 +1560,48 @@ adopt_report_shape() {
     CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" 2>&1
 }
+# The RETAINED precondition, which got no test when the CLAUDE_PROJECT_DIR one was
+# removed. A bare `|| exit 1` here once made this command — the last reachable
+# diagnosis in a wedged session — print NOTHING at all for a plugin-data store that
+# had been pruned, replaced by a file or symlinked, because zensu-host-path.sh exits
+# silently for anything that is not an existing non-symlink directory.
+#
+# Asserted on the MESSAGE, never on the exit status: the pre-change tree also exited
+# non-zero here, so a status-only assertion would not discriminate.
+PLUGIN_DATA_IS_A_FILE="$TMP/plugin-data-is-a-file"
+printf x > "$PLUGIN_DATA_IS_A_FILE"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_IS_A_FILE" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+  >"$TMP/plugin-data-file.out" 2>"$TMP/plugin-data-file.err"
+if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-file.err"; then
+  check "a plugin-data store that is a file names its cause instead of exiting silently" PASS
+else
+  check "a plugin-data store that is a file names its cause instead of exiting silently" FAIL
+  sed -n '1,10p' "$TMP/plugin-data-file.err" 2>/dev/null
+fi
+
+# The same precondition through a SYMLINK, which is the shape the renderer rejects
+# for a different reason than a file does — and the one an operator is most likely to
+# have created on purpose.
+PLUGIN_DATA_LINK="$TMP/plugin-data-is-a-link"
+rm -rf "$PLUGIN_DATA_LINK"
+ln -s "$SHARED_DATA" "$PLUGIN_DATA_LINK" 2>/dev/null
+# ln -s exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy or
+# a shortcut native Node does not follow. Confirm before asserting on it.
+if [ -L "$PLUGIN_DATA_LINK" ]; then
+  CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_LINK" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/plugin-data-link.out" 2>"$TMP/plugin-data-link.err"
+  if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-link.err"; then
+    check "a symlinked plugin-data store names its cause instead of exiting silently" PASS
+  else
+    check "a symlinked plugin-data store names its cause instead of exiting silently" FAIL
+    sed -n '1,10p' "$TMP/plugin-data-link.err" 2>/dev/null
+  fi
+else
+  check "a symlinked plugin-data store names its cause instead of exiting silently" SKIP
+fi
+
 PROJECT_SHAPE_FAILURES=''
 adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
   || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset"
@@ -1913,6 +2026,77 @@ else
     "$(node -p 'require(process.argv[1]).plugin_root' "$ADOPT_RECORD" 2>/dev/null)"
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
+fi
+
+# The IN-PLACE LEASE-STORE REPAIR. adoptContext commits the record and only then
+# sweeps, and the two are not transactional together — so a run that died in between
+# leaves a committed adoption with the store still wedged, and every later run
+# refused as already-served. The documented remedy was unreachable for exactly the
+# state it repairs.
+#
+# Simulated the way it actually happens: the record is already adopted (the run
+# above did that), and a superseded lease is present that the sweep has not seen.
+REPAIR_LEASE_ID="rel1_$(printf 'e%.0s' $(seq 1 32))"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_LEASE_ID" "$SYNTHETIC_BREAKING_ROOT" 2>/dev/null
+if [ -f "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ]; then
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-repair.out" 2>&1
+  REPAIR_STATUS=$?
+  # exit 0, not 1: this is a successful repair, not a refusal.
+  if [ "$REPAIR_STATUS" -eq 0 ] \
+      && grep -qF 'ALREADY SERVED (lease store repaired)' "$TMP/adopt-repair.out" \
+      && grep -qF 'leases set aside : 1' "$TMP/adopt-repair.out" \
+      && [ ! -e "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_ASIDE/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" PASS
+  else
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+    printf '    exit: %s\n' "$REPAIR_STATUS"
+    sed -n '1,14p' "$TMP/adopt-repair.out" 2>/dev/null
+  fi
+
+  # The read-only form must stay read-only, which is what the recognizer's own
+  # justification for admitting this write-capable command rests on. Same session,
+  # a fresh superseded lease, and NO --confirm: it must refuse and move nothing.
+  REPAIR_RO_ID="rel1_$(printf 'f%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_RO_ID" "$SYNTHETIC_BREAKING_ROOT" 2>/dev/null
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/adopt-repair-readonly.out" 2>&1
+  if grep -qF 'NOT adoptable (already-served)' "$TMP/adopt-repair-readonly.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json" ] \
+      && [ ! -e "$ADOPT_LEASE_ASIDE/$REPAIR_RO_ID.json" ]; then
+    check "the report-only form still refuses already-served and sweeps nothing" PASS
+  else
+    check "the report-only form still refuses already-served and sweeps nothing" FAIL
+    sed -n '1,10p' "$TMP/adopt-repair-readonly.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json"
+else
+  check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+  check "the report-only form still refuses already-served and sweeps nothing" FAIL
 fi
 
 # The point of the whole feature: the session works again, in place. Both are

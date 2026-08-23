@@ -1,0 +1,361 @@
+'use strict';
+
+// Unit driver for discardSupersededLeases — the superseded-lease sweep the
+// adoption runs after it re-mints a session's Session Control record.
+//
+// It exists because the sweep used to be reachable only through a full
+// synthetic install plus a session lifecycle: every branch cost one end-to-end
+// row in test-versioned-plugin-upgrade.sh, and three of its return shapes were
+// not reachable from there at all. Review of PR #252 recorded that as the
+// direct cost of the function being unexported, alongside the five lease-store
+// elements it used to hand-copy from review-evidence-lease-v1.js.
+//
+// WHY THE SWEEP IS NOT IN session-control-core-v1.js ANY MORE. The obvious
+// seam — the core requiring the owner and consuming its exports — is a require
+// CYCLE: review-evidence-lease-v1.js requires claude-hook-session-v1.js, which
+// requires session-control-core-v1.js. So the sweep moved the other way, into
+// this module, which may require the owner freely (sweep -> lease ->
+// hook-session -> core is acyclic). That is the ENTRY-POINT seam CLAUDE.md
+// already prescribes, and its stated cost is that the sweep becomes a host
+// obligation: zensu-session-adopt.sh calls it after adoptContext instead of
+// adoptContext calling it internally.
+//
+// Registered with the tree runner through test-versioned-plugin-upgrade.sh,
+// which drives it the same way it drives the recognizer and lineage suites —
+// tests/run-all.sh discovers only test-*.sh, so an undriven *.test.js never
+// runs at all.
+
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const test = require('node:test');
+
+const LIB = path.join(__dirname, '..', '..', 'hooks', 'lib');
+const CORE_FILE = path.join(LIB, 'session-control-core-v1.js');
+const LEASE_FILE = path.join(LIB, 'review-evidence-lease-v1.js');
+const SWEEP_FILE = path.join(LIB, 'review-evidence-sweep-v1.js');
+
+const lease = require(LEASE_FILE);
+
+// Required per test rather than at module scope. A top-level require of a file
+// that does not exist yet aborts the whole file, so exactly one case reports and
+// the other ten never run — which is the difference between a RED that names
+// every missing property and one that names only the first.
+function sweep() {
+  return require(SWEEP_FILE);
+}
+
+// A session key is 'scv1_' plus 64 hex characters; the sweep only ever joins it
+// as a path segment, so any well-formed one serves.
+const KEY = `scv1_${'a'.repeat(64)}`;
+const LEASE_ID = `rel1_${'b'.repeat(32)}`;
+
+function tempRoot() {
+  // realpath: on macOS mkdtemp answers /var/... while the kernel spells it
+  // /private/var/..., and the sweep compares realpath against its own join.
+  return fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-sweep-')));
+}
+
+function recordsDir(pluginData) {
+  return path.join(pluginData, 'review-evidence', 'v1', 'records', KEY);
+}
+
+function asideDir(pluginData) {
+  return path.join(pluginData, 'review-evidence', 'v1', 'superseded', KEY);
+}
+
+function seedLease(pluginData, name, body) {
+  const dir = recordsDir(pluginData);
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(dir, name), body, { mode: 0o600 });
+  return path.join(dir, name);
+}
+
+function leaseBody(overrides) {
+  return JSON.stringify(Object.assign({
+    schema: 'zensu.review-evidence-lease',
+    schema_version: 1,
+    lease_id: LEASE_ID,
+    plugin_root: '/executing/root',
+  }, overrides || {}));
+}
+
+// ── The seam ────────────────────────────────────────────────────────────────
+// PR #252 review, finding #3: five elements were hand-copied out of
+// review-evidence-lease-v1.js and only two of them were pinned — and both pins
+// compared source SPELLINGS rather than behaviour. CLAUDE.md's own rule for
+// this function ("if it needs a fourth correction, take the seam") had already
+// fired, so the copies are gone and the owner exports them instead.
+
+test('S1 the sweep is exported so its branches are reachable without a session lifecycle', () => {
+  assert.equal(typeof sweep().discardSupersededLeases, 'function');
+});
+
+test('S1 the owner exports the lease-store elements the sweep needs', () => {
+  assert.ok(lease.LEASE_ID_RE instanceof RegExp, 'LEASE_ID_RE is exported');
+  assert.equal(typeof lease.MAX_RECORD_BYTES, 'number');
+  assert.equal(typeof lease.ensurePrivateDirectory, 'function');
+  assert.ok(Array.isArray(lease.REVIEW_EVIDENCE_SEGMENTS), 'the store layout is exported');
+  assert.equal(typeof lease.leaseRecordIsOwned, 'function', 'the ownership predicate is exported');
+});
+
+test('S1 neither the core nor the sweep keeps a private copy of the owner\'s literals', () => {
+  // Source-level, deliberately: a behavioural check cannot see a SECOND copy of
+  // a rule that happens to agree today. This is the same reason
+  // fixture-mutation-watch.test.js pins its single-implementation property at
+  // source level. BOTH files are checked — testing only the core would go green
+  // the moment the sweep moved out, carrying its copies with it.
+  for (const file of [CORE_FILE, SWEEP_FILE]) {
+    const source = fs.readFileSync(file, 'utf8');
+    assert.equal(
+      source.includes('rel1_[a-f0-9]{32}'), false,
+      `${path.basename(file)}: the lease id shape must come from the owner, not a copy`,
+    );
+    assert.equal(
+      /8\s*\*\s*1024\s*\*\s*1024/.test(source), false,
+      `${path.basename(file)}: the record size cap must come from the owner, not a copy`,
+    );
+  }
+});
+
+test('S1 the sweep no longer lives in the core, and the core does not call it', () => {
+  // The entry-point seam in one assertion: the cycle makes a core-side sweep
+  // impossible to keep honest, so the core must not carry it at all.
+  const source = fs.readFileSync(CORE_FILE, 'utf8');
+  assert.equal(source.includes('function discardSupersededLeases'), false);
+  assert.equal(source.includes('discardSupersededLeases('), false);
+});
+
+test('S1 the ownership predicate agrees with the reader it mirrors', () => {
+  assert.equal(
+    lease.leaseRecordIsOwned(`${LEASE_ID}.json`, JSON.parse(leaseBody()), '/executing/root'),
+    true,
+  );
+  // Each conjunct on its own.
+  assert.equal(
+    lease.leaseRecordIsOwned('not-a-lease.json', JSON.parse(leaseBody()), '/executing/root'),
+    false,
+  );
+  assert.equal(
+    lease.leaseRecordIsOwned(`${LEASE_ID}.tmp`, JSON.parse(leaseBody()), '/executing/root'),
+    false,
+  );
+  assert.equal(
+    lease.leaseRecordIsOwned(`${LEASE_ID}.json`, JSON.parse(leaseBody({ lease_id: `rel1_${'c'.repeat(32)}` })), '/executing/root'),
+    false,
+  );
+  assert.equal(
+    lease.leaseRecordIsOwned(`${LEASE_ID}.json`, JSON.parse(leaseBody()), '/other/root'),
+    false,
+  );
+  assert.equal(lease.leaseRecordIsOwned(`${LEASE_ID}.json`, null, '/executing/root'), false);
+});
+
+// ── asideIsSafe at module scope ─────────────────────────────────────────────
+// Finding #7: the walk's leaf-vs-ancestor asymmetry was 30 lines of prose plus
+// an `if (segment === 'superseded')` in the middle of the loop, and no row
+// planted an unsafe shape at review-evidence, v1 or superseded.
+
+test('S1 asideIsSafe is reachable and takes its mode-checked segments as a parameter', () => {
+  assert.equal(typeof sweep().asideIsSafe, 'function');
+  assert.equal(sweep().asideIsSafe.length >= 2, true, 'base plus segments, not a closure over both');
+});
+
+// ── Baseline behaviour the later steps build on ─────────────────────────────
+
+test('S1 a lease naming the executing root is kept', () => {
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.deepEqual(result, { discarded: 0, failed: [], unsafe: '', unsafeAt: '' });
+  assert.equal(fs.existsSync(path.join(recordsDir(pluginData), `${LEASE_ID}.json`)), true);
+});
+
+test('S1 a lease naming the superseded root is set aside, never deleted', () => {
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody({ plugin_root: '/previous/root' }));
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.equal(result.discarded, 1);
+  assert.deepEqual(result.failed, []);
+  assert.equal(result.unsafe, '');
+  assert.equal(fs.existsSync(path.join(recordsDir(pluginData), `${LEASE_ID}.json`)), false);
+  assert.equal(fs.existsSync(path.join(asideDir(pluginData), `${LEASE_ID}.json`)), true);
+});
+
+test('S1 an absent records directory is the clean no-lease case, not a refusal', () => {
+  const pluginData = tempRoot();
+  assert.deepEqual(
+    sweep().discardSupersededLeases(pluginData, KEY, '/executing/root'),
+    { discarded: 0, failed: [], unsafe: '', unsafeAt: '' },
+  );
+});
+
+test('S1 an existing-but-empty records directory creates no superseded leaf', () => {
+  // Finding #6: this early return is what makes the armed-fixture rows in the
+  // shell suite positive controls, and nothing exercised it.
+  const pluginData = tempRoot();
+  fs.mkdirSync(recordsDir(pluginData), { recursive: true, mode: 0o700 });
+  assert.deepEqual(
+    sweep().discardSupersededLeases(pluginData, KEY, '/executing/root'),
+    { discarded: 0, failed: [], unsafe: '', unsafeAt: '' },
+  );
+  assert.equal(fs.existsSync(asideDir(pluginData)), false);
+});
+
+test('S1 every return spells the clean verdict identically', () => {
+  // Finding #7's tail: one return said `unsafe: ""` while its siblings said ''.
+  const source = fs.readFileSync(SWEEP_FILE, 'utf8');
+  assert.equal(source.includes('unsafe: ""'), false);
+});
+
+// ── S2: sweep correctness ───────────────────────────────────────────────────
+// Four review findings, each of which needed the sweep broken into pieces small
+// enough to reach. Before this the only entry point was the whole function, so a
+// refusal arm could only be driven by arranging the filesystem to reach it — which
+// is exactly why several of them had never been driven at all.
+
+test('S2 asideIsSafe names the component it refused, not a bare false', () => {
+  // Finding #20: asideIsSafe refuses on four distinct components and returned a
+  // bare false for all of them, which collapsed to unsafe: "destination". The
+  // report then told the operator to inspect superseded/<key> — a path that cannot
+  // exist when its own parent is the offending file.
+  const pluginData = tempRoot();
+  fs.mkdirSync(path.join(pluginData, 'review-evidence', 'v1'), { recursive: true, mode: 0o700 });
+  const blocker = path.join(pluginData, 'review-evidence', 'v1', 'superseded');
+  fs.writeFileSync(blocker, 'not a directory', { mode: 0o600 });
+
+  const verdict = sweep().asideIsSafe(pluginData, ['review-evidence', 'v1', 'superseded', KEY], ['superseded']);
+  assert.equal(verdict.ok, false);
+  assert.equal(verdict.at, blocker, 'the refused component is the file, not the leaf below it');
+});
+
+test('S2 asideIsSafe reports ok with no offending component on a clean chain', () => {
+  const pluginData = tempRoot();
+  const verdict = sweep().asideIsSafe(pluginData, ['review-evidence', 'v1', 'superseded', KEY], ['superseded']);
+  assert.equal(verdict.ok, true);
+  assert.equal(verdict.at, '');
+});
+
+test('S2 the win32 read path rejects a symlinked entry without O_NOFOLLOW', () => {
+  // Finding #9: noFollow is forced to 0 on win32, and there openSync follows the
+  // link while fstat describes the TARGET — so a symlink whose target is a valid
+  // lease naming the executing root was KEPT, while canonicalExisting in the owner
+  // rejects it with no win32 gate. The sweep then reported a clean set-aside count
+  // for a store listRecords still refuses.
+  //
+  // Driven through the explicit noFollow option so the branch is reachable on a
+  // POSIX host, where O_NOFOLLOW exists and would otherwise mask it.
+  const pluginData = tempRoot();
+  const target = seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const link = path.join(recordsDir(pluginData), `rel1_${'d'.repeat(32)}.json`);
+  fs.symlinkSync(target, link);
+  // The W167/W168 rule: confirm the link is a real symlink before asserting on it.
+  assert.notEqual(fs.realpathSync.native(link), link);
+
+  assert.equal(sweep().readLeaseEntry(link, { noFollow: 0 }), null,
+    'a symlinked entry is unreadable even where O_NOFOLLOW is unavailable');
+  // Positive control on the same host: the real file still reads.
+  assert.notEqual(sweep().readLeaseEntry(target, { noFollow: 0 }), null);
+});
+
+test('S2 the read path refuses an oversized entry and an unparseable one', () => {
+  const pluginData = tempRoot();
+  const good = seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const junk = path.join(recordsDir(pluginData), 'not-json.json');
+  fs.writeFileSync(junk, '{ this is not json', { mode: 0o600 });
+  assert.equal(sweep().readLeaseEntry(junk), null);
+  assert.notEqual(sweep().readLeaseEntry(good), null);
+  assert.equal(sweep().readLeaseEntry(good, { maxBytes: 4 }), null, 'over the cap is unreadable');
+});
+
+test('S2 moveAside distinguishes moved, collision and gone', () => {
+  // Finding #12: rename(2) replaces an existing destination silently, so a colliding
+  // entry under superseded/<key> was DESTROYED with no report — contradicting the
+  // "MOVED (never deleted)" contract in the entry script's own header. And a source
+  // that vanished (a .tmp unlinked by its own writer) threw ENOENT and was reported
+  // as a stuck lease, naming a file that no longer exists.
+  const root = tempRoot();
+  const from = path.join(root, 'from');
+  const to = path.join(root, 'to');
+  fs.mkdirSync(from, { mode: 0o700 });
+  fs.mkdirSync(to, { mode: 0o700 });
+
+  fs.writeFileSync(path.join(from, 'a.json'), 'A', { mode: 0o600 });
+  assert.equal(sweep().moveAside(path.join(from, 'a.json'), path.join(to, 'a.json')), 'moved');
+  assert.equal(fs.readFileSync(path.join(to, 'a.json'), 'utf8'), 'A');
+
+  fs.writeFileSync(path.join(from, 'b.json'), 'NEW', { mode: 0o600 });
+  fs.writeFileSync(path.join(to, 'b.json'), 'EXISTING', { mode: 0o600 });
+  assert.equal(sweep().moveAside(path.join(from, 'b.json'), path.join(to, 'b.json')), 'collision');
+  assert.equal(fs.readFileSync(path.join(to, 'b.json'), 'utf8'), 'EXISTING',
+    'a collision must never destroy what is already set aside');
+
+  assert.equal(sweep().moveAside(path.join(from, 'gone.json'), path.join(to, 'gone.json')), 'gone');
+});
+
+test('S2 a collision is reported as stuck, never as a clean set-aside', () => {
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody({ plugin_root: '/previous/root' }));
+  fs.mkdirSync(asideDir(pluginData), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(asideDir(pluginData), `${LEASE_ID}.json`), 'ALREADY THERE', { mode: 0o600 });
+
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.equal(result.discarded, 0);
+  assert.deepEqual(result.failed, [`${LEASE_ID}.json`]);
+  assert.equal(fs.readFileSync(path.join(asideDir(pluginData), `${LEASE_ID}.json`), 'utf8'), 'ALREADY THERE');
+});
+
+test('S2 destinationStillSafe catches a destination swapped after the guard ran', () => {
+  // The re-check does not CLOSE the rename race — Node exposes no renameat — but it
+  // converts a silent redirect of every moved lease into a reported outcome.
+  const root = tempRoot();
+  const real = path.join(root, 'real');
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(real, { mode: 0o700 });
+  fs.mkdirSync(elsewhere, { mode: 0o700 });
+  assert.equal(sweep().destinationStillSafe(real), true);
+
+  const swapped = path.join(root, 'swapped');
+  fs.symlinkSync(elsewhere, swapped);
+  assert.notEqual(fs.realpathSync.native(swapped), swapped);
+  assert.equal(sweep().destinationStillSafe(swapped), false);
+  assert.equal(sweep().destinationStillSafe(path.join(root, 'absent')), false);
+});
+
+test('S2 the sweep runs under the lease store\'s own lock', () => {
+  // Finding #5: every mutating entry point in review-evidence-lease-v1.js runs
+  // inside withLock on review-evidence/v1/locks/<sessionKey>.lock, and the sweep
+  // acquired nothing — so a concurrent createLease could have its .tmp moved out
+  // from under it. The lease module's withLock never reclaims a lock; the core's
+  // withFileLock does, and importing that policy here would let the sweep unlink a
+  // live owner's lock.
+  const source = fs.readFileSync(SWEEP_FILE, 'utf8');
+  // A CALL, not a mention: the module's own comment names withFileLock to say why it
+  // is the wrong policy here, and a bare substring pin cannot tell the two apart.
+  assert.equal(/\bwithFileLock\s*\(/.test(source), false,
+    'the core reclaiming lock policy must not be CALLED on this store');
+  assert.ok(/lease\.withLock\s*\(/.test(source), 'the sweep takes the owner\'s lock');
+
+  // Behavioural half: a sweep leaves the store's lock directory behind, which is
+  // only created by the owner's own storage() constructor.
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody({ plugin_root: '/previous/root' }));
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.equal(result.discarded, 1);
+  assert.equal(fs.existsSync(path.join(pluginData, 'review-evidence', 'v1', 'locks')), true);
+});
+
+test('S2 an unopenable store is refused as source rather than thrown', () => {
+  // Taking the owner's lock means its constructor can throw — on a symlinked or
+  // aliased store it refuses rather than repairing. That must reach the caller as a
+  // verdict, because this runs AFTER the record swap: a throw here would report
+  // failure for an adoption that already succeeded.
+  const pluginData = tempRoot();
+  const evidence = path.join(pluginData, 'review-evidence');
+  fs.writeFileSync(evidence, 'not a directory', { mode: 0o600 });
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.equal(result.unsafe, 'source');
+  assert.equal(result.discarded, 0);
+  assert.deepEqual(result.failed, []);
+});

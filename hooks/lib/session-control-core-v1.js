@@ -1424,37 +1424,6 @@ const ADOPTION_REFUSALS = {
 // manifest could steer the superseded record anywhere in the tree.
 const ADOPTION_SAFE_VERSION_RE = /^[0-9A-Za-z][0-9A-Za-z.+-]{0,63}$/;
 
-// A hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js. That module cannot be
-// required from here (it requires the binder, which requires this core), and the
-// sweep has to agree with its listRecords about which entries are valid — an
-// entry this predicate keeps but listRecords rejects leaves the wedge intact.
-const LEASE_RECORD_ID_RE = /^rel1_[a-f0-9]{32}$/;
-
-// A hand-copy of MAX_RECORD_BYTES in review-evidence-lease-v1.js, for the same
-// reason LEASE_RECORD_ID_RE is one: the sweep must agree with listRecords about
-// which entries are readable, and that module cannot be required from here. An
-// entry over this cap is one listRecords would reject, so the sweep moves it
-// rather than reading it.
-const LEASE_RECORD_MAX_BYTES = 8 * 1024 * 1024;
-
-// The ONE spelling of the store prefix inside this file. It was written out three
-// times in a single function, and the shape walk has to traverse exactly the chain
-// mkdir created — a divergence would lstat a path that does not exist and land in
-// the outer catch as a blanket destination refusal, silently. Same move
-// WORKFLOW_STATE_SEGMENTS already makes for the workflow document. The layout is
-// still a hand-copy of review-evidence-lease-v1.js; this removes the copies WITHIN
-// the copy, not the copy itself.
-const REVIEW_EVIDENCE_SEGMENTS = ['review-evidence', 'v1'];
-
-// The one spelling of "private enough to be a rename destination". Platform-gated
-// exactly as ensurePrivateDirectory's own pair is: win32 has no comparable mode or
-// uid semantics here, so the check is skipped there rather than guessed at.
-function privateEnough(stat) {
-  if (process.platform === 'win32') return true;
-  if ((stat.mode & 0o077) !== 0) return false;
-  if (typeof process.getuid === 'function' && stat.uid !== process.getuid()) return false;
-  return true;
-}
 
 function adoptionRefusal(reason) {
   return { ok: false, reason };
@@ -1593,235 +1562,6 @@ function adoptableRecord(options) {
   };
 }
 
-// Stale leases are moved OUT of the records directory, never renamed inside it:
-// listRecords fails on any entry that does not end in `.json`, so a set-aside
-// file left in place would be strictly worse than the stale lease it replaced.
-//
-// Why they must go at all: review-evidence-lease-v1.js compares its recorded
-// plugin_root STRICTLY and listRecords propagates the first failure, so a single
-// lease minted before the adoption would fail every later lease operation for
-// this session. A lease is a short-lived evidence reservation — losing one costs
-// a repeat, not a guarantee — so this is the cheapest correct resolution, and it
-// sets them aside rather than deleting them.
-function discardSupersededLeases(pluginData, key, executingPluginRoot) {
-  const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
-  // The owning module reaches this directory only through ensurePrivateDirectory,
-  // which rejects a symlink, an alias and unsafe permissions or ownership. This
-  // copy cannot call that constructor (the dependency runs the other way), so it
-  // re-applies the part that matters before it renames anything: a symlinked or
-  // aliased records directory is left ALONE rather than swept through.
-  try {
-    const stat = fs.lstatSync(recordsDirectory);
-    // `unsafe` distinguishes a store this sweep REFUSED to touch from the
-    // ordinary "no lease was ever minted" case. Both discard nothing; only one of
-    // them is a clean outcome, and the caller must be able to say which. It also
-    // names WHICH directory it refused: the two live in different places and have
-    // different remedies — `source` is this session's own lease records directory,
-    // `destination` the shared `superseded/` one. Reported as a bare true, a
-    // planted link at the destination sent the operator to the directory the sweep
-    // had just read successfully, and went uninvestigated.
-    if (stat.isSymbolicLink() || !stat.isDirectory()) return { discarded: 0, failed: [], unsafe: 'source' };
-    if (fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
-      return { discarded: 0, failed: [], unsafe: 'source' };
-    }
-  } catch (error) {
-    return { discarded: 0, failed: [], unsafe: error && error.code !== 'ENOENT' ? 'source' : '' };
-  }
-  let entries;
-  try {
-    entries = fs.readdirSync(recordsDirectory);
-  } catch (error) {
-    // ONE shape on every path — a scalar here would hand the caller `undefined`
-    // for both fields and make the reporter throw AFTER the record swap had
-    // already succeeded, reporting failure for a completed adoption.
-    //
-    // NOT the ordinary "no lease was ever minted" case, whatever an older
-    // comment here claimed: the lstat guard above has already established that
-    // this directory exists, is a real directory and is canonical, and it is
-    // what answers ENOENT. What reaches this catch is EACCES, EPERM, EMFILE or a
-    // race — a directory that exists and cannot be read, which is precisely the
-    // state the caller must not be told was clean. It carries the same `source`
-    // diagnosis as the guard above, and the ENOENT arm stays clean for the race.
-    return {
-      discarded: 0,
-      failed: [],
-      unsafe: error && error.code === 'ENOENT' ? '' : 'source',
-    };
-  }
-  // Nothing to sweep: return BEFORE the destination guard, so an adoption with an
-  // existing-but-empty records directory neither creates superseded/<key> nor can
-  // report a destination warning about leases that do not exist.
-  if (entries.length === 0) return { discarded: 0, failed: [], unsafe: '' };
-  const asideDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'superseded', key);
-  let discarded = 0;
-  const failed = [];
-  // The DESTINATION gets the same treatment as the source. mkdirSync does NOT fail
-  // on an existing symlink-to-directory, so without this a pre-created link there
-  // would quietly receive every moved lease while the sweep still reported a clean
-  // count.
-  // The SHAPE check runs on every component; the PERMISSION check stays on the
-  // leaf. Those are two different questions and only one of them is this
-  // function's to ask.
-  //
-  // Shape, per segment: an ancestor swapped to a symlink is how the rename race
-  // below is won, and mkdir neither fails on nor reports one. Checking only the
-  // leaf left that open, so the walk closes it.
-  //
-  // Permissions, leaf only, and deliberately NOT per segment: `review-evidence`
-  // and `v1` are SHARED and this function does not own them. Their mode is
-  // `ensurePrivateDirectory`'s to set — that reader REPAIRS with a chmod per
-  // segment (review-evidence-lease-v1.js) where this one may only look, so
-  // refusing here on an ancestor that some earlier version created at 0755 would
-  // turn a working sweep into a destination refusal for a permission this code
-  // never manages. In practice the loop never CREATES those two anyway: the source
-  // guard above has already proved <pluginData>/review-evidence/v1/records/<key>
-  // exists and is canonical, so both are there before this runs.
-  //
-  // `superseded` and the leaf are different, and the check earns its place
-  // precisely when they were NOT absent: the mkdir tolerates EEXIST, so it neither
-  // chmods nor fails on an existing directory. On a second adoption of the same
-  // session key, or against a component another local process pre-created, the mode
-  // it finds is not one this function set. Refusing a hostile pre-existing one is
-  // the whole job.
-  //
-  // The shape it mirrors is privateRecordsDirectory in claude-hook-session-v1.js
-  // — check, never repair. Do not "align" it with ensurePrivateDirectory: a
-  // read-side guard that silently widens or narrows a mode is a worse defect than
-  // the one it would be fixing.
-  const asideIsSafe = () => {
-    try {
-      // Create and check ONE segment at a time. A single recursive mkdir up front
-      // resolves an existing symlinked component and creates the leaf THROUGH it —
-      // outside the confinement the entry script's header asserts — and only then
-      // does the walk notice the link and refuse. Nothing is moved either way, but
-      // one directory lands where nothing of this plugin's should. Interleaving
-      // costs nothing and closes it: a planted link is seen before the next segment
-      // is created under it. EEXIST is the ordinary case, not a failure.
-      let current = pluginData;
-      for (const segment of [...REVIEW_EVIDENCE_SEGMENTS, 'superseded', key]) {
-        current = path.join(current, segment);
-        try {
-          fs.mkdirSync(current, { mode: 0o700 });
-        } catch (error) {
-          if (!error || error.code !== 'EEXIST') return false;
-        }
-        const stat = fs.lstatSync(current);
-        if (stat.isSymbolicLink() || !stat.isDirectory()) return false;
-        // `superseded` gets the permission pair too, and the shared pair above it
-        // does not. The difference is ownership, not depth: `review-evidence` and
-        // `v1` are created and chmod-repaired by ensurePrivateDirectory, so
-        // refusing on their mode would fight another owner — but `superseded`
-        // appears nowhere in that module. THIS function is its only creator, so
-        // nothing else can be blamed for its mode and nothing else will repair it.
-        // It also matters more than the leaf: renameSync resolves it as a non-final
-        // component, so a writable `superseded` is enough to redirect every moved
-        // lease record out of the store.
-        if (segment === 'superseded' && !privateEnough(stat)) return false;
-      }
-      if (!privateEnough(fs.lstatSync(asideDirectory))) return false;
-      // Last: realpath resolves every component at once, so one call covers the
-      // whole chain against a link the lstat pass above could still have raced.
-      if (fs.realpathSync.native(asideDirectory) !== asideDirectory) return false;
-      return true;
-    } catch {
-      return false;
-    }
-  };
-  // `unsafe` carries the whole diagnosis, exactly as the three source-unsafe
-  // returns do. Listing every entry as `failed` here would name leases the
-  // keep-branch would have left alone, and the reporter would print two
-  // contradictory warnings about the same sweep.
-  if (!asideIsSafe()) return { discarded: 0, failed: [], unsafe: 'destination' };
-  for (const name of entries.sort()) {
-    // EVERY entry listRecords would reject, not only the `.json` ones: it fails
-    // the whole set on an unexpected name, so a leftover `.tmp` from a killed
-    // lease write wedges it exactly as hard as a stale record would.
-    const file = path.join(recordsDirectory, name);
-    let record;
-    try {
-      // Decide BEFORE reading, and decide on the DESCRIPTOR, not on the path. A
-      // bare readFileSync on a FIFO blocks forever and raises nothing a catch can
-      // see — and this runs AFTER adoptContext has already swapped the record, so
-      // a hang here leaves the one repair the user can still invoke stuck
-      // half-done with no other channel to finish it. A path-based lstat followed
-      // by a path-based read does not close that: the entry can be swapped for a
-      // symlink-to-FIFO in between. O_NOFOLLOW refuses the symlink at open, and
-      // fstat then judges the exact object the read will consume.
-      //
-      // An entry that is not a regular file, or is larger than the cap listRecords
-      // holds its records to, is one that reader would reject anyway — so it falls
-      // through to the move branch exactly as an unparseable one does, and the
-      // keep-predicate's residual list below must not claim otherwise.
-      const noFollow = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
-        ? fs.constants.O_NOFOLLOW : 0;
-      // O_NONBLOCK is not optional here, it is the half that stops the hang:
-      // O_NOFOLLOW refuses a symlink, but opening a FIFO directly blocks in
-      // open(2) itself, before fstat can say what it is.
-      const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
-      const descriptor = fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock);
-      try {
-        const entry = fs.fstatSync(descriptor);
-        if (!entry.isFile() || entry.size > LEASE_RECORD_MAX_BYTES) throw new Error('unreadable');
-        record = JSON.parse(fs.readFileSync(descriptor, 'utf8'));
-      } finally {
-        fs.closeSync(descriptor);
-      }
-    } catch {
-      record = null;
-    }
-    // An unreadable lease is moved aside too: listRecords would fail on it just
-    // as hard, and leaving it would defeat the whole point of this sweep.
-    // Keep a SUPERSET of what listRecords accepts — stated as a superset because
-    // that is what it is. Three of that reader's conjuncts are mirrored here (the
-    // id shape, lease_id agreeing with the filename, and the executing root),
-    // which is what stops an entry it rejects from being kept on plugin_root
-    // alone. NOT mirrored: it also rejects a multiply-linked record file, a
-    // non-canonical spelling, and every other validateRecord violation. A symlink
-    // and an oversized entry USED to belong on that list and no longer do — the
-    // O_NOFOLLOW open and the size cap above send both to the move branch.
-    // An entry failing only what is still on that list, while naming the executing
-    // root, is therefore KEPT and keeps wedging later lease operations — a residual, not
-    // the main gap, because a lease can only name the executing root if that
-    // runtime minted it, and none can be minted while the session is unbound.
-    // The id shape is a hand-copy of LEASE_ID_RE in review-evidence-lease-v1.js,
-    // pinned by test-versioned-plugin-upgrade.sh; keep the two in step.
-    const leaseId = name.endsWith('.json') ? name.slice(0, -5) : '';
-    if (LEASE_RECORD_ID_RE.test(leaseId)
-      && record && typeof record === 'object'
-      && record.lease_id === leaseId
-      && record.plugin_root === executingPluginRoot) {
-      continue;
-    }
-    try {
-      // No mkdir here: asideIsSafe() already created AND validated the directory.
-      // What that buys is one fewer way to CREATE the target — it does not close the
-      // race. rename(2) resolves every non-final component, so a link swapped in at
-      // asideDirectory after the guard still redirects each move.
-      //
-      // State the residual against what the guard actually establishes.
-      // asideIsSafe() refuses a symlinked component anywhere in the chain, so the
-      // swap has to happen AFTER it looked — and the leaf it lands in is 0700 and
-      // owner-checked. What it does NOT establish is the mode of the shared
-      // ancestors, which belong to ensurePrivateDirectory: where those are
-      // group-writable the race needs no same-uid access at all. So: bounded by a
-      // same-uid attacker on a store whose ancestors are private, unbounded on one
-      // where they are not, and never closed either way.
-      fs.renameSync(file, path.join(asideDirectory, name));
-      discarded += 1;
-    } catch {
-      // A lease that could NOT be moved is reported separately, never folded
-      // into the success count and never swallowed. Counting only successes
-      // would render a partial sweep as a clean adoption while the exact wedge
-      // this sweep exists to prevent survives.
-      failed.push(name);
-    }
-  }
-  // Every return carries the same three keys, and `unsafe` is a total string —
-  // empty for a clean sweep, `source` or `destination` otherwise. One field, not a
-  // boolean plus a scope: the two would be two spellings of one fact, and the
-  // "unknown scope" arm a caller wrote for the boolean could never be reached.
-  return { discarded, failed, unsafe: "" };
-}
 
 const ADOPTION_HISTORY_PHASE = 'RUNTIME_ADOPTED';
 const ADOPTION_HISTORY_REASON_PREFIX = 'runtime-adopted: ';
@@ -1960,19 +1700,15 @@ function adoptContext(options) {
     }
   }
 
-  const leases = discardSupersededLeases(pluginData, key, adopted.context.plugin_root);
-
+  // NO lease sweep here any more. It lives in review-evidence-sweep-v1.js and the
+  // adoption ENTRY SCRIPT calls it after this function returns — see that module's
+  // header for why the direction had to invert (requiring the lease owner from this
+  // file is a cycle). The consequence for a caller: an adoption is not complete
+  // until the sweep has also run, and a host that forgets it gets a re-minted record
+  // with the superseded leases still wedging every later lease operation.
   return {
     ...adopted,
     provenance,
-    leasesDiscarded: leases.discarded,
-    leasesFailed: leases.failed,
-    // WHICH directory the sweep refused, empty when it refused nothing. ONE field:
-    // a parallel boolean was a second spelling of the same fact, and the "truthy
-    // but no scope" arm its consumer carried could not be reached from any core
-    // this entry script can load — it resolves the module from its own
-    // installation.
-    leasesUnsafeScope: typeof leases.unsafe === 'string' ? leases.unsafe : '',
   };
 }
 
