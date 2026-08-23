@@ -13,14 +13,11 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (137 = 130 + 7), **and as of this change §3 is too**: its ten
-CI group headers now sum to 130, the eleventh (local-only) adds 7, and every one of the 137
-manifest suites appears in exactly one group. The four that previously appeared nowhere —
-`test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
-and `test-session-control-core.sh` — are listed now. §7's profile table was re-derived from
+reconciled to that manifest (141 = 134 + 7), **and §3 is too**: its eleven CI group headers
+sum to 134, the twelfth (local-only) adds 7, and every one of the 141 manifest suites appears
+in exactly one group. §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
-membership are the JSON's own; the entry total is **41**, not the 40 that survived the
-reshard, because this change adds one suite to `windows-shard-4`.
+membership are the JSON's own, and the entry total is **41**.
 
 **Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
 at this commit, not an invariant: the next suite added without touching §3 silently breaks
@@ -30,9 +27,9 @@ it again, and no test will say so. Re-derive rather than trust when the numbers 
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **137** — 130 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **130 structure suites + 5 offline evals = 135 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 137 − 130 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **141** — 134 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **134 structure suites + 5 offline evals = 139 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 141 − 134 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **20 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 41 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -43,8 +40,8 @@ it again, and no test will say so. Re-derive rather than trust when the numbers 
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 137 structure suites + 5 offline evals | none |
-| `--ci` | 130 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 141 structure suites + 5 offline evals | none |
+| `--ci` | 134 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -212,6 +209,17 @@ that coverage as-is; anything else has to add the suite to `windows-ci.v1.json` 
 commit.
 
 
+### Documentation pins (4)
+`multi-repo-doc-citations` · `multi-repo-doc-consistency` ·
+`multi-repo-doc-contrast` · `multi-repo-doc-structure`
+
+The three hand-written multi-repo design documents under `docs/` have no build step and
+are never rendered in CI, so these four suites are the only thing that grades them:
+`path:line` citations resolve to a substantive line, WCAG contrast holds across all three
+palettes on both pages, the pages carry landmarks, resolved ARIA references and no
+unresolvable `var()` in an SVG presentation attribute, and the three documents agree with
+each other on counts, terminology, navigation and the specification's BLOCKED status.
+
 ### Promptfoo local-only (7 — skipped under `--ci`)
 `claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
 `promptfoo-reset-review-limit` · `promptfoo-session-upgrade` (~206) ·
@@ -220,7 +228,7 @@ commit.
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (19 files)
+## 4. `node --test` unit suites (20 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -237,6 +245,7 @@ that suite's failure.
 | `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
+| `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
@@ -294,7 +303,10 @@ assert, `# ` = comment.
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard, and this branch's new suite takes it to 41:
+of 40 survived the reshard, and this branch's new suite takes it to 41.
+`tests/structure/windows-ci-contract.test.js` pins exactly these seven keys and the
+41-entry total, so a shard renamed there and not here is drift this table cannot catch
+on its own:
 
 | Profile | Suites | Members |
 |---|---|---|

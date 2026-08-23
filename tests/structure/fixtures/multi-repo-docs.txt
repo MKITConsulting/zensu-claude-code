@@ -1,0 +1,13 @@
+# The multi-repo design document set — ONE list, read by all four
+# tests/structure/test-multi-repo-doc-*.sh suites.
+#
+# It existed as a fixed literal in four separate suites, so a fourth companion
+# document was checked by nothing until someone remembered every copy. Each
+# suite reads this file and filters to the extensions it grades: the citations
+# and consistency suites take every entry, the contrast and structure suites
+# take the .html entries only.
+#
+# Repo-relative paths, one per line. Blank lines and `#` comments are ignored.
+docs/multi-repo-chains-spec.md
+docs/multi-repo-chains-overview.html
+docs/multi-repo-chains-principle.html
