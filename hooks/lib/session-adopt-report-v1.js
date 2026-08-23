@@ -185,10 +185,32 @@ function main() {
       // It is idempotent by construction: the sweep only ever moves entries that do
       // NOT name the executing installation, so a store that is already clean yields
       // a zero count and creates nothing.
+      // The executing root comes from the RECORD, not from the verdict: a refusal
+      // carries only `{ ok, reason }` — reading `verdict.context` here threw
+      // "Cannot read properties of undefined", which an end-to-end row caught and
+      // the predicate-level unit test could not. And not from the environment
+      // either: the sweep compares this value against each lease's recorded
+      // plugin_root, so it has to be the same canonical spelling the record holds.
+      // "Already served" is precisely the statement that the record names this
+      // installation.
+      let servedRoot;
+      try {
+        servedRoot = core.readContext({
+          recordsDir: request.recordsDir,
+          sessionId: request.sessionId,
+          expectedHost: "claude",
+        }).plugin_root;
+      } catch (error) {
+        process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
+        process.stdout.write("The record says this installation already serves it, but it could not be re-read to\n");
+        process.stdout.write("sweep the lease store: " + safe(error && error.message ? error.message : "unknown") + "\n");
+        process.exitCode = 1;
+        return;
+      }
       const repaired = sweepLeases.discardSupersededLeases(
         request.pluginData,
         core.sessionKey(request.sessionId),
-        verdict.context.plugin_root,
+        servedRoot,
       );
       process.stdout.write("Zensu session adoption — ALREADY SERVED (lease store repaired)\n\n");
       process.stdout.write("  leases set aside : " + repaired.discarded + "\n");
