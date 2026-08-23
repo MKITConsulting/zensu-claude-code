@@ -2046,7 +2046,7 @@ fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.str
   lease_id: process.argv[2],
   plugin_root: process.argv[3],
 }), { mode: 0o600 });
-' "$ADOPT_LEASE_DIR" "$REPAIR_LEASE_ID" "$SYNTHETIC_BREAKING_ROOT" 2>/dev/null
+' "$ADOPT_LEASE_DIR" "$REPAIR_LEASE_ID" '/previous/zensu/installation' 2>/dev/null
 if [ -f "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ]; then
   env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
     CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
@@ -2080,7 +2080,7 @@ fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.str
   lease_id: process.argv[2],
   plugin_root: process.argv[3],
 }), { mode: 0o600 });
-' "$ADOPT_LEASE_DIR" "$REPAIR_RO_ID" "$SYNTHETIC_BREAKING_ROOT" 2>/dev/null
+' "$ADOPT_LEASE_DIR" "$REPAIR_RO_ID" '/previous/zensu/installation' 2>/dev/null
   env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
     CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
     bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
