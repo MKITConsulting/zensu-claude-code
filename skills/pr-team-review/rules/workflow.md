@@ -60,6 +60,9 @@ Trigger detection runs against `git diff origin/<base>...pr-<n>-review --name-on
 | Path-prefix match (e.g. `docs/DDD/`) | Activates persona |
 | Migration directory present | Forces `persistence-db` |
 | New endpoint files | Forces `security` + `rest-api` + `observability` |
+| Authorization or tenant-scoping code changed in an EXISTING path — role/permission checks, ownership predicates, repository or query filters | Forces `security` |
+| Secret / credential / token / API key introduced in code, config, or a log or trace statement | Forces `security` |
+| New outbound third-party client or integration (new egress, new trust boundary) | Forces `security` |
 | Dependency manifest / lockfile changed | Forces `supply-chain` |
 | Public contract changed (REST/gRPC/GraphQL/events/exported symbols) | Forces `api-compat` |
 | Outbound call / async consumer / retry-timeout config | Forces `resilience` |
