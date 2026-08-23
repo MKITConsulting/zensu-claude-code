@@ -13,8 +13,8 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (136 = 129 + 7), **and as of this change §3 is too**: its ten
-CI group headers now sum to 129, the eleventh (local-only) adds 7, and every one of the 136
+reconciled to that manifest (137 = 130 + 7), **and as of this change §3 is too**: its ten
+CI group headers now sum to 130, the eleventh (local-only) adds 7, and every one of the 137
 manifest suites appears in exactly one group. The four that previously appeared nowhere —
 `test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
 and `test-session-control-core.sh` — are listed now. §7's profile table was re-derived from
@@ -30,8 +30,8 @@ it again, and no test will say so. Re-derive rather than trust when the numbers 
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **136** — 129 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **129 structure suites + 5 offline evals = 134 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 136 − 129 gap | — |
+| `tests/structure/test-*.sh` (deterministic shell) | **137** — 130 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **130 structure suites + 5 offline evals = 135 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 137 − 130 gap | — |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -43,8 +43,8 @@ it again, and no test will say so. Re-derive rather than trust when the numbers 
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 136 structure suites + 5 offline evals | none |
-| `--ci` | 129 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 137 structure suites + 5 offline evals | none |
+| `--ci` | 130 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -144,9 +144,9 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (19)
+### Skill contracts (20)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
-`ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
+`gauntlet-loop-skill` · `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
 `pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
 `session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
 `verify-feature-skill` · `zen-mode` · `zensu-help-skill`

@@ -9,8 +9,10 @@ set -u
 #     digest — a top-level rules/ would leave the declared source of truth the
 #     one normative surface an installed-plugin edit could change undetected.
 #   - hooks/session-start-evidence-discipline.sh READS that block at run time
-#     (it must not carry its own copy, or the hook silently drifts from the 32
-#     prompt carriers — EXPECTED_AGENTS + EXPECTED_SKILLS below), injects it on BOTH SessionStart (every source, including
+#     (it must not carry its own copy, or the hook silently drifts from the
+#     EXPECTED_AGENTS + EXPECTED_SKILLS prompt carriers pinned below — never
+#     restate that total as a literal here, it drifts on every new skill),
+#     injects it on BOTH SessionStart (every source, including
 #     resume/compact) and SubagentStart, reads no config at all, and fails
 #     silent on everything it does not understand — including a missing node.
 #   - every agents/*.md and every skills/*/SKILL.md carries the block VERBATIM,
@@ -590,7 +592,7 @@ for f in "$PLUGIN_DIR"/skills/*/SKILL.md; do
   SKILL_N=$((SKILL_N+1))
   carries_block "$f" || SKILL_MISS="$SKILL_MISS $(basename "$(dirname "$f")")"
 done
-EXPECTED_SKILLS=26
+EXPECTED_SKILLS=27
 if [ "$SKILL_N" != "$EXPECTED_SKILLS" ]; then
   check "C2 skill inventory changed ($SKILL_N found, $EXPECTED_SKILLS pinned) — bump EXPECTED_SKILLS deliberately so a new skill cannot slip past this guard" FAIL
 elif [ -z "$SKILL_MISS" ]; then
@@ -599,20 +601,23 @@ else
   check "C2 skills missing the block:$SKILL_MISS" FAIL
 fi
 
-# C5 pins the two hand-copied prose restatements of this inventory against the constants above.
-# The header of THIS file and docs/architecture.md both spell the derived total, and it has
-# already drifted once (28 and 29 against a real 32). C1/C2 fail loudly when a carrier is added,
-# but nothing made the author update the prose — this does.
+# C5 enforces the ABSENCE of the hand-copied total, which is the opposite of what it did when it
+# landed and is the better rule. It first pinned the numeral in both prose sites so a stale count
+# failed loudly; main independently reached the stronger answer — do not restate the total at all,
+# because a numeral goes stale on every new skill. That merge proved the point twice over: the
+# literal this check pinned was 32, and #249 made it 33 before the branch even landed. So the
+# prose keeps the SYMBOLS and this check makes the rule machine-enforced instead of advisory.
 C5_TOTAL=$((EXPECTED_AGENTS + EXPECTED_SKILLS))
-C5_MISS=""
-grep -qF "the $C5_TOTAL" "$0" || C5_MISS="$C5_MISS this-suite-header"
-grep -qF "the $C5_TOTAL prompt carriers" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS docs/architecture.md"
-grep -qF "\`EXPECTED_AGENTS\`=$EXPECTED_AGENTS" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS architecture-agents"
-grep -qF "\`EXPECTED_SKILLS\`=$EXPECTED_SKILLS" "$PLUGIN_DIR/docs/architecture.md" || C5_MISS="$C5_MISS architecture-skills"
-if [ -z "$C5_MISS" ]; then
-  check "C5 the $C5_TOTAL-carrier total and its two components are current in every prose restatement" PASS
+C5_BAD=""
+grep -qF "the $C5_TOTAL prompt carriers" "$PLUGIN_DIR/docs/architecture.md" && C5_BAD="$C5_BAD docs/architecture.md"
+grep -qE "the $C5_TOTAL$|the $C5_TOTAL[^0-9]" "$0" && C5_BAD="$C5_BAD this-suite-header"
+if [ -n "$C5_BAD" ]; then
+  check "C5 the carrier total $C5_TOTAL is restated as a literal in:$C5_BAD — name EXPECTED_AGENTS + EXPECTED_SKILLS instead, a numeral goes stale on every new skill" FAIL
+elif grep -qF 'EXPECTED_AGENTS' "$PLUGIN_DIR/docs/architecture.md" \
+  && grep -qF 'EXPECTED_SKILLS' "$PLUGIN_DIR/docs/architecture.md"; then
+  check "C5 the carrier prose names EXPECTED_AGENTS + EXPECTED_SKILLS and restates no total ($C5_TOTAL today)" PASS
 else
-  check "C5 stale carrier-count prose ($C5_TOTAL = $EXPECTED_AGENTS + $EXPECTED_SKILLS not found in:$C5_MISS)" FAIL
+  check "C5 docs/architecture.md no longer names EXPECTED_AGENTS / EXPECTED_SKILLS — the carrier population has no prose anchor at all" FAIL
 fi
 
 # C6 pins the one measured figure docs/architecture.md states about this hook. CTX above IS the

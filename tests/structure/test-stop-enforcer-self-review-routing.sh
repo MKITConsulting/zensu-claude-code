@@ -20,6 +20,7 @@ PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 STOP="$PLUGIN_DIR/hooks/stop-chain-enforcer.sh"
 POSTREV="$PLUGIN_DIR/hooks/post-review-tdd-delegate.sh"
 LOG="$PLUGIN_DIR/hooks/lib/zensu-log.sh"
+. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 
 PASS=0; FAIL=0
 check() {
@@ -76,10 +77,12 @@ start_session() {
 # anywhere. It needs nothing but PLUGIN_DIR and STATE_DIR, so it belongs here.
 UNIT_OUT="$STATE_DIR/reviewer-spawn-denial-unit.out"
 if node --test "$PLUGIN_DIR/tests/structure/reviewer-spawn-denial-v1.test.js" >"$UNIT_OUT" 2>&1; then
-  UNIT_PASS="$(sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  UNIT_TOTAL="$(sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^. tests \([0-9][0-9]*\)$/\1/p' "$UNIT_OUT" | tail -1)"
-  case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
-  case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
+  # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
+  # and the reporter-ordering caveat. This block used to carry its own copy of that
+  # expression, byte-identical to the one in test-bash-source-write-gate.sh W3a;
+  # both now delegate, so the next correction to it has exactly one site.
+  UNIT_PASS="$(unit_summary_field pass "$UNIT_OUT")"
+  UNIT_TOTAL="$(unit_summary_field tests "$UNIT_OUT")"
   # The total is the real floor; the pass floor is lower because the symlink and
   # FIFO cases skip themselves where the platform cannot create one.
   if [ "$UNIT_TOTAL" -ge 29 ] && [ "$UNIT_PASS" -ge 27 ]; then

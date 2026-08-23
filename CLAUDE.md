@@ -816,6 +816,62 @@ silently governs whether the shipped cleanup passes. Do not "fix" a deny there b
 writing `ZENSU_BASH_WRITE_GATE=off` into a skill: a
 shipped escape prefix teaches the hatch and lands a self-inflicted bypass-ledger entry.
 
+## Bypass Ledger Read Contract (`tdd_bypasses`)
+
+`tdd_bypasses` is the ONE member of the `_tdd_read_validated_state` reader family
+that signals an unreadable document through its EXIT STATUS rather than an echoed
+sentinel. Its siblings — `tdd_state_status`, `tdd_get_flag`, `zensu_workflow_allows`,
+`tdd_phase`, `tdd_step`, `tdd_has_red_fail`, `tdd_get_counter` — all stay total and
+`return 0` with a value (`invalid`, `false`, `INVALID_STATE`, `0`, …). The divergence
+is deliberate: this reader's value is rendered VERBATIM into the user-facing
+`Gates bypassed during this session:` line, so a sentinel would be printed as if it
+were a gate name. It returns **1** for a document that does not validate and **2**
+for one that is absent, because a clean ENOENT at `--tdd-begin` is the ordinary
+first-arming case and must not be reported as damage.
+
+**No rendering site consumes that status directly.** `zensu_bypass_display`, beside the
+constants in `hooks/lib/zensu-tdd-phase.sh`, owns the whole ladder — including a
+catch-all that fails CLOSED on an unknown status, which three hand-rolled copies
+previously got backwards by testing `-eq 1` and falling silent instead. Its second
+argument decides ONLY what an absent document renders: `text` for a terminus that must
+disclose (`--bypass-list`, the post-review delegate), the default `empty` for a clearing
+verb (`--tdd-begin`, `--tdd-reset`) and for a Stop release, where a clean ENOENT means
+nothing was ever recorded. It re-raises `tdd_bypasses`' status, so `--bypass-list` still
+exits **3** on a non-zero read — distinct from its pre-existing exit 2 for an unavailable
+session identity. `tdd_add_bypass`'s own dedupe is the one exception: it consumes the raw
+value inside a `case` word and discards the status by design. Adding a sixth rendering
+site means calling the helper, never re-rolling the mapping; both message constants live
+beside `ZENSU_BYPASS_GATE_ALLOWLIST` and neither sentence may be hand-copied into a
+consumer.
+
+**A chain terminus and a Stop release are both disclosure points**, because a gate escape
+needs no file change to be recorded — `ZENSU_TEST_WITNESS` and `ZENSU_MCP_GATE` are both
+reachable without one, so a zero-change chain is exactly where an undisclosed escape would
+hide. Four release paths therefore render the line themselves on **stderr**, the operator
+channel every other Stop release message already uses: `ZENSU_CHAIN=off`,
+`hooks.chainEnforcer=false`, the cap release after a chain fails to converge (all three via
+`zensu_render_bypass_release` in `hooks/stop-chain-enforcer.sh`), and the `--chain-done`
+verb itself via `zensu_render_terminus_bypasses` in `hooks/lib/zensu-log.sh`, which covers
+both the standalone and the bound spelling so either entry point discloses. A new release
+path added above the routing branches needs the same call.
+
+**Operator-facing accounts that must move with this contract:** the "Visible opt-outs
+(bypass ledger)" paragraph in `docs/configuration.md`, which is the AUTHORITATIVE residual
+list — the other surfaces point at it rather than restating it, because three divergent
+copies is exactly the drift this rule exists to prevent; the `## Open` rendering rules in
+`skills/self-review/SKILL.md`; the build-union rule in `skills/autopilot/SKILL.md` and its
+`templates/autopilot-pr-body.md` third value. `tests/structure/test-bypass-ledger.sh` pins
+the first three; the template is not pinned by that suite.
+
+**What the ledger proves is narrower than it reads.** Validation is STRUCTURAL:
+`validateWorkflowState` checks shape plus a self-derivable `session_id_hash`, and the
+`bypasses` array carries no MAC and no monotone counter. A document edited in place
+but left schema-valid still reads `valid` and renders `none` — `test-bypass-ledger.sh`'s
+P5y case performs exactly that read-modify-write and expects a valid result. Closing that
+needs a persisted authenticity signal, which is a workflow-state schema field and
+therefore a breaking minor under the Runtime Lineage rule; it is deliberately not
+paid for. Say "what a readable document recorded", never "no gate was escaped".
+
 ## Chain Shape & Rearm Receipt (`hooks/lib/chain-recovery-v1.js`)
 
 `chain-recovery-v1.js` is the single source of truth for two things, and it is **not**
@@ -1361,12 +1417,84 @@ points otherwise, while the hooks compare `String.length` — UTF-16 code units 
 carry non-ASCII characters. `test-evidence-discipline.sh` passes identically under `LC_ALL=C`,
 which is the claim tested rather than asserted.
 
-`test-evidence-discipline.sh` C5/C6 pin the two hand-copied figures in `docs/architecture.md` (the carrier
-total with its two components, and the emitted character length) against values it derives, so neither can go
-stale silently. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
+`test-evidence-discipline.sh` C6 pins the one measured figure in `docs/architecture.md` — the emitted
+character length — against a value it derives. C5 works the other way for the carrier population: it
+FORBIDS restating the total as a literal and requires the prose to name `EXPECTED_AGENTS` and
+`EXPECTED_SKILLS` instead, because a numeral there goes stale on every new skill. Both directions were
+learned the hard way — C5 first pinned the numeral, and the count moved from 32 to 33 in a merge before
+this branch even landed. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
 the same document — its emitted length and the per-turn total derived from it — are NOT pinned. The suite is absent from `tests/profiles/windows-ci.v1.json`, so it never runs on
 the Windows PR shard; it IS in `ciStructureTests`, which the weekly Windows Safety structure
 shards execute.
+
+## Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12
+
+**Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
+commit.** `tests/structure/test-gauntlet-loop-skill.sh` G12 scans `skills/gauntlet-loop/`
+for any gate-disable prefix, because a prompt carrier that teaches one hands the model a
+hatch that lands no bypass-ledger entry. A negative scan is only as wide as its
+alternation, so G12 builds its pattern from a hardcoded `ESCAPE_STEMS` list, and its
+`G12a` arm re-derives the set from `hooks/`, `docs/` and this file and FAILS when the two
+disagree.
+
+That makes the coupling run in an unobvious direction: an ordinary change under `docs/`
+or `hooks/` that adds — or removes the last occurrence of — such a literal turns a suite
+named for the gauntlet-loop skill red, and the remedy is to edit `ESCAPE_STEMS`, not the
+file you were working on. The message names both sets so the diagnosis is in the failure
+itself, but nothing points at it from the side that changes.
+
+It is not hypothetical. `ZENSU_REQUIREMENTS_GATE=off` arrived with the
+plan-requirements completion gate and was caught on the next merge, by exactly this arm.
+
+Two properties worth keeping when touching G12: the derivation carries the same quote
+tolerance as the pattern it validates (the gates compare after shell quote removal, so
+`ZENSU_CHAIN='off'` disables one at runtime and a bare `=off` derivation is blind to it),
+and an EMPTY derivation is a FAIL rather than a skip — a swallowed `grep -r` failure used
+to read as agreement while the control block still printed PASS.
+
+## Fixture Mutation Events (`scripts/fixture-mutation-watch.js`)
+
+The promptfoo wrapper attests `tracked_clean` for the immutable eval fixture from TWO
+independent signals: a manifest comparison (`scripts/fixture-manifest.js`, also polled every
+10 ms) and a filesystem-event marker. **The marker is not redundant** — it is the only thing
+that catches a TRANSIENT mutation, written and restored byte-for-byte before the run ends,
+which is what `test-claude-promptfoo-wrapper.sh` P13-S6 pins.
+
+**Both watch backends now share ONE decision, `classifyFixtureEvent`.** They did not, and
+the divergence was the bug: the per-directory backend gated `.git` behind a manifest delta
+while the recursive one (`fs.watch(root, {recursive:true})`, FSEvents on macOS) marked any
+path outright. Under load that made the wrapper attest dirty against its own `git init` +
+`git add` + `git commit` seeding, which runs BEFORE the watcher starts — P13-S8 failed with
+rc=3 on 8 of 8 concurrent runs and 0 of 8 idle. Three further event shapes were measured the
+same way and are gated for the same reason: the watched ROOT's own basename (what libuv
+reports for an event on the watched directory itself), a directory that CONTAINS a run-owned
+subtree (`.zensu`, whose children the wrapper permits the run to write, coalesced upward),
+and garbled names FSEvents emits under coalescing (`.git/ä`).
+
+**The gated classes are adjudicated by the MANIFEST; ordinary fixture paths are NOT, and
+that split is load-bearing.** A manifest gate on an ordinary path would destroy transient
+detection outright — the manifest is equal by definition in exactly that case. Ordinary paths
+are separated by the entry's own `ctimeMs`/`mtimeMs` against the watcher's start instead: a
+denied write leaves the inode untouched, a restore does not, and an unreadable entry marks
+(a deletion is a mutation). Do NOT "simplify" that branch onto `gateOnManifest` — it reads as
+one consistent rule and silently removes the feature P13-S6 exists for. The ctime half of the
+argument is POSIX only; on Windows that field is the creation time and settable, which is
+acceptable solely because the `init_git` path requires `sandbox-exec`/`bwrap` and exits 69
+without one.
+
+Moving together: `RUN_OWNED` (the ancestor set is DERIVED from it, never hand-listed),
+`EXCLUDED_PATHS` and `gitControlSnapshot` in `fixture-manifest.js` (what a manifest delta can
+still see is what makes gating `.git` safe), and the registered-case floor in the shell
+driver. `tests/structure/fixture-mutation-watch.test.js` carries the four measured shapes and
+pins the single-implementation property at SOURCE level — a rule pin alone cannot catch a
+SECOND copy of the rule, which is what the bug was. The suite is local-only
+(`tests/profiles/promptfoo-local-only.v1.json`, and in the `excluded` list of
+`windows-native-structure.v1.json`), so none of this runs in GitHub Actions.
+
+**Known gap, measured and not closed.** Under the harness that failed 8 of 8 before the fix,
+128 runs at a heavier setting produced ONE failure whose cause was not established; 224
+instrumented runs at the same setting could not reproduce it. Say "the observed shapes are
+closed", never "the watcher cannot false-positive".
 
 ## Pull Request Workflow
 

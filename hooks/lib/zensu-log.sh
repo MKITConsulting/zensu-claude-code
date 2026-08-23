@@ -64,6 +64,20 @@ zensu_state_failure_hint() {
   esac
 }
 
+# A chain terminus is a disclosure point: a gate escape needs no file change to
+# be recorded, so the zero-change spelling is exactly where one would otherwise
+# go unreported. The line goes to stderr, the operator channel every other
+# release message in the Stop enforcer already uses, so a caller parsing this
+# verb's stdout is unaffected.
+zensu_render_terminus_bypasses() {
+  local session="${1:-}" rendered
+  [ -n "$session" ] || return 0
+  command -v zensu_bypass_display >/dev/null 2>&1 || return 0
+  rendered="$(zensu_bypass_display "$(tdd_state_file "$session" 2>/dev/null)")"
+  [ -n "$rendered" ] && echo "Gates bypassed during this session: $rendered" >&2
+  return 0
+}
+
 case "${1:-}" in
   --session-key)
     session_val="$(zensu_resolve_session_id)" || {
@@ -184,7 +198,13 @@ case "${1:-}" in
       exit 2
     fi
     source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
-    bypass_list="$(tdd_bypasses "$(tdd_state_file "$session_val")")"
+    bypass_rc=0
+    bypass_list="$(zensu_bypass_display "$(tdd_state_file "$session_val")" text)" || bypass_rc=$?
+    if [ "$bypass_rc" -ne 0 ]; then
+      echo "$bypass_list"
+      zensu_state_failure_hint --bypass-list "$session_val" >&2
+      exit 3
+    fi
     if [ -n "$bypass_list" ]; then
       echo "$bypass_list"
     else
@@ -488,7 +508,7 @@ case "${1:-}" in
           echo "zensu-log.sh --tdd-begin: current-session workflow storage is unsafe" >&2
           exit 1
         }
-        outgoing_bypasses="$(tdd_bypasses "$begin_state_file" 2>/dev/null)"
+        outgoing_bypasses="$(zensu_bypass_display "$begin_state_file")"
         # Mode precedence, resolved ONCE here and then frozen into this chain
         # generation's `vanilla` flag:
         #   1. the session override /zensu:tdd-mode recorded for this session
@@ -1175,6 +1195,7 @@ case "${1:-}" in
               }
             fi
           fi
+          zensu_render_terminus_bypasses "$session_val"
           exit 0
         fi
         [ -n "$autopilot_run_val" ] && [ -n "$autopilot_attempt_val" ] && [ -n "$chain_id_val" ] || {
@@ -1207,7 +1228,9 @@ case "${1:-}" in
         autopilot_finish_tdd_attempt "$done_run" "$done_event_id" \
           "${CLAUDE_PROJECT_DIR:-.}" "$session_val" "$done_attempt" "$done_chain" \
           "$done_outcome" "$claimed_ticket_seen" "$claimed_ticket_val"
-        exit $?
+        chain_done_rc=$?
+        [ "$chain_done_rc" -eq 0 ] && zensu_render_terminus_bypasses "$session_val"
+        exit "$chain_done_rc"
         ;;
       --code-review-done)
         if [ "$claimed_ticket_seen" = "true" ]; then
@@ -1229,10 +1252,13 @@ case "${1:-}" in
       --workflow-end)   tdd_set_flag "$session_val" workflowActive false ;;
       --tdd-reset)
         reset_state="$(tdd_state_file "$session_val")"
+        reset_bypasses="$(zensu_bypass_display "$reset_state")"
+        reset_rc=0
         reset_ctx='{}'
         if [ -e "$reset_state" ] || [ -L "$reset_state" ]; then
           reset_ctx="$(tdd_autopilot_context "$reset_state" "$session_val" 2>/dev/null)" || {
             echo "zensu-log.sh --tdd-reset: corrupt or incomplete Autopilot linkage" >&2
+            [ -n "$reset_bypasses" ] && echo "previous-run bypasses preserved: $reset_bypasses" >&2
             exit 1
           }
         fi
@@ -1243,18 +1269,27 @@ case "${1:-}" in
               process.stdout.write([c.runId,c.attempt,c.chainId].join("\t"));
             }
             catch (_) { process.exit(3); }
-          ' 2>/dev/null)" || exit 1
+          ' 2>/dev/null)" || {
+            [ -n "$reset_bypasses" ] && echo "previous-run bypasses preserved: $reset_bypasses" >&2
+            exit 1
+          }
           IFS=$'\t' read -r reset_run reset_attempt reset_chain <<<"$reset_fields"
           source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
           if ! autopilot_reset_inner "$reset_run" "${CLAUDE_PROJECT_DIR:-.}" "$session_val" \
               "$reset_attempt" "$reset_chain"; then
             echo "zensu-log.sh --tdd-reset: an active or resumable durable outer run owns this chain" >&2
+            [ -n "$reset_bypasses" ] && echo "previous-run bypasses preserved: $reset_bypasses" >&2
             exit 1
           fi
           reset_rc=0
         else
           tdd_reset_pending_review_claim "$session_val"
           reset_rc=$?
+        fi
+        if [ "$reset_rc" -eq 0 ]; then
+          [ -n "$reset_bypasses" ] && echo "previous-run bypasses (cleared now): $reset_bypasses"
+        else
+          [ -n "$reset_bypasses" ] && echo "previous-run bypasses preserved: $reset_bypasses" >&2
         fi
         exit "$reset_rc"
         ;;
