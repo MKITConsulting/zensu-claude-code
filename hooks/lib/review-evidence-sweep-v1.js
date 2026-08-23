@@ -36,6 +36,11 @@ const {
   leaseRecordIsOwned,
 } = lease;
 
+// The ONE value `readLeaseEntry`'s `mode` option accepts. It exists so the win32
+// branch — where O_NOFOLLOW is unavailable — is reachable from a POSIX host, and it
+// is a STRING on purpose: compared, never OR-ed, so no caller can widen the open.
+const LSTAT_PRECHECK_MODE = 'lstat-precheck';
+
 // The one spelling of "private enough to be a rename destination". Platform-gated
 // exactly as ensurePrivateDirectory's own pair is: win32 has no comparable mode or
 // uid semantics here, so the check is skipped there rather than guessed at.
@@ -135,8 +140,14 @@ function asideIsSafe(base, segments, modeChecked) {
 // closes; nothing available here can.
 function readLeaseEntry(file, options) {
   const settings = options || {};
-  const noFollow = Object.prototype.hasOwnProperty.call(settings, 'noFollow')
-    ? settings.noFollow
+  // A MODE, never a flag mask. `options.mode` is COMPARED against the one accepted
+  // string and never OR-ed into the open, so a caller can only take the STRICTER
+  // path — the win32 branch, where O_NOFOLLOW does not exist — and can never widen
+  // it. Taking a caller-supplied number verbatim let `O_CREAT` through, which would
+  // make this reader CREATE the file it reports unreadable. The repo already pins
+  // exactly this shape for plan-payload-v1.js's reader; this is the same rule.
+  const noFollow = settings.mode === LSTAT_PRECHECK_MODE
+    ? 0
     : (process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
       ? fs.constants.O_NOFOLLOW : 0);
   const maxBytes = Number.isInteger(settings.maxBytes) ? settings.maxBytes : MAX_RECORD_BYTES;
@@ -180,6 +191,18 @@ function moveAside(sourceFile, targetFile) {
   } catch (error) {
     return error && error.code === 'ENOENT' ? 'gone' : 'failed';
   }
+  // The source EXISTS at this point — the lstat above proved it — so an ENOENT from
+  // either move primitive is ambiguous between a source that vanished under us and a
+  // destination that did. Both arms re-check the source to decide, rather than only
+  // the regular-file one.
+  const goneOrFailed = () => {
+    try {
+      fs.lstatSync(sourceFile);
+      return 'failed';
+    } catch {
+      return 'gone';
+    }
+  };
   if (sourceStat.isSymbolicLink()) {
     // MEASURED, not assumed: linkSync FOLLOWS a symlink on at least macOS, which
     // would hard-link the link's TARGET — possibly a file outside this store —
@@ -197,23 +220,14 @@ function moveAside(sourceFile, targetFile) {
       fs.renameSync(sourceFile, targetFile);
       return 'moved';
     } catch (error) {
-      return error && error.code === 'ENOENT' ? 'gone' : 'failed';
+      return error && error.code === 'ENOENT' ? goneOrFailed() : 'failed';
     }
   }
   try {
     fs.linkSync(sourceFile, targetFile);
   } catch (error) {
     if (error && error.code === 'EEXIST') return 'collision';
-    if (error && error.code === 'ENOENT') {
-      // Ambiguous on its own: either the source vanished under us or the destination
-      // directory did. The source is the one that decides 'gone'.
-      try {
-        fs.lstatSync(sourceFile);
-        return 'failed';
-      } catch {
-        return 'gone';
-      }
-    }
+    if (error && error.code === 'ENOENT') return goneOrFailed();
     return 'failed';
   }
   try {
@@ -301,10 +315,18 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
   // do. Listing every entry as `failed` here would name leases the keep-branch would
   // have left alone, and the reporter would print two contradictory warnings about
   // the same sweep.
-  const destination = asideIsSafe(pluginData, asideSegments, ['superseded']);
-  if (!destination.ok) {
-    return { discarded: 0, failed: [], unsafe: 'destination', unsafeAt: destination.at };
-  }
+  // The destination chain is created and validated LAZILY, on the first entry that
+  // actually needs moving. Running it up front materialized superseded/<key> for a
+  // session whose leases are all valid — the same "create nothing for a session that
+  // needs nothing" property the no-lease pre-check exists for, one case wider — and
+  // let a run that moved nothing still report a destination WARNING.
+  let destinationReady = false;
+  const ensureDestination = () => {
+    if (destinationReady) return { ok: true, at: '' };
+    const verdict = asideIsSafe(pluginData, asideSegments, ['superseded']);
+    destinationReady = verdict.ok;
+    return verdict;
+  };
   for (const name of entries.sort()) {
     // EVERY entry listRecords would reject, not only the `.json` ones: it fails the
     // whole set on an unexpected name, so a leftover `.tmp` from a killed lease write
@@ -361,6 +383,13 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
     // same-uid access at all. So: bounded by a same-uid attacker on a store whose
     // ancestors are private, unbounded on one where they are not, and never closed
     // either way.
+    const destination = ensureDestination();
+    if (!destination.ok) {
+      // `unsafe` carries the whole diagnosis, exactly as the source-unsafe returns
+      // do. Listing every entry as `failed` here would name leases the keep-branch
+      // would have left alone.
+      return { discarded, failed, unsafe: 'destination', unsafeAt: destination.at };
+    }
     const outcome = moveAside(file, path.join(asideDirectory, name));
     if (outcome === 'moved') {
       discarded += 1;
@@ -379,7 +408,7 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
   // scope: the two would be two spellings of one fact, and the "unknown scope" arm a
   // caller wrote for the boolean could never be reached. `unsafeAt` names the
   // offending component when there is one.
-  if (!destinationStillSafe(asideDirectory)) {
+  if (destinationReady && !destinationStillSafe(asideDirectory)) {
     return { discarded, failed, unsafe: 'destination', unsafeAt: asideDirectory };
   }
   return { discarded, failed, unsafe: '', unsafeAt: '' };
@@ -427,8 +456,30 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
       { pluginData, sessionKey: key },
       () => sweepUnderLock(pluginData, key, executingPluginRoot),
     );
-  } catch {
-    return { discarded: 0, failed: [], unsafe: 'source', unsafeAt: '' };
+  } catch (error) {
+    // Distinguish the two throws this catch can see. The owner's storage()
+    // constructor refuses a store whose SHAPE is wrong; withLock itself refuses
+    // when the lock is held or abandoned. Collapsing both into 'source' sent the
+    // operator to inspect a records directory that was fine, and discarded the
+    // owner's own remedy sentence — the two have different causes and different
+    // fixes, so they get different scopes.
+    const message = error && error.message ? String(error.message) : '';
+    if (/lock is busy or abandoned/i.test(message)) {
+      return { discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '' };
+    }
+    // Re-probe the records directory so a shape refusal can still NAME the
+    // component. storage() throws before sweepUnderLock's own guard can run, so
+    // without this the four source returns that collect unsafeAt are unreachable
+    // through this entry point and the report prints its generic text.
+    let unsafeAt = '';
+    try {
+      const stat = fs.lstatSync(recordsDirectory);
+      if (stat.isSymbolicLink() || !stat.isDirectory()
+        || fs.realpathSync.native(recordsDirectory) !== recordsDirectory) {
+        unsafeAt = recordsDirectory;
+      }
+    } catch { /* leave it unnamed rather than guess */ }
+    return { discarded: 0, failed: [], unsafe: 'source', unsafeAt };
   }
 }
 
@@ -442,4 +493,5 @@ module.exports = {
   // Re-exported so a caller that already has this module does not need the owner too
   // just to spell the store's id shape in a message.
   LEASE_ID_RE,
+  LSTAT_PRECHECK_MODE,
 };

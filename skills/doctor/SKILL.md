@@ -209,8 +209,10 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   so a single lease minted before the update makes every later review-evidence
   operation fail for the rest of that session, with no row explaining it. If a
   user reports that reviews stopped working shortly after a plugin update while
-  everything else still runs, name this as the likely cause; the remedy is a fresh
-  session.
+  everything else still runs, name this as the likely cause. The remedy is
+  `/zensu:adopt-session --confirm`: on an `already-served` record that re-runs the
+  lease sweep as an idempotent in-place repair and re-mints nothing. A fresh session
+  is the fallback, for the refusals that have no in-place exit.
 - **⚠️ chain: wedged chain(s)** → a review chain reached a shape no supported
   command can advance. Report it and name `/zensu:recover-chain`, which must be
   run **from the session that owns that chain** (the row prints its truncated

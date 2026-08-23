@@ -523,8 +523,15 @@ version-shape rule are unchecked:
   cycles (that module requires the binder, which requires this core), so the SWEEP
   moved instead, into `hooks/lib/review-evidence-sweep-v1.js`, where requiring the
   owner is acyclic. `review-evidence-lease-v1.js` now exports `LEASE_ID_RE`,
-  `MAX_RECORD_BYTES`, `REVIEW_EVIDENCE_SEGMENTS`, `ensurePrivateDirectory` and a
-  `leaseRecordIsOwned` predicate, and the sweep consumes all five.
+  `MAX_RECORD_BYTES`, `REVIEW_EVIDENCE_SEGMENTS`, a `leaseRecordIsOwned` predicate
+  and `withLock`, and the sweep consumes those five.
+
+  **One copy deliberately SURVIVES, and claiming otherwise was the overstatement
+  review caught.** `privateEnough` in the sweep reproduces `ensurePrivateDirectory`'s
+  mode/uid pair verbatim, because the two do different things with the same
+  predicate: the owner REPAIRS with a chmod, this one may only LOOK. It is a
+  read-only twin, not a removed copy — do not "align" them, and do not read "the
+  copies are gone" as covering it.
 
   **The stated cost was paid, not avoided:** the sweep is an EIGHTH host obligation
   now, not part of the cross-host core half. `adoptContext` no longer sweeps at all
@@ -542,20 +549,25 @@ version-shape rule are unchecked:
   exported constant both sides read — but it is not closed.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
-`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
-plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. Note that
+`executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
+the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
+host obligation enumerated below. Note that
 `adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
 so a port that takes only the core delta (the condition gone) while its own entry
 script still requires and host-path-renders a project-dir variable still exits
 before printing any report, which is the same wedge in a different place. The two
 halves move together. The host
-half is SEVEN separate obligations, and a port that takes only the core delta gets
+half is EIGHT separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
-deny scope at every gate that denies in this state, the skill, and — easy to miss
+deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining. A port that copies only
+records directory through it and never by hand-joining, and EIGHTH the sweep itself
+(`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
+entry point's call to it) — a port that skips it re-mints the record and leaves every
+superseded lease wedging the store. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
@@ -567,11 +579,15 @@ revision. An uncommitted change under `hooks/` or `skills/` is therefore reporte
 GREEN against the previous commit, which is not a hypothetical: a real regression in
 `discardSupersededLeases` shipped that way for a full review round, because every
 measurement of it had been taken before the commit that carried it. Test-file edits
-DO take effect immediately, and SIX rows read the working tree — the
-`zensu-doctor-invocation` and `session-control-lineage` unit drivers, the
-`LEASE_ID_RE` and `MAX_RECORD_BYTES` hand-copy pins (hoisted to the front of the
-file so a Windows timeout cannot drop them), the lease-gap grep, and AC-013
-— each labelled in place. Getting that count wrong is its own hazard, in the
+DO take effect immediately, and SEVERAL rows read the working tree — the four unit
+drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep and
+the adoption report), the three seam pins hoisted to the front of the file so a
+Windows timeout cannot drop them, the committed-tree check beside them, the
+lease-gap grep, and AC-013 — each labelled `WORKING TREE, not HEAD` in place. The
+count is deliberately NOT written out, matching the rule the suite states about
+itself: a hand-maintained number is exactly what a driven loop cannot catch when a
+row is removed, and the two hand-copy pins this enumeration used to name were
+themselves deleted when the seam was taken. Getting that set wrong is its own hazard, in the
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 

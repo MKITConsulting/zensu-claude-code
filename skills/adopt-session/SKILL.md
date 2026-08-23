@@ -46,7 +46,11 @@ different states with different remedies, and it will refuse.
 
 ## Do NOT Use For
 
-- A session that is binding normally. If tools fail for another reason, that is
+- A session that is binding normally — with ONE exception, which is the whole
+  reason the repair branch exists: if review-evidence operations started failing
+  after a plugin update, the record is fine and the LEASE STORE is wedged. That
+  session binds normally and is still the right caller; run the `--confirm` form and
+  it re-runs the sweep as an idempotent repair. For any other failure, that is
   `/zensu:doctor`.
 - Clearing a review chain or granting a budget. The chain state survives adoption
   untouched and is enforced again on the very next Stop.
@@ -170,11 +174,13 @@ surfaced rather than summarized away:
   takeover happened but was not written into the history;
 - a non-zero `leases set aside` means evidence reservations were dropped and
   have to be gathered again;
-- a non-zero `leases stuck` is the serious one — those leases still name the
-  previous installation, and because every lease read validates the whole set,
-  review-evidence operations keep failing for this session until they are moved
-  out of the records directory by hand. The adoption itself is complete; say
-  both things;
+- a non-zero `leases stuck` is the serious one — those entries could NOT be moved
+  out of the records directory, and because every lease read validates the whole
+  set, review-evidence operations keep failing for this session until they are
+  moved by hand. Do NOT assert why: an entry lands there when the move collided
+  with a file already set aside, when the link or the unlink half failed, or on an
+  ordinary I/O error. Relay the rendered warning, which names the collision case
+  first. The adoption itself is complete; say both things;
 - any `WARNING:` line about the review-evidence lease store. Report it verbatim
   and tell the user to look at the named directory before running the adoption
   again — never fold it into a summary. Do NOT assert a cause: the same verdict is
@@ -182,7 +188,9 @@ surfaced rather than summarized away:
   tamper signal, and by an ordinary I/O failure such as a full or read-only store.
   The command cannot tell those apart, so neither can you.
 
-Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
+Exit codes: `0` on a successful report, adoption, or in-place lease repair — the
+repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather than
+`ADOPTED`; a repair whose sweep was refused or left leases stuck exits `1`. `1` on a refusal or a
 precondition failure, `2` on a bad argument. A non-zero exit is not a broken
 command — read the message.
 

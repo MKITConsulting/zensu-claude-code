@@ -186,3 +186,62 @@ test('S3 the already-served remedy no longer claims there is nothing to do', () 
   const text = REMEDY[core.ADOPTION_REFUSALS.ALREADY_SERVED];
   assert.ok(text.includes('--confirm'), 'the remedy names the repair that is available');
 });
+
+// ── F1 / CRITICAL: the repair swept against the wrong root ──────────────────
+// `already-served` does NOT mean the record names the executing installation.
+// servesRecordedRuntime is true on the equality fast path AND on the
+// lineage-relaxed sibling arm, so under a compatible upgrade the recorded root
+// (0.18.1) and the executing root (0.18.2) differ. Leases carry the EXECUTING
+// root, so sweeping against the recorded one inverts the selector: the stale
+// entries that wedge listRecords are kept and the live ones are moved aside.
+// Four reviewers found this independently.
+
+test('F1 the repair sweeps against the EXECUTING root, never the recorded one', () => {
+  const { repairSweepRoot } = report();
+  const request = {
+    executingPluginRoot: '/cache/zensu/zensu/0.18.2',
+    pluginData: '/data',
+    sessionId: 'sid',
+    recordsDir: '/data/session-control/v1/records',
+  };
+  assert.equal(repairSweepRoot(request), '/cache/zensu/zensu/0.18.2');
+  // The discrimination: a recorded root that differs must NOT be what comes back.
+  assert.notEqual(repairSweepRoot(request), '/cache/zensu/zensu/0.18.1');
+});
+
+test('F1 the repair headline is chosen from the verdict, not printed unconditionally', () => {
+  const { repairHeadline } = report();
+  assert.match(repairHeadline({ discarded: 2, failed: [], unsafe: '' }), /repaired/);
+  assert.match(repairHeadline({ discarded: 0, failed: [], unsafe: '' }), /nothing to repair/i);
+  // A refused sweep and a stuck lease are NOT repairs.
+  assert.match(repairHeadline({ discarded: 0, failed: [], unsafe: 'source' }), /NOT repaired/);
+  assert.match(repairHeadline({ discarded: 1, failed: ['a.json'], unsafe: '' }), /NOT repaired/);
+});
+
+test('F1 a refused or partial repair exits non-zero', () => {
+  const { repairExitCode } = report();
+  assert.equal(repairExitCode({ discarded: 2, failed: [], unsafe: '' }), 0);
+  assert.equal(repairExitCode({ discarded: 0, failed: [], unsafe: '' }), 0);
+  assert.equal(repairExitCode({ discarded: 0, failed: [], unsafe: 'source' }), 1);
+  assert.equal(repairExitCode({ discarded: 0, failed: [], unsafe: 'destination' }), 1);
+  assert.equal(repairExitCode({ discarded: 1, failed: ['a.json'], unsafe: '' }), 1);
+});
+
+test('F1 the refused component is rendered for a source refusal too', () => {
+  // The four source returns collect unsafeAt and the report threw it away,
+  // rendering it only in the destination arm.
+  const { renderLeaseWarnings } = report();
+  const source = renderLeaseWarnings({ discarded: 0, failed: [], unsafe: 'source', unsafeAt: '/data/review-evidence/v1/records/scv1_x' });
+  assert.ok(source.includes('/data/review-evidence/v1/records/scv1_x'),
+    'a source refusal names the component it refused');
+  const destination = renderLeaseWarnings({ discarded: 0, failed: [], unsafe: 'destination', unsafeAt: '/data/review-evidence/v1/superseded' });
+  assert.ok(destination.includes('/data/review-evidence/v1/superseded'));
+});
+
+test('F1 a busy lock is not reported as an unsafe records directory', () => {
+  const { renderLeaseWarnings } = report();
+  const locked = renderLeaseWarnings({ discarded: 0, failed: [], unsafe: 'locked', unsafeAt: '' });
+  assert.match(locked, /lock/i, 'the lock case says so');
+  assert.equal(/not a plain directory you own/.test(locked), false,
+    'it must not claim the two store-shape causes');
+});

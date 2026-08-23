@@ -991,10 +991,10 @@ fi
 # test-*.sh, so an undriven *.test.js never executes anywhere.
 SWEEP_UNIT="$ROOT/tests/structure/session-control-lease-sweep.test.js"
 if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/sweep-unit.out" 20; then
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" 30; then
   check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
 else
-  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 20 registered — driven from here)" FAIL
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 30 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/sweep-unit.out" 2>/dev/null | head -40
 fi
@@ -1005,10 +1005,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 10; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 18; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 10 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 18 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
@@ -2100,9 +2100,9 @@ if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" PASS
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" PASS
 else
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" FAIL
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" FAIL
   # Name the two strings that had to match. Every failure of this check so far was
   # a path-SPELLING mismatch invisible from a POSIX host, and each round cost a
   # full CI cycle to identify. Printing them turns the next one into a read.
@@ -2189,7 +2189,7 @@ fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.str
   # Driven through a COLLISION, which is now the shape that produces it: the move is
   # a link/unlink pair, so an entry already sitting in the superseded directory is
   # refused rather than overwritten.
-  REPAIR_STUCK_ID="rel1_$(printf 'a%.0s' $(seq 1 32))"
+  REPAIR_STUCK_ID="rel1_$(printf 'd%.0s' $(seq 1 32))"
   node -e '
 const fs = require("node:fs");
 const path = require("node:path");

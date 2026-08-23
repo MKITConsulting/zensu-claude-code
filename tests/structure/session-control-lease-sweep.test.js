@@ -459,3 +459,56 @@ test('S4 the size cap the reader uses is the owner\'s, not a test-only one', () 
   assert.notEqual(sweep().readLeaseEntry(file), null, 'an ordinary lease is under the cap');
   assert.equal(lease.MAX_RECORD_BYTES, 8 * 1024 * 1024);
 });
+
+// ── F2: the fix round for the consolidated review ───────────────────────────
+
+test('F2 the read seam is a MODE, not a flag mask a caller can widen', () => {
+  // The repo already pins this shape for plan-payload-v1.js: a caller may take the
+  // STRICTER path, never widen the open. Taking settings.noFollow verbatim and
+  // OR-ing it into openSync let a caller inject O_CREAT, so the reader would CREATE
+  // the file it reports unreadable.
+  const pluginData = tempRoot();
+  const target = seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const absent = path.join(recordsDir(pluginData), `rel1_${'7'.repeat(32)}.json`);
+
+  assert.equal(typeof sweep().LSTAT_PRECHECK_MODE, 'string');
+  // The documented seam still reaches the win32 branch.
+  assert.notEqual(sweep().readLeaseEntry(target, { mode: sweep().LSTAT_PRECHECK_MODE }), null);
+  // A mask cannot get in: passing O_CREAT must neither widen the open nor create.
+  assert.equal(sweep().readLeaseEntry(absent, { mode: fs.constants.O_CREAT }), null);
+  assert.equal(fs.existsSync(absent), false, 'the reader must never create the file it reads');
+});
+
+test('F2 a store whose leases are all owned creates no superseded leaf', () => {
+  // The S9 property was incomplete: asideIsSafe ran for any non-empty store, before
+  // the keep/move loop, so a session whose leases are ALL valid still had the
+  // destination chain materialized.
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.deepEqual(result, { discarded: 0, failed: [], unsafe: '', unsafeAt: '' });
+  assert.equal(fs.existsSync(asideDir(pluginData)), false,
+    'nothing needed moving, so nothing may be created');
+});
+
+test('F2 the symlink arm distinguishes a vanished source from a vanished destination', () => {
+  if (process.platform === 'win32') return;
+  const root = tempRoot();
+  const from = path.join(root, 'from');
+  fs.mkdirSync(from, { mode: 0o700 });
+  fs.symlinkSync(path.join(root, 'nowhere'), path.join(from, 'link.json'));
+  assert.equal(fs.lstatSync(path.join(from, 'link.json')).isSymbolicLink(), true);
+  // The source EXISTS (it is a dangling link, which lstat still sees), so an ENOENT
+  // from the rename is the DESTINATION's, and that is 'failed', not 'gone'.
+  assert.equal(
+    sweep().moveAside(path.join(from, 'link.json'), path.join(root, 'absent-dir', 'link.json')),
+    'failed',
+  );
+});
+
+test('F2 a busy lock answers its own scope, not a store-shape refusal', () => {
+  const source = fs.readFileSync(SWEEP_FILE, 'utf8');
+  assert.ok(/unsafe: 'locked'/.test(source), 'the lock failure has its own scope');
+  assert.equal(/catch \{\s*\n\s*return \{ discarded: 0, failed: \[\], unsafe: 'source', unsafeAt: '' \};/.test(source), false,
+    'the bare catch that discarded the error is gone');
+});

@@ -34,7 +34,13 @@
 #     not already own. State it this way and not as "every location is derived
 #     from the record": that is the stronger claim, and it is not what the code
 #     enforces.
-#   - It refuses unless every adoptableRecord condition holds.
+#   - The record and history writes require every adoptableRecord condition to
+#     hold. There is exactly ONE bounded exception, and it is stated here because
+#     this header is what the recognizer's admission rests on: with `--confirm`, an
+#     `already-served` refusal re-runs write class 3 — the lease sweep — as an
+#     idempotent repair. It re-mints nothing and touches nothing outside
+#     <plugin_data>/review-evidence/v1/{records,superseded}/<session key>. Without
+#     `--confirm` that refusal is read-only like every other.
 #   - It cannot reach project source files, cannot run a build or a test, and
 #     takes no argument other than the single literal `--confirm`.
 #   - Without `--confirm` it is strictly read-only and answers the same question
@@ -85,6 +91,18 @@ REPORT="$DIR/session-adopt-report-v1.js"
 SWEEP="$DIR/review-evidence-sweep-v1.js"
 [ -f "$SWEEP" ] && [ ! -L "$SWEEP" ] || {
   printf '%s\n' 'zensu:adopt-session: the review-evidence sweep module is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+# The lease-store OWNER, which the sweep requires. It is new to this command's load
+# graph — before the seam the core hand-copied its constants precisely to avoid the
+# require cycle — and it is the module that decides WHICH leases move
+# (leaseRecordIsOwned) and that creates and chmods the store (ensurePrivateDirectory,
+# storage). Leaving it unguarded while its four siblings are guarded would mean the
+# one command still reachable in a tamper-suspicious state loads its move selector
+# from a file nothing checked.
+LEASE="$DIR/review-evidence-lease-v1.js"
+[ -f "$LEASE" ] && [ ! -L "$LEASE" ] || {
+  printf '%s\n' 'zensu:adopt-session: the review-evidence lease module is missing or symlinked; repair the Zensu plugin installation' >&2
   exit 1
 }
 

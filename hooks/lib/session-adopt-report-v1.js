@@ -130,6 +130,42 @@ const leasesScope = (leases) => {
 //
 // A report-only run stays strictly read-only. That is not a nicety — it is what the
 // PreToolUse recognizer's justification for admitting this command rests on.
+// The root the repair sweeps against: the EXECUTING installation, never the one
+// the record names.
+//
+// `already-served` does NOT mean the record names this installation.
+// servesRecordedRuntime is true on the equality fast path AND on the
+// lineage-relaxed sibling arm, so after a compatible upgrade the recorded root
+// and the executing root are different directories. Leases are minted with the
+// EXECUTING root (review-evidence-lease-v1.js writes binding.pluginRoot, and the
+// binder answers executedPluginRoot), and the lease reader compares against that
+// same value. Sweeping against the recorded root therefore INVERTED the selector:
+// the stale entries wedging listRecords were kept and the live ones set aside,
+// and the report printed a clean repair over it.
+//
+// The value is already canonical: zensu-session-adopt.sh renders it through
+// zensu-host-path.sh, which resolves with `cd -P && pwd -P`. That is the same
+// spelling adoptContext puts into a re-minted record.
+const repairSweepRoot = (request) => request.executingPluginRoot;
+
+// The headline is CHOSEN from the sweep verdict. It used to be printed before the
+// verdict was consulted, so a refused sweep still announced a repair.
+const repairHeadline = (repaired) => {
+  if (leasesScope(repaired) || (repaired.failed && repaired.failed.length > 0)) {
+    return "Zensu session adoption — ALREADY SERVED (lease store NOT repaired)";
+  }
+  if (!repaired.discarded) {
+    return "Zensu session adoption — ALREADY SERVED (nothing to repair)";
+  }
+  return "Zensu session adoption — ALREADY SERVED (lease store repaired)";
+};
+
+// A refused or partial sweep is a failure, and the exit code has to say so: the
+// branch returned without touching process.exitCode, so it exited 0 on a refusal
+// while the skill's own contract reserves 0 for a successful report or adoption.
+const repairExitCode = (repaired) =>
+  (leasesScope(repaired) || (repaired.failed && repaired.failed.length > 0) ? 1 : 0);
+
 const shouldRepairInPlace = (verdict, confirmed) =>
   !!verdict
   && verdict.ok === false
@@ -185,34 +221,17 @@ function main() {
       // It is idempotent by construction: the sweep only ever moves entries that do
       // NOT name the executing installation, so a store that is already clean yields
       // a zero count and creates nothing.
-      // The executing root comes from the RECORD, not from the verdict: a refusal
-      // carries only `{ ok, reason }` — reading `verdict.context` here threw
-      // "Cannot read properties of undefined", which an end-to-end row caught and
-      // the predicate-level unit test could not. And not from the environment
-      // either: the sweep compares this value against each lease's recorded
-      // plugin_root, so it has to be the same canonical spelling the record holds.
-      // "Already served" is precisely the statement that the record names this
-      // installation.
-      let servedRoot;
-      try {
-        servedRoot = core.readContext({
-          recordsDir: request.recordsDir,
-          sessionId: request.sessionId,
-          expectedHost: "claude",
-        }).plugin_root;
-      } catch (error) {
-        process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
-        process.stdout.write("The record says this installation already serves it, but it could not be re-read to\n");
-        process.stdout.write("sweep the lease store: " + safe(error && error.message ? error.message : "unknown") + "\n");
-        process.exitCode = 1;
-        return;
-      }
+      // The sweep root is the EXECUTING installation — see repairSweepRoot for why
+      // the recorded one inverted the selector on exactly the upgrade this branch
+      // serves.
       const repaired = sweepLeases.discardSupersededLeases(
         request.pluginData,
         core.sessionKey(request.sessionId),
-        servedRoot,
+        repairSweepRoot(request),
       );
-      process.stdout.write("Zensu session adoption — ALREADY SERVED (lease store repaired)\n\n");
+      // Headline AFTER the verdict, never before it: printing "repaired"
+      // unconditionally made a refused sweep announce a success.
+      process.stdout.write(repairHeadline(repaired) + "\n\n");
       process.stdout.write("  leases set aside : " + repaired.discarded + "\n");
       process.stdout.write("  leases stuck     : " + repaired.failed.length + "\n\n");
       process.stdout.write("This installation already serves the record, so nothing was re-minted. The lease\n");
@@ -223,6 +242,7 @@ function main() {
         process.stdout.write("one — run /zensu:doctor.\n");
       }
       reportLeaseWarnings(repaired);
+      process.exitCode = repairExitCode(repaired);
       return;
     }
     process.stdout.write("Zensu session adoption — NOT adoptable (" + safe(verdict.reason) + ")\n\n");
@@ -251,12 +271,6 @@ function main() {
     core.sessionKey(request.sessionId),
     adopted.context.plugin_root,
   );
-  // WHICH directory the sweep refused, empty when it refused nothing. ONE field: a
-  // parallel boolean would be a second spelling of the same fact.
-  const leasesUnsafeScope = leasesScope(leases);
-  // The component the sweep refused, when it named one. Empty is a legitimate answer
-  // — a lock failure knows the store is unusable without knowing which part of it is.
-  const leasesUnsafeAt = typeof leases.unsafeAt === "string" ? leases.unsafeAt : "";
   process.stdout.write("Zensu session adoption — ADOPTED\n\n");
   process.stdout.write("  record minted by : " + safe(adopted.recorded) + "\n");
   process.stdout.write("  now served by    : " + safe(adopted.executing) + "\n");
@@ -281,58 +295,84 @@ function main() {
 
 // Shared by the ordinary adoption and the in-place lease-store repair, so the two can
 // never drift into telling the user different things about the same sweep result.
-function reportLeaseWarnings(leases) {
+// RENDERS to a string rather than writing, so every arm is drivable from a unit
+// test. It was write-only, which is why three of its branches had never been
+// executed by anything.
+function renderLeaseWarnings(leases) {
+  const out = [];
+  const w = (line) => out.push(line);
   const leasesUnsafeScope = leasesScope(leases);
   // The component the sweep refused, when it named one. Empty is a legitimate answer
   // — a lock failure knows the store is unusable without knowing which part of it is.
   const leasesUnsafeAt = typeof leases.unsafeAt === "string" ? leases.unsafeAt : "";
+  const nameComponent = () => {
+    if (leasesUnsafeAt) {
+      w("The component that was refused is: " + safe(leasesUnsafeAt) + "\n");
+    }
+  };
   if (leases.discarded > 0) {
-    process.stdout.write("\nNOTE: " + leases.discarded + " review-evidence lease(s) were set aside because they name the previous\n");
-    process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
+    w("\nNOTE: " + leases.discarded + " review-evidence lease(s) were set aside because they name the previous\n");
+    w("installation. Any review evidence they reserved has to be gathered again.\n");
   }
   if (leasesUnsafeScope) {
-    // Names the directory that actually failed. Both cases stop the sweep, but they
-    // sit in different places and mean different things: a refused DESTINATION is
-    // the shared superseded/ directory, which the sweep only ever writes to — a
-    // planted link there is an active tamper signal, and pointing the operator at
-    // the records directory the sweep had just read successfully left it
-    // uninvestigated.
-    if (leasesUnsafeScope === "destination") {
-      process.stdout.write("\nWARNING: the review-evidence SUPERSEDED directory could not be opened safely,\n");
+    // Names the directory that actually failed. The three cases stop the sweep for
+    // different reasons and have different remedies: a refused DESTINATION is the
+    // shared superseded/ directory, which the sweep only ever writes to — a planted
+    // link there is an active tamper signal; a refused SOURCE is this session's own
+    // records directory; and a BUSY LOCK is neither, it is ordinary contention.
+    if (leasesUnsafeScope === "locked") {
+      w("\nWARNING: the review-evidence lease store is LOCKED, so no lease was inspected or\n");
+      w("set aside. That is ordinary contention rather than a damaged store: another\n");
+      w("process in this session holds the lock, or one exited without releasing it.\n");
+      w("Nothing here needs repairing by hand. Re-run this command with --confirm once\n");
+      w("that process has finished; if it persists, start a fresh Claude Code session.\n");
+    } else if (leasesUnsafeScope === "destination") {
+      w("\nWARNING: the review-evidence SUPERSEDED directory could not be opened safely,\n");
       // The OFFENDING component, not the leaf. The walk refuses on four different
       // paths — review-evidence, v1, superseded and superseded/<session key> — and
       // naming the leaf for all four sent the operator to a path that cannot exist
       // whenever the refusal was a plain file planted at one of its parents.
       if (leasesUnsafeAt) {
-        process.stdout.write("The component that was refused is: " + safe(leasesUnsafeAt) + "\n");
+        nameComponent();
       } else {
-        process.stdout.write("It is under <plugin_data>/review-evidence/v1/superseded/.\n");
+        w("It is under <plugin_data>/review-evidence/v1/superseded/.\n");
       }
-      process.stdout.write("That subtree is one this plugin only writes to. Two causes produce this: an entry\n");
-      process.stdout.write("there that is not a plain directory you own — which is a tamper signal — or an\n");
-      process.stdout.write("ordinary I/O failure such as a full or read-only store. Inspect it before doing\n");
-      process.stdout.write("anything else. Once the cause is removed, run this command again with\n");
-      process.stdout.write("--confirm: an already-served record re-runs the sweep as an in-place repair.\n");
+      w("That subtree is one this plugin only writes to. Two causes produce this: an entry\n");
+      w("there that is not a plain directory you own — which is a tamper signal — or an\n");
+      w("ordinary I/O failure such as a full or read-only store. Inspect it before doing\n");
+      w("anything else. Once the cause is removed, run this command again with\n");
+      w("--confirm: an already-served record re-runs the sweep as an in-place repair.\n");
     } else {
-      process.stdout.write("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
-      process.stdout.write("opened safely, so no lease was inspected or set aside. Same two causes as above: an\n");
-      process.stdout.write("entry that is not a plain directory you own, or an I/O failure. If any lease there\n");
-      process.stdout.write("names the previous installation, review-evidence operations keep failing until it is\n");
-      process.stdout.write("moved out by hand.\n");
+      w("\nWARNING: the review-evidence lease RECORDS directory of this session could not be\n");
+      // The source arm collects a component name on four of its returns and used to
+      // throw it away, which is the same "named the wrong path" defect the
+      // destination arm was fixed for.
+      nameComponent();
+      w("opened safely, so no lease was inspected or set aside. Same two causes as above: an\n");
+      w("entry that is not a plain directory you own, or an I/O failure. If any lease there\n");
+      w("names the previous installation, review-evidence operations keep failing until it is\n");
+      w("moved out by hand.\n");
     }
   }
   if (leases.failed.length > 0) {
-    process.stdout.write("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: " + leases.failed.map(safe).join(", ") + "\n");
+    w("\nWARNING: " + leases.failed.length + " review-evidence lease(s) could NOT be set aside: " + leases.failed.map(safe).join(", ") + "\n");
     // Do NOT assert which of the several possible causes applies. An entry lands here
     // when the move collided with a file already set aside, when the link or the
     // unlink half failed, or on an ordinary I/O error — naming only "they still name
     // the previous installation" picked one of those and stated it as fact.
-    process.stdout.write("Because every lease read validates the whole set, review-evidence operations will keep\n");
-    process.stdout.write("failing for this session until those entries are moved out of the records directory by\n");
-    process.stdout.write("hand. Check first whether a file of the same name is already sitting in the superseded\n");
-    process.stdout.write("directory: a collision is refused rather than overwritten, so nothing was destroyed.\n");
-    process.stdout.write("The adoption itself is complete.\n");
+    w("Because every lease read validates the whole set, review-evidence operations will keep\n");
+    w("failing for this session until those entries are moved out of the records directory by\n");
+    w("hand. Check first whether a file of the same name is already sitting in the superseded\n");
+    w("directory: a collision is refused rather than overwritten, so nothing was destroyed.\n");
+    w("The adoption itself is complete.\n");
   }
+  return out.join("");
+}
+
+// Shared by the ordinary adoption and the in-place lease-store repair, so the two
+// can never drift into telling the user different things about the same sweep.
+function reportLeaseWarnings(leases) {
+  process.stdout.write(renderLeaseWarnings(leases));
 }
 
 module.exports = {
@@ -341,6 +381,10 @@ module.exports = {
   REMEDY,
   SAFE_DISPLAY,
   leasesScope,
+  renderLeaseWarnings,
+  repairExitCode,
+  repairHeadline,
+  repairSweepRoot,
   reportLeaseWarnings,
   shouldRepairInPlace,
   main,
