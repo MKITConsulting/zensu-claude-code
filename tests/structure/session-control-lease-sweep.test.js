@@ -183,6 +183,22 @@ test('S1 a lease naming the superseded root is set aside, never deleted', () => 
   assert.equal(fs.existsSync(path.join(asideDir(pluginData), `${LEASE_ID}.json`)), true);
 });
 
+test('S9 a session with no lease store has nothing created for it', () => {
+  // SELF-REVIEW FINDING, introduced by taking the owner's lock in S2. withLock runs
+  // storage(), which is a CONSTRUCTOR: it calls ensurePrivateDirectory for the store
+  // root, the records leaf and the locks directory. So every adoption of a session
+  // that never minted a lease was materializing the whole store — and, worse, the
+  // source guard's lstat ENOENT arm became unreachable through the public entry
+  // point, because the directory it tests for absence was created moments earlier by
+  // the lock. The sibling case below is named for that arm and had stopped
+  // exercising it.
+  const pluginData = tempRoot();
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.deepEqual(result, { discarded: 0, failed: [], unsafe: '', unsafeAt: '' });
+  assert.deepEqual(fs.readdirSync(pluginData), [],
+    'a no-lease sweep must create nothing at all');
+});
+
 test('S1 an absent records directory is the clean no-lease case, not a refusal', () => {
   const pluginData = tempRoot();
   assert.deepEqual(

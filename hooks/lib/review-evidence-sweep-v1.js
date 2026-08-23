@@ -403,6 +403,25 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
 // verdict, never as a throw: this runs AFTER the record swap, so an exception here
 // would report failure for an adoption that has already succeeded.
 function discardSupersededLeases(pluginData, key, executingPluginRoot) {
+  const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
+  // UNLOCKED pre-check, and it is not an optimization. `withLock` runs the owner's
+  // storage() CONSTRUCTOR, which ensurePrivateDirectory-creates the store root, this
+  // records leaf and the locks directory. Taking the lock unconditionally therefore
+  // materialized the whole store for every session that had never minted a lease —
+  // and made the source guard's own ENOENT arm unreachable through this entry point,
+  // because the directory it tests for absence had just been created by the lock.
+  //
+  // A store that appears between this check and the lock belongs to a concurrent
+  // writer, and its leases are new rather than superseded, so skipping is the right
+  // answer for that window too.
+  try {
+    fs.lstatSync(recordsDirectory);
+  } catch (error) {
+    if (error && error.code === 'ENOENT') {
+      return { discarded: 0, failed: [], unsafe: '', unsafeAt: '' };
+    }
+    return { discarded: 0, failed: [], unsafe: 'source', unsafeAt: recordsDirectory };
+  }
   try {
     return lease.withLock(
       { pluginData, sessionKey: key },
