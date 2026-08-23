@@ -835,18 +835,47 @@ in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
 `skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
 `docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
 difference is what decides where an edit is owed. All of them state the CONTAINMENT
-rule. The environment variables are named by `writeAnchor`'s header, `writesLines`'
+rule.
+
+**The two env channels are NOT equally authoritative, and only one direction of the
+weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
+as the last resort when no Session Control record exists — its own header says "The
+mutable payload cwd is never a project authority" — while the record's `projectRoot`
+is what it exports as `ZENSU_PROJECT_ROOT`, and that is the value the gate compares.
+For a session started in a subdirectory the ambient variable is therefore the WIDER
+root. `writeAnchor` downgrades `covered` to `null` when containment was measured off
+that channel, and leaves `covered: false` alone: containment in a wider root does not
+imply containment in the narrower one, but NON-containment does. The downgrade travels
+in the field rather than only in the render, so a `--json` consumer is not misled
+either, and `source`/`callerRoot` still report what was measured. A channel is also
+usable only when ABSOLUTE (a relative value would reach `path.resolve` inside
+`canonicalDir` and be resolved against the process cwd — the derivation `W3b` exists
+to forbid, one call further down than `W3b` can see) and the winning value is compared
+VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
+directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
+four. The environment variables are named by `writeAnchor`'s header,
+`writesLines`'
 emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
-header (A, B and C), `writesLines` (B/C), flow 3 (B and C) and `docs/gates.md`
-(C only). `writeAnchorCaution` and the Limits bullet name neither — deliberately,
-because the caution is persisted into a brief a stranger reads and the bullet is a
-one-line index entry. A change to
+header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
+(C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
+into a brief a stranger reads. The Limits bullet withholds only those two things: it
+restates the asymmetry IN FULL, naming both Edit-matcher hook filenames, the
+capability gate and its main-principal exemption, and the containment definition,
+then points at flow 3 for the routing rule. Do not describe it as an index entry —
+an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
+that claim for as long as the bullet really carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
 `projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
 six wrong with both session-trail suites green — they drive `trail.mjs` against its
 own definition and grep the prose for literals. `writeAnchor` holds a HAND-COPY of
 `within` because the parser defines it inside its own function scope and exports
-nothing; it is one more copy of that predicate, held in step by nothing. Do not
+nothing; it is one more copy of that predicate, held in step by nothing. It also
+feeds BOTH operands through `canonicalDir`, whose trailing-separator rule
+(`TRAILING_SEP`, platform-selected, guarded by `path.parse(real).root === real`) is
+NOT a copy of the gate's `stripSlash` but a DIFFERENT rule — forward-slash-only and
+unguarded there. A change to the gate's own canonicalization therefore has no
+recorded re-check site in this file; treat `canonicalDir` as a second, independent
+place where this feature encodes what it believes the gate does. Do not
 trust an ordinal here — an earlier wording said "sixth" and was already wrong,
 because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
 inside a `node -e`. Read the enumeration below, not a count. THREE
@@ -854,7 +883,9 @@ narrowings are deliberate and stated at the copy, and they do NOT share a direct
 only rule (C)'s `isTemp` carve-out errs toward WARNING. The other two err toward
 `allowed`: rule (A) fires on an IN-ANCHOR target — a raw shell overwrite of tracked
 source — which is exactly where this answers `allowed`, and the third realpaths BOTH
-sides while the gate realpaths only its roots and resolves a `cd` operand lexically. That asymmetry is the property to re-check before letting the hand-copy
+sides while the gate realpaths only its roots and resolves a `cd` operand
+lexically. That asymmetry is the property to re-check before letting the
+hand-copy
 drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
 `show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
 STATIC containment sentence, deliberately unmeasured because a brief is read by a

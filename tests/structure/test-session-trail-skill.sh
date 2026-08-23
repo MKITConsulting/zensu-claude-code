@@ -661,7 +661,7 @@ else
   check "T25 --force authorization channel:$FORCE_MISS" FAIL
 fi
 
-# ── T26-T29 — the write-anchor routing rule ─────────────────────────────────
+# ── T26-T30 — the write-anchor routing rule and its carriers ────────────────
 # The skill tells a takeover to work in the target worktree, and the Bash
 # source-write gate refuses to commit there: the session's project root is minted
 # at SessionStart and nothing re-anchors it. Editing and testing still succeed,
@@ -749,12 +749,31 @@ WRITES_MISS=""
 # The shipped reader is env-only — no channel means `unknown — assume denied`,
 # never a cwd guess — which is what W3/W3b pin and what the caveat arm below
 # requires the prose to state.
-WRITES_LABEL="$(sed -n "s/^  if (w\.covered === true) return \['\([A-Z]*\) .*/\1/p" "$TRAIL_MJS" | head -1)"
+# Derived from the RENDERER'S BODY, not from one branch's return spelling. The
+# earlier form matched the literal `  if (w.covered === true) return ['...`, so it
+# pinned the SHAPE of that branch rather than the label: giving `allowed` its
+# necessary-not-sufficient caveat turned the one-liner into a block and the
+# derivation went empty, failing this check on a change that strengthened the
+# render. Anchoring on the body means any branch whose first rendered token is the
+# label supplies it.
+WRITES_LABEL="$(sed -n '/^function writesLines(/,/^}/p' "$TRAIL_MJS" | sed -n "s/.*['\`]\([A-Z][A-Z]*\)   [a-z].*/\1/p" | head -1)"
 # Both quote styles: the `allowed` head is a plain string, the other two are
 # template literals. Matching only one style silently derives a single verb and
 # the loop below then pins a third of the vocabulary.
 WRITES_VERBS="$(sed -n "s/.*[\`']${WRITES_LABEL:-WRITES}   \([a-z]*\).*/\1/p" "$TRAIL_MJS" | sort -u | tr '\n' ' ')"
 WRITES_VERB_COUNT="$(printf '%s\n' $WRITES_VERBS | grep -c .)"
+# One implementation of the verb arm, so T27 and its T27b control cannot diverge.
+#
+# ANCHORED to the line carrying the label, not matched anywhere in flow 3. The
+# unanchored form searched ~35 lines of prose that already use the same English
+# words for a different purpose — flow 3 describes containment with "a worktree
+# *inside* the anchor is writable" and "is the blocked case" — so renaming the
+# renderer's `allowed` to `writable`, or `denied here` to `blocked here`, left two
+# of three arms green against a paragraph documenting neither. T27b is the control
+# that holds this anchoring in place.
+writes_verb_documented() { # <verb>
+  printf '%s\n' "$FLOW3" | grep -F "$WRITES_LABEL" | grep -qF "$1"
+}
 if [ -z "$WRITES_LABEL" ]; then
   WRITES_MISS="$WRITES_MISS [label-not-derivable-from-renderer]"
 elif [ "$WRITES_VERB_COUNT" -lt 3 ]; then
@@ -764,7 +783,7 @@ elif [ "$WRITES_VERB_COUNT" -lt 3 ]; then
 else
   printf '%s\n' "$FLOW3" | grep -qF "$WRITES_LABEL" || WRITES_MISS="$WRITES_MISS [label-$WRITES_LABEL-undocumented]"
   for verb in $WRITES_VERBS; do
-    printf '%s\n' "$FLOW3" | grep -qF "$verb" || WRITES_MISS="$WRITES_MISS [verdict-word-$verb-undocumented]"
+    writes_verb_documented "$verb" || WRITES_MISS="$WRITES_MISS [verdict-word-$verb-undocumented]"
   done
 fi
 printf '%s\n' "$FLOW3" | grep -qF 'ZENSU_PROJECT_ROOT' || WRITES_MISS="$WRITES_MISS [measurement-caveat-missing]"
@@ -776,6 +795,92 @@ if [ -z "$WRITES_MISS" ]; then
   check "T27 flow 3 documents the derived WRITES vocabulary (${WRITES_VERBS}), its measurement caveat and the JSON carrier" PASS
 else
   check "T27 WRITES line documentation:$WRITES_MISS" FAIL
+fi
+
+# T27b — control for T27's verb arms, and the reason they needed one. The arms
+# derive their words from the renderer (right) and then matched them anywhere in
+# flow 3 (wrong): ~35 lines of prose that already use the same English vocabulary
+# for a DIFFERENT purpose. Flow 3 says "a worktree *inside* the anchor is writable"
+# and "is the blocked case" while describing containment, so renaming the
+# renderer's `allowed` to `writable` or `denied here` to `blocked here` left two of
+# three arms green against a paragraph that documents neither.
+#
+# The probes are those two real words. Each must be present in flow 3 (or the
+# control is inert and says so) and must NOT satisfy the arm, because neither sits
+# on the line that carries the label.
+T27B_BAD=""
+for probe in writable blocked; do
+  printf '%s\n' "$FLOW3" | grep -qF "$probe" \
+    || T27B_BAD="$T27B_BAD [$probe-absent-from-flow3-control-inert]"
+  writes_verb_documented "$probe" \
+    && T27B_BAD="$T27B_BAD [$probe-accepted-as-a-documented-verdict-word]"
+done
+if [ -z "$T27B_BAD" ]; then
+  check "T27b a word flow 3 uses for another purpose does not satisfy T27's verdict-word arm" PASS
+else
+  check "T27b verdict-word arm anchoring:$T27B_BAD" FAIL
+fi
+
+# T30 — the maintainer contract must describe the carrier it enumerates. CLAUDE.md's
+# six-carrier paragraph justified `writeAnchorCaution` and the Limits bullet naming
+# neither the rule letters nor the env variables by calling the bullet "a one-line
+# index entry". The shipped bullet is not one: it restates both Edit-matcher hook
+# filenames, the capability gate and its main-principal exemption, the containment
+# definition and the classifier caveat. Being wrong about a carrier is worse than
+# the duplication it describes, because the next reader trusts the enumeration over
+# the file.
+#
+# Tied to the SHIPPED content rather than asserted as a bare literal ban: the claim
+# is only false while the bullet really does carry the hook roster, so the premise
+# arm fails loudly if that stops being true and the pin turns into a stale rule.
+CLAUDE_MD="$PLUGIN_DIR/CLAUDE.md"
+T30_BAD=""
+if [ ! -f "$CLAUDE_MD" ]; then
+  T30_BAD="$T30_BAD claude-md-not-found"
+else
+  LIMITS_BULLET="$(section_of '## Limits of what this can know' | grep -aF 'but not commit it' | head -1)"
+  [ -n "$LIMITS_BULLET" ] || T30_BAD="$T30_BAD limits-bullet-not-located"
+  case "$LIMITS_BULLET" in
+    *pre-edit-tdd-reminder.sh*) ;;
+    *) T30_BAD="$T30_BAD premise-lapsed-bullet-no-longer-names-the-hook-roster" ;;
+  esac
+  # Needled on the RULE, not on one spelling of it: "an index entry", "a single-line
+  # index entry" and "an index bullet" all violate it while none contains the
+  # original literal. Anchored on the COPULA (`is a…`), which is what makes a
+  # sentence a description — CLAUDE.md's own prohibition reads "Do not describe it
+  # AS an index entry", and an `as`-anchored or article-only pattern flags that
+  # sentence too, which is exactly what T30b caught on the first spelling.
+  if [ -z "$T30_BAD" ] && grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' "$CLAUDE_MD"; then
+    T30_BAD="$T30_BAD claude-md-describes-a-multi-clause-bullet-as-an-index-entry"
+  fi
+fi
+if [ -z "$T30_BAD" ]; then
+  check "T30 CLAUDE.md's carrier description matches the Limits bullet that ships" PASS
+else
+  check "T30 carrier description accuracy:$T30_BAD" FAIL
+fi
+
+# T30b — the control T30's negative arm needs, and the one every other negative arm
+# in this file already has. T30 passes by finding NOTHING, so a reworded rule or a
+# broken pattern turns it into an unconditional PASS with no signal. Each control
+# string is a phrasing the rule forbids; the pattern must match all of them, and
+# must spare the compliant sentence CLAUDE.md actually ships.
+T30B_BAD=""
+for probe in "the bullet is a one-line index entry" "it is an index entry" "that row is a single-line index bullet"; do
+  printf '%s\n' "$probe" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
+    || T30B_BAD="$T30B_BAD [missed:$probe]"
+done
+# The second anti-probe deliberately CONTAINS the word `index`: one that does not
+# cannot discriminate, because no pattern ending in `index (entry|bullet)` could ever
+# match it. An earlier spelling used a sentence with no `index` token at all.
+for anti in "Do not describe it as an index entry" "the enumeration must not call it an index entry"; do
+  printf '%s\n' "$anti" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
+    && T30B_BAD="$T30B_BAD [flagged-compliant-sentence:$anti]"
+done
+if [ -z "$T30B_BAD" ]; then
+  check "T30b the carrier-description pattern matches every phrasing probed here and spares the shipped one" PASS
+else
+  check "T30b carrier-description pattern:$T30B_BAD" FAIL
 fi
 
 # T28 — the Limits bullet. The asymmetry is the part that gets rediscovered: a
@@ -852,18 +957,42 @@ for root in targetRoot callerRoot; do
   printf '%s\n' "$TRAIL_CODE" | grep -A24 '^function writesLines(' | grep -qF "flatPath(w.${root})" \
     || CAUTION_MISS="$CAUTION_MISS [writesLines-${root}-unbounded]"
 done
-# And the shared bound is real: `briefPath` must both clip and neutralize
-# backticks, or routing through it buys nothing. Pinned at the definition because
-# every brief path carrier now depends on it.
-printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF 'oneLine(p, 200)' || CAUTION_MISS="$CAUTION_MISS [briefPath-does-not-clip]"
+# And the shared bound is real: `briefPath` must clip, neutralize backticks, and
+# strip the control class, or routing through it buys nothing. Pinned at the
+# definition because every brief path carrier now depends on it.
+#
+# The clip is needled as `oneLine(` plus the 200 budget rather than as the whole
+# call `oneLine(p, 200)`. That earlier spelling pinned the ARGUMENT, not the
+# property: wrapping the argument to add the control strip changed it to
+# `oneLine(String(p …).replace(CONTROL_RUN, " "), 200)`, and the pin then failed on
+# a change that STRENGTHENED the bound it exists to protect. The contract is
+# "clips at 200", which is what these two arms now say.
+# ONE pattern, not two independent needles. Matched separately within the same
+# 3-line window, `oneLine(` and `, 200)` are both satisfied by
+# `oneLine(x, 40).slice(0, 200)` — a body whose clip budget is 40. Binding them
+# into a single expression asserts the budget belongs to the `oneLine` call, while
+# `.*` still allows the argument to be wrapped (which it now is, by CONTROL_RUN).
+printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qE 'oneLine\(.*, 200\)' || CAUTION_MISS="$CAUTION_MISS [briefPath-does-not-clip-at-200]"
+# `.*` is unrestricted and crosses the closing paren, so the arm above still matches
+# `oneLine(x, 40).slice(0, 200)` — same-line adjacency, not budget binding. A second
+# `.slice(` in the body is what that re-clip would look like, and there is no
+# legitimate reason for one here.
+printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF '.slice(' && CAUTION_MISS="$CAUTION_MISS [briefPath-re-clips-after-oneLine]"
+# Control for that arm, which passes by finding nothing: the needle must match a body
+# that DOES re-clip, and the extracted window must be non-empty. Without both, a typo
+# in the needle or a `briefPath` grown past the -A2 window reads as compliance.
+printf '%s\n' "  return oneLine(x, 40).slice(0, 200);" | grep -qF '.slice(' \
+  || CAUTION_MISS="$CAUTION_MISS [re-clip-needle-inert]"
+[ -n "$(printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(')" ] \
+  || CAUTION_MISS="$CAUTION_MISS [briefPath-window-empty]"
 printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF 'replace(/`/g' || CAUTION_MISS="$CAUTION_MISS [briefPath-does-not-neutralize-backticks]"
 # `flatPath` and `briefShellArg` must strip the SAME line-break class. They drifted
 # once: `briefShellArg` justified a narrower class by the markdown fence alone, and
 # then gained two plain-text callers where the narrower class leaves a `\v`/`\f`
 # able to split a runnable line on screen. Derived from `flatPath`, not hardcoded.
 # The class is now a single named const, which is the strongest form of this pin:
-# the two helpers cannot drift because they share one definition. Assert the const
-# exists, that BOTH helpers reference it, and that it still covers LF — an earlier
+# all three helpers cannot drift because they share one definition. Assert the const
+# exists, that EVERY one of them references it, and that it still covers LF — an earlier
 # spelling excluded TAB by writing two ranges and silently dropped LF out of the
 # class with it, un-doing the whole bound.
 CONTROL_CLASS="$(printf '%s\n' "$TRAIL_CODE" | sed -n 's/^const CONTROL_RUN = \(\/\[[^]]*\]+\/g\);$/\1/p' | head -1)"
@@ -871,7 +1000,10 @@ if [ -z "$CONTROL_CLASS" ]; then
   CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-const-not-found]"
 else
   case "$CONTROL_CLASS" in *'u000a'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-LF($CONTROL_CLASS)]" ;; esac
-  for helper in flatPath briefShellArg; do
+  # `briefPath` belongs here too, and its absence was the defect: it bounded with
+  # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
+  # was the only one of the three not covered by the shared class.
+  for helper in flatPath briefShellArg briefPath; do
     printf '%s\n' "$TRAIL_CODE" | grep -A2 "^function ${helper}(" | grep -qF 'CONTROL_RUN' \
       || CAUTION_MISS="$CAUTION_MISS [${helper}-does-not-use-CONTROL_RUN]"
   done
@@ -900,7 +1032,15 @@ fi
 # unbounded, which is why the control below asserts the pattern in BOTH directions.
 # The trailing class after each name is a hand-rolled word boundary: `\b` is a GNU
 # extension, and without it `r.cwd` also matches the innocuous `r.cwdExists`.
-BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch)|r\.app\.instance|r\.live\.(entrypoint|name)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
+# `r.title` and the three `r.app` config fields joined this roster with the same
+# argument the others carry: they come from the SAME third-party stores — another
+# session's registry and the desktop app's `local_*.json` — as `r.app.instance`,
+# which sits one line away from them in `cmdShow` and was already listed.
+# The `s.` spellings are the SAME fields from the SAME store, rendered by
+# `cmdInstances` under a different binding — an `r.`-anchored roster could not see
+# them, which is how three unbounded carriers survived a round that hardened their
+# `cmdShow` twins one line apart.
+BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(instance|model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
 # `oneLine(` and `basename(` are deliberately NOT here: neither swaps a backtick,
 # so exempting them would certify a carrier that still closes a code span — the
 # very property this check asserts two paragraphs above. Nothing in the tree
@@ -929,7 +1069,23 @@ RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . 
 # a renderer added later was invisible to every check — which is how the same leak
 # survived four rounds. `flatPath` is the compliant wrapper here (a plain-text path
 # is compared, not clipped); `briefPath`/`oneLine` also remove a line break.
-PRINT_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|oneLine\(|statusOf\(|ago\('
+# `oneLine\(` is NOT a compliant wrapper here, and admitting it was the structural
+# cause of two separate leaks. This roster is the only check that scans plain-text
+# print carriers for an unbounded third-party value, and `oneLine` collapses
+# `/\s+/` ONLY — JS `\s` excludes ESC, the rest of C0, DEL and C1, which is the
+# class that can overwrite a row the reader already trusted. While `oneLine(` sat
+# in this alternation, every carrier still using it was invisible here: the BRANCH
+# row and the STATUS/CONFIG rows both passed for that reason alone, one line below
+# an OWNER row that had been moved to `flatPath` precisely because of this class.
+# The plain-text bound is `flatPath` (or `briefPath`/`briefShellArg` for a brief);
+# `oneLine` remains correct for prose, which this roster does not cover.
+# `oneLine\(flatPath\(` IS compliant, and the composition is the right one for a
+# PROSE column: `flatPath` removes the control class, then `oneLine` collapses
+# whitespace and clips with an ellipsis. Bare `flatPath(x).slice(0, n)` is correct
+# for an identifier the reader must COMPARE, where collapsing spaces would alter
+# the spelling; for a title or a task line the collapse is what makes the column
+# readable. Both spellings are accepted; a bare `oneLine(` is not.
+PRINT_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|oneLine\(flatPath\('
 raw_print_carriers() {
   grep -F 'print(' | grep -oE '\$\{[^{}]*\}' | grep -E "$BRIEF_TAINTED" | grep -Ev "$PRINT_WRAPPED" || true
 }
@@ -950,6 +1106,28 @@ else
   printf '%s\n' "$GATES_SECTION" | grep -qF 'session-trail' || CAUTION_MISS="$CAUTION_MISS [gates-doc-does-not-route-to-the-skill]"
   printf '%s\n' "$GATES_SECTION" | grep -qF 'does **not** cover a nested worktree' || CAUTION_MISS="$CAUTION_MISS [gates-doc-states-equality-not-containment]"
 fi
+# One POSITIVE control per alternation branch added since the original roster, plus
+# one SHARED wrapped-carrier control — not a two-way pair per branch, because the
+# negative direction cannot be made branch-specific: `${flatPath(` satisfies
+# `PRINT_WRAPPED` before the probe name is ever consulted. The CD block below is
+# genuinely per-branch-per-direction and says so; this one is not, and saying it was
+# is the stale-summary failure this file keeps paying for. Both scans pass by finding
+# NOTHING, so a typo in any branch silently stops covering its carriers — which the
+# roster's own comment records as having already happened once.
+# Routed through `raw_print_carriers`, the same scan the production check uses, so
+# these exercise the emitter keying and the `${...}` extraction rather than a
+# hand-rolled copy of the pattern — the shape this file records having been burned by
+# before. Positive arm per branch (the branch must claim its own carrier); the
+# wrapped-carrier arm is hoisted OUT of the loop, because `${flatPath(` satisfies
+# `PRINT_WRAPPED` without ever reaching the probe name, so running it per branch was
+# one assertion repeated four times rather than four assertions.
+for branch_probe in 's.entrypoint' 'p.at' 'r.compaction.at' 't.subject'; do
+  [ "$(printf '%s\n' "  print(\`\${$branch_probe}\`);" | raw_print_carriers | grep -c .)" = "1" ] \
+    || CAUTION_MISS="$CAUTION_MISS [roster-branch-inert:$branch_probe]"
+done
+[ "$(printf '%s\n' "  print(\`\${flatPath(s.entrypoint)}\`);" | raw_print_carriers | grep -c .)" = "0" ] \
+  || CAUTION_MISS="$CAUTION_MISS [roster-flags-a-bounded-carrier]"
+
 if [ -z "$CAUTION_MISS" ]; then
   check "T29 both briefs carry the bounded containment caution from one accounted-for definition, and docs/gates.md routes the legitimate rule-(C) hit here" PASS
 else

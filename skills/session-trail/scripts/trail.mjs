@@ -90,11 +90,19 @@ function repoContext(startDir) {
 // `path.relative` then resolves against that drive's current directory instead of
 // its root. `path.parse().root` is the portable test; a length check only ever
 // covered POSIX `/`.
+// Platform-selected, because the two hosts disagree about what a separator IS. On
+// win32 both `\` and `/` end a path; on POSIX only `/` does, and a backslash is an
+// ordinary character in a directory name. Stripping it there is not a cosmetic
+// over-reach — it rewrote the anchor: `…/foo\` canonicalized to `…/foo`, which no
+// longer contains its own nested worktree `…/foo\/wt`, so a covered worktree
+// rendered as `denied here` from a deterministic input.
+const TRAILING_SEP = process.platform === 'win32' ? /[\\/]+$/ : /\/+$/;
+
 function canonicalDir(p) {
   const abs = path.resolve(p);
   let real = abs;
   try { real = fs.realpathSync.native(abs); } catch { /* an absent path keeps its lexical spelling */ }
-  return path.parse(real).root === real ? real : real.replace(/[\\/]+$/, '');
+  return path.parse(real).root === real ? real : real.replace(TRAILING_SEP, '');
 }
 
 // The Bash source-write gate compares every write target against the session's
@@ -142,22 +150,76 @@ function canonicalDir(p) {
 // source either: that flag selects which repo to scan, not where this session is
 // anchored.
 //
+// Which is also why a channel is usable only when it carries an ABSOLUTE path,
+// and why the value that wins is carried VERBATIM. Both halves close a way back
+// to the same defect. A RELATIVE value reaches `canonicalDir`, whose first
+// statement is `path.resolve` — so the current-directory derivation this
+// function refuses to make would be reintroduced one call further down, where
+// the structural pin (W3b extracts this function's body and greps it) cannot
+// see it. A relative value is therefore passed over rather than repaired, and
+// the next channel gets its turn. And `.trim()` still decides PRESENCE — a
+// whitespace-only value falls through as before — but it must not rewrite what
+// is compared: a leading or trailing space is legal in a POSIX directory name
+// and the gate receives the untrimmed value, so trimming would compare a
+// different directory than the one that will actually be judged, erring toward
+// `allowed`.
+//
+// Neither channel is AUTHENTICATED. `ZENSU_PROJECT_ROOT` is an ordinary environment
+// variable, so a per-command prefix produces a confident `allowed` for a worktree the
+// gate will still refuse — no privilege is gained, but the line is only as trustworthy
+// as the environment its caller supplied, which is why SKILL.md keeps "the
+// authoritative check is yours" as the operative instruction.
+//
 // The fail-safe direction is DENIED. When no channel resolves, `covered` is null
 // and every renderer presents it as unknown-assume-denied — answering "writable"
 // off a measurement that was never taken is the one wrong answer. In an ordinary
 // subprocess neither variable is normally present, so `unknown` is the expected
 // reading and the routing advice below it is what carries the value.
 function writeAnchor(targetWt) {
-  const fromEnv = [
+  // Absolute-only, and the winner is carried verbatim — see the header above for
+  // why each half is load-bearing. The rationale lives THERE rather than here
+  // because W3b extracts this body and greps it, so naming the rejected
+  // derivation inside the function would trip the pin that proves it is absent.
+  //
+  // A channel that was PRESENT but unusable is reported as `rejected:<name>`, never
+  // collapsed into `unknown`. The two states look identical to a reader otherwise,
+  // and they call for opposite actions: `unknown` means nothing was set, while
+  // `rejected` means the operator set something the comparison cannot use. Both
+  // still yield `covered: null` — the distinction is provenance, not verdict.
+  const candidates = [
     ['env:ZENSU_PROJECT_ROOT', process.env.ZENSU_PROJECT_ROOT],
     ['env:CLAUDE_PROJECT_DIR', process.env.CLAUDE_PROJECT_DIR]
-  ].find(([, v]) => v && String(v).trim());
-  const callerRoot = fromEnv ? String(fromEnv[1]).trim() : null;
-  const source = fromEnv ? fromEnv[0] : 'unknown';
+  ];
+  const present = ([, v]) => Boolean(v) && String(v).trim() !== '';
+  const fromEnv = candidates.find(([, v]) => present([, v]) && path.isAbsolute(String(v)));
+  // KNOWN LIMIT, stated rather than implied: `rejected` reaches the reader only when
+  // NO channel resolved, because `source` is its single consumer and a winner takes
+  // precedence there. So `ZENSU_PROJECT_ROOT` set to a relative path while an
+  // absolute `CLAUDE_PROJECT_DIR` resolves is reported as the ordinary weak-channel
+  // case, and the operator is not told the authoritative variable they set was
+  // refused. Surfacing it needs a second return field and a render line; that is a
+  // shape change, and `W11_REL_FALLBACK` pins the current answer.
+  const rejected = candidates.find((c) => present(c) && !path.isAbsolute(String(c[1])));
+  const callerRoot = fromEnv ? String(fromEnv[1]) : null;
+  const source = fromEnv ? fromEnv[0] : (rejected ? `rejected:${rejected[0]}` : 'unknown');
   const targetRoot = targetWt || null;
   if (!callerRoot || !targetRoot) return { callerRoot, targetRoot, covered: null, source };
   const rel = path.relative(canonicalDir(callerRoot), canonicalDir(targetRoot));
-  const covered = rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  const contained = rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  // The two channels are NOT equally authoritative, and only one direction of the
+  // weaker one is sound. `claude-hook-session-v1.js` reads CLAUDE_PROJECT_DIR only
+  // as the last resort when no Session Control record exists — its own header says
+  // "The mutable payload cwd is never a project authority" — while the record's
+  // `projectRoot` is what it exports as ZENSU_PROJECT_ROOT, and THAT is the value
+  // the gate compares. For a session started in a subdirectory the ambient variable
+  // is the WIDER root. Containment in a wider root does not imply containment in the
+  // narrower one, so `allowed` off this channel is unsound; NON-containment in the
+  // wider root does imply it, so `denied here` stays sound. Downgrade exactly the
+  // unsound half — discarding the true answer as well would cost a real diagnosis to
+  // remove a false one. The downgrade travels in `covered`, not only in the render,
+  // so a `--json` consumer reading that field alone is not misled either; `source`
+  // and `callerRoot` still report what was measured, which keeps it auditable.
+  const covered = (contained && source === 'env:CLAUDE_PROJECT_DIR') ? null : contained;
   return { callerRoot, targetRoot, covered, source };
 }
 
@@ -170,20 +232,63 @@ function writeAnchor(targetWt) {
 // otherwise EXACT because SKILL.md flow 3 tells the reader to compare this root
 // against the WORKTREE line above it.
 function writesLines(w) {
-  if (w.covered === true) return ['WRITES   allowed — the target worktree is inside this session\'s anchor.'];
+  // `allowed` carries its own caveat, because the header above enumerates three
+  // narrowings and TWO of them err in exactly this direction: rule (A) can still
+  // refuse an in-anchor raw shell overwrite of tracked source, and this helper
+  // realpaths BOTH sides while the gate realpaths only its comparison roots and
+  // resolves a `cd` operand lexically. Leaving this branch as one bare sentence
+  // applied the design's fail-safe to the `null` case and dropped it on the only
+  // case that can send a reader confidently into a deny.
+  if (w.covered === true) {
+    return [
+      'WRITES   allowed — the target worktree is inside this session\'s anchor.',
+      '         Necessary, not sufficient: rule (A) can still refuse a raw shell',
+      '         overwrite of tracked source, and a spelling that reaches the anchor',
+      '         only through a symlink is judged outside by the gate\'s own test.'
+    ];
+  }
   const target = flatPath(w.targetRoot) || '(unknown)';
   // Name the reason rather than echoing `source`, which is the literal string
   // "unknown" in the case this branch exists for — "was not measured (unknown)"
   // tells a reader nothing they can act on. The reason is computed INSIDE the
-  // branch that renders it, so the head and the reason cannot disagree. The
-  // missing-target arm is defensive only: `buildIndex` skips a row with no cwd
-  // and falls back to it otherwise, so `r.wt` is never falsy and no behavioral
-  // fixture can reach it — do not write one.
+  // branch that renders it, so the head and the reason cannot disagree.
+  //
+  // Each arm keys on the condition that actually produced the null, never on a
+  // proxy for it: an earlier spelling keyed the missing-target arm on `callerRoot`
+  // being truthy, which stopped being equivalent the moment a second way to reach
+  // null existed. The arms in order: no recorded worktree (defensive only —
+  // `buildIndex` skips a row with no cwd and falls back to it otherwise, so `r.wt`
+  // is never falsy and no behavioral fixture can reach it; do not write one), then
+  // the weak channel, then the ordinary no-channel case. The weak-channel arm MUST
+  // name the variable: a reader who exported it deserves to learn why a value that
+  // was present did not settle the question, instead of reading this as the plain
+  // "nothing was set" answer.
+  // One literal for both the test and the slice. Testing `rejected:` while slicing
+  // `rejected:env:` works only while every channel label starts `env:`; a future
+  // `rejected:file:X` would satisfy the guard and then lose four characters of its
+  // own name, naming a variable that does not exist.
+  const REJECTED_PREFIX = 'rejected:env:';
+  const rejectedChannel = String(w.source || '').startsWith(REJECTED_PREFIX)
+    ? String(w.source).slice(REJECTED_PREFIX.length)
+    : null;
+  const why = !w.targetRoot
+    ? 'the target session has no recorded worktree'
+    : rejectedChannel
+      ? `${rejectedChannel} is set but is not an absolute path, so it cannot anchor the comparison`
+      : w.source === 'env:CLAUDE_PROJECT_DIR'
+        ? 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing'
+        : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case';
+  // The deny head must not call a CLAUDE_PROJECT_DIR value "this session's anchor":
+  // `writeAnchor` disclaims exactly that two dozen lines above, and this line is a
+  // disclosure surface SKILL.md points the reader at. The VERDICT is sound either
+  // way — non-containment in the wider root implies non-containment in the narrower
+  // one, which is the asymmetry the whole feature rests on — so only the attribution
+  // changes, and it changes to something the reader can act on.
   const head = w.covered === false
-    ? `WRITES   denied here — this session is anchored to ${flatPath(w.callerRoot)}, which does not contain that worktree.`
-    : `WRITES   unknown — this session's anchor was not measured (${w.callerRoot
-        ? 'the target session has no recorded worktree'
-        : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case'}); assume denied and check yourself.`;
+    ? (w.source === 'env:CLAUDE_PROJECT_DIR'
+      ? `WRITES   denied here — this session's CLAUDE_PROJECT_DIR is ${flatPath(w.callerRoot)}, which does not contain that worktree; the anchor the gate compares lies inside it, so the deny holds either way.`
+      : `WRITES   denied here — this session is anchored to ${flatPath(w.callerRoot)}, which does not contain that worktree.`)
+    : `WRITES   unknown — this session's anchor was not measured (${why}); assume denied and check yourself.`;
   return [
     head,
     `         Bash git and source writes into ${target} are refused by the Zensu`,
@@ -196,6 +301,9 @@ function writesLines(w) {
 // The shared control class, defined once so `flatPath` and `briefShellArg` cannot
 // drift apart — a lockstep the suite also pins by DERIVING one from the other.
 // TAB is deliberately excluded: it is ordinary in a path and moves no cursor.
+// Consumed by `flatPath`, `briefPath`, `briefShellArg` and `instanceId` — extend
+// this roster when a consumer is added; an enumeration that silently omits one is
+// the failure this file kept paying for.
 // The range excludes TAB (\u0009) and NOTHING ELSE — an earlier spelling wrote it
 // as \u0000-\u0008 plus \u000b-\u001f, which silently also dropped LF (\u000a) out
 // of the class and un-did the whole bound. W8/W8b caught it in one run.
@@ -209,10 +317,14 @@ const CONTROL_RUN = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]+/g;
 // and overwrites a row the reader already trusted, which is strictly worse than a
 // `\v`. `CONTROL_RUN` is the shared class — every C0 and C1 control except TAB,
 // plus U+2028/U+2029 — and ordinary spaces are deliberately NOT collapsed, which
-// is what keeps the spelling comparable. Used by every PLAIN-TEXT renderer —
-// `show`, `list`, `limited`, `instances` and `resolve`'s ambiguous-candidate list —
-// and never by a brief. Extend this roster when a renderer is added: an enumeration
-// that silently omits a caller is the failure this file kept paying for.
+// is what keeps the spelling comparable. Applied directly by every PLAIN-TEXT
+// renderer — `show`, `list`, `limited`, `instances` and `resolve`'s
+// ambiguous-candidate list — and reached by both BRIEF carriers too: `briefPath`
+// and `briefShellArg` each route through it before applying their own bound. An
+// earlier spelling of this note claimed the class was "never [used] by a brief",
+// and that gap was the defect: the persisted artifact was the one carrier without
+// it. Extend this roster when a renderer is added — an enumeration that silently
+// omits a caller is the failure this file kept paying for.
 function flatPath(p) {
   return String(p == null ? '' : p).replace(CONTROL_RUN, ' ');
 }
@@ -241,8 +353,17 @@ function flatPath(p) {
 // `r.cwd` — so there the harm is simply that the operand is not the path.)
 // All FOUR runnable lines use `briefShellArg` — the two brief ones and the two
 // `printResume` prints, which flow 3 now names as the remedy for a blocked commit.
+// `CONTROL_RUN` FIRST, then `oneLine`. The two bounds are not interchangeable and
+// neither subsumes the other: `oneLine` collapses `/\s+/`, and JS `\s` is only the
+// line-break class plus a few spaces — it does not cover ESC, the rest of C0, DEL
+// or C1. Leaving the brief on `oneLine` alone therefore let exactly the class
+// `flatPath`'s header names as its whole reason for existing — a CSI sequence that
+// moves the cursor and overwrites a row the reader already trusted — through on the
+// carrier that matters most, since a brief is PERSISTED and opened by an instance
+// that need not have this skill loaded. The clip stays, and stays SECOND, so the
+// 200-char budget is measured on the text that will actually be rendered.
 function briefPath(p) {
-  return oneLine(p, 200).replace(/`/g, "'") || '(unknown)';
+  return oneLine(String(p == null ? '' : p).replace(CONTROL_RUN, ' '), 200).replace(/`/g, "'") || '(unknown)';
 }
 
 // The FOUR carriers that must stay UNCLIPPED and be safe to paste: the takeover
@@ -254,7 +375,8 @@ function briefPath(p) {
 // POSIX `'\''` idiom closes and reopens the quote around an embedded apostrophe.
 // No length clip: a shortened path is a DIFFERENT path that `cd` still accepts.
 //
-// The full LINE-BREAK class is collapsed — the same one `flatPath` removes — and
+// The full CONTROL class is collapsed — the same `CONTROL_RUN` `flatPath` removes,
+// which is wider than the line breaks alone: ESC, the rest of C0, DEL and C1 go too — and
 // that is the one place exactness yields. Two reasons, one per caller: inside a
 // brief, a line beginning ``` would close the fence; and `printResume`'s two
 // prints are plain terminal output, where a `\v` or `\f` moves the cursor down a
@@ -262,7 +384,7 @@ function briefPath(p) {
 // output as a WORKTREE value that IS stripped. Neither is a shell-injection path — the bytes stay inside the
 // quotes — but a spoofed display of a runnable line is worth the same treatment.
 // No path carrying a line break could be `cd`-ed on one line anyway. Everything
-// else survives verbatim.
+// else survives verbatim — everything, that is, outside `CONTROL_RUN`.
 function briefShellArg(p) {
   return `'${String(p == null ? '' : p).replace(CONTROL_RUN, ' ').replace(/'/g, "'\\''")}'`;
 }
@@ -343,9 +465,57 @@ function ccdIndex() {
   return map;
 }
 
+// The desktop instance id, bounded for a FIXED-COLUMN row. `flatPath` strips the
+// control class but deliberately preserves ordinary spaces, which is right for a
+// path the reader must compare and wrong here: `cmdShow` appends `**ARCHIVED**`
+// after this field, so a directory name padded with spaces can march itself into
+// that column and impersonate a marker the reader treats as machine-derived. Two
+// things are neutralized, and collapsing the padding alone is NOT enough — the
+// literal `**ARCHIVED**` can sit inside the name itself. So a run of two or more
+// spaces collapses (a single space is left alone, so an ordinary name renders
+// exactly), and a run of asterisks is separated, which leaves the name legible
+// while no longer spelling the emphasis marker `cmdShow` appends after this field.
+// The zero-advance class is removed FIRST, and it is expressed as Unicode PROPERTIES
+// rather than as a hand-rolled range list. That is the whole lesson of this line: an
+// enumerated class was shipped once and missed the bidi-format block
+// (U+202A-U+202E, U+2066-U+2069), U+034F and the variation selectors — every one of
+// them zero-advance, and every one of them enough to break the asterisk run below so
+// the separator never fires. A name spelled `x*<U+2069>*ARCHIVED*<U+2069>*` then
+// reaches the terminal looking exactly like the marker `cmdShow` appends after this
+// field, on a session that is not archived. The three categories are the zero-advance
+// ones Unicode defines — format, non-spacing mark, enclosing mark — which is a
+// DESCRIPTION rather than a remembered list, and that is the property that matters;
+// it is not a proof of closure, and U+034F needs no separate mention because it is
+// already `Mn`. `\p{Mn}` is deliberately over-broad for a display bound: it also strips
+// legitimate diacritics, so two instance names differing only by combining marks
+// render alike here. Both call sites use this helper, so correlation survives; only
+// fidelity is spent, and that is the right way round for a column a reader trusts.
+// The horizontal-space collapse is the full Zs class for the same reason, since TAB
+// is deliberately outside `CONTROL_RUN` and U+1680/U+2000-U+200A pad a fixed column
+// exactly as well as a plain space.
+const ZERO_WIDTH = /[\p{Cf}\p{Mn}\p{Me}]/gu;
+const H_SPACE_RUN = /[\u0020\u0009\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]{2,}/g;
+
+function instanceId(value, width) {
+  return flatPath(value)
+    .replace(ZERO_WIDTH, '')
+    .replace(H_SPACE_RUN, ' ')
+    .replace(/\*{2,}/g, (m) => m.split('').join(' '))
+    .slice(0, width);
+}
+
+// `instanceId`, the same spelling `cmdInstances` uses for the id it prints beside
+// this one — correlating those two rows is the only thing an 8-character prefix is
+// for, so a divergence makes the field useless. `oneLine(x, 8)`
+// was wrong twice over: it leaves ESC/C0/C1 in a row a reader trusts, and its clip
+// yields `slice(0, n - 1) + '…'` — seven characters plus an ellipsis — while
+// `cmdInstances` renders eight raw ones. Correlating a `list` row with an
+// `instances` row is the only thing an 8-character prefix is for, so two spellings
+// of one id made the field useless. `app.instance` is a DIRECTORY NAME read out of
+// another application's store, which is why it needs the control bound at all.
 function appTag(app) {
   if (!app) return '';
-  return `${app.archived ? '[ARCHIVED] ' : ''}inst ${oneLine(app.instance, 8)}`;
+  return `${app.archived ? '[ARCHIVED] ' : ''}inst ${instanceId(app.instance, 8)}`;
 }
 
 function liveRegistry() {
@@ -569,7 +739,12 @@ function extractStopCauseIn(text) {
   // otherwise; count the fields below rather than trusting a number in prose.
   // A local helper rather than `oneLine`: these are short identifiers, not prose,
   // and the clip is applied without the ellipsis a truncated identifier must not carry.
-  const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(/\s+/g, ' ').trim().slice(0, n));
+  // `CONTROL_RUN` FIRST, then the whitespace collapse. `/\s+/` alone is the
+  // line-break class plus Zs — it leaves ESC, the rest of C0, DEL and C1, which is
+  // exactly the class that can overwrite a row above it. These five values reach
+  // `show`'s STOPPED row, `limited`, and the PERSISTED takeover brief, so the weaker
+  // bound was the one carrier this feature hardened everywhere except here.
+  const flat = (v, n) => (v === null || v === undefined ? v : String(v).replace(CONTROL_RUN, ' ').replace(/\s+/g, ' ').trim().slice(0, n));
   return {
     error: flat(err.error, 64) || 'api_error',
     // `?? null` so the key is always present: `flat` passes `undefined` through,
@@ -1025,7 +1200,15 @@ function buildIndex(opts) {
       if (fst.size < 200) continue;
       let s;
       try { s = summarize(file, fst.size, false); } catch { SKIPPED += 1; continue; }
-      const cwd = s.cwd || (live.get(sessionId) || {}).cwd || null;
+      // The registry half is TYPED, because it comes from another process's
+      // `~/.claude/sessions/*.json` and `liveRegistry` accepts any record carrying a
+      // `sessionId` and a `pid`. An object or a number there reaches `worktreeRoot`
+      // and `path.basename` and takes the whole command down with an uncaught
+      // TypeError, instead of the SKIPPED accounting this script is built around —
+      // and the `cwd` repair is what made that value newly reachable in a runnable
+      // `cd` line. `cmdInstances` already guards the same field this way.
+      const registryCwd = (live.get(sessionId) || {}).cwd;
+      const cwd = s.cwd || (typeof registryCwd === 'string' && registryCwd ? registryCwd : null) || null;
       if (!cwd) continue;
       if (ctx && !inRepo(cwd, ctx)) continue;
       const wt = (dirExists(cwd) && worktreeRoot(cwd)) || cwd;
@@ -1036,12 +1219,22 @@ function buildIndex(opts) {
         transcriptDir: dir,
         size: fst.size,
         mtime: fst.mtimeMs,
-        cwd,
         wt,
         cwdExists: dirExists(cwd),
         worktree: path.basename(wt),
         live: isLive ? live.get(sessionId) : null,
         ...s,
+        // AFTER the spread, deliberately. `summarize()` ALWAYS emits a `cwd` key,
+        // and it is null for exactly the rows the live-registry fallback above
+        // exists to serve — a live session whose transcript carries no `"cwd":"…"`
+        // match. Placed before `...s` the fallback value was written and then
+        // immediately overwritten with that null, so `r.cwd` came back empty for a
+        // session whose working directory the registry knew perfectly well. `r.wt`
+        // hid it: that one is computed before this literal and `summarize` has no
+        // `wt` key, so every worktree-shaped carrier looked correct while
+        // `printResume` rendered `cd -- ''` and `cmdHandoff` called
+        // `path.basename(null)`.
+        cwd,
         app,
       };
       if (!row.title && app && app.title) row.title = app.title;
@@ -1116,7 +1309,7 @@ function cmdList(opts) {
     const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
     print(`${statusOf(r).padEnd(4)}  ${flatPath(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
-    print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
+    print(`      "${oneLine(flatPath(r.title || r.lastPrompt || '(untitled)'), 96)}"`);
     if (!r.cwdExists) print(`      !! worktree directory missing: ${flatPath(r.cwd)}`);
     print('');
   }
@@ -1139,15 +1332,20 @@ function cmdInstances(opts) {
   const insts = new Set();
   for (const s of rows) { const a = ccdIndex().get(s.sessionId); if (a) insts.add(a.instance); }
   print(`LIVE CLAUDE CODE SESSIONS: ${rows.length} (every session process on this machine)`);
-  print(`DESKTOP INSTANCES INVOLVED: ${insts.size}${insts.size ? ` — ${[...insts].map((i) => flatPath(i).slice(0, 8)).join(', ')}` : ''}\n`);
+  print(`DESKTOP INSTANCES INVOLVED: ${insts.size}${insts.size ? ` — ${[...insts].map((i) => instanceId(i, 8)).join(', ')}` : ''}\n`);
   for (const [root, list] of [...groups.entries()].sort()) {
     print(`${flatPath(root)}  (${list.length})`);
     for (const s of list) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${oneLine(String(s.sessionId), 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${flatPath(wt)}`);
-      print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
+      // Same store and same fields as `cmdShow`'s STATUS row, so the same bound. The
+      // `s.` binding is why they were missed: a roster anchored on `r.` could not see
+      // them, and these three sat unbounded one renderer away from their hardened
+      // twins. The id uses the identifier spelling, so it stays comparable with the
+      // one `appTag` prints on the row below.
+      print(`  ${String(s.pid).padStart(6)}  ${instanceId(String(s.sessionId), 8)}  ${(oneLine(flatPath(s.entrypoint), 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${flatPath(wt)}`);
+      print(`          "${oneLine(flatPath(s.name), 92)}"${app ? `   ${appTag(app)}` : ''}`);
     }
     print('');
   }
@@ -1181,7 +1379,7 @@ function resolve(opts, selectorRaw) {
       const byWorktree = new Set(t.map((r) => r.cwd));
       if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${flatPath(r.sessionId).slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
+      for (const r of t) print(`  ${flatPath(r.sessionId).slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(flatPath(r.title || r.lastPrompt), 70)}"`);
       flush();
       process.exit(2);
     }
@@ -1194,10 +1392,25 @@ function resolve(opts, selectorRaw) {
   fail(`no session matched "${sel}" (try --all or --days 0)${SKIPPED ? ` — NOTE ${SKIPPED} record(s) were unreadable and skipped, the target may be one of them` : ''}`, 2);
 }
 
+// The SECOND site of the same rule as `buildIndex`'s row literal, and the reason a
+// fix applied only there did not hold: this re-spreads a fresh `summarize()` over
+// the row, and that object always carries a `cwd` key which is null for a session
+// whose working directory only the live registry knows. A blind spread therefore
+// re-introduces exactly the null `buildIndex` had already resolved. Keep the two in
+// step — a row's `cwd` is whatever the deep read found, falling back to what the
+// index resolved, never null-because-the-transcript-did-not-say.
 function hydrate(row) {
   let st;
   try { st = fs.statSync(row.transcript); } catch { return row; }
-  try { return { ...row, ...summarize(row.transcript, st.size, true) }; } catch { SKIPPED += 1; return row; }
+  try {
+    const s = summarize(row.transcript, st.size, true);
+    // `title` for the same reason as `cwd`, and it was missed the first time:
+    // `summarize` always emits the key, it is null for a transcript with no
+    // custom-title record, and `buildIndex` resolves a desktop-app title one line
+    // before pushing the row. Without this the app title showed in `list` and
+    // `(none)` in `show`, and both briefs fell back to a directory name in their H1.
+    return { ...row, ...s, cwd: s.cwd || row.cwd, title: s.title || row.title };
+  } catch { SKIPPED += 1; return row; }
 }
 
 function siblings(opts, row) {
@@ -1213,18 +1426,26 @@ function cmdShow(opts) {
   const w = writeAnchor(r.wt);
   if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, skipped: SKIPPED }, null, 2));
   print(`SESSION  ${flatPath(r.sessionId)}`);
-  print(`TITLE    ${oneLine(r.title, 200) || '(none)'}`);
+  print(`TITLE    ${oneLine(flatPath(r.title), 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
   // instance's JSON, and a newline in `name` or `entrypoint` would fabricate a
   // line directly above the TAKEOVER verdict a reader acts on.
-  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(r.live.entrypoint, 40)}  name "${oneLine(r.live.name, 92)}"` : ''}`);
+  // Both live-registry values carry the control class: they come from another
+  // process's `~/.claude/sessions/*.json`, and this row sits directly above the
+  // one a reader takes the verdict from. The roster in T29 could not see them —
+  // the outer interpolation opens with a compliant `statusOf(`, so a nested
+  // `${...}` inside the same template is invisible to a line-anchored scan.
+  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(flatPath(r.live.entrypoint), 40)}  name "${oneLine(flatPath(r.live.name), 92)}"` : ''}`);
   if (r.app) {
-    print(`OWNER    desktop instance ${oneLine(r.app.instance, 64)}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
-    print(`CONFIG   model ${oneLine(r.app.model, 40) || '?'}   effort ${oneLine(r.app.effort, 40) || '?'}   permissions ${oneLine(r.app.permissionMode, 40) || '?'}`);
+    // Same bound as `appTag`, at this row's own width: the value is a directory
+    // name from another application's store, and `oneLine` leaves the control class
+    // that can overwrite the row above this one.
+    print(`OWNER    desktop instance ${instanceId(r.app.instance, 64)}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
+    print(`CONFIG   model ${oneLine(flatPath(r.app.model), 40) || '?'}   effort ${oneLine(flatPath(r.app.effort), 40) || '?'}   permissions ${oneLine(flatPath(r.app.permissionMode), 40) || '?'}`);
   }
   print(`WORKTREE ${flatPath(r.wt)}${r.cwdExists ? '' : '   !! MISSING'}`);
   if (r.cwd !== r.wt) print(`CWD      ${flatPath(r.cwd)}   (session started in a subdirectory)`);
-  print(`BRANCH   ${oneLine((g && g.branch) || r.branch, 120) || '?'}`);
+  print(`BRANCH   ${oneLine(flatPath((g && g.branch) || r.branch), 120) || '?'}`);
   print(`LAST     ${ago(r.mtime)} ago   transcript ${flatPath(r.transcript)}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
@@ -1242,10 +1463,17 @@ function cmdShow(opts) {
   const ps = r.prompts || [];
   const shown = ps.slice(-Math.max(1, opts.prompts));
   if (ps.length > shown.length) print(`(${ps.length - shown.length} earlier prompts omitted — raise with --prompts N)`);
-  for (const p of shown) print(`[${oneLine(p.at, 40).slice(0, 16)}] ${oneLine(p.text, 300)}`);
+  // These two blocks print verbatim text from ANOTHER session directly below the
+  // WRITES verdict, so the control class has to go even though the text itself stays
+  // free-form. `flatPath` never lengthens a string, so no clip behaviour changes —
+  // and without it a prompt beginning with a cursor-up sequence rewrites the very
+  // line this feature exists to make trustworthy. The free-text carriers in the
+  // BRIEFS remain a stated gap in SKILL.md; this is the terminal renderer, where
+  // there is nothing to trade away.
+  for (const p of shown) print(`[${oneLine(flatPath(p.at), 40).slice(0, 16)}] ${oneLine(flatPath(p.text), 300)}`);
   if (r.assistantTail && r.assistantTail.length) {
     print('\n--- LAST ASSISTANT OUTPUT ---');
-    for (const a of r.assistantTail) print(`[${oneLine(a.at, 40).slice(0, 16)}] ${oneLine(a.text, 400)}`);
+    for (const a of r.assistantTail) print(`[${oneLine(flatPath(a.at), 40).slice(0, 16)}] ${oneLine(flatPath(a.text), 400)}`);
   }
   if (g) {
     print('\n--- GIT ---');
@@ -1325,7 +1553,7 @@ function cmdLimited(opts) {
     if (!r.stopCause.final) {
       print(`      RECOVERED: ${r.stopCause.laterTurns} further turn(s) after that, last at ${(r.stopCause.resumedUntil || '').slice(0, 16)} — this is NOT why it stopped`);
     }
-    print(`      task:  "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
+    print(`      task:  "${oneLine(flatPath(r.title || r.lastPrompt || '(untitled)'), 96)}"`);
     print('');
   };
   if (stalled.length) {
@@ -1380,7 +1608,7 @@ function cmdTakeover(opts) {
   L.push(first ? clip(first.text, 4000) : '_no user prompt found in the scanned range_');
   L.push('');
   if (r.compaction) {
-    L.push(`## State at last compaction (${oneLine(r.compaction.at, 40).slice(0, 16)})`);
+    L.push(`## State at last compaction (${briefPath(r.compaction.at).slice(0, 16)})`);
     L.push(clip(r.compaction.text, 8000));
     L.push('');
   }
@@ -1401,11 +1629,11 @@ function cmdTakeover(opts) {
   const tasks = r.tasks || [];
   if (!tasks.length) L.push('_the session tracked no tasks_');
   for (const t of tasks) {
-    L.push(`- [${oneLine(String(t.status ?? ''), 24)}] **#${oneLine(String(t.id ?? ''), 16)} ${oneLine(String(t.subject ?? ''), 200)}**`);
+    L.push(`- [${briefPath(String(t.status ?? '')).slice(0, 24)}] **#${briefPath(String(t.id ?? '')).slice(0, 16)} ${briefPath(String(t.subject ?? '')).slice(0, 200)}**`);
     if (t.description) L.push(`  - ${clip(t.description, 600)}`);
   }
   const open = tasks.filter((t) => t.status !== 'completed');
-  if (open.length) L.push(`\n**${open.length} task(s) not completed: ${open.map((t) => `#${oneLine(String(t.id ?? ''), 16)}`).join(', ')}**`);
+  if (open.length) L.push(`\n**${open.length} task(s) not completed: ${open.map((t) => `#${briefPath(String(t.id ?? '')).slice(0, 16)}`).join(', ')}**`);
   L.push('');
   L.push('## Recent instructions (verbatim, newest last)');
   const recent = (r.prompts || []).slice(-Math.max(1, opts.prompts));

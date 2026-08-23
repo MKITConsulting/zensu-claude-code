@@ -2,7 +2,7 @@
 set -u
 
 # Behavioural contract for the session-trail TAKEOVER verdict (V*) AND for the
-# WRITES anchor (W1-W9, under their own banner below) — two contracts, one file,
+# WRITES anchor (W1-W19, under their own banner below) — two contracts, one file,
 # because both are driven by the same synthetic-HOME fixture harness.
 #
 # test-session-trail-skill.sh pins the verdict VOCABULARY against SKILL.md; it
@@ -657,7 +657,7 @@ fi
 # V-clock report a lapsed budget for checks that were comfortably inside it.
 CLOCK_IDLE="$(field aaaaaaaa-0000-0000-0000-000000000001 takeover.idleMin)"
 
-# ── W1-W9 — the WRITES anchor ───────────────────────────────────────────────
+# ── W1-W19 — the WRITES anchor, and the renderer bounds around it ───────────
 # A takeover into another worktree can edit and test but cannot commit: the Bash
 # source-write gate compares every write against the session's IMMUTABLE project
 # root, and nothing re-anchors a session. `show` therefore reports whether the
@@ -697,13 +697,30 @@ CWD_IN_ANCHOR_PATTERN_SOURCE="  const top = git(process.cwd(), ['rev-parse']);"
 # Only the WRITES block, so a needle cannot be satisfied by the WORKTREE row
 # cmdShow prints unconditionally. W2's target-root assertion was vacuous against
 # full stdout for exactly that reason.
+# -A4 tracks `writesLines`' LONGEST branch (head + 4 lines on the denied/unknown
+# path; the allowed path is head + 3). There is no headroom: a sixth line added to
+# either branch silently truncates the block for every arm that reads it, and the
+# arms are presence checks, so the loss would not announce itself.
 writes_block() { grep -E -A4 '^WRITES' || true; }
 
 W_ALLOWED="$(ZENSU_PROJECT_ROOT="$WT_A" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
-case "$W_ALLOWED" in
-  "WRITES   allowed"*) check "W1 the target worktree IS this session's anchor -> allowed" PASS ;;
-  *) check "W1 anchor-match should render allowed (got '${W_ALLOWED:-<empty>}')" FAIL ;;
-esac
+W1_BAD=""
+case "$W_ALLOWED" in "WRITES   allowed"*) ;; *) W1_BAD="$W1_BAD anchor-match-not-allowed" ;; esac
+# `allowed` must say it is NECESSARY, not SUFFICIENT. The function's own header
+# records that of its three known narrowings, two err toward `allowed` — rule (A)
+# can still refuse an in-anchor raw shell overwrite of tracked source, and this
+# helper realpaths BOTH sides while the gate realpaths only its roots and resolves
+# a `cd` operand lexically. So the design's stated fail-safe was applied to the
+# `null` branch and dropped on the one branch that can actually mislead: a reader
+# who acts on a bare "allowed" and then hits a deny is back in the state this whole
+# feature exists to remove, minus any warning. The other two verdicts carry their
+# caveat; this one must too.
+case "$W_ALLOWED" in *"ecessary"*) ;; *) W1_BAD="$W1_BAD allowed-claims-sufficiency" ;; esac
+if [ -z "$W1_BAD" ]; then
+  check "W1 the target worktree IS this session's anchor -> allowed, stated as necessary not sufficient" PASS
+else
+  check "W1 anchor-match render:$W1_BAD (got '$(printf '%s' "${W_ALLOWED:-<empty>}" | head -1)')" FAIL
+fi
 
 # W1b — the comparison is CONTAINMENT, not equality, because that is what the gate
 # does (`within(projectRoot, p)`). This repo nests every worktree under the main
@@ -811,11 +828,25 @@ fi
 # checkout with both env channels stripped: a cwd-derived measurement would
 # resolve to SOMETHING and answer allowed or denied; the env-only reader must
 # still say `unknown`.
-W3B="$(cd "$PLUGIN_DIR" && env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+#
+# The premise is a PREDICATE rather than an inline test, because W3c exercises it
+# in both directions — a guard that always answered yes would restore exactly the
+# silent-pass this fixes.
+w3b_is_checkout() { # <dir>
+  ( cd "$1" 2>/dev/null && git rev-parse --show-toplevel >/dev/null 2>&1 )
+}
 W3B_BAD=""
+if ! w3b_is_checkout "$PLUGIN_DIR"; then
+  # Not a failure: on such a tree a cwd-derived reader would resolve to nothing
+  # either, so the three arms below would pass without discriminating anything.
+  # The structural arm still runs.
+  skip "W3b behavioural arms (\$PLUGIN_DIR is not a git checkout, so a cwd-derived reader would answer unknown here too)"
+else
+W3B="$(cd "$PLUGIN_DIR" && env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
 case "$W3B" in *"WRITES   unknown"*) ;; *) W3B_BAD="$W3B_BAD cwd-became-a-channel" ;; esac
 case "$W3B" in *"WRITES   allowed"*) W3B_BAD="$W3B_BAD claims-allowed-from-cwd" ;; esac
 case "$W3B" in *"WRITES   denied here"*) W3B_BAD="$W3B_BAD claims-denied-from-cwd" ;; esac
+fi
 # The structural half, UNCONDITIONAL. It was previously gated behind a grep for
 # the `--show-toplevel` literal the fix removed, so the whole `&&` chain
 # short-circuited and the scan never ran — an inert guard reading as a pin.
@@ -826,6 +857,26 @@ if [ -z "$W3B_BAD" ]; then
   check "W3b the anchor is never derived from this process's cwd" PASS
 else
   check "W3b cwd independence:$W3B_BAD" FAIL
+fi
+
+# W3c — W3b's PREMISE, which was the one premise in this file left unasserted.
+# W3b's three behavioural arms discriminate only because $PLUGIN_DIR really is a
+# git checkout: a cwd-derived reader would resolve a toplevel there and answer
+# `allowed` or `denied here`, which is what makes `unknown` mean something. On a
+# plugin tree WITHOUT `.git` — a release zip, a vendored copy, a `--plugin-dir`
+# tree — `git rev-parse` returns nothing, a regressed reader answers `unknown`
+# too, and all three arms pass having proved nothing. Every other premise in this
+# file self-names on lapse (V0, V-clock, W1c, W9, W8b); this one did not.
+#
+# The predicate is exercised in BOTH directions on this host, so a function that
+# always answers yes — or always no — cannot satisfy it.
+W3C_BAD=""
+w3b_is_checkout "$PLUGIN_DIR" || W3C_BAD="$W3C_BAD plugin-dir-not-recognized-as-a-checkout"
+w3b_is_checkout "$FAKE" && W3C_BAD="$W3C_BAD non-checkout-recognized-as-a-checkout"
+if [ -z "$W3C_BAD" ]; then
+  check "W3c the W3b premise predicate answers both directions on this host" PASS
+else
+  check "W3c W3b premise predicate:$W3C_BAD" FAIL
 fi
 
 # W4 — the JSON carrier. `show --json` skips every renderer, so a consumer that
@@ -904,6 +955,53 @@ if [ -z "$W7_BAD" ]; then
   check "W7 both rendered briefs carry the write-anchor caution in containment wording" PASS
 else
   check "W7 rendered brief caution:$W7_BAD" FAIL
+fi
+
+# W7b — the two STRUCTURAL properties of the briefs, which W7 does not see. Both
+# already hold; this is a regression pin with its own bite arm, not a bite.
+#
+# (1) The takeover payload must carry NO measured `writes` object. That absence is
+# the design's stated invariant, not an omission: `writeAnchorCaution` is static
+# precisely because a brief is written by one session for a DIFFERENT one to open,
+# so a verdict measured against the writer's anchor would be reported to a reader it
+# was never about. `cmdShow`'s payload carries `writes`; `cmdTakeover`'s must not. A
+# later "consistency" edit adding it would persist the wrong answer with W4 — which
+# only sees `show --json` — still green.
+#
+# (2) The caution must sit INSIDE the parsed body, above the end marker. W7 greps
+# the whole brief, so moving the bullet below `--- END … MARKDOWN ---`, where a
+# reader that stops at the marker never sees it, leaves W7 green.
+W7B_BAD=""
+W7B_TAKEOVER_WRITES="$(HOME="$FAKE" node "$TRAIL_MJS" takeover "$SID_A" --all --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).writes===undefined?"ABSENT":"PRESENT")}catch{process.stdout.write("PARSE_ERROR")}})')"
+[ "$W7B_TAKEOVER_WRITES" = "ABSENT" ] || W7B_BAD="$W7B_BAD takeover-payload-carries-a-measured-writes(got=$W7B_TAKEOVER_WRITES)"
+for verb in takeover handoff; do
+  W7B_BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" "$verb" "$SID_A" --all 2>/dev/null)"
+  W7B_CAUT_AT="$(printf '%s\n' "$W7B_BRIEF" | grep -an 'Before editing' | head -1 | cut -d: -f1)"
+  W7B_END_AT="$(printf '%s\n' "$W7B_BRIEF" | grep -an '^--- END .* MARKDOWN ---$' | head -1 | cut -d: -f1)"
+  if [ -z "$W7B_CAUT_AT" ] || [ -z "$W7B_END_AT" ]; then
+    W7B_BAD="$W7B_BAD $verb-caution-or-marker-not-located"
+  elif [ "$W7B_CAUT_AT" -ge "$W7B_END_AT" ] 2>/dev/null; then
+    W7B_BAD="$W7B_BAD $verb-caution-outside-the-parsed-body"
+  fi
+done
+# The BITE arm. Without it, arm (1) is a check that can only ever pass: it asserts
+# the absence of something nothing puts there. A mutated copy adds the field, and
+# the same extraction must report PRESENT — if it does not, arm (1) is measuring
+# nothing and says so here rather than reading as coverage.
+W7B_MUT="$FAKE/trail-w7b-mutated.mjs"
+sed 's/takeover: tv, skipped: SKIPPED }/takeover: tv, writes: writeAnchor(r.wt), skipped: SKIPPED }/' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
+if ! grep -qF 'writes: writeAnchor(r.wt), skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null; then
+  W7B_BAD="$W7B_BAD bite-mutation-did-not-apply(payload-spelling-moved)"
+else
+  W7B_MUTOUT="$(HOME="$FAKE" node "$W7B_MUT" takeover "$SID_A" --all --json 2>/dev/null \
+    | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).writes===undefined?"ABSENT":"PRESENT")}catch{process.stdout.write("PARSE_ERROR")}})')"
+  [ "$W7B_MUTOUT" = "PRESENT" ] || W7B_BAD="$W7B_BAD bite-arm-inert(mutated-copy-reported=$W7B_MUTOUT)"
+fi
+if [ -z "$W7B_BAD" ]; then
+  check "W7b the takeover payload carries no measured writes, the caution sits above the end marker, and the absence arm bites" PASS
+else
+  check "W7b brief structural invariants:$W7B_BAD" FAIL
 fi
 
 # W8 — the caution BOUNDS its transcript-derived path. The brief is persisted and
@@ -1154,6 +1252,624 @@ if [ -z "$W9_BAD" ]; then
   check "W9 both BRIEF runnable cd lines single-quote an unclipped operand after --" PASS
 else
   check "W9 runnable cd quoting:$W9_BAD" FAIL
+fi
+
+# W10 — `CLAUDE_PROJECT_DIR` is not the anchor the gate compares, so it may never
+# produce an "allowed". `hooks/lib/claude-hook-session-v1.js` reads that variable
+# only as the LAST RESORT when no Session Control record exists — the header over
+# `resolveFreshHookProject` says "The mutable payload cwd is never a project
+# authority" — while the record's own `projectRoot` is what the same file exports
+# as ZENSU_PROJECT_ROOT, and that is the value `pre-bash-source-write-gate.sh`
+# hands the parser. For a session started in a SUBDIRECTORY the ambient variable
+# is the WIDER root, so containment measured against it says nothing about the
+# anchor the gate will actually use.
+#
+# The downgrade is ASYMMETRIC, and the asymmetry is the contract: containment in
+# a wider root does not imply containment in the narrower one, so "allowed" is
+# unsound — but NON-containment in the wider root DOES imply non-containment in
+# the narrower one, so "denied here" off this channel stays sound and must
+# survive. A symmetric fix would discard a true answer to remove a false one.
+W10_BAD=""
+W10_COVERING="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$FAKE/work" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W10_COVERING" in
+  *"WRITES   allowed"*) W10_BAD="$W10_BAD weak-channel-claims-allowed" ;;
+  *"WRITES   unknown"*) ;;
+  *) W10_BAD="$W10_BAD weak-channel-verdict-unrecognized(got='$(printf '%s' "$W10_COVERING" | head -1)')" ;;
+esac
+# The reason must NAME the channel, or a reader takes this `unknown` for the
+# ordinary no-channel case and never learns why a value that WAS present failed
+# to settle the question.
+#
+# Needled on a fragment UNIQUE to the weak-channel reason, not on the variable
+# name: the ordinary no-channel reason reads "no ZENSU_PROJECT_ROOT or
+# CLAUDE_PROJECT_DIR in this process", so a `*CLAUDE_PROJECT_DIR*` needle is
+# satisfied by the very branch this arm exists to distinguish — deleting the
+# weak-channel arm left all four W10 arms green, because the other three are
+# decided in `writeAnchor` rather than in `writesLines`.
+case "$W10_COVERING" in *"wider project directory"*) ;; *) W10_BAD="$W10_BAD weak-channel-reason-does-not-name-it" ;; esac
+# The control for that needle: the ordinary no-channel render must NOT match it,
+# or the arm above has silently become true for every state again.
+W10_NOCHAN="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W10_NOCHAN" in *"wider project directory"*) W10_BAD="$W10_BAD weak-channel-needle-matches-the-no-channel-render" ;; esac
+# The sound direction survives.
+W10_OUTSIDE="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$FAKE/work/wt-other" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W10_OUTSIDE" in *"WRITES   denied here"*) ;; *) W10_BAD="$W10_BAD sound-deny-direction-lost(got='$(printf '%s' "$W10_OUTSIDE" | head -1)')" ;; esac
+# The JSON carrier reports the SAME downgrade, so a consumer reading `covered`
+# alone is not misled — while `source` and `callerRoot` still report what was
+# actually measured, which is what makes the downgrade auditable rather than a
+# silent erasure.
+W10_JSON="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$FAKE/work" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const w=JSON.parse(s).writes;process.stdout.write(`${w.source}/${w.covered}`)}catch{process.stdout.write("PARSE_ERROR")}})')"
+[ "$W10_JSON" = "env:CLAUDE_PROJECT_DIR/null" ] || W10_BAD="$W10_BAD json-not-downgraded(got=$W10_JSON)"
+# Discrimination: the AUTHORITATIVE channel standing in the same containment
+# relation must still read allowed, or this would have disabled the feature
+# rather than narrowed it.
+W10_STRONG="$(env -u CLAUDE_PROJECT_DIR ZENSU_PROJECT_ROOT="$FAKE/work" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W10_STRONG" in *"WRITES   allowed"*) ;; *) W10_BAD="$W10_BAD authoritative-channel-collaterally-downgraded" ;; esac
+if [ -z "$W10_BAD" ]; then
+  check "W10 CLAUDE_PROJECT_DIR never yields allowed, and its deny direction survives" PASS
+else
+  check "W10 weak-channel downgrade:$W10_BAD" FAIL
+fi
+
+# W11 — what may enter the anchor comparison, and in which spelling. Four arms;
+# only the first two are bites, and the last two say so rather than being read as
+# ones.
+#
+# (a) A RELATIVE value re-opens the exact channel W3b closes, one call further
+# down: `canonicalDir` begins with `path.resolve`, which resolves a relative
+# spelling against `process.cwd()`. W3b greps `writeAnchor`'s own body for
+# `process.cwd()` and structurally cannot see a resolution that happens inside a
+# callee. The probe runs FROM $FAKE with a relative spelling of the target, which
+# is what the old predicate resolved straight onto it.
+#
+# (b) The value must be compared AS GIVEN. `.trim()` may decide presence but must
+# not rewrite what is compared: a trailing space is legal in a POSIX directory
+# name and the gate receives the UNTRIMMED value, so trimming makes the two sides
+# measure different directories — and it errs toward `allowed`, the wrong way.
+#
+# (c)+(d) REGRESSION PINS, not bites — both already hold. A whitespace-only and a
+# set-but-empty first channel must each lose the precedence race to a usable
+# second one. No probe distinguished UNSET from SET-BUT-EMPTY before, so relaxing
+# the predicate to a presence test would have left every other arm green while
+# `source` named a channel that carried no value.
+#
+# Arm (a) is asserted on `source`/`callerRoot`, NOT on the rendered verdict, and
+# that is deliberate: a first spelling of it checked that the render is not
+# "allowed" while running from $FAKE with a relative spelling of the target, and
+# it passed against the UNFIXED code — $FAKE is a `mktemp -d` under $TMPDIR, so
+# on macOS `process.cwd()` reports the realpathed /private/var/... while the
+# fixture path keeps its /var/... spelling, the two never coincided, and the arm
+# proved nothing. The property that actually holds regardless of how the host
+# spells a temp root is that a relative value never becomes the caller root at
+# all.
+W11_BAD=""
+w11_json() { # <extra-env-assignments...> — echoes "<source>/<callerRoot>"
+  HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git --json 2>/dev/null \
+    | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const w=JSON.parse(s).writes;process.stdout.write(`${w.source}/${w.callerRoot}`)}catch{process.stdout.write("PARSE_ERROR")}})'
+}
+# The second channel is UNSET because this arm asserts the NO-CHANNEL outcome, and
+# the block header states the rule: a suite run from inside a hook environment
+# would otherwise inherit it, and the arm would fail loudly with the contract's own
+# label for what is really an environment fault. `unset` rather than `env -u`,
+# because `w11_json` is a shell function and `env` can only exec a binary — the
+# `env -u` spelling silently produced an empty result instead of a verdict.
+W11_REL="$(cd "$FAKE" && unset CLAUDE_PROJECT_DIR; ZENSU_PROJECT_ROOT="work/wt-aaaaaaaa" w11_json)"
+# `rejected:env:ZENSU_PROJECT_ROOT/null`, not `unknown/null`: the value never became
+# the caller root — which is what this arm is about — AND the payload now records
+# WHICH channel was turned away, so an operator who exported one is not told that
+# nothing was set. W18 owns the rendered wording; this arm owns the field.
+[ "$W11_REL" = "rejected:env:ZENSU_PROJECT_ROOT/null" ] || W11_BAD="$W11_BAD relative-value-became-the-anchor(got=$W11_REL)"
+W11_REL_FALLBACK="$(cd "$FAKE" && ZENSU_PROJECT_ROOT="work/wt-aaaaaaaa" CLAUDE_PROJECT_DIR="$FAKE/work/wt-other" w11_json)"
+case "$W11_REL_FALLBACK" in "env:CLAUDE_PROJECT_DIR/"*) ;; *) W11_BAD="$W11_BAD relative-value-not-passed-over(got=$W11_REL_FALLBACK)" ;; esac
+W11_SPACE="$(ZENSU_PROJECT_ROOT="$WT_A " HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W11_SPACE" in *"WRITES   allowed"*) W11_BAD="$W11_BAD trailing-space-trimmed-before-compare" ;; esac
+W11_WS="$(ZENSU_PROJECT_ROOT="   " CLAUDE_PROJECT_DIR="$WT_A" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).writes.source))}catch{process.stdout.write("PARSE_ERROR")}})')"
+[ "$W11_WS" = "env:CLAUDE_PROJECT_DIR" ] || W11_BAD="$W11_BAD whitespace-only-value-won-the-race(got=$W11_WS)"
+W11_EMPTY="$(ZENSU_PROJECT_ROOT="" CLAUDE_PROJECT_DIR="$WT_A" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).writes.source))}catch{process.stdout.write("PARSE_ERROR")}})')"
+[ "$W11_EMPTY" = "env:CLAUDE_PROJECT_DIR" ] || W11_BAD="$W11_BAD empty-first-channel-won-the-race(got=$W11_EMPTY)"
+if [ -z "$W11_BAD" ]; then
+  check "W11 the anchor value must be absolute, is compared as given, and an unusable channel loses" PASS
+else
+  check "W11 anchor value admission:$W11_BAD" FAIL
+fi
+
+# W12 — the BRIEF carriers must bound the same control class as the plain-text
+# ones. `flatPath` and `briefShellArg` both route through `CONTROL_RUN`;
+# `briefPath` routed only through `oneLine`, whose `/\s+/` covers the line-break
+# class and nothing else — JS `\s` excludes ESC (), the rest of C0, DEL and
+# all of C1. So the exact class `flatPath`'s own header names as its reason for
+# existing ("a CSI sequence moves the cursor and overwrites a row the reader
+# already trusted, which is strictly worse than a \v") was the one class the
+# brief did not remove — on the carrier that matters most, since a brief is
+# PERSISTED and opened by an instance that need not have this skill loaded.
+#
+# W8 could not see this: its fixture plants newlines, a backtick and forged end
+# markers, no C0/C1 byte anywhere. The whole brief is scanned rather than just the
+# caution line, because every `## Source` bullet shares the helper.
+#
+# The id must be unique across this file, and this comment has now been earned
+# TWICE. The first spelling reused W9's `SID_META`, which put the same session in
+# two project directories and made the selector AMBIGUOUS: the renderer printed a
+# candidate list instead of a brief, so the ESC arm found nothing and the whole
+# check failed as "caution absent" — a fixture fault wearing the contract's name.
+# The replacement collided with W8b's registry-only record instead, which is
+# quieter and worse: `liveRegistry` keys on the session id, so the W12 row silently
+# inherited another check's live pid and worktree while every arm still passed.
+# When picking a fixture id here, grep the whole file for it first.
+W12_SID=f1f1f1f1-0000-0000-0000-0000000000c3
+W12_ESC="$(printf '\033')"
+W12_WT="$FAKE/work/wt-ctl${W12_ESC}[2K${W12_ESC}[1A-tail"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W12_SID" "$W12_WT" 2>/dev/null
+W12_BAD=""
+for verb in takeover handoff; do
+  W12_BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" "$verb" "$W12_SID" --all 2>/dev/null)"
+  if [ -z "$W12_BRIEF" ]; then
+    W12_BAD="$W12_BAD $verb-fixture-unreadable"
+    continue
+  fi
+  # A brief, not a candidate list. Without this the ambiguity above degrades into
+  # "caution absent", which names the contract for a fault in the fixture.
+  case "$W12_BRIEF" in
+    *"--- BEGIN "*" MARKDOWN ---"*) ;;
+    *) W12_BAD="$W12_BAD $verb-not-a-brief"; continue ;;
+  esac
+  case "$W12_BRIEF" in *"$W12_ESC"*) W12_BAD="$W12_BAD $verb-esc-survived-into-the-brief" ;; esac
+  # Positive control, so a renderer that passed by DROPPING the bullet fails here:
+  # the caution must still be present and must still carry the path's own tail.
+  W12_CAUT="$(printf '%s\n' "$W12_BRIEF" | grep -F 'Before editing' | head -1)"
+  [ -n "$W12_CAUT" ] || W12_BAD="$W12_BAD $verb-caution-absent"
+  case "$W12_CAUT" in *"-tail"*) ;; *) W12_BAD="$W12_BAD $verb-path-tail-lost" ;; esac
+done
+if [ -z "$W12_BAD" ]; then
+  check "W12 the brief carriers strip the full control class, not just the line breaks" PASS
+else
+  check "W12 brief control-class bound:$W12_BAD (head='$(printf '%s' "$W12_BRIEF" | head -3 | tr -d '\033' | tr '\n' '/')')" FAIL
+fi
+
+# W13 — the desktop instance id, on both renderers that print it. `appTag` used
+# `oneLine(app.instance, 8)`, which gets BOTH halves wrong: `oneLine` collapses
+# `/\s+/` only, so a CSI sequence survives into a row a reader trusts, and its clip
+# returns `slice(0, n - 1) + '…'` — SEVEN characters plus an ellipsis, where
+# `cmdInstances` renders `flatPath(i).slice(0, 8)`, eight raw ones. The ONLY purpose
+# of an 8-character prefix is correlating a `list`/`show` row with an `instances`
+# row, so two spellings of one id defeat the field entirely. `cmdShow`'s OWNER row
+# carried the same defect at width 64.
+#
+# The ellipsis arm IS scoped to this fixture's own row — `grep -a 'inst inst-A'`
+# cannot match the `archive()` fixture, which `appTag` renders as `inst inst-000`.
+# That is sufficient: this fixture's instance name is fifteen characters, well past
+# the eight-character prefix, so the clip is exposed here. An earlier wording
+# claimed the arm covered every long instance name in the suite; it does not.
+W13_SID=abababab-0000-0000-0000-0000000000b1
+W13_ESC="$(printf '\033')"
+W13_INST="inst-A${W13_ESC}[2K-0001"
+W13_WT="$FAKE/work/wt-app"
+W13_DIR="$FAKE/Library/Application Support/Claude/claude-code-sessions/$W13_INST/ws-0001"
+if ! mkdir -p "$W13_DIR" 2>/dev/null; then
+  skip "W13 desktop-instance id bound (this host refused a directory name carrying ESC)"
+else
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W13_SID" "$W13_WT" 2>/dev/null
+  printf '{"cliSessionId":"%s","isArchived":false,"title":"app fixture","model":"opus","effort":"high","permissionMode":"default"}\n' "$W13_SID" > "$W13_DIR/local_$W13_SID.json"
+  W13_BAD=""
+  W13_LIST="$(HOME="$FAKE" node "$TRAIL_MJS" list --all 2>/dev/null | grep -a 'inst inst-A' || true)"
+  [ -n "$W13_LIST" ] || W13_BAD="$W13_BAD appTag-row-absent"
+  case "$W13_LIST" in *"$W13_ESC"*) W13_BAD="$W13_BAD appTag-esc-survived" ;; esac
+  case "$W13_LIST" in *'…'*) W13_BAD="$W13_BAD appTag-clips-to-seven-plus-ellipsis" ;; esac
+  W13_OWNER="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W13_SID" --all --no-git 2>/dev/null | grep -a '^OWNER' || true)"
+  [ -n "$W13_OWNER" ] || W13_BAD="$W13_BAD owner-row-absent"
+  case "$W13_OWNER" in *"$W13_ESC"*) W13_BAD="$W13_BAD owner-row-esc-survived" ;; esac
+  if [ -z "$W13_BAD" ]; then
+    check "W13 the desktop instance id is control-stripped and keeps the 8-char prefix instances renders" PASS
+  else
+    check "W13 desktop instance id bound:$W13_BAD" FAIL
+  fi
+fi
+
+# W14 — `canonicalDir`'s two normalization decisions, neither of which any probe
+# reached. The arms are of different kinds and the labels say which is which.
+#
+# (a) BITE. The trailing-separator strip was `/[\\/]+$/`, which also removes a
+# BACKSLASH — a perfectly legal character in a POSIX directory name. An anchor
+# named `…/foo\` therefore canonicalized to `…/foo`, stopped matching its own
+# nested worktree `…/foo\/wt`, and a covered worktree rendered as denied from a
+# deterministic input. Skipped on Windows, where `\` really is a separator and the
+# strip is correct.
+#
+# (b) REGRESSION PIN with a STATED GAP, and the gap is the interesting half. The
+# arm drives the filesystem-root guard (`path.parse(real).root === real`), which no
+# other fixture reaches, and it does bite an UNGUARDED strip. What it cannot do is
+# discriminate the `real.length > 1` spelling the guard replaced: on POSIX
+# `'/'.length` is 1, so that check is false and `/` comes back unchanged — byte
+# identical to the shipped guard. The two diverge only at a win32 drive root
+# (`C:\`, length 3), and `tests/profiles/windows-native-structure.v1.json` excludes
+# this suite from native Windows. So the length-check regression is UNVERIFIED on
+# every host this suite runs on. Closing it needs a `path.win32`-parameterised
+# probe, which `trail.mjs` cannot serve because it exports nothing.
+W14_BAD=""
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*) skip "W14a backslash-in-a-directory-name (this host treats \\ as a separator)" ;;
+  *)
+    W14_BS='\'
+    W14_SID=bcbcbcbc-0000-0000-0000-0000000000c9
+    W14_ANCHOR="$FAKE/work/foo${W14_BS}"
+    W14_WT="${W14_ANCHOR}/wt"
+    HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W14_SID" "$W14_WT" 2>/dev/null
+    W14_BSOUT="$(ZENSU_PROJECT_ROOT="$W14_ANCHOR" HOME="$FAKE" node "$TRAIL_MJS" show "$W14_SID" --all --no-git 2>/dev/null | writes_block)"
+    case "$W14_BSOUT" in
+      "WRITES   allowed"*) ;;
+      *) W14_BAD="$W14_BAD backslash-in-anchor-name-stripped(got='$(printf '%s' "${W14_BSOUT:-<empty>}" | head -1)')" ;;
+    esac
+    ;;
+esac
+W14_ROOT="$(ZENSU_PROJECT_ROOT="/" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W14_ROOT" in
+  "WRITES   allowed"*) ;;
+  *) W14_BAD="$W14_BAD filesystem-root-anchor-not-normalized(got='$(printf '%s' "${W14_ROOT:-<empty>}" | head -1)')" ;;
+esac
+if [ -z "$W14_BAD" ]; then
+  check "W14 canonicalDir keeps a backslash in a POSIX name and leaves a filesystem root intact" PASS
+else
+  check "W14 canonicalDir normalization:$W14_BAD" FAIL
+fi
+
+# W16 — `resumedUntil`, the one bound on `stopCause` that was executed but never
+# OBSERVED. It renders in exactly one place: `cmdShow`'s RECOVERED branch, the
+# `else if (r.stopCause)` arm that runs only when the api-error record is NOT the
+# last one in the transcript. Every stopCause fixture in this file — and in W8b's —
+# puts that record last, so `final` is always true, the STOPPED branch always wins
+# and this line never rendered under test. The value is transcript-derived, so
+# "executed" is not the same as "bounded".
+#
+# The fixture therefore places a further turn AFTER the error, and gives THAT turn
+# the hostile timestamp, because `resumedUntil` reports the last turn rather than
+# the error's own.
+W16_SID=cdcdcdcd-0000-0000-0000-0000000000d5
+W16_WT="$FAKE/work/wt-recovered"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"working"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"API Error: 429 rate_limit"}]}, cwd:wt, isSidechain:false, isApiErrorMessage:true, apiErrorStatus:429, error:"rate_limit", timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"recovered and finished"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:`${iso}\nINJECTEDBYTIMESTAMP` })
+].join("\n") + "\n");
+' "$FAKE" "$W16_SID" "$W16_WT" 2>/dev/null
+#
+# What the bound actually DOES here was measured rather than assumed, and it is not
+# what it looks like. `extractStopCause` reads the RAW transcript text, so a JSON
+# `\n` stays a LITERAL backslash-n and never becomes a newline — `flat()`'s
+# whitespace collapse does no work on this path, and `cmdShow` slices to 16
+# characters anyway, truncating any payload before it could reach the terminal. The
+# load-bearing half of `flat(lastTurnAt, 40)` is the 40-character CLIP, and the only
+# renderer that can show it is the takeover brief, which prints the value UNSLICED
+# into a persisted artifact. So that is where the bound is asserted, with its own
+# bite copy — an arm aimed at the `show` line would have passed forever.
+W16_BAD=""
+W16_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W16_SID" --all --no-git 2>/dev/null)"
+W16_NOTES="$(printf '%s\n' "$W16_OUT" | grep -ac '^NOTE     hit ' || true)"
+# The premise: the RECOVERED branch must be the one that ran. If STOPPED fired
+# instead, the fixture failed to put a turn after the error and every arm below
+# would be judging a line this check is not about.
+case "$W16_OUT" in *"STOPPED  "*) W16_BAD="$W16_BAD premise-lapsed-error-record-is-still-last" ;; esac
+[ "$W16_NOTES" = "1" ] || W16_BAD="$W16_BAD recovered-note-not-rendered-exactly-once(count=$W16_NOTES)"
+w16_resumed_len() { # <script> — length of the brief's unsliced `last at` value
+  HOME="$FAKE" node "$1" takeover "$W16_SID" --all 2>/dev/null \
+    | grep -aF 'but **recovered**' | head -1 \
+    | sed 's/.*last at \(.*\)\. That error.*/\1/' | tr -d '\n' | wc -c | tr -d ' '
+}
+W16_LEN="$(w16_resumed_len "$TRAIL_MJS")"
+[ -n "$W16_LEN" ] && [ "$W16_LEN" -gt 0 ] 2>/dev/null || W16_BAD="$W16_BAD brief-recovered-line-not-located"
+[ "${W16_LEN:-999}" -le 40 ] 2>/dev/null || W16_BAD="$W16_BAD resumedUntil-not-clipped-in-the-brief(len=$W16_LEN)"
+# The bite arm: with the clip removed the same extraction must exceed it, or the
+# assertion above is measuring a value that was never long enough to be clipped.
+W16_MUT="$FAKE/trail-w16-mutated.mjs"
+sed 's/resumedUntil: flat(lastTurnAt, 40) ?? null,/resumedUntil: lastTurnAt ?? null,/' "$TRAIL_MJS" > "$W16_MUT" 2>/dev/null
+if ! grep -qF 'resumedUntil: lastTurnAt ?? null,' "$W16_MUT" 2>/dev/null; then
+  W16_BAD="$W16_BAD bite-mutation-did-not-apply(bound-spelling-moved)"
+else
+  W16_MUTLEN="$(w16_resumed_len "$W16_MUT")"
+  [ "${W16_MUTLEN:-0}" -gt 40 ] 2>/dev/null || W16_BAD="$W16_BAD bite-arm-inert(unclipped-len=$W16_MUTLEN)"
+fi
+if [ -z "$W16_BAD" ]; then
+  check "W16 the RECOVERED note renders once and the brief's resumedUntil is clipped, with the clip proven load-bearing" PASS
+else
+  check "W16 resumedUntil render:$W16_BAD" FAIL
+fi
+
+# W17 — `buildIndex`'s live-registry cwd fallback must survive its own row literal.
+# The row computes `const cwd = s.cwd || (live.get(sessionId) || {}).cwd || null;`
+# and then places `cwd` BEFORE `...s`. `summarize()` always emits a `cwd` key, so
+# for exactly the rows the fallback exists to serve — a live session whose
+# transcript carries no `"cwd":"…"` match — the registry value is written and then
+# immediately overwritten with null.
+#
+# `r.wt` is unaffected (computed before the literal, and `summarize` has no `wt`
+# key), which is why nothing noticed: only the carriers that read `r.cwd` break.
+# `printResume` is one of them, and it now renders that value through
+# `briefShellArg`, so the failure surfaces as a runnable line reading `cd -- ''` —
+# a command that changes to an unspecified directory and then resumes a session
+# there. Out of this PR's own diff by origin, in it by consequence.
+W17_SID=efefefef-0000-0000-0000-0000000000f7
+W17_WT="$FAKE/work/wt-registry-only"
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt, pid] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+fs.mkdirSync(path.join(home, ".claude", "sessions"), { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+// No `cwd` field anywhere in the transcript — that is the whole fixture. Padded
+// past the 200-byte floor `buildIndex` requires before it will summarize a file.
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:`start ${"x".repeat(120)}`}, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+fs.writeFileSync(path.join(home, ".claude", "sessions", `${sid}.json`), JSON.stringify({
+  sessionId: sid, cwd: wt, pid: Number(pid), startedAt: Date.now() - 7200000
+}));
+' "$FAKE" "$W17_SID" "$W17_WT" "$LIVE_PID" 2>/dev/null
+W17_BAD=""
+W17_CWD="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W17_SID" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).cwd))}catch{process.stdout.write("PARSE_ERROR")}})')"
+[ "$W17_CWD" = "$W17_WT" ] || W17_BAD="$W17_BAD registry-cwd-overwritten(got=$W17_CWD)"
+# TWO carriers, because the defect has two sites and `show` alone cannot separate
+# them: `cmdShow`, `cmdTakeover` and `cmdHandoff` all pass the row through
+# `hydrate`, so the guard there rescues the value even when the row literal is
+# wrong — a bite test reverting only the literal left this check green. `list
+# --json` emits the raw `buildIndex` rows with no hydrate step, so it is the
+# carrier that sees the literal by itself.
+W17_LIST_CWD="$(HOME="$FAKE" node "$TRAIL_MJS" list --all --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";const sid=process.argv[1];process.stdin.on("data",d=>s+=d).on("end",()=>{try{const r=(JSON.parse(s).rows||[]).find(x=>x.sessionId===sid);process.stdout.write(r?String(r.cwd):"ROW_ABSENT")}catch{process.stdout.write("PARSE_ERROR")}})' "$W17_SID")"
+[ "$W17_LIST_CWD" = "$W17_WT" ] || W17_BAD="$W17_BAD unhydrated-row-cwd-overwritten(got=$W17_LIST_CWD)"
+W17_RESUME="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W17_SID" --all --no-git 2>/dev/null | grep -aF 'claude --resume' | head -1)"
+[ -n "$W17_RESUME" ] || W17_BAD="$W17_BAD resume-line-absent"
+case "$W17_RESUME" in *"cd -- ''"*) W17_BAD="$W17_BAD runnable-line-has-an-empty-cd-operand" ;; esac
+if [ -z "$W17_BAD" ]; then
+  check "W17 a registry-only cwd survives the row literal and reaches the runnable line" PASS
+else
+  check "W17 registry cwd fallback:$W17_BAD" FAIL
+fi
+
+# W18 — two reason/attribution defects the round-1 review found, and one field the
+# `cwd` repair left behind. All three are about a renderer telling the reader
+# something the code beside it knows to be false.
+#
+# (a) A channel that IS set but was REJECTED as non-absolute currently renders the
+# ordinary no-channel reason, so an operator who exported one is told nothing was
+# set. `source` must distinguish rejection from absence on the JSON carrier too.
+# (b) The `denied here` head calls `callerRoot` "this session's anchor" even when
+# it came from CLAUDE_PROJECT_DIR, which `writeAnchor` disclaims two lines above.
+# (c) `hydrate` guards `cwd` but not `title`, which has the identical defect:
+# `buildIndex` resolves a desktop-app title and the blind spread overwrites it.
+W18_BAD=""
+# (a)
+W18_REJ="$(cd "$FAKE" && unset CLAUDE_PROJECT_DIR; ZENSU_PROJECT_ROOT="work/relative" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W18_REJ" in
+  *"the ordinary case"*) W18_BAD="$W18_BAD rejected-channel-reported-as-absent" ;;
+esac
+W18_REJ_SRC="$(cd "$FAKE" && unset CLAUDE_PROJECT_DIR; ZENSU_PROJECT_ROOT="work/relative" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(String(JSON.parse(s).writes.source))}catch{process.stdout.write("PARSE_ERROR")}})')"
+case "$W18_REJ_SRC" in *rejected*) ;; *) W18_BAD="$W18_BAD json-source-does-not-record-the-rejection(got=$W18_REJ_SRC)" ;; esac
+# The control: a genuinely empty environment must still read as the ordinary case,
+# or arm (a) would be satisfied by any wording change at all.
+W18_NONE="$(env -u ZENSU_PROJECT_ROOT -u CLAUDE_PROJECT_DIR HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W18_NONE" in *"the ordinary case"*) ;; *) W18_BAD="$W18_BAD no-channel-render-lost-its-ordinary-case-wording" ;; esac
+# (b)
+W18_DENY="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$FAKE/work/wt-other" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W18_DENY" in *"this session is anchored to"*) W18_BAD="$W18_BAD weak-channel-deny-claims-to-name-the-anchor" ;; esac
+case "$W18_DENY" in *"WRITES   denied here"*) ;; *) W18_BAD="$W18_BAD weak-channel-deny-direction-lost" ;; esac
+# The control: the AUTHORITATIVE channel may still call it the anchor, because there
+# it is one.
+W18_DENY_STRONG="$(env -u CLAUDE_PROJECT_DIR ZENSU_PROJECT_ROOT="$FAKE/work/wt-other" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W18_DENY_STRONG" in *"this session is anchored to"*) ;; *) W18_BAD="$W18_BAD authoritative-deny-lost-its-anchor-wording" ;; esac
+# (c) — its OWN fixture: a transcript with no custom-title record plus a desktop-store
+# title, so `summarize`'s always-emitted null `title` is what a blind spread restores.
+# Not W17's row and not registry-only; an earlier wording claimed both.
+W18_TITLE_SID=a7a7a7a7-0000-0000-0000-0000000000a4
+W18_TITLE_WT="$FAKE/work/wt-apptitle"
+W18_TITLE_INST="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-title/ws-0001"
+mkdir -p "$W18_TITLE_INST" 2>/dev/null
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+// No custom-title record anywhere — the desktop store is the only source.
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:`start ${"y".repeat(120)}`}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W18_TITLE_SID" "$W18_TITLE_WT" 2>/dev/null
+printf '{"cliSessionId":"%s","isArchived":false,"title":"TITLE-FROM-THE-DESKTOP-STORE","model":"opus","effort":"high","permissionMode":"default"}\n' "$W18_TITLE_SID" > "$W18_TITLE_INST/local_$W18_TITLE_SID.json"
+W18_TITLE_ROW="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W18_TITLE_SID" --all --no-git 2>/dev/null | grep -a '^TITLE' | head -1)"
+case "$W18_TITLE_ROW" in *TITLE-FROM-THE-DESKTOP-STORE*) ;; *) W18_BAD="$W18_BAD hydrate-clobbered-the-resolved-title(got='$W18_TITLE_ROW')" ;; esac
+if [ -z "$W18_BAD" ]; then
+  check "W18 a rejected channel, a weak-channel deny and a store-resolved title are each reported truthfully" PASS
+else
+  check "W18 renderer attribution:$W18_BAD" FAIL
+fi
+
+# W19 — two hazards that reach the renderer from ANOTHER process's store, and one
+# structural pin for the literal the whole `allowed` verdict now depends on.
+#
+# (a) A non-string `cwd` in `~/.claude/sessions/*.json` reaches `worktreeRoot` and
+# `path.basename` and takes the WHOLE command down with an uncaught TypeError,
+# instead of the SKIPPED accounting this script is built around. `cmdInstances`
+# already guards the same field with `typeof s.cwd === 'string'`; `buildIndex` did
+# not, and the `cwd` repair is what made that value newly reachable in a runnable
+# `cd` line.
+# (b) `flatPath` deliberately does not collapse ordinary spaces, so a directory
+# name can pad itself into the position where `cmdShow` prints `**ARCHIVED**` and
+# impersonate a marker the reader treats as machine-derived.
+# (c) `covered === true` is now reachable ONLY through the literal
+# `ZENSU_PROJECT_ROOT`, and its sole producer is a different layer. Nothing in
+# either suite compared the two, so a rename in the hook would degrade this feature
+# to permanent `unknown` with every check green.
+W19_BAD=""
+W19_SID=b9b9b9b9-0000-0000-0000-0000000000b7
+mkdir -p "$FAKE/.claude/sessions" 2>/dev/null
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt, pid] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  // No cwd in the transcript, so the live-registry value is the ONLY source and the
+  // fallback actually runs — with a cwd of its own the row never reaches it.
+  JSON.stringify({ type:"user", message:{role:"user",content:`start ${"z".repeat(120)}`}, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+// The hostile half: a registry record whose cwd is an OBJECT.
+fs.writeFileSync(path.join(home, ".claude", "sessions", `${sid}.json`), JSON.stringify({
+  sessionId: sid, cwd: { a: 1 }, pid: Number(pid), startedAt: Date.now() - 7200000
+}));
+' "$FAKE" "$W19_SID" "$FAKE/work/wt-badregistry" "$LIVE_PID" 2>/dev/null
+W19_LIST_RC=0
+HOME="$FAKE" node "$TRAIL_MJS" list --all >/dev/null 2>&1 || W19_LIST_RC=$?
+# `= 0`, not `-le 1`: an uncaught TypeError exits 1 and `cmdList` has no other
+# non-zero exit, so `-le 1` was unconditionally true and the crash label could
+# never be reached.
+[ "$W19_LIST_RC" = "0" ] || W19_BAD="$W19_BAD non-string-registry-cwd-crashed-list(rc=$W19_LIST_RC)"
+W19_LIST_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" list --all 2>/dev/null | grep -ac . || true)"
+[ "${W19_LIST_OUT:-0}" -gt 0 ] 2>/dev/null || W19_BAD="$W19_BAD non-string-registry-cwd-emptied-list"
+# (b)
+W19_FORGE_SID=b8b8b8b8-0000-0000-0000-0000000000b8
+W19_FORGE_INST="x   **ARCHIVED** (process stopped, worktree may have been clean"
+W19_FORGE_DIR="$FAKE/Library/Application Support/Claude/claude-code-sessions/$W19_FORGE_INST/ws-0001"
+if mkdir -p "$W19_FORGE_DIR" 2>/dev/null; then
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:`start ${"q".repeat(120)}`}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W19_FORGE_SID" "$FAKE/work/wt-forge" 2>/dev/null
+  printf '{"cliSessionId":"%s","isArchived":false,"title":"forge fixture","model":"opus","effort":"high","permissionMode":"default"}\n' "$W19_FORGE_SID" > "$W19_FORGE_DIR/local_$W19_FORGE_SID.json"
+  W19_OWNER="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W19_FORGE_SID" --all --no-git 2>/dev/null | grep -a '^OWNER' | head -1)"
+  # Liveness first: `cmdShow` emits OWNER only under `if (r.app)`, so a record the
+  # store did not pick up leaves this empty and the negative arm below would pass
+  # having exercised nothing — the failure every sibling here carries a control for.
+  [ -n "$W19_OWNER" ] || W19_BAD="$W19_BAD forge-owner-row-absent"
+  case "$W19_OWNER" in *'**ARCHIVED**'*) W19_BAD="$W19_BAD instance-name-forged-the-archived-marker" ;; esac
+  # ZERO-WIDTH variant: U+200B is in neither CONTROL_RUN nor the space collapse, and
+  # it breaks the asterisk run so the separator never fires — while a terminal still
+  # renders the result as `**ARCHIVED**`.
+  W19_ZW_SID=b6b6b6b6-0000-0000-0000-0000000000b6
+  # U+2069 (POP DIRECTIONAL ISOLATE), not U+200B: it is zero-advance, it breaks the
+  # asterisk run just as well, and it is in \p{Cf} but was NOT in the hand-rolled
+  # production class — which is the whole point of this fixture.
+  W19_ZW="$(printf 'x*\342\201\251*ARCHIVED*\342\201\251*')"
+  W19_ZW_DIR="$FAKE/Library/Application Support/Claude/claude-code-sessions/$W19_ZW/ws-0001"
+  if mkdir -p "$W19_ZW_DIR" 2>/dev/null; then
+    HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:`start ${"w".repeat(120)}`}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W19_ZW_SID" "$FAKE/work/wt-zwforge" 2>/dev/null
+    printf '{"cliSessionId":"%s","isArchived":false,"title":"zw forge","model":"opus","effort":"high","permissionMode":"default"}\n' "$W19_ZW_SID" > "$W19_ZW_DIR/local_$W19_ZW_SID.json"
+    W19_ZW_OWNER="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W19_ZW_SID" --all --no-git 2>/dev/null | grep -a '^OWNER' | head -1)"
+    [ -n "$W19_ZW_OWNER" ] || W19_BAD="$W19_BAD zero-width-forge-owner-row-absent"
+    # Matched AFTER stripping the zero-width/format class, because that is what a
+    # terminal shows the reader: the bytes differ from `**ARCHIVED**`, the glyphs do
+    # not. A byte-literal grep here tests nothing, which is how the first spelling of
+    # this arm passed.
+    # STRICTLY wider than production's, and that is the whole point of the arm.
+    # Production strips \p{Cf}, \p{Mn} and \p{Me}; this adds \p{Cc}, so a zero-advance
+    # code point production misses is still stripped here and the forge is still seen.
+    # (That arithmetic went stale once already: the round that widened production left
+    # this line describing the older, narrower class.)
+    # Two earlier spellings got this wrong in the same way: the first copied
+    # production's hand-rolled list, the second copied its property class — and both
+    # times the comment claimed independence the code did not have. A class that
+    # audits itself measures nothing, however it is spelled.
+    W19_ZW_STRIP='s.replace(/[\p{Cf}\p{Mn}\p{Me}\p{Cc}]/gu,"")'
+    W19_ZW_SEEN="$(printf '%s' "$W19_ZW_OWNER" | HOME="$FAKE" node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{process.stdout.write(/\\*\\*ARCHIVED\\*\\*/.test($W19_ZW_STRIP)?\"FORGED\":\"clean\")})")"
+    # Positive control: the same predicate must report FORGED for a raw marker, or a
+    # typo in the regex turns the arm into an unconditional pass.
+    W19_ZW_CTRL="$(printf 'x**ARCHIVED**' | HOME="$FAKE" node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{process.stdout.write(/\\*\\*ARCHIVED\\*\\*/.test($W19_ZW_STRIP)?\"FORGED\":\"clean\")})")"
+    [ "$W19_ZW_CTRL" = "FORGED" ] || W19_BAD="$W19_BAD zero-width-probe-inert(control=$W19_ZW_CTRL)"
+    # The superset relation is held STRUCTURALLY, not by the comment above it. The
+    # probe is a hand-copy of production's class plus \p{Cc}, and nothing under tests/
+    # names ZERO_WIDTH — so a fourth category added to production would silently make
+    # the probe NARROWER, falsifying "strictly wider" with the suite green. That is
+    # the same staleness this comment already records once. Extract production's
+    # class and require every property it names to appear in the probe.
+    W19_PROD_CLASS="$(grep -F 'const ZERO_WIDTH' "$TRAIL_MJS" | head -1)"
+    [ -n "$W19_PROD_CLASS" ] || W19_BAD="$W19_BAD production-zero-width-class-not-found"
+    for prop in $(printf '%s\n' "$W19_PROD_CLASS" | grep -oE '\\p\{[A-Za-z]+\}'); do
+      case "$W19_ZW_STRIP" in *"$prop"*) ;; *) W19_BAD="$W19_BAD probe-narrower-than-production($prop)" ;; esac
+    done
+    [ "$W19_ZW_SEEN" = "clean" ] || W19_BAD="$W19_BAD zero-width-forged-the-archived-marker"
+  fi
+else
+  skip "W19b archived-marker forge (this host refused the crafted directory name)"
+fi
+# (c) — structural, and cross-layer on purpose.
+W19_HOOK="$PLUGIN_DIR/hooks/lib/claude-hook-session-v1.js"
+if [ ! -f "$W19_HOOK" ]; then
+  W19_BAD="$W19_BAD anchor-producer-hook-not-found"
+else
+  # The ASSIGNMENT shape, not the bare literal: a rename that leaves the old spelling
+  # in a comment would keep a presence grep green under a label asserting an export.
+  grep -qE '^[[:space:]]*ZENSU_PROJECT_ROOT:[[:space:]]' "$W19_HOOK" || W19_BAD="$W19_BAD anchor-producer-no-longer-exports-the-literal"
+fi
+# The `process.env` READ, not the bare literal: `WRITE_ANCHOR_BODY` is the whole
+# extracted function including its comments, and the name appears in prose there too,
+# so a presence grep survives deletion of the actual read.
+printf '%s\n' "$WRITE_ANCHOR_BODY" | grep -qF 'process.env.ZENSU_PROJECT_ROOT' || W19_BAD="$W19_BAD writeAnchor-no-longer-reads-the-literal"
+if [ -z "$W19_BAD" ]; then
+  check "W19 a hostile registry record cannot crash or forge a row, and the anchor literal still has a producer" PASS
+else
+  check "W19 third-party store hazards:$W19_BAD" FAIL
 fi
 
 # V-clock — the budget stated at the fixture block, asserted. Runs LAST, so it
