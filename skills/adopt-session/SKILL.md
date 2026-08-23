@@ -95,8 +95,24 @@ None beyond a running session. No network, no API key. The entry point needs
 if it is missing. It does **not** need `CLAUDE_PROJECT_DIR` and never reads it, so
 the command below does not pass it: the project it repairs is the one the RECORD
 names. A session whose **harness** project directory has moved or been deleted
-therefore still gets its report. That is not the same as a record whose own
-recorded project root is gone — that one still refuses, as `record-unreadable`.
+therefore still gets its report.
+
+**OPEN GAP — a record whose own recorded project root is gone still refuses, and
+that is a limitation rather than a decision.** It answers `record-unreadable`,
+because `readContext` canonicalizes `context.project_root` and throws when it is
+absent. The two sources of truth diverge in two ways in worktree workflows and only
+one is closed: a cwd that was a worktree while the harness reported elsewhere is
+handled, but a worktree later REMOVED — `git worktree remove`, the documented
+cleanup in `skills/pr-team-review` Phase E — is a permanent wedge. Combined with an
+incompatible lineage, `orphanedProjectRootSession` does not fire,
+`resolveIncompatibleRuntime` cannot read the record, `/zensu:doctor` falls back to
+its *no valid record* row, and this skill's own remedy text says to start a fresh
+session. `readOrphanedProjectRootContext` already distinguishes *record intact,
+project root absent* from *record altered or pruned*, and the gates already use it —
+so the distinction exists; adoption simply does not consume it yet. Widening it is a
+separate, larger decision, because adoption would have to succeed with an anchor
+that does not exist. Do not read "that one still refuses" as "and should".
+
 Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
@@ -110,16 +126,27 @@ CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib
 Render both versions and the verdict verbatim. On a refusal, render the reason
 and its remedy verbatim too and STOP — every refusal names a different cause.
 
-The table below is the `adoptableRecord` refusals. The entry point emits one more,
-`private-record-store-unsafe`, before it ever reaches them: the record store itself
-could not be opened safely. It prints its own remedy inline, so render that verbatim
-too.
+**A quoted, backslash-escaped value is NORMAL output, not corruption.** Every
+non-constant string in the report goes through a positive allowlist: an ordinary
+path — including a localized one with umlauts, accents or CJK — prints as itself,
+and anything outside the set is emitted JSON-quoted with non-ASCII folded to
+`\uXXXX`. Two further shapes force the quoted form even when every character is
+allowed: a run of two or more spaces, and a literal `" : "`. Both exist because the
+report is a list of `label : value` pairs and a directory name must not be able to
+forge another one. Render whatever you get verbatim; do NOT un-escape it, and do not
+report it as damage.
+
+Every refusal a user can see is in the table below. Most are `adoptableRecord`
+verdicts; `private-record-store-unsafe` is emitted by the ENTRY POINT before those
+are ever reached, and is marked as such. Each prints its own remedy inline, so
+render that verbatim too.
 
 | Reason | Meaning |
 |--------|---------|
+| `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
-| `already-served` | Nothing to adopt; the failure has another cause. Run `/zensu:doctor`. |
+| `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
 | `executing-runtime-unidentified` | The executing installation declares no usable version. |
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |

@@ -186,17 +186,33 @@ else
 fi
 
 # This offline structure test materializes both roots from the COMMITTED revision:
-# line 27 captures `git rev-parse HEAD` and the install fixture reads the tree with
-# `git ls-tree`. That is load-bearing to know, because it splits the suite in two —
-# anything reached through a $SYNTHETIC_*_ROOT path (every behavioural row, and the
-# copies of skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read) grades the
-# LAST COMMIT, while SIX rows read $ROOT — the working tree — directly: the two unit
-# drivers, the two hand-copy pins hoisted to the front of the file, the lease-gap grep, and
-# AC-013. Each of the six is labelled in place. An uncommitted change under hooks/
-# or skills/ therefore reports green against the previous commit everywhere EXCEPT
-# those six; it cost a full review round here once. It proves create-once,
-# root-binding, and fail-closed invariants only. The Promptfoo upgrade profile supplies the authoritative
+# `ROOT_REVISION` captures `git rev-parse HEAD` above and the install fixture reads
+# the tree with `git ls-tree`. (No line number here on purpose — the previous wording
+# named one and the next hoist made it stale, which is the same drift this comment is
+# warning about.) That split is load-bearing to know: anything reached through a
+# $SYNTHETIC_*_ROOT path — every behavioural row, and the copies of
+# skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read — grades the LAST COMMIT,
+# while a handful of rows read $ROOT, the working tree, directly. Each of those is
+# labelled `WORKING TREE, not HEAD` in place; the count is deliberately NOT written
+# out here, because a hand-maintained number is exactly what a driven loop cannot
+# catch when a row is removed.
+#
+# An uncommitted change under hooks/ or skills/ therefore reports green against the
+# previous commit everywhere except those rows. It cost a full review round here
+# once, so it is now an executable check rather than a warning in prose — see the
+# row immediately below. This suite proves create-once, root-binding, and fail-closed
+# invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
+#
+# Placed beside the two hoisted pins and for the same reason: it needs no fixture and
+# no session lifecycle, and a Windows timeout that kills the tail must not be able to
+# take the one row that tells you the rest graded the wrong tree.
+if git -C "$ROOT" diff --quiet HEAD -- hooks skills 2>/dev/null; then
+  check "the tree under test is committed (behavioural rows grade $ROOT_REVISION)" PASS
+else
+  check "UNCOMMITTED hooks/ or skills/ changes: behavioural rows grade $ROOT_REVISION, not your edits" FAIL
+  git -C "$ROOT" diff --name-only HEAD -- hooks skills 2>/dev/null | head -10
+fi
 SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
 SHARED_DATA="$TMP/data/zensu-zensu"
 PROJECT="$TMP/project"
@@ -1220,6 +1236,38 @@ else
   check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
 fi
 
+# The LEGACY shape, which is the one property that decides whether an in-flight
+# session survives the upgrade.
+#
+# $ADOPT_CMD used to carry CLAUDE_PROJECT_DIR and went through this same
+# enumeration. It no longer does, and the rows above therefore grade only the NEW
+# shape — so nothing graded the command an older, still-running skill copy emits. It
+# is still admitted (ASSIGNMENTS is unchanged and a rooted literal passes), but that
+# property was left resting on an allowlist entry whose own comment called it free,
+# which is exactly the setup for a future narrowing that turns this green suite into
+# a silently broken remedy for anyone mid-upgrade. A model does not reload its skill
+# body when the plugin updates underneath it.
+ADOPT_LEGACY_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$SYNTHETIC_BREAKING_ROOT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+ADOPT_LEGACY_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_LEGACY_CMD")"
+ADOPT_LEGACY_FAILURES=''
+while IFS= read -r hook_name; do
+  [ -n "$hook_name" ] || continue
+  hook_expected="$ADOPT_EXPECTED"
+  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
+    hook_expected=allow
+  fi
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
+    ADOPT_LEGACY_FAILURES="$ADOPT_LEGACY_FAILURES $hook_name"
+  fi
+done <<EOF
+$ADOPT_MATCHER_HOOKS
+EOF
+if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_LEGACY_FAILURES" ]; then
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted" PASS
+else
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted (unexpected:$ADOPT_LEGACY_FAILURES)" FAIL
+fi
+
 # The discrimination test for AC-C04: the recognizer must stay exactly this
 # narrow. An ordinary Bash command in the same state still denies, so an allow
 # above cannot have come from the bind succeeding.
@@ -1886,7 +1934,7 @@ DESTUNSAFE_LEASE='rel1_00112233445566778899aabbccddeeff'
 write_lease "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" "$DESTUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
 printf 'not a directory\n' > "$DESTUNSAFE_ASIDE"
 DESTUNSAFE_OUT="$TMP/adopt-dest-unsafe.out"
-if CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$DESTUNSAFE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$DESTUNSAFE_OUT" \
@@ -1927,7 +1975,7 @@ SRCUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-
 mkdir -p "$CANONICAL_SHARED_DATA/review-evidence/v1/records"
 printf 'not a directory\n' > "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$SRCUNSAFE_KEY"
 SRCUNSAFE_OUT="$TMP/adopt-src-unsafe.out"
-if CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$SRCUNSAFE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$SRCUNSAFE_OUT" \
@@ -1992,7 +2040,7 @@ case "$(uname -s 2>/dev/null)" in
     ;;
 esac
 LEAFUNSAFE_OUT="$TMP/adopt-leaf-unsafe.out"
-if CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$LEAFUNSAFE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT"; then
@@ -2450,9 +2498,18 @@ REFUSAL_GAPS="$(
       .map((l) => l.match(/^\|\s*`([a-z0-9_-]+)`\s*\|/))
       .filter(Boolean)
       .map((m) => m[1]);
-    const stale = rows.filter((r) => !reasons.includes(r));
+    // ENTRY-POINT-ONLY refusals. The adoption script emits `private-record-store-unsafe`
+    // itself, before adoptableRecord is ever reached, so it is a refusal a user sees
+    // and the model has to recognize — but it is not an ADOPTION_REFUSALS value. The
+    // stale arm used to reject it, which meant the refusal TABLE had to stay
+    // incomplete in order to keep this pin simple: the test dictated what could be
+    // documented instead of checking that what exists is documented. Naming the
+    // exception explicitly inverts that back.
+    const ENTRY_ONLY = ["private-record-store-unsafe"];
+    const known = reasons.concat(ENTRY_ONLY);
+    const stale = rows.filter((r) => !known.includes(r));
     if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }
-    const missing = reasons.filter((r) => !rows.includes(r));
+    const missing = known.filter((r) => !rows.includes(r));
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
 )" || REFUSAL_GAPS=threw
@@ -2460,6 +2517,37 @@ if [ "$REFUSAL_GAPS" = ok ]; then
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill" PASS
 else
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL
+fi
+
+# CONV-2 — the doctor skill must not hand the recognizer an EMPTY assignment.
+#
+# isRootedLiteralPath("") is false, so a harness that renders the placeholder empty
+# makes parseAssignment reject and the ENTIRE invocation is denied — and the command
+# it denies is /zensu:doctor, the FIRST of the two exempt commands and the one a
+# wedged user is told to run first, in exactly the bind-failure state it exists to
+# diagnose. The user gets a gate deny, not the script's own message, because the
+# recognizer runs before it. `CLAUDE_PROJECT_DIR= bash <doctor>` is already pinned as
+# ASSIGNMENT-refused in zensu-doctor-invocation.test.js; what is pinned HERE is that
+# the shipped skill body tells the model to omit the assignment rather than render it
+# empty, the way ZDOC_PLAYWRIGHT_TOOLS already is.
+DOCTOR_SKILL="$ROOT/skills/doctor/SKILL.md"
+if grep -qF 'omit' "$DOCTOR_SKILL" \
+  && grep -qE 'omit (that|the) `?CLAUDE_PROJECT_DIR' "$DOCTOR_SKILL"; then
+  check "CONV-2 the doctor skill tells the model to omit an unrenderable CLAUDE_PROJECT_DIR" PASS
+else
+  check "CONV-2 the doctor skill tells the model to omit an unrenderable CLAUDE_PROJECT_DIR" FAIL
+fi
+
+# CONV-3 — the recognizer must SAY why it still accepts the assignment at all. It is
+# not a harmless leftover: it is what keeps a model still holding the PREVIOUS
+# release's skill body from having its command refused, which is not exotic, because
+# a mid-session upgrade is the state the whole feature exists for.
+RECOGNIZER_SRC="$ROOT/hooks/lib/zensu-doctor-invocation.js"
+if grep -qF 'CLAUDE_PROJECT_DIR' "$RECOGNIZER_SRC" \
+  && grep -qE 'previous release|older skill|mid-session upgrade' "$RECOGNIZER_SRC"; then
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" PASS
+else
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" FAIL
 fi
 
 # The reserved phase cannot be minted by a caller — the same protection

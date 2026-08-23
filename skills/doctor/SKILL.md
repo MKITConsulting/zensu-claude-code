@@ -90,12 +90,31 @@ assignment when the tool set is not loaded. The root preflight now lives inside
 `zensu-doctor.sh`, so an invalid root still prints the standardized doctor table
 fragment rather than an unformatted shell error.
 
+**If `${CLAUDE_PROJECT_DIR}` would render EMPTY, omit that assignment entirely
+rather than emitting `CLAUDE_PROJECT_DIR=`.** An empty value is not a rooted
+literal path, so the recognizer rejects the assignment and denies the WHOLE
+invocation — and the command it denies is this one, the first thing a wedged user
+is told to run, in exactly the bind failure it exists to diagnose. You would see a
+gate deny instead of the doctor's own message, because the recognizer runs first.
+Dropping it costs at most the project-local config row: `zensu-doctor.sh` falls
+back to `${CLAUDE_PROJECT_DIR:-.}` and the report guards every use of it.
+
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 ```bash
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
+```
+
+The same two forms with `CLAUDE_PROJECT_DIR` dropped, for the empty-render case:
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" ZDOC_PLAYWRIGHT_TOOLS=ready bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
+```
+
+```bash
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"
 ```
 
 If the Bash call itself fails to run — the plugin root is gone, so there is no

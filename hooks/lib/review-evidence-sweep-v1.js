@@ -327,6 +327,25 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
     // therefore KEPT and keeps wedging later lease operations — a residual, not the
     // main gap, because a lease can only name the executing root if that runtime
     // minted it, and none can be minted while the session is unbound.
+    //
+    // ONE item on that residual list is NOT bounded by that argument, and it is the
+    // one to watch: the LEASE SCHEMA. This predicate never looks at `record.schema`
+    // or `record.schema_version`, which the owner declares and `readRecord`
+    // enforces. So a release that bumps the lease schema is invisible here — every
+    // lease naming the executing root is kept, the new reader rejects each one,
+    // `listRecords` propagates the first failure, and the session is wedged for
+    // review evidence AFTER an adoption that reported `leases set aside : 0`. The
+    // session looks repaired and is not. A schema bump is precisely the case where
+    // the executing runtime DID mint the record and still cannot read it, so
+    // "only the executing runtime could have minted it" does not cover it.
+    //
+    // This is also where the authorising argument for adoption stops. Schema
+    // equality closes itself only for the two documents `validateContext` and
+    // `validateWorkflowState` own; it does not close itself for this store, nor —
+    // by the same reasoning — for the attestation shape or any strict `exactKeys`
+    // validator, both of which the breaking-axis list in CLAUDE.md names. Adding the
+    // check means pinning a `LEASE_RECORD_SCHEMA_VERSION` alongside it; it is not
+    // done here, and the gap is stated rather than implied.
     if (leaseRecordIsOwned(name, record, executingPluginRoot)) continue;
     // No mkdir here: asideIsSafe() already created AND validated the directory. What
     // that buys is one fewer way to CREATE the target — it does not close the race.

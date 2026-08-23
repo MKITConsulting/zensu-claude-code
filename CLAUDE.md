@@ -477,6 +477,21 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
+**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
+Removing the caller's project-root condition closed one of the two ways the two
+sources of truth diverge in worktree workflows — a cwd that was a worktree while the
+harness reported elsewhere. The other is still a permanent wedge: a worktree later
+REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
+Phase E) makes `readContext` throw at condition 1, so adoption answers
+`record-unreadable` whose remedy says to start a fresh session. Combined with an
+incompatible lineage, `orphanedProjectRootSession` does not fire either, and
+`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
+ALREADY distinguishes *record intact, project root absent* from *record altered or
+pruned*, and the gates already consume it — adoption does not. Widening it is a
+separate and larger decision, because adoption would then have to succeed with an
+anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
+so the next reader does not take "that one still refuses" for "and should".
+
 **Three re-encodings move with this.** Their coverage is stated once, in the
 store-layout bullet below, and nowhere else — a ledger that contradicts itself about
 its own pins is the failure mode it exists to prevent. The wire format and the
@@ -496,28 +511,35 @@ version-shape rule are unchecked:
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
   destination guard landed — that module's `ensurePrivateDirectory` policy, its
-  `LEASE_ID_RE`, and its `MAX_RECORD_BYTES` (copied as `LEASE_RECORD_MAX_BYTES`
-  when the sweep's per-entry read gained a size cap). FIVE copied elements, not
-  one, and two of them are now pinned byte-for-byte against their owner in
-  `test-versioned-plugin-upgrade.sh` — the two regexes-and-constants; the layout
-  and the `ensurePrivateDirectory` policy are not. A cap that moves in the lease
-  module and not here silently disagrees with `listRecords` about which entries
-  are readable, which is the wedge the sweep exists to clear.
-  The stated reason is narrower than
-  it looks: a core -> lease CALL would cycle (that module requires the binder,
-  which requires this core), but an ENTRY-POINT seam would not, because
-  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
-  that it moves the sweep from the core half to an eighth host obligation. If this
-  function needs a fourth correction, take the seam. THAT TRIGGER HAS FIRED — round after
-  round of review landed corrections here — and taking it was DEFERRED by explicit
-  decision, not overlooked. The reason it stays defensible: none of those rounds
-  added a sixth copied element. The `superseded` mode/uid pair is a policy local to a
-  directory that appears nowhere in the lease module, so nothing there owns or
-  repairs it; the count is still five. The seam belongs in its own change, together
-  with exporting the sweep for a unit driver — which is the same decision, since the
-  module it would move to can be driven directly. The source `lstat`'s ENOENT
-  branch is also the silent one: it cannot tell "no lease was ever minted" from a
-  layout that moved, so a layout change makes the sweep a SILENT no-op.
+  `LEASE_ID_RE`, and its `MAX_RECORD_BYTES`. FIVE copied elements, not one, of
+  which only two were ever pinned — and both pins compared source SPELLINGS rather
+  than behaviour, so `8388608` in the owner would turn them red with nothing wrong
+  while neither checked that the two sides applied the constant to the same
+  quantity.
+
+  **THE SEAM HAS BEEN TAKEN, and the copies are gone.** The trigger this file
+  recorded — "if this function needs a fourth correction, take the seam" — had
+  fired. The direction is the one that was always available: a core -> lease CALL
+  cycles (that module requires the binder, which requires this core), so the SWEEP
+  moved instead, into `hooks/lib/review-evidence-sweep-v1.js`, where requiring the
+  owner is acyclic. `review-evidence-lease-v1.js` now exports `LEASE_ID_RE`,
+  `MAX_RECORD_BYTES`, `REVIEW_EVIDENCE_SEGMENTS`, `ensurePrivateDirectory` and a
+  `leaseRecordIsOwned` predicate, and the sweep consumes all five.
+
+  **The stated cost was paid, not avoided:** the sweep is an EIGHTH host obligation
+  now, not part of the cross-host core half. `adoptContext` no longer sweeps at all
+  — the adoption ENTRY POINT calls it after the record swap — so a port that takes
+  only the core delta gets an adoption that never sweeps and leaves every superseded
+  lease wedging the store. What the move bought: the function is exported and driven
+  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  a temp directory each instead of a full synthetic install plus a session
+  lifecycle, and three return shapes the shell layer could not reach are ordinary
+  cases.
+
+  The source `lstat`'s ENOENT branch remains the silent one: it cannot tell "no
+  lease was ever minted" from a layout that moved, so a layout change still makes
+  the sweep a SILENT no-op. That is now bounded rather than open — the layout is one
+  exported constant both sides read — but it is not closed.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
 `discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
@@ -553,20 +575,21 @@ file so a Windows timeout cannot drop them), the lease-gap grep, and AC-013
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
-It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
-and four session lifecycles, but no Windows wall clock was taken — unlike the two
-suites this file records a measured figure for. AC-C11 then added three more
-entry-point process runs on top of that unmeasured baseline, and review of that
-work added a fourth (the `native_root` render), two `adoptableRecord` calls for
-AC-C11b and three gate-layer decisions — each of the last carrying its own node
-payload build and decode. AC-C12, AC-C12a and AC-C12b then added three session
-lifecycles, and they are NOT the same size: counted from the file, the top-level
-node and bash runs are 5, 4 and 5 — each builds its SessionStart payload in its own
-`node -e`, AC-C12 and AC-C12b additionally call `write_lease`, and each `--confirm`
-itself spawns the host-path renderer twice plus node. Three `chmod`s and one `uname`
-sit on top. The ceiling did not move for any of it, and an itemization is a poor
-substitute for the measurement this paragraph keeps asking for. Budget against a measurement before trusting the headroom. The caveat lives here and NOT in the manifest:
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
+measurement is one sample.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
+12%, so about seven eighths of the budget is unused. Taken at the head that carried
+Part C plus the AC-C11/AC-C11b/AC-C12 family.
+
+Read that as ONE sample, not as a bound. The sibling
+`stop-enforcer-self-review-routing` note in this file records a 29% spread across
+two green runs of byte-identical content on the same runner class, so a single
+figure says nothing about the worst case — it says only that the suite is not
+currently close to its ceiling. Budget against the measured figure and re-measure
+after a change that adds process runs; the previous wording tried to substitute a
+hand-counted itemization of node and bash invocations for a wall clock, and that
+itemization went stale on its next row edit, which is exactly why it is gone.
+The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a

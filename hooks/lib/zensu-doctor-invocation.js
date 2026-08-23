@@ -101,6 +101,21 @@ const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 // rather than per-entry: unlike `args`, an assignment cannot change what a
 // script DOES, only what it can see. `path` requires a rooted, traversal-free
 // literal; a Set requires one of its members.
+//
+// `CLAUDE_PROJECT_DIR` is NOT a harmless leftover now that the adoption ignores it,
+// and it must not be dropped on that reasoning. It is what keeps a model still
+// holding the PREVIOUS release's skill body — which emits the assignment — from
+// having its command refused. That is not an exotic case: a mid-session upgrade is
+// precisely the state this whole feature exists for, and the skill text a running
+// model holds is the one thing an upgrade does not replace.
+//
+// The residual it leaves sits on the READ command rather than the write one:
+// `isRootedLiteralPath("")` is false, so a harness rendering the placeholder empty
+// makes the assignment reject and denies the entire invocation — /zensu:doctor
+// included, the first thing a wedged user is told to run. `skills/doctor/SKILL.md`
+// therefore instructs the model to OMIT the assignment rather than render it empty;
+// the recognizer cannot fix that end, because by the time it sees the command the
+// empty value is already there.
 const ASSIGNMENTS = {
   CLAUDE_PLUGIN_DATA: "path",
   CLAUDE_PROJECT_DIR: "path",
