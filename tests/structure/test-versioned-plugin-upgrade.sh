@@ -1650,6 +1650,32 @@ else
   check "a symlinked plugin-data store names its cause instead of exiting silently" SKIP
 fi
 
+# The ENTRY-POINT-ONLY refusal, which CONV-1's ENTRY_ONLY list now REQUIRES to be
+# documented while nothing checked the code still emits it. It is raised before
+# adoptableRecord runs, when privateRecordsDirectory refuses the store — here a
+# records leaf that is group- and world-accessible. Platform-gated: the binder's
+# mode and ownership checks are POSIX-only.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "the entry point still emits private-record-store-unsafe (win32: mode checks are no-ops)" SKIP
+    ;;
+  *)
+    UNSAFE_STORE="$TMP/unsafe-record-store"
+    mkdir -p "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    chmod 0777 "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+      CLAUDE_PLUGIN_DATA="$UNSAFE_STORE" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+      >"$TMP/unsafe-store.out" 2>&1
+    if grep -qF 'NOT adoptable (private-record-store-unsafe)' "$TMP/unsafe-store.out"; then
+      check "the entry point still emits private-record-store-unsafe" PASS
+    else
+      check "the entry point still emits private-record-store-unsafe" FAIL
+      sed -n '1,10p' "$TMP/unsafe-store.out" 2>/dev/null
+    fi
+    ;;
+esac
+
 PROJECT_SHAPE_FAILURES=''
 adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
   || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset"

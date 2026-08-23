@@ -452,6 +452,11 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     return { discarded: 0, failed: [], unsafe: 'source', unsafeAt: recordsDirectory };
   }
   try {
+    // A two-field binding, synthesised rather than obtained from bindWorker. What
+    // withLock and storage read IS those two fields today; if a future version reads
+    // a third, the throw lands in the catch below and is rendered as a store-shape
+    // refusal — a silent MISDIAGNOSIS after the record swap rather than a crash,
+    // which is why the narrow owner-side entry point is the real fix.
     return lease.withLock(
       { pluginData, sessionKey: key },
       () => sweepUnderLock(pluginData, key, executingPluginRoot),
