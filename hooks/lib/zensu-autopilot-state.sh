@@ -1468,13 +1468,7 @@ if (mode === "release") {
     // its mtime says when that session last acted. No state field is added.
     const ttlHours = Number(ownerActivityTtlHours);
     if (Number.isFinite(ttlHours) && ttlHours > 0) {
-      let ownerActivity = null;
-      try {
-        const candidate = fs.statSync(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));
-        if (candidate.isFile()) ownerActivity = candidate;
-      } catch (_) {
-        ownerActivity = null;
-      }
+      const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));
       if (ownerActivity) {
         // Bounded in BOTH directions: a future mtime yields a negative age that
         // never crosses the bound, which would make the run permanently

@@ -1605,6 +1605,8 @@ if [ "$REL_READY" = true ]; then
     commit -q --allow-empty -m init >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/ra" -b rel-a >/dev/null 2>&1 || REL_READY=false
   git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rb" -b rel-b >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rl" -b rel-l >/dev/null 2>&1 || REL_READY=false
+  git -C "$REL_P" worktree add -q "$REL_P/.claude/worktrees/rd" -b rel-d >/dev/null 2>&1 || REL_READY=false
 fi
 
 # S6 — a run left pointerless by a torn begin: `apply` refuses it (no pointer
@@ -1653,6 +1655,56 @@ if [ "$REL_READY" = true ] && [ "$REL_LIVE_RC" -eq 7 ]; then
   check "W17 a release is refused while the owning session's workflow document is fresh" PASS
 else
   check "W17 release must refuse a live owner (rc=$REL_LIVE_RC, want 7)" FAIL
+fi
+
+REL_LINK_MADE=false
+REL_SYMLINK_RC=0
+REL_SYMLINK_ERR="$ROOT/rel-symlink.err"
+: > "$REL_SYMLINK_ERR"
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rl" && autopilot_begin_run run_rel_link session_rel_link "$REL_P" false true "" ) >/dev/null 2>&1
+  printf '%s\n' '{}' > "$REL_P/.zensu/state/decoy-stale.json"
+  touch -t 200001010000 "$REL_P/.zensu/state/decoy-stale.json" 2>/dev/null
+  rm -f "$REL_P/.zensu/state/tdd-phase-session_rel_link.json"
+  if ln -sfn "$REL_P/.zensu/state/decoy-stale.json" "$REL_P/.zensu/state/tdd-phase-session_rel_link.json" 2>/dev/null \
+    && [ -L "$REL_P/.zensu/state/tdd-phase-session_rel_link.json" ]; then
+    REL_LINK_MADE=true
+    ( cd "$REL_P/.claude/worktrees/rl" && autopilot_release_run run_rel_link evt_rel_link "$REL_P" session_rel_other ) >/dev/null 2>"$REL_SYMLINK_ERR"
+    REL_SYMLINK_RC=$?
+  fi
+fi
+if [ "$REL_READY" != true ]; then
+  check "W20 release fixture unavailable" FAIL
+elif [ "$REL_LINK_MADE" != true ]; then
+  check "W20 skipped: this host cannot create a symlink; the W22 source pin still covers the read" PASS
+elif [ "$REL_SYMLINK_RC" -eq 2 ] && grep -qF 'unsafe state file' "$REL_SYMLINK_ERR"; then
+  check "W20 a symlinked liveness beacon is refused instead of followed" PASS
+else
+  check "W20 a symlinked liveness beacon must be refused (rc=$REL_SYMLINK_RC, want 2)" FAIL
+fi
+
+REL_DIR_RC=0
+REL_DIR_ERR="$ROOT/rel-dir.err"
+: > "$REL_DIR_ERR"
+if [ "$REL_READY" = true ]; then
+  ( cd "$REL_P/.claude/worktrees/rd" && autopilot_begin_run run_rel_dir session_rel_dir "$REL_P" false true "" ) >/dev/null 2>&1
+  rm -f "$REL_P/.zensu/state/tdd-phase-session_rel_dir.json"
+  mkdir -p "$REL_P/.zensu/state/tdd-phase-session_rel_dir.json"
+  ( cd "$REL_P/.claude/worktrees/rd" && autopilot_release_run run_rel_dir evt_rel_dir "$REL_P" session_rel_other ) >/dev/null 2>"$REL_DIR_ERR"
+  REL_DIR_RC=$?
+  rm -rf "$REL_P/.zensu/state/tdd-phase-session_rel_dir.json"
+fi
+if [ "$REL_READY" = true ] && [ "$REL_DIR_RC" -eq 2 ] && grep -qF 'unsafe state file' "$REL_DIR_ERR"; then
+  check "W21 a directory at the liveness beacon path is refused, not read as absent" PASS
+else
+  check "W21 a directory at the beacon path must be refused (rc=$REL_DIR_RC, want 2)" FAIL
+fi
+
+if grep -qF 'const ownerActivity = regularFile(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`));' "$LIB" \
+  && ! grep -qF 'fs.statSync(path.join(stateDir, `tdd-phase-${state.ownerSessionId}.json`))' "$LIB"; then
+  check "W22 the liveness beacon is read through the regularFile chokepoint" PASS
+else
+  check "W22 the liveness beacon must not be read with a link-following stat" FAIL
 fi
 
 # --- R1: the containment predicate must be separator-correct and total ---
