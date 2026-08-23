@@ -989,7 +989,7 @@ fi
 # three of its return shapes were not reachable from here at all. Driven from this
 # file for the same reason the two above are — tests/run-all.sh discovers only
 # test-*.sh, so an undriven *.test.js never executes anywhere.
-SWEEP_UNIT="$ROOT/tests/structure/session-control-lease-sweep.test.js"
+SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
 if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
   && unit_cases_registered_floor "$TMP/sweep-unit.out" 30; then
   check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
@@ -1003,7 +1003,7 @@ fi
 # single-quoted `node -e` shell payload into its own module, which is what finally
 # gives safe() a driver: it had no test in either direction, so deleting its whole
 # guard condition and returning the text unchanged left the suite green.
-REPORT_UNIT="$ROOT/tests/structure/session-adopt-report.test.js"
+REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
   && unit_cases_registered_floor "$TMP/report-unit.out" 18; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
@@ -1893,7 +1893,10 @@ if [ -n "${EMPTY_RECORDS_DIR##*/}" ] && mkdir -p "$EMPTY_RECORDS_DIR" 2>/dev/nul
     ls -1d "$EMPTY_ASIDE_DIR" 2>/dev/null
   fi
 else
-  check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" SKIP
+  # FAIL, not SKIP: reaching here means the sessionKey substitution produced nothing
+  # or the mkdir failed, and this file states the rule twenty lines earlier — fail
+  # loudly on the fixture rather than quietly on the feature.
+  check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf (FIXTURE could not be built)" FAIL
 fi
 
 # AC-C12 — the DESTINATION refusal, and the only check that reaches either scope
@@ -2552,8 +2555,11 @@ fi
 # release's skill body from having its command refused, which is not exotic, because
 # a mid-session upgrade is the state the whole feature exists for.
 RECOGNIZER_SRC="$ROOT/hooks/lib/zensu-doctor-invocation.js"
-if grep -qF 'CLAUDE_PROJECT_DIR' "$RECOGNIZER_SRC" \
-  && grep -qE 'previous release|older skill|mid-session upgrade' "$RECOGNIZER_SRC"; then
+# ANCHORED to the ASSIGNMENTS entry, not the whole file: a whole-file grep is
+# satisfied by any unrelated occurrence anywhere, so it would grade prose that had
+# drifted away from the entry it explains.
+if sed -n '/^const ASSIGNMENTS = {/,/^};/p;/CLAUDE_PROJECT_DIR is NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
+  | grep -qE 'previous release|older skill|mid-session upgrade'; then
   check "CONV-3 the recognizer states why the legacy assignment stays admitted" PASS
 else
   check "CONV-3 the recognizer states why the legacy assignment stays admitted" FAIL

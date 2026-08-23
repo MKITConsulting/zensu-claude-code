@@ -13,7 +13,7 @@
 // admits.
 //
 // Run as a program by that script; required as a module by
-// tests/structure/session-adopt-report.test.js.
+// tests/structure/session-adopt-report-v1.test.js.
 
 const path = require("node:path");
 const core = require("./session-control-core-v1.js");
@@ -24,9 +24,9 @@ const core = require("./session-control-core-v1.js");
 // fails this command before adoptContext has mutated anything, rather than after.
 const sweepLeases = require("./review-evidence-sweep-v1.js");
 
-const pluginRoot = process.env.ZADOPT_PLUGIN_ROOT;
-const pluginData = process.env.ZADOPT_PLUGIN_DATA;
-const sessionId = process.env.ZADOPT_SESSION_ID;
+// The three inputs are read INSIDE buildRequest, not at module scope. Freezing them
+// at require time made main() undrivable from a unit test: every case would share one
+// environment captured before the file was loaded.
 // The binder OWNS the private-store constructor, and this uses it rather than a
 // hand-joined path: it additionally rejects a records directory that is a
 // symlink, an alias, group- or world-accessible, or owned by another user.
@@ -40,13 +40,16 @@ const sessionId = process.env.ZADOPT_SESSION_ID;
 // denied, and where those conditions are exactly the diagnosis the user needs
 // stated plainly.
 const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
-const buildRequest = () => ({
-  recordsDir: privateRecordsDirectory(pluginData),
-  sessionId,
-  host: "claude",
-  pluginData,
-  executingPluginRoot: pluginRoot,
-});
+const buildRequest = () => {
+  const pluginData = process.env.ZADOPT_PLUGIN_DATA;
+  return {
+    recordsDir: privateRecordsDirectory(pluginData),
+    sessionId: process.env.ZADOPT_SESSION_ID,
+    host: "claude",
+    pluginData,
+    executingPluginRoot: process.env.ZADOPT_PLUGIN_ROOT,
+  };
+};
 
 // The recorded project root is echoed into a terminal AND into the model context,
 // and the strict read constrains it less than that use deserves: validateContext
@@ -89,7 +92,7 @@ const DOUBLE_SPACE = / {2}/;
 // directory name the user opens Claude Code in controls this substring. A real path
 // containing " : " now renders JSON-quoted, which is still readable.
 const PAIR_SEPARATOR = / : /;
-const NON_ASCII = new RegExp("[\\u007f-\\uffff]", "g");
+const NON_ASCII = /[\u007f-\uffff]/g;
 const SPACE_RUN = / {2,}/g;
 const safe = (value) => {
   const text = String(value);

@@ -73,7 +73,7 @@ test('S5 a bidi override never survives as a raw byte', () => {
 test('S5 U+2028, U+2029 and U+007F are folded too', () => {
   for (const threat of [' ', ' ', '']) {
     const rendered = report().safe(`/tmp/a${threat}b`);
-    assert.equal(rendered.includes(threat), false, `raw ${escape(threat)} survived`);
+    assert.equal(rendered.includes(threat), false, `raw ${JSON.stringify(threat)} survived`);
     for (const ch of rendered) assert.ok(ch.charCodeAt(0) < 0x80);
   }
 });
@@ -86,8 +86,8 @@ test('S5 a localized path prints as itself', () => {
   // line the change exists to add, landing on exactly the developers whose home
   // directory is not pure ASCII.
   for (const localized of [
-    '/Users/müller/projekte/kunde',
-    '/Users/josé/proyectos/app',
+    '/Users/müller/projects/customer',
+    '/Users/josé/projects/app',
     '/Users/田中/プロジェクト',
   ]) {
     assert.equal(report().safe(localized), localized, `${localized} must print as itself`);
@@ -172,6 +172,12 @@ test('S3 no other refusal is repairable, and a clean verdict is not a repair', (
     if (reason === core.ADOPTION_REFUSALS.ALREADY_SERVED) continue;
     assert.equal(shouldRepairInPlace({ ok: false, reason }, true), false,
       `${reason} must not be treated as an in-place repair`);
+  }
+  // Cardinality, so an emptied constant cannot make the loop vacuous, and every
+  // refusal has a remedy — the map falls back to a generic sentence for any eighth.
+  assert.equal(Object.values(core.ADOPTION_REFUSALS).length, 7);
+  for (const reason of Object.values(core.ADOPTION_REFUSALS)) {
+    assert.ok(report().REMEDY[reason], reason + ' has no remedy');
   }
   // ok:true is the ordinary adoption path, not the repair path.
   assert.equal(shouldRepairInPlace({ ok: true }, true), false);

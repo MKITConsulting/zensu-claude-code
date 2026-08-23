@@ -597,7 +597,14 @@ measurement is one sample.** `windows-shard-2` logged
 12%, so about seven eighths of the budget is unused. Taken at the head that carried
 Part C plus the AC-C11/AC-C11b/AC-C12 family.
 
-Read that as ONE sample, not as a bound. The sibling
+**That sample is now STALE, and saying so is the point of recording it.** The work
+that took the seam added two further `node --test` drivers to this suite plus roughly
+450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
+figure describes a head that no longer exists. Do not budget against it; re-measure
+on the next green Windows run and replace the number and its provenance sentence
+together.
+
+Read the original sample as ONE sample, not as a bound. The sibling
 `stop-enforcer-self-review-routing` note in this file records a 29% spread across
 two green runs of byte-identical content on the same runner class, so a single
 figure says nothing about the worst case — it says only that the suite is not

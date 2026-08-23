@@ -378,13 +378,15 @@ test('S2 an unopenable store is refused as source rather than thrown', () => {
 
 // ── S4: the refusal arms that had never been driven ─────────────────────────
 
-test('S4 the per-segment superseded permission check is reachable and load-bearing', () => {
+test('S4 the per-segment superseded permission check is reachable and load-bearing', (t) => {
   // Finding #8: AC-C12b plants 0777 at the LEAF and then explicitly chmods
   // `superseded` back to 0700, forcing this check to pass so the walk refuses one
   // line later. Its own claim — delete the mode pair and the row goes red — was
   // therefore true of the LEAF pair, not this one. Deleting the per-segment check
   // left the whole suite green.
-  if (process.platform === 'win32') return; // privateEnough is a no-op there by design
+  // A real SKIP, not a bare return: node:test records a returning case as a PASS, so
+  // five of these reported green on the Windows shard with nothing asserted.
+  if (process.platform === 'win32') return t.skip('win32: privateEnough is a documented no-op');
   const pluginData = tempRoot();
   const segments = ['review-evidence', 'v1', 'superseded', KEY];
   // Build the chain, then widen `superseded` only — the leaf stays private, so the
@@ -404,12 +406,12 @@ test('S4 the per-segment superseded permission check is reachable and load-beari
   assert.equal(withoutCheck.ok, true);
 });
 
-test('S4 a shared ancestor at 0755 is NOT refused', () => {
+test('S4 a shared ancestor at 0755 is NOT refused', (t) => {
   // The other half of the asymmetry, and it has to hold or the sweep starts failing
   // on a permission it does not manage: `review-evidence` and `v1` belong to
   // ensurePrivateDirectory, which repairs them with a chmod. This function may only
   // look.
-  if (process.platform === 'win32') return;
+  if (process.platform === 'win32') return t.skip('win32: privateEnough is a documented no-op');
   const pluginData = tempRoot();
   const segments = ['review-evidence', 'v1', 'superseded', KEY];
   fs.mkdirSync(path.join(pluginData, ...segments), { recursive: true, mode: 0o700 });
@@ -418,17 +420,17 @@ test('S4 a shared ancestor at 0755 is NOT refused', () => {
   assert.equal(verdict.ok, true, 'a shared ancestor mode is not this function to judge');
 });
 
-test('S4 a FIFO entry is refused rather than hung on', () => {
+test('S4 a FIFO entry is refused rather than hung on', (t) => {
   // The exact hang this guard was written to stop, and no fixture had ever
   // demonstrated it being stopped. A bare readFileSync on a FIFO blocks forever and
   // raises nothing a catch can see — and the sweep runs AFTER the record swap, so a
   // hang leaves the one repair the user can still invoke stuck half-done.
-  if (process.platform === 'win32') return;
+  if (process.platform === 'win32') return t.skip('win32: privateEnough is a documented no-op');
   const pluginData = tempRoot();
   seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
   const fifo = path.join(recordsDir(pluginData), `rel1_${'9'.repeat(32)}.json`);
   const made = require('node:child_process').spawnSync('mkfifo', [fifo], { stdio: 'ignore' });
-  if (made.status !== 0) return; // no mkfifo on this host
+  if (made.status !== 0) return t.skip('mkfifo is unavailable on this host');
   // Confirm it really is a FIFO before asserting on it — the same rule W167/W168
   // apply to `ln -s`, for the same reason: a tool that exits 0 is not evidence.
   assert.equal(fs.lstatSync(fifo).isFIFO(), true);
@@ -442,8 +444,8 @@ test('S4 a FIFO entry is refused rather than hung on', () => {
   assert.equal(fs.existsSync(path.join(asideDir(pluginData), path.basename(fifo))), true);
 });
 
-test('S4 a directory entry in the records store is refused, not read', () => {
-  if (process.platform === 'win32') return;
+test('S4 a directory entry in the records store is refused, not read', (t) => {
+  if (process.platform === 'win32') return t.skip('win32: privateEnough is a documented no-op');
   const pluginData = tempRoot();
   seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
   const dir = path.join(recordsDir(pluginData), `rel1_${'8'.repeat(32)}.json`);
@@ -455,9 +457,43 @@ test('S4 the size cap the reader uses is the owner\'s, not a test-only one', () 
   // The S2 case drove the comparison through an injected maxBytes, which proves the
   // branch runs but not that the shipped default is the owner's value.
   const pluginData = tempRoot();
+  // Driven through the DEFAULT, with no options argument: the previous form
+  // compared the owner's constant against a literal in this file, which is the
+  // fixture value, and never observed the value readLeaseEntry actually resolves.
+  // Replacing that default with a private 4096 left it green.
   const file = seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
   assert.notEqual(sweep().readLeaseEntry(file), null, 'an ordinary lease is under the cap');
-  assert.equal(lease.MAX_RECORD_BYTES, 8 * 1024 * 1024);
+  const oversize = path.join(recordsDir(pluginData), `rel1_${'6'.repeat(32)}.json`);
+  // One byte past the owner's cap, written as valid JSON so only the SIZE can be
+  // what refuses it.
+  const padding = 'x'.repeat(lease.MAX_RECORD_BYTES);
+  fs.writeFileSync(oversize, JSON.stringify({ pad: padding }), { mode: 0o600 });
+  assert.ok(fs.statSync(oversize).size > lease.MAX_RECORD_BYTES);
+  assert.equal(sweep().readLeaseEntry(oversize), null,
+    'the shipped default is the owner cap, not a private one');
+});
+
+test('F4 the withLock refusal is converted to a verdict, not thrown', (t) => {
+  // The case named for this arm returned at the unlocked pre-check instead: a
+  // regular file at <pluginData>/review-evidence makes the pre-check lstat fail
+  // ENOTDIR before withLock is ever entered. To reach the catch, the records
+  // directory has to EXIST and be readable while the owner's storage() constructor
+  // refuses something — here an aliased store root.
+  if (process.platform === 'win32') return t.skip('win32: the alias refusal is platform-gated');
+  const root = tempRoot();
+  const real = path.join(root, 'real-data');
+  fs.mkdirSync(path.join(real, 'review-evidence', 'v1', 'records', KEY), { recursive: true, mode: 0o700 });
+  fs.writeFileSync(path.join(real, 'review-evidence', 'v1', 'records', KEY, `${LEASE_ID}.json`),
+    leaseBody({ plugin_root: '/previous/root' }), { mode: 0o600 });
+  const aliased = path.join(root, 'aliased-data');
+  fs.symlinkSync(real, aliased);
+  if (fs.realpathSync.native(aliased) === aliased) return t.skip('this host did not create a real symlink');
+
+  // The pre-check succeeds through the link; storage() is what refuses.
+  const result = sweep().discardSupersededLeases(aliased, KEY, '/executing/root');
+  assert.equal(result.unsafe, 'source', 'a constructor refusal is a verdict, never a throw');
+  assert.equal(result.discarded, 0);
+  assert.deepEqual(result.failed, []);
 });
 
 // ── F2: the fix round for the consolidated review ───────────────────────────
@@ -491,8 +527,8 @@ test('F2 a store whose leases are all owned creates no superseded leaf', () => {
     'nothing needed moving, so nothing may be created');
 });
 
-test('F2 the symlink arm distinguishes a vanished source from a vanished destination', () => {
-  if (process.platform === 'win32') return;
+test('F2 the symlink arm distinguishes a vanished source from a vanished destination', (t) => {
+  if (process.platform === 'win32') return t.skip('win32: privateEnough is a documented no-op');
   const root = tempRoot();
   const from = path.join(root, 'from');
   fs.mkdirSync(from, { mode: 0o700 });
