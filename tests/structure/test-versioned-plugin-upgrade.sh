@@ -901,11 +901,13 @@ fi
 # file cannot be silently left out of a shard.
 # WORKING TREE, not HEAD: this requires ../../hooks/lib directly, unlike every
 # behavioural row above, which reaches the fixture-installed copy of that file.
+. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
-if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1; then
-  check "the recognizer unit suite passes (driven from here — nothing else referenced it)" PASS
+if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/recognizer-unit.out" 26; then
+  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), driven from here — nothing else referenced it)" PASS
 else
-  check "the recognizer unit suite passes (driven from here — nothing else referenced it)" FAIL
+  check "the recognizer unit suite passes ($(unit_cases_report "$TMP/recognizer-unit.out"), want >= 26 registered — driven from here, nothing else referenced it)" FAIL
   # The FAILING lines, not the first forty. node --test emits every passing case
   # before any failure, so a head-style dump of a 26-case suite showed only
   # successes and the verdict never reached the log — exactly what happened on
@@ -916,10 +918,11 @@ fi
 
 # WORKING TREE, not HEAD — same split as the recognizer unit row above.
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
-if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1; then
-  check "AC-011 runtimeLineageCompatible unit suite passes" PASS
+if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/lineage-unit.out" 13; then
+  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"))" PASS
 else
-  check "AC-011 runtimeLineageCompatible unit suite passes" FAIL
+  check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= 13 registered)" FAIL
   sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
 fi
 

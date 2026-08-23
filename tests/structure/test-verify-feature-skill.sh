@@ -17,6 +17,10 @@ MCP_LOCK="$PLUGIN_DIR/mcp-runtime/package-lock.json"
 MCP_LAUNCHER="$PLUGIN_DIR/scripts/playwright-mcp.sh"
 MCP_PROXY="$PLUGIN_DIR/scripts/playwright-mcp-proxy.js"
 MCP_PROXY_TEST="$PLUGIN_DIR/tests/structure/playwright-mcp-proxy.test.js"
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
+
 MCP_RUNTIME_DOC="$PLUGIN_DIR/docs/playwright-mcp-runtime.md"
 RUNTIME_CONTROLLER="$SKILL_DIR/scripts/zensu-monorepo-runtime.sh"
 PLUGIN_JSON="$PLUGIN_DIR/.claude-plugin/plugin.json"
@@ -332,9 +336,13 @@ else
   check "P6a Playwright MCP is pinned, integrity-locked, isolated, and brokered" FAIL
 fi
 PROXY_TEST_OUTPUT="$(node --test "$MCP_PROXY_TEST" 2>&1)"
+# Floor on the REGISTERED total (16). A passing floor is not used: one case already
+# skips itself on this host and the set of skips is platform-dependent, which is the
+# coupling unit_cases_registered_floor exists to avoid. A real failure is already
+# non-zero from node, and PROXY_TEST_RC covers it.
 PROXY_TEST_RC=$?
-if [ "$PROXY_TEST_RC" = "0" ]; then
-  check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy" PASS
+if [ "$PROXY_TEST_RC" = "0" ] && unit_cases_registered_floor_text "$PROXY_TEST_OUTPUT" 16; then
+  check "P6g MCP broker exposes only the exact safe inventory and enforces navigation policy ($(unit_cases_report_text "$PROXY_TEST_OUTPUT"))" PASS
 else
   check "P6g MCP broker inventory/policy behavior (rc=$PROXY_TEST_RC, out=${PROXY_TEST_OUTPUT:0:500})" FAIL
 fi
