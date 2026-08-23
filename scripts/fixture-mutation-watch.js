@@ -19,13 +19,28 @@ function runOwned(relativePath) {
   return RUN_OWNED.some((entry) => relativePath === entry || relativePath.startsWith(`${entry}/`));
 }
 
+function ownsDescendant(relativePath) {
+  return RUN_OWNED.some((entry) => entry.startsWith(`${relativePath}/`));
+}
+
+function classifyFixtureEvent(relativePath, rootName) {
+  if (relativePath === '' || relativePath === '.') return 'root-self';
+  if (runOwned(relativePath)) return 'ignore';
+  if (relativePath === '.git' || relativePath.startsWith('.git/')) return 'git-gated';
+  if (rootName && relativePath === rootName) return 'root-named';
+  if (ownsDescendant(relativePath)) return 'ancestor-gated';
+  return 'mutation';
+}
+
 function main() {
+  const startedAt = Date.now();
   const [rootInput, marker, ready, option] = process.argv.slice(2);
   if (!rootInput || !marker || !ready) throw new Error('usage: fixture-mutation-watch.js <root> <marker> <ready>');
   if (option && !['--force-fallback', '--test-polling'].includes(option)) {
     throw new Error('unknown fixture watcher option');
   }
   const root = fs.realpathSync(rootInput);
+  const rootName = path.basename(root);
   const baseline = digest(root);
   const watchers = new Map();
   let stopping = false;
@@ -38,6 +53,39 @@ function main() {
     catch (error) { if (error.code !== 'EEXIST') throw error; }
   };
 
+  const gateOnManifest = (relativePath) => {
+    try { if (digest(root) !== baseline) mark(relativePath); }
+    catch (_error) { mark('manifest-unreadable'); }
+  };
+
+  const markIfTouchedSinceStart = (relativePath) => {
+    let info;
+    try { info = fs.lstatSync(path.join(root, relativePath)); }
+    catch (_error) { mark(relativePath); return true; }
+    if (info.ctimeMs < startedAt && info.mtimeMs < startedAt) return false;
+    mark(relativePath);
+    return true;
+  };
+
+  const handleEvent = (relativePath) => {
+    switch (classifyFixtureEvent(relativePath, rootName)) {
+      case 'ignore':
+        return false;
+      case 'root-self':
+        gateOnManifest('.');
+        return false;
+      case 'root-named':
+        if (!fs.existsSync(path.join(root, relativePath))) { gateOnManifest(relativePath); return false; }
+        return markIfTouchedSinceStart(relativePath);
+      case 'git-gated':
+      case 'ancestor-gated':
+        gateOnManifest(relativePath);
+        return false;
+      default:
+        return markIfTouchedSinceStart(relativePath);
+    }
+  };
+
   const watchDirectory = (absoluteDirectory) => {
     if (watchers.has(absoluteDirectory)) return;
     if (watchers.size >= MAX_WATCHERS) throw new Error(`fixture watcher limit exceeded (${MAX_WATCHERS})`);
@@ -48,13 +96,7 @@ function main() {
       watcher = fs.watch(absoluteDirectory, (eventType, filename) => {
         if (!filename) { mark('unknown-watch-event'); return; }
         const relativePath = path.posix.join(relativeDirectory, String(filename));
-        if (runOwned(relativePath)) return;
-        if (relativePath === '.git' || relativePath.startsWith('.git/')) {
-          try { if (digest(root) !== baseline) mark(relativePath); }
-          catch (_error) { mark('manifest-unreadable'); }
-          return;
-        }
-        mark(relativePath);
+        if (!handleEvent(relativePath)) return;
         if (eventType === 'rename') {
           const candidate = path.join(absoluteDirectory, String(filename));
           try { if (fs.lstatSync(candidate).isDirectory()) watchTree(candidate); }
@@ -89,8 +131,7 @@ function main() {
     try {
       watcher = fs.watch(root, { recursive: true }, (_eventType, filename) => {
         if (!filename) { mark('unknown-watch-event'); return; }
-        const relativePath = String(filename).split(path.sep).join('/');
-        if (!runOwned(relativePath)) mark(relativePath);
+        handleEvent(String(filename).split(path.sep).join('/'));
       });
     } catch (error) {
       if (['ERR_FEATURE_UNAVAILABLE_ON_PLATFORM', 'ERR_INVALID_ARG_VALUE'].includes(error.code)) return false;
@@ -131,8 +172,12 @@ function main() {
   fs.writeFileSync(ready, 'ready\n', { mode: 0o600, flag: 'wx' });
 }
 
-try { main(); }
-catch (error) {
-  process.stderr.write(`fixture mutation watch: ${error.message}\n`);
-  process.exit(1);
+module.exports = { RUN_OWNED, classifyFixtureEvent, runOwned };
+
+if (require.main === module) {
+  try { main(); }
+  catch (error) {
+    process.stderr.write(`fixture mutation watch: ${error.message}\n`);
+    process.exit(1);
+  }
 }

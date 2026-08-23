@@ -79,9 +79,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (25)
+### Skills (26)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (26 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (27 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -101,6 +101,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:converge` | Audit the code against the plan and flow real changes back into the spec |
 | `/zensu:docs` | Write code-grounded feature documentation that honestly clears the docs release gate |
 | `/zensu:wargame` | Map a hard task move by move so a cheaper model can execute it blind |
+| `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
 | `/zensu:session-trail` | See what your other Claude Code instances are doing, and take a session over |
@@ -232,3 +233,15 @@ plugin or the Zensu SaaS while the restriction is in effect.
 Full text and FAQ at [fsl.software](https://fsl.software/). For commercial-use
 questions outside the Permitted Purpose, contact
 [contact@zensu.dev](mailto:contact@zensu.dev).
+
+### Third-party references
+
+One skill cites external work as the source of a *method* rather than of any text:
+`/zensu:gauntlet-loop` links to
+[How to Run a Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) and its prompt
+generator, and to [Claude-of-Duty](https://github.com/mshumer/Claude-of-Duty), in
+`skills/gauntlet-loop/SKILL.md` § Provenance and
+`skills/gauntlet-loop/references/quality-bars.md` § Method sources. No code, prompt
+text, or asset from those sources is vendored here — the entire third-party surface
+*of those two sources* is the hyperlinks themselves. Build and test dependencies
+are a separate matter and are declared in `package.json`.

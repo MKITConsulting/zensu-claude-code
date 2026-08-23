@@ -38,6 +38,7 @@
     "test-evidence-discipline.sh",
     "test-file-exists-replacement.sh",
     "test-finding-verification.sh",
+    "test-gauntlet-loop-skill.sh",
     "test-ghost-scan-test-detection.sh",
     "test-gitignore-zensu.sh",
     "test-immutable-marketplace-release.sh",

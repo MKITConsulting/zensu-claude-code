@@ -162,11 +162,11 @@ else
   check "P9b README badge shows version-$EXPECTED_VERSION-green" FAIL
 fi
 
-# P10 — README skills section: count bumped to 12 and the skill is listed
+# P10 — README skills section: the '### Skills (N)' heading exists and the skill is listed
 if grep -qE '^### Skills \([0-9]+\)$' "$README_MD"; then
-  check "P10a README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" PASS
+  check "P10a README.md has a '### Skills (N)' heading (header==rows: test-converge-skill P4c and test-chain-recover T39; README<->plugin.json set + registered count: T39)" PASS
 else
-  check "P10a README.md has a '### Skills (N)' heading (count owned by test-converge-skill P4c)" FAIL
+  check "P10a README.md has a '### Skills (N)' heading (header==rows: test-converge-skill P4c and test-chain-recover T39; README<->plugin.json set + registered count: T39)" FAIL
 fi
 
 if grep -qF "/zensu:pr-team-review" "$README_MD"; then
