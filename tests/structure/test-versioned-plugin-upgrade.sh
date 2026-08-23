@@ -2530,12 +2530,21 @@ fi
 # ASSIGNMENT-refused in zensu-doctor-invocation.test.js; what is pinned HERE is that
 # the shipped skill body tells the model to omit the assignment rather than render it
 # empty, the way ZDOC_PLAYWRIGHT_TOOLS already is.
+#
+# Graded on what the skill OFFERS, not on a sentence: at least one shipped doctor
+# invocation must carry no CLAUDE_PROJECT_DIR at all, so the model has a form to
+# reach for. A prose-only pin would go red on a rewording that changed nothing and
+# green on guidance with no command behind it — the first draft of this row did
+# exactly the former.
 DOCTOR_SKILL="$ROOT/skills/doctor/SKILL.md"
-if grep -qF 'omit' "$DOCTOR_SKILL" \
-  && grep -qE 'omit (that|the) `?CLAUDE_PROJECT_DIR' "$DOCTOR_SKILL"; then
-  check "CONV-2 the doctor skill tells the model to omit an unrenderable CLAUDE_PROJECT_DIR" PASS
+DOCTOR_CMDS_TOTAL="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null || printf 0)"
+DOCTOR_CMDS_WITHOUT_PROJECT="$(grep 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null \
+  | grep -cv 'CLAUDE_PROJECT_DIR' || printf 0)"
+if [ "$DOCTOR_CMDS_TOTAL" -ge 2 ] && [ "$DOCTOR_CMDS_WITHOUT_PROJECT" -ge 1 ] \
+  && grep -qiE 'render(ed)? EMPTY' "$DOCTOR_SKILL"; then
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case" PASS
 else
-  check "CONV-2 the doctor skill tells the model to omit an unrenderable CLAUDE_PROJECT_DIR" FAIL
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case (total=$DOCTOR_CMDS_TOTAL without=$DOCTOR_CMDS_WITHOUT_PROJECT)" FAIL
 fi
 
 # CONV-3 — the recognizer must SAY why it still accepts the assignment at all. It is
