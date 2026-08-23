@@ -899,7 +899,7 @@ case "$(run_report_home "$H_DENY_MIXED")" in *'a permissions.deny entry'*)
   *) check "P1ao4 non-string deny entry collapsed the report" FAIL ;; esac
 # Same hazard one predicate over: namesReviewerSpawn also calls .trim().
 H_UNJ_MIXED="$(settings_home unjudge-mixed '{"permissions":{"defaultMode":"auto","deny":[null,42,"Agent(zensu:code-reviewer)*"],"allow":[]}}')"
-case "$(run_report_home "$H_UNJ_MIXED")" in *'in a spelling this check has not verified'*)
+case "$(run_report_home "$H_UNJ_MIXED")" in *'⚠️  permissions: a permissions.deny or permissions.ask entry'*'in a spelling this check has not verified'*)
   check "P1ao5 a non-string entry beside an unverified spelling does not throw" PASS ;;
   *) check "P1ao5 non-string entry collapsed the could-not-judge path" FAIL ;; esac
 # An unverified spelling must NOT count as a grant: suppressing the warning is
@@ -950,14 +950,14 @@ absent_row "P1as3 the ask row does not also render when deny matched first" "$H_
 # must not fall through to the exposure row's allow remedy.
 H_UNJUDGE="$(settings_home unjudgeable '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer)*"],"allow":[]}}')"
 UNJ_OUT="$(run_report_home "$H_UNJUDGE")"
-case "$UNJ_OUT" in *'in a spelling this check has not verified'*)
+case "$UNJ_OUT" in *'⚠️  permissions: a permissions.deny or permissions.ask entry'*'in a spelling this check has not verified'*)
   check "P1as4 an unverified deny spelling renders the could-not-judge row" PASS ;;
   *) check "P1as4 unjudgeable deny row (got: $UNJ_OUT)" FAIL ;; esac
 absent_row "P1as5 the could-not-judge row replaces the exposure row's allow remedy" "$H_UNJUDGE" 'permission mode "auto" is set'
 # The ask half of that disjunct, and the ask side of the trim split — both were
 # unreachable while every ask fixture used the exact, unpadded spelling.
 H_ASK_UNJ="$(settings_home ask-unjudgeable '{"permissions":{"defaultMode":"auto","ask":["Agent(zensu:code-reviewer)*"],"allow":[]}}')"
-case "$(run_report_home "$H_ASK_UNJ")" in *'in a spelling this check has not verified'*)
+case "$(run_report_home "$H_ASK_UNJ")" in *'⚠️  permissions: a permissions.deny or permissions.ask entry'*'in a spelling this check has not verified'*)
   check "P1as6 an unverified ask spelling also renders the could-not-judge row" PASS ;;
   *) check "P1as6 unverified ask spelling" FAIL ;; esac
 H_ASK_PAD="$(settings_home ask-padded '{"permissions":{"defaultMode":"auto","ask":[" Agent(zensu:code-reviewer) "],"allow":[]}}')"
@@ -1008,7 +1008,7 @@ else
   check "P1bj rows instructing a settings edit without the self-permission prohibition:$BAR_MISS" FAIL
 fi
 # An `Agent(`-shaped deny/ask entry that is not one of the two verified spellings used
-# to match NO predicate at all — matchesReviewerSpawn wants an exact spelling and
+# to match NO predicate at all — matchesDenyOrAskRule wants an exact spelling and
 # namesReviewerSpawn wants the literal agent name — so the ladder fell through: to the
 # WRONG remedy in auto mode, and to complete silence in every other mode. This is a
 # reachable state, not a hypothetical: `Agent(*)` is valid host grammar (the rule parser
@@ -1125,7 +1125,7 @@ absent_row "P1bm5 an unverified spelling does not claim an unreadable entry" "$H
 # lines BELOW this block, so reusing them here silently runs against an empty home.
 H_AMA_SPLIT="$(settings_home automode-allow-split '{"permissions":{"defaultMode":"auto"},"autoMode":{"allow":"nope"}}')"
 AMA_SPLIT_OUT="$(run_report_home "$H_AMA_SPLIT")"
-case "$AMA_SPLIT_OUT" in *'has a shape this check cannot judge — autoMode.allow is present but not an array'*)
+case "$AMA_SPLIT_OUT" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — autoMode.allow is present but not an array'*)
   check "P1bn precondition: the autoMode.allow shape row still renders" PASS ;;
   *) check "P1bn autoMode.allow shape row (got: $AMA_SPLIT_OUT)" FAIL ;; esac
 case "$AMA_SPLIT_OUT" in *'permission mode "auto" is set'*)
@@ -1273,7 +1273,7 @@ case "$AM_CONT_BARE_OUT" in *'permission mode "auto" is set'*)
 # Discrimination: a fatal key the ladder genuinely cannot proceed without stays fatal.
 # The needle was ORIGINALLY the deny row, which this fixture can never produce under ANY
 # implementation — an array root has no `permissions` key, so `perms.deny` is undefined and
-# matchesReviewerSpawn's Array.isArray guard answers false whether the root check is fatal,
+# matchesDenyOrAskRule's Array.isArray guard answers false whether the root check is fatal,
 # demoted or absent. Unfalsifiable, therefore worthless. The clean row IS a bite: demote the
 # root check and the ladder emits nothing, so the wrapper renders the ✅ row.
 # The variable is also renamed — `H_ROOT_ARR` is re-assigned several hundred lines below for
@@ -1421,7 +1421,7 @@ case "$THROW_OUT" in *"$OK_ROW"*) check "P1bs3 a throw must not claim a clean re
   *) check "P1bs3 a throw does not claim a clean result" PASS ;; esac
 # The fixture above lands its throw on the FIRST property read, which is data.permissions
 # inside settingsShape — so a wrapper narrowed to that one call would keep every check
-# above green while a throw raised in matchesReviewerSpawn, namesReviewerSpawn,
+# above green while a throw raised in matchesDenyOrAskRule, namesReviewerSpawn,
 # hasUnreadableEntry or mentionsReviewerAgent escaped to the outer handler and discarded
 # the whole four-block report. A second injection site is what makes the family test the
 # WRAPPER rather than one call inside it.
@@ -1623,15 +1623,15 @@ H_PERMS_ARR="$(settings_home perms-array '{"permissions":[],"autoMode":{}}')"
 # The tail, not the shared prefix: shapeRow and deferredShapeRow are byte-identical up to
 # ' — ' + err and diverge only afterwards, so a prefix-only needle cannot tell a FATAL
 # suppression from a scoped one. permissions-not-an-object is fatal and must say so.
-case "$(run_report_home "$H_PERMS_ARR")" in *'has a shape this check cannot judge — permissions is present but not an object'*'the reviewer-spawn permission check did not run'*)
+case "$(run_report_home "$H_PERMS_ARR")" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — permissions is present but not an object'*'the reviewer-spawn permission check did not run'*)
   check "P1az1 a non-object permissions value renders the FATAL did-not-run row" PASS ;;
   *) check "P1az1 non-object permissions did not carry the fatal tail" FAIL ;; esac
 H_AM_ARR="$(settings_home automode-array '{"permissions":{"defaultMode":"auto"},"autoMode":[]}')"
-case "$(run_report_home "$H_AM_ARR")" in *'has a shape this check cannot judge — autoMode is present but not an object'*'could not be determined'*)
+case "$(run_report_home "$H_AM_ARR")" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — autoMode is present but not an object'*'could not be determined'*)
   check "P1az2 a non-object autoMode value renders the SCOPED could-not-determine row" PASS ;;
   *) check "P1az2 non-object autoMode did not reach the scoped row" FAIL ;; esac
 H_ROOT_ARR="$(settings_home root-array '["nope"]')"
-case "$(run_report_home "$H_ROOT_ARR")" in *'has a shape this check cannot judge — the settings root is not a JSON object'*)
+case "$(run_report_home "$H_ROOT_ARR")" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — the settings root is not a JSON object'*)
   check "P1az3 a non-object settings root degrades to the did-not-run row" PASS ;;
   *) check "P1az3 non-object settings root" FAIL ;; esac
 # The shape doctrine has to reach the RULE LISTS, not stop at their containers.
@@ -1643,7 +1643,7 @@ for rk in allow deny ask; do
   # deny and ask are FATAL and keep the whole-check tail; allow is DEFERRED and takes the
   # scoped one. Asserting only the shared prefix let all three pass under either wording.
   if [ "$rk" = "allow" ]; then rk_tail='could not be determined'; else rk_tail='the reviewer-spawn permission check did not run'; fi
-  case "$(run_report_home "$H_RK")" in *"has a shape this check cannot judge — permissions.$rk is present but not an array"*"$rk_tail"*)
+  case "$(run_report_home "$H_RK")" in *"⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — permissions.$rk is present but not an array"*"$rk_tail"*)
     check "P1az5x$rk a non-array permissions.$rk renders its own tail ($rk_tail)" PASS ;;
     *) check "P1az5x$rk non-array permissions.$rk did not carry the expected tail" FAIL ;; esac
 done
@@ -1688,7 +1688,7 @@ fi
 # A deferred defect co-present with an unverified spelling: the could-not-judge row
 # is decided first, so the ladder order between them is observable.
 H_UNJ_DEFER="$(settings_home unjudge-defer '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer)*"],"allow":{}}}')"
-case "$(run_report_home "$H_UNJ_DEFER")" in *'in a spelling this check has not verified'*)
+case "$(run_report_home "$H_UNJ_DEFER")" in *'⚠️  permissions: a permissions.deny or permissions.ask entry'*'in a spelling this check has not verified'*)
   check "P1az5i an unverified spelling outranks a deferred shape failure" PASS ;;
   *) check "P1az5i ladder order between could-not-judge and deferred shape" FAIL ;; esac
 # Which deferred defect is named, when two are present.
@@ -1698,11 +1698,11 @@ case "$(run_report_home "$H_DEFER_TWO")" in *'permissions.allow is present but n
   *) check "P1az5j deferred chain order" FAIL ;; esac
 SHAPE_OUT="$(run_report_home "$H_FATAL_DENY")"
 H_AMA="$(settings_home automode-allow-str '{"permissions":{"defaultMode":"auto"},"autoMode":{"allow":"nope"}}')"
-case "$(run_report_home "$H_AMA")" in *'has a shape this check cannot judge — autoMode.allow is present but not an array'*'could not be determined'*)
+case "$(run_report_home "$H_AMA")" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — autoMode.allow is present but not an array'*'could not be determined'*)
   check "P1az6 a non-array autoMode.allow renders the SCOPED could-not-determine row" PASS ;;
   *) check "P1az6 non-array autoMode.allow did not reach the scoped row" FAIL ;; esac
 H_MODE_NUM="$(settings_home mode-number '{"permissions":{"defaultMode":7,"allow":[]}}')"
-case "$(run_report_home "$H_MODE_NUM")" in *'has a shape this check cannot judge — permissions.defaultMode is present but not a string'*'could not be determined'*)
+case "$(run_report_home "$H_MODE_NUM")" in *'⚠️  permissions: ~/.claude/settings.json has a shape this check cannot judge — permissions.defaultMode is present but not a string'*'could not be determined'*)
   check "P1az7 a non-string defaultMode renders the SCOPED could-not-determine row" PASS ;;
   *) check "P1az7 non-string defaultMode did not reach the scoped row" FAIL ;; esac
 # The most common real settings file has no permissions key at all. Mutating the
@@ -2045,12 +2045,21 @@ esac
 # leak returned; it was also satisfied by `ISOLATED_HOME=` inside an unrelated
 # grep needle. The excluded class contains `_`, so both are rejected while every
 # real `HOME="…" cmd` prefix, `(HOME=…` and `export HOME=` still match.
+#
+# COMMENT LINES ARE STRIPPED FIRST, and that is not cosmetic. A leading SPACE is
+# in the excluded class, so any prose occurrence of ` HOME=` satisfied the arm —
+# including the very `# zensu-doctor-home-exempt:` sentence a suite writes to
+# declare that it has NO sandbox. That suite then took the HOME arm and its
+# exemption arm was never reached, so the sentence stating the absence of a
+# sandbox was what classified the suite as having one. The arms are ordered
+# HOME-then-exemption on purpose; stripping comments is what keeps that order
+# from swallowing the exemption it precedes.
 DOCTOR_HOMELESS=""
 DOCTOR_IN_SCOPE=0
 for suite in "$PLUGIN_DIR"/tests/structure/*.sh; do
   grep -qE 'zensu-doctor-report\.js|zensu-doctor\.sh' "$suite" 2>/dev/null || continue
   DOCTOR_IN_SCOPE=$((DOCTOR_IN_SCOPE+1))
-  grep -qE '(^|[^A-Za-z0-9_])HOME=' "$suite" && continue
+  grep -vE '^[[:space:]]*#' "$suite" | grep -qE '(^|[^A-Za-z0-9_])HOME=' && continue
   grep -q '# zensu-doctor-home-exempt:' "$suite" && continue
   DOCTOR_HOMELESS="$DOCTOR_HOMELESS ${suite##*/}"
 done
@@ -2076,7 +2085,7 @@ SHAPE_COUNT="$(printf '%s\n' "$SHAPE_KEYS" | grep -c .)"
 SHAPE_UNVETTED=""
 for k in $SHAPE_KEYS; do
   case "$k" in
-    perms.deny|perms.ask) grep -qF "FATAL_RULE_KEYS = ['deny', 'ask']" "$REPORT" || SHAPE_UNVETTED="$SHAPE_UNVETTED $k" ;;
+    perms.deny|perms.ask) grep -qF "FATAL_RULE_KEYS = RULE_LADDER.slice(0, RULE_LADDER.indexOf('allow'))" "$REPORT" || SHAPE_UNVETTED="$SHAPE_UNVETTED $k" ;;
     perms.allow) grep -qF "perms.allow !== undefined && !Array.isArray(perms.allow)" "$REPORT" || SHAPE_UNVETTED="$SHAPE_UNVETTED $k" ;;
     perms.defaultMode) grep -qF "perms.defaultMode !== undefined && typeof perms.defaultMode !== 'string'" "$REPORT" || SHAPE_UNVETTED="$SHAPE_UNVETTED $k" ;;
     autoMode.allow) grep -qF "autoMode.allow !== undefined && !Array.isArray(autoMode.allow)" "$REPORT" || SHAPE_UNVETTED="$SHAPE_UNVETTED $k" ;;
@@ -2098,6 +2107,24 @@ if grep -qF 'deny -> ask -> allow' "$REPORT"; then
   check "P1bd1 the provenance note names the deny/ask/allow evaluation order" PASS
 else
   check "P1bd1 provenance note omits the evaluation order" FAIL
+fi
+
+# P1bd1 reads the COMMENT and P1bi reads the derivation; neither reads the ladder.
+# That was the whole defect: FATAL_RULE_KEYS is now computed from RULE_LADDER, but
+# nothing tied RULE_LADDER to the `if` sequence that actually decides the order, so
+# moving `allow` ahead of `ask` — the one reordering no behavioural fixture covers,
+# since P1as2/P1as3 catch only a deny<->ask swap — still left every check green while
+# `ask` should have left the fatal set. This derives the order from the ladder body
+# and compares it to the declared array, so the two cannot drift apart silently.
+LADDER_BODY="$(sed -n '/^function permissionExposureLadder/,/^}/p' "$REPORT")"
+LADDER_SEEN="$(printf '%s\n' "$LADDER_BODY" | grep -oE 'perms\.(deny|ask|allow)\b' | sed 's/perms\.//' | awk '!seen[$0]++' | tr '\n' ' ')"
+LADDER_DECL="$(grep -oE "var RULE_LADDER = \[[^]]*\]" "$REPORT" | grep -oE "'[a-z]+'" | tr -d "'" | tr '\n' ' ')"
+if [ -z "$LADDER_DECL" ] || [ -z "$LADDER_SEEN" ]; then
+  check "P1bd2 could not derive the ladder order (declared:'$LADDER_DECL' dereferenced:'$LADDER_SEEN') — the scan is vacuous" FAIL
+elif [ "$LADDER_DECL" = "$LADDER_SEEN" ]; then
+  check "P1bd2 RULE_LADDER matches the order the ladder dereferences ($LADDER_SEEN)" PASS
+else
+  check "P1bd2 RULE_LADDER says '$LADDER_DECL' but the ladder dereferences '$LADDER_SEEN'" FAIL
 fi
 # Same drift pin the denial rows already carry at P1qr, for the new rows: the
 # renderer and skills/doctor/SKILL.md are two hand-written accounts, and without
@@ -2181,6 +2208,37 @@ if [ -z "$PERM_UNEMITTED" ] && [ -z "$PERM_DRIFT" ]; then
   check "P1be every permission-exposure row phrase is both emitted and documented in the skill" PASS
 else
   check "P1be permission rows vs skill (not emitted:$PERM_UNEMITTED not documented:$PERM_DRIFT)" FAIL
+fi
+
+# P1be asserts BOTH sides — emitted AND documented — so it can only ever pin wording
+# the renderer also prints, and it matches each phrase ANYWHERE in the skill. The one
+# claim that has no emitted counterpart is therefore invisible to it: the Phase 2
+# preamble states that the absence of a `permissions:` row is not an all-clear, which
+# is by construction about a row that did not print. Its candidate phrases
+# (`~/.claude/settings.json`, `permission mode`) occur five and two times elsewhere in
+# the file, so deleting that whole paragraph left P1be green.
+#
+# This arm pins skill-ONLY claims, and it matches a WHITESPACE-FLATTENED copy on
+# purpose: the file wraps its prose, and a line-based `grep -qF` cannot see a sentence
+# that spans two lines — which is why the obvious needle for this bound (`never that
+# the auto-mode classifier is inactive`) matches zero times as a literal despite being
+# written three times.
+SKILL_FLAT="$(tr '\n' ' ' < "$SKILL_MD" | tr -s ' ')"
+DOC_DRIFT=""
+DOC_SEEN=0
+while IFS= read -r doc_phrase; do
+  [ -n "$doc_phrase" ] || continue
+  DOC_SEEN=$((DOC_SEEN+1))
+  case "$SKILL_FLAT" in *"$doc_phrase"*) ;; *) DOC_DRIFT="$DOC_DRIFT [$doc_phrase]" ;; esac
+done <<'DOC_PHRASES'
+prints on every path the check can take, so read the rows rather than their absence
+DOC_PHRASES
+if [ "$DOC_SEEN" -lt 1 ]; then
+  check "P1bw no skill-only phrase was scanned — the arm is vacuous, not clean" FAIL
+elif [ -z "$DOC_DRIFT" ]; then
+  check "P1bw the skill still states the permission check's own bound ($DOC_SEEN phrase)" PASS
+else
+  check "P1bw skill no longer states the permission check's own bound:$DOC_DRIFT" FAIL
 fi
 
 # --- TTL honored from ZDOC_TTL_HOURS (canonical getter value) --------------

@@ -960,11 +960,15 @@ Eight things are coupled and must move together:
   settings key the ladder reads to be shape-vetted, which is the coupling that
   reopens the original defect if it drifts.
   **The proactive ladder has no unit seam**: this renderer exports nothing and
-  ends in `process.exit(0)`, so `settingsShape`, the four rule predicates
-  (`matchesReviewerSpawn`, `namesReviewerSpawn`, `mentionsReviewerAgent`,
-  `hasUnreadableEntry`), the combinator `reviewerSpawnMention` over the first two, and the
+  ends in `process.exit(0)`, so `settingsShape`, the rule predicates
+  (`matchesDenyOrAskRule` and `matchesAllowRule` — deliberately TWO named predicates and
+  not one boolean-flag predicate, because the flag named the input while it decided the
+  trim behaviour, so no call site said which side of the asymmetry it meant — plus
+  `namesReviewerSpawn`, `mentionsReviewerAgent`, `hasUnreadableEntry`), the shared
+  `isVerifiedSpelling` test that every exact-match arm consults instead of re-spelling it,
+  the combinator `reviewerSpawnMention` over the deny/ask pair, and the
   branch ladder are pinned only behaviorally, by shell fixtures. `reviewerSpawnMention` is
-  not a fifth predicate — it is a reduction over two lists — but it encodes a rule neither
+  not a further predicate — it is a reduction over two lists — but it encodes a rule neither
   the predicates nor the ladder carry: `'named'` outranks `'shaped'` ACROSS the deny and ask
   lists, and `namesReviewerSpawn` must scan its whole list rather than return at the first
   match, or the precedence silently becomes positional WITHIN a list. A port that copies

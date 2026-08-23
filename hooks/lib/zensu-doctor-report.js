@@ -75,9 +75,9 @@ var REVIEWER_AGENT = 'zensu:code-reviewer';
 //     deny/ask trim (over-matching is safe) and allow does not — a port that
 //     learns the real answer can collapse the asymmetry.
 //   * the HOME/.claude/settings.json layout
-//   * `FATAL_RULE_KEYS` below, whose membership is DERIVED from that order — it
-//     is exactly the keys evaluated before `allow`. A port that reorders the
-//     ladder and leaves this constant alone ships a wrong fatal/deferred split.
+//   * `RULE_LADDER` below, which IS that order. `FATAL_RULE_KEYS` is computed from
+//     it — exactly the keys evaluated before `allow` — so a port reorders that one
+//     array and the fatal/deferred split follows instead of drifting from it.
 //   * the deny -> ask -> allow evaluation order, first match wins. This one is
 //     listed separately because its failure mode is the opposite of the others':
 //     a rename makes the check fall silent, which is merely useless, while a
@@ -352,6 +352,25 @@ function walkQuotedBooleans(obj, prefix, hits) {
 // closed — no byte of whatever file it lands on reaches the report. Adding a
 // dedicated override would widen the surface for no gain; the structure suite
 // sandboxes HOME wholesale for the same reason.
+//
+// "Suppress or forge a row" understates what a forged row IS, so say it plainly:
+// every row names the display string ~/.claude/settings.json and never the path
+// that was actually opened. Under a redirected HOME a planted deny entry produces
+// a row asserting, in this plugin's own voice, that the user's REAL
+// ~/.claude/settings.json denies the reviewer spawn, and telling them to go remove
+// an entry that is not there — a misattribution, not merely a false positive. The
+// inverse is quieter and worse: a planted allow rule silences the one proactive
+// warning this check exists to produce, and skills/doctor/SKILL.md then has the
+// model report the table as green. Naming the opened path instead would trade the
+// misattribution for the disclosure this file refuses, so the display string stays.
+//
+// The bound that actually exists is the recognizer's, not this comment's:
+// hooks/lib/zensu-doctor-invocation.js admits a CLOSED assignment allowlist —
+// CLAUDE_PLUGIN_DATA, CLAUDE_PROJECT_DIR, ZDOC_PLAYWRIGHT_TOOLS — and neither HOME
+// nor ZENSU_CONFIG is in it, so the RECOGNIZED doctor invocation cannot carry a
+// redirect. Whether an ordinary Bash call in a healthy session can is UNVERIFIED:
+// zensu-doctor.sh never reads or normalises HOME, and the Bash gates cover zensu
+// mutations and source writes, neither of which a read-only doctor run is.
 function claudeSettingsFile() {
   if (!env.HOME) return null;
   return path.join(env.HOME, '.claude', 'settings.json');
@@ -371,6 +390,17 @@ function readSettingsJson(file) {
   var fd;
   var text;
   try {
+    // The `: 0` arm is UNEXERCISED, and stating that is the whole mitigation taken
+    // here. It is taken only where O_NONBLOCK is not an integer constant — i.e. not
+    // on the POSIX hosts this suite runs on — and tests/structure/test-doctor.sh
+    // appears in no shard of tests/profiles/windows-ci.v1.json and sits in the
+    // `excluded` list of tests/profiles/windows-native-structure.v1.json. So the one
+    // platform family the fallback exists for never runs this path, and whether
+    // `O_RDONLY | 0` still behaves on a host without the flag has no CI evidence
+    // anywhere. The alternative — adding a doctor entry to a Windows shard — is not
+    // free wall clock (P1az4 writes 1.1 MB, P1bg polls a FIFO to a 30 s deadline) and
+    // under CLAUDE.md it must be budgeted against a MEASURED figure, which nobody has
+    // taken. Left unexercised deliberately; say "unverified", never "covered".
     var nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
     fd = fs.openSync(file, fs.constants.O_RDONLY | nonBlock);
     var st = fs.fstatSync(fd);
@@ -465,7 +495,7 @@ function plainObject(v) {
 // rather than silently render as an empty rule set.
 //
 // The vetting goes to the RULE LISTS, not just to the two containers. Stopping
-// at depth 1 was the earlier defect: `matchesReviewerSpawn` opens with an
+// at depth 1 was the earlier defect: `matchesDenyOrAskRule` opens with an
 // Array.isArray guard, so a `deny` written as an object read as "no deny rules"
 // and the exposure row then recommended an allow rule while an unevaluated deny
 // key sat in the same file — a confidently WRONG remedy, which is worse than the
@@ -482,7 +512,16 @@ function plainObject(v) {
 // only AFTER the deny/ask branches have had their say, because those two do not
 // depend on it — swallowing the deny row over an unrelated malformed key would
 // drop the highest-value row this check emits.
-var FATAL_RULE_KEYS = ['deny', 'ask'];
+// The evaluation ORDER is the single source; the fatal set is DERIVED from it here
+// rather than asserted by a comment. As a literal, `['deny', 'ask']` claimed to be
+// "exactly the keys evaluated before allow" while nothing performed that derivation
+// and no pin observed it — so a port that reordered the ladder and left the constant
+// alone shipped a wrong fatal/deferred split with every check still green. Reorder
+// RULE_LADDER and the split follows. P1bi pins the derivation; P1bd2 pins that this
+// array still agrees with the order the ladder actually dereferences, which is the
+// half a constant can never state about itself.
+var RULE_LADDER = ['deny', 'ask', 'allow'];
+var FATAL_RULE_KEYS = RULE_LADDER.slice(0, RULE_LADDER.indexOf('allow'));
 function settingsShape(raw) {
   var data = plainObject(raw);
   if (!data) return { ok: false, err: 'the settings root is not a JSON object' };
@@ -597,11 +636,14 @@ var SELF_PERMISSION_BAR = 'no agent may edit a settings file to widen its own pe
 // Only the two spellings verified against a live permission decision on Claude
 // Code SETTINGS_SOURCE_BUILD are accepted. A wildcard form may well work too,
 // but it is not a verified spelling.
-// `padded` is the deny/ask spelling and is deliberately NOT used for allow.
-// Whether the host trims a rule string is unverified against SETTINGS_SOURCE_BUILD,
-// so trimming has to fall on the side where a wrong guess only over-warns: on
-// deny/ask an extra match costs a row the user can dismiss, while on allow it
-// SUPPRESSES the warning — the direction that leaves no diagnosis at all.
+// TWO named predicates rather than one with a boolean flag, because the flag named
+// the INPUT ("padded") while it decided the BEHAVIOUR, and `true` at a call site
+// said nothing about which side of the asymmetry was meant. Whether the host trims a
+// rule string is unverified against SETTINGS_SOURCE_BUILD, so trimming has to fall on
+// the side where a wrong guess only over-warns: on deny/ask an extra match costs a row
+// the user can dismiss, while on allow it SUPPRESSES the warning — the direction that
+// leaves no diagnosis at all. The names now carry that asymmetry; do not collapse them
+// back behind a parameter.
 //
 // Not widened to `Task(...)` on purpose, and the divergence is worth stating
 // because the sibling module invites the opposite conclusion:
@@ -612,17 +654,31 @@ var SELF_PERMISSION_BAR = 'no agent may edit a settings file to widen its own pe
 // by the low-claim predicate — see `namesReviewerSpawn`, whose 'shaped' arm claims
 // only that the entry cannot be judged. Do not promote it here: what separates the
 // two tables is the strength of the claim, not the spelling.
-function matchesReviewerSpawn(rules, padded) {
+// ONE spelling test, consulted by every predicate that needs it. It used to be written
+// out twice — here and again inside namesReviewerSpawn — where the second copy carried
+// four lines apologising for being unreachable BECAUSE it duplicated the first. The
+// branch is worth keeping; the hand-maintained duplicate was not.
+function isVerifiedSpelling(entry) {
+  return entry === 'Agent' || entry === 'Agent(' + REVIEWER_AGENT + ')';
+}
+function matchesDenyOrAskRule(rules) {
   if (!Array.isArray(rules)) return false;
   for (var i = 0; i < rules.length; i++) {
     if (typeof rules[i] !== 'string') continue;
-    var r = padded ? rules[i].trim() : rules[i];
-    if (r === 'Agent' || r === 'Agent(' + REVIEWER_AGENT + ')') return true;
+    if (isVerifiedSpelling(rules[i].trim())) return true;
+  }
+  return false;
+}
+function matchesAllowRule(rules) {
+  if (!Array.isArray(rules)) return false;
+  for (var i = 0; i < rules.length; i++) {
+    if (typeof rules[i] !== 'string') continue;
+    if (isVerifiedSpelling(rules[i])) return true;
   }
   return false;
 }
 // A deny/ask entry that clearly means this spawn but is not one of the two
-// verified spellings. Broadening matchesReviewerSpawn to swallow it was rejected:
+// verified spellings. Broadening matchesDenyOrAskRule to swallow it was rejected:
 // the deny row makes a strong claim ("every /zensu:tdd run wedges at the review
 // step") that must not fire for an unrelated agent, and a wildcard spelling is
 // the same unverified host grammar moved onto the loud side. Reporting that the
@@ -649,20 +705,21 @@ function namesReviewerSpawn(rules) {
     if (typeof rules[i] !== 'string') continue;
     var r = rules[i].trim();
     // Defensive and UNREACHABLE from the only caller, which reaches this
-    // predicate solely after matchesReviewerSpawn(..., true) rejected the same
-    // list with the same trim and the same two comparisons. Kept so the
-    // predicate is correct standing alone, not because a fixture covers it.
-    if (r === 'Agent' || r === 'Agent(' + REVIEWER_AGENT + ')') continue;
+    // predicate solely after matchesDenyOrAskRule rejected the same list with the
+    // same trim and the same spelling test. Kept so the predicate is correct
+    // standing alone, not because a fixture covers it — and it now costs one
+    // clause through the shared test rather than a hand-maintained copy.
+    if (isVerifiedSpelling(r)) continue;
     if (r.indexOf(REVIEWER_AGENT) !== -1) return 'named';
     // Any OTHER `Agent(...)` rule. Without this the predicate did not do what the
     // comment above claims: a wildcard spelling names no agent, so it matched
-    // neither this nor matchesReviewerSpawn, and the ladder fell through — to the
+    // neither this nor matchesDenyOrAskRule, and the ladder fell through — to the
     // wrong remedy in auto mode and to complete SILENCE in every other mode, for an
     // entry that plausibly blocks every run. `Agent(*)` is valid host grammar, so
     // that was a reachable green report, not a hypothetical. It stays on the
     // low-claim side deliberately: this row says only that the entry cannot be
     // judged, which is the fail-safe direction. Never move it into
-    // matchesReviewerSpawn — that row asserts every /zensu:tdd run wedges.
+    // matchesDenyOrAskRule — that row asserts every /zensu:tdd run wedges.
     if (r.indexOf('Agent(') === 0) { shaped = true; continue; }
     // The same treatment for the OTHER tool name the host uses for this spawn.
     // reviewer-spawn-denial-v1.js exports SPAWN_TOOL_NAMES = ['Agent', 'Task'], so
@@ -750,7 +807,7 @@ function permissionExposureLadder(file) {
   // Claude Code evaluates deny, then ask, then allow, and the first match wins —
   // so a deny is reported even when an allow rule for the same spawn is present,
   // and neither depends on the permission mode.
-  if (matchesReviewerSpawn(perms.deny, true)) {
+  if (matchesDenyOrAskRule(perms.deny)) {
     line(WARN, 'permissions: a permissions.deny entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Deny is evaluated before ask and allow, so the review chain can never '
       + 'spawn its reviewer and every /zensu:tdd run wedges at the review step. Remove that entry '
@@ -763,7 +820,7 @@ function permissionExposureLadder(file) {
       + 'refused-spawn report recommends. You have to apply this yourself — ' + SELF_PERMISSION_BAR + '.');
     return;
   }
-  if (matchesReviewerSpawn(perms.ask, true)) {
+  if (matchesDenyOrAskRule(perms.ask)) {
     line(WARN, 'permissions: a permissions.ask entry in ~/.claude/settings.json matches the '
       + REVIEWER_AGENT + ' spawn. Ask is evaluated before allow, so the spawn prompts every time and a '
       + 'turn that cannot answer the prompt refuses it. Move the rule to permissions.allow yourself if '
@@ -807,7 +864,7 @@ function permissionExposureLadder(file) {
   // failure too — where the old inline return was unreachable. Safe even when
   // `permissions.allow` is itself the malformed key: the predicate opens with an
   // Array.isArray guard and simply answers false.
-  var granted = matchesReviewerSpawn(perms.allow, false);
+  var granted = matchesAllowRule(perms.allow);
   // Each row is now gated by the carrier it actually depends on, and NEITHER branch
   // returns. The old single `deferred` set plus an early `return granted` produced two
   // suppressions, and exactly ONE of them was lifted here: a malformed `autoMode.allow`
