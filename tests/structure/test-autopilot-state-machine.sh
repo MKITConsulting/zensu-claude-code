@@ -1350,33 +1350,73 @@ else
 fi
 
 # --- Release: the one path that ends a run the caller does not own ---
-RELEASE_OK=true
-autopilot_release_run run_conc_b release_owner_evt "$CONC_PROJECT" session_conc_b >/dev/null 2>&1 \
-  && RELEASE_OK=false
-autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
-  || RELEASE_OK=false
+# W4 used to fold four independent properties into one boolean and asserted
+# only zero/non-zero, so any of them could regress into a different refusal
+# with the check still green. Each property now carries its own exit code.
+autopilot_release_run run_conc_b release_owner_evt "$CONC_PROJECT" session_conc_b >/dev/null 2>&1
+RELEASE_OWNER_RC=$?
+if [ "$RELEASE_OWNER_RC" -eq 4 ]; then
+  check "W4a the owner is refused while its own pointer still designates the run" PASS
+else
+  check "W4a owner release must be refused as 4 (rc=$RELEASE_OWNER_RC)" FAIL
+fi
+
+autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1
+RELEASE_FOREIGN_RC=$?
+RELEASE_CANCELLED=true
 json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
   'value.stage === "CANCELLED" && value.events[value.events.length - 1].eventId === "release_evt_001"' \
-  || RELEASE_OK=false
+  || RELEASE_CANCELLED=false
+if [ "$RELEASE_FOREIGN_RC" -eq 0 ] && [ "$RELEASE_CANCELLED" = true ]; then
+  check "W4b release cancels a foreign nonterminal run and records the event" PASS
+else
+  check "W4b foreign release must cancel the run (rc=$RELEASE_FOREIGN_RC cancelled=$RELEASE_CANCELLED)" FAIL
+fi
+
 # AC-006's two record-side halves: the release adds no state field and records
 # no bypass. The CLI-minted `release-` id shape is pinned in
 # tests/structure/test-autopilot-release-cli.sh A3, which is the only place the
 # verb actually runs.
+RELEASE_SHAPE=true
 json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
-  'Array.isArray(value.bypasses) && value.bypasses.length === 0' || RELEASE_OK=false
+  'Array.isArray(value.bypasses) && value.bypasses.length === 0' || RELEASE_SHAPE=false
 json_ok "$(autopilot_run_file run_conc_a "$CONC_PROJECT")" \
   'Object.keys(value).sort().join(",") === ["schemaVersion","runId","projectRoot","workspaceRoot","ownerSessionId","stage","nextActionCode","approvedPlanSha256","options","tdd","effects","evidence","blocked","bypasses","stopBudget","events"].sort().join(",")' \
-  || RELEASE_OK=false
-RELEASE_AFTER="$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")"
-autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
-  || RELEASE_OK=false
-[ "$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")" = "$RELEASE_AFTER" ] || RELEASE_OK=false
-autopilot_release_run run_conc_a release_evt_002 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1 \
-  && RELEASE_OK=false
-if [ "$RELEASE_OK" = true ]; then
-  check "W4 release cancels a foreign nonterminal run, is idempotent, and refuses owner or terminal" PASS
+  || RELEASE_SHAPE=false
+if [ "$RELEASE_SHAPE" = true ]; then
+  check "W4c the release adds no state field and records no bypass" PASS
 else
-  check "W4 release truth table" FAIL
+  check "W4c release must not change the record shape" FAIL
+fi
+
+RELEASE_AFTER="$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")"
+autopilot_release_run run_conc_a release_evt_001 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1
+RELEASE_REPEAT_RC=$?
+RELEASE_REPEAT_DIGEST="$(file_digest "$(autopilot_run_file run_conc_a "$CONC_PROJECT")")"
+if [ "$RELEASE_REPEAT_RC" -eq 0 ] && [ "$RELEASE_REPEAT_DIGEST" = "$RELEASE_AFTER" ]; then
+  check "W4d replaying the same release event id is a byte-identical no-op" PASS
+else
+  check "W4d release replay must be a no-op (rc=$RELEASE_REPEAT_RC digest-changed=$([ "$RELEASE_REPEAT_DIGEST" = "$RELEASE_AFTER" ] && echo no || echo yes))" FAIL
+fi
+
+autopilot_release_run run_conc_a release_evt_002 "$CONC_PROJECT" session_conc_c >/dev/null 2>&1
+RELEASE_TERMINAL_RC=$?
+if [ "$RELEASE_TERMINAL_RC" -eq 3 ]; then
+  check "W4e a terminal run is refused as terminal, not as a write failure" PASS
+else
+  check "W4e terminal release must be refused as 3 (rc=$RELEASE_TERMINAL_RC)" FAIL
+fi
+
+# The guard order matters and only the owner can show it: session_conc_a owns
+# this run, so an ownership check running first would answer 4. It answers 3,
+# which proves the terminal check precedes it — otherwise a caller could learn
+# ownership of a run from a refusal about a run that is already over.
+autopilot_release_run run_conc_a release_evt_003 "$CONC_PROJECT" session_conc_a >/dev/null 2>&1
+RELEASE_OWNER_TERMINAL_RC=$?
+if [ "$RELEASE_OWNER_TERMINAL_RC" -eq 3 ]; then
+  check "W4f the owner of a terminal run is refused by the FSM, not by the ownership guard" PASS
+else
+  check "W4f owner-on-terminal must be refused as 3, not 4 (rc=$RELEASE_OWNER_TERMINAL_RC)" FAIL
 fi
 
 # Re-assert the precondition so a W4 failure does not surface here as a second,
@@ -1625,6 +1665,34 @@ if [ "$GATE_LEGACY_STRIPPED" = true ] && [ "$GATE_LEGACY_RC" -eq 4 ]; then
   check "W25 a run record without workspaceRoot holds every tree" PASS
 else
   check "W25 a legacy record must fail closed over every tree (stripped=$GATE_LEGACY_STRIPPED rc=$GATE_LEGACY_RC, want true/4)" FAIL
+fi
+
+GATE_UPGRADE_RC=1
+GATE_UPGRADE_KEY=absent
+GATE_AFTER_RC=0
+if [ "$GATE_LEGACY_STRIPPED" = true ]; then
+  ( cd "$GATE_P/.claude/worktrees/wa" && autopilot_begin_run run_gate_holder session_gate_holder "$GATE_P" false true "" ) >/dev/null 2>&1
+  GATE_UPGRADE_RC=$?
+  GATE_UPGRADE_KEY="$(F="$GATE_P/.zensu/state/autopilot-run-run_gate_holder.json" node -e '
+    const fs = require("fs");
+    const record = JSON.parse(fs.readFileSync(process.env.F, "utf8"));
+    const value = record.workspaceRoot;
+    process.stdout.write(typeof value === "string" && value.length > 0 ? "present" : "absent");
+  ' </dev/null 2>/dev/null)"
+  [ -n "$GATE_UPGRADE_KEY" ] || GATE_UPGRADE_KEY=absent
+  ( cd "$GATE_P/.claude/worktrees/wb" && autopilot_begin_standalone_tdd "$GATE_P" session_gate_after false ) >/dev/null 2>&1
+  GATE_AFTER_RC=$?
+fi
+# The upgrade is asserted through its consequence, not through a path string:
+# W25 has just shown that this record blocks the sibling tree, so the sibling
+# becoming free again is what proves the key was filled in. The retry also has
+# a live pointer designating the run, which is the no-op shortcut the upgrade
+# has to decline in order to happen at all.
+if [ "$GATE_LEGACY_STRIPPED" = true ] && [ "$GATE_UPGRADE_RC" -eq 0 ] \
+  && [ "$GATE_UPGRADE_KEY" = present ] && [ "$GATE_AFTER_RC" -ne 4 ]; then
+  check "W28 an exact begin retry stamps workspaceRoot onto a legacy record" PASS
+else
+  check "W28 legacy record must be upgraded on retry (rc=$GATE_UPGRADE_RC key=$GATE_UPGRADE_KEY sibling=$GATE_AFTER_RC, want 0/present/not-4)" FAIL
 fi
 
 # --- Release: liveness, tree scoping, and the owner's exit from a torn begin ---

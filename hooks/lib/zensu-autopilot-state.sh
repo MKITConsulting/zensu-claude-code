@@ -1326,8 +1326,18 @@ if (mode === "begin") {
     if (existing.runId !== runId || existing.ownerSessionId !== ownerSessionId
       || existing.projectRoot !== projectRoot || !mayHoldWorkspace(existing, workspaceRoot)
       || canonical(existing.options) !== canonical(options)) fail(4, "run identity/options conflict");
-    if (activeStat) {
+    // A record minted before `workspaceRoot` existed holds EVERY tree, so while
+    // it stays nonterminal it blocks every other tree in the project. The exact
+    // retry is the owner asking for this same run from a known tree, which is
+    // the only moment the missing key can be filled in without guessing — so
+    // the no-op shortcut below is taken only when there is nothing to fill in.
+    const needsWorkspace = typeof existing.workspaceRoot !== "string";
+    if (activeStat && !needsWorkspace) {
       if (pointer.runId === runId) process.exit(10);
+    }
+    if (needsWorkspace) {
+      existing.workspaceRoot = workspaceRoot;
+      if (!stateValid(existing)) fail(2, "legacy record failed validation after workspace upgrade");
     }
     writeOutput(runOutput, existing);
     writeOutput(activeOutput, { schemaVersion: 1, runId });
