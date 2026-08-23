@@ -21,8 +21,21 @@
 // Conditions 2 and 3 are what the model cannot author.
 //
 // DENIAL_MARKERS are host-emitted literals, read out of the installed Claude
-// Code binary (2.1.231). They are matched as prefixes: the host appends a
+// Code binary (2.1.240). They are matched as prefixes: the host appends a
 // `Reason: ...` tail that is not part of the contract.
+//
+// Both literals were re-read out of 2.1.237, 2.1.239 and 2.1.240 and are
+// byte-identical across all three, so the prefix rule below still holds against
+// the shipping host. The refusal the host actually writes into the transcript
+// continues past the `Reason: ` tail into several sentences of advice; only the
+// prefix is contracted.
+//
+// The same transcript entry ALSO carries a host-native `toolDenialKind` beside
+// `message` (observed value `automode-blocked`). It is deliberately NOT read:
+// it is an undocumented, unversioned host field whose absence would be
+// indistinguishable from a clean spawn, and it buys nothing the three
+// conditions below do not already establish. Recorded here so a future reader
+// knows it was seen and declined, not missed.
 //
 // The CLI's single output line is a PARSED CONTRACT, not a display string:
 // `status=<s> kind=<k> tool=<n> spawns=<n> denials=<n>`. The shell caller in
@@ -60,7 +73,7 @@ const DENIAL_MARKERS = Object.freeze([
 // place and left stale in the other — a reworded host message is invisible to
 // every other check in this repo, and this is the line that forces a human to
 // re-verify rather than assume.
-const DENIAL_MARKERS_SOURCE_BUILD = '2.1.231';
+const DENIAL_MARKERS_SOURCE_BUILD = '2.1.240';
 
 const REVIEWER_SUBAGENT_TYPE = 'zensu:code-reviewer';
 const SPAWN_TOOL_NAMES = Object.freeze(['Agent', 'Task']);

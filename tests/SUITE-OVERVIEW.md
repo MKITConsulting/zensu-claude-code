@@ -13,33 +13,35 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (138 = 131 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's eleven CI group headers sum to 127, and the arithmetic closes at 131
+reconciled to that manifest (140 = 133 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's eleven CI group headers sum to 129, and the arithmetic closes at 133
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
 (the first and fourth are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's twelfth header, the local-only group of 7, gives 134 against 138. Nothing
-machine-checks this document, so treat §3's per-group numbers as descriptive rather than
-authoritative until that sweep happens.
+§3's twelfth header, the local-only group of 7, gives 136 against 140. The five-profile
+Windows drift this note used to carry is GONE: §1's Windows row and §7 are re-derived from
+`tests/profiles/windows-ci.v1.json` in this same commit. Nothing machine-checks this
+document, so treat §3's per-group numbers as descriptive rather than authoritative until
+that sweep happens.
 
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **138** — 131 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **140** — 133 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **7** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 40 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
-| Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
+| Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
 ## 2. Run modes (`tests/run-all.sh`)
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 138 structure suites + 5 offline evals | none |
-| `--ci` | 131 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 140 structure suites + 5 offline evals | none |
+| `--ci` | 133 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -75,9 +77,10 @@ rejection, fail-closed behavior on an unreadable state file, diagnostics on fail
 state verbs, and the SessionStart banner. `session-control-claude` alone carries ~140
 assertions.
 
-### TDD engine & phase gate (15)
+### TDD engine & phase gate (16)
 `edit-landing-audit` · `evidence-discipline` · `pre-edit-hook-mirror` ·
-`pretool-config-prompts` · `smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
+`pretool-config-prompts` · `requirements-table-gate` ·
+`smoke-main-thread-chain` · `tdd-begin-chain-reset` ·
 `tdd-complete-receipt-gate` · `tdd-full-cycle` · `tdd-manager-patches` ·
 `tdd-mode-toggle` · `tdd-protocol-prominence` · `tdd-reminder-hook` ·
 `tdd-skill-review-fanout` ·
@@ -88,8 +91,9 @@ lifecycle walked hermetically end to end (`tdd-full-cycle`), vanilla mode
 (`hooks.tddImplementation=false` — no RED/GREEN ceremony but audits + review chain
 retained), the mode precedence at the freeze point (`tdd-mode-toggle` — session
 choice > `--tdd-mode` caller default > config > vanilla, plus the fail-safe that an
-unreadable marker forces nothing), the edit-landing receipt required by
-`--tdd-complete`, and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
+unreadable marker forces nothing), the two preconditions `--tdd-complete` refuses on —
+the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
+anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
 ### Review chain & findings (25)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
@@ -135,9 +139,9 @@ the bypass ledger (gate escapes only — ~100 assertions), the post-Bash witness
 (anti-hallucination trail), the build-time guard that a skill never runs a zensu
 mutation without `--workflow-begin` / `--workflow-end` markers, and the secret-scan gate.
 
-### Skill contracts (19)
+### Skill contracts (20)
 `converge-skill` · `cover-skill` · `doc-generation-guidance` · `docs-skill` · `doctor` ·
-`ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
+`gauntlet-loop-skill` · `ghost-scan-test-detection` · `pilot-skill` · `plan-requirement-ids` · `plan-review-skill` ·
 `pr-fix-findings-skill` · `pr-team-review-skill` · `session-trail-skill` ·
 `session-trail-verdict` · `setup-skill` · `skill-overlays` · `templates` ·
 `verify-feature-skill` · `zen-mode` · `zensu-help-skill`
@@ -275,21 +279,24 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-7 bounded shards, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
-`node tests/run-profile.js <profile>`. The names and counts below are derived from
-`tests/profiles/windows-ci.v1.json`; `tests/structure/windows-ci-contract.test.js`
-pins exactly these seven keys and the 40-entry total, so a shard renamed there and
-not here is drift this table cannot catch on its own:
+7 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
+`node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
+than described — the previous five-profile layout (`windows-reset-session`,
+`windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
+`windows-native-branches`) no longer exists under any of those names, and only its total
+of 40 survived the reshard. `tests/structure/windows-ci-contract.test.js` pins exactly
+these seven keys and the 40-entry total, so a shard renamed there and not here is drift
+this table cannot catch on its own:
 
-| Profile | Suites | Focus |
+| Profile | Suites | Members |
 |---|---|---|
-| `windows-shard-1` | 9 | autopilot bound payload and state machine, deferred lease refresh and review fallback, installed-plugin provisioner, no-flock external lease, Linux sandbox host paths, Windows CI metadata contract, checkout credentials |
-| `windows-shard-2` | 8 | installed wrapper, MSYS runtime boundaries, pre-edit hook mirror, reviewer capability gate, runtime-fixture installer concurrency, session-control core, large-identity upgrade hook, versioned plugin upgrade |
-| `windows-shard-3` | 6 | deferred-reset races, file-exists path transport, MSYS special plugin module boundaries, session-start banner, VCS review-marker reconcile, Windows profile-lifecycle contract |
-| `windows-shard-4` | 3 | deferred claim adoption, plan-payload path transport, TDD state junction safety |
-| `windows-shard-5` | 7 | autopilot plan delegate, coverage-report Windows paths, post-review self-review handoff, session id, session safe file read, upgrade provider zero-launch, portability guards |
-| `windows-shard-6` | 5 | Bash source-write gate, deferred transfer reset, marketplace fixture, session-control-claude, upgrade process Windows boundaries |
-| `windows-shard-7` | 2 | review-worker evidence lease, stop-enforcer self-review routing |
+| `windows-shard-1` | 9 | autopilot-bound-payload-windows, autopilot-state-machine, deferred-lease-refresh, deferred-review-fallback, installed-plugin-provisioner, tdd-no-flock-external-lease, upgrade-linux-sandbox-host-paths, windows-ci-metadata-contract, workflow-checkout-credentials |
+| `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
+| `windows-shard-3` | 6 | deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
+| `windows-shard-4` | 3 | deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
+| `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
+| `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
+| `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute

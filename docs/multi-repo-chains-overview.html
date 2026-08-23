@@ -283,7 +283,7 @@
       <p>The audit writes to <code>&lt;--project&gt;/.zensu/state/</code> while the terminus looks in
       the anchor's state directory. Two runs therefore leave two receipts nobody reads — and each run
       reports the other repository's claims as not landed.</p>
-      <p class="src">zensu-edit-landing.sh:266 · zensu-log.sh:572</p>
+      <p class="src">zensu-edit-landing.sh:266 · zensu-log.sh:608</p>
     </div>
     <div class="card">
       <span class="tag warn">Asymmetry</span>
@@ -299,7 +299,7 @@
       <p>The receipt gate fires only when <code>git -C "$CLAUDE_PROJECT_DIR"</code> counts changes.
       With a clean orchestrator the count is zero, the receipt is skipped, and the chain closes — with
       a reviewer that saw nothing either.</p>
-      <p class="src">zensu-log.sh:558-569</p>
+      <p class="src">zensu-log.sh:668-670</p>
     </div>
   </div>
 </section>
@@ -427,7 +427,7 @@
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
           <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
           counts the union. Otherwise a clean anchor still closes an empty chain.</td>
-          <td class="where mono">zensu-log.sh:558-569</td>
+          <td class="where mono">zensu-log.sh:668-670</td>
         </tr>
         <tr>
           <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
@@ -517,7 +517,7 @@
     <strong>Why this stage is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
-    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:194</span>). The decisive difference
+    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:195</span>). The decisive difference
     from the mechanical audit: a reviewer <em>reports</em> a finding, it does not <em>demand</em> a
     characterization test. That demand is precisely why the Cross-Layer audit cannot run in
     vanilla.</p>
@@ -553,7 +553,7 @@
     paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
     two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
     so it reports the unpaired literal without demanding the pairing.</p>
-    <p class="src">skills/tdd/SKILL.md:415 · skills/tdd/SKILL.md:417</p>
+    <p class="src">skills/tdd/SKILL.md:416 · skills/tdd/SKILL.md:418</p>
     <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
     specification carries the same proposal in §7.4.</p>
   </div>
