@@ -888,22 +888,68 @@ Eight things are coupled and must move together:
   `skills/doctor/SKILL.md` by P1be, the same drift pin P1qr applies to the reactive
   rows — `docs/tdd-manager-workflow.md` §"The proactive counterpart, before any
   chain wedges" is the third account and is NOT covered by that pin.
-- **The deny-first caveat sentence is a FOURTH hand-copy class, pinned nowhere
+- **Every row that INSTRUCTS a settings edit carries `SELF_PERMISSION_BAR`**, and
+  all five call sites consume it — the exposure row, the reactive refused-spawn row,
+  the deny row, the ask row and the could-not-judge row. The two that previously
+  spelled the sentence inline now consume the constant with their emitted bytes
+  unchanged, which is what keeps P1be and P1qr green. A shared constant with an
+  unconsumed copy beside it is worse than either honest duplication or one source,
+  because it advertises a single source that does not exist; do not reintroduce one.
+- **The deny-first caveat sentence is a SIX-member hand-copy class, pinned nowhere
   across its copies.** `DENY_FIRST_CAVEAT` in `hooks/lib/zensu-doctor-report.js`
   is consumed by the ask row and the exposure row; the reactive row in the SAME
   file spells its own lead-in and shares only the trailing clause; `DENIAL_REMEDY`
   in `hooks/stop-chain-enforcer.sh` is a third; `skills/doctor/SKILL.md`'s
-  refused-spawn bullet is a fourth. P1be and P1qr each pin a doctor copy against
+  refused-spawn bullet is a fourth; and `unjudgeableRow` in the renderer is a
+  FIFTH, which states the same deny-before-allow precedence in its own words and
+  deliberately does NOT consume the constant — that row tells the reader to go and
+  READ the entry, while `DENY_FIRST_CAVEAT` tells them to REMOVE a deny, so reusing
+  it verbatim there would give the wrong instruction. A SIXTH member is the deny row itself,
+  which says "Deny is evaluated before ask and allow" and "while it stands, adding a
+  permissions.allow rule for this spawn changes nothing" in its own words and consumes only
+  `SELF_PERMISSION_BAR`.
+  **State the base or the count means nothing.** The six MEMBERS are: the constant itself,
+  the reactive row, `DENIAL_REMEDY`, the SKILL.md refused-spawn bullet, `unjudgeableRow`, and
+  the deny row. THREE of them carry the trailing clause VERBATIM — the constant, the reactive
+  row and `DENIAL_REMEDY` — and a fourth, the SKILL.md bullet, carries its first half verbatim.
+  That verbatim sharing is exactly what makes the three `grep -qF` pins possible; a genuine
+  paraphrase could not be pinned that way. Only the deny row and `unjudgeableRow` paraphrase it — but the
+  deny row is nonetheless PINNED, by its own clause: `P1bv` and `P1bm3` match
+  `Deny is evaluated before ask and allow` literally. So five of the six are caught by
+  something, and `unjudgeableRow` alone is the copy nothing catches; it is the one to check
+  by hand after any reword. The ask row and the exposure row CONSUME the
+  constant, which keeps them out of the drift class entirely — consumers, not members. The
+  renderer's own comment beside the constant counts the same class as FIVE BESIDES the
+  constant, which is the same six; keep both numbers and both bases, and do not "fix" one
+  into the other. The criterion needs a real discriminator, not a blanket exclusion: a member
+  is a remedy string EMITTED to a user, plus the one skill bullet that STANDS IN for such a
+  string — the refused-spawn bullet, which relays the reactive row's remedy in its own words.
+  The proactive-row bullets in `skills/doctor/SKILL.md` also restate the precedence and stay
+  excluded, but state the test precisely, because two of them DO re-author a sentence: the
+  could-not-judge bullet and the unreadable-entry bullet write their own remedy in their own
+  words. They are excluded because each accompanies a row whose wording the model is sent to
+  read, so a reword of that row is what a maintainer notices; the refused-spawn bullet is a
+  member because it stands in for a string the model never sees rendered. `docs/tdd-manager-workflow.md` is
+  narrative and outside the class. Without that discriminator the class grows until it stops
+  being checkable, which is what an earlier wording of this paragraph did. P1be and P1qr each pin a doctor copy against
   the skill, and the routing suite pins the enforcer copy against itself — nothing
   pins the doctor and the enforcer against each other. Reword one and the others
   go stale with every check green; check them by hand, as with `WRAP` above.
 - **That proactive check's PORT half is not this module's.** A port that renames
   only the literals still ships a wrong check: the branch LADDER in
-  `permissionExposureRows` encodes the deny -> ask -> allow precedence, so a host
+  `permissionExposureLadder` encodes the deny -> ask -> allow precedence, so a host
   that orders them differently needs the ladder reordered, not the strings renamed.
+  The wrapper is TWO functions, not one, and a port that copies only the outer name
+  ships half of it: `permissionExposureRows` contains the throw so a fault costs one
+  row instead of the whole report, and `permissionExposureRowsInner` turns the
+  ladder's silence into a statement — the ✅ row when the check ran and found nothing,
+  a did-not-run row when `HOME` is unset. The split exists so the row-counting seam
+  sits INSIDE the try; collapsing them would put the counter outside the containment. Counting emitted rows rather than threading a flag through
+  the ladder's exits is deliberate: a branch added later cannot forget to close itself
+  out. A port that copies the ladder without the wrapper ships the silence back.
   A host with no per-user permission-rule file at all DROPS the check rather than
   repointing it — there is nothing to read. The accounts a port also owns are
-  `skills/doctor/SKILL.md`'s `⚠️ permissions:` bullets and its green-summary bound,
+  `skills/doctor/SKILL.md`'s `⚠️`/`✅ permissions:` bullets and its green-summary bound,
   `docs/tdd-manager-workflow.md` §"The proactive counterpart", and the bullet above.
   P1bh requires every suite that NAMES either doctor file to sandbox HOME or to
   carry an explicit `# zensu-doctor-home-exempt:` sentence — deliberately blunt,
@@ -914,9 +960,20 @@ Eight things are coupled and must move together:
   settings key the ladder reads to be shape-vetted, which is the coupling that
   reopens the original defect if it drifts.
   **The proactive ladder has no unit seam**: this renderer exports nothing and
-  ends in `process.exit(0)`, so `settingsShape`, the three rule predicates
-  (`matchesReviewerSpawn`, `namesReviewerSpawn`, `mentionsReviewerAgent`) and the
-  branch ladder are pinned only behaviorally, by shell fixtures. Extracting a
+  ends in `process.exit(0)`, so `settingsShape`, the four rule predicates
+  (`matchesReviewerSpawn`, `namesReviewerSpawn`, `mentionsReviewerAgent`,
+  `hasUnreadableEntry`), the combinator `reviewerSpawnMention` over the first two, and the
+  branch ladder are pinned only behaviorally, by shell fixtures. `reviewerSpawnMention` is
+  not a fifth predicate — it is a reduction over two lists — but it encodes a rule neither
+  the predicates nor the ladder carry: `'named'` outranks `'shaped'` ACROSS the deny and ask
+  lists, and `namesReviewerSpawn` must scan its whole list rather than return at the first
+  match, or the precedence silently becomes positional WITHIN a list. A port that copies
+  only the predicates renders the weaker row for a list that really does name the reviewer. Two of those fixtures reach their branch through a `node --require`
+  preload rather than through a settings file, because neither a short read nor a
+  throw inside the check is producible from file content alone (P1bp, P1bs).
+  `settingsShape` returns TWO deferred carriers, not one: each row is suppressed only
+  by a malformed key its own claim depends on. Collapsing them back into one carrier
+  restores the defect where a malformed `autoMode.allow` deleted the exposure row. Extracting a
   pure classifier into a `*-v1.js` module would buy one, at the cost of a lazy
   require, a degraded-row fixture and a `node --test` driver charged to a named
   Windows shard budget. Deliberately not done; recorded so it is not mistaken for
@@ -1093,15 +1150,35 @@ refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` 
 in `docs/configuration.md`. The PROACTIVE check has three of its own, listed here
 so a maintainer navigating by this paragraph reaches them: §"The proactive
 counterpart, before any chain wedges" in `docs/tdd-manager-workflow.md`, the
-`⚠️ permissions:` bullets plus the green-summary bound in `skills/doctor/SKILL.md`,
+`⚠️`/`✅ permissions:` bullets plus the green-summary bound in `skills/doctor/SKILL.md`,
 and the two bullets above.
 
 **Port-relevant.** The PROACTIVE check has its own port half, stated in the two
-bullets above and NOT covered by this paragraph: `permissionExposureRows` and
-`SETTINGS_SOURCE_BUILD` in `hooks/lib/zensu-doctor-report.js`, the `permissions.*`
-/ `autoMode.allow` grammar, the single `~/.claude/settings.json` path, and — the
-one a literal-renaming port misses — the branch ladder, which encodes the
-deny -> ask -> allow precedence in code rather than in a string.
+bullets above and NOT covered by this paragraph: `permissionExposureRows`,
+`permissionExposureRowsInner` and `SETTINGS_SOURCE_BUILD` in
+`hooks/lib/zensu-doctor-report.js`, the `permissions.*` / `autoMode.allow` grammar,
+the `Task` / `Task(` spellings the low-claim predicate admits WITHOUT verification
+against `SETTINGS_SOURCE_BUILD`, `reviewerSpawnMention` and its cross-list precedence, the single `~/.claude/settings.json` path, and — the
+two a literal-renaming port misses — the branch ladder, which encodes the
+deny -> ask -> allow precedence in code rather than in a string, and `FATAL_RULE_KEYS`,
+whose membership is DERIVED from that same order, so a port that reorders the ladder and
+leaves the constant alone ships a wrong fatal/deferred split.
+
+**The Config block carries its own host-coupled claim, and it is NOT the settings ladder's.**
+`readJson`'s three flags — `io`, `cap`, `loaderFallback` — encode facts about THIS host's config
+loader, `rd()` in `hooks/lib/zensu-config.sh`: that an open or read error makes it return `{}`,
+that it has no size limit, and that it MERGES a global with a project file so a broken overlay
+does not fall back to defaults. Two rows state those facts to the user verbatim. A port whose
+loader caps size, aborts instead of falling back, or reads a single file would ship both
+sentences as false verdicts with every check green — the same failure class
+`SETTINGS_SOURCE_BUILD` exists to prevent, one block over. Re-decide the three flags against the
+port's own loader, or drop the Config block's loader claims entirely.
+
+**Known gap in the Config block, accepted and recorded.** The `soleSource` axis is present-ness,
+not effectiveness: when BOTH default config files exist and both degrade to `{}`, each failure row
+says "the other config source still applies" while defaults actually apply. Not a regression — the
+predicate that preceded it was wrong in that case too — and self-limiting, because a row prints for
+each broken file. Closing it means counting entries that are present AND not `loaderFallback`.
 For the REACTIVE module below, every constant here is host-coupled: a port copies
 `DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
 (`message.content[]`, `tool_use`/`tool_result`, `tool_use_id`, `input.subagent_type`,

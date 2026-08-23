@@ -537,26 +537,30 @@ if ln "$NOTE_A" "$NOTE_B" 2>/dev/null; then
     *) check "P1qk hard-linked note rejected (got: $OUT)" FAIL ;;
   esac
   rm -f "$NOTE_B"
-  # The binding itself: a perfectly well-formed note whose session has no
-  # workflow document beside it. Every other rejection case here is malformed in
-  # some way, so without this the accept path rested entirely on the note's own
-  # contents — and this directory is writable from inside the session, which
-  # makes "widen your permissions" a row an agent could manufacture for itself.
-  note_json 1 auto-mode-classifier > "$NOTE_B"
-  rm -f "$STATE_DIR_CANON/tdd-phase-${DENY_KEY_B}.json"
-  OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
-  case "$OUT" in
-    *'2 session(s) where the host permission layer refused'*)
-      check "P1qq a well-formed note with no matching session is counted as a refusal (got: $OUT)" FAIL ;;
-    *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn note(s) this plugin did not write'*)
-      check "P1qq a well-formed note with no matching session is rejected, not counted" PASS ;;
-    *) check "P1qq unbound note rejected (got: $OUT)" FAIL ;;
-  esac
-  rm -f "$NOTE_B"
-  deny_session_doc "$DENY_KEY_B"
 else
   check "P1qk hard links unavailable on this filesystem — skipped" PASS
 fi
+# The binding itself: a perfectly well-formed note whose session has no workflow document
+# beside it. Every other rejection case here is malformed in some way, so without this the
+# accept path rested entirely on the note's own contents — and this directory is writable
+# from inside the session, which makes "widen your permissions" a row an agent could
+# manufacture for itself.
+# HOISTED OUT of the hard-link guard above: it needs no hard link, only a fresh note and a
+# removed workflow document, and while it sat inside that guard it vanished with no signal
+# on any filesystem where `ln` fails — the suite simply reported one fewer check, all green.
+# Same class as the mkfifo gating this round removed elsewhere.
+note_json 1 auto-mode-classifier > "$NOTE_B"
+rm -f "$STATE_DIR_CANON/tdd-phase-${DENY_KEY_B}.json"
+OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$OUT" in
+  *'2 session(s) where the host permission layer refused'*)
+    check "P1qq a well-formed note with no matching session is counted as a refusal (got: $OUT)" FAIL ;;
+  *'1 session(s) where the host permission layer refused'*'1 reviewer-spawn note(s) this plugin did not write'*)
+    check "P1qq a well-formed note with no matching session is rejected, not counted" PASS ;;
+  *) check "P1qq unbound note rejected (got: $OUT)" FAIL ;;
+esac
+rm -f "$NOTE_B"
+deny_session_doc "$DENY_KEY_B"
 # A plugin root without the module must still report the refusal — losing the
 # kind is acceptable, losing the row is not.
 rm -f "$NOTE_B" "$SBOX/plug/hooks/lib/reviewer-spawn-denial-v1.js"
@@ -601,6 +605,7 @@ reviewer-spawn refusal note(s) older than
 reviewer-spawn note(s) this plugin did not write
 no matching session
 a deny rule outranks an allow rule
+no agent may edit a settings file to widen its own permissions
 ROW_PHRASES
 if [ -z "$ROW_UNEMITTED" ] && [ -z "$ROW_DRIFT" ]; then
   check "P1qr every denial row phrase is both emitted and documented in the skill" PASS
@@ -654,6 +659,44 @@ printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug2/.clau
 printf '{bad json' > "$SBOX/plug2/hooks/hooks.json"
 OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
 case "$OUT" in *'hooks.json: invalid JSON'*) check "P1x hooks.json invalid ❌" PASS ;; *) check "P1x hooks.json invalid ❌ (got: $OUT)" FAIL ;; esac
+# jsonFailure's DISCRIMINATING branch had no coverage at all: the three sites that consume
+# it (plugin.json, marketplace.json, hooks.json) were only ever driven with missing or
+# malformed files, where `io` is false, and the sole unreadable fixture in this suite drives
+# the config site — which does not call the helper. Collapsing jsonFailure back to an
+# unconditional "invalid JSON — " therefore left the whole suite green while three of four
+# render sites went back to announcing a filesystem fault as a content fault.
+printf '{bad json' > "$SBOX/plug2/hooks/hooks.json"
+printf '{"name":"zensu","version":"1.2.3"}\n' > "$SBOX/plug2/.claude-plugin/plugin.json"
+chmod 000 "$SBOX/plug2/.claude-plugin/plugin.json" 2>/dev/null || true
+if [ -r "$SBOX/plug2/.claude-plugin/plugin.json" ]; then
+  check "P1x1 SKIPPED — this principal can read a chmod 000 file, EACCES not producible" PASS
+  check "P1x2 SKIPPED — same principal limitation" PASS
+  check "P1x3 SKIPPED — same principal limitation" PASS
+else
+  UNREAD_PLUG_OUT="$(run_report "$SBOX/plug2" "$SBOX/good-cfg.json" "$EMPTY_PROJECT")"
+  # Anchored by hand rather than through absent_row_out: that helper and $ANCHOR are both
+  # defined several hundred lines BELOW this block, and calling it here made the check
+  # vanish silently — bash reports command-not-found on stderr and no check is emitted at
+  # all. A bare absence assertion is exactly what this round is removing, so the render
+  # proof is spelled out instead: the sibling row that must still be there.
+  case "$UNREAD_PLUG_OUT" in
+    *'plugin.json: invalid JSON'*)
+      check "P1x1 an unreadable plugin.json must not be announced as invalid JSON" FAIL ;;
+    *'hooks.json:'*)
+      check "P1x1 an unreadable plugin.json is not announced as invalid JSON" PASS ;;
+    *) check "P1x1 (report never rendered — no Plugin integrity row in output)" FAIL ;;
+  esac
+  # Positive control: the finding survives the reword and still names the operation.
+  case "$UNREAD_PLUG_OUT" in *'plugin.json: unreadable ('*)
+    check "P1x2 an unreadable plugin.json is still reported, with its operation" PASS ;;
+    *) check "P1x2 unreadable plugin.json lost its row (got: $UNREAD_PLUG_OUT)" FAIL ;; esac
+  # Discrimination: the sibling site whose file is merely malformed keeps the content wording.
+  case "$UNREAD_PLUG_OUT" in *'hooks.json: invalid JSON'*)
+    check "P1x3 a malformed sibling still renders the content wording" PASS ;;
+    *) check "P1x3 the malformed sibling lost its content wording" FAIL ;; esac
+fi
+chmod 644 "$SBOX/plug2/.claude-plugin/plugin.json" 2>/dev/null || true
+printf '{"hooks":{}}\n' > "$SBOX/plug2/hooks/hooks.json"
 
 # --- config-absent (defaults apply) ---------------------------------------
 OUT="$(ZDOC_ZENSU=absent ZDOC_NODE=vT ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
@@ -770,11 +813,40 @@ absent_row() { # absent_row <label> <fixture home> <needle>
 }
 # For the three cases where the ABSENCE of a settings file is the fixture, so
 # absent_row's existence check would be exactly wrong.
-absent_row_out() { # absent_row_out <label> <output> <needle>
+OK_ROW='permissions: no reviewer-spawn exposure found in ~/.claude/settings.json'
+# The check now speaks on every path, so "renders no permissions row" is no longer a
+# meaningful assertion — every report has one. What those checks were REALLY about is
+# that no WARNING renders. This says exactly that, and requires the clean row as its own
+# render anchor, so it is stronger than the `absent_row … 'permissions:'` form it
+# replaces IN THAT DIMENSION: that form passed for a report that collapsed before the
+# Config block. It is NOT strictly stronger — "strictly" was the earlier wording and it
+# was wrong. `absent_row` opens with a fixture-existence guard and this helper carries
+# none, deliberately: P1bq, P1bq1 and P1aw use an EMPTY or ABSENT settings file as the
+# fixture, and a size guard would reject exactly those. The gap it leaves is narrow
+# rather than open — an empty `$home` still renders the HOME-unset warning, which this
+# helper fails on — but a fixture that was never written to an otherwise valid home
+# would read as clean. Prefer `absent_row` where the fixture must be non-empty.
+clean_row() { # clean_row <label> <fixture home>
+  local label="$1" home="$2" out
+  out="$(run_report_home "$home")"
+  case "$out" in *'⚠️  permissions:'*)
+    check "$label (a permissions warning rendered, expected none)" FAIL; return ;; esac
+  case "$out" in *"$OK_ROW"*) check "$label" PASS ;;
+    *) check "$label (clean row absent — the report may not have rendered at all)" FAIL ;; esac
+}
+clean_row_out() { # clean_row_out <label> <output>
+  local label="$1" out="$2"
+  case "$out" in *'⚠️  permissions:'*)
+    check "$label (a permissions warning rendered, expected none)" FAIL; return ;; esac
+  case "$out" in *"$OK_ROW"*) check "$label" PASS ;;
+    *) check "$label (clean row absent — the report may not have rendered at all)" FAIL ;; esac
+}
+absent_row_out() { # absent_row_out <label> <output> <needle> [render-proof]
+  local proof="${4:-$ANCHOR}"
   case "$2" in
     *"$3"*) check "$1 (row present, expected absent)" FAIL ;;
-    *"$ANCHOR"*) check "$1" PASS ;;
-    *) check "$1 (report never rendered — no anchor in output)" FAIL ;;
+    *"$proof"*) check "$1" PASS ;;
+    *) check "$1 (report never rendered — no proof '$proof' in output)" FAIL ;;
   esac
 }
 
@@ -797,18 +869,15 @@ case "$OUT" in *'⚠️  permissions: permission mode "auto"'*)
   *) check "P1am1 exposure row glyph (got: $OUT)" FAIL ;; esac
 
 H_RULE="$(settings_home rule '{"permissions":{"defaultMode":"auto","allow":["Agent(zensu:code-reviewer)"]}}')"
-absent_row "P1an the exact Agent(zensu:code-reviewer) allow rule suppresses every permissions row" \
-  "$H_RULE" 'permissions:'
+clean_row "P1an the exact Agent(zensu:code-reviewer) allow rule suppresses every permissions warning" "$H_RULE"
 H_BARE="$(settings_home bare '{"permissions":{"defaultMode":"auto","allow":["Agent"]}}')"
-absent_row "P1ao the bare Agent allow rule suppresses the exposure row" \
-  "$H_BARE" 'permissions:'
+clean_row "P1ao the bare Agent allow rule suppresses the exposure row" "$H_BARE"
 # The allow path exercises the SKIP, not a throw: it is called with padded=false,
 # so no method is called on the element and a missing guard would just compare
 # null === 'Agent'. The throw only happens on the trimming call sites, which is
 # what P1ao4 below pins.
 H_MIXED="$(settings_home mixed '{"permissions":{"defaultMode":"auto","allow":[null,42,{"a":1},"Agent(zensu:code-reviewer)"]}}')"
-absent_row "P1ao1 non-string allow entries are skipped and the exact rule still grants" \
-  "$H_MIXED" 'permissions:'
+clean_row "P1ao1 non-string allow entries are skipped and the exact rule still grants" "$H_MIXED"
 # Whether the host trims a rule string is UNVERIFIED against SETTINGS_SOURCE_BUILD,
 # so the allow side compares untrimmed: a wrong guess there would SUPPRESS the
 # warning, the direction that leaves no diagnosis. The deny/ask side trims, where
@@ -919,6 +988,534 @@ H_ASK_AUTO="$(settings_home ask-auto '{"permissions":{"defaultMode":"auto","ask"
 OUT="$(run_report_home "$H_ASK_AUTO")"
 case "$OUT" in *'a permissions.ask entry'*) ;; *) check "P1as1 precondition: the ask row must render (got: $OUT)" FAIL ;; esac
 absent_row "P1as1 the ask branch returns instead of stacking the exposure row" "$H_ASK_AUTO" 'permission mode "auto" is set'
+# Every row that INSTRUCTS a settings edit carries the prohibition, not only the two
+# that happened to have it. The deny row says "Remove that entry yourself", the ask row
+# says "Move the rule to permissions.allow yourself" (and appends DENY_FIRST_CAVEAT,
+# a second widening instruction), and the could-not-judge row says "Read the entry
+# yourself before adding any permissions.allow rule". These rows are printed verbatim
+# by the model, so the row text is what has to carry the bar — a skill bullet does not
+# survive paraphrase. `exposure` is the positive control: it already carries the
+# sentence, so a needle typo shows up as all four failing rather than as three.
+SELF_BAR='no agent may edit a settings file to widen its own permissions'
+BAR_MISS=""
+for pair in "exposure:$H_EXPOSED" "deny:$H_DENY_ONLY" "ask:$H_ASK_AUTO" "unjudgeable:$H_UNJUDGE"; do
+  case "$(run_report_home "${pair#*:}")" in *"$SELF_BAR"*) ;;
+    *) BAR_MISS="$BAR_MISS ${pair%%:*}" ;; esac
+done
+if [ -z "$BAR_MISS" ]; then
+  check "P1bj every row instructing a settings edit carries the self-permission prohibition" PASS
+else
+  check "P1bj rows instructing a settings edit without the self-permission prohibition:$BAR_MISS" FAIL
+fi
+# An `Agent(`-shaped deny/ask entry that is not one of the two verified spellings used
+# to match NO predicate at all — matchesReviewerSpawn wants an exact spelling and
+# namesReviewerSpawn wants the literal agent name — so the ladder fell through: to the
+# WRONG remedy in auto mode, and to complete silence in every other mode. This is a
+# reachable state, not a hypothetical: `Agent(*)` is valid host grammar (the rule parser
+# is /^([^(]+)\(([^)]+)\)$/, and the host's own validator names "*" as a supported glob
+# while restricting ":*" to Bash prefix rules). All three fixtures must reach the
+# could-not-judge row, which asserts nothing about what the entry actually does.
+UNVERIFIED_ROW='in a spelling this check has not verified'
+H_WILD_DENY="$(settings_home wild-deny '{"permissions":{"defaultMode":"auto","deny":["Agent(*)"],"allow":[]}}')"
+case "$(run_report_home "$H_WILD_DENY")" in *"$UNVERIFIED_ROW"*)
+  check "P1bk an Agent(*) deny renders the could-not-judge row instead of falling through" PASS ;;
+  *) check "P1bk Agent(*) deny fell through to the exposure row or to silence" FAIL ;; esac
+# The silent half, and the one that matters most: outside auto mode the exposure row is
+# gated off, so before this fix NOTHING printed for a deny that blocks every run.
+H_WILD_PLAIN="$(settings_home wild-deny-plain '{"permissions":{"defaultMode":"default","deny":["Agent(*)"]}}')"
+case "$(run_report_home "$H_WILD_PLAIN")" in *"$UNVERIFIED_ROW"*)
+  check "P1bk1 an Agent(*) deny is reported outside auto mode too" PASS ;;
+  *) check "P1bk1 Agent(*) deny rendered no row outside auto mode" FAIL ;; esac
+# The worst case in the feature's own terms: the user did exactly what the doctor told
+# them to do and holds the recommended allow rule, while the deny still outranks it.
+H_WILD_GRANT="$(settings_home wild-deny-granted '{"permissions":{"defaultMode":"auto","deny":["Agent(*)"],"allow":["Agent(zensu:code-reviewer)"]}}')"
+case "$(run_report_home "$H_WILD_GRANT")" in *"$UNVERIFIED_ROW"*)
+  check "P1bk2 an Agent(*) deny beside the recommended allow rule is still reported" PASS ;;
+  *) check "P1bk2 Agent(*) deny silenced by the grant it outranks" FAIL ;; esac
+# An `Agent(` prefix must not be treated as a VERIFIED spelling — the deny row makes a
+# strong claim ("every /zensu:tdd run wedges") and must keep firing only on the two
+# spellings that were checked against a live permission decision.
+absent_row "P1bk3 an Agent(*) deny does not fire the loud deny row" "$H_WILD_DENY" 'Deny is evaluated before ask and allow'
+# The same gap on the other tool name. `Task(zensu:code-reviewer)` already matched by
+# substring while a BARE `Task` matched nothing, so the treatment of Task rules was
+# inconsistent by accident rather than by decision. reviewer-spawn-denial-v1.js exports
+# SPAWN_TOOL_NAMES = ['Agent','Task'], so this repo's own code treats Task as a name the
+# host uses for the spawn. Low-claim row only — the permission-rule spelling of Task is
+# NOT verified against the host, which is exactly why it must not reach the loud row.
+H_TASK_BARE="$(settings_home task-bare '{"permissions":{"defaultMode":"auto","deny":["Task"],"allow":[]}}')"
+case "$(run_report_home "$H_TASK_BARE")" in *"$UNVERIFIED_ROW"*)
+  check "P1bl a bare Task deny renders the could-not-judge row" PASS ;;
+  *) check "P1bl bare Task deny fell through" FAIL ;; esac
+H_TASK_WILD="$(settings_home task-wild '{"permissions":{"defaultMode":"default","ask":["Task(*)"]}}')"
+case "$(run_report_home "$H_TASK_WILD")" in *"$UNVERIFIED_ROW"*)
+  check "P1bl1 a Task(*) ask entry renders the could-not-judge row outside auto mode" PASS ;;
+  *) check "P1bl1 Task(*) ask entry rendered no row" FAIL ;; esac
+absent_row "P1bl2 a bare Task deny does not fire the loud deny row" "$H_TASK_BARE" 'Deny is evaluated before ask and allow'
+# Discrimination: a tool name that merely STARTS with the same letters must not match.
+H_TASKY="$(settings_home tasky '{"permissions":{"defaultMode":"auto","deny":["TaskRunner(build)"],"allow":[]}}')"
+absent_row "P1bl3 an unrelated tool whose name starts with Task is not matched" "$H_TASKY" "$UNVERIFIED_ROW"
+# The two shape-only arms are reachable ONLY for entries that provably do NOT contain
+# REVIEWER_AGENT: the loop continues on the two verified spellings and returns on any
+# entry containing the name, so an entry reaching `Agent(` or `Task` names something
+# else. Saying it "names zensu:code-reviewer" is then a false statement about the
+# user's file, and warnCount makes the green summary unreachable for that user. Every
+# other fixture in this family uses a WILDCARD, which plausibly does cover the spawn —
+# so a concrete unrelated agent is the only fixture that can tell the two cases apart.
+H_OTHER_AGENT="$(settings_home other-agent '{"permissions":{"defaultMode":"auto","deny":["Agent(docs-writer)"],"allow":[]}}')"
+OTHER_AGENT_OUT="$(run_report_home "$H_OTHER_AGENT")"
+absent_row_out "P1bl4 a deny naming a DIFFERENT agent is not reported as naming the reviewer" "$OTHER_AGENT_OUT" 'names zensu:code-reviewer'
+# Positive control: the entry must still be REPORTED — the fix is the wording, not silence.
+case "$OTHER_AGENT_OUT" in *"$UNVERIFIED_ROW"*)
+  check "P1bl5 a deny naming a different agent still renders the could-not-judge row" PASS ;;
+  *) check "P1bl5 a deny naming a different agent fell through to silence" FAIL ;; esac
+# The reduction establishes 'named' > 'shaped' ACROSS the two lists, but the predicate
+# RETURNS at the first matching element, so within ONE list the earlier entry wins on
+# position rather than on strength. A wildcard followed by an entry that really does name
+# the reviewer then renders the weaker row — the mirror image of the defect the split was
+# made to fix, and the skill tells the model to relay it as "names a DIFFERENT agent".
+H_MIXED_LIST="$(settings_home mixed-list '{"permissions":{"defaultMode":"auto","deny":["Agent(*)","Agent(zensu:code-reviewer-canary)"],"allow":[]}}')"
+MIXED_LIST_OUT="$(run_report_home "$H_MIXED_LIST")"
+case "$MIXED_LIST_OUT" in *'names zensu:code-reviewer'*)
+  check "P1bl7 a list whose LATER entry names the reviewer renders the stronger row" PASS ;;
+  *) check "P1bl7 position, not strength, decided the row within one list" FAIL ;; esac
+# The same list read the other way round must reach the same verdict.
+H_MIXED_REV="$(settings_home mixed-list-rev '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer-canary)","Agent(*)"],"allow":[]}}')"
+case "$(run_report_home "$H_MIXED_REV")" in *'names zensu:code-reviewer'*)
+  check "P1bl8 the same list in the other order reaches the same verdict" PASS ;;
+  *) check "P1bl8 the verdict depends on element order" FAIL ;; esac
+# Discrimination: a list with ONLY shape-only entries must still get the weaker row.
+case "$(run_report_home "$H_WILD_DENY")" in *'names zensu:code-reviewer'*)
+  check "P1bl9 a shape-only list must not be promoted to the stronger row" FAIL ;;
+  *) check "P1bl9 a shape-only list keeps the weaker row" PASS ;; esac
+# The substring arm keeps the accurate wording: this entry really does name the reviewer.
+H_NAMED_ODD="$(settings_home named-odd '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer:extra)"],"allow":[]}}')"
+case "$(run_report_home "$H_NAMED_ODD")" in *'names zensu:code-reviewer'*)
+  check "P1bl6 an entry that really does name the reviewer keeps the naming wording" PASS ;;
+  *) check "P1bl6 the naming wording was lost for an entry that does name the reviewer" FAIL ;; esac
+# settingsShape vets deny/ask as ARRAYS but never their elements, and both predicates
+# silently skip a non-string — so a deny written as a list of objects read as "no deny
+# rules" and the exposure row then recommended an allow rule while an unevaluated deny
+# sat in the same file. That is the confidently-WRONG remedy the fatal/deferred split
+# exists to remove, still open one level deeper.
+# The cause is NOT an unverified spelling — a non-string entry names nothing — so it
+# gets its own lead-in and shares the row's remedy tail. Asserting the spelling phrase
+# here would have pinned a sentence that is false about this input.
+UNREADABLE_ROW='contains an entry this check cannot read'
+H_DENY_OBJ="$(settings_home deny-object '{"permissions":{"defaultMode":"auto","deny":[{"tool":"Agent"}],"allow":[]}}')"
+DENY_OBJ_OUT="$(run_report_home "$H_DENY_OBJ")"
+case "$DENY_OBJ_OUT" in *"$UNREADABLE_ROW"*)
+  check "P1bm a deny list of non-string entries renders the could-not-read row" PASS ;;
+  *) check "P1bm non-string deny entries yielded the allow remedy" FAIL ;; esac
+absent_row "P1bm1 a non-string deny entry does not reach the exposure row's allow remedy" "$H_DENY_OBJ" 'permission mode "auto" is set'
+H_ASK_NULL="$(settings_home ask-null '{"permissions":{"defaultMode":"default","ask":[null,42]}}')"
+case "$(run_report_home "$H_ASK_NULL")" in *"$UNREADABLE_ROW"*)
+  check "P1bm2 a non-string ask entry renders the could-not-read row outside auto mode" PASS ;;
+  *) check "P1bm2 non-string ask entries rendered no row" FAIL ;; esac
+# The two causes must stay distinguishable: an unverified SPELLING is a string this
+# check read and declined to judge, which is a different thing to tell the user.
+absent_row "P1bm4 the non-string cause does not claim an unverified spelling" "$H_DENY_OBJ" "$UNVERIFIED_ROW"
+absent_row "P1bm5 an unverified spelling does not claim an unreadable entry" "$H_UNJUDGE" "$UNREADABLE_ROW"
+# One `deferred` carrier meant a malformed autoMode.allow suppressed the EXPOSURE row —
+# the feature's primary output — although that row's claim rests on permissions.allow
+# and permissions.defaultMode, neither of which was the malformed key. P1az6 pinned only
+# that the shape row is PRESENT, never that the exposure row is ABSENT, so the accepted
+# asymmetry was undefended. Split the carrier: each row is suppressed only by a failure
+# it actually depends on.
+# Own fixtures rather than H_AMA / H_DEFER_EXPOSE: those are declared several hundred
+# lines BELOW this block, so reusing them here silently runs against an empty home.
+H_AMA_SPLIT="$(settings_home automode-allow-split '{"permissions":{"defaultMode":"auto"},"autoMode":{"allow":"nope"}}')"
+AMA_SPLIT_OUT="$(run_report_home "$H_AMA_SPLIT")"
+case "$AMA_SPLIT_OUT" in *'has a shape this check cannot judge — autoMode.allow is present but not an array'*)
+  check "P1bn precondition: the autoMode.allow shape row still renders" PASS ;;
+  *) check "P1bn autoMode.allow shape row (got: $AMA_SPLIT_OUT)" FAIL ;; esac
+case "$AMA_SPLIT_OUT" in *'permission mode "auto" is set'*)
+  check "P1bn1 a malformed autoMode.allow no longer suppresses the exposure row" PASS ;;
+  *) check "P1bn1 malformed autoMode.allow still deletes the exposure row" FAIL ;; esac
+# The other direction must keep holding: a malformed key the exposure row DOES depend on
+# still suppresses it, because the claim would be unsupported.
+H_EXPOSE_DEFER="$(settings_home expose-defer-split '{"permissions":{"defaultMode":"auto","allow":{}}}')"
+absent_row "P1bn2 a malformed permissions.allow still suppresses the exposure row" "$H_EXPOSE_DEFER" 'permission mode "auto" is set'
+# shapeRow's sentence is a WHOLE-check claim. At the fatal site it is true and the
+# ladder returns. At the two deferred sites the deny, ask, could-not-judge and
+# unreadable-entry branches all ran and judged, and neither branch returns — so the
+# sentence can print directly beneath a substantive finding and contradict it, and with
+# both carriers malformed it prints twice. skills/doctor/SKILL.md relays it verbatim.
+WHOLE_CHECK='the reviewer-spawn permission check did not run'
+absent_row_out "P1bn3 a deferred carrier scopes its claim to the row it could not determine" "$AMA_SPLIT_OUT" "$WHOLE_CHECK"
+# Positive control: the row must still be REPORTED, and must still say what was malformed.
+# ORDER matters here: the key name must appear in the row carrying the SCOPED tail. Matching
+# the key alone was a strict substring of P1bn's own needle on the same captured output, so it
+# could not fail independently — and a whole-check reversion would have satisfied it too,
+# because shapeRow interpolates the same `err`.
+case "$AMA_SPLIT_OUT" in *'autoMode.allow is present but not an array'*'could not be determined'*)
+  check "P1bn4 the malformed key is named in the row carrying the scoped tail" PASS ;;
+  *) check "P1bn4 the key name and the scoped tail are not in the same row" FAIL ;; esac
+# Discrimination: the FATAL site keeps the whole-check wording, because there it is true.
+H_ROOT_BAD="$(settings_home shape-root-bad '[]')"
+case "$(run_report_home "$H_ROOT_BAD")" in *"$WHOLE_CHECK"*)
+  check "P1bn5 the fatal shape row keeps the whole-check wording" PASS ;;
+  *) check "P1bn5 the fatal shape row lost the whole-check wording" FAIL ;; esac
+# Both carriers malformed. Two malformed keys deserve two rows — dropping one would hide
+# a real defect in the user's file — but they must not be the SAME sentence twice, which
+# is what a single whole-check wording produced. Assert distinctness, not scarcity.
+H_BOTH_DEFER="$(settings_home defer-both '{"permissions":{"defaultMode":"auto","allow":{}},"autoMode":{"allow":"nope"}}')"
+BOTH_OUT="$(run_report_home "$H_BOTH_DEFER")"
+BOTH_N="$(printf '%s\n' "$BOTH_OUT" | grep -c 'has a shape this check cannot judge')"
+BOTH_U="$(printf '%s\n' "$BOTH_OUT" | grep 'has a shape this check cannot judge' | sort -u | wc -l | tr -d ' ')"
+if [ "$BOTH_N" = "2" ] && [ "$BOTH_U" = "2" ]; then
+  check "P1bn6 two malformed carriers render two DISTINCT shape rows (got $BOTH_N rows, $BOTH_U distinct)" PASS
+else
+  check "P1bn6 two malformed carriers render two DISTINCT shape rows (got $BOTH_N rows, $BOTH_U distinct)" FAIL
+fi
+# Silence was the DEFAULT verdict of this check and the one verdict it could not
+# qualify: every carrier of the "not an all-clear" doctrine hung off a row that
+# printed, so in the ordinary case the reader saw nothing and a permission check that
+# had been advertised in the skill frontmatter read as "checked, and fine". A row on
+# every path makes the tool structurally unable to mislead instead of merely
+# instructed not to. configBlock already uses this idiom two lines below the call.
+H_QUIET="$(settings_home quiet '{"permissions":{"defaultMode":"default","allow":["Bash(ls)"]}}')"
+QUIET_OUT="$(run_report_home "$H_QUIET")"
+case "$QUIET_OUT" in *"$OK_ROW"*)
+  check "P1bo a settings file with no reviewer-relevant rule still renders a permissions row" PASS ;;
+  *) check "P1bo no row rendered for a clean settings file (got: $QUIET_OUT)" FAIL ;; esac
+# The row must carry its own bound, or it becomes the all-clear it exists to prevent.
+case "$QUIET_OUT" in *"$OK_ROW"*'only settings source this check reads'*'without being written there'*)
+  check "P1bo1 the clean row states that it reads one file and that the mode need not be written there" PASS ;;
+  *) check "P1bo1 clean row is missing its bound" FAIL ;; esac
+# Severity is load-bearing: a ⚠️ here would inflate warnCount and turn every healthy
+# report into "resolve the warnings first".
+case "$QUIET_OUT" in *"✅  $OK_ROW"*)
+  check "P1bo2 the clean row renders as ✅, not as a warning" PASS ;;
+  *) check "P1bo2 clean row glyph" FAIL ;; esac
+# It must not stack on top of a real finding.
+absent_row "P1bo3 an exposed file gets the warning, not the clean row" "$H_EXPOSED" "$OK_ROW"
+absent_row "P1bo4 a denied file gets the warning, not the clean row" "$H_DENY_ONLY" "$OK_ROW"
+# An unset HOME is NOT a clean result — the check could not even locate its input, and
+# saying nothing there is exactly the silence-reads-as-all-clear failure.
+NOHOME_OUT="$( unset HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$REPORT" 2>/dev/null )"
+case "$NOHOME_OUT" in *'the reviewer-spawn permission check did not run'*)
+  check "P1bo5 an unset HOME renders a did-not-run row instead of silence" PASS ;;
+  *) check "P1bo5 unset HOME still renders nothing (got: $NOHOME_OUT)" FAIL ;; esac
+case "$NOHOME_OUT" in *"$OK_ROW"*) check "P1bo6 an unset HOME must not claim a clean result" FAIL ;;
+  *) check "P1bo6 an unset HOME does not claim a clean result" PASS ;; esac
+# A short read cannot be produced by an ordinary fixture — it needs readSync to return
+# fewer bytes than fstat reported. A --require preload stubs exactly that. It reaches the
+# settings reader and only it: readJson uses readFileSync, and readNoteJson has no note
+# to read in an empty project, so readSettingsJson owns the first readSync call.
+# Without the guard the truncated prefix is parsed and the failure is blamed on the
+# file's CONTENTS — the mirror of the mislabel the !shape.ok branch guards against.
+# FR-005's hoist (parse OUT of the I/O try) has exactly one externally visible effect:
+# a CODE-LESS throw from openSync/fstatSync/readSync now reaches the I/O fall-through and
+# renders `unreadable (unknown)`, where the pre-change shared try would have blamed the
+# CONTENTS. Nothing asserted that arm, so restoring the old shared try plus its
+# 'unparseable JSON' fall-through left the whole suite green. This is that missing bite.
+THROWLESS_PRELOAD="$SBOX/throwless-read.js"
+cat > "$THROWLESS_PRELOAD" <<'PRELOAD'
+const fs = require('fs');
+const realOpen = fs.openSync;
+const realRead = fs.readSync;
+let target = -1;
+// Keyed on the FILE, not on call ordinality: a stub that counts calls silently relocates
+// itself the moment any earlier reader gains a readSync, and the check would then pass or
+// fail for a reason unrelated to its contract.
+fs.openSync = function (path, ...rest) {
+  const fd = realOpen.call(fs, path, ...rest);
+  // Separator-agnostic: the renderer builds this path with path.join, which is
+  // backslash-separated on win32, where a POSIX-only suffix test would never arm the stub —
+  // the check would then fail for a reason unrelated to its contract while its two absence
+  // siblings passed having tested nothing.
+  if (String(path).replace(/\\/g, '/').endsWith('.claude/settings.json')) target = fd;
+  return fd;
+};
+fs.readSync = function (fd, ...rest) {
+  if (fd === target) {
+    // Release the fd before throwing, so a later openSync that recycles the same number
+    // cannot inherit the injection.
+    target = -1;
+    // No `code` property — this is the whole point of the fixture.
+    throw new Error('synthetic read failure with no errno');
+  }
+  return realRead.call(fs, fd, ...rest);
+};
+PRELOAD
+THROWLESS_OUT="$( HOME="$H_EXPOSED"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  node --require "$THROWLESS_PRELOAD" "$REPORT" 2>&1 )"
+case "$THROWLESS_OUT" in *'unreadable (unknown)'*)
+  check "P1bu a code-less read failure is reported as an I/O fault, not a content fault" PASS ;;
+  *) check "P1bu code-less read failure not routed to the I/O fall-through (got: $THROWLESS_OUT)" FAIL ;; esac
+absent_row_out "P1bu1 a code-less read failure is not blamed on the file contents" "$THROWLESS_OUT" 'unparseable JSON'
+# The synthetic message must never reach the report — same closed-vocabulary guarantee
+# the settings reader carries everywhere else.
+absent_row_out "P1bu2 the raw throw message does not reach the report" "$THROWLESS_OUT" 'synthetic read failure'
+# A malformed autoMode CONTAINER is still FATAL, so it suppresses the deny, ask,
+# could-not-judge and exposure rows — the very swallow the fatal/deferred split removed
+# one level down for autoMode.allow. The deny below is perfectly readable and says every
+# run wedges; the container's shape is no reason to withhold it.
+H_AM_CONTAINER="$(settings_home automode-container '{"permissions":{"defaultMode":"auto","deny":["Agent(zensu:code-reviewer)"]},"autoMode":[]}')"
+AM_CONTAINER_OUT="$(run_report_home "$H_AM_CONTAINER")"
+case "$AM_CONTAINER_OUT" in *'Deny is evaluated before ask and allow'*)
+  check "P1bv a malformed autoMode container must not suppress the deny row" PASS ;;
+  *) check "P1bv a malformed autoMode container still swallows the deny row" FAIL ;; esac
+# Positive control, on a fixture where no earlier row returns. The deny row above WINS
+# and returns, exactly as it does over every other row in this ladder — so demanding the
+# container also be named there would be demanding a special case the design does not have.
+H_AM_CONT_BARE="$(settings_home automode-container-bare '{"permissions":{"defaultMode":"auto","allow":[]},"autoMode":[]}')"
+AM_CONT_BARE_OUT="$(run_report_home "$H_AM_CONT_BARE")"
+case "$AM_CONT_BARE_OUT" in *'autoMode is present but not an object'*)
+  check "P1bv1 the malformed autoMode container is still named when no row outranks it" PASS ;;
+  *) check "P1bv1 the malformed autoMode container is no longer reported (got: $AM_CONT_BARE_OUT)" FAIL ;; esac
+# ...and the exposure row, whose claim does NOT depend on autoMode, still renders beside it.
+case "$AM_CONT_BARE_OUT" in *'permission mode "auto" is set'*)
+  check "P1bv1a a malformed autoMode container no longer suppresses the exposure row" PASS ;;
+  *) check "P1bv1a a malformed autoMode container still deletes the exposure row" FAIL ;; esac
+# Discrimination: a fatal key the ladder genuinely cannot proceed without stays fatal.
+# The needle was ORIGINALLY the deny row, which this fixture can never produce under ANY
+# implementation — an array root has no `permissions` key, so `perms.deny` is undefined and
+# matchesReviewerSpawn's Array.isArray guard answers false whether the root check is fatal,
+# demoted or absent. Unfalsifiable, therefore worthless. The clean row IS a bite: demote the
+# root check and the ladder emits nothing, so the wrapper renders the ✅ row.
+# The variable is also renamed — `H_ROOT_ARR` is re-assigned several hundred lines below for
+# P1az3, and reusing the name here left two fixtures one reordering apart from swapping.
+H_SHAPE_ROOT_ARR="$(settings_home shape-root-arr '[1,2]')"
+absent_row "P1bv2 a non-object settings root is fatal, so no clean row is claimed" "$H_SHAPE_ROOT_ARR" "$OK_ROW"
+# readNoteJson's own comment says a short read would land this plugin's note in the
+# "did not write it" row, but the loop has no read-completeness guard after it, so the
+# failure the comment describes is still reachable. Its sibling gained exactly that guard.
+NOTE_GUARD_N="$(awk '/^function readNoteJson\(/,/^}$/' "$REPORT" | grep -c 'read !== st.size')"
+if [ "$NOTE_GUARD_N" -ge 1 ]; then
+  check "P1bv3 readNoteJson carries the read-completeness guard its comment promises" PASS
+else
+  check "P1bv3 readNoteJson parses a partial buffer its own comment calls a defect" FAIL
+fi
+SHORT_PRELOAD="$SBOX/short-read.js"
+cat > "$SHORT_PRELOAD" <<'PRELOAD'
+const fs = require('fs');
+const realOpen = fs.openSync;
+const realRead = fs.readSync;
+let target = -1;
+// Keyed on the FILE, never on call ordinality. The earlier version keyed on `calls === 1`
+// and rested on an assumption about which reader owns the first readSync — an assumption
+// the config reader invalidated the moment it was hardened to use a bounded read loop.
+// It then short-read the CONFIG file instead, and P1bp1 failed for a reason unrelated to
+// its contract. Separator-agnostic for the same reason as the sibling preload.
+fs.openSync = function (path, ...rest) {
+  const fd = realOpen.call(fs, path, ...rest);
+  if (String(path).replace(/\\/g, '/').endsWith('.claude/settings.json')) target = fd;
+  return fd;
+};
+fs.readSync = function (fd, buf, off, len, pos) {
+  // The injection must SURVIVE the whole read of this descriptor: readSettingsJson loops
+  // until the buffer is full, so releasing after the first short read would let the second
+  // call finish it and no short read would ever be observed. The sibling preload can
+  // release immediately only because it THROWS. Release on close instead.
+  if (fd === target && len > 6) return realRead.call(fs, fd, buf, off, len - 5, pos);
+  if (fd === target) return 0;
+  return realRead.call(fs, fd, buf, off, len, pos);
+};
+const realClose = fs.closeSync;
+fs.closeSync = function (fd) {
+  if (fd === target) target = -1;
+  return realClose.call(fs, fd);
+};
+PRELOAD
+SHORT_OUT="$( HOME="$H_EXPOSED"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  node --require "$SHORT_PRELOAD" "$REPORT" 2>/dev/null )"
+case "$SHORT_OUT" in *'incomplete (short read)'*)
+  check "P1bp a short read is reported as an incomplete read" PASS ;;
+  *) check "P1bp short read not detected (got: $SHORT_OUT)" FAIL ;; esac
+absent_row_out "P1bp1 a short read is not blamed on the file's contents" "$SHORT_OUT" 'unparseable JSON'
+# The new reason is a literal like every other one — no byte of the file may ride along.
+case "$SHORT_OUT" in *'permissions'*'defaultMode'*)
+  check "P1bp2 the incomplete-read reason must not echo settings content" FAIL ;;
+  *) check "P1bp2 the incomplete-read reason carries no settings content" PASS ;; esac
+# Two shapes this reader is stricter about than the consumer it models, and each turns a
+# healthy setup into a scary did-not-run row. Alarm fatigue is the real cost: all three
+# permission rows share the same prefix, so a user who learns to dismiss one dismisses
+# the deny row too. An empty file is a plausible artefact of an interrupted write, and a
+# BOM is what a Windows editor produces — JSON.parse rejects U+FEFF, which is a spec
+# property, not a guess. No rules is a FACT about the settings, not a fault.
+H_EMPTY_FILE="$SBOX/home-empty-settings"; mkdir -p "$H_EMPTY_FILE/.claude"; : > "$H_EMPTY_FILE/.claude/settings.json"
+clean_row "P1bq a zero-byte settings file reads as no rules, not as a broken file" "$H_EMPTY_FILE"
+H_WS="$SBOX/home-ws-settings"; mkdir -p "$H_WS/.claude"; printf '  \n\t\n' > "$H_WS/.claude/settings.json"
+clean_row "P1bq1 a whitespace-only settings file reads as no rules" "$H_WS"
+# A BOM must not hide a real finding: the fixture below IS exposed, so the exposure row
+# has to survive the byte-order mark rather than degrade to a did-not-run row.
+H_BOM="$SBOX/home-bom"; mkdir -p "$H_BOM/.claude"
+printf '\357\273\277%s\n' '{"permissions":{"defaultMode":"auto","allow":[]}}' > "$H_BOM/.claude/settings.json"
+BOM_OUT="$(run_report_home "$H_BOM")"
+case "$BOM_OUT" in *'permission mode "auto" is set'*)
+  check "P1bq2 a BOM-prefixed settings file is still parsed and still reports its exposure" PASS ;;
+  *) check "P1bq2 BOM-prefixed settings (got: $BOM_OUT)" FAIL ;; esac
+# 'could not be read' is now emitted only for an io:true class, which this small readable
+# regular file can never reach — so the old needle passed with the BOM strip deleted. The
+# reachable failure is the PARSE row, which is what a dropped strip actually produces.
+absent_row_out "P1bq3 a BOM is not reported as a parse failure" "$BOM_OUT" 'could not be parsed'
+# Discrimination: genuinely malformed content must STILL be reported. Relaxing the parse
+# for empty and BOM must not turn every parse failure into a silent clean row.
+H_BAD_SHAPE="$(settings_home bad-shape '{"permissions":{')"
+absent_row "P1bq4 genuinely malformed JSON is still reported, not swallowed as no rules" "$H_BAD_SHAPE" "$OK_ROW"
+# The settings buffer holds credential-bearing content, and allocUnsafe was safe only
+# because toString is bounded by `read` rather than by st.size — one token standing
+# between uninitialised process heap and a report the doctor skill tells the model to
+# print verbatim, on a path (the short-read break) that no ordinary fixture reaches.
+# Behavioural checks cannot see this, so it is pinned structurally.
+# Comment lines are stripped before the scan. Without that the check reads the prose
+# that EXPLAINS the divergence as if it were the divergence — the same comment-scanning
+# trap P1bi carries, reproduced here while writing this very check.
+RSJ_SRC="$(awk '/^function readSettingsJson\(/,/^}$/' "$REPORT" | grep -v '^[[:space:]]*//')"
+case "$RSJ_SRC" in
+  *allocUnsafe*) check "P1br the settings buffer must not be allocated unsafely" FAIL ;;
+  *'Buffer.alloc('*) check "P1br the settings buffer is zero-initialised" PASS ;;
+  *) check "P1br no Buffer allocation found in readSettingsJson — the scan is vacuous" FAIL ;;
+esac
+# readNoteJson keeps allocUnsafe on purpose: it reads this plugin's own note in the state
+# directory, not the user's credential file, and the divergence is stated in-source.
+# Pinning the count makes a later tree-wide sweep a decision rather than an accident.
+UNSAFE_N="$(grep -v '^[[:space:]]*//' "$REPORT" | grep -cF 'Buffer.allocUnsafe' 2>/dev/null || true)"
+# The count alone cannot support the claim in the label: an allocUnsafe that MOVES into a
+# third reader keeps the total at one while "it is the note reader" quietly becomes false.
+# Scope it to the receiver the way the sibling P1br does, and keep the total as a separate
+# assertion so a SECOND one appearing anywhere is still caught.
+UNSAFE_IN_NOTE="$(awk '/^function readNoteJson\(/,/^}$/' "$REPORT" | grep -v '^[[:space:]]*//' | grep -cF 'Buffer.allocUnsafe' || true)"
+if [ "$UNSAFE_N" = "1" ] && [ "$UNSAFE_IN_NOTE" = "1" ]; then
+  check "P1br1 exactly one Buffer.allocUnsafe remains, and it is inside readNoteJson" PASS
+else
+  check "P1br1 allocUnsafe: $UNSAFE_N in the renderer, $UNSAFE_IN_NOTE inside readNoteJson, expected 1 and 1" FAIL
+fi
+# ~310 lines were added inside a report whose outer handler discards the ENTIRE
+# four-block table on any throw, while every other risky reader in this file is
+# individually contained. No reachable throw is known — this pins the CONTAINMENT, so
+# that being wrong once costs one degraded row instead of the whole diagnostic, for a
+# user who ran the doctor precisely because something is already broken.
+# The throw is injected surgically: JSON.parse is wrapped only for the fixture carrying
+# the marker key, and the proxy throws on the first property read, which happens in
+# settingsShape — outside every try in the reader.
+THROW_PRELOAD="$SBOX/throw-on-shape.js"
+cat > "$THROW_PRELOAD" <<'PRELOAD'
+const realParse = JSON.parse;
+JSON.parse = function (text) {
+  const value = realParse(text);
+  if (typeof text === 'string' && text.indexOf('__zensu_throw_marker__') !== -1) {
+    return new Proxy(value, { get() { throw new Error('injected'); } });
+  }
+  return value;
+};
+PRELOAD
+H_THROW="$(settings_home throw '{"__zensu_throw_marker__":1,"permissions":{"defaultMode":"auto","allow":[]}}')"
+THROW_OUT="$( HOME="$H_THROW"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  node --require "$THROW_PRELOAD" "$REPORT" 2>/dev/null )"; THROW_RC=$?
+[ "$THROW_RC" -eq 0 ] && check "P1bs1 a throw inside the permission check still exits 0" PASS \
+  || check "P1bs1 throw inside the permission check exit (rc=$THROW_RC)" FAIL
+case "$THROW_OUT" in *"$ANCHOR"*)
+  check "P1bs a throw inside the permission check does not discard the rest of the report" PASS ;;
+  *) check "P1bs the whole report collapsed on a throw inside the permission check" FAIL ;; esac
+case "$THROW_OUT" in *'permissions: the reviewer-spawn permission check failed to run'*)
+  check "P1bs2 a throw is reported as one degraded row" PASS ;;
+  *) check "P1bs2 no degraded row for a throw inside the permission check" FAIL ;; esac
+# The degraded row must not claim a clean result either.
+case "$THROW_OUT" in *"$OK_ROW"*) check "P1bs3 a throw must not claim a clean result" FAIL ;;
+  *) check "P1bs3 a throw does not claim a clean result" PASS ;; esac
+# The fixture above lands its throw on the FIRST property read, which is data.permissions
+# inside settingsShape — so a wrapper narrowed to that one call would keep every check
+# above green while a throw raised in matchesReviewerSpawn, namesReviewerSpawn,
+# hasUnreadableEntry or mentionsReviewerAgent escaped to the outer handler and discarded
+# the whole four-block report. A second injection site is what makes the family test the
+# WRAPPER rather than one call inside it.
+THROW_DEEP_PRELOAD="$SBOX/throw-in-predicate.js"
+cat > "$THROW_DEEP_PRELOAD" <<'PRELOAD'
+const realParse = JSON.parse;
+JSON.parse = function (text) {
+  const value = realParse(text);
+  if (typeof text === 'string' && text.indexOf('__zensu_deep_marker__') !== -1) {
+    // The object itself reads normally; only an ELEMENT of the deny list throws, so the
+    // failure lands inside a rule predicate, well past settingsShape.
+    const deny = new Proxy(value.permissions.deny, {
+      get(t, k) { if (k === '0') throw new Error('injected-deep'); return t[k]; }
+    });
+    value.permissions.deny = deny;
+  }
+  return value;
+};
+PRELOAD
+H_THROW_DEEP="$(settings_home throw-deep '{"__zensu_deep_marker__":1,"permissions":{"defaultMode":"auto","deny":["x"],"allow":[]}}')"
+THROW_DEEP_OUT="$( HOME="$H_THROW_DEEP"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+  node --require "$THROW_DEEP_PRELOAD" "$REPORT" 2>/dev/null )"; THROW_DEEP_RC=$?
+case "$THROW_DEEP_OUT" in *'CLI & tooling'*'Plugin integrity'*'Config'*'Session state'*)
+  check "P1bs4 a throw inside a rule predicate still leaves all four blocks intact" PASS ;;
+  *) check "P1bs4 a throw inside a rule predicate discarded the report (rc=$THROW_DEEP_RC)" FAIL ;; esac
+case "$THROW_DEEP_OUT" in *'failed to run'*)
+  check "P1bs5 a throw inside a rule predicate is reported as a missing check" PASS ;;
+  *) check "P1bs5 a throw inside a rule predicate rendered no containment row" FAIL ;; esac
+absent_row_out "P1bs6 a throw inside a rule predicate does not claim a clean result" "$THROW_DEEP_OUT" "$OK_ROW"
+# The sibling reader in the SAME block still echoed the raw parser message, which embeds
+# a leading slice of its input — and configFiles() honours ZENSU_CONFIG as an
+# unconstrained path override, so that variable can aim this reader at any file,
+# including the settings file the hardened reader exists to protect. One reader in a
+# block with a closed vocabulary and one without is not a policy.
+# The decoy MUST sit inside the first ten characters. V8 quotes a ten-character window
+# from the start of the input — `Unexpected token 's', "sk-CFGDECO"... is not valid JSON`
+# — so a marker beginning at character eleven is cut off and the check passes while the
+# leak is wide open. Measured on node v23.11.0; this exact off-by-one made the first
+# version of this check vacuous.
+CFG_DECOY="$SBOX/decoy-cfg.json"
+printf '%s\n' 'DECOYSEC1 {"hooks":{' > "$CFG_DECOY"
+CFG_OUT="$(run_report "$SBOX/plug" "$CFG_DECOY" "$EMPTY_PROJECT")"
+case "$CFG_OUT" in *DECOYSEC1*)
+  check "P1bt a malformed config file leaks its opening bytes into the report" FAIL ;;
+  *) check "P1bt no byte of a malformed config file reaches the report" PASS ;; esac
+# The parser's own phrasing is the carrier, so its absence is the second half of the
+# guarantee — and it is what a future revert would trip over.
+absent_row_out "P1bt2 the raw parser message does not reach the report" "$CFG_OUT" 'is not valid JSON' 'config: invalid JSON in'
+# Discrimination: closing the leak must not silence the finding. The row still has to
+# name the file, and a path is a fact about the filesystem, not about the contents.
+case "$CFG_OUT" in *'invalid JSON in'*'(the whole file is ignored, defaults apply)'*)
+  check "P1bt1a a non-capped failure KEEPS the loader verdict" PASS ;;
+  *) check "P1bt1a the loader verdict was dropped from the parse class" FAIL ;; esac
+case "$CFG_OUT" in *'invalid JSON in'*"$CFG_DECOY"*)
+  check "P1bt1 a malformed config file is still reported, by path" PASS ;;
+  *) check "P1bt1 malformed config file no longer reported (got: $CFG_OUT)" FAIL ;; esac
+# The FR-011 retrofit widened readJson's vocabulary to include `unreadable (<code>)`, but
+# all four render sites still hard-code an `invalid JSON` lead-in — so an EACCES prints as
+# "invalid JSON — unreadable (EACCES)", announcing a content fault for a file that was
+# never read. That is the same cause/operation mislabel FR-003 and FR-005 removed one
+# reader over, reintroduced at the RENDER layer instead of the read layer.
+CFG_NOREAD="$SBOX/noread-cfg.json"
+printf '%s\n' '{"hooks":{}}' > "$CFG_NOREAD"
+chmod 000 "$CFG_NOREAD" 2>/dev/null || true
+if [ -r "$CFG_NOREAD" ]; then
+  # Running as a principal that ignores the mode bits (root, or a host without them):
+  # the fixture cannot produce EACCES, so the check would be vacuous. Say so.
+  check "P1bt3 SKIPPED — this principal can read a chmod 000 file, EACCES not producible" PASS
+  check "P1bt4 SKIPPED — same principal limitation" PASS
+  check "P1bt5 SKIPPED — same principal limitation" PASS
+else
+  NOREAD_OUT="$(run_report "$SBOX/plug" "$CFG_NOREAD" "$EMPTY_PROJECT")"
+  case "$NOREAD_OUT" in *'invalid JSON'*'unreadable ('*)
+    check "P1bt3 an unreadable config file must not be announced as invalid JSON" FAIL ;;
+    *) check "P1bt3 an unreadable config file is not announced as invalid JSON" PASS ;; esac
+  # Positive control: the finding must survive the reword — the file still has to be named.
+  case "$NOREAD_OUT" in *'unreadable ('*"$CFG_NOREAD"*|*"$CFG_NOREAD"*'unreadable ('*)
+    check "P1bt4 an unreadable config file is still reported, by path and cause" PASS ;;
+    *) check "P1bt4 unreadable config file lost its row (got: $NOREAD_OUT)" FAIL ;; esac
+  # The EACCES class DOES make rd() fall back — readFileSync throws and it returns {} — so
+  # this is the one io class that must KEEP the loader verdict. Nothing asserted it, and
+  # when the flag was briefly missing from that return the row silently dropped to the
+  # weaker check-limited wording with every check still green.
+  case "$NOREAD_OUT" in *'unreadable ('*'the whole file is ignored, defaults apply'*)
+    check "P1bt5 an unreadable config keeps the loader verdict" PASS ;;
+    *) check "P1bt5 an unreadable config lost the loader verdict (got: $NOREAD_OUT)" FAIL ;; esac
+fi
+chmod 644 "$CFG_NOREAD" 2>/dev/null || true
+# Discrimination, and the reason this must NOT be fatal: P1ao4's fixture mixes
+# non-strings with a MATCHING string, and the deny row has to keep winning there.
+case "$(run_report_home "$H_DENY_MIXED")" in *'Deny is evaluated before ask and allow'*)
+  check "P1bm3 a matching string still wins over non-string siblings in the same list" PASS ;;
+  *) check "P1bm3 non-string vetting displaced the deny row" FAIL ;; esac
 
 # autoMode.allow is classifier guidance in prose, not a permission rule — the
 # distinction this row exists to make, because writing one there LOOKS like a fix.
@@ -946,25 +1543,35 @@ case "$(run_report_home "$H_AM_PLAIN")" in *'classifier guidance in prose'*)
   check "P1au2 the autoMode correction renders outside auto mode too" PASS ;;
   *) check "P1au2 autoMode correction gated on auto mode" FAIL ;; esac
 H_AM_GRANT="$(settings_home automode-granted '{"permissions":{"defaultMode":"auto","allow":["Agent(zensu:code-reviewer)"]},"autoMode":{"allow":["Zensu: allow zensu:code-reviewer"]}}')"
-absent_row "P1au3 a real grant suppresses the autoMode correction as well" "$H_AM_GRANT" 'permissions:'
+clean_row "P1au3 a real grant suppresses the autoMode correction as well" "$H_AM_GRANT"
 
 H_PLAIN="$(settings_home plain '{"permissions":{"defaultMode":"default","allow":[]}}')"
-absent_row "P1av a non-auto mode with no deny/ask renders no permissions row" \
-  "$H_PLAIN" 'permissions:'
+clean_row "P1av a non-auto mode with no deny/ask renders no permissions warning" "$H_PLAIN"
 H_NONE="$SBOX/home-none"; mkdir -p "$H_NONE"
 OUT="$(run_report_home "$H_NONE")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1aw1 an absent settings file still exits 0" PASS || check "P1aw1 absent settings exit (rc=$RC)" FAIL
-absent_row_out "P1aw an absent settings file renders no permissions row" "$OUT" 'permissions:'
+clean_row_out "P1aw an absent settings file renders the clean row, not a warning" "$OUT"
 # AC-007's other half. Removing the !env.HOME guard does NOT drop one row — it
 # throws in path.join and collapses the entire four-block table into the outer
 # catch's single line, still exiting 0. The anchor is what notices that.
 UNSET_OUT="$( unset HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$REPORT" 2>/dev/null )"; RC=$?
 [ "$RC" -eq 0 ] && check "P1aw2a an unset HOME still exits 0" PASS || check "P1aw2a unset HOME exit (rc=$RC)" FAIL
-absent_row_out "P1aw2 an unset HOME renders no permissions row and does not collapse the report" "$UNSET_OUT" 'permissions:'
+# An unset HOME is a check that could NOT run, so it gets the did-not-run row rather
+# than the clean one — claiming "no exposure found" for a file it never located would be
+# the false all-clear this feature exists to remove. The row also serves as the render
+# anchor the old absent-row form relied on: dropping the !env.HOME guard throws in
+# path.join and collapses the whole four-block table into the outer catch's single line.
+case "$UNSET_OUT" in *'HOME is not set'*'the reviewer-spawn permission check did not run'*)
+  check "P1aw2 an unset HOME renders the did-not-run row and does not collapse the report" PASS ;;
+  *) check "P1aw2 unset HOME did-not-run row (got: $UNSET_OUT)" FAIL ;; esac
+absent_row_out "P1aw2b an unset HOME never claims a clean result" "$UNSET_OUT" "$OK_ROW"
 EMPTY_OUT="$( HOME=""; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
   ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" node "$REPORT" 2>/dev/null )"
-absent_row_out "P1aw3 an empty HOME renders no permissions row and does not collapse the report" "$EMPTY_OUT" 'permissions:'
+case "$EMPTY_OUT" in *'HOME is not set'*'the reviewer-spawn permission check did not run'*)
+  check "P1aw3 an empty HOME renders the did-not-run row and does not collapse the report" PASS ;;
+  *) check "P1aw3 empty HOME did-not-run row (got: $EMPTY_OUT)" FAIL ;; esac
+absent_row_out "P1aw3b an empty HOME never claims a clean result" "$EMPTY_OUT" "$OK_ROW"
 
 # A check that could not run must say so — the one thing it must never do is
 # stay silent, which reads as an all-clear.
@@ -976,11 +1583,34 @@ absent_row_out "P1aw3 an empty HOME renders no permissions row and does not coll
 H_BAD="$(settings_home bad 'sk-DECOYSECRET-zzz {"permissions":{')"
 BAD_OUT="$(run_report_home "$H_BAD")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1ax invalid settings JSON still exits 0" PASS || check "P1ax invalid settings JSON exit (rc=$RC)" FAIL
-case "$BAD_OUT" in *'⚠️  permissions: ~/.claude/settings.json could not be read — unparseable JSON'*'That is a missing check, not an all-clear'*)
+case "$BAD_OUT" in *'⚠️  permissions: ~/.claude/settings.json could not be parsed'*'That is a missing check, not an all-clear'*)
   check "P1ay invalid settings JSON renders the did-not-run row, not silence" PASS ;;
   *) check "P1ay invalid settings row (got: $BAD_OUT)" FAIL ;; esac
 case "$BAD_OUT" in *DECOYSECRET*) check "P1ay1 the parse failure leaks a slice of the settings file into the report" FAIL ;;
   *) check "P1ay1 no settings byte reaches the report through the failure reason" PASS ;; esac
+# The sibling reader gained an `io` discriminator this round; this one did not, so its
+# PARSE failure still renders under a "could not be read" lead-in — the same cause/operation
+# mislabel, running in the opposite direction. skills/doctor/SKILL.md compounds it by telling
+# the model that row "names a filesystem problem".
+absent_row_out "P1ay2 a settings parse failure is not announced as a read failure" "$BAD_OUT" 'could not be read — unparseable JSON'
+# Positive control: the finding must survive the reword, and must still name the cause.
+# The cause is now carried by the LEAD-IN alone: appending the single io:false value after
+# "could not be parsed" produced "could not be parsed — unparseable JSON", which says the
+# same thing twice. The bound must still travel with it.
+case "$BAD_OUT" in *'could not be parsed'*'That is a missing check, not an all-clear'*)
+  check "P1ay3 a settings parse failure is still reported, with its cause and bound" PASS ;;
+  *) check "P1ay3 the settings parse failure lost its row or its bound" FAIL ;; esac
+# Discrimination: a genuine I/O failure must KEEP the read wording.
+H_NOREAD="$(settings_home noread '{"permissions":{}}')"
+chmod 000 "$H_NOREAD/.claude/settings.json" 2>/dev/null || true
+if [ -r "$H_NOREAD/.claude/settings.json" ]; then
+  check "P1ay4 SKIPPED — this principal can read a chmod 000 file, EACCES not producible" PASS
+else
+  case "$(run_report_home "$H_NOREAD")" in *'could not be read — unreadable ('*)
+    check "P1ay4 a genuine I/O failure keeps the read wording" PASS ;;
+    *) check "P1ay4 a genuine I/O failure lost the read wording" FAIL ;; esac
+fi
+chmod 644 "$H_NOREAD/.claude/settings.json" 2>/dev/null || true
 H_DIR="$SBOX/home-dir"; mkdir -p "$H_DIR/.claude/settings.json"
 OUT="$(run_report_home "$H_DIR")"; RC=$?
 [ "$RC" -eq 0 ] && case "$OUT" in *'could not be read — not a regular file'*)
@@ -990,13 +1620,16 @@ OUT="$(run_report_home "$H_DIR")"; RC=$?
 # Array test these two render identically to a settings file with no rules at
 # all, because typeof [] === 'object'.
 H_PERMS_ARR="$(settings_home perms-array '{"permissions":[],"autoMode":{}}')"
-case "$(run_report_home "$H_PERMS_ARR")" in *'has a shape this check cannot judge — permissions is present but not an object'*)
-  check "P1az1 a non-object permissions value degrades to the did-not-run row" PASS ;;
-  *) check "P1az1 non-object permissions" FAIL ;; esac
+# The tail, not the shared prefix: shapeRow and deferredShapeRow are byte-identical up to
+# ' — ' + err and diverge only afterwards, so a prefix-only needle cannot tell a FATAL
+# suppression from a scoped one. permissions-not-an-object is fatal and must say so.
+case "$(run_report_home "$H_PERMS_ARR")" in *'has a shape this check cannot judge — permissions is present but not an object'*'the reviewer-spawn permission check did not run'*)
+  check "P1az1 a non-object permissions value renders the FATAL did-not-run row" PASS ;;
+  *) check "P1az1 non-object permissions did not carry the fatal tail" FAIL ;; esac
 H_AM_ARR="$(settings_home automode-array '{"permissions":{"defaultMode":"auto"},"autoMode":[]}')"
-case "$(run_report_home "$H_AM_ARR")" in *'has a shape this check cannot judge — autoMode is present but not an object'*)
-  check "P1az2 a non-object autoMode value degrades to the did-not-run row" PASS ;;
-  *) check "P1az2 non-object autoMode" FAIL ;; esac
+case "$(run_report_home "$H_AM_ARR")" in *'has a shape this check cannot judge — autoMode is present but not an object'*'could not be determined'*)
+  check "P1az2 a non-object autoMode value renders the SCOPED could-not-determine row" PASS ;;
+  *) check "P1az2 non-object autoMode did not reach the scoped row" FAIL ;; esac
 H_ROOT_ARR="$(settings_home root-array '["nope"]')"
 case "$(run_report_home "$H_ROOT_ARR")" in *'has a shape this check cannot judge — the settings root is not a JSON object'*)
   check "P1az3 a non-object settings root degrades to the did-not-run row" PASS ;;
@@ -1007,9 +1640,12 @@ case "$(run_report_home "$H_ROOT_ARR")" in *'has a shape this check cannot judge
 # which is a confidently WRONG remedy rather than a missing one.
 for rk in allow deny ask; do
   H_RK="$(settings_home "rule-$rk" "{\"permissions\":{\"defaultMode\":\"auto\",\"$rk\":{\"Agent(zensu:code-reviewer)\":true}}}")"
-  case "$(run_report_home "$H_RK")" in *"has a shape this check cannot judge — permissions.$rk is present but not an array"*)
-    check "P1az5x$rk a non-array permissions.$rk degrades to the did-not-run row" PASS ;;
-    *) check "P1az5x$rk non-array permissions.$rk" FAIL ;; esac
+  # deny and ask are FATAL and keep the whole-check tail; allow is DEFERRED and takes the
+  # scoped one. Asserting only the shared prefix let all three pass under either wording.
+  if [ "$rk" = "allow" ]; then rk_tail='could not be determined'; else rk_tail='the reviewer-spawn permission check did not run'; fi
+  case "$(run_report_home "$H_RK")" in *"has a shape this check cannot judge — permissions.$rk is present but not an array"*"$rk_tail"*)
+    check "P1az5x$rk a non-array permissions.$rk renders its own tail ($rk_tail)" PASS ;;
+    *) check "P1az5x$rk non-array permissions.$rk did not carry the expected tail" FAIL ;; esac
 done
 # The shape check splits by CONSEQUENCE. A malformed deny or ask is FATAL — no
 # allow remedy may be recommended when they cannot be read. Everything else is
@@ -1062,19 +1698,18 @@ case "$(run_report_home "$H_DEFER_TWO")" in *'permissions.allow is present but n
   *) check "P1az5j deferred chain order" FAIL ;; esac
 SHAPE_OUT="$(run_report_home "$H_FATAL_DENY")"
 H_AMA="$(settings_home automode-allow-str '{"permissions":{"defaultMode":"auto"},"autoMode":{"allow":"nope"}}')"
-case "$(run_report_home "$H_AMA")" in *'has a shape this check cannot judge — autoMode.allow is present but not an array'*)
-  check "P1az6 a non-array autoMode.allow degrades to the did-not-run row" PASS ;;
-  *) check "P1az6 non-array autoMode.allow" FAIL ;; esac
+case "$(run_report_home "$H_AMA")" in *'has a shape this check cannot judge — autoMode.allow is present but not an array'*'could not be determined'*)
+  check "P1az6 a non-array autoMode.allow renders the SCOPED could-not-determine row" PASS ;;
+  *) check "P1az6 non-array autoMode.allow did not reach the scoped row" FAIL ;; esac
 H_MODE_NUM="$(settings_home mode-number '{"permissions":{"defaultMode":7,"allow":[]}}')"
-case "$(run_report_home "$H_MODE_NUM")" in *'has a shape this check cannot judge — permissions.defaultMode is present but not a string'*)
-  check "P1az7 a non-string defaultMode degrades to the did-not-run row" PASS ;;
-  *) check "P1az7 non-string defaultMode" FAIL ;; esac
+case "$(run_report_home "$H_MODE_NUM")" in *'has a shape this check cannot judge — permissions.defaultMode is present but not a string'*'could not be determined'*)
+  check "P1az7 a non-string defaultMode renders the SCOPED could-not-determine row" PASS ;;
+  *) check "P1az7 non-string defaultMode did not reach the scoped row" FAIL ;; esac
 # The most common real settings file has no permissions key at all. Mutating the
 # absent-key branch to plainObject() would make every one of them print a false
 # did-not-run WARN, and no other fixture would notice.
 H_NO_PERMS="$(settings_home no-perms '{"model":"opus","autoMode":{}}')"
-absent_row "P1az8 a settings file with no permissions key renders no permissions row" \
-  "$H_NO_PERMS" 'permissions:'
+clean_row "P1az8 a settings file with no permissions key renders the clean row, not a warning" "$H_NO_PERMS"
 # Without a fixture only a DOWNWARD mutation of SETTINGS_MAX_BYTES would ever be
 # caught; deleting the cap outright would stay green.
 H_BIG="$SBOX/home-big"; mkdir -p "$H_BIG/.claude"
@@ -1099,6 +1734,116 @@ chmod 644 "$H_ACC/.claude/settings.json" 2>/dev/null
 # The shape the O_NONBLOCK open exists for. A blocking open on a writer-less FIFO
 # never returns, which would hang a renderer contracted to always exit 0 — and the
 # directory fixture above can never show that.
+# These four pin the two REGRESSIONS a previous fix round introduced, and they depend on
+# `ln -s` and `printf` — NOT on FIFO support. They lived inside the mkfifo branch below,
+# whose SKIP arm emits three checks, so on any host without FIFOs all four vanished with
+# no signal at all: the suite reported fewer checks, all green. Kept OUTSIDE that branch.
+# A symlinked config is ORDINARY — a dotfile manager links it routinely — and the real
+# config reader (hooks/lib/zensu-config.sh's rd()) uses readFileSync, which follows links.
+# The sibling settings reader declines O_NOFOLLOW for exactly this reason and P1ba pins it.
+# Copying the flag here made the doctor render a ❌ for a file every hook reads fine.
+CFG_REAL="$SBOX/symlink-target-cfg.json"
+printf '{"hooks":{"tddImplementation":true}}\n' > "$CFG_REAL"
+CFG_LINK="$SBOX/symlink-cfg.json"
+rm -f "$CFG_LINK"; ln -s "$CFG_REAL" "$CFG_LINK" 2>/dev/null
+if [ -L "$CFG_LINK" ]; then
+  SYM_OUT="$(run_report "$SBOX/plug" "$CFG_LINK" "$EMPTY_PROJECT")"
+  case "$SYM_OUT" in *'ELOOP'*|*'is unreadable'*)
+    check "P1bg3 a symlinked config must be followed, not refused" FAIL ;;
+    *) check "P1bg3 a symlinked config is followed, not refused" PASS ;; esac
+  case "$SYM_OUT" in *'no quoted-boolean traps'*)
+    check "P1bg4 a symlinked config is read and validated like its target" PASS ;;
+    *) check "P1bg4 a symlinked config did not reach the valid-config row (got: $SYM_OUT)" FAIL ;; esac
+else
+  check "P1bg3 symlinked config — SKIP (symlinks unavailable on this host)" PASS
+  check "P1bg4 symlinked config — SKIP (symlinks unavailable on this host)" PASS
+fi
+# A BOM-prefixed config is DISCARDED by the real loader (rd() hands the raw string with its
+# BOM straight to JSON.parse), so tolerating it here would render a green row for a file
+# every hook ignores. The divergence rule this file states runs the other way: fail toward
+# "no rules found" UNLESS the host would reject the file too — and here it does.
+CFG_BOM="$SBOX/bom-cfg.json"
+# Octal, the spelling the sibling BOM fixture already uses — `printf '\xHH'` is not
+# portable and a shell without it writes six literal characters, which produce the SAME
+# two verdicts as a real BOM and make the pair a duplicate of P1bt1 that tests nothing.
+printf '\357\273\277{"hooks":{}}\n' > "$CFG_BOM"
+if [ "$(od -An -tx1 -N3 "$CFG_BOM" | tr -d ' \n')" != "efbbbf" ]; then
+  check "P1bg5 BOM fixture is not BOM-prefixed — the check would be vacuous" FAIL
+  check "P1bg6 BOM fixture is not BOM-prefixed — the check would be vacuous" FAIL
+else
+BOMCFG_OUT="$(run_report "$SBOX/plug" "$CFG_BOM" "$EMPTY_PROJECT")"
+case "$BOMCFG_OUT" in *'no quoted-boolean traps'*)
+  check "P1bg5 a BOM-prefixed config must not be reported as valid — the loader discards it" FAIL ;;
+  *) check "P1bg5 a BOM-prefixed config is not reported as valid" PASS ;; esac
+case "$BOMCFG_OUT" in *'invalid JSON in'*)
+  check "P1bg6 a BOM-prefixed config is reported as invalid, matching the loader" PASS ;;
+  *) check "P1bg6 a BOM-prefixed config rendered no invalid-JSON row (got: $BOMCFG_OUT)" FAIL ;; esac
+fi
+
+# The 1 MiB cap is the doctor's OWN memory bound; the loader it models has none. So for
+# that one class the trailing "the whole file is ignored, defaults apply" would be a false
+# statement — an oversized well-formed config is read and APPLIED by every hook. The other
+# io classes do make the loader return {}, so the clause is true there.
+BIG_CFG="$SBOX/big-cfg.json"
+{ printf '{"_pad":"'; head -c 1100000 /dev/zero | tr '\0' 'x'; printf '"}\n'; } > "$BIG_CFG"
+BIG_OUT="$(run_report "$SBOX/plug" "$BIG_CFG" "$EMPTY_PROJECT")"
+# The loader MERGES a global and a project config; "defaults apply" is only true when the
+# failing file is the sole source. With ZENSU_CONFIG unset and two sources present, a broken
+# project overlay leaves the valid global's values in force, so that half of the clause
+# overreaches. `readJson`'s own justification comment forbids exactly this.
+MERGE_HOME="$SBOX/merge-home"; mkdir -p "$MERGE_HOME/.zensu"
+printf '%s\n' '{"hooks":{}}' > "$MERGE_HOME/.zensu/config.json"
+MERGE_PROJ="$SBOX/merge-proj"; mkdir -p "$MERGE_PROJ/.zensu"
+printf '%s' '{bad json' > "$MERGE_PROJ/.zensu/config.json"
+MERGE_OUT="$( HOME="$MERGE_HOME"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" \
+  ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$MERGE_PROJ" \
+  node "$REPORT" 2>&1 )"
+case "$MERGE_OUT" in *'invalid JSON in'*'defaults apply'*)
+  check "P1bge a broken overlay must not claim defaults apply while a valid source remains" FAIL ;;
+  *) check "P1bge a broken overlay does not claim defaults apply beside a valid source" PASS ;; esac
+case "$MERGE_OUT" in *'invalid JSON in'*)
+  check "P1bgf a broken overlay is still reported" PASS ;;
+  *) check "P1bgf a broken overlay lost its row (got: $MERGE_OUT)" FAIL ;; esac
+# The mirror case, and the one an ordinary user hits: only a PROJECT config exists and it is
+# broken. `configFiles()` returns candidate PATHS, not present files, so a length-based
+# soleSource is always false here and the row promises an "other config source" that does not
+# exist — while defaults really do apply. Present-ness, not candidacy, decides the clause.
+LONE_HOME="$SBOX/lone-home"; mkdir -p "$LONE_HOME/.zensu"
+rm -f "$LONE_HOME/.zensu/config.json"
+LONE_PROJ="$SBOX/lone-proj"; mkdir -p "$LONE_PROJ/.zensu"
+printf '%s' '{bad json' > "$LONE_PROJ/.zensu/config.json"
+LONE_OUT="$( HOME="$LONE_HOME"; export HOME; ZDOC_ZENSU=absent ZDOC_NODE="vTEST" \
+  ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent \
+  ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" CLAUDE_PROJECT_DIR="$LONE_PROJ" \
+  node "$REPORT" 2>&1 )"
+case "$LONE_OUT" in *'the other config source still applies'*)
+  check "P1bgh a lone broken config must not promise an other source that does not exist" FAIL ;;
+  *) check "P1bgh a lone broken config does not promise a nonexistent other source" PASS ;; esac
+case "$LONE_OUT" in *'invalid JSON in'*'defaults apply'*)
+  check "P1bgi a lone broken config says defaults apply, which is true there" PASS ;;
+  *) check "P1bgi a lone broken config lost the defaults-apply verdict (got: $LONE_OUT)" FAIL ;; esac
+rm -f "$BIG_CFG"
+case "$BIG_OUT" in *'larger than'*'the whole file is ignored, defaults apply'*)
+  check "P1bg7 an oversized config must not claim the loader ignores it" FAIL ;;
+  *) check "P1bg7 an oversized config does not claim the loader ignores it" PASS ;; esac
+# The cap class has its own third wording, distinct from both the loader verdict and the
+# check-limited one; without this the `capped` branch was invariant under the mutation the
+# round-5 finding named.
+case "$BIG_OUT" in *'declined to read it'*)
+  check "P1bgd an oversized config carries the cap wording" PASS ;;
+  *) check "P1bgd an oversized config did not carry the cap wording (got: $BIG_OUT)" FAIL ;; esac
+case "$BIG_OUT" in *'still applies it'*)
+  check "P1bga an oversized config must not assert the loader applies it — it was never parsed" FAIL ;;
+  *) check "P1bga an oversized config does not assert the loader applies it" PASS ;; esac
+# The severity is part of the claim: a "check declined" row is a WARNING, never a blocker.
+case "$BIG_OUT" in *'⚠️  config: '*'larger than'*)
+  check "P1bg8 an oversized config is reported as ⚠️, not ❌" PASS ;;
+  *) check "P1bg8 an oversized config rendered no ⚠️ row (got: $BIG_OUT)" FAIL ;; esac
+# Discrimination: an absent config keeps its own row and is not swept into the cap class.
+case "$(run_report "$SBOX/plug" "$SBOX/nonexistent-dir/cfg.json" "$EMPTY_PROJECT")" in *'no config file present'*)
+  check "P1bg9 an absent config is still reported as absent, not as oversized" PASS ;;
+  *) check "P1bg9 an absent config lost its row" FAIL ;; esac
 H_FIFO="$SBOX/home-fifo"; mkdir -p "$H_FIFO/.claude"
 if mkfifo "$H_FIFO/.claude/settings.json" 2>/dev/null && [ -p "$H_FIFO/.claude/settings.json" ]; then
   # BOUNDED on purpose. The mutation this pins — dropping O_NONBLOCK from the open
@@ -1132,8 +1877,76 @@ if mkfifo "$H_FIFO/.claude/settings.json" 2>/dev/null && [ -p "$H_FIFO/.claude/s
       || check "P1bg FIFO fixture exit (rc=$RC)" FAIL
   fi
   rm -f "$H_FIFO/.claude/settings.json"
+  # The SAME hazard, one reader over, and the mutation this pins is dropping the
+  # non-blocking open from readJson — which leaves it blocking and unbounded while
+  # ZENSU_CONFIG can aim it at any path the caller names. The
+  # module's own comment gives the reason its sibling is hardened: "open non-blocking so a
+  # path swapped to a FIFO cannot hang a process contracted to always exit 0". A hang here
+  # is invisible: the doctor simply never returns, and the "ALWAYS exits 0" contract in the
+  # module header becomes false without any output saying so.
+  CFG_FIFO="$SBOX/fifo-cfg.json"
+  rm -f "$CFG_FIFO"
+  # Prove the fixture. Without the [ -p ] re-check a failed mkfifo leaves ENOENT, readJson
+  # answers `missing`, configBlock prints "no config file present" and exits 0 with a full
+  # report — so BOTH checks below would pass having exercised nothing. This is the same
+  # fixture-existence hole this round closed elsewhere.
+  if ! mkfifo "$CFG_FIFO" 2>/dev/null || [ ! -p "$CFG_FIFO" ]; then
+    check "P1bg1 config FIFO fixture could not be created" FAIL
+    check "P1bg2 config FIFO fixture could not be created" FAIL
+    check "P1bgb config FIFO fixture could not be created" FAIL
+    check "P1bgc config FIFO fixture could not be created" FAIL
+  else
+  CFG_FIFO_OUT_FILE="$SBOX/fifo-cfg-out.txt"
+  ( ZDOC_ZENSU=absent ZDOC_NODE="vTEST" ZDOC_FORGE_PROVIDER=github ZDOC_FORGE_CLI=gh \
+    ZDOC_FORGE_STATE=missing ZDOC_PLAYWRIGHT=absent ZENSU_DOCTOR_PLUGIN_DIR="$SBOX/plug" \
+    ZENSU_CONFIG="$CFG_FIFO" CLAUDE_PROJECT_DIR="$EMPTY_PROJECT" \
+    node "$REPORT" >"$CFG_FIFO_OUT_FILE" 2>/dev/null </dev/null ) &
+  CFG_FIFO_PID=$!
+  CFG_FIFO_WAITED=0
+  while kill -0 "$CFG_FIFO_PID" 2>/dev/null && [ "$CFG_FIFO_WAITED" -lt 30 ]; do
+    CFG_FIFO_WAITED=$((CFG_FIFO_WAITED+1))
+    sleep 1
+  done
+  if kill -0 "$CFG_FIFO_PID" 2>/dev/null; then
+    kill -9 "$CFG_FIFO_PID" 2>/dev/null; wait "$CFG_FIFO_PID" 2>/dev/null
+    check "P1bg1 the renderer BLOCKED on a FIFO at the config path (readJson unhardened)" FAIL
+    # Emitted on EVERY path, so a regression fails a check instead of removing one. This
+    # arm is where that convention was stated and then not applied to the two checks added
+    # a round later — the fifth time in this work that an arm emitted fewer checks than
+    # its sibling and the loss was invisible.
+    check "P1bg2 the renderer BLOCKED before the report could render" FAIL
+    check "P1bgb the renderer BLOCKED before the wording could be observed" FAIL
+    check "P1bgc the renderer BLOCKED before the wording could be observed" FAIL
+  else
+    wait "$CFG_FIFO_PID" 2>/dev/null; CFG_RC=$?
+    CFG_FIFO_OUT="$(cat "$CFG_FIFO_OUT_FILE" 2>/dev/null)"
+    if [ "$CFG_RC" -eq 0 ]; then
+      check "P1bg1 a FIFO at the config path does not hang the renderer" PASS
+    else
+      check "P1bg1 FIFO config fixture exit (rc=$CFG_RC)" FAIL
+    fi
+    # Observe the FIFO itself, not just the report header: the header renders for a config
+    # that is merely absent, which is exactly the state a failed fixture produces.
+    case "$CFG_FIFO_OUT" in *'is not a regular file'*)
+      check "P1bg2 the FIFO is reported as not a regular file, not blocked on" PASS ;;
+      *) check "P1bg2 the FIFO was not reported (got: $CFG_FIFO_OUT)" FAIL ;; esac
+    # A FIFO does NOT make the loader fall back — rd()'s blocking readFileSync would hang —
+    # so this class must carry the check-limited wording, never the loader verdict.
+    case "$CFG_FIFO_OUT" in *'could not read it and cannot say what the config loader gets from it'*)
+      check "P1bgb a FIFO config carries the check-limited wording, not the loader verdict" PASS ;;
+      *) check "P1bgb a FIFO config did not carry the check-limited wording" FAIL ;; esac
+    case "$CFG_FIFO_OUT" in *'is not a regular file'*'the whole file is ignored, defaults apply'*)
+      check "P1bgc a FIFO config must not claim the loader ignores it" FAIL ;;
+      *) check "P1bgc a FIFO config does not claim the loader ignores it" PASS ;; esac
+  fi
+  fi
+  rm -f "$CFG_FIFO"
 else
   check "P1bg FIFO at the settings path — SKIP (mkfifo unavailable on this host)" PASS
+  check "P1bg1 FIFO at the config path — SKIP (mkfifo unavailable on this host)" PASS
+  check "P1bg2 FIFO at the config path — SKIP (mkfifo unavailable on this host)" PASS
+  check "P1bgb config FIFO wording — SKIP (mkfifo unavailable on this host)" PASS
+  check "P1bgc config FIFO wording — SKIP (mkfifo unavailable on this host)" PASS
 fi
 # "NEVER writes" is the module's first contract line and nothing asserted it.
 if command -v shasum >/dev/null 2>&1; then HASHER="shasum"; elif command -v cksum >/dev/null 2>&1; then HASHER="cksum"; else HASHER=""; fi
@@ -1291,9 +2104,46 @@ fi
 # this a row could be reworded while the skill keeps naming the old wording.
 # Asserted on BOTH sides — against the emitted output so this list cannot go
 # stale, and against the skill so the documentation cannot fall behind. The
-# output is the concatenation of seven fixture runs because the branches return
+# output is the concatenation of every permission-row fixture above — the count is
+# deliberately not written out, because a literal there went stale the moment a fixture was
+# added and nothing could catch it. The concatenation is needed because the branches return
 # early and no single settings file can render every row.
-PERM_ROWS="$EXPOSED_OUT$DENY_OUT$ASK_OUT$AM_OUT$BAD_OUT$UNJ_OUT$SHAPE_OUT"
+# Extended with the fixtures for the rows added in this change: the clean row, the
+# unset-HOME did-not-run row, the incomplete-read reason, the unreadable-entry row and
+# the containment row. A row whose fixture is missing here reports as "not emitted",
+# which is the pin telling the truth rather than a failure to explain away.
+# The CONFIG block had no renderer-to-skill drift pin at all, and this round grew it from
+# one wording to three — two of which were documented nowhere. Same shape as P1be, its own
+# corpus, because the config rows and the permission rows come from different fixtures.
+# The DOCUMENTED side covers all four wordings unconditionally. The EMITTED side covers only
+# the three whose fixtures always exist: the check-limited wording is reachable only through a
+# FIFO or a short read, and gating this pin on mkfifo would make it host-dependent — the very
+# hazard it exists to catch. P1bgb pins that one's emission where its fixture lives.
+CFG_ROWS="$CFG_OUT$BIG_OUT$MERGE_OUT$NOREAD_OUT"
+CFG_UNEMITTED=""; CFG_DRIFT=""
+while IFS= read -r cfg_phrase; do
+  [ -n "$cfg_phrase" ] || continue
+  case "$CFG_ROWS" in *"$cfg_phrase"*) ;; *) CFG_UNEMITTED="$CFG_UNEMITTED [$cfg_phrase]" ;; esac
+done <<'CFG_EMITTED'
+the whole file is ignored, defaults apply
+the other config source still applies
+declined to read it
+CFG_EMITTED
+while IFS= read -r cfg_phrase; do
+  [ -n "$cfg_phrase" ] || continue
+  grep -qF "$cfg_phrase" "$SKILL_MD" || CFG_DRIFT="$CFG_DRIFT [$cfg_phrase]"
+done <<'CFG_PHRASES'
+the whole file is ignored, defaults apply
+the other config source still applies
+cannot say what the config loader gets from it
+declined to read it
+CFG_PHRASES
+if [ -z "$CFG_UNEMITTED" ] && [ -z "$CFG_DRIFT" ]; then
+  check "P1bgg every config-failure wording is both emitted and documented in the skill" PASS
+else
+  check "P1bgg config rows vs skill (not emitted:$CFG_UNEMITTED not documented:$CFG_DRIFT)" FAIL
+fi
+PERM_ROWS="$EXPOSED_OUT$DENY_OUT$ASK_OUT$AM_OUT$BAD_OUT$UNJ_OUT$SHAPE_OUT$QUIET_OUT$NOHOME_OUT$SHORT_OUT$THROW_OUT$DENY_OBJ_OUT$OTHER_AGENT_OUT$AMA_SPLIT_OUT"
 PERM_UNEMITTED=""; PERM_DRIFT=""
 while IFS= read -r perm_phrase; do
   [ -n "$perm_phrase" ] || continue
@@ -1313,6 +2163,19 @@ Move the rule to permissions.allow
 has not verified
 has a shape this check cannot judge
 a deny rule outranks an allow rule
+no agent may edit a settings file to widen its own permissions
+no reviewer-spawn exposure found
+only settings source this check reads
+without being written there
+HOME is not set
+incomplete (short read)
+could not be read —
+could not be parsed
+contains an entry this check cannot read
+failed to run
+scopes the Agent or Task tool
+could not be determined
+missing part of the check
 PERM_PHRASES
 if [ -z "$PERM_UNEMITTED" ] && [ -z "$PERM_DRIFT" ]; then
   check "P1be every permission-exposure row phrase is both emitted and documented in the skill" PASS

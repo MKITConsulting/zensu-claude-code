@@ -125,16 +125,17 @@ the report, not a failed command. Do not re-render or paraphrase the table.
 ## Phase 2: Interpret
 
 Briefly call out, in one or two lines, the highest-severity findings and the
-concrete next step for each — but only for rows the table actually marked ⚠️/❌.
+concrete next step for each — but only for rows the table actually marked ⚠️/❌,
+plus the one green row named below, which is always relayed.
 
-One bound is stated here rather than in a bullet, because it is about a row that
-did NOT print and the bullets below are scoped to rows that did: the
-reviewer-spawn permission check reads `~/.claude/settings.json` and nothing else,
-and the permission mode can be in effect for a session without being written
-there. So the absence of a `permissions:` row means no exposure was found in that
-one file — never that the auto-mode classifier is inactive. Say so whenever the
-user asks whether the classifier will refuse a spawn, not only when the whole
-table is green.
+One bound is stated here rather than in a bullet, because it belongs to the check
+as a whole rather than to any single row: the reviewer-spawn permission check
+reads `~/.claude/settings.json` and nothing else, and the permission mode can be
+in effect for a session without being written there. At least one `permissions:`
+row now prints on every path the check can take, so read the rows rather than their
+absence — a ✅ row means no exposure was found in that one file, never that the
+auto-mode classifier is inactive. Say so whenever the user asks whether the
+classifier will refuse a spawn, not only when the whole table is green.
 
 - **❌ version sync** → bump `plugin.json` and `marketplace.json` together (the
   release train owns this; see `CLAUDE.md`).
@@ -158,16 +159,89 @@ table is green.
   effect. An `autoMode.allow` entry is classifier guidance in prose, not a
   permission rule; if the row says so, the user's earlier attempt did not grant
   anything.
-- **⚠️ permissions: … could not be read** / **… has a shape this check cannot judge**
-  → the check did not run. The first names a filesystem problem, the second a file
-  that was read and parsed but whose `permissions`/`autoMode` value or rule list is
-  not the shape the check understands. Report either one as a
-  missing check, not an all-clear — never as evidence that nothing is wrong.
+- **❌ config: … (the whole file is ignored, defaults apply)** → a LOADER verdict, and the
+  strongest of the three config-failure rows: the doctor established that the config loader
+  gets nothing from this file. Relay it as such. The `defaults apply` half appears only when
+  the file is the sole config source; with a global and a project config the row instead says
+  `the other config source still applies`, and you must not upgrade that to `defaults apply`.
+- **❌ config: … cannot say what the config loader gets from it** → an explicit REFUSAL to
+  make a loader verdict. The doctor could not read the file, and for this class it also cannot
+  infer what the loader does — a FIFO, for instance, would block the loader rather than make it
+  fall back. Report the file as unreadable by the check; do not tell the user it is ignored.
+- **⚠️ config: … is larger than … bytes** → a MISSING CHECK, never a verdict about the
+  config. The row says the doctor `declined to read it`: the file is over its own memory
+  bound, so it did not
+  parse it and cannot judge it. Say explicitly that the config loader has no size limit,
+  so the file is not skipped for its size — but do not tell the user it is applied, or
+  that it is ignored: neither is knowable from a row that never read the file.
+- **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
+  not be opened, is not a regular file, is too large, or was read incompletely.
+- **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
+  not valid JSON. Do not relay this as a filesystem problem — that sends the user
+  looking for a permissions or disk fault that does not exist.
+- **⚠️ permissions: … has a shape this check cannot judge** → the file was read and
+  parsed, but a value or rule list is not the shape the check understands. This
+  prefix is shared by TWO different rows and the tail is what separates them: one
+  continues `the reviewer-spawn permission check did not run` — fatal, nothing else
+  was judged — and the other names a single row that `could not be determined`, for
+  which see the bullet further down. Read the tail before you relay it.
+  Report every row in this group as a missing check, not an all-clear — never as
+  evidence that nothing is wrong.
 - **⚠️ permissions: … names zensu:code-reviewer in a spelling this check has not verified**
   → a `deny`/`ask` entry plainly means this spawn but is not one of the two
   spellings the check verified, so it cannot say whether that entry blocks it.
   Tell the user to read the entry before adding any allow rule; do not relay an
-  allow-rule remedy here, because `deny` and `ask` both outrank `allow`.
+  allow-rule remedy here, because `deny` and `ask` both outrank `allow`. This row is
+  reserved for entries that really do CONTAIN the agent name; an unrecognised
+  `Agent(...)` or `Task` spelling that does not contain it reaches the weaker row
+  documented below.
+- **⚠️ permissions: … contains an entry this check cannot read** → a `deny`/`ask`
+  list holds a non-string entry, so the check could not read it and cannot say
+  whether it blocks the spawn. Distinct from the spelling row above: that one is a
+  string the check read and declined to judge. Same remedy, same reason — read the
+  entry before adding any allow rule.
+- **✅ permissions: no reviewer-spawn exposure found** → the check ran and found
+  nothing. Relay its bound with it, and keep these TWO clauses intact — they are
+  the row's own wording and the drift pin matches them literally:
+  it is the `only settings source this check reads`, and the permission mode can be
+  in effect for a session `without being written there`.
+  A green row means no exposure was found in that one file, never that the
+  auto-mode classifier is inactive. Repeat that bound to the user; never act on it
+  yourself.
+  The separate prohibition
+  `no agent may edit a settings file to widen its own permissions`
+  belongs to the rows that INSTRUCT a settings edit — the deny, ask,
+  could-not-judge, exposure and refused-spawn rows — and is deliberately NOT in this
+  one, which instructs nothing. Do not attribute it to the green row.
+- **⚠️ permissions: … `scopes the Agent or Task tool` …** → a `permissions.deny`
+  or `permissions.ask` entry is an `Agent(...)`/`Task(...)` rule in a spelling this
+  check has not verified. It names a DIFFERENT agent, or none at all — the check is
+  saying only that it cannot judge the entry's reach, never that the entry mentions
+  `zensu:code-reviewer`. Do not report it as naming the reviewer. The separate row
+  that says an entry `names zensu:code-reviewer … has not verified` is the stronger
+  claim and is reserved for entries that really do contain the name.
+  This is where a wildcard `deny` lands. Such an entry used to produce no row at all,
+  which read as a clean result while it blocked every run — that silence is the failure
+  this whole check exists to prevent, so never relay this row as merely cosmetic.
+- **⚠️ permissions: … the `<row>` `could not be determined`** → a
+  `missing part of the check`, not a missing check. One malformed key suppressed the row
+  whose claim depended on it; every other row in the block still ran and still
+  means what it says. Two malformed CARRIERS therefore render two of these rows,
+  naming two different keys. Two malformed keys inside ONE carrier render a single
+  row naming only the first, so a repair may uncover a second. And a deferred row is
+  dropped entirely when a deny, ask, could-not-judge or unreadable-entry finding
+  returns above it — deliberate, because the returning row is the stronger finding. Distinguish it from
+  the whole-check row, which says `the reviewer-spawn permission check did not run`
+  and appears only when the file's shape is fatal.
+- **⚠️ permissions: HOME is not set** → the check could not locate
+  `~/.claude/settings.json` at all, so it did not run. Report it as a missing
+  check, never as a clean result.
+- **⚠️ permissions: … incomplete (short read)** → the file was located and
+  opened but the read returned fewer bytes than its size. That is an I/O problem,
+  **not** malformed content — do not tell the user their settings file is broken.
+- **⚠️ permissions: the reviewer-spawn permission check failed to run** → the
+  check itself threw. The rest of the report is intact and trustworthy; only this
+  one row is missing its answer. Treat it as a missing check.
 - **⚠️ forge CLI not authenticated / not found** → authenticate or install the CLI
   the report names for the detected provider: `gh auth login` for GitHub,
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
