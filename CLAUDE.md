@@ -1063,16 +1063,24 @@ permission layer refuses that spawn, the call never executes — so no PreToolUs
 or PostToolUse hook can see it, and without this module the enforcer repeats an
 impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
 
-Five things are coupled and must move together:
+Six things are coupled and must move together:
 
 - **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
-  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.240: `Permission for this action was
   denied by the Claude Code auto mode classifier.` and `Permission for this action
   has been denied.`). The build is exported and pinned against the module header,
   so the constant cannot drift away from the provenance note beside it. They are
   matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
   that rewords them silently disables the diagnosis — re-verify against the
-  binary, never against memory. The `kind` values are re-encoded in exactly TWO
+  binary, never against memory. Re-verified 2026-08-22 with `strings` over
+  2.1.237, 2.1.239 and 2.1.240: byte-identical in all three, each stored WITH the
+  trailing `Reason: ` the prefix rule declines to contract, and no third
+  refusal-result literal exists to add. The same transcript entry also carries a
+  host-native `toolDenialKind` beside `message` (observed `automode-blocked`); it
+  is deliberately NOT read — an undocumented, unversioned field whose absence
+  would be indistinguishable from a clean spawn — and the module header plus a
+  unit case record that it was seen and declined rather than missed.
+  The `kind` values are re-encoded in exactly TWO
   places outside the module: the `case` arms in `hooks/stop-chain-enforcer.sh`
   that render cause and remedy, and the closed set `reviewerDenialRows` accepts
   from a note. The hook's PROBE deliberately holds no third copy — it reads `kind`
@@ -1114,6 +1122,18 @@ Five things are coupled and must move together:
   contents would let anything able to write there mint a row telling the user to widen
   `permissions.allow` for the very spawn it wants. Change the workflow-document name and
   the binding silently stops matching; `P1qq` is the pin.
+- **One fixture is a real host capture, and it is the only one that can falsify the
+  hand-authored envelopes.** `tests/structure/fixtures/reviewer-spawn-denied-transcript.v1.jsonl`
+  is a redaction of two entries taken verbatim out of a Claude Code 2.1.237 session whose
+  `zensu:code-reviewer` spawns the classifier refused: the `tool_use`/`tool_result` pair,
+  `is_error`, the full refusal body and `toolDenialKind` are the original bytes; the
+  prompt, ids, cwd and branch are placeholders. Every other transcript in both suites is
+  written by this repo and therefore pins only what this repo BELIEVES the host emits.
+  Driven at the unit layer (four cases, including a shape guard so a gutted redaction
+  fails loudly) and end-to-end by T36/T36a, which sit beside scenario 7 rather than at
+  the tail for the Windows-budget reason below. Like
+  `fixtures/exitplanmode-posttooluse-payload.v1.json`, it CANNOT observe live harness
+  drift — only a fresh capture can.
 
 **The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
 Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
@@ -1122,6 +1142,12 @@ single sample here says nothing about headroom. Budget against the HIGH figure: 
 `timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
 its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
 was killed by it, which is exactly the failure this range exists to prevent.
+**That range no longer covers the file.** Scenario 7b (T36/T36a, the real-host capture)
+added a session and a Stop after the range was taken, and the ceiling was NOT raised —
+85% of cap was already the slow sample's share. Treat the remaining headroom as
+UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
+`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
+budget below would surface such a run as a profile abort rather than a suite timeout.
 
 **The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
@@ -1279,6 +1305,21 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
 
 **Known gaps, accepted and deliberate:**
 
+- **The whole diagnosis is inert on an installation that predates it, and that is the
+  first thing to check before suspecting the scanner.** The probe's
+  `[ -f "$lib" ] && [ ! -L "$lib" ] || return 0` returns before `node` is ever invoked,
+  leaving the verdict `none` and routing byte-identical — the correct fail-open
+  direction for a diagnostic, and indistinguishable from "no refusal happened". The
+  module first shipped in **v0.18.2**; a session on 0.18.1 or earlier gets the ordinary
+  `Resume the /zensu:tdd Phase 6 review sequence` directive on every Stop until the cap
+  releases, and `/zensu:doctor` stays silent because no note is ever minted. Measured
+  2026-08-22: three classifier-refused `zensu:code-reviewer` spawns, seven Stop
+  interceptions, zero notes — and the shipped scanner run against that same transcript
+  afterwards answered `status=blocked kind=auto-mode-classifier spawns=3 denials=3`. The
+  detection was never wrong; the code was not installed. Nothing surfaces the version
+  skew, so diagnose it by checking whether the executing plugin root actually contains
+  `hooks/lib/reviewer-spawn-denial-v1.js` before touching the marker set. T36b pins the
+  guard and its position ahead of the invocation.
 - The verdict has no chain-generation lower bound. After a cap release and a fresh
   `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
   so the branch fires again before any new spawn is attempted. The reason text handles
