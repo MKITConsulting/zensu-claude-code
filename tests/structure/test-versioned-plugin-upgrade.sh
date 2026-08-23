@@ -1811,6 +1811,43 @@ else
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
+# The EXISTING-BUT-EMPTY records directory, which no scenario produced. The no-lease
+# row above reaches the lstat ENOENT arm instead — its directory does not exist at
+# all — and every other row seeds at least one entry.
+#
+# The second-order effect is what makes this worth a row rather than only a unit
+# case: AC-C12 and AC-C12b are armed-fixture-safe ONLY because this early return
+# fires before the destination guard. If write_lease ever wrote to the wrong path the
+# directory would be empty, this return would fire, no WARNING would print, and both
+# rows would go red instead of passing against an unarmed fixture. That positive
+# control was itself supplied by untested code.
+EMPTY_RECORDS_DIR="$SHARED_DATA/review-evidence/v1/records/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+EMPTY_ASIDE_DIR="$SHARED_DATA/review-evidence/v1/superseded/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+if [ -n "${EMPTY_RECORDS_DIR##*/}" ] && mkdir -p "$EMPTY_RECORDS_DIR" 2>/dev/null; then
+  rm -rf "$EMPTY_ASIDE_DIR"
+  # The record is already adopted by the row above, so this takes the in-place repair
+  # branch — which runs the same sweep against the same store.
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/empty-records.out" 2>&1
+  if grep -qF 'leases set aside : 0' "$TMP/empty-records.out" \
+      && ! grep -qF 'WARNING' "$TMP/empty-records.out" \
+      && [ ! -e "$EMPTY_ASIDE_DIR" ]; then
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" PASS
+  else
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" FAIL
+    sed -n '1,12p' "$TMP/empty-records.out" 2>/dev/null
+    ls -1d "$EMPTY_ASIDE_DIR" 2>/dev/null
+  fi
+else
+  check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" SKIP
+fi
+
 # AC-C12 — the DESTINATION refusal, and the only check that reaches either scope
 # string. Both existing sweeps are clean paths: the seeded one passes asideIsSafe()
 # and the no-lease one returns through the lstat ENOENT branch, so before this row
@@ -2094,9 +2131,48 @@ fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.str
     sed -n '1,10p' "$TMP/adopt-repair-readonly.out" 2>/dev/null
   fi
   rm -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json"
+
+  # A NON-EMPTY `failed`. Every adoption row asserts `leases stuck     : 0`, so the
+  # catch arm and the warning block it feeds were never observed — and that warning
+  # is the only place safe() is applied to a LIST. The partial sweep is also the one
+  # state the report has to describe correctly while still claiming the adoption
+  # succeeded.
+  #
+  # Driven through a COLLISION, which is now the shape that produces it: the move is
+  # a link/unlink pair, so an entry already sitting in the superseded directory is
+  # refused rather than overwritten.
+  REPAIR_STUCK_ID="rel1_$(printf 'a%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: "/previous/zensu/installation",
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_STUCK_ID" 2>/dev/null
+  mkdir -p "$ADOPT_LEASE_ASIDE" 2>/dev/null
+  printf 'ALREADY SET ASIDE\n' > "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-stuck.out" 2>&1
+  if grep -qF 'leases stuck     : 1' "$TMP/adopt-stuck.out" \
+      && grep -qF 'could NOT be set aside' "$TMP/adopt-stuck.out" \
+      && grep -qF "$REPAIR_STUCK_ID" "$TMP/adopt-stuck.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" ] \
+      && [ "$(cat "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json")" = 'ALREADY SET ASIDE' ]; then
+    check "a colliding entry is reported stuck and what was already set aside survives" PASS
+  else
+    check "a colliding entry is reported stuck and what was already set aside survives" FAIL
+    sed -n '1,16p' "$TMP/adopt-stuck.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
 else
   check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
   check "the report-only form still refuses already-served and sweeps nothing" FAIL
+  check "a colliding entry is reported stuck and what was already set aside survives" FAIL
 fi
 
 # The point of the whole feature: the session works again, in place. Both are

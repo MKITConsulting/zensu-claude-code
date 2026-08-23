@@ -359,3 +359,87 @@ test('S2 an unopenable store is refused as source rather than thrown', () => {
   assert.equal(result.discarded, 0);
   assert.deepEqual(result.failed, []);
 });
+
+// ── S4: the refusal arms that had never been driven ─────────────────────────
+
+test('S4 the per-segment superseded permission check is reachable and load-bearing', () => {
+  // Finding #8: AC-C12b plants 0777 at the LEAF and then explicitly chmods
+  // `superseded` back to 0700, forcing this check to pass so the walk refuses one
+  // line later. Its own claim — delete the mode pair and the row goes red — was
+  // therefore true of the LEAF pair, not this one. Deleting the per-segment check
+  // left the whole suite green.
+  if (process.platform === 'win32') return; // privateEnough is a no-op there by design
+  const pluginData = tempRoot();
+  const segments = ['review-evidence', 'v1', 'superseded', KEY];
+  // Build the chain, then widen `superseded` only — the leaf stays private, so the
+  // leaf pair cannot be what refuses.
+  fs.mkdirSync(path.join(pluginData, ...segments), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.join(pluginData, 'review-evidence', 'v1', 'superseded'), 0o777);
+  fs.chmodSync(path.join(pluginData, ...segments), 0o700);
+
+  const verdict = sweep().asideIsSafe(pluginData, segments, ['superseded']);
+  assert.equal(verdict.ok, false, 'a world-writable superseded must refuse');
+  assert.equal(verdict.at, path.join(pluginData, 'review-evidence', 'v1', 'superseded'));
+
+  // The discrimination: with `superseded` NOT in the mode-checked set, the same
+  // chain is accepted. That is what proves the refusal came from this check and not
+  // from the leaf pair or the shape walk.
+  const withoutCheck = sweep().asideIsSafe(pluginData, segments, []);
+  assert.equal(withoutCheck.ok, true);
+});
+
+test('S4 a shared ancestor at 0755 is NOT refused', () => {
+  // The other half of the asymmetry, and it has to hold or the sweep starts failing
+  // on a permission it does not manage: `review-evidence` and `v1` belong to
+  // ensurePrivateDirectory, which repairs them with a chmod. This function may only
+  // look.
+  if (process.platform === 'win32') return;
+  const pluginData = tempRoot();
+  const segments = ['review-evidence', 'v1', 'superseded', KEY];
+  fs.mkdirSync(path.join(pluginData, ...segments), { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.join(pluginData, 'review-evidence'), 0o755);
+  const verdict = sweep().asideIsSafe(pluginData, segments, ['superseded']);
+  assert.equal(verdict.ok, true, 'a shared ancestor mode is not this function to judge');
+});
+
+test('S4 a FIFO entry is refused rather than hung on', () => {
+  // The exact hang this guard was written to stop, and no fixture had ever
+  // demonstrated it being stopped. A bare readFileSync on a FIFO blocks forever and
+  // raises nothing a catch can see — and the sweep runs AFTER the record swap, so a
+  // hang leaves the one repair the user can still invoke stuck half-done.
+  if (process.platform === 'win32') return;
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const fifo = path.join(recordsDir(pluginData), `rel1_${'9'.repeat(32)}.json`);
+  const made = require('node:child_process').spawnSync('mkfifo', [fifo], { stdio: 'ignore' });
+  if (made.status !== 0) return; // no mkfifo on this host
+  // Confirm it really is a FIFO before asserting on it — the same rule W167/W168
+  // apply to `ln -s`, for the same reason: a tool that exits 0 is not evidence.
+  assert.equal(fs.lstatSync(fifo).isFIFO(), true);
+
+  // If this guard regressed, this call does not fail — it never returns.
+  assert.equal(sweep().readLeaseEntry(fifo), null);
+
+  // And the sweep moves it aside, because listRecords would reject it too.
+  const result = sweep().discardSupersededLeases(pluginData, KEY, '/executing/root');
+  assert.equal(result.discarded, 1);
+  assert.equal(fs.existsSync(path.join(asideDir(pluginData), path.basename(fifo))), true);
+});
+
+test('S4 a directory entry in the records store is refused, not read', () => {
+  if (process.platform === 'win32') return;
+  const pluginData = tempRoot();
+  seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  const dir = path.join(recordsDir(pluginData), `rel1_${'8'.repeat(32)}.json`);
+  fs.mkdirSync(dir, { mode: 0o700 });
+  assert.equal(sweep().readLeaseEntry(dir), null);
+});
+
+test('S4 the size cap the reader uses is the owner\'s, not a test-only one', () => {
+  // The S2 case drove the comparison through an injected maxBytes, which proves the
+  // branch runs but not that the shipped default is the owner's value.
+  const pluginData = tempRoot();
+  const file = seedLease(pluginData, `${LEASE_ID}.json`, leaseBody());
+  assert.notEqual(sweep().readLeaseEntry(file), null, 'an ordinary lease is under the cap');
+  assert.equal(lease.MAX_RECORD_BYTES, 8 * 1024 * 1024);
+});
