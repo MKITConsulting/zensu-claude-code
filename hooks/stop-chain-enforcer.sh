@@ -798,13 +798,22 @@ zensu_hook_enabled chainEnforcer || INNER_ENABLED=false
 # Both escapes retire a refusal note for the same reason the terminal exits do:
 # this session's Stop will never route the inner chain again, so nothing else
 # could ever remove it and /zensu:doctor would warn about it forever.
+zensu_render_bypass_release() {
+  local rendered
+  rendered="$(zensu_bypass_display "$(tdd_state_file "$SESSION_ID")")"
+  [ -n "$rendered" ] \
+    && echo "Gates bypassed during this session: $rendered" >&2
+  return 0
+}
 if [ "${ZENSU_CHAIN:-}" = "off" ]; then
   tdd_record_bypass "$SESSION_ID" ZENSU_CHAIN 2>/dev/null || true
+  zensu_render_bypass_release
   reviewer_denial_note_clear
   outer_finish
   exit 0
 fi
 if [ "$INNER_ENABLED" != "true" ]; then
+  zensu_render_bypass_release
   reviewer_denial_note_clear
   outer_finish
   exit 0
@@ -1065,6 +1074,7 @@ if [ "$BLOCKS" -gt "$CAP" ]; then
     # The refusal diagnosis itself is emitted above, before the bound arms, so
     # every cap sub-path carries it rather than the standalone one alone.
   fi
+  zensu_render_bypass_release
   outer_finish
   exit 0
 fi

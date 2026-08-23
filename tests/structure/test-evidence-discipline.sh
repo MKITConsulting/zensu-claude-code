@@ -9,8 +9,10 @@ set -u
 #     digest — a top-level rules/ would leave the declared source of truth the
 #     one normative surface an installed-plugin edit could change undetected.
 #   - hooks/session-start-evidence-discipline.sh READS that block at run time
-#     (it must not carry its own copy, or the hook silently drifts from the 28
-#     prompt carriers), injects it on BOTH SessionStart (every source, including
+#     (it must not carry its own copy, or the hook silently drifts from the
+#     EXPECTED_AGENTS + EXPECTED_SKILLS prompt carriers pinned below — never
+#     restate that total as a literal here, it drifts on every new skill),
+#     injects it on BOTH SessionStart (every source, including
 #     resume/compact) and SubagentStart, reads no config at all, and fails
 #     silent on everything it does not understand — including a missing node.
 #   - every agents/*.md and every skills/*/SKILL.md carries the block VERBATIM,

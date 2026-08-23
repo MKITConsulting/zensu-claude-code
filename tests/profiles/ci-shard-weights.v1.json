@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "defaultSeconds": 20,
-  "note": "Balance hint only. Coverage never depends on it: the partition is computed from the ENFORCED suite inventory, so an unlisted suite still runs -- it is merely costed at defaultSeconds and the split drifts. Measured on ubuntu-latest, CI run 31374620366.",
+  "note": "Balance hint only. Coverage never depends on it: the partition is computed from the ENFORCED suite inventory, so an unlisted suite still runs -- it is merely costed at defaultSeconds and the split drifts. Measured on ubuntu-latest, CI run 31374620366; structure/test-gauntlet-loop-skill.sh measured separately on ubuntu-latest in CI run 32574149642 (1.045 s between its own PASS line and its predecessor's).",
   "seconds": {
     "evals/config-gate (--self-check)": 584,
     "evals/reset-review-limit (self-check)": 3,
@@ -45,6 +45,7 @@
     "structure/test-evidence-discipline.sh": 1,
     "structure/test-file-exists-replacement.sh": 1,
     "structure/test-finding-verification.sh": 1,
+    "structure/test-gauntlet-loop-skill.sh": 1,
     "structure/test-ghost-scan-test-detection.sh": 1,
     "structure/test-gitignore-zensu.sh": 1,
     "structure/test-immutable-marketplace-release.sh": 1,

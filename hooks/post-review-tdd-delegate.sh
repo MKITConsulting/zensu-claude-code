@@ -306,9 +306,11 @@ fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 
-BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)"
-[ -z "$BYPASSES" ] && BYPASSES="none"
-BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): in the ## Open section include the literal line: Gates bypassed during this session: '"$BYPASSES"
+BYPASS_RC=0
+BYPASSES="$(zensu_bypass_display "$(tdd_state_file "$SESSION_ID")" text)" || BYPASS_RC=$?
+[ "$BYPASS_RC" -eq 0 ] && [ -z "$BYPASSES" ] && BYPASSES="none"
+BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): as the last line of the ## Open section, include the literal line: Gates bypassed during this session: '"$BYPASSES"
+BYPASS_DIRECTIVE_TRAILING=$'\n\nBypass ledger (from chain state): end your reply with the literal line: Gates bypassed during this session: '"$BYPASSES"
 
 CONVERGE_OFFER_DIRECTIVE=""
 if [ "$AUTOPILOT_BOUND" != "true" ]; then
@@ -325,6 +327,8 @@ fi
 # self-review owns the chain terminus (--chain-done) and renders the report.
 SELF_REVIEW_ON=0
 if zensu_hook_enabled selfReview; then SELF_REVIEW_ON=1; fi
+BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE_TRAILING"
+[ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE"
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
@@ -335,7 +339,7 @@ if [ "$SELF_REVIEW_ON" = "1" ]; then
   TAIL_DIRECTIVE=""
 else
   CLOSE_PASS="close only this review generation by running: ${LOG_COMMAND} --chain-done${AUTOPILOT_BOUND_ARGS} --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0; on failure this completion is stale, so leave the current chain untouched and resume it."
-  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
+  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
 fi
 
 emit_post_context() {
@@ -350,7 +354,9 @@ emit_post_context() {
 
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
-  printf '%s' "${DISABLED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  DISABLED_TAIL=""
+  [ "$SELF_REVIEW_ON" = "0" ] && DISABLED_TAIL="${BYPASS_DIRECTIVE_TRAILING}"
+  printf '%s' "${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -379,7 +385,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     else
       tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
     fi
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
   printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
