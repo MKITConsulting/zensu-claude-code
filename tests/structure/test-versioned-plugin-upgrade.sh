@@ -57,7 +57,8 @@ OWNER_SRC="$ROOT/hooks/lib/review-evidence-lease-v1.js"
 if [ -f "$SWEEP_SRC" ] \
   && ! grep -qF 'rel1_[a-f0-9]{32}' "$CORE_SRC" \
   && ! grep -qF 'rel1_[a-f0-9]{32}' "$SWEEP_SRC" \
-  && ! grep -qE '8 \* 1024 \* 1024' "$CORE_SRC" \
+  && !if sed -n '/NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
+  | grep -qE '8 \* 1024 \* 1024' "$CORE_SRC" \
   && ! grep -qE '8 \* 1024 \* 1024' "$SWEEP_SRC" \
   && grep -qF "require('./review-evidence-lease-v1.js')" "$SWEEP_SRC"; then
   check "the sweep consumes the lease-store literals from their owner instead of copying them" PASS
@@ -2558,7 +2559,7 @@ RECOGNIZER_SRC="$ROOT/hooks/lib/zensu-doctor-invocation.js"
 # ANCHORED to the ASSIGNMENTS entry, not the whole file: a whole-file grep is
 # satisfied by any unrelated occurrence anywhere, so it would grade prose that had
 # drifted away from the entry it explains.
-if sed -n '/^const ASSIGNMENTS = {/,/^};/p;/CLAUDE_PROJECT_DIR is NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
+if sed -n '/NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
   | grep -qE 'previous release|older skill|mid-session upgrade'; then
   check "CONV-3 the recognizer states why the legacy assignment stays admitted" PASS
 else
