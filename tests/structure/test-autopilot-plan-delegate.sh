@@ -472,4 +472,25 @@ else
   check "P16 legacy carrier fixture could not be armed" FAIL
 fi
 
+
+# --- P8e the fail-closed arm is gated on a NONTERMINAL signal (source pin) ---
+# The existence hint cannot tell "mid-run" from "finished months ago and kept
+# the record", and only the first may block an ordinary plan approval — the
+# stage branch further down already applies that rule to a terminal pointer.
+# This is a source pin because the arm is defense in depth and this suite
+# cannot enter it: an unresolvable session id is refused by
+# zensu_bind_hook_session first, which is why P8a observes RUNTIME_UNAVAILABLE
+# rather than SESSION_CONTEXT_UNAVAILABLE. What the pin protects is that the
+# undecidable cases still fail closed — an unreadable directory, a record that
+# will not parse, a pointer naming a run with no record.
+P8E_OK=true
+grep -qF '&& autopilot_undecided_or_nonterminal; }' "$HOOK" || P8E_OK=false
+grep -qF 'catch (_) { process.exit(0); }' "$HOOK" || P8E_OK=false
+grep -qF 'if (!stages.has(runId)) process.exit(0);' "$HOOK" || P8E_OK=false
+grep -qF 'if (!TERMINAL.has(stage)) process.exit(0);' "$HOOK" || P8E_OK=false
+if [ "$P8E_OK" = true ]; then
+  check "P8e the empty-owner arm is conjoined with a nonterminal signal that fails closed when undecidable" PASS
+else
+  check "P8e fail-closed arm nonterminal gating" FAIL
+fi
 echo "----"; echo "test-autopilot-plan-delegate: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

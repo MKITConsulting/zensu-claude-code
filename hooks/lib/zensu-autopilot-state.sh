@@ -1620,7 +1620,7 @@ _autopilot_begin_critical() {
 }
 
 autopilot_begin_run() {
-  local run_id="${1:-}" owner_session_id="${2:-}" root cover validate workspace_root session_workspace root_rendered
+  local run_id="${1:-}" owner_session_id="${2:-}" root cover validate workspace_root session_workspace root_rendered declared_rendered
   _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$owner_session_id" || return 3
   root="$(_autopilot_project_root "${3:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
   cover="${4:-false}"
@@ -1634,7 +1634,16 @@ autopilot_begin_run() {
   # pre-change exclusion; a session working inside a worktree gets its own.
   workspace_root="${6:-}"
   if [ -n "$workspace_root" ]; then
+    # A declared workspace must BE a working tree, not merely sit inside one.
+    # `autopilot_workspace_root` answers the git toplevel, so a plain
+    # subdirectory of a repository silently widens to the whole project root and
+    # the run records a far broader occupancy claim than was asked for. Both
+    # sides are canonicalized by the same renderer, so an alias spelling still
+    # compares equal and only a genuine non-toplevel is refused.
+    declared_rendered="$(_autopilot_rendered_dir "$workspace_root")" \
+      || declared_rendered="$(cd -P -- "$workspace_root" 2>/dev/null && pwd -P)" || return 2
     workspace_root="$(autopilot_workspace_root "$workspace_root")" || return 2
+    [ "$workspace_root" = "$declared_rendered" ] || return 3
     # A declared workspace that names neither the session's own resolved tree
     # nor a directory under the project root would record a key nothing else
     # can claim while the run's commits still land elsewhere, which defeats the
@@ -1717,6 +1726,12 @@ autopilot_apply_event() {
   local run_id="${1:-}" event_id="${2:-}" event_type="${3:-}" payload_json="${4:-}" root
   local caller_session_id="${6:-}"
   _autopilot_identifier_ok "$run_id" && _autopilot_identifier_ok "$event_id" || return 3
+  # The `release-` event-id namespace belongs to autopilot_release_run, which
+  # derives it from the run alone so a repeat release lands on the same ledger
+  # entry. The CLI arm refuses it as well, but this writer is reachable directly
+  # and a forged entry there would make an ordinary CANCEL indistinguishable
+  # from an audited release in the ledger.
+  case "$event_id" in release-*) return 3 ;; esac
   if [ -n "$caller_session_id" ]; then
     _autopilot_identifier_ok "$caller_session_id" || return 3
   fi

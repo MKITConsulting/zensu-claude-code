@@ -155,6 +155,48 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     AUTOPILOT_OWNER="$(zensu_resolve_session_id "$(read_field session_id)" 2>/dev/null)" \
       || AUTOPILOT_OWNER=""
   fi
+  # The existence hint alone cannot distinguish "this project is mid-run" from
+  # "this project finished a run months ago and kept the record". Only the first
+  # may block an ordinary plan approval; the stage branch below already applies
+  # exactly that rule to a terminal pointer. Anything that cannot be JUDGED —
+  # an unreadable directory, a record that will not parse, a pointer naming a
+  # run with no record — counts as nonterminal, so the arm still fails closed.
+  autopilot_undecided_or_nonterminal() {
+    STATE_DIR="$PROJECT_ROOT/.zensu/state" node -e '
+      const fs = require("fs");
+      const path = require("path");
+      const dir = process.env.STATE_DIR;
+      const TERMINAL = new Set(["DONE", "CANCELLED"]);
+      let names;
+      try { names = fs.readdirSync(dir, { encoding: "utf8" }); }
+      catch (_) { process.exit(0); }
+      const stages = new Map();
+      const pointers = [];
+      for (const name of names) {
+        const isRun = /^autopilot-run-.+\.json$/.test(name);
+        const isPointer = /^autopilot-active(-[^/]*)?\.json$/.test(name);
+        if (!isRun && !isPointer) continue;
+        let parsed;
+        try { parsed = JSON.parse(fs.readFileSync(path.join(dir, name), "utf8")); }
+        catch (_) { process.exit(0); }
+        if (!parsed || typeof parsed !== "object") process.exit(0);
+        if (isRun) {
+          if (typeof parsed.stage !== "string") process.exit(0);
+          stages.set(String(parsed.runId), parsed.stage);
+        } else {
+          if (typeof parsed.runId !== "string") process.exit(0);
+          pointers.push(parsed.runId);
+        }
+      }
+      for (const stage of stages.values()) {
+        if (!TERMINAL.has(stage)) process.exit(0);
+      }
+      for (const runId of pointers) {
+        if (!stages.has(runId)) process.exit(0);
+      }
+      process.exit(1);
+    ' 2>/dev/null </dev/null
+  }
   ACTIVE_JSON=""
   if [ -z "$AUTOPILOT_OWNER" ]; then
     # `AUTOPILOT_STATE_HINT` was already computed from the same artifacts; a
@@ -165,7 +207,7 @@ if [ -n "$PROJECT_ROOT" ] && [ -r "$AUTOPILOT_STATE_LIB" ]; then
     # readable but not searchable every `[ -e ]` probe above fails, so the hint
     # stays false while the directory plainly holds durable artifacts. Both bits
     # take the fail-closed arm, and so does an unsearchable `.zensu` itself.
-    if [ "$AUTOPILOT_STATE_HINT" = true ] \
+    if { [ "$AUTOPILOT_STATE_HINT" = true ] && autopilot_undecided_or_nonterminal; } \
       || { [ -d "$PROJECT_ROOT/.zensu/state" ] \
         && { [ ! -r "$PROJECT_ROOT/.zensu/state" ] || [ ! -x "$PROJECT_ROOT/.zensu/state" ]; }; } \
       || { [ -e "$PROJECT_ROOT/.zensu" ] && [ ! -x "$PROJECT_ROOT/.zensu" ]; }; then

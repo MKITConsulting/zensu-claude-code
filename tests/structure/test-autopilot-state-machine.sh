@@ -1419,6 +1419,21 @@ else
   check "W4f owner-on-terminal must be refused as 3, not 4 (rc=$RELEASE_OWNER_TERMINAL_RC)" FAIL
 fi
 
+# The `release-` namespace was reserved only in the CLI arm, so any library
+# caller could mint one and make an ordinary CANCEL indistinguishable from an
+# audited release in the ledger. The reservation belongs at the writer. The
+# positive control is required: without it a writer that refused EVERY event
+# would satisfy the negative half.
+autopilot_apply_event run_conc_b release-forged CANCEL '{}' "$CONC_PROJECT" session_conc_b >/dev/null 2>&1
+APPLY_RESERVED_RC=$?
+autopilot_apply_event run_conc_b w30_ordinary CANCEL '{}' "$CONC_PROJECT" session_conc_b >/dev/null 2>&1
+APPLY_ORDINARY_RC=$?
+if [ "$APPLY_RESERVED_RC" -eq 3 ] && [ "$APPLY_ORDINARY_RC" -eq 0 ]; then
+  check "W30 the writer reserves the release- event-id namespace" PASS
+else
+  check "W30 release- must be refused at the writer (reserved=$APPLY_RESERVED_RC ordinary=$APPLY_ORDINARY_RC, want 3/0)" FAIL
+fi
+
 # Re-assert the precondition so a W4 failure does not surface here as a second,
 # unexplained failure.
 W5_RELEASED=false
@@ -1639,6 +1654,29 @@ if [ "$GATE_HOLD_RC" -eq 0 ] \
   check "W14 a standalone chain is permitted in a sibling tree the run does not hold" PASS
 else
   check "W14 standalone gate must permit an unheld sibling tree (hold=$GATE_HOLD_RC free=$GATE_FREE_RC, want 0/past-the-gate)" FAIL
+fi
+
+GATE_SUBDIR_RC=0
+GATE_SUBDIR_WROTE=unknown
+if [ "$GATE_READY" = true ]; then
+  mkdir -p "$GATE_P/plain-subdir"
+  autopilot_begin_run run_gate_subdir session_gate_subdir "$GATE_P" false true "$GATE_P/plain-subdir" >/dev/null 2>&1
+  GATE_SUBDIR_RC=$?
+  if [ -e "$GATE_P/.zensu/state/autopilot-run-run_gate_subdir.json" ]; then
+    GATE_SUBDIR_WROTE=yes
+  else
+    GATE_SUBDIR_WROTE=no
+  fi
+fi
+# A declared workspace that git does not report as a toplevel used to resolve to
+# the project root and be accepted, so the run recorded occupancy over the whole
+# project while the caller had asked for one directory. Refusing needs the
+# no-record half too: a refusal that still wrote the run would leave the broad
+# claim in place.
+if [ "$GATE_READY" = true ] && [ "$GATE_SUBDIR_RC" -eq 3 ] && [ "$GATE_SUBDIR_WROTE" = no ]; then
+  check "W29 a declared workspace that is not a git toplevel is refused and writes nothing" PASS
+else
+  check "W29 non-toplevel workspace must be refused (rc=$GATE_SUBDIR_RC wrote=$GATE_SUBDIR_WROTE, want 3/no)" FAIL
 fi
 
 GATE_LEGACY_RC=0

@@ -66,11 +66,31 @@ run_verb() {
       bash "$LOG" "$@" )
 }
 
+# Same contract as run_verb, but the verb runs from a directory INSIDE the
+# project instead of from its root — the only way to drive the resolver's own
+# cwd branch through the CLI.
+run_verb_in() {
+  local project="$1" raw_session="$2" cwd="$3"; shift 3
+  activate_session "$project" "$raw_session" || return 90
+  ( cd "$cwd" && CLAUDE_PROJECT_DIR="$project" ZENSU_CONFIG="$TMP/missing-config.json" \
+      bash "$LOG" "$@" )
+}
+
 json_ok() {
   FILE="$1" EXPR="$2" node -e '
     const value = JSON.parse(require("fs").readFileSync(process.env.FILE, "utf8"));
     process.exit(Function("value", `return Boolean(${process.env.EXPR})`)(value) ? 0 : 1);
   ' 2>/dev/null
+}
+
+# Expectations must be spelled the way the RUNTIME records a directory, not the
+# way this shell sees it. On MSYS `pwd -P` answers /d/a/... and
+# `fs.realpathSync.native` answers D:\a\..., while everything the library
+# persists goes through this renderer and comes back as D:/a/... — three
+# namespaces, and a raw comparison picks the wrong one twice.
+native_dir() {
+  bash "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$1" 2>/dev/null </dev/null \
+    || (cd -P -- "$1" 2>/dev/null && pwd -P)
 }
 
 digest() {
@@ -178,7 +198,7 @@ WS_TREE_A="$WS_PROJECT/tree-a"
 run_verb "$WS_PROJECT" ws_cli_owner --autopilot-begin --run ws_cli_run --workspace "$WS_TREE_A" >/dev/null 2>&1
 A6_RC=$?
 WS_RUN_FILE="$WS_PROJECT/.zensu/state/autopilot-run-ws_cli_run.json"
-WS_TREE_A_JSON="$(node -e 'process.stdout.write(JSON.stringify(require("fs").realpathSync.native(process.argv[1])))' "$WS_TREE_A")"
+WS_TREE_A_JSON="$(WS_TREE_A_NATIVE="$(native_dir "$WS_TREE_A")" node -e 'process.stdout.write(JSON.stringify(String(process.env.WS_TREE_A_NATIVE)))' </dev/null)"
 if [ "$A6_RC" -eq 0 ] && [ -f "$WS_RUN_FILE" ] \
   && json_ok "$WS_RUN_FILE" "value.workspaceRoot === $WS_TREE_A_JSON"; then
   check "A6 --workspace reaches the record as the run's working tree" PASS
@@ -219,7 +239,7 @@ fi
 GIT_TREE="$TMP/git-tree"
 mkdir -p "$GIT_TREE/nested/deeper"
 if git -C "$GIT_TREE" init --quiet >/dev/null 2>&1; then
-  GIT_TOP="$(cd "$GIT_TREE" && pwd -P)"
+  GIT_TOP="$(native_dir "$GIT_TREE")"
   RESOLVED_DEEP="$(autopilot_workspace_root "$GIT_TREE/nested/deeper")"
   RESOLVED_TOP="$(autopilot_workspace_root "$GIT_TREE")"
   if [ "$RESOLVED_DEEP" = "$GIT_TOP" ] && [ "$RESOLVED_TOP" = "$GIT_TOP" ]; then
@@ -228,18 +248,33 @@ if git -C "$GIT_TREE" init --quiet >/dev/null 2>&1; then
     check "A9 git toplevel resolution (deep=$RESOLVED_DEEP top=$GIT_TOP)" FAIL
   fi
 
-  # Two spellings of one tree therefore collide, which is the property the
-  # exclusion exists for.
+  # A subdirectory is no longer an accepted SPELLING of the tree — a declared
+  # workspace must be a toplevel — so the collision is driven the way it
+  # actually occurs: a session standing in a subdirectory of the held tree.
   GIT_PROJECT="$GIT_TREE"
   run_verb "$GIT_PROJECT" git_ws_owner --autopilot-begin --run git_ws_run --workspace "$GIT_TREE" >/dev/null 2>&1
   GIT_BEGIN_RC=$?
-  run_verb "$GIT_PROJECT" git_ws_other --autopilot-begin --run git_ws_second --workspace "$GIT_TREE/nested/deeper" >/dev/null 2>&1
+  run_verb_in "$GIT_PROJECT" git_ws_other "$GIT_TREE/nested/deeper" --autopilot-begin --run git_ws_second >/dev/null 2>&1
   GIT_SECOND_RC=$?
   if [ "$GIT_BEGIN_RC" -eq 0 ] && [ "$GIT_SECOND_RC" -eq 4 ] \
     && [ ! -e "$GIT_PROJECT/.zensu/state/autopilot-run-git_ws_second.json" ]; then
     check "A10 a begin from a subdirectory is refused while the tree root is held" PASS
   else
     check "A10 subdirectory begin refused (first=$GIT_BEGIN_RC second=$GIT_SECOND_RC)" FAIL
+  fi
+
+  # FR-004. Before this the declaration resolved to the tree root and was
+  # accepted, so the run recorded occupancy of the whole tree while the caller
+  # had named one directory inside it. The refusal must also write nothing:
+  # a refusal that still minted the run would leave the wider claim standing.
+  run_verb "$GIT_PROJECT" git_ws_declared --autopilot-begin --run git_ws_declared_run \
+    --workspace "$GIT_TREE/nested/deeper" >/dev/null 2>&1
+  GIT_DECLARED_RC=$?
+  if [ "$GIT_DECLARED_RC" -eq 3 ] \
+    && [ ! -e "$GIT_PROJECT/.zensu/state/autopilot-run-git_ws_declared_run.json" ]; then
+    check "A10b a declared workspace that is not a git toplevel is refused and writes nothing" PASS
+  else
+    check "A10b non-toplevel --workspace must be refused (rc=$GIT_DECLARED_RC, want 3)" FAIL
   fi
 else
   check "A9 git is unavailable, so the toplevel branch could not be exercised" FAIL
@@ -264,6 +299,23 @@ if [ "$A11_OK" = true ]; then
   check "A11 the release skill is registered and every command it prints is runnable" PASS
 else
   check "A11 release skill contract" FAIL
+fi
+
+# --- A12 release-id child hygiene (source pin) --------------------------------
+# Both properties are unreachable behaviourally from here: the arm needs node
+# for session resolution BEFORE it derives the id, so a stub that silences the
+# derivation never gets that far, and an inherited descriptor only surfaces as
+# an unrelated suite hanging minutes later. Pinned at source instead, which is
+# what this suite already does for branches a fixture cannot enter.
+A12_OK=true
+grep -qF "2>/dev/null </dev/null)" "$LOG" || A12_OK=false
+grep -qF 'event_digest="${event_val#release-}"' "$LOG" || A12_OK=false
+grep -qF '"${#event_digest}" -ne 64' "$LOG" || A12_OK=false
+grep -qF 'derived release event id has an unexpected shape' "$LOG" || A12_OK=false
+if [ "$A12_OK" = true ]; then
+  check "A12 the release-id child redirects stdin and its output shape is asserted" PASS
+else
+  check "A12 release-id child hygiene" FAIL
 fi
 
 printf '%s\n' "----" "test-autopilot-release-cli: $PASS PASS / $FAIL FAIL"

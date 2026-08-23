@@ -388,7 +388,21 @@ case "${1:-}" in
       const crypto = require("crypto");
       process.stdout.write(`release-${crypto.createHash("sha256")
         .update(String(process.env.RUN_ID)).digest("hex")}`);
-    ')" || { echo "zensu-log.sh --autopilot-release: cannot derive the release event id" >&2; exit 2; }
+    ' 2>/dev/null </dev/null)" || { echo "zensu-log.sh --autopilot-release: cannot derive the release event id" >&2; exit 2; }
+    # A child that exits 0 having written nothing would hand an empty id to the
+    # release, which refuses it as a malformed RUN id — a message about the
+    # wrong thing entirely. Assert the derived shape here instead.
+    event_digest="${event_val#release-}"
+    if [ "$event_val" = "$event_digest" ] || [ "${#event_digest}" -ne 64 ]; then
+      echo "zensu-log.sh --autopilot-release: derived release event id has an unexpected shape" >&2
+      exit 2
+    fi
+    case "$event_digest" in
+      *[!0-9a-f]*)
+        echo "zensu-log.sh --autopilot-release: derived release event id has an unexpected shape" >&2
+        exit 2
+        ;;
+    esac
     autopilot_release_run "$run_val" "$event_val" "${CLAUDE_PROJECT_DIR:-.}" "$session_val"
     exit $?
     ;;
