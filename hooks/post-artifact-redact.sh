@@ -200,6 +200,14 @@ printf '%s' "$INPUT" | \
       // residual class made a routine race report as the worst outcome.
       if (mod.CLEAN_REASONS.has(result.reason)) continue;
       if (mod.TRANSIENT_REASONS.has(result.reason)) continue;
+      // Refused BY DESIGN, on either route and regardless of provenance: the
+      // module declined to touch the file on purpose, so there is nothing to
+      // report. Three sets were not a partition — `witness-artifact` fell
+      // through all of them and printed "artifact left UNREDACTED" for a refusal
+      // the design intends. Optional-chained so an older module that predates
+      // the set degrades to the previous behaviour (a spurious line) rather than
+      // throwing, which would silence the redactor for the whole call.
+      if (mod.DESIGN_REFUSAL_REASONS?.has(result.reason)) continue;
       // Keyed on PROVENANCE, not on the matcher. "This path is not an artifact"
       // is an ordinary outcome for the file a write tool NAMED — that matcher
       // sees every file the model writes, and a genuine fault for a path the

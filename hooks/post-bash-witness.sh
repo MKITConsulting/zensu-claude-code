@@ -25,7 +25,7 @@ zensu_bind_hook_session "$INPUT" || exit 0
 # extraction now redacts absolute developer paths out of `cmd` (only — see the
 # note further down for why the `tail` is left raw), and it needs the project
 # root to do that. See that same note for
-# why the witness is redacted at all when it is never committed.
+# why `cmd` is redacted and `tail` is not.
 PROJECT_DIR="$(zensu_resolve_project_dir)" || exit 0
 
 # Bypass ledger: the escape stays free, but while a TDD session is active the
@@ -43,8 +43,12 @@ fi
 
 if ! command -v node >/dev/null 2>&1; then exit 0; fi
 
-# The witness is gitignored and never committed, so redacting it buys no
-# publication safety of its own. It is redacted because the narrative log is:
+# `cmd` is redacted for SYMMETRY, not for the witness's own publication safety.
+# The witness is gitignored in THIS repository only; a consuming repo has to add
+# `.zensu/state/` and `.zensu/logs/witness-*.log` itself, and until it does, this
+# file publishes with the artifacts around it. So do not read what follows as
+# "this file never ships" — that claim was retracted across this feature and must
+# not come back here. It is redacted because the narrative log is:
 # hooks/lib/zensu-evidence-crosscheck.js matches a CHECKPOINT/AUDIT claim
 # against a witness entry by EQUALITY, so redacting one side only would turn
 # every Phase-6 claim whose command names an absolute path into an EVIDENCE GAP
@@ -60,8 +64,13 @@ if ! command -v node >/dev/null 2>&1; then exit 0; fi
 # `failureMarker`, which scans for FAIL/failed/Error tokens. Redaction there is
 # purely subtractive, so a failure token sitting inside an absolute path would
 # vanish and an EVIDENCE CONTRADICTION would silently downgrade to `verified`.
-# The witness is gitignored and never committed, so leaving the tail raw costs
-# no publication safety.
+# That is the WHOLE argument for leaving it raw, and it is a trade rather than a
+# free choice: a consuming repo that has not added the two `.gitignore` lines
+# publishes this file with `tail` intact. The evidence channel is judged the more
+# valuable of the two, because a cross-check that silently reports `verified` for
+# a failed command corrupts every later decision built on it. Do not re-derive
+# this from a claim that the file never ships — that is false for a consuming
+# repo, and it was retracted everywhere else in this feature.
 #
 # The module path is transported through mechanism 2 of the two this repo
 # accepts (tests/structure/test-msys-special-plugin-module-boundaries.sh):

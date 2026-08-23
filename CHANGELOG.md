@@ -70,7 +70,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bound, and an mtime is not knowable without a stat, so the enumeration was never
   bounded by the window either. The write matchers
   additionally redact the tool's own `file_path`, which is the only way an artifact
-  outside that window is reached. `witness-*.log` is excluded, and a refusal names
+  outside that window is reached. A `witness-` prefixed name is excluded in the
+  `logs` bucket only — where the witness actually lives; the same name under
+  `.zensu/plans/` is an ordinary plan and is redacted like one. A refusal names
   whether the target was swept or written. Every path exits 0 — a
   PostToolUse hook cannot un-run the call it follows — but no refusal is silent: an
   artifact left un-redacted (too large, hard-linked, unreadable) is reported on stderr,

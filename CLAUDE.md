@@ -123,7 +123,10 @@ different objects — and `[ -L ]` is blind to a HARD link, which
 Planting one inside `.zensu/logs/` turned the verb into an append/truncate
 primitive on any file on the same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor (`isFile`,
 `nlink === 1`, and the expected dev/ino re-derived from the canonical parent, which
-closes the same swap one component higher), and never truncates in place. `O_TRUNC`
+catches the name resolving to a DIFFERENT inode than the one opened — the
+rename/replace race, NOT an intermediate-directory swap: when nothing moved the
+re-derived parent is the lexical parent, so the lstat re-traverses what the open
+traversed and both move together), and never truncates in place. `O_TRUNC`
 stays out of the open flags, because truncating at open would run BEFORE the `nlink`
 check could refuse. The destructive mode publishes by RENAME instead: an earlier
 spelling ran `ftruncate` after those checks, which committed the destroy before the
@@ -154,9 +157,16 @@ second authority to disagree with — while the witness passes both without a
 check, deliberately, because losing the equality match is worse than an ambiguous
 placeholder in a gitignored file.
 
+**A fifth `within()`-family hand-copy lives in this feature** and belongs on the roster
+in §"Git Mutation Tables": the `append` verb's cwd anchor spells its own containment
+check inline in the `node -e` program (`here !== rootReal && !here.startsWith(rootReal +
+path.sep)`), rather than calling the module that owns containment. It is the ANCHORED
+form, so it carries none of the `..bak` defect, and it is unreachable from a unit layer
+for the same reason the requirements-gate copies are.
+
 **Coupled sites that move together:** the module's `ARTIFACT_BUCKETS` / `ARTIFACT_DIR`,
 which are module-INTERNAL — `post-artifact-redact.sh` consumes the layout TRANSITIVELY,
-by calling `sweepTargets` and `resolveArtifactTarget` rather than joining
+by calling `sweepTargets` and `redactFile` rather than joining
 `.zensu/plans` and `.zensu/logs` itself, and it never imported either constant; an
 earlier revision of this clause said it consumed them directly, and the module header
 now records the same correction. `SWEEP_WINDOW_SECONDS` and `SWEEP_MAX_TARGETS` are

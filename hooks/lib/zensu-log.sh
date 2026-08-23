@@ -1568,9 +1568,20 @@ case "$cmd" in
           // `cd <sibling> && … append --truncate --log <sibling>/.zensu/logs/x.log`
           // satisfies this check and is judged by no gate at any point.
           //
-          // So this bounds an ACCIDENTAL cross-project truncate — the drifted-cwd
-          // shape, which is the one that actually happens — and not a deliberate
-          // one. It does NOT restore what the pre-change redirect form had: that
+          // AND IT IS VACUOUS FOR THE SHIPPED SPELLING, which an earlier revision
+          // of this paragraph got backwards. `resolveArtifactTarget` is called
+          // with no `base`, so a RELATIVE `--log` resolves against the cwd and the
+          // project root is then derived from that same resolution — this check
+          // compares the cwd against itself and cannot fail. `skills/tdd/SKILL.md`
+          // renders `{log_file}` from `${CLAUDE_PROJECT_DIR:-.}`, and that
+          // variable is unset on some hosts, which is exactly the relative form
+          // (R28 pins it as succeeding). So the drifted-cwd shape is the one shape
+          // this cannot see: a drifted cwd REDEFINES the root it would be judged
+          // against.
+          //
+          // What it does bound is an ABSOLUTE `--log` naming another project,
+          // issued from this one (R44). Real, and narrower than it reads.
+          // It does NOT restore what the pre-change redirect form had: that
           // was judged against the session root, an authority outside the command,
           // while this is state the command sets in its own first token. Anchoring
           // on the `project_root` of the Session Control record — the authority

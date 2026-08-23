@@ -46,10 +46,28 @@
 // divergence needs a second `.zensu/logs` under a non-root cwd. Narrow, and
 // named rather than papered over.
 //
-// The rule is TEXTUAL and that bound is real: a path spelled through a symlink
-// or a shell alias that does not match a known root is not caught, and a git
-// repository root ABOVE the project root is redacted only insofar as $HOME
-// covers it.
+// The rule is TEXTUAL, and "TOTAL" above is a claim about COVERAGE of the
+// residual prefixes, not a promise that no developer path can survive. Four
+// bounds are real, and the first two were measured rather than reasoned:
+//
+//   - CASE VARIANCE. Every rule here is built with the `g` flag and no `i`,
+//     while `isWitnessName` below is deliberately case-insensitive, on the
+//     stated grounds that the filesystem may not distinguish the spellings.
+//     Both cannot be right. On APFS and NTFS `cd /users/<name>/…` is a working path that
+//     reaches a `cmd="…"` field verbatim and that no rule matches. Left
+//     case-sensitive on purpose: `i` here would also rewrite ordinary prose
+//     containing "users" or "home" out of an audit trail whose whole value is
+//     being readable, and the residual rules already run against text, not paths.
+//   - NESTING. Residual rule 3 consumes its prefix plus exactly ONE segment and
+//     cannot re-anchor inside what follows, because the left bound fails on the
+//     character it just consumed. `/Users/a/Users/b` therefore redacts to
+//     `<home>/Users/b`, and a second pass does not repair it — the
+//     placeholder lookbehind now blocks at that separator. Confirmed by running
+//     it, not by reading it.
+//   - a path spelled through a symlink or a shell alias that does not match a
+//     known root is not caught;
+//   - a git repository root ABOVE the project root is redacted only insofar as
+//     $HOME covers it.
 //
 // It is also a rule about PATHS, and identifiers reach these artifacts by other
 // routes. A developer or organisation login appearing outside a path survives
@@ -77,8 +95,9 @@
 // `<root>/.zensu/{plans,logs}/<file>`, verified by canonicalizing the parent
 // directory, and it refuses otherwise. `writeArtifactLine` narrows that further
 // to the `logs` bucket and refuses the witness file, because `mode: 'replace'`
-// truncates and would otherwise destroy a committed plan or the evidence the
-// Phase-6 crosscheck matches against. Without containment this module is a write
+// DESTROYS the previous contents — by rename, never in place — and would
+// otherwise take out a committed plan or the evidence the Phase-6 crosscheck
+// matches against. Without containment this module is a write
 // primitive with a caller-supplied destination that no Bash gate can see,
 // because it carries none of the redirect/tee/heredoc tokens
 // `bash-source-write-parse.js` recognizes as a channel.
@@ -86,9 +105,14 @@
 // Both readers and the writer open with `O_NOFOLLOW`, judge the DESCRIPTOR
 // (`isFile`, `nlink === 1`) rather than the path, and compare its dev/ino against
 // the location re-derived from the canonical parent. `O_NOFOLLOW` binds the final
-// component; the dev/ino comparison catches an intermediate-directory swap one
-// component higher. Both are still CHECK-THEN-USE: they narrow the window from a
-// one-shot symlink plant to a rename race against a real directory, and only
+// component; the dev/ino comparison catches the NAME resolving to a different
+// inode than the one opened, which is the rename/replace race. It does NOT catch
+// an intermediate-directory swap one component higher — an earlier revision of
+// this paragraph claimed it did, and `sameInode` below says why it cannot: when
+// nothing moved, the re-derived parent IS the lexical parent, so the lstat
+// re-traverses exactly what the open traversed and both sides move together.
+// Both checks are still CHECK-THEN-USE: they narrow the window from a one-shot
+// symlink plant to a rename race against a real directory, and only
 // `openat`-style semantics — which Node does not expose — would close it.
 // The same is true of `redactFile`'s pre-rename re-stat and of
 // `writeArtifactLine`'s single `writeFileSync`, which can leave a partial line
@@ -164,10 +188,22 @@ const SWEEP_WINDOW_SECONDS = 300;
 // `hooks/post-artifact-redact.sh` as the named target, so it can never be the
 // one the cap drops.
 //
-// Accepted bound, stated rather than implied: a checkout that refreshes more
-// than this many artifacts inside one window, followed by fewer tool calls than
-// it takes to drain them, leaves the tail unswept until something touches it
-// again. Bounding a hook's synchronous work is worth that.
+// Accepted bound, and it is HARDER than an earlier revision of this comment
+// admitted. That revision made the unswept tail conditional on there being too
+// few later tool calls, which presupposes some number of them that drains it.
+// There is none. The sort below is a TOTAL deterministic order
+// (mtime desc, then path) over a candidate set the sweep never shrinks, so with
+// more than this many in-window artifacts the SAME ones are selected on every
+// invocation: a clean artifact answers `no-op` and is not rewritten, so its
+// mtime never changes and it keeps its place at the head forever. Within the
+// window, the tail is not reached at all — not slowly, never. It becomes
+// reachable only when the head ages out of the window.
+//
+// Rotating the selection (an offset, or spending part of the budget oldest-first)
+// would fix it and is deliberately not done: writer-side redaction already covers
+// every artifact this plugin writes, and the sweep is the net under a hand-rolled
+// append. Bounding a hook's synchronous work is worth an unreached tail; claiming
+// the tail drains is not.
 const SWEEP_MAX_TARGETS = 25;
 
 // 8 MiB. A narrative log that large is pathological; refusing to load it is
@@ -522,19 +558,23 @@ function sweepTargets(projectRoot, options = {}) {
     for (const entry of entries) {
       const name = entry.name;
       if (!name.endsWith(extension)) continue;
-      // The witness is redacted by its own writer and is the largest file in the
-      // directory. It is gitignored in THIS repository only — a consuming repo has
-      // to add `.zensu/state/` and `.zensu/logs/witness-*.log` itself — so "never
-      // committed" is NOT the reason it is skipped here, and saying so would
-      // re-assert the claim docs/tdd-manager-workflow.md exists to retract.
-      // EITHER bucket, not just `logs`. `redactFile` refuses any `witness-`
-      // basename wherever it sits and answers `witness-artifact`, and that reason
-      // is deliberately in none of the three exported sets — so a swept path
-      // carrying it fell through the hook's partition and printed "artifact left
-      // UNREDACTED (sweep)" once per tool call for the whole window, about a file
-      // the design refuses on purpose. Scoping the skip to `logs` made the module
-      // header's "excluded from EVERY path" false for the enumeration alone.
-      if (isWitnessName(name)) continue;
+      // `logs` ONLY, and the scope is load-bearing rather than tidy. The witness
+      // lives in `.zensu/logs/`; it is redacted by its own writer and is the
+      // largest file in the directory. It is gitignored in THIS repository only
+      // — a consuming repo has to add `.zensu/state/` and
+      // `.zensu/logs/witness-*.log` itself — so "never committed" is NOT the
+      // reason it is skipped here, and saying so would re-assert the claim
+      // docs/tdd-manager-workflow.md exists to retract.
+      //
+      // An earlier round widened this to EITHER bucket to silence a stderr line:
+      // `redactFile` then refused a plans-bucket `witness-` name too, and
+      // `witness-artifact` is in none of the reason sets the hook partitions on,
+      // so every tool call printed "artifact left UNREDACTED (sweep)" for it.
+      // Widening the skip removed the message and left the file unredacted —
+      // which the consuming repo's `.gitignore` fragment does not cover either.
+      // The refusal is scoped now instead, so a `.zensu/plans/witness-*.md` is an
+      // ordinary plan: swept here, redacted, and silent because nothing is wrong.
+      if (bucket === 'logs' && isWitnessName(name)) continue;
       // The dirent carries the type, so a directory or a symlink named like an
       // artifact is rejected without a syscall. A filesystem that does not report
       // `d_type` answers UNKNOWN and every predicate below is false — the entry
@@ -596,12 +636,27 @@ function defaultHome() {
 function redactFile(filePath, options = {}) {
   const target = resolveArtifactTarget(filePath, options.expectedRoot, options.base);
   if (!target.ok) return { changed: false, reason: target.reason };
-  // The witness is excluded from EVERY path, not just the sweep. Its `tail` must
-  // stay raw — redaction there is purely subtractive and would let a `failed`
-  // token inside an absolute path vanish, downgrading an EVIDENCE CONTRADICTION
-  // to `verified` — and the targeted Edit/Write branch reaches this function
-  // with a caller-supplied path.
-  if (isWitnessName(path.basename(target.path))) {
+  // The witness is excluded from every path that can reach IT, and the bucket is
+  // part of that — not decoration. The reason is entirely logs-specific: the
+  // witness `tail` must stay raw, because redaction there is purely subtractive
+  // and would let a `failed` token inside an absolute path vanish, downgrading
+  // an EVIDENCE CONTRADICTION to `verified`. A `.zensu/plans/witness-*.md` has
+  // no `tail` and no crosscheck relationship, so none of that applies to it.
+  //
+  // AN UNSCOPED REFUSAL HERE WAS A LEAK, and a pinned one. It answered
+  // `witness-artifact` for a plans-bucket name too, so such a file kept its
+  // absolute developer paths; the `.gitignore` fragment this feature ships for
+  // consumers covers `.zensu/logs/witness-*.log` only, so it was not ignored
+  // either; and an earlier round silenced the resulting stderr line by dropping
+  // the name from `sweepTargets`' ENUMERATION instead, which removed the report
+  // and kept the leak. Unredacted, unscanned, unreported and un-ignored at once
+  // — the exact harm this module exists to remove. Scoping the refusal is the
+  // fix; scoping the enumeration was treating the symptom, in the wrong
+  // direction. R62 pins both sides, R55 the swept route.
+  //
+  // The targeted Edit/Write branch reaches this function with a caller-supplied
+  // path, so this is the only guard that route passes.
+  if (target.bucket === 'logs' && isWitnessName(path.basename(target.path))) {
     return { changed: false, reason: 'witness-artifact' };
   }
 
@@ -690,8 +745,11 @@ function redactFile(filePath, options = {}) {
 // The narrative-log WRITE, performed here rather than by a shell redirect.
 //
 // It is named for what it can do, not for its common case: `mode: 'replace'`
-// truncates. Calling it `append` hid the destructive capability at every call
-// site.
+// DESTROYS whatever the artifact held. Calling it `append` hid the destructive
+// capability at every call site. Say "destroys", not "truncates": the in-place
+// truncate is gone — `replaceArtifactFile` publishes an `O_EXCL` temp by rename
+// and `O_TRUNC` is deliberately absent from every open in this file — and a
+// comment naming the removed mechanism invites a future editor to restore it.
 //
 // A shell `>>` names a PATH and follows whatever it finds, while the validation
 // that preceded it named a different moment and — for a hard link — a different
@@ -719,7 +777,7 @@ function writeArtifactLine(filePath, line, options = {}) {
   const target = resolveArtifactTarget(filePath, options.expectedRoot, options.base);
   if (!target.ok) return { written: false, reason: target.reason };
   // The narrative LOG only. `resolveArtifactTarget` admits both buckets, so
-  // without this the same verb — in `replace` mode — truncates a committed plan
+  // without this the same verb — in `replace` mode — destroys a committed plan
   // or the witness log the Phase-6 crosscheck matches against.
   if (target.bucket !== 'logs') return { written: false, reason: 'not-a-log-artifact' };
   // Case-INSENSITIVE, because the comparison runs against a path the filesystem
@@ -895,6 +953,15 @@ const NON_ARTIFACT_REASONS = new Set([
   'artifact-directory-unresolvable',
   'no-path',
 ]);
+// The fourth set, and the reason it exists is that three were not a partition.
+// `witness-artifact` is issued by this module ON PURPOSE and belonged to none of
+// the sets above, so a consumer that partitions on them reported a deliberate
+// design refusal as the worst outcome it has — "artifact left UNREDACTED". A
+// reason the module mints is the module's to classify; leaving one uncovered
+// pushes the decision into every caller, and the caller has no way to tell a
+// refusal-by-design from a redaction that failed. Add any future
+// refused-by-design reason HERE rather than teaching a consumer another literal.
+const DESIGN_REFUSAL_REASONS = new Set(['witness-artifact']);
 
 function parseArgs(argv) {
   const opts = { mode: '', projectRoot: '', home: '', file: '' };
@@ -979,6 +1046,7 @@ module.exports = {
   writeArtifactLine,
   defaultHome,
   NON_ARTIFACT_REASONS,
+  DESIGN_REFUSAL_REASONS,
   TRANSIENT_REASONS,
   CLEAN_REASONS,
   rootSpellings,

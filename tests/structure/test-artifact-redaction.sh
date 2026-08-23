@@ -509,8 +509,8 @@ node -e '
 ' "$OLD_LOG"
 SWEEP_CONTROL="$PROJ/.zensu/logs/2026-01-01-0012_tdd-control.log"
 printf 'CONTROL %s\n' "$LEAK_TEXT" > "$SWEEP_CONTROL"
-sweep_payload 'echo sweep' \
-  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" >/dev/null 2>&1
+ERR17="$(sweep_payload 'echo sweep' \
+  | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
 # Positive control: without it, any failure that stops the hook before the sweep
 # satisfies all three negatives below.
 if [ -f "$SWEEP_CONTROL" ] && ! grep -qF "$FOREIGN_USER" "$SWEEP_CONTROL" \
@@ -519,10 +519,19 @@ if [ -f "$SWEEP_CONTROL" ] && ! grep -qF "$FOREIGN_USER" "$SWEEP_CONTROL" \
 else
   check "R17ctl the same sweep invocation DID redact an in-window artifact" FAIL
 fi
-if grep -qF "$FOREIGN_USER" "$FRESH_WITNESS"; then
-  check "R17 the sweep skips witness-*.log" PASS
+# BOTH arms are required, and the content arm alone proves nothing about the
+# ENUMERATION. `redactFile` refuses any `witness-` basename before it opens
+# anything and answers `witness-artifact`, so the file is unmodified whether or
+# not `sweepTargets` skipped it — deleting the enumeration guard left this check
+# green while every tool call printed an UNREDACTED line for the largest file in
+# the directory. `witness-artifact` is in none of the hook's three reason sets,
+# so a swept witness surfaces on stderr; the stderr arm is what makes this
+# sensitive to the guard it names. R55 is the same pair for the plans bucket.
+if grep -qF "$FOREIGN_USER" "$FRESH_WITNESS" \
+  && ! printf '%s' "$ERR17" | grep -qF 'witness-sweep-probe.log'; then
+  check "R17 the sweep skips witness-*.log, and does not report it as a fault" PASS
 else
-  check "R17 the sweep skips witness-*.log" FAIL
+  check "R17 the sweep skips witness-*.log, and does not report it as a fault (err=[$ERR17])" FAIL
 fi
 if grep -qF "$FOREIGN_USER" "$OLD_LOG"; then
   check "R17a the sweep skips an artifact older than the window" PASS
@@ -1134,10 +1143,19 @@ fi
 # arrange. The behavioral half runs the sweep BETWEEN the append and the
 # crosscheck, which is the interleaving nothing exercised: R8 checks the two
 # writers against each other with no sweep in between.
-if printf '%s' "$HOOK_PROGRAM" | grep -qF 'CLAUDE_PROJECT_DIR'; then
-  check "R51 the sweep passes CLAUDE_PROJECT_DIR alongside the record root" PASS
+# The structural half pins the two COMPOSED expressions, not the token. A bare
+# `grep -qF 'CLAUDE_PROJECT_DIR'` over the whole program was green for any
+# placement of the variable — including moving it into `expectedRoot`, which is
+# the one edit the hook's own comment forbids, because that widens the
+# containment bound rather than the root set. Both spellings are pinned at a
+# count of exactly 1 so a second, contradicting occurrence fails too.
+R51_UNION="$(printf '%s' "$HOOK_PROGRAM" \
+  | grep -cF 'projectRoot: [project, process.env.CLAUDE_PROJECT_DIR || ""].filter(Boolean)')"
+R51_BOUND="$(printf '%s' "$HOOK_PROGRAM" | grep -cF 'expectedRoot: project,')"
+if [ "$R51_UNION" -eq 1 ] && [ "$R51_BOUND" -eq 1 ]; then
+  check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root" PASS
 else
-  check "R51 the sweep passes CLAUDE_PROJECT_DIR alongside the record root" FAIL
+  check "R51 the sweep unions CLAUDE_PROJECT_DIR into projectRoot and leaves expectedRoot the record root (union=$R51_UNION bound=$R51_BOUND)" FAIL
 fi
 
 SWEPT_LOG="$PROJ/.zensu/logs/2026-01-01-0051_tdd-swept.log"
@@ -1287,11 +1305,61 @@ WITNESS_PLAN="$PROJ/.zensu/plans/witness-probe-r55.md"
 printf 'PLANTED %s\n' "$FOREIGN_USER" > "$WITNESS_PLAN"
 ERR55="$(sweep_payload 'printf "%s\n" "x" >> "$LOG"' \
   | env HOME="$FAKE_HOME" CLAUDE_PROJECT_DIR="$PROJ" bash "$ARTIFACT_HOOK" 2>&1 >/dev/null)"
+# R55 IS INVERTED FROM WHAT ROUND 5 PINNED, deliberately, and the old assertion
+# is why this needed a seventh round to find. Round 5 saw the hook print
+# `artifact left UNREDACTED (sweep)` for a plans-bucket `witness-` name and
+# silenced it by dropping the name from the ENUMERATION. That removed the
+# report and kept the leak: `redactFile` still refused the file, so the planted
+# developer path stayed on disk — and R55's second arm asserted exactly that,
+# turning a leak into a pinned expectation. The refusal's own stated reason is
+# logs-only (the witness `tail` must stay raw or a `failed` token inside an
+# absolute path vanishes and an EVIDENCE CONTRADICTION downgrades to
+# `verified`); a `.zensu/plans/witness-*.md` has no `tail` and no crosscheck
+# relationship, and the `.gitignore` fragment this feature ships for consumers
+# covers `.zensu/logs/witness-*.log` only. So it was unredacted, unscanned,
+# unreported and un-ignored at once. The refusal is now scoped to the `logs`
+# bucket and the enumeration skip with it, which makes such a file an ordinary
+# plan: swept, redacted, and silent because nothing was wrong.
 if ! printf '%s' "$ERR55" | grep -qF 'witness-probe-r55.md' \
-  && grep -qF "$FOREIGN_USER" "$WITNESS_PLAN"; then
-  check "R55 a witness name in the plans bucket is skipped by the sweep, not reported as a fault" PASS
+  && ! grep -qF "$FOREIGN_USER" "$WITNESS_PLAN" \
+  && grep -qF 'PLANTED' "$WITNESS_PLAN"; then
+  check "R55 a witness name in the plans bucket is redacted like any plan, and reported as no fault" PASS
 else
-  check "R55 a witness name in the plans bucket is skipped by the sweep (err=[$ERR55])" FAIL
+  check "R55 a witness name in the plans bucket is redacted like any plan (err=[$ERR55])" FAIL
+fi
+
+# R62 is the same property through the FUNCTION rather than the sweep, because
+# the two routes refuse independently and the sweep half alone would not catch a
+# regression in `redactFile`. It also pins the other side: a logs-bucket witness
+# is still refused, which is the case the raw-`tail` argument actually covers.
+R62_OUT="$(REDACT="$REDACT" node -e '
+  const fs = require("fs");
+  const os = require("os");
+  const path = require("path");
+  const m = require(process.env.REDACT);
+  const root = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), "r62-"));
+  fs.mkdirSync(path.join(root, ".zensu", "plans"), { recursive: true });
+  fs.mkdirSync(path.join(root, ".zensu", "logs"), { recursive: true });
+  const leak = "/Users/r62probe/checkout";
+  const plan = path.join(root, ".zensu", "plans", "witness-probe-r62.md");
+  const log = path.join(root, ".zensu", "logs", "witness-probe-r62.log");
+  fs.writeFileSync(plan, "PLANNED " + leak + "\n");
+  fs.writeFileSync(log, "WITNESSED " + leak + "\n");
+  const planVerdict = m.redactFile(plan, { projectRoot: root, home: "/nohome-r62" });
+  const logVerdict = m.redactFile(log, { projectRoot: root, home: "/nohome-r62" });
+  const planLeaks = fs.readFileSync(plan, "utf8").includes(leak);
+  const logRaw = fs.readFileSync(log, "utf8").includes(leak);
+  fs.rmSync(root, { recursive: true, force: true });
+  process.stdout.write(
+    (!planLeaks && planVerdict.reason !== "witness-artifact"
+      && logRaw && logVerdict.reason === "witness-artifact") ? "OK"
+    : "plan=" + JSON.stringify(planVerdict) + " planLeaks=" + planLeaks
+      + " log=" + JSON.stringify(logVerdict) + " logRaw=" + logRaw);
+' 2>&1)"
+if [ "$R62_OUT" = "OK" ]; then
+  check "R62 redactFile refuses a witness name in the logs bucket only, and redacts one in plans" PASS
+else
+  check "R62 redactFile refuses a witness name in the logs bucket only, and redacts one in plans ($R62_OUT)" FAIL
 fi
 rm -f "$WITNESS_PLAN"
 
@@ -1666,6 +1734,78 @@ if [ "$OUT43" = "OK" ]; then
   check "R43 a mixed-separator path leaves no user segment behind" PASS
 else
   check "R43 a mixed-separator path leaves no user segment behind (bad: $OUT43)" FAIL
+fi
+
+# ── R56-R61: the claims this feature makes about itself ──────────────
+# Six rounds of review spent most of their findings on ONE class: a comment or a
+# shipped operator doc claiming more than the code delivers. Three of the six
+# below were retracted at some sites and left standing at others, which is the
+# shape that keeps coming back — a coupled-site roster is prose, and prose does
+# not fail. These pins make each retraction checkable. They are deliberately
+# NEGATIVE (the false claim is absent) rather than positive (some replacement
+# wording is present): a positive pin would freeze one phrasing and fail on an
+# honest reword, while the false claim is what must never return.
+#
+# Whitespace is normalized before matching because every one of these claims is
+# wrapped across two or three comment lines, so a line-scoped grep sees none of
+# them. That is not hypothetical — it is why the module's own copies survived the
+# round that corrected CLAUDE.md.
+claim_absent() {
+  local label="$1" file="$2" pattern="$3"
+  local hits
+  hits="$(FILE="$file" PATTERN="$pattern" node -e '
+    const fs = require("fs");
+    const text = fs.readFileSync(process.env.FILE, "utf8")
+      .replace(/^[ \t]*(#|\/\/)[ \t]?/gm, " ")
+      .replace(/\s+/g, " ");
+    const m = text.match(new RegExp(process.env.PATTERN, "g"));
+    process.stdout.write(m ? String(m.length) : "0");
+  ' 2>/dev/null)"
+  if [ "$hits" = "0" ]; then
+    check "$label" PASS
+  else
+    check "$label (found $hits)" FAIL
+  fi
+}
+
+claim_absent "R56 the witness writer no longer claims the witness is never committed" \
+  "$WITNESS_HOOK" "never committed"
+
+claim_absent "R57a docs/configuration.md no longer spells the sweep exclusion as a .log-only glob" \
+  "$PLUGIN_DIR/docs/configuration.md" "witness-\\*\\.log\` is excluded"
+claim_absent "R57b the CHANGELOG no longer spells the sweep exclusion as a .log-only glob" \
+  "$PLUGIN_DIR/CHANGELOG.md" "witness-\\*\\.log\` is excluded"
+
+claim_absent "R58a the module header no longer claims dev/ino catches an intermediate-directory swap" \
+  "$REDACT" "dev/ino comparison catches an intermediate-directory swap"
+claim_absent "R58b CLAUDE.md no longer claims the same swap is closed" \
+  "$PLUGIN_DIR/CLAUDE.md" "re-derived from the canonical parent, which closes the same swap"
+
+claim_absent "R59 the module no longer describes mode: 'replace' as truncating" \
+  "$REDACT" "'replace'\`? (mode )?truncates"
+
+claim_absent "R60 the sweep cap no longer claims the tail drains after enough tool calls" \
+  "$REDACT" "followed by fewer tool calls than it takes to drain them"
+
+# R61 is the positive half of the pair, and it is the exception the block header
+# allows: M17 and M20 are bounds the header must NAME, not claims it must drop.
+# `/users/<name>` on a case-insensitive filesystem and a nested `/Users/a/Users/b`
+# both survive redaction — the second was confirmed by execution, not by reading
+# — so a header that calls residual rule 3 what makes the guarantee TOTAL is
+# false until both are listed beside the symlink/alias bound.
+R61_BOUNDS="$(FILE="$REDACT" node -e '
+  const fs = require("fs");
+  const text = fs.readFileSync(process.env.FILE, "utf8")
+    .replace(/^[ \t]*\/\/[ \t]?/gm, " ").replace(/\s+/g, " ");
+  const total = /makes the guarantee TOTAL/.test(text);
+  const caseBound = /case-insensitive filesystem|differently-cased|case variance/i.test(text);
+  const nestedBound = /nested home prefix|cannot re-anchor/i.test(text);
+  process.stdout.write(!total || (caseBound && nestedBound) ? "OK" : "MISSING");
+' 2>/dev/null)"
+if [ "$R61_BOUNDS" = "OK" ]; then
+  check "R61 a TOTAL residual guarantee is stated only alongside the case and nesting bounds" PASS
+else
+  check "R61 a TOTAL residual guarantee is stated only alongside the case and nesting bounds" FAIL
 fi
 
 # ── R26: a SKIP on a POSIX host is a defect, not a pass ──────────────
