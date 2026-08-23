@@ -13,12 +13,12 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (134 = 127 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 123, and the arithmetic closes at 127
+reconciled to that manifest (138 = 131 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's eleven CI group headers sum to 127, and the arithmetic closes at 131
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
-(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 130 against 134. Nothing
+(the first and fourth are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
+§3's twelfth header, the local-only group of 7, gives 134 against 138. Nothing
 machine-checks this document, so treat §3's per-group numbers as descriptive rather than
 authoritative until that sweep happens.
 
@@ -26,11 +26,11 @@ authoritative until that sweep happens.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **134** — 127 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **138** — 131 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **5** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **7** (40 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,100** (~3,640 in the CI set) | — |
 
@@ -38,8 +38,8 @@ authoritative until that sweep happens.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 134 structure suites + 5 offline evals | none |
-| `--ci` | 127 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 138 structure suites + 5 offline evals | none |
+| `--ci` | 131 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -187,6 +187,17 @@ contract.
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
 root containing whitespace and an apostrophe, and the Windows CI manifest contract.
 
+### Documentation pins (4)
+`multi-repo-doc-citations` · `multi-repo-doc-consistency` ·
+`multi-repo-doc-contrast` · `multi-repo-doc-structure`
+
+The three hand-written multi-repo design documents under `docs/` have no build step and
+are never rendered in CI, so these four suites are the only thing that grades them:
+`path:line` citations resolve to a substantive line, WCAG contrast holds across all three
+palettes on both pages, the pages carry landmarks, resolved ARIA references and no
+unresolvable `var()` in an SVG presentation attribute, and the three documents agree with
+each other on counts, terminology, navigation and the specification's BLOCKED status.
+
 ### Promptfoo local-only (7 — skipped under `--ci`)
 `claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
 `promptfoo-reset-review-limit` · `promptfoo-session-upgrade` (~206) ·
@@ -264,16 +275,21 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-5 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
-`node tests/run-profile.js <profile>`:
+7 bounded shards, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
+`node tests/run-profile.js <profile>`. The names and counts below are derived from
+`tests/profiles/windows-ci.v1.json`; `tests/structure/windows-ci-contract.test.js`
+pins exactly these seven keys and the 40-entry total, so a shard renamed there and
+not here is drift this table cannot catch on its own:
 
 | Profile | Suites | Focus |
 |---|---|---|
-| `windows-reset-session` | 8 | deferred-reset races, self-review handoff, review-marker reconcile, session-control-claude, MSYS module boundaries, safe file read, large-identity upgrade hook |
-| `windows-leases-routing` | 9 | lease refresh, stop-enforcer routing, plan delegate, source-write gate, installed-plugin provisioner, external lease, banner, upgrade process boundaries |
-| `windows-native-state` | 10 | claim adoption, autopilot state machine, pre-edit mirror, capability gate, session-id, versioned upgrade, MSYS runtime, marketplace fixture, coverage-report paths, installer concurrency |
-| `windows-installed-core` | 9 | transfer reset, installed wrapper, evidence lease, session-control-core, portability guards, **split** metadata contract (3 min) vs profile-lifecycle contract (7 min), checkout credentials, Linux sandbox host paths |
-| `windows-native-branches` | 4 | bound payload, file-exists path transport, TDD state junction safety, plan-payload path transport |
+| `windows-shard-1` | 9 | autopilot bound payload and state machine, deferred lease refresh and review fallback, installed-plugin provisioner, no-flock external lease, Linux sandbox host paths, Windows CI metadata contract, checkout credentials |
+| `windows-shard-2` | 8 | installed wrapper, MSYS runtime boundaries, pre-edit hook mirror, reviewer capability gate, runtime-fixture installer concurrency, session-control core, large-identity upgrade hook, versioned plugin upgrade |
+| `windows-shard-3` | 6 | deferred-reset races, file-exists path transport, MSYS special plugin module boundaries, session-start banner, VCS review-marker reconcile, Windows profile-lifecycle contract |
+| `windows-shard-4` | 3 | deferred claim adoption, plan-payload path transport, TDD state junction safety |
+| `windows-shard-5` | 7 | autopilot plan delegate, coverage-report Windows paths, post-review self-review handoff, session id, session safe file read, upgrade provider zero-launch, portability guards |
+| `windows-shard-6` | 5 | Bash source-write gate, deferred transfer reset, marketplace fixture, session-control-claude, upgrade process Windows boundaries |
+| `windows-shard-7` | 2 | review-worker evidence lease, stop-enforcer self-review routing |
 
 Runner guarantees: full manifest + audited command catalog validated before any child
 starts; every suite bound to a validated content digest; per-suite **and** 30-minute
@@ -281,7 +297,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 5
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 7
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite
@@ -291,7 +307,7 @@ file. Fails closed on missing, failed, timed-out, or incompletely-cleaned profil
 
 | Workflow | Invokes |
 |---|---|
-| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 5 Windows profiles via `run-profile.js` |
+| `ci.yml` | `bash tests/run-all.sh --ci` (Ubuntu, blocking) + the 7 Windows profiles via `run-profile.js` |
 | `release.yml` | `bash tests/run-all.sh --ci` **twice** — once in `prepare` against the local release commit, once in `publish` against the exact `github.sha`; plus runtime-digest and clean-tree evidence |
 | `windows-safety.yml` | `node tests/run-windows-safety-shard.js <kind> <shard> <total>` — scheduled weekly + manual; partitions the former Windows monolith (legacy canary + every non-Promptfoo structure test + all 3 offline eval runners) without duplication or loss, 30-minute command deadline |
 

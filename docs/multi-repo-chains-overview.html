@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Anchor and Satellites</title>
+<title>Multi-repo chains — anchor and code roots</title>
 <style>
   :root {
     --bg: #f7f7f5;
@@ -11,12 +11,13 @@
     --surface-2: #f0efec;
     --ink: #1c1b19;
     --ink-2: #55524d;
-    --ink-3: #86827b;
+    --ink-3: #6b6862;
     --line: #dddad4;
     --line-2: #c4c0b8;
-    --accent: #b4532a;
+    --line-strong: #8a867e;
+    --accent: #a54a24;
     --accent-soft: #f6e5dd;
-    --warn: #8a6d1f;
+    --warn: #7d621b;
     --warn-soft: #f8f0d8;
     --ok: #3d6b47;
     --ok-soft: #e2efe4;
@@ -30,9 +31,10 @@
       --surface-2: #26252c;
       --ink: #eceaf0;
       --ink-2: #b3afba;
-      --ink-3: #837f8c;
+      --ink-3: #9d99a6;
       --line: #34323c;
       --line-2: #55515f;
+      --line-strong: #7e7a89;
       --accent: #e08a63;
       --accent-soft: #3a2620;
       --warn: #d9bb6a;
@@ -47,9 +49,10 @@
     --surface-2: #26252c;
     --ink: #eceaf0;
     --ink-2: #b3afba;
-    --ink-3: #837f8c;
+    --ink-3: #9d99a6;
     --line: #34323c;
     --line-2: #55515f;
+    --line-strong: #7e7a89;
     --accent: #e08a63;
     --accent-soft: #3a2620;
     --warn: #d9bb6a;
@@ -89,24 +92,24 @@
 
   figure { margin: 0 0 1.25rem; }
   .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); padding: 1rem; }
-  svg.diagram { display: block; min-width: 660px; width: 100%; height: auto; }
+  svg.diagram { display: block; min-width: 880px; width: 100%; height: auto; }
   figcaption { font-size: .85rem; color: var(--ink-3); margin-top: .6rem; }
 
   /* SVG paint — custom properties do not resolve inside presentation
      attributes, so every fill and stroke is set through a class instead. */
   .diagram { font-family: var(--sans); }
-  .box      { fill: var(--surface-2); stroke: var(--line-2); }
-  .box-plain{ fill: var(--surface);   stroke: var(--line-2); }
-  .box-ghost{ fill: var(--surface-2); stroke: var(--line-2); stroke-dasharray: 4 4; }
+  .box      { fill: var(--surface-2); stroke: var(--line-strong); }
+  .box-plain{ fill: var(--surface);   stroke: var(--line-strong); }
+  .box-ghost{ fill: var(--surface-2); stroke: var(--line-strong); stroke-dasharray: 4 4; }
   .box-anchor      { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
   .box-anchor-open { fill: var(--surface);     stroke: var(--accent); stroke-width: 1.5; }
   .t-ink  { fill: var(--ink); }
   .t-ink2 { fill: var(--ink-2); }
   .t-ink3 { fill: var(--ink-3); }
   .t-acc  { fill: var(--accent); }
-  .flow      { fill: none; stroke: var(--line-2); }
-  .flow-dash { fill: none; stroke: var(--line-2); stroke-dasharray: 4 4; }
-  .arrowhead { fill: var(--line-2); stroke: none; }
+  .flow      { fill: none; stroke: var(--line-strong); }
+  .flow-dash { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
+  .arrowhead { fill: var(--line-strong); stroke: none; }
   .divider   { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 5; }
   .code-svg  { font-family: var(--mono); }
   .bold-svg  { font-weight: 600; }
@@ -158,6 +161,15 @@
   .stage ul { margin: 0; padding-left: 1.1rem; font-size: .9rem; color: var(--ink-2); }
   .stage li { margin-bottom: .35rem; }
 
+  .scroll:focus-visible,
+  .tablewrap:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+  details.longdesc { margin: .6rem 0 0; font-size: .9rem; color: var(--ink-2); }
+  details.longdesc summary { cursor: pointer; color: var(--accent); font-size: .85rem; }
+  details.longdesc li { margin-bottom: .4rem; }
+
   footer { border-top: 1px solid var(--line); margin-top: 3rem; padding-top: 1.5rem; font-size: .82rem; color: var(--ink-3); }
 </style>
 </head>
@@ -170,7 +182,14 @@
   <p class="lede">How a Zensu chain could span several repositories without giving up the one
   trusted project root — and how a review sitting on top of it can see contract breaks between
   those roots.</p>
+  <p class="lede"><strong>Status: proposed, and stages 2 and 3 are BLOCKED.</strong> Nothing here is
+  implemented. Stage 2 must not be built until the carrier question of the specification's §6.1.1 is
+  answered and the carrier-integrity finding of §8.1 is resolved: the workflow document is writable
+  from inside the session and carries no integrity check, so it cannot hold a capability. Read the
+  staging below as blocked work, not as a plan ready to execute.</p>
 </header>
+
+<main>
 
 <section>
   <h2><span class="num">1</span> Today: everything hangs off one anchor</h2>
@@ -178,8 +197,9 @@
   the chain asks that same place, and anything outside it does not exist for the chain.</p>
 
   <figure>
-    <div class="scroll">
-      <svg class="diagram" viewBox="0 0 880 400" role="img" aria-label="Diagram: every consumer points at a single project root while two sibling repositories sit outside the visibility boundary">
+    <div class="scroll" tabindex="0" role="group" aria-labelledby="d1-cap">
+      <svg class="diagram" viewBox="0 0 880 400" role="img" aria-labelledby="d1-title" aria-describedby="d1-desc">
+        <title id="d1-title">Today: every chain consumer reads one project root</title>
         <defs>
           <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -194,7 +214,7 @@
         </g>
 
         <g font-size="12.5">
-          <rect class="box" x="40" y="52" width="140" height="48" rx="7"/>
+          <rect class="box" x="55" y="52" width="110" height="48" rx="7"/>
           <rect class="box" x="185" y="52" width="110" height="48" rx="7"/>
           <rect class="box" x="315" y="52" width="110" height="48" rx="7"/>
           <rect class="box" x="445" y="52" width="110" height="48" rx="7"/>
@@ -239,7 +259,15 @@
         </g>
       </svg>
     </div>
-    <figcaption>The orchestrator is the project root. The code is produced right of the line.</figcaption>
+    <figcaption id="d1-cap">The orchestrator is the project root. The code is produced right of the line.</figcaption>
+    <details id="d1-desc" class="longdesc">
+      <summary>Text description of the diagram</summary>
+      <ol>
+        <li>Four consumers — Edit landing (phase 6, step 5b), Review packet (changed_files), Write gate (rules B and C), Terminus (tdd-complete) — all point at one anchor.</li>
+        <li>The anchor is the single project root resolved by zensu_resolve_project_dir(). It holds state, logs, the workflow document and doctor. Below it sits the orchestrator repository, where no code is written.</li>
+        <li>Right of the visibility boundary are the backend/ and frontend/ worktrees where the code actually lives. Both are invisible to audit and review, and denied for Bash writes.</li>
+      </ol>
+    </details>
   </figure>
 </section>
 
@@ -263,7 +291,7 @@
       <p>Rule (B) of the write gate denies every Bash write outside the root. The edit gate only
       classifies a path as <code>state</code>, <code>zensu</code> or <code>other</code> and does not
       confine it. The topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:808 · pre-edit-tdd-reminder.sh:161</p>
+      <p class="src">bash-source-write-parse.js:808 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass</span>
@@ -271,7 +299,7 @@
       <p>The receipt gate fires only when <code>git -C "$CLAUDE_PROJECT_DIR"</code> counts changes.
       With a clean orchestrator the count is zero, the receipt is skipped, and the chain closes — with
       a reviewer that saw nothing either.</p>
-      <p class="src">zensu-log.sh:558-568</p>
+      <p class="src">zensu-log.sh:558-569</p>
     </div>
   </div>
 </section>
@@ -282,8 +310,9 @@
   declared list of further roots is added, read by a small set of consumers.</p>
 
   <figure>
-    <div class="scroll">
-      <svg class="diagram" viewBox="0 0 880 400" role="img" aria-label="Diagram: the consumers read the union of anchor and declared code roots">
+    <div class="scroll" tabindex="0" role="group" aria-labelledby="d2-cap">
+      <svg class="diagram" viewBox="0 0 780 400" role="img" aria-labelledby="d2-title" aria-describedby="d2-desc">
+        <title id="d2-title">The proposal: consumers read the union of anchor and code roots</title>
         <defs>
           <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -317,7 +346,7 @@
           <rect class="box-anchor" x="180" y="140" width="420" height="62" rx="9"/>
           <g text-anchor="middle">
             <text class="t-ink bold-svg" x="390" y="166" font-size="14.5">Union: anchor + codeRoots[]</text>
-            <text class="t-ink2" x="390" y="188" font-size="11.5">frozen at arming, immutable afterwards</text>
+            <text class="t-ink2" x="390" y="188" font-size="11.5">must freeze at arming · carrier not yet chosen</text>
           </g>
 
           <g class="flow">
@@ -348,54 +377,65 @@
         </g>
       </svg>
     </div>
-    <figcaption>The consumers read the union. Everything else stays single-rooted.</figcaption>
+    <figcaption id="d2-cap">The consumers read the union. Everything else stays single-rooted.</figcaption>
+    <details id="d2-desc" class="longdesc">
+      <summary>Text description of the diagram</summary>
+      <ol>
+        <li>The same four consumers — Edit landing with labelled claims, Review packet per root, Write gate matching within any declared root, Terminus counting the union — now read one set.</li>
+        <li>That set is the union of the anchor and codeRoots[], which must freeze at arming and be immutable afterwards — a requirement no chosen carrier yet satisfies.</li>
+        <li>It resolves to three trees: the anchor (orchestrator repository, holding state, logs, record and doctor), and two code roots, backend/ and frontend/, whose claims carry a root label such as backend:src/… The anchor alone still carries the session's identity; the satellites carry only code.</li>
+      </ol>
+    </details>
   </figure>
 </section>
 
 <section>
-  <h2><span class="num">4</span> The five consumers</h2>
-  <p class="sub">That is all of them. Everything else — record, state directory, logs, phase gate,
-  doctor — stays untouched at the anchor. The first four carry multi-repo; the fifth carries the
-  cross-root review of section 5.</p>
+  <h2><span class="num">4</span> The consumers that read the union</h2>
+  <p class="sub">These are the consumers whose ENUMERATION or CONFINEMENT changes: the first four
+  carry multi-repo, the fifth carries the cross-root review of section 5.
+  <code>session-trail</code> also reads the same list and is covered in section 6; it is left out
+  here because it gains no new boundary, only more roots to report on. Everything else — record,
+  state directory, logs, phase gate, doctor — stays untouched at the anchor.</p>
 
-  <div class="tablewrap">
+  <div class="tablewrap" tabindex="0" role="group" aria-labelledby="roster-cap">
     <table>
+      <caption id="roster-cap">The consumers that read the union, and the change each needs</caption>
       <thead>
-        <tr><th>Consumer</th><th>Change</th><th class="where">Site</th></tr>
+        <tr><th scope="col">Consumer</th><th scope="col">Change</th><th scope="col" class="where">Site</th></tr>
       </thead>
       <tbody>
         <tr>
-          <td><strong>Edit landing</strong><span class="tag flat inline">stage 2</span></td>
+          <th scope="row"><strong>Edit landing</strong><span class="tag flat inline">stage 2</span></th>
           <td>Enumerate the union. Claims carry a root label instead of being merely repo-relative,
           otherwise <code>src/foo.ts</code> is ambiguous. Exactly <strong>one</strong> merged
           receipt, written beside the anchor's workflow document.</td>
-          <td class="where mono">zensu-edit-landing.sh<br>tdd/SKILL.md:184</td>
+          <td class="where mono">zensu-edit-landing.sh<br>skills/tdd/SKILL.md:181</td>
         </tr>
         <tr>
-          <td><strong>Review packet</strong><span class="tag flat inline">stage 2</span></td>
+          <th scope="row"><strong>Review packet</strong><span class="tag flat inline">stage 2</span></th>
           <td>Enumerate <code>changed_files</code> per root and emit them label-prefixed. Without it
           no reviewer sees the code.</td>
           <td class="where mono">tdd/SKILL.md · step 10.2</td>
         </tr>
         <tr>
-          <td><strong>Write gate</strong><span class="tag flat inline">stage 2</span></td>
+          <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
           <td><code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B)
           and rule (C).</td>
           <td class="where mono">bash-source-write-parse.js:808<br>bash-source-write-parse.js:854</td>
         </tr>
         <tr>
-          <td><strong>Terminus</strong><span class="tag flat inline">stage 2</span></td>
+          <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
           <td>The zero-change scoping of <code>--tdd-complete</code> and <code>--chain-done</code>
           counts the union. Otherwise a clean anchor still closes an empty chain.</td>
-          <td class="where mono">zensu-log.sh:558-568</td>
+          <td class="where mono">zensu-log.sh:558-569</td>
         </tr>
         <tr>
-          <td><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></td>
+          <th scope="row"><strong>Capability confinement</strong><span class="tag flat inline">stage 3</span></th>
           <td>Today it confines every reviewer path to the project root — “file access must remain
           inside the immutable project root” — and forbids absolute Grep patterns and
           <code>..</code>. Without an exception no reviewer can read the satellites even when the
           packet names them.</td>
-          <td class="where mono">reviewer-capability-v1.js:319<br>reviewer-capability-v1.js:286</td>
+          <td class="where mono">reviewer-capability-v1.js:319<br>reviewer-capability-v1.js:285-291</td>
         </tr>
       </tbody>
     </table>
@@ -408,8 +448,9 @@
   stage run that looks solely at relations between roots — and then the chain closes.</p>
 
   <figure>
-    <div class="scroll">
-      <svg class="diagram" viewBox="0 0 880 380" role="img" aria-label="Diagram: three converged per-repo reviews feed a cross-repo review that precedes the terminus and returns findings into fix rounds">
+    <div class="scroll" tabindex="0" role="group" aria-labelledby="d3-cap">
+      <svg class="diagram" viewBox="0 0 880 380" role="img" aria-labelledby="d3-title" aria-describedby="d3-desc">
+        <title id="d3-title">Cross-repo review as a stage between convergence and terminus</title>
         <defs>
           <marker id="a3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
             <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
@@ -460,14 +501,23 @@
         </g>
       </svg>
     </div>
-    <figcaption>One stage between convergence and terminus. The per-repo reviews are unchanged.</figcaption>
+    <figcaption id="d3-cap">One stage between convergence and terminus. The per-repo reviews are unchanged.</figcaption>
+    <details id="d3-desc" class="longdesc">
+      <summary>Text description of the diagram</summary>
+      <ol>
+        <li>Three per-repository reviews converge independently: the anchor (orchestrator), backend/ and frontend/.</li>
+        <li>They feed a single cross-repo review, which reads the union under its own lease, reports findings and demands no test, and runs in both strict and vanilla mode.</li>
+        <li>Only then does the chain reach its terminus, --chain-done.</li>
+        <li>Findings return as an ordinary fix round in the affected root.</li>
+      </ol>
+    </details>
   </figure>
 
   <div class="note">
     <strong>Why this stage is mode-independent.</strong>
     <p>The review chain runs in full under vanilla — fan-out, judge second pass, Finding
     Verification Gate, the consuming reviewer and the self-review terminus are all listed among what
-    runs “exactly as written” (<span class="mono">tdd/SKILL.md:193</span>). The decisive difference
+    runs “exactly as written” (<span class="mono">skills/tdd/SKILL.md:194</span>). The decisive difference
     from the mechanical audit: a reviewer <em>reports</em> a finding, it does not <em>demand</em> a
     characterization test. That demand is precisely why the Cross-Layer audit cannot run in
     vanilla.</p>
@@ -496,10 +546,16 @@
   <div class="note quiet">
     <strong>Step 6b could be split.</strong>
     <p>Part (a) verifies the plan's Cross-Layer table and is rightly skipped in vanilla — the table
-    is never populated there. Part (b) only scans the diff for newly added field and payload
-    literals and demands nothing. It could run in vanilla at warning level, exactly as step 6c
-    already does.</p>
-    <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it.</p>
+    is never populated there. Part (b) is a mechanical diff scan for newly added field and payload
+    literals, and it is skipped for one reason only: it lives inside the same step as part (a).
+    Marking Phase 6 NOT complete is not itself what keeps it out — the Precondition Drift Audit does
+    the same and runs in vanilla. What part (b) inherits is the remedy: its finding text asks for a
+    paired characterization, a test vanilla cannot produce. Making it vanilla-safe therefore needs
+    two edits, not one — downgrade it to warning level as step 6c already is, AND reword the finding
+    so it reports the unpaired literal without demanding the pairing.</p>
+    <p class="src">skills/tdd/SKILL.md:415 · skills/tdd/SKILL.md:417</p>
+    <p>That is a cheap mechanical precursor to the cross-repo review, not a substitute for it. The
+    specification carries the same proposal in §7.4.</p>
   </div>
 </section>
 
@@ -526,7 +582,7 @@
       repo's main checkout. From a code root's repository the session is reachable only via
       <code>--all</code>, otherwise only from the anchor. Pre-existing behavior that multi-repo makes
       more consequential.</p>
-      <p class="src">session-trail/SKILL.md:152</p>
+      <p class="src">skills/session-trail/SKILL.md:152</p>
     </div>
     <div class="card">
       <span class="tag ok">Resume</span>
@@ -539,30 +595,41 @@
 
   <div class="note spaced">
     <strong>Constraint: resume always in the anchor.</strong>
-    <p>A resume inside a code root would present a different <code>CLAUDE_PROJECT_DIR</code>. The
-    Session Control record would no longer match and the session would bind as orphaned or not at
-    all. The printed resume line must therefore never point at a satellite, however plainly the work
-    lives there.</p>
+    <p>A resume inside a code root would present a different <code>CLAUDE_PROJECT_DIR</code> while
+    the recorded <code>project_root</code> still exists — and a present-but-different root is never
+    relaxed, because the orphaned relaxation requires the recorded path to be <em>absent</em>. So the
+    session would not bind as orphaned; it would simply be denied. The printed resume line must
+    therefore never point at a satellite, however plainly the work lives there.</p>
   </div>
 
   <div class="note quiet">
-    <strong>The fix costs no schema.</strong>
+    <strong>The fix costs no schema — but it is not free.</strong>
     <p><code>trail.mjs</code> has no write channel. It may read the anchor's workflow document, take
-    <code>codeRoots[]</code>, and call <code>gitState</code> once per root. No new registry, no
+    the root list, and call <code>gitState</code> once per root. No new registry, no
     change to <code>~/.claude</code>, no lineage cost. That places it in stage 2, not stage 3.</p>
+    <p>The cost worth naming, as &sect;6.4 of the specification insists: <code>trail.mjs</code> may
+    run outside any session and outside every hook, so teaching it to read the root list makes it a
+    second consumer of the untrusted carrier of &sect;6.1.1, running <code>git -C</code> in paths
+    that carrier names.</p>
   </div>
 </section>
 
 <section>
-  <h2><span class="num">7</span> Two non-negotiable constraints</h2>
+  <h2><span class="num">7</span> Two constraints — and why the second is not met</h2>
 
   <div class="note">
-    <strong>The root list is frozen at arming.</strong>
-    <p>It belongs in the workflow document, exactly like today's <code>vanilla</code> flag — never in
-    an environment variable and never derived from model-authored text. It governs the write gate and
-    the capability confinement: extending it is a capability grant, not configuration. Every root
-    must canonicalize, be a real work tree, and be neither a parent of the anchor nor a filesystem
-    root.</p>
+    <strong>The root list must be frozen at arming — and nothing yet holds it.</strong>
+    <p>It must not come from an environment variable and must not be derived from model-authored
+    text, because it governs the write gate and the capability confinement: extending it is a
+    capability grant, not configuration. Every root must canonicalize, be a real work tree, and be
+    neither a parent of the anchor nor a filesystem root.</p>
+    <p>The workflow document is <em>not</em> that carrier. It is writable from inside the session and
+    its validator is shape-only, so the gate would read its own boundary from a file the gated party
+    can rewrite. <code>vanilla</code> is not a precedent either: that flag only relaxes TDD
+    discipline, where a prose control is proportionate. The specification's §6.1.1 records that no
+    channel currently satisfies the second requirement at all, and §8.1 states the consequence —
+    stage 2 is BLOCKED until a carrier the session cannot write is chosen, or an integrity mechanism
+    over the list is specified as a stage-2 precondition.</p>
   </div>
 
   <div class="note">
@@ -580,7 +647,7 @@
 
   <div class="stages">
     <div class="stage">
-      <span class="tag ok">Stage 1</span>
+      <span class="tag flat">Stage 1</span>
       <h3>Detect and refuse</h3>
       <p class="cost">no schema change · patch</p>
       <ul>
@@ -591,20 +658,22 @@
       </ul>
     </div>
     <div class="stage">
-      <span class="tag ok">Stage 2</span>
+      <span class="tag flat">Stage 2</span>
       <h3>Declared code roots</h3>
       <p class="cost">schema change · minor</p>
       <ul>
-        <li><code>codeRoots[]</code> in the workflow document, written at arming.</li>
+        <li><code>codeRoots[]</code> frozen at arming, in a carrier the session cannot rewrite —
+        <em>not</em> the workflow document, which &sect;8.1 rules out and &sect;6.1.1 leaves
+        unresolved. Choosing that carrier is the precondition of this stage, not part of it.</li>
         <li>Root labels in the claim format and in the merged receipt.</li>
-        <li>The four multi-repo consumers from section 4.</li>
+        <li>The four multi-repo consumers from section 4 (the fifth, the capability confinement, belongs to stage 3).</li>
         <li>Validation of each root before it enters the write gate or a lease.</li>
         <li><code>session-trail</code> reads <code>codeRoots[]</code> and calls <code>gitState</code>
         per root so the handover brief is true.</li>
       </ul>
     </div>
     <div class="stage">
-      <span class="tag ok">Stage 3</span>
+      <span class="tag flat">Stage 3</span>
       <h3>Cross-repo review</h3>
       <p class="cost">new chain shape · minor</p>
       <ul>
@@ -618,13 +687,19 @@
   </div>
 </section>
 
+</main>
+
 <footer>
   Every code site cited here was read in the session that authored this page; the line numbers are
-  for that state of the tree. The count of <code>classifyChain</code> consumers comes from the
-  repository conventions in <span class="mono">CLAUDE.md</span>, not from a reading of the
-  implementation. Proposal — nothing in this repository implements it. Companion documents:
-  <span class="mono">docs/multi-repo-chains-spec.md</span> and
-  <span class="mono">docs/multi-repo-chains-principle.html</span>.
+  for that state of the tree. Two claims on this page rest on inference rather than a reading, and
+  the specification discloses both: the <code>classifyChain</code> consumer count comes from the
+  repository conventions in <span class="mono">CLAUDE.md</span>, and the two
+  <code>--chain-done</code> assertions — in the section&nbsp;4 terminus row and in the section&nbsp;5
+  diagram — were inferred from a comment beside that command, never from its implementation.
+  Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until the
+  carrier questions of §6.1.1 and §8.1 are resolved. Companion documents:
+  <a href="multi-repo-chains-spec.md">the specification</a> and
+  <a href="multi-repo-chains-principle.html">the principle page</a>.
 </footer>
 
 </div>
