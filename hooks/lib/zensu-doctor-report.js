@@ -50,8 +50,11 @@ var SETTINGS_MAX_BYTES = 1048576;
 // Do NOT read the sentence above as a census of the tree. An earlier version named
 // stop-chain-enforcer.sh's DENIAL_RULE as "a third copy" and CLAUDE.md turned that
 // into "the three copies — check them by hand", which made the by-hand instruction
-// unfollowable: the literal really lives in EIGHT files under hooks/ (26 occurrences,
-// measured 2026-08-23), and two of them are functional comparisons a rename breaks
+// unfollowable: the literal really lives in EIGHT files under hooks/ (27 occurrences,
+// measured 2026-08-23 — the grep instruction below is one of them, so the occurrence
+// number moves when this comment is edited while the FILE count does not; that is the
+// second reason to trust the grep over any number written here), and two of them are
+// functional comparisons a rename breaks
 // silently — post-review-tdd-delegate.sh's SUBAGENT_TYPE test and
 // claude-principal-v1.js's list entry. An enumeration in a comment goes stale the next
 // time one is added, so the instruction is a GREP, not a list: before renaming this

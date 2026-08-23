@@ -19,6 +19,6 @@ renumbered) with status `deprecated` and no evidence.
 
 - Gates: {gate commands + results}
 - Validation driver: {driver + what was exercised}
-- Gates bypassed during build: {list|none}
+- Gates bypassed during build: {list|none|UNREADABLE — …}
 
 {Converge report note when findings were folded in, or remove this line.}

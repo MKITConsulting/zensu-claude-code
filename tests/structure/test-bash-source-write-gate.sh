@@ -28,11 +28,28 @@ bash -n "$HOOK" 2>/dev/null && check "W2 hook bash -n syntax" PASS || check "W2 
 { [ -f "$PARSER" ] && node --check "$PARSER" 2>/dev/null; } \
   && check "W3 parser exists + node --check" PASS || check "W3 parser exists + node --check" FAIL
 
+. "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 UNIT="$PLUGIN_DIR/tests/structure/git-repo-escape.test.js"
 if [ ! -f "$UNIT" ]; then
   check "W3a rule-C unit suite is missing from the checkout ($UNIT) — stage it with the change" FAIL
 elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
-  UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+  # Counts come from lib-unit-summary.sh, which owns the locale-independent parse
+  # and explains why it cannot be a `^. pass` pattern. This block used to carry its
+  # own copy of that expression; the copy is gone so the next correction has one site.
+  #
+  # The two floors are EQUAL here, deliberately, unlike T26's 29/27 split: this suite
+  # reports 45 registered / 45 passing / 0 skipped, so there is no measured skip to
+  # allow for and lowering the pass floor for a hypothetical one would weaken it for
+  # nothing. The win32 cases ARE platform-conditional — if one starts skipping, lower
+  # the pass floor in that same commit and name the case and the host.
+  # Called for the counts it publishes, not for its verdict — the floor is applied
+  # in the conjunction below, together with the symbol pin, so one FAIL message can
+  # name whichever half failed. The *_text helper spools to a temp file rather than
+  # reading /dev/stdin: this suite runs on the Windows shards, where Git Bash's
+  # /dev/stdin is not something to bet a count on.
+  unit_cases_registered_floor_text "$UNIT_OUT" 45 || true
+  UNIT_PASS="$UNIT_CASES_PASS"
+  UNIT_TOTAL="$UNIT_CASES_TESTS"
   # Exit 0 alone would also accept a file that registers zero cases.
   # Raise this with the file. The win32 cases are the ONLY witnesses of the MSYS
   # namespace fix — no POSIX host executes that branch end-to-end — so a stale
@@ -44,10 +61,10 @@ elif UNIT_OUT="$(node --test "$UNIT" 2>&1)"; then
   for sym in "msysToDrive(" "splitTempList(" "isUnsafeTempEntry(" "winTempList(" "path.win32"; do
     grep -qF -- "$sym" "$UNIT" || UNIT_SYMS=0
   done
-  if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
-    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS cases, win32 witnesses present)" PASS
+  if [ -n "$UNIT_PASS" ] && [ "$UNIT_TOTAL" -ge 45 ] && [ "$UNIT_PASS" -ge 45 ] && [ "$UNIT_SYMS" -eq 1 ]; then
+    check "W3a rule-C option lattice unit suite passes ($UNIT_PASS of $UNIT_TOTAL cases, win32 witnesses present)" PASS
   else
-    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing cases (want >= 45) win32_symbols=$UNIT_SYMS" FAIL
+    check "W3a rule-C unit suite reported '${UNIT_PASS:-no}' passing of '${UNIT_TOTAL}' registered (want total >= 45, pass >= 45) win32_symbols=$UNIT_SYMS" FAIL
   fi
 else
   check "W3a rule-C unit suite: $(printf '%s' "$UNIT_OUT" | grep -E '✖|fail [0-9]' | head -3 | tr '\n' ' ')" FAIL

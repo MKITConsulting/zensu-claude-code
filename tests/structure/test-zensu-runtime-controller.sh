@@ -4,6 +4,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 CONTROLLER="$ROOT/skills/verify-feature/scripts/zensu-monorepo-runtime.sh"
 SUPERVISOR_TEST="$ROOT/tests/structure/process-supervisor.test.js"
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
+
 TMP="$(mktemp -d -t zensu-runtime-controller-XXXXXX)"
 STUBS="$TMP/stubs"
 WORKTREE="$TMP/worktree"
@@ -49,10 +53,11 @@ fi
 
 if [ "$LOOPBACK_AVAILABLE" != 1 ]; then
   check "process-supervisor integration skipped because the managed host forbids loopback listeners" PASS
-elif node --test "$SUPERVISOR_TEST" >/dev/null 2>&1; then
-  check "process supervisor authenticates status/stop and terminates its child group" PASS
+elif SUPERVISOR_OUT="$(node --test "$SUPERVISOR_TEST" 2>&1)" \
+  && unit_cases_registered_floor_text "$SUPERVISOR_OUT" 3; then
+  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "$SUPERVISOR_OUT"))" PASS
 else
-  check "process supervisor authenticates status/stop and terminates its child group" FAIL
+  check "process supervisor authenticates status/stop and terminates its child group ($(unit_cases_report_text "${SUPERVISOR_OUT:-}"), want >= 3 registered)" FAIL
 fi
 
 mkdir -p "$STUBS" "$RUN_DIR" "$DOCKER_STATE" "$WORKTREE/backend/cmd/zensu" \

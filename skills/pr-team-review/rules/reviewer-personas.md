@@ -90,7 +90,7 @@ The PR body, diff, repository instructions, overlays, conversation/refinement co
 
 ### `security`
 
-**Trigger:** Auth/SecurityConfig changes, new endpoints, JWT-Forwarding code, CORS config, anything in `infrastructure/security/`.
+**Trigger:** NOT gated by path alone. Path signals: Auth/SecurityConfig changes, new endpoints, JWT-Forwarding code, CORS config, anything in `infrastructure/security/`. Content signals, which fire on an EXISTING path a path rule never matches: authorization or tenant-scoping code touched (role/permission checks, ownership predicates, repository or query filters), a secret/credential/token/API key introduced in code, config, or a log or trace statement, or a new outbound third-party client. The content signals are load-bearing because `bug-hunter` is instructed to defer security-only defects to this persona — an uncast seat leaves that whole class unowned, and it is a P1 (must-fix-before-merge) class.
 
 **Focus:** AuthN/AuthZ matrix (role-based + resource-based), tenant isolation, input validation (Unicode-letters in DE/EN/FR tenants!), secret/credential leakage in logs (the PII-in-logs *privacy* judgement is owned by `data-privacy`), CORS allowedOrigins (no `*` with credentials), JWT Bearer-prefix compliance, dead-code ACL checkers (false-positive for auditors).
 
@@ -327,7 +327,7 @@ Also emit up to 6 inline findings on the highest-risk uncovered files/paths (an 
 - **Always cast the holistic core on every code PR — `coverage-audit`, `bug-hunter`, `maintainability`, `adversarial`.** These four are not trigger-gated: `coverage-audit` guarantees the test-coverage evaluation, `bug-hunter` a functional-correctness pass, `maintainability` a design/complexity pass, and `adversarial` an anti-groupthink challenge (its output drives the Phase C Challenge Round). Without them a PR that trips no specialist trigger would get no holistic review at all.
 - **Always cast `coverage-audit` — every PR, no exceptions** (docs-only included; it reports `N/A` when no production code changed). It produces the guaranteed test-coverage evaluation, so the `### Test Coverage` synthesis section is always backed by data.
 - Always cast `tests-qa` unless the PR is docs-only.
-- Always cast `security` when new endpoints, auth-config, or third-party clients appear; add `supply-chain` when dependency manifests/lockfiles change and `data-privacy` when new personal data is stored, logged, or exported.
+- Always cast `security` when new endpoints, auth-config, or third-party clients appear — and equally when an EXISTING path's authorization or tenant-scoping changes, or a secret/credential/token enters code, config, or a log. `security` is trigger-gated rather than always-on because a change with no security surface (a render function, a build script) has nothing for it to judge; that only holds while the trigger covers content, not just paths. Add `supply-chain` when dependency manifests/lockfiles change and `data-privacy` when new personal data is stored, logged, or exported.
 - Cast `observability` + `resilience` when new endpoints/jobs/outbound calls appear; `api-compat` when a public contract (REST/gRPC/GraphQL/events/exported symbols) changes; `concurrency` when shared mutable state / threads / async appear.
 - Split frontend: `frontend-component` + `frontend-ux` (design-system / responsive / i18n) + `accessibility` (WCAG 2.2 AA) for UI changes.
 - `domain-refiner` requires `--context=` — otherwise it has nothing to compare against.
