@@ -81,6 +81,23 @@ export function boundText(value, max = FIELD_MAX) {
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
 
+// Paths are not prose. `boundText` collapses runs of whitespace to one space and
+// ellipsizes past its cap, and all three of those rewrites are legal-path
+// destroying: `/Users/me/My  Projects/api` persists with a single space, a tab or
+// newline inside a component becomes a space, and a long path silently becomes a
+// different path that still LOOKS like one. A path is a value a reader compares
+// and may retype, so the bound removes exactly what can fabricate or reorder a
+// rendered line — the control and format class — and otherwise leaves the
+// spelling alone. Over the cap it returns NULL rather than a truncation, because
+// a truncated path is a wrong answer while an absent one is a missing answer.
+const PATH_MAX = 4096;
+export function boundPath(value) {
+  if (value === null || value === undefined) return null;
+  const flat = String(value).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '');
+  if (!flat || flat.length > PATH_MAX) return null;
+  return flat;
+}
+
 export function boundLabel(value) {
   return boundText(value, LABEL_MAX);
 }
@@ -106,11 +123,23 @@ export function isIsoInstant(value) {
 // bounded on neither.
 export function normalizeRepo(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
-  return { name: boundText(r.name), root: boundText(r.root) };
+  // `name` is prose in a header a reader acts on; `root` is a path. Two bounds,
+  // because collapsing whitespace in a path rewrites it.
+  return { name: boundText(r.name), root: boundPath(r.root) };
+}
+
+// The store's FAMILY root — the directory that holds every `v<N>`. It is exported
+// because `trail.mjs` was reconstructing `path.join(configRoot, 'zensu',
+// 'session-lineage')` by hand to reach it, which put the store layout in the file
+// this module's header declares does not own it: three spellings across two files,
+// and a reader following CLAUDE.md's "sites that move with the STORE LAYOUT" would
+// not have found the one in a command body, because it is not a wrapper.
+export function ledgerFamilyRoot(configRoot) {
+  return path.join(configRoot, 'zensu', 'session-lineage');
 }
 
 export function ledgerPaths(configRoot) {
-  const base = path.join(configRoot, 'zensu', 'session-lineage', `v${LEDGER_SCHEMA_VERSION}`);
+  const base = path.join(ledgerFamilyRoot(configRoot), `v${LEDGER_SCHEMA_VERSION}`);
   return { base, edges: path.join(base, 'edges'), labels: path.join(base, 'labels.json') };
 }
 
@@ -126,7 +155,7 @@ export function ledgerPaths(configRoot) {
 // so the empty answer is disclosed instead of silent. Migration is still the open
 // decision; being wrong out loud is the part that could not wait for it.
 export function siblingLedgerVersions(configRoot) {
-  const root = path.join(configRoot, 'zensu', 'session-lineage');
+  const root = ledgerFamilyRoot(configRoot);
   const mine = `v${LEDGER_SCHEMA_VERSION}`;
   let names;
   try { names = fs.readdirSync(root); } catch { return []; }
@@ -271,7 +300,7 @@ export function makeEndpoint(input) {
     accountUuid: boundText(src.accountUuid, 128),
     appPid: Number.isFinite(src.appPid) ? src.appPid : null,
     pid: Number.isFinite(src.pid) ? src.pid : null,
-    worktree: boundText(src.worktree),
+    worktree: boundPath(src.worktree),
     branch: boundText(src.branch),
   };
 }
@@ -335,6 +364,14 @@ export function classifyEdge(raw) {
   if (!from.sessionId || !to.sessionId) {
     return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
   }
+  // A record whose two endpoints are the same session is not a handover. All three
+  // writers refuse to mint one, so the only sources are a hand edit or a foreign
+  // writer — which is exactly what this refusal table exists for. Admitting it
+  // rendered `RECORDED HANDOVERS: 1` with no chain beneath it, and a `--json` root
+  // with an empty `links`, which reads as a tool defect rather than as a bad record.
+  if (from.sessionId === to.sessionId) {
+    return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
+  }
   // `recordedAt` decides the read order, which successor `walkChain` follows and
   // which duplicate `dedupeEdges` keeps — and it was the one field that only ever
   // passed through `boundText`, which accepts any non-empty string. A record
@@ -359,7 +396,15 @@ export function classifyEdge(raw) {
       to,
       repo: normalizeRepo(raw.repo),
       reason: boundText(raw.reason) || 'manual',
-      inferred: raw.inferred === true,
+      // NOT authenticated, and it fails toward GUESS. Nothing here can re-derive
+      // provenance: the store is writable by every local process, so a planted
+      // record can claim `inferred: false` and render as a measured handover. What
+      // this can do is refuse to read a MISSING or non-boolean marker as "measured"
+      // — an omitted field used to normalize to false, so the cheapest possible
+      // forgery was leaving the field out entirely. A record must now say
+      // `inferred: false` explicitly to be shown as measured, and SKILL.md no
+      // longer promises that a record exists only because a handover happened.
+      inferred: raw.inferred === false ? false : true,
       recordedAt,
       recordedBy: boundText(raw.recordedBy),
     },
@@ -470,25 +515,45 @@ export function walkChain(sessionId, edges, maxHops = 64) {
 // non-zero handover count rendered above no chain is worse than a wrong chain.
 // Every session not reachable from a computed root therefore becomes a root of
 // its own, so a cycle renders as something rather than as silence.
-export function chainRoots(edges) {
+// Returns the roots AND the walk it already performed for each of them. The walks
+// were being computed here to decide coverage and then thrown away, so both
+// callers re-walked the same edges from the same roots — every chain traversed
+// twice. The cost is the small half; the shape is the one that bites later,
+// because the root DECISION and the RENDERED chain were independent traversals of
+// the same data and a change to `walkChain`'s branch preference could make them
+// disagree about which chain a root even has.
+//
+// `chainRoots` stays the name and stays array-like for its existing callers —
+// `chainWalks` is the map they use instead of re-walking.
+export function chainWalks(edges) {
   const targets = new Set(edges.map((e) => e.to.sessionId));
   const roots = [];
   for (const e of edges) {
     if (!targets.has(e.from.sessionId) && !roots.includes(e.from.sessionId)) roots.push(e.from.sessionId);
   }
+  const walks = new Map();
   const covered = new Set();
-  for (const r of roots) {
-    covered.add(r);
-    for (const l of walkChain(r, edges).links) covered.add(l.to.sessionId);
-  }
+  const take = (root) => {
+    covered.add(root);
+    const walk = walkChain(root, edges);
+    walks.set(root, walk);
+    for (const l of walk.links) covered.add(l.to.sessionId);
+  };
+  for (const r of roots) take(r);
+  // A cycle makes every `from` also a `to`, so the first pass yields no roots at
+  // all. Everything still uncovered becomes a root of its own, which is what keeps
+  // a non-zero handover count from rendering above no chain.
   for (const e of edges) {
     if (!covered.has(e.from.sessionId)) {
       roots.push(e.from.sessionId);
-      covered.add(e.from.sessionId);
-      for (const l of walkChain(e.from.sessionId, edges).links) covered.add(l.to.sessionId);
+      take(e.from.sessionId);
     }
   }
-  return roots;
+  return { roots, walks };
+}
+
+export function chainRoots(edges) {
+  return chainWalks(edges).roots;
 }
 
 // Two namespaces, tagged, because the keys are different kinds of thing: an

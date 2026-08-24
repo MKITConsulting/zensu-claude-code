@@ -5,7 +5,8 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  ledgerPaths, writeEdge, readEdges, dedupeEdges, siblingLedgerVersions, LEDGER_SCHEMA_VERSION,
+  ledgerPaths, ledgerFamilyRoot, writeEdge, readEdges, dedupeEdges, siblingLedgerVersions, LEDGER_SCHEMA_VERSION,
+  chainWalks,
   makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
   readLabels as readLabelsFile, writeLabels, emptyLabels, boundLabel,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
@@ -415,12 +416,31 @@ function windowOf(pid, table = processTable()) {
 // The schema, the store layout and the chain walk live in session-lineage-v1.mjs.
 // These wrappers only bind the module to this process's resolved roots and to the
 // module-scope SKIPPED counter, so the record shape has exactly one owner.
+// The module returns a VALUE object; these are the three fields of it that four
+// command bodies read, at fourteen sites. They are module-scope because the
+// renderers are, and every one of those reads is correct only if `ledgerRead()`
+// already ran — which used to be true by call order alone, with nothing saying so.
+//
+// `LEDGER_READ` is what says so. It starts false and `ledgerRead()` sets it, and
+// the three accessors below REFUSE rather than answer when it is still false: a
+// renderer reached before the read now fails loudly instead of reporting "no
+// directory error, no refused records" about a store nobody looked at. That is the
+// hazard the ambient-state shape carried; the shape itself is kept, because
+// threading the object through fourteen sites in four command bodies is a larger
+// change than the defect warrants.
+let LEDGER_READ = false;
 let LEDGER_DIR_ERROR = null;
 let LEDGER_SCHEMA_NEWER = false;
 // Per-record refusals, kept apart from the whole-directory failure: they are the
 // narrow half of the same hazard -- one dropped record is one pair missing from
 // the duplicate guard -- and the remedies differ.
 let LEDGER_REFUSED = 0;
+const ledgerState = () => {
+  if (!LEDGER_READ) {
+    throw new Error('internal: the ledger was consulted before ledgerRead() ran');
+  }
+  return { dirError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, refused: LEDGER_REFUSED };
+};
 
 function ledgerWrite(edge) {
   return writeEdge(LEDGER_DIR, edge, Date.now(), CONFIG_ROOT);
@@ -432,6 +452,7 @@ function ledgerWrite(edge) {
 // answer this whole feature exists to prevent.
 function ledgerRead() {
   const { edges, refused, directoryError } = readEdges(LEDGER_DIR);
+  LEDGER_READ = true;
   LEDGER_DIR_ERROR = directoryError;
   LEDGER_REFUSED = refused.length;
   if (directoryError) SKIPPED += 1;
@@ -1360,8 +1381,8 @@ function cmdInstances(opts) {
     return print(JSON.stringify({
       rows: rows.map((r) => ({ ...r, lineage: lineageOf(r.sessionId) })),
       edgeCount: edges.length,
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerError: ledgerState().dirError,
+      schemaNewer: ledgerState().schemaNewer,
       skipped: SKIPPED,
     }, null, 2));
   }
@@ -1931,8 +1952,8 @@ function lineageDiagnose(opts) {
       ledgerDir: LEDGER_DIR,
       labelsFile: LABELS_FILE,
       edgeCount: edges.length,
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerError: ledgerState().dirError,
+      schemaNewer: ledgerState().schemaNewer,
       store: resolved,
       probes,
       platform: process.platform,
@@ -1942,8 +1963,8 @@ function lineageDiagnose(opts) {
   print(`PLATFORM     ${process.platform}`);
   print(`CONFIG ROOT  ${CONFIG_ROOT}   (${opts.configDir ? '--config-dir' : (process.env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR' : 'default ~/.claude')})`);
   print(`LEDGER       ${LEDGER_DIR}   (${edges.length} edge record(s))`);
-  if (LEDGER_DIR_ERROR) print(`LEDGER ERROR ${LEDGER_DIR_ERROR} — the count above is NOT a measurement of what exists.`);
-  if (LEDGER_SCHEMA_NEWER) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  if (ledgerState().dirError) print(`LEDGER ERROR ${ledgerState().dirError} — the count above is NOT a measurement of what exists.`);
+  if (ledgerState().schemaNewer) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
   print(`LABELS       ${LABELS_FILE}`);
   print('');
   print('DESKTOP STORE PROBES (first existing wins; only the macOS path is verified):');
@@ -1974,9 +1995,9 @@ function lineageBackfill(opts) {
   // drops an unreadable, malformed or wrong-schema record, and each one is a pair
   // missing from `known` above. The gate names which of the two it is, because the
   // remedies differ -- fix the directory, versus find the one bad record.
-  const refusedCount = LEDGER_REFUSED;
-  const applyBlocked = Boolean(opts.apply && (LEDGER_DIR_ERROR || refusedCount > 0));
-  const applyRefusal = LEDGER_DIR_ERROR ? 'ledger-unreadable' : 'records-refused';
+  const refusedCount = ledgerState().refused;
+  const applyBlocked = Boolean(opts.apply && (ledgerState().dirError || refusedCount > 0));
+  const applyRefusal = ledgerState().dirError ? 'ledger-unreadable' : 'records-refused';
   const stalled = rows.filter((r) => r.stopCause && r.stopCause.final);
   const candidates = [];
   for (const s of stalled) {
@@ -2013,8 +2034,8 @@ function lineageBackfill(opts) {
         from: c.from.sessionId, to: c.to.sessionId, worktree: c.to.wt,
         cause: c.from.stopCause.error || 'rate_limit',
       })),
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerError: ledgerState().dirError,
+      schemaNewer: ledgerState().schemaNewer,
       skipped: SKIPPED,
     }, null, 2));
   }
@@ -2039,10 +2060,10 @@ function lineageBackfill(opts) {
       return print(JSON.stringify({
         dryRun: false, applied: false, refusal: applyRefusal,
         written: 0, files: [], writeError: null, refusedRecords: refusedCount,
-        ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED,
+        ledgerError: ledgerState().dirError, schemaNewer: ledgerState().schemaNewer, skipped: SKIPPED,
       }, null, 2));
     }
-    if (LEDGER_DIR_ERROR) print(`BACKFILL REFUSED — the ledger could not be read (${LEDGER_DIR_ERROR}).`);
+    if (ledgerState().dirError) print(`BACKFILL REFUSED — the ledger could not be read (${ledgerState().dirError}).`);
     else print(`BACKFILL REFUSED — ${refusedCount} ledger record(s) could not be read.`);
     print('Nothing was written. The already-recorded edges could not be listed in full, so a');
     print('candidate above may already exist and --apply would mint a duplicate of it.');
@@ -2064,7 +2085,7 @@ function lineageBackfill(opts) {
       break;
     }
   }
-  if (opts.json) return print(JSON.stringify({ dryRun: false, applied: true, refusal: null, written: written.length, files: written, writeError, refusedRecords: refusedCount, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ dryRun: false, applied: true, refusal: null, written: written.length, files: written, writeError, refusedRecords: refusedCount, ledgerError: ledgerState().dirError, schemaNewer: ledgerState().schemaNewer, skipped: SKIPPED }, null, 2));
   print(`BACKFILL APPLIED — ${written.length} inferred edge(s) recorded in ${LEDGER_DIR}`);
   if (writeError) print(`BACKFILL INCOMPLETE — stopped after ${written.length} edge(s): ${writeError}`);
 }
@@ -2207,7 +2228,7 @@ function cmdLineage(opts) {
       process.exit(2);
     }
     if (!match.length) {
-      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerError: ledgerState().dirError, schemaNewer: ledgerState().schemaNewer, skipped: SKIPPED }, null, 2));
       print(`No lineage recorded for "${opts.where}".`);
       // An empty match set has THREE causes and only one of them is "nothing was
       // recorded". The sibling branch below already refuses to read an unreadable
@@ -2215,13 +2236,13 @@ function cmdLineage(opts) {
       // state, and then sent the user to --backfill, which refuses on exactly that
       // condition. A confident wrong diagnosis is the one answer this feature exists
       // to prevent, so the cause is named before the conclusion is drawn.
-      if (LEDGER_DIR_ERROR) {
-        print(`The ledger could not be read (${LEDGER_DIR_ERROR}) — this is NOT evidence that it was never handed over.`);
+      if (ledgerState().dirError) {
+        print(`The ledger could not be read (${ledgerState().dirError}) — this is NOT evidence that it was never handed over.`);
         print(`Fix ${LEDGER_DIR}, then re-run. \`lineage --diagnose\` names what failed.`);
         return;
       }
-      if (LEDGER_REFUSED) {
-        print(`${LEDGER_REFUSED} ledger record(s) could not be read — one of them may name that session.`);
+      if (ledgerState().refused) {
+        print(`${ledgerState().refused} ledger record(s) could not be read — one of them may name that session.`);
         print(`Fix or remove them in ${LEDGER_DIR}, then re-run before concluding anything.`);
         return;
       }
@@ -2245,7 +2266,7 @@ function cmdLineage(opts) {
       : (incoming ? incoming.to : makeEndpoint({ sessionId: start }));
     const isLeaf = !links.length;
     if (opts.json) {
-      return print(JSON.stringify({ query: opts.where, found: true, start, current: last, live: liveState(last.sessionId, live), links, forks: walk.forks, truncated: walk.truncated, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+      return print(JSON.stringify({ query: opts.where, found: true, start, current: last, live: liveState(last.sessionId, live), links, forks: walk.forks, truncated: walk.truncated, ledgerError: ledgerState().dirError, schemaNewer: ledgerState().schemaNewer, skipped: SKIPPED }, null, 2));
     }
     print(`${isLeaf ? 'THIS IS THE END OF THE CHAIN' : 'CONTINUED IN'}  ${last.sessionId.slice(0, 8)}   ${endpointLabel(last)}   ${liveState(last.sessionId, live)}`);
     print(`WORKTREE      ${last.worktree || '(unknown)'}${last.branch ? `   branch ${last.branch}` : ''}`);
@@ -2257,21 +2278,24 @@ function cmdLineage(opts) {
   }
 
   if (opts.json) {
-    const chains = chainRoots(scoped).map((root) => {
-      const w = walkChain(root, scoped);
-      return { root, links: w.links, forks: w.forks };
+    // The walk `chainWalks` already performed to decide the roots, reused rather
+    // than repeated: the two used to be independent traversals of the same edges.
+    const { roots, walks } = chainWalks(scoped);
+    const chains = roots.map((root) => {
+      const w = walks.get(root) || walkChain(root, scoped);
+      return { root, links: w.links, forks: w.forks, returns: w.returns };
     });
-    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, ledgerError: ledgerState().dirError, schemaNewer: ledgerState().schemaNewer, skipped: SKIPPED }, null, 2));
   }
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`RECORDED HANDOVERS: ${scoped.length}\n`);
   if (!scoped.length) {
-    if (LEDGER_DIR_ERROR) {
-      print(`The ledger could not be read (${LEDGER_DIR_ERROR}) — this is NOT evidence that no handover was recorded.`);
+    if (ledgerState().dirError) {
+      print(`The ledger could not be read (${ledgerState().dirError}) — this is NOT evidence that no handover was recorded.`);
       print(`Check ${LEDGER_DIR}, then re-run.`);
       return;
     }
-    if (LEDGER_SCHEMA_NEWER) {
+    if (ledgerState().schemaNewer) {
       print('The ledger holds records written by a NEWER schema than this build can read.');
       print('Update the plugin rather than treating this as an empty history.');
       return;
@@ -2284,7 +2308,7 @@ function cmdLineage(opts) {
       // offer invites the user to replace intact records with guesses.
       const total = siblings.reduce((n, v) => n + v.records, 0);
       print(`No handover is recorded under the schema this build reads (v${LEDGER_SCHEMA_VERSION}).`);
-      print(`${total} record(s) exist under ${siblings.map((v) => `${v.version} (${v.records})`).join(', ')} in ${path.join(CONFIG_ROOT, 'zensu', 'session-lineage')}.`);
+      print(`${total} record(s) exist under ${siblings.map((v) => `${v.version} (${v.records})`).join(', ')} in ${ledgerFamilyRoot(CONFIG_ROOT)}.`);
       print('That is your history, written by another build of this plugin. It is NOT lost, and');
       print('it is NOT reconstructable by --backfill — do not run that here, it would mint guesses');
       print('beside intact records. Use the build that wrote them, or move the records by hand.');
@@ -2294,8 +2318,9 @@ function cmdLineage(opts) {
     print(`Past ones can be reconstructed as GUESSES: node ${scriptPath()} lineage --backfill`);
     return;
   }
-  for (const root of chainRoots(scoped)) {
-    const { links, forks } = walkChain(root, scoped);
+  const { roots: chainRootIds, walks: chainWalkById } = chainWalks(scoped);
+  for (const root of chainRootIds) {
+    const { links, forks } = chainWalkById.get(root) || walkChain(root, scoped);
     if (!links.length) continue;
     const wt = links[0].to.worktree || links[0].from.worktree;
     print(`CHAIN  ${links[0].repo && links[0].repo.name ? links[0].repo.name : '(unknown repo)'}${wt ? `   ${path.basename(wt)}` : ''}`);

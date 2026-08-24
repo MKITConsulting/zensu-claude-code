@@ -211,21 +211,43 @@ test('the hop bound is reported when it bites', () => {
 });
 
 test('an oversized or non-regular ledger entry is refused, not read', () => {
+  // BOTH halves, because `readBoundedFile` guards them on one line
+  // (`!st.isFile() || st.size > MAX_RECORD_BYTES`) and deleting `!st.isFile() ||`
+  // is a single-line edit the oversized fixture alone would not catch. That guard
+  // is what stops a directory or a FIFO named `<n>.json` inside a machine-wide,
+  // session-writable directory from being read.
   const root = tmp();
   const p = mod.ledgerPaths(root);
-  mod.writeEdge(p.edges, edge('a', 'b', '1'), 1, root);
+  mod.writeEdge(p.edges, edge('a', 'b', 1), 1, root);
   fs.writeFileSync(path.join(p.edges, '2-oversize.json'), 'x'.repeat(300 * 1024));
+  fs.mkdirSync(path.join(p.edges, '3-directory.json'));
+  let planted = 2;
+  if (process.platform !== 'win32') {
+    try { execFileSync('mkfifo', [path.join(p.edges, '4-fifo.json')], { stdio: 'ignore' }); planted = 3; } catch (_) { /* no mkfifo */ }
+  }
   const out = mod.readEdges(p.edges);
   assert.equal(out.edges.length, 1, 'the good record still reads');
-  assert.equal(out.refused.length, 1, 'the oversized one is refused, not parsed');
+  assert.equal(out.refused.length, planted, 'every non-record entry is refused, not parsed');
+  for (const r of out.refused) assert.equal(r.reason, mod.EDGE_REFUSALS.UNREADABLE);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('labels land by rename, so a concurrent reader never sees a half-written file', () => {
+  // The rename is OBSERVED, not inferred. Reading the value back and finding no
+  // stray `.tmp` both hold for the plain truncating write this replaced — the
+  // value reads back either way, and no temp survives because none was ever made.
+  // What discriminates is the INODE: a rename publishes a NEW inode over the name,
+  // while a truncating write keeps the old one. So the file is written twice and
+  // the two identities compared.
   const root = tmp();
   const p = mod.ledgerPaths(root);
   mod.writeLabels(p.labels, { ...mod.emptyLabels(), accounts: { a: 'One' } }, root);
   assert.equal(mod.readLabels(p.labels).labels.accounts.a, 'One');
+  const first = fs.statSync(p.labels);
+  mod.writeLabels(p.labels, { ...mod.emptyLabels(), accounts: { a: 'Two' } }, root);
+  const second = fs.statSync(p.labels);
+  assert.equal(mod.readLabels(p.labels).labels.accounts.a, 'Two');
+  assert.notEqual(second.ino, first.ino, 'the second write published a new inode, i.e. it landed by rename');
   const strays = fs.readdirSync(path.dirname(p.labels)).filter((n) => n.endsWith('.tmp'));
   assert.deepEqual(strays, [], 'no temp file is left behind');
   fs.rmSync(root, { recursive: true, force: true });
@@ -355,6 +377,18 @@ test('an edge record never overwrites an existing name, and the retry loop is wh
   assert.equal(fs.readdirSync(edges).filter((n) => n.endsWith('.json')).length, 2);
   // No temp file survives either half.
   assert.deepEqual(fs.readdirSync(edges).filter((n) => n.endsWith('.tmp')), []);
+  // The COLLISION itself cannot be driven from here — `edgeFileName` appends 8
+  // random bytes, so two calls collide at about 2^-64 and nothing in the module
+  // lets a caller choose the name. Both exclusive creates are therefore asserted
+  // at SOURCE, which is what makes the retry loop meaningful: the temp keeps its
+  // `wx` create, and the final publish is a `link` (which fails EEXIST) rather
+  // than a `rename` (which replaces an existing destination silently, and left
+  // the loop guarding the only create that cannot realistically collide).
+  const modSrc = fs.readFileSync(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url), 'utf8');
+  const writeBody = modSrc.slice(modSrc.indexOf('export function writeEdge'), modSrc.indexOf('export function makeEndpoint'));
+  assert.ok(writeBody.includes("flag: 'wx'"), 'the temp create is still exclusive');
+  assert.ok(writeBody.includes('fs.linkSync(tmp, file)'), 'the record is published by link, not rename');
+  assert.equal(writeBody.includes('fs.renameSync('), false, 'rename would replace an existing record silently');
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -377,4 +411,44 @@ test('a FIFO planted in the ledger cannot block the read', { skip: process.platf
     assert.equal(out.refused[0].reason, mod.EDGE_REFUSALS.UNREADABLE);
   }
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a self-edge is refused: it is not a handover, and no writer mints one', () => {
+  assert.equal(mod.classifyEdge(edge('a', 'a', 1)).reason, mod.EDGE_REFUSALS.MALFORMED);
+  assert.equal(mod.classifyEdge(edge('a', 'b', 1)).ok, true);
+});
+
+test('the inferred marker fails toward GUESS, because nothing can authenticate it', () => {
+  // The store is writable by every local process, so a planted record can claim
+  // `inferred: false` and render as a measured handover — that is not closable
+  // in-band and SKILL.md no longer promises otherwise. What IS closed is the
+  // cheapest forgery: omitting the field used to normalize to false.
+  const withInferred = (v) => { const e = edge('a', 'b', 1); if (v === undefined) delete e.inferred; else e.inferred = v; return e; };
+  assert.equal(mod.classifyEdge(withInferred(undefined)).edge.inferred, true, 'an omitted marker is a guess');
+  assert.equal(mod.classifyEdge(withInferred('false')).edge.inferred, true, 'a string is not a boolean false');
+  assert.equal(mod.classifyEdge(withInferred(0)).edge.inferred, true);
+  assert.equal(mod.classifyEdge(withInferred(false)).edge.inferred, false, 'an explicit false is honoured');
+  assert.equal(mod.classifyEdge(withInferred(true)).edge.inferred, true);
+});
+
+test('a path is bounded as a path, not as prose', () => {
+  // `boundText` collapses whitespace runs and ellipsizes, and all three rewrites
+  // turn a legal path into a different one that still looks like a path.
+  assert.equal(mod.boundPath('/Users/me/My  Projects/api'), '/Users/me/My  Projects/api');
+  assert.equal(mod.boundPath('/a/b\tc'), '/a/bc', 'a control character is removed, not turned into a space');
+  assert.equal(mod.boundPath('/a/' + 'x'.repeat(5000)), null, 'over the cap it is absent, never truncated');
+  assert.equal(mod.boundPath(null), null);
+  // and the endpoint uses it, so a path with a double space survives the round trip.
+  const ep = mod.makeEndpoint({ sessionId: 's', worktree: '/w/My  Tree' });
+  assert.equal(ep.worktree, '/w/My  Tree');
+});
+
+test('chainWalks returns the walk it already performed, so no chain is traversed twice', () => {
+  const edges = [edge('a', 'b', 1), edge('b', 'c', 2), edge('x', 'y', 3)];
+  const { roots, walks } = mod.chainWalks(edges);
+  assert.deepEqual(roots.sort(), ['a', 'x']);
+  assert.equal(walks.size, roots.length, 'every root carries its walk');
+  assert.deepEqual(walks.get('a').links.map((l) => l.to.sessionId), ['b', 'c']);
+  // and the compatibility wrapper still answers ids only.
+  assert.deepEqual(mod.chainRoots(edges).sort(), ['a', 'x']);
 });
