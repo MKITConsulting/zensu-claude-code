@@ -34,7 +34,7 @@ therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
 
 Two of the consumers named in §6.3 do NOT sit on that binding: the terminus
-count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1182`) and
+count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1270`) and
 the audit's default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:36`) — both ambient, both with a `.` fallback.
 Which root that variable names in a multi-root topology, and what the fallback
@@ -45,7 +45,7 @@ means when it is unset, is an open question (§11).
 enumerates the change set with `git -C "$REPO_ROOT"` (`:69-93`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:266`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:608`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:696`). Running the audit once per repository therefore
 writes receipts nothing reads, and each run reports the other repository's claims
 as not landed, so no run can exit 0.
 
@@ -558,7 +558,7 @@ re-verify.
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:585`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:673`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

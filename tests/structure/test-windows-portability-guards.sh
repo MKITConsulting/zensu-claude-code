@@ -37,6 +37,7 @@ CORE_SNAPSHOT_BLOCK="$(awk '
   capture
 ' "$CORE")"
 AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
+AUTOPILOT_STATE_WORKSPACE_BLOCK="$(sed -n '/^CONC_PROJECT=/,/^CONC_REFUSAL_OK=true$/p' "$AUTOPILOT_STATE_TEST")"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -211,6 +212,21 @@ if grep -qF 'CONCURRENT_WORKERS="1 2 3 4 5 6 7 8"' <<<"$AUTOPILOT_STATE_CONCURRE
   check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" PASS
 else
   check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" FAIL
+fi
+
+if [ -n "$AUTOPILOT_STATE_WORKSPACE_BLOCK" ] \
+  && [ "$(grep -cE '^CONC_PROJECT=' "$AUTOPILOT_STATE_TEST")" -eq 1 ] \
+  && [ "$(grep -cE '^CONC_REFUSAL_OK=true$' "$AUTOPILOT_STATE_TEST")" -eq 1 ] \
+  && grep -qF 'make_directory_symlink "$CONC_PROJECT" "$CONC_ALIAS"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'CONC_B="$CONC_ALIAS/tree-b"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'CONC_B_NATIVE="$(native_directory "$CONC_B")"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -q '^CONC_B_JSON=.*\$CONC_B_NATIVE' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'value.workspaceRoot === $CONC_B_JSON' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && [ "$(grep -cF '[ "$CONC_B" != "$CONC_B_NATIVE" ]' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK")" -ge 2 ] \
+  && ! grep -qE '_(JSON|NATIVE)=.*pwd -P' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK"; then
+  check "Windows Autopilot workspace expectation stays in the native namespace" PASS
+else
+  check "Windows Autopilot workspace expectation stays in the native namespace" FAIL
 fi
 
 if grep -qF 'PROJECT_HOST_PATHS="$(node - "$PROJECT_ROOT"' "$CLAUDE_WRAPPER" \

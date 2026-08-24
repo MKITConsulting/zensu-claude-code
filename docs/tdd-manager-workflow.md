@@ -49,6 +49,18 @@ Two distinct phase concepts share the word "phase". Keep them separate.
 
 Each step inside Workflow Phase 4 cycles the TDD-FSM through `RED_WRITE → RED_RUN → RED_FAIL → IMPL → GREEN_RUN → GREEN_PASS` (and optionally `REFACTOR`). When all steps complete, the agent advances to Workflow Phase 5.
 
+### Autopilot run scope — owner session and working tree
+
+A durable Autopilot run is bound to the session that started it and to the git working tree it drives, and the two bounds do different jobs.
+
+The **owner** decides who can see and advance the run. Its active pointer is stored per owner, so a run belonging to another session is invisible to yours: it neither resumes in your session nor blocks it. That is what lets two Claude Code sessions run Autopilot at the same time in one project — for example from two git worktrees of the same repository.
+
+The **working tree** decides what two runs may collide on. `--autopilot-begin` refuses while any nonterminal run — yours or another session's — is driving the same tree, because both would push commits onto one branch and open one pull request. The run resolves that tree from the directory the session is standing in; `--autopilot-begin --workspace <path>` overrides it, for a tree that is either the one this session resolves or a directory under the project root — a worktree outside the project is refused. A standalone `/zensu:tdd` chain is gated the same way: it will not arm underneath a durable run in the same tree.
+
+Only `DONE` and `CANCELLED` are terminal — `BLOCKED` is not — and every ordinary event, cancellation included, requires the owning session. A session that disappears while its run is nonterminal therefore leaves the working tree held. `zensu-log.sh --autopilot-release --run <id> --confirm` ends such a run: it applies a real `CANCEL` under the project lock with the ownership check — and only that check — skipped, refuses a terminal run and refuses a caller that owns the run, and is idempotent on retry. `/zensu:autopilot-release` is the guided form; it reports the holding run first and mutates nothing without an explicit yes. It records no bypass-ledger entry, because it escapes no gate.
+
+The refusal quotes the release command, but a person decides whether to run it: the holding session may still be alive.
+
 ---
 
 ## 3. High-Level Workflow

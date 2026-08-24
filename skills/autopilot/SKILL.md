@@ -102,6 +102,19 @@ persist it from the worktree root:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
 ```
 
+The run records the working tree it drives, defaulting to the one this session is standing
+in. Two runs may be live in one project at the same time as long as their working trees
+differ, so a second Autopilot session in another git worktree is no longer refused. Two
+runs in the SAME working tree still are — they would collide on the branch, the commits and
+the pull request. Pass `--workspace <path>` only when the run drives a tree other than the
+current one, and only when that tree lies under the project root — a worktree
+outside the project is refused.
+
+A refusal naming a nonterminal run in this working tree quotes the audited release command.
+That command cancels a run owned by ANOTHER session, so it is the user's call: report the
+refusal and the command, and never run it unasked. `/zensu:autopilot-release` is the
+guided form.
+
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the
 harness hands back (`tool_response.plan`, saved at `tool_response.filePath`), never in a

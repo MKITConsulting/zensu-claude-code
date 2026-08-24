@@ -19,6 +19,7 @@
     "structure/test-autopilot-inner-termination.sh": 24,
     "structure/test-autopilot-plan-delegate.sh": 57,
     "structure/test-autopilot-post-review-max-rounds.sh": 51,
+    "structure/test-autopilot-release-cli.sh": 90,
     "structure/test-autopilot-review-rearm.sh": 41,
     "structure/test-autopilot-session-resume.sh": 42,
     "structure/test-autopilot-skill.sh": 1,
