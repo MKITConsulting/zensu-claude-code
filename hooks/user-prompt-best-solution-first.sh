@@ -34,9 +34,23 @@
 # a config library that is absent, symlinked, or fails to load, or a rule file that is
 # absent, symlinked, swapped between the pre-check and the open, oversized in FILE or in
 # BLOCK, short-read, or malformed exits 0 with no output, so it can never block a prompt or
-# a spawn. Note what that means for a malformed block specifically — the
-# injection is DROPPED, not truncated, and nothing reports it; the build-time pins in
-# tests/structure/test-best-solution-first.sh are what make that shape a hard failure.
+# a spawn. The injection is DROPPED, not truncated, and nothing reports it.
+#
+# What the build-time pins in tests/structure/test-best-solution-first.sh cover, stated
+# precisely because an earlier wording of this paragraph overclaimed it: they make a
+# malformed shape a hard failure IN THIS REPOSITORY'S TREE. No suite ever runs in an
+# INSTALLED tree, so the failure modes have to be separated by whether they self-heal:
+#
+#   TRANSIENT and self-healing — a missing node, a rule file being written at the moment
+#   it is read, a swap caught by the dev/ino re-check. The next prompt injects.
+#
+#   PERSISTENT, operator-caused and invisible forever — a hand-edited or re-wrapped block
+#   in the installed docs/, a symlinked rule file or config library, a partial install
+#   missing hooks/lib/rule-block-v1.js, a forgotten `bestSolutionFirst: false`. Nothing in
+#   the plugin reports any of these, and no test in this repository can see them, because
+#   they are states of somebody else's filesystem. That gap is real and is not closed here;
+#   docs/architecture.md records the proposal for a read-only diagnostic surface, and B16a
+#   in the suite was narrowed so this hook staying stateless does not foreclose it.
 # The plugin-root guard is the one deliberate exception: it is the sibling hooks' guard
 # plus CDPATH= and -- hardening, so a mismatched inherited CLAUDE_PLUGIN_ROOT refuses
 # with exit 2.
@@ -68,15 +82,41 @@ ZENSU_BEST_SOLUTION_CONFIG_LIB="${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-config.sh"
 # node — takes stdin from /dev/null rather than risking the channel the emitter needs.
 # shellcheck source=hooks/lib/zensu-config.sh
 source "$ZENSU_BEST_SOLUTION_CONFIG_LIB" </dev/null 2>/dev/null || exit 0
-zensu_hook_enabled bestSolutionFirst </dev/null || exit 0
+# The verdict is CARRIED rather than acted on here, because the shell cannot see
+# the event: the payload is still unread on fd 0 and buffering it through the
+# shell would corrupt a multi-byte character straddling a chunk boundary. node
+# reads the event and applies the verdict per leg.
+if zensu_hook_enabled bestSolutionFirst </dev/null; then
+  ZENSU_BEST_SOLUTION_ENABLED=1
+else
+  ZENSU_BEST_SOLUTION_ENABLED=0
+fi
+
+# The hardened read and the marker parse live in ONE module now, not in a
+# hand-copy per carrier. zensu-host-path.sh renders a DIRECTORY in the native
+# spelling; the file name is appended after conversion, and the spelling that is
+# actually loaded is what gets guarded — including readability, because a module
+# that is present but unreadable would otherwise throw inside node and be
+# indistinguishable from a malformed rule file.
+ZENSU_RULE_BLOCK_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+  "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+# The renderer only MATTERS on win32, where the two namespaces differ. When it
+# cannot run at all — a stripped PATH, a partial install — falling back to the
+# plain spelling keeps the POSIX carrier working instead of turning a rendering
+# failure into a silent no-injection. The guards below still judge the spelling
+# that is actually loaded, so the fallback widens nothing.
+[ -n "$ZENSU_RULE_BLOCK_DIR" ] || ZENSU_RULE_BLOCK_DIR="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+ZENSU_RULE_BLOCK_LIB="${ZENSU_RULE_BLOCK_DIR:+${ZENSU_RULE_BLOCK_DIR}/rule-block-v1.js}"
+[ -n "$ZENSU_RULE_BLOCK_LIB" ] && [ -f "$ZENSU_RULE_BLOCK_LIB" ] \
+  && [ ! -L "$ZENSU_RULE_BLOCK_LIB" ] && [ -r "$ZENSU_RULE_BLOCK_LIB" ] || exit 0
 
 # node reads the payload itself: buffering it through the shell and re-piping it
 # would corrupt a multi-byte character that straddles a stdin chunk boundary.
-ZENSU_BEST_SOLUTION_RULE_FILE="$ZENSU_BEST_SOLUTION_RULE_FILE" node -e '
+ZENSU_BEST_SOLUTION_RULE_FILE="$ZENSU_BEST_SOLUTION_RULE_FILE" \
+ZENSU_BEST_SOLUTION_ENABLED="$ZENSU_BEST_SOLUTION_ENABLED" \
+ZENSU_RULE_BLOCK_LIB="$ZENSU_RULE_BLOCK_LIB" node -e '
   const OPEN = "<!-- zensu:best-solution-first -->";
   const CLOSE = "<!-- /zensu:best-solution-first -->";
-  const MAX_BLOCK = 4000;
-  const MAX_FILE = 1048576;
   try {
     const fs = require("fs");
     const payload = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
@@ -84,66 +124,25 @@ ZENSU_BEST_SOLUTION_RULE_FILE="$ZENSU_BEST_SOLUTION_RULE_FILE" node -e '
     const event = payload.hook_event_name;
     if (event !== "UserPromptSubmit" && event !== "SubagentStart") process.exit(0);
 
-    // Hardened open, modelled on the reader in hooks/lib/plan-payload-v1.js: lstat, then
-    // open non-blocking without following a link, then fstat back against the same inode
-    // before reading. The shell pre-check above narrows the swap window; this closes it.
-    //
-    // Two deliberate divergences from that reference, both because the path here is FIXED
-    // under the executing plugin root rather than payload-named:
-    //   - no nlink === 1 requirement. There it defends a caller-named path, where a hard
-    //     link is how an attacker reaches a file the symlink check refuses. Here an
-    //     attacker who can plant a hard link can equally rewrite the file, so the check
-    //     buys nothing and would silently disable the rule on any install that
-    //     materializes files by hard link (cp -al, content-addressed stores).
-    //   - the read is bounded by the size fstat already reported, so a file that grows
-    //     between the two calls cannot be read past what was measured. Like the
-    //     reference it fills in a loop and refuses a short read rather than parsing a
-    //     truncated file, which would drop the injection while looking like a refusal.
-    const rulePath = process.env.ZENSU_BEST_SOLUTION_RULE_FILE;
-    const pre = fs.lstatSync(rulePath);
-    if (!pre.isFile()) process.exit(0);
-    // Platform-gated exactly as platformNoFollow() in plan-payload-v1.js: a bare
-    // `O_NOFOLLOW || 0` accepts a flag that is defined but unsupported, where openSync
-    // throws and the rule silently never injects.
-    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
-      ? fs.constants.O_NOFOLLOW : 0;
-    const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
-    const fd = fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock);
-    let raw;
-    try {
-      const post = fs.fstatSync(fd);
-      if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);
-      if (post.size > MAX_FILE) process.exit(0);
-      const buf = Buffer.alloc(post.size);
-      let filled = 0;
-      while (filled < post.size) {
-        const chunk = fs.readSync(fd, buf, filled, post.size - filled, filled);
-        if (chunk < 1) break;
-        filled += chunk;
-      }
-      // A short read would truncate the file before the marker block and drop the
-      // injection while looking exactly like a correct refusal. Refuse explicitly.
-      if (filled !== post.size) process.exit(0);
-      raw = buf.toString("utf8");
-    } finally {
-      // A throwing close must not replace a successful read: without this the outer
-      // catch swallows it and the injection is dropped after the bytes were already in.
-      try { fs.closeSync(fd); } catch (_) {}
-    }
+    // The config opt-out is scoped to the MAIN-THREAD leg. `zensu_hook_enabled`
+    // resolves the merged config and a project-local `.zensu/config.json` wins per
+    // key, so a single `hooks.bestSolutionFirst: false` there silenced both legs.
+    // For UserPromptSubmit that is the documented bargain — the user chose to open
+    // the project. It does not transfer to SubagentStart: a confined reviewer
+    // spawned to review a repository would have its directive set decided by a file
+    // in the repository under review, and the reviewer is exactly the process whose
+    // instructions must not be editable by its subject. The opt-out remains real
+    // for the user; it just no longer reaches a spawn.
+    if (process.env.ZENSU_BEST_SOLUTION_ENABLED !== "1" && event !== "SubagentStart") process.exit(0);
 
-    const lines = raw.split("\n");
-    const open = lines.indexOf(OPEN);
-    if (open < 0 || lines.indexOf(OPEN, open + 1) !== -1) process.exit(0);
-    if (lines[open + 2] !== CLOSE) process.exit(0);
-    const block = String(lines[open + 1] || "").replace(/^>\s*/, "").trim();
-    // The block is injected on every prompt and at every spawn, so its size is a per-turn
-    // multiplier. Refuse rather than silently ship an unbounded context tax.
-    // MAX_BLOCK is a SHARED value: session-start-evidence-discipline.sh declares the same one,
-    // and three checks bind them — B2h here, H4e in the evidence suite, and the cross-carrier
-    // equality in tests/structure/test-windows-portability-guards.sh. This block is the larger
-    // of the two, so the pressure to raise the number lands here; raising it means re-arguing
-    // the bound on the UNSWITCHABLE carrier too, not following this one.
-    if (!block || block.length > MAX_BLOCK) process.exit(0);
+    // The hardened open, the size and short-read bounds, MAX_BLOCK and the marker
+    // parse all live in hooks/lib/rule-block-v1.js. This carrier used to hold a
+    // byte-identical copy of every one of them; the copy then had to be policed by
+    // a cross-carrier equality check, which proves the copies agree rather than
+    // that they are right and cannot be driven from a unit layer at all.
+    const { readRuleBlock } = require(process.env.ZENSU_RULE_BLOCK_LIB);
+    const { block } = readRuleBlock(process.env.ZENSU_BEST_SOLUTION_RULE_FILE, OPEN, CLOSE);
+    if (!block) process.exit(0);
 
     const directive = "Zensu best-solution-first — binding for every process in this "
       + "session, main thread and subagents alike. " + block;

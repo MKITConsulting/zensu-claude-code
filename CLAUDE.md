@@ -320,6 +320,29 @@ The version/ref invariant above is machine-enforced: the gate runs `tests/run-al
 
 If marketplace version or source `ref` ever lags `plugin.json` (for example, a hand bump forgot one field), fix both in the release PR before any tag is created or any user-side `claude plugin install <name>@<name>` attempt.
 
+## Windows Budget for `best-solution-first`
+
+The suite cap was raised 300000 -> 600000, matching its siblings, but **the cap is
+not the ceiling that binds** and the measurement says which one is. On the last
+green run `windows-shard-4` completed in **1591 s** against its `profileTimeoutMs`
+of 1800000 — roughly **209 s of headroom for the whole shard**. A suite never
+receives its configured `timeoutMs`; it receives the shard's remaining budget, so
+raising this number buys nothing while the shard is that close to its own ceiling.
+
+The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
+it builds five fixture plugin trees, and it now also drives
+`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
+also carries `plan-payload-path-transport`, which this file records at a measured
+714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
+not by raising a number. If the shard starts reporting an abort, the tail of
+whichever suite ran last went unverified regardless of how many checks passed
+before it.
+
+The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
+The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
+outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is
+a CI-wide outage rather than documentation.
+
 ## Runtime Lineage (`version_type` is load-bearing)
 
 A plugin update that lands while a session is running leaves the Session Control
@@ -354,7 +377,14 @@ carve-outs kept here so a releaser meets them where they will look:
   `deferredReviewCancellation`, and every other validator that rejects an
   unknown or missing key rather than ignoring it;
 - **removing or renaming a registered hook, or changing a hook's matcher**;
-  **adding** one is NOT in this list and is a `patch`. The argument has two halves
+  **adding** one is NOT in this list and is a `patch`. **Provenance, because it
+  matters here:** this exemption and the config-key one below were WRITTEN BY the
+  change that needed them — the release that added the best-solution-first hook and
+  its `bestSolutionFirst` key. A commit amending the policy that classifies it is
+  the shape that deserves a second reader, so it got one: the exemption was
+  challenged in review and survived on the argument below, not on the author's own
+  say-so. Anyone widening either exemption should expect the same standard. The
+  argument has two halves
   and the second is the load-bearing one. First, `runtimeLineageCompatible`
   compares version tuples only and never inspects the hook inventory, an older
   harness never loads a hook its own `hooks.json` does not declare, and the new
@@ -364,8 +394,17 @@ carve-outs kept here so a releaser meets them where they will look:
   in-flight bind alive is that `readContextInternal` measures the **recorded**
   root, and the upgraded case re-measures the executing tree against the caller's
   claim rather than against the record. Do not over-bump defensively; do
-  re-derive this if the added hook writes session state or participates in a
-  strict key set;
+  re-derive this if the added hook writes session state, participates in a strict
+  key set, **or can DENY**. The third disqualifier is the one an earlier wording
+  left out, and it is the one that matters: a hook that can refuse a tool call
+  changes the capability set of every session an older runtime is still serving,
+  which is exactly what makes a matcher change breaking in the bullet above. A new
+  `PreToolUse` entry on the existing `Bash` matcher returning
+  `permissionDecision: deny` writes no session state and touches no strict key
+  set, so it passed both original tests while being as breaking as anything in
+  this list. The test is CAPABILITY, not storage: an ADVISORY hook — one whose
+  only output is `additionalContext` — is the exempt shape, and that is what the
+  two hooks this exemption was written for are;
 - **adding a permissively-read config key** is likewise NOT in this list and is
   a `patch`, for a reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
   `j.hooks[key] === false`, so an older runtime ignores a key it does not know

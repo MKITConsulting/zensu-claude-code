@@ -208,7 +208,7 @@
           "runner": "bash",
           "path": "tests/structure/test-best-solution-first.sh",
           "args": [],
-          "timeoutMs": 300000
+          "timeoutMs": 600000
         },
         {
           "id": "deferred-claim-adoption",

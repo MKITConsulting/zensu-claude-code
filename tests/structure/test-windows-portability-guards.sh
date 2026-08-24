@@ -457,160 +457,49 @@ else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
 fi
 
-# The best-solution-first rule reader is the third file carrying a hardened open,
-# and it is enrolled here for the reason stated above: every count pin in this
-# suite is per-file, so a NEW file carrying a secure open is invisible until it is
-# named. It deliberately omits the reference's `nlink !== 1` clause — its path is
-# fixed under the executing plugin root rather than payload-named, so a hard link
-# is not a way to reach a file the symlink check refuses, and refusing one would
-# silently disable the rule on any install that materializes files by hard link.
-# That omission is pinned as a negative so it cannot be reintroduced by accident.
-if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
-  && [ "$(grep -cF 'const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
-  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$BEST_SOLUTION_HOOK")" -eq 1 ] \
-  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$BEST_SOLUTION_HOOK" \
-  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$BEST_SOLUTION_HOOK" \
-  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$BEST_SOLUTION_HOOK" \
-  && ! grep -v '^[[:space:]]*//' "$BEST_SOLUTION_HOOK" | grep -qF 'nlink'; then
-  check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" PASS
+# The rule-block reader is the third file carrying a hardened open, and it is now
+# ONE file rather than two carriers to be compared. It is enrolled here for the
+# reason stated above: every count pin in this suite is per-file, so a NEW file
+# carrying a secure open is invisible until it is named.
+#
+# What used to sit here was a ~115-line cross-carrier equality apparatus —
+# extract both embedded readers, strip indentation, compare bodies, compare
+# MAX_FILE, compare MAX_BLOCK, count declarations on each side. Every line of it
+# existed because the reader was hand-copied into two hooks, and all it could ever
+# prove was that the two copies agreed with each other, never that either was
+# right. The copies are gone; the apparatus goes with them. What replaces it is
+# the property that made it necessary: exactly one owner, and no carrier holding a
+# reader of its own.
+#
+# The open deliberately omits the plan-payload reference's `nlink !== 1` clause —
+# the path is fixed under the executing plugin root rather than payload-named, so
+# a hard link is not a way to reach a file the symlink check refuses, and refusing
+# one would silently disable the rule on any install that materializes files by
+# hard link. That omission is pinned as a negative so it cannot be reintroduced.
+RULE_BLOCK_LIB="$ROOT/hooks/lib/rule-block-v1.js"
+RB_CARRIER_READERS=""
+for carrier in "$BEST_SOLUTION_HOOK" "$EVIDENCE_DISCIPLINE_HOOK"; do
+  # A carrier that reopens the rule file itself, or redeclares either bound, has
+  # forked the reader again. Both are the shape this consolidation removed.
+  grep -qF 'fs.openSync(rulePath' "$carrier" && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):open"
+  grep -qE '(MAX_BLOCK|MAX_FILE)[[:space:]]*=[[:space:]]*[0-9]' "$carrier" \
+    && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):bound"
+  grep -qF 'readRuleBlock' "$carrier" || RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):not-wired"
+done
+if [ -f "$RULE_BLOCK_LIB" ] \
+  && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | platformNoFollow() | platformNonBlock())' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$RULE_BLOCK_LIB" \
+  && [ "$(grep -cE '^const MAX_BLOCK = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cE '^const MAX_FILE = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$RULE_BLOCK_LIB" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$RULE_BLOCK_LIB" \
+  && ! grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB" | grep -qF 'nlink' \
+  && [ -z "$RB_CARRIER_READERS" ]; then
+  check "the rule-block reader is one owner with a Windows-safe flag, and neither carrier forked it" PASS
 else
-  check "best-solution-first reader omits unsupported O_NOFOLLOW on Windows" FAIL
-fi
-
-# The evidence-discipline carrier is the fourth file carrying a hardened open. It read its
-# rule file with a plain readFileSync behind the shell pre-check alone until the reader was
-# backported from the sibling above; it is enrolled here for the same reason the sibling is,
-# because every count pin in this suite is per-file and a NEW file carrying a secure open is
-# invisible until it is named. The literals are deliberately IDENTICAL to the sibling's — the
-# two readers are one reader in two carriers, and a divergence in either is a divergence in
-# the pattern. It omits the reference's `nlink !== 1` clause for the same reason and that
-# omission is pinned as a negative so it cannot be reintroduced by accident.
-if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
-  && [ "$(grep -cF 'const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
-  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' "$EVIDENCE_DISCIPLINE_HOOK")" -eq 1 ] \
-  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$EVIDENCE_DISCIPLINE_HOOK" \
-  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$EVIDENCE_DISCIPLINE_HOOK" \
-  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$EVIDENCE_DISCIPLINE_HOOK" \
-  && ! grep -v '^[[:space:]]*//' "$EVIDENCE_DISCIPLINE_HOOK" | grep -qF 'nlink'; then
-  check "evidence-discipline reader omits unsupported O_NOFOLLOW on Windows" PASS
-else
-  check "evidence-discipline reader omits unsupported O_NOFOLLOW on Windows" FAIL
-fi
-
-# The pattern only holds if the two carriers keep the SAME reader. Comparing the extracted
-# blocks catches a one-sided edit that leaves both per-file pins above green — each of them
-# only asserts that its own file still satisfies the shape, never that the two agree.
-# Starts one line BELOW `const rulePath = …`, which is the only line the two legitimately
-# differ on — each names its own rule-file variable.
-#
-# MAX_FILE and MAX_BLOCK are compared SEPARATELY because both are declared above that start
-# line, outside the extracted body, and every per-file structural pin greps `const MAX_FILE =`
-# without its value. Without those comparisons one carrier's ceiling could be changed to any
-# number with every check in the tree still green. The two bound different things: MAX_FILE the
-# file, MAX_BLOCK the single line that is actually injected.
-#
-# The range ENDS on the enforcement rather than on the `finally` brace so the comparison covers
-# the hardened reader, the marker-position parse AND the bound's use. It ended at the brace
-# once, and a probe confirmed the cost: with the enforcement deleted from the evidence carrier
-# this suite still reported 41 PASS / 0 FAIL. That gap was Windows-PR-shard only —
-# `test-evidence-discipline.sh` is absent from tests/profiles/windows-ci.v1.json, so it never
-# runs on the Windows PR shard, but it IS in `ciStructureTests` (pinned by M1 in that suite),
-# which tests/run-windows-safety-shard.js maps into the weekly Windows Safety structure shards,
-# and tests/profiles/windows-native-structure.v1.json records that as the reason for the PR-gate
-# exclusion. On POSIX `tests/run-all.sh` globs every structure suite, so H4e caught it there.
-#
-# Where the range deliberately STOPS: everything below the enforcement — the directive text and
-# the emission — legitimately differs per carrier and is covered behaviourally instead, by
-# test-evidence-discipline.sh H5-H7 and test-best-solution-first.sh B3a/B3b (the directive
-# text) plus B3c (the emitted object shape).
-#
-# TRADE, stated because it is easy to miss: comment stripping runs before range selection, so
-# comment TEXT inside the range is no longer compared. Three in-range comment blocks used to be
-# byte-identical across the carriers and a one-sided edit to any of them used to fail this
-# check; it no longer does. The equality now DEPENDS on the strip — the two carriers' in-range
-# comments are deliberately different lengths.
-#
-# The end address is a SUBSTRING match, so a trailing `// … block.length > MAX_BLOCK …` on a
-# code line survives the full-line strip and truncates the range there. Added to BOTH carriers
-# that keeps the bodies equal and satisfies a mere `grep` for the needle — a probe confirmed it:
-# both enforcements deleted plus that comment gave 41 PASS / 0 FAIL again. The LAST-LINE
-# assertions below are what close it: a truncated body ends on the comment line, not on the
-# enforcement statement, so the equality can no longer stand in for coverage.
-extract_reader() {
-  grep -v '^[[:space:]]*//' "$1" \
-    | sed -n '/const pre = fs.lstatSync(rulePath);/,/block.length > MAX_BLOCK/p'
-}
-extract_max_file() {
-  grep -F 'const MAX_FILE =' "$1" | grep -v '^[[:space:]]*//' | head -1 | tr -d '[:space:]'
-}
-extract_max_block() {
-  grep -F 'const MAX_BLOCK =' "$1" | grep -v '^[[:space:]]*//' | head -1 | tr -d '[:space:]'
-}
-# Uniqueness counts, because every extractor above is steerable. `head -1` takes the FIRST
-# spelling and the sed range ends on the FIRST match of an unanchored substring, so a SECOND
-# declaration or enforcement placed above the real one — in a `/* */` block the full-line `//`
-# filter does not match, in dead code, or in a string — drives all three while the real code
-# below is free to change. That includes the shadow zone between `const rulePath` and
-# `const pre`, which is inside the hook's `try` and therefore a legal place to rebind the value
-# the enforcement reads.
-#
-# What these counts do NOT cover, stated rather than implied: they match a declaration keyword
-# followed by the name, so a rebinding spelled some other way still slips past, and they count
-# per line. The residue is closed BEHAVIOURALLY, not here — test-evidence-discipline.sh H10d and
-# test-best-solution-first.sh B7g drive each real hook against an oversized block. A probe
-# confirmed the split: a `let MAX_BLOCK = 999999999;` shadow on both carriers left this suite at
-# 42 PASS / 0 FAIL while H10d went red.
-count_decl() { grep -v '^[[:space:]]*//' "$1" | grep -cE "(^|[^A-Za-z0-9_])(const|let|var)[[:space:]]+$2[[:space:]]*="; }
-count_literal() { grep -v '^[[:space:]]*//' "$1" | grep -oF "$2" | grep -c .; }
-strip_indent() { printf '%s' "${1#"${1%%[![:space:]]*}"}"; }
-# Compared without indentation on purpose: an identical reindent of both embedded JS bodies is
-# semantically empty and must not render as "the carriers diverged".
-ENFORCE_STMT='if (!block || block.length > MAX_BLOCK) process.exit(0);'
-BSF_READER="$(extract_reader "$BEST_SOLUTION_HOOK")"
-EVD_READER="$(extract_reader "$EVIDENCE_DISCIPLINE_HOOK")"
-BSF_MAX_FILE="$(extract_max_file "$BEST_SOLUTION_HOOK")"
-EVD_MAX_FILE="$(extract_max_file "$EVIDENCE_DISCIPLINE_HOOK")"
-BSF_MAX_BLOCK="$(extract_max_block "$BEST_SOLUTION_HOOK")"
-EVD_MAX_BLOCK="$(extract_max_block "$EVIDENCE_DISCIPLINE_HOOK")"
-BSF_LAST="$(strip_indent "$(printf '%s\n' "$BSF_READER" | tail -1)")"
-EVD_LAST="$(strip_indent "$(printf '%s\n' "$EVD_READER" | tail -1)")"
-BSF_ENF_N="$(count_literal "$BEST_SOLUTION_HOOK" 'block.length > MAX_BLOCK')"
-EVD_ENF_N="$(count_literal "$EVIDENCE_DISCIPLINE_HOOK" 'block.length > MAX_BLOCK')"
-BSF_BDECL_N="$(count_decl "$BEST_SOLUTION_HOOK" MAX_BLOCK)"
-EVD_BDECL_N="$(count_decl "$EVIDENCE_DISCIPLINE_HOOK" MAX_BLOCK)"
-BSF_FDECL_N="$(count_decl "$BEST_SOLUTION_HOOK" MAX_FILE)"
-BSF_MAX_BLOCK_N="$(printf '%s' "$BSF_MAX_BLOCK" | sed -n 's/.*=\([0-9]*\);*$/\1/p')"
-EVD_MAX_BLOCK_N="$(printf '%s' "$EVD_MAX_BLOCK" | sed -n 's/.*=\([0-9]*\);*$/\1/p')"
-EVD_FDECL_N="$(count_decl "$EVIDENCE_DISCIPLINE_HOOK" MAX_FILE)"
-# Named arms, not one conjunction: several of these can fail with the two carriers byte-identical,
-# and "the carriers diverged" would then name a fault that did not occur. Absence is split from
-# duplication throughout, because 0 and 2 have opposite causes and opposite remedies. The two
-# range-end arms run BEFORE the guarded-close arm: a truncated range must be reported as a range
-# fault, not as missing content that the truncation merely pushed out of scope.
-if [ -z "$BSF_READER" ] || [ -z "$EVD_READER" ]; then
-  check "a carrier's reader body could not be extracted (bsf=${#BSF_READER}B evd=${#EVD_READER}B) — the range start moved" FAIL
-elif [ "$BSF_ENF_N" -eq 0 ] || [ "$EVD_ENF_N" -eq 0 ]; then
-  check "the enforcement is absent from a carrier (bsf=$BSF_ENF_N evd=$EVD_ENF_N) — the bound is no longer applied" FAIL
-elif [ "$BSF_ENF_N" -ne 1 ] || [ "$EVD_ENF_N" -ne 1 ]; then
-  check "the enforcement literal is duplicated (bsf=$BSF_ENF_N evd=$EVD_ENF_N) — a second copy steers the extracted range" FAIL
-elif [ "$BSF_BDECL_N" -ne 1 ] || [ "$EVD_BDECL_N" -ne 1 ]; then
-  check "MAX_BLOCK is not declared exactly once (bsf=$BSF_BDECL_N evd=$EVD_BDECL_N) — 0 removes the bound, 2 shadows it past head -1" FAIL
-elif [ "$BSF_FDECL_N" -ne 1 ] || [ "$EVD_FDECL_N" -ne 1 ]; then
-  check "MAX_FILE is not declared exactly once (bsf=$BSF_FDECL_N evd=$EVD_FDECL_N) — 0 removes the bound, 2 shadows it past head -1" FAIL
-elif [ "$BSF_LAST" != "$ENFORCE_STMT" ]; then
-  check "the best-solution-first reader range no longer ends on the enforcement (ends on [${BSF_LAST}])" FAIL
-elif [ "$EVD_LAST" != "$ENFORCE_STMT" ]; then
-  check "the evidence-discipline reader range no longer ends on the enforcement (ends on [${EVD_LAST}])" FAIL
-elif ! printf '%s\n' "$BSF_READER" | grep -qF 'fs.closeSync(fd)'; then
-  check "the shared reader lost its guarded close" FAIL
-elif [ "$BSF_READER" != "$EVD_READER" ]; then
-  check "the two marker-block carriers' reader bodies differ (bsf=${#BSF_READER}B evd=${#EVD_READER}B)" FAIL
-elif [ -z "$BSF_MAX_FILE" ] || [ "$BSF_MAX_FILE" != "$EVD_MAX_FILE" ]; then
-  check "MAX_FILE differs between the carriers (bsf=${BSF_MAX_FILE:-none} evd=${EVD_MAX_FILE:-none})" FAIL
-elif [ -z "$BSF_MAX_BLOCK" ] || [ "$BSF_MAX_BLOCK" != "$EVD_MAX_BLOCK" ]; then
-  check "MAX_BLOCK differs between the carriers (bsf=${BSF_MAX_BLOCK:-none} evd=${EVD_MAX_BLOCK:-none})" FAIL
-else
-  check "both marker-block carriers share one hardened reader body" PASS
+  check "rule-block reader ownership broken:${RB_CARRIER_READERS:- (owner check failed)}" FAIL
 fi
 
 # The review ceilings are the second thing the two carriers must keep in step. What must match is
@@ -620,6 +509,10 @@ fi
 # text, well inside its own ceiling, turned this suite red while the owning suite correctly
 # accepted it. Measured, not assumed — 88 against 89 on a single added character. A ceiling is a
 # budget the block may grow into; pinning it to the block would make that budget unreachable.
+# The fail-safe now has one source, so it is read from the owner rather than from
+# each carrier — which is what the two BSF_/EVD_ variables used to do, and what the
+# consolidation above removed.
+RB_MAX_BLOCK_N="$(sed -n 's/^const MAX_BLOCK = \([0-9]*\);$/\1/p' "$RULE_BLOCK_LIB" | head -1)"
 suite_const() { sed -n "s/^$2=\([0-9]*\).*/\1/p" "$1" | head -1; }
 suite_const_n() { grep -c "^$2=" "$1"; }
 HDR_BSF_SUITE="$ROOT/tests/structure/test-best-solution-first.sh"
@@ -635,12 +528,12 @@ elif [ "$HDR_N" -ne 4 ]; then
   check "the review-ceiling constants are not declared exactly once each (4 expected, $HDR_N found) — head -1 would read a decoy while the suite uses the last assignment" FAIL
 elif [ "$HDR_BSF_H" != "$HDR_EVD_H" ]; then
   check "the declared review headroom differs (bsf=$HDR_BSF_H evd=$HDR_EVD_H) — the criterion is absolute headroom, identical on both carriers, not a ratio" FAIL
-elif [ -z "$BSF_MAX_BLOCK_N" ] || [ -z "$EVD_MAX_BLOCK_N" ]; then
-  check "a carrier's MAX_BLOCK value is not a bare integer (bsf=${BSF_MAX_BLOCK:-none} evd=${EVD_MAX_BLOCK:-none}) — the ceiling comparison cannot run, and an unguarded -ge would fall through to PASS" FAIL
-elif [ "$HDR_BSF_C" -ge "$BSF_MAX_BLOCK_N" ] || [ "$HDR_EVD_C" -ge "$EVD_MAX_BLOCK_N" ]; then
-  check "a review ceiling is not below its MAX_BLOCK fail-safe (bsf $HDR_BSF_C vs $BSF_MAX_BLOCK_N; evd $HDR_EVD_C vs $EVD_MAX_BLOCK_N) — the tripwire would be inert" FAIL
+elif [ -z "$RB_MAX_BLOCK_N" ]; then
+  check "the shared reader's MAX_BLOCK is not a bare integer (${RB_MAX_BLOCK_N:-none}) — the ceiling comparison cannot run, and an unguarded -ge would fall through to PASS" FAIL
+elif [ "$HDR_BSF_C" -ge "$RB_MAX_BLOCK_N" ] || [ "$HDR_EVD_C" -ge "$RB_MAX_BLOCK_N" ]; then
+  check "a review ceiling is not below the shared MAX_BLOCK fail-safe (bsf $HDR_BSF_C, evd $HDR_EVD_C, fail-safe $RB_MAX_BLOCK_N) — the tripwire would be inert" FAIL
 else
-  check "both carriers declare the same review headroom ($HDR_BSF_H chars) below their MAX_BLOCK fail-safe" PASS
+  check "both suites declare the same review headroom ($HDR_BSF_H chars) below the shared MAX_BLOCK fail-safe" PASS
 fi
 
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \

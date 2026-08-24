@@ -111,7 +111,14 @@ exactly as its sibling hooks do.
 ## Precedence
 
 This rule governs which options are in the set and, absent a competing contract, their
-order. It does not outrank a skill that fixes an option order by contract.
+order. It does not outrank a skill that fixes an option order by contract, an agent
+contract that fixes output shape, **or another hook that prescribes an option list on the
+same channel**. That last case is not hypothetical: `hooks/user-prompt-tdd-reminder.sh`
+injects on the same `UserPromptSubmit` event and names the options it wants offered. Where
+two directives arrive together on one channel, the more SPECIFIC one decides the set — a
+hook that names its options has already made the ranking decision for its own subject — and
+this rule still requires that the option you would defend as best is not silently demoted
+inside whatever set survives.
 `skills/pilot/SKILL.md` derives its offers from a decision table and prescribes their
 sequence; where the two disagree, the skill's order wins and this rule still requires that
 the option the agent would defend as best be present. The block says so itself, so the

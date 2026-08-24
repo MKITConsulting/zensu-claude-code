@@ -53,13 +53,30 @@ unset _ZENSU_EXECUTED_PLUGIN_ROOT _ZENSU_DECLARED_PLUGIN_ROOT
 command -v node >/dev/null 2>&1 || exit 0
 [ -f "$ZENSU_EVIDENCE_RULE_FILE" ] && [ ! -L "$ZENSU_EVIDENCE_RULE_FILE" ] || exit 0
 
+# The hardened read and the marker parse live in ONE module now, not in a
+# hand-copy per carrier. zensu-host-path.sh renders a DIRECTORY in the native
+# spelling; the file name is appended after conversion, and the spelling that is
+# actually loaded is what gets guarded — including readability, because a module
+# that is present but unreadable would otherwise throw inside node and be
+# indistinguishable from a malformed rule file.
+ZENSU_RULE_BLOCK_DIR="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+  "${CLAUDE_PLUGIN_ROOT}/hooks/lib" 2>/dev/null)"
+# The renderer only MATTERS on win32, where the two namespaces differ. When it
+# cannot run at all — a stripped PATH, a partial install — falling back to the
+# plain spelling keeps the POSIX carrier working instead of turning a rendering
+# failure into a silent no-injection. The guards below still judge the spelling
+# that is actually loaded, so the fallback widens nothing.
+[ -n "$ZENSU_RULE_BLOCK_DIR" ] || ZENSU_RULE_BLOCK_DIR="${CLAUDE_PLUGIN_ROOT}/hooks/lib"
+ZENSU_RULE_BLOCK_LIB="${ZENSU_RULE_BLOCK_DIR:+${ZENSU_RULE_BLOCK_DIR}/rule-block-v1.js}"
+[ -n "$ZENSU_RULE_BLOCK_LIB" ] && [ -f "$ZENSU_RULE_BLOCK_LIB" ] \
+  && [ ! -L "$ZENSU_RULE_BLOCK_LIB" ] && [ -r "$ZENSU_RULE_BLOCK_LIB" ] || exit 0
+
 # node reads the payload itself: buffering it through the shell and re-piping it
 # would corrupt a multi-byte character that straddles a stdin chunk boundary.
-ZENSU_EVIDENCE_RULE_FILE="$ZENSU_EVIDENCE_RULE_FILE" node -e '
+ZENSU_EVIDENCE_RULE_FILE="$ZENSU_EVIDENCE_RULE_FILE" \
+ZENSU_RULE_BLOCK_LIB="$ZENSU_RULE_BLOCK_LIB" node -e '
   const OPEN = "<!-- zensu:evidence-discipline -->";
   const CLOSE = "<!-- /zensu:evidence-discipline -->";
-  const MAX_BLOCK = 4000;
-  const MAX_FILE = 1048576;
   try {
     const fs = require("fs");
     const payload = JSON.parse(fs.readFileSync(0, "utf8") || "{}");
@@ -67,68 +84,15 @@ ZENSU_EVIDENCE_RULE_FILE="$ZENSU_EVIDENCE_RULE_FILE" node -e '
     const event = payload.hook_event_name;
     if (event !== "SessionStart" && event !== "SubagentStart") process.exit(0);
 
-    // Hardened open, modelled on the reader in hooks/lib/plan-payload-v1.js and shared
-    // verbatim with hooks/user-prompt-best-solution-first.sh: lstat, then open
-    // non-blocking without following a link, then fstat back against the same inode
-    // before reading. The shell pre-check above narrows the swap window; this closes it.
-    //
-    // Two deliberate divergences from that reference, both because the path here is FIXED
-    // under the executing plugin root rather than payload-named:
-    //   - no nlink === 1 requirement. There it defends a caller-named path, where a hard
-    //     link is how an attacker reaches a file the symlink check refuses. Here an
-    //     attacker who can plant a hard link can equally rewrite the file, so the check
-    //     buys nothing and would silently disable the rule on any install that
-    //     materializes files by hard link (cp -al, content-addressed stores).
-    //   - the read is bounded by the size fstat already reported, so a file that grows
-    //     between the two calls cannot be read past what was measured. Like the
-    //     reference it fills in a loop and refuses a short read rather than parsing a
-    //     truncated file, which would drop the injection while looking like a refusal.
-    const rulePath = process.env.ZENSU_EVIDENCE_RULE_FILE;
-    const pre = fs.lstatSync(rulePath);
-    if (!pre.isFile()) process.exit(0);
-    // Platform-gated exactly as platformNoFollow() in plan-payload-v1.js: a bare
-    // `O_NOFOLLOW || 0` accepts a flag that is defined but unsupported, where openSync
-    // throws and the rule silently never injects.
-    const noFollow = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
-      ? fs.constants.O_NOFOLLOW : 0;
-    const nonBlock = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;
-    const fd = fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock);
-    let raw;
-    try {
-      const post = fs.fstatSync(fd);
-      if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);
-      if (post.size > MAX_FILE) process.exit(0);
-      const buf = Buffer.alloc(post.size);
-      let filled = 0;
-      while (filled < post.size) {
-        const chunk = fs.readSync(fd, buf, filled, post.size - filled, filled);
-        if (chunk < 1) break;
-        filled += chunk;
-      }
-      // A short read would truncate the file before the marker block and drop the
-      // injection while looking exactly like a correct refusal. Refuse explicitly.
-      if (filled !== post.size) process.exit(0);
-      raw = buf.toString("utf8");
-    } finally {
-      // A throwing close must not replace a successful read: without this the outer
-      // catch swallows it and the injection is dropped after the bytes were already in.
-      try { fs.closeSync(fd); } catch (_) {}
-    }
-
-    const lines = raw.split("\n");
-    const open = lines.indexOf(OPEN);
-    if (open < 0 || lines.indexOf(OPEN, open + 1) !== -1) process.exit(0);
-    if (lines[open + 2] !== CLOSE) process.exit(0);
-    const block = String(lines[open + 1] || "").replace(/^>\s*/, "").trim();
-    // MAX_FILE caps the FILE; without this the same file, well under that ceiling, can
-    // still carry one enormous marker line — and this carrier injects it into every
-    // session and every subagent as a directive that cannot be switched off. Shared
-    // value with the sibling carrier user-prompt-best-solution-first.sh, and three checks
-    // bind them: H4e in tests/structure/test-evidence-discipline.sh (which fails first),
-    // B2h in tests/structure/test-best-solution-first.sh, and the cross-carrier equality in
-    // tests/structure/test-windows-portability-guards.sh. Raising it here means re-arguing
-    // the bound on the sibling too, not following it.
-    if (!block || block.length > MAX_BLOCK) process.exit(0);
+    // The hardened open, the size and short-read bounds, MAX_BLOCK and the marker
+    // parse all live in hooks/lib/rule-block-v1.js. This carrier used to hold a
+    // byte-identical copy of every one of them, and it is the carrier where the
+    // duplicate-OPEN rule mattered most: this directive is documented as not
+    // switchable off, and appending one duplicated marker line to the rule file
+    // silently disabled it. The module takes the FIRST marker pair instead.
+    const { readRuleBlock } = require(process.env.ZENSU_RULE_BLOCK_LIB);
+    const { block } = readRuleBlock(process.env.ZENSU_EVIDENCE_RULE_FILE, OPEN, CLOSE);
+    if (!block) process.exit(0);
 
     const directive = "Zensu evidence discipline — binding for every process in this "
       + "session, main thread and subagents alike, and not switchable off. " + block;

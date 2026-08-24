@@ -153,7 +153,14 @@ The **flag** exists because this rule governs how a decision is *presented*, not
 
 The **per-prompt** event, rather than `SessionStart`, is the whole point: a rule delivered once fades as the context fills, and it fades exactly when an agent starts optimizing for the smallest disturbance to what already exists. There is no de-bounce band — unlike `user-prompt-context-nudge.sh`, which is right to fire once per threshold band — because the moment an agent is about to frame a question is not observable in advance.
 
-**What it costs, measured rather than asserted.** Driving the hook directly, each injection
+**What it costs, measured rather than asserted — and exactly one of these figures is
+enforced.** `C6` in `tests/structure/test-best-solution-first.sh` derives the emitted length
+from the hook itself and requires this paragraph to match it, so the injection size below is
+machine-pinned and cannot drift. Every OTHER number here — the sibling's emitted length, the
+KB estimates and the per-turn totals — is hand-computed and illustrative: they were correct
+when written, nothing re-derives them, and a change to any input silently ages them. Read them
+as an order of magnitude, not as a measurement, and do not add a new figure here expecting the
+suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
 injects roughly 2.7 KB on the same prompt channel. A `/zensu:tdd` review round spawns five

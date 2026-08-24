@@ -239,12 +239,18 @@ fi
 # reader's own commentary names O_NOFOLLOW and nlink in prose, so a bare token grep would
 # stay green after the flag was deleted from the open. The composition and the ORDER are
 # pinned, not the vocabulary.
-HOOK_JS="$(grep -v '^[[:space:]]*//' "$HOOK")"
+# The hardened read, the bounds and the marker parse have ONE owner now:
+# hooks/lib/rule-block-v1.js. These pins grep the owner, which is what removed the
+# cross-carrier equality dance — H4e used to recover MAX_BLOCK out of the SIBLING
+# HOOK by path, because the number was declared twice and neither copy was the
+# definition.
+RULE_BLOCK_LIB="$PLUGIN_DIR/hooks/lib/rule-block-v1.js"
+HOOK_JS="$(grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB")"
 H4B_FSTAT="$(printf '%s\n' "$HOOK_JS" | grep -n 'fs.fstatSync(fd)' | head -1 | cut -d: -f1)"
 H4B_READ="$(printf '%s\n' "$HOOK_JS" | grep -n 'fs.readSync(fd' | head -1 | cut -d: -f1)"
-if printf '%s\n' "$HOOK_JS" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' \
-   && printf '%s\n' "$HOOK_JS" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
-   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);' \
+if printf '%s\n' "$HOOK_JS" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | platformNoFollow() | platformNonBlock())' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) {' \
    && [ -n "$H4B_FSTAT" ] && [ -n "$H4B_READ" ] && [ "$H4B_FSTAT" -lt "$H4B_READ" ]; then
   check "H4b reader opens O_NOFOLLOW|O_NONBLOCK and re-checks dev/ino BEFORE reading" PASS
 else
@@ -257,8 +263,8 @@ fi
 # the bytes were already read, which looks exactly like a correct refusal.
 if printf '%s\n' "$HOOK_JS" | grep -qF 'const MAX_FILE =' \
    && printf '%s\n' "$HOOK_JS" | grep -qF 'post.size > MAX_FILE' \
-   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (filled !== post.size) process.exit(0);' \
-   && printf '%s\n' "$HOOK_JS" | grep -qF 'try { fs.closeSync(fd); } catch (_) {}'; then
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'if (filled !== post.size) return { text: null, reason: REASONS.SHORT_READ };' \
+   && printf '%s\n' "$HOOK_JS" | grep -qF 'try { fs.closeSync(fd); } catch (_)'; then
   check "H4c reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
 else
   check "H4c reader lost its size ceiling, short-read refusal or guarded close" FAIL
@@ -275,32 +281,31 @@ else
   check "H4d reader carries no nlink refusal (deliberate divergence from plan-payload-v1)" PASS
 fi
 
-# The block bound, the last divergence from the sibling carrier. MAX_FILE caps the FILE;
-# without MAX_BLOCK a file that stays under it can still carry one enormous marker line,
-# and this hook injects that line into every session and every subagent as a directive
-# that cannot be switched off. The value is shared with
-# hooks/user-prompt-best-solution-first.sh on purpose — see the cross-carrier equality
-# check in tests/structure/test-windows-portability-guards.sh — so it is read out of the
-# sibling rather than hand-copied here, and a change there cannot leave this pin behind.
-H4E_SIBLING="$PLUGIN_DIR/hooks/user-prompt-best-solution-first.sh"
-H4E_WANT="$(grep -v '^[[:space:]]*//' "$H4E_SIBLING" 2>/dev/null \
-  | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
-H4E_HAVE="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
+# The block bound. MAX_FILE caps the FILE; without MAX_BLOCK a file that stays
+# under it can still carry one enormous marker line, and this hook injects that
+# line into every session and every subagent as a directive that cannot be
+# switched off.
+#
+# It used to be declared in BOTH carriers and recovered here out of the sibling
+# hook by path — a dependency on another file's source text, chosen because the
+# alternative was a third hand copy of the number. There is one definition now, in
+# the module both carriers call, so this asserts that: the owner declares it, the
+# owner enforces it, and NEITHER carrier declares one of its own.
+H4E_WANT="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\1/p' | head -1)"
 H4E_ENF_N="$(printf '%s\n' "$HOOK_JS" | grep -oF 'block.length > MAX_BLOCK' | grep -c .)"
-if [ ! -f "$H4E_SIBLING" ]; then
-  check "H4e sibling carrier is missing from disk — the shared bound cannot be resolved (this is a dependency on the sibling FILE, deliberate: the alternative is a third hand copy of the number)" FAIL
-elif [ -z "$H4E_WANT" ]; then
-  check "H4e sibling carrier declares no MAX_BLOCK (evidence=${H4E_HAVE:-none}) — the shared bound cannot be resolved" FAIL
-elif [ "$H4E_HAVE" != "$H4E_WANT" ]; then
-  check "H4e MAX_BLOCK values disagree (sibling=$H4E_WANT evidence=${H4E_HAVE:-none})" FAIL
-elif [ "$H4E_ENF_N" -eq 0 ]; then
-  check "H4e MAX_BLOCK = $H4E_WANT is declared but the injected block is no longer compared against it" FAIL
-elif [ "$H4E_ENF_N" -ne 1 ]; then
-  check "H4e the enforcement literal is duplicated ($H4E_ENF_N occurrences) — a second copy makes this check meaningless" FAIL
-elif [ "$(printf '%s\n' "$HOOK_JS" | grep -F 'block.length > MAX_BLOCK' | sed 's/^[[:space:]]*//')" = 'if (!block || block.length > MAX_BLOCK) process.exit(0);' ]; then
-  check "H4e reader declares MAX_BLOCK = $H4E_WANT and bounds the injected block by it" PASS
+H4E_REDECLARED=""
+for carrier in "$PLUGIN_DIR/hooks/user-prompt-best-solution-first.sh" "$HOOK"; do
+  grep -qE 'MAX_BLOCK[[:space:]]*=[[:space:]]*[0-9]' "$carrier" 2>/dev/null \
+    && H4E_REDECLARED="$H4E_REDECLARED $(basename "$carrier")"
+done
+if [ -z "$H4E_WANT" ]; then
+  check "H4e the shared reader declares no MAX_BLOCK — the bound cannot be resolved" FAIL
+elif [ "$H4E_ENF_N" -lt 1 ]; then
+  check "H4e MAX_BLOCK is declared but never compared against the block" FAIL
+elif [ -n "$H4E_REDECLARED" ]; then
+  check "H4e a carrier redeclared MAX_BLOCK:$H4E_REDECLARED — the shared definition is no longer the only one" FAIL
 else
-  check "H4e MAX_BLOCK = $H4E_WANT is declared but the injected block is no longer compared against it" FAIL
+  check "H4e MAX_BLOCK = $H4E_WANT has one definition in the shared reader, is enforced there, and no carrier redeclares it" PASS
 fi
 
 emitted() {
@@ -477,6 +482,9 @@ MAXF="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_FILE = \([0-9]*\);.*/\1
 BIG_DIR="$(mktemp -d -t zensu-evidence-big-XXXXXX)" || BIG_DIR=""
 if [ -n "$BIG_DIR" ] && [ -n "$MAXF" ] \
    && mkdir -p "$BIG_DIR/hooks" "$BIG_DIR/docs" \
+   && mkdir -p "$BIG_DIR/hooks/lib" \
+   && cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$BIG_DIR/hooks/lib/rule-block-v1.js" \
+   && cp "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$BIG_DIR/hooks/lib/zensu-host-path.sh" \
    && cp "$HOOK" "$BIG_DIR/hooks/$HOOK_BASE" \
    && cp "$RULES" "$BIG_DIR/docs/evidence-discipline.md"; then
   BIG_PAYLOAD='{"hook_event_name":"SessionStart","source":"startup"}'
@@ -512,6 +520,9 @@ MAXB="$(printf '%s\n' "$HOOK_JS" | sed -n 's/.*const MAX_BLOCK = \([0-9]*\);.*/\
 BLK_DIR="$(mktemp -d -t zensu-evidence-blk-XXXXXX)" || BLK_DIR=""
 if [ -n "$BLK_DIR" ] && [ -n "$MAXF" ] && [ -n "$MAXB" ] && [ "$MAXB" -lt "$MAXF" ] \
    && mkdir -p "$BLK_DIR/hooks" "$BLK_DIR/docs" \
+   && mkdir -p "$BLK_DIR/hooks/lib" \
+   && cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$BLK_DIR/hooks/lib/rule-block-v1.js" \
+   && cp "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$BLK_DIR/hooks/lib/zensu-host-path.sh" \
    && cp "$HOOK" "$BLK_DIR/hooks/$HOOK_BASE" \
    && cp "$RULES" "$BLK_DIR/docs/evidence-discipline.md"; then
   BLK_PAYLOAD='{"hook_event_name":"SessionStart","source":"startup"}'

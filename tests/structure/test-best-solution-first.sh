@@ -40,6 +40,12 @@ set -u
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 RULES="$PLUGIN_DIR/docs/best-solution-first.md"
 HOOK="$PLUGIN_DIR/hooks/user-prompt-best-solution-first.sh"
+# The hardened read, the size and short-read bounds, MAX_BLOCK and the marker
+# parse have ONE owner now. Every pin that used to grep a carrier's inline copy
+# greps this instead, which is what makes the cross-carrier equality checks the
+# review flagged unnecessary rather than merely satisfied.
+RULE_BLOCK_LIB="$PLUGIN_DIR/hooks/lib/rule-block-v1.js"
+
 HOOKS_JSON="$PLUGIN_DIR/hooks/hooks.json"
 HOOK_BASENAME="user-prompt-best-solution-first.sh"
 OPEN_MARKER='<!-- zensu:best-solution-first -->'
@@ -327,24 +333,56 @@ if [ "$(( REVIEW_CEILING - B2G_LEN ))" -le "$REVIEW_HEADROOM" ]; then
 else
   check "B2g1 the review ceiling is $(( REVIEW_CEILING - B2G_LEN )) chars above the block, more than the declared ${REVIEW_HEADROOM} — raise the headroom deliberately or lower the ceiling" FAIL
 fi
-# The suite's fail-safe number is a hand copy; bind it to the hook's literal so raising
-# one without the other cannot leave B2g's label describing a bound that is not enforced.
-B2H_CODE="$(grep -v '^[[:space:]]*//' "$HOOK")"
+# The suite's fail-safe number is a hand copy; bind it to the OWNER's literal.
+# There is one owner now — hooks/lib/rule-block-v1.js — so this no longer has to
+# police two carriers against each other, and B2h asserts that neither carrier
+# reintroduces a declaration of its own.
+B2H_CODE="$(grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB")"
+B2H_CARRIERS_CLEAN=1
+for carrier in "$HOOK" "$PLUGIN_DIR/hooks/session-start-evidence-discipline.sh"; do
+  grep -qE 'MAX_BLOCK[[:space:]]*=[[:space:]]*[0-9]' "$carrier" && B2H_CARRIERS_CLEAN=0
+done
 if printf '%s\n' "$B2H_CODE" | grep -qF "const MAX_BLOCK = $MAX_BLOCK;" \
-   && printf '%s\n' "$B2H_CODE" | grep -qF 'block.length > MAX_BLOCK'; then
-  check "B2h the hook declares MAX_BLOCK = $MAX_BLOCK and compares the block against it" PASS
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'block.length > MAX_BLOCK' \
+   && [ "$B2H_CARRIERS_CLEAN" = 1 ]; then
+  check "B2h MAX_BLOCK = $MAX_BLOCK has ONE definition, in the shared reader, and no carrier redeclares it" PASS
 else
-  check "B2h the hook no longer declares $MAX_BLOCK or no longer compares the block against it" FAIL
+  check "B2h MAX_BLOCK is no longer $MAX_BLOCK in the shared reader, is not compared, or a carrier redeclared it" FAIL
 fi
-# MAX_FILE, the short-read refusal and the guarded close are one-line additions with no
-# behavioral case; without these pins any of them can be deleted with the suite green.
+# MAX_FILE, the short-read refusal and the guarded close are one-line additions.
+# They now have executed cases in tests/structure/rule-block-v1.test.js as well;
+# these greps stay because a deletion should fail loudly at both layers.
 if printf '%s\n' "$B2H_CODE" | grep -qF 'const MAX_FILE =' \
    && printf '%s\n' "$B2H_CODE" | grep -qF 'post.size > MAX_FILE' \
-   && printf '%s\n' "$B2H_CODE" | grep -qF 'if (filled !== post.size) process.exit(0);' \
-   && printf '%s\n' "$B2H_CODE" | grep -qF 'try { fs.closeSync(fd); } catch (_) {}'; then
-  check "B2i reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'if (filled !== post.size) return { text: null, reason: REASONS.SHORT_READ };' \
+   && printf '%s\n' "$B2H_CODE" | grep -qF 'try { fs.closeSync(fd); } catch (_)'; then
+  check "B2i the shared reader keeps its file-size ceiling, short-read refusal and non-throwing close" PASS
 else
-  check "B2i reader lost its size ceiling, short-read refusal or guarded close" FAIL
+  check "B2i the shared reader lost its size ceiling, short-read refusal or guarded close" FAIL
+fi
+
+# B0 — the unit contract for the shared reader, driven FIRST. tests/run-all.sh
+# discovers only test-*.sh, so a *.test.js with no driver is never executed by the
+# tree runner. It runs at the head of this file on purpose: it needs nothing this
+# suite builds, and at the tail a Windows shard timeout would cost the only
+# coverage the reader's own refusal branches have anywhere.
+RULE_BLOCK_UNIT="$PLUGIN_DIR/tests/structure/rule-block-v1.test.js"
+if [ ! -f "$RULE_BLOCK_UNIT" ]; then
+  check "B0 the shared reader's unit contract is missing from disk" FAIL
+elif ! command -v node >/dev/null 2>&1; then
+  skip "B0 rule-block unit contract (node unavailable)"
+else
+  B0_OUT="$(node --test "$RULE_BLOCK_UNIT" 2>&1)"
+  B0_RC=$?
+  # A case-count floor as well as the exit status: `node --test` exits 0 for a file
+  # that registers ZERO cases, so the status alone cannot tell a green run from a
+  # suite that stopped being discovered.
+  B0_PASS="$(printf '%s\n' "$B0_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
+  if [ "$B0_RC" -eq 0 ] && [ -n "$B0_PASS" ] && [ "$B0_PASS" -ge 9 ]; then
+    check "B0 the shared reader's unit contract passes ($B0_PASS cases)" PASS
+  else
+    check "B0 rule-block unit contract: rc=$B0_RC pass=${B0_PASS:-none} (want >= 9): $(printf '%s' "$B0_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
+  fi
 fi
 
 # ── B1: registration on both events ─────────────────────────────────────────
@@ -502,6 +540,12 @@ build_fake() {
   mkdir -p "$dest/hooks/lib" "$dest/docs" || return 1
   cp "$HOOK" "$dest/hooks/$HOOK_BASENAME" || return 1
   cp "$PLUGIN_DIR/hooks/lib/zensu-config.sh" "$dest/hooks/lib/zensu-config.sh" || return 1
+  # The hardened read and the marker parse moved into a shared module, so a tree
+  # that carries the hook without it is a PARTIAL install and the hook exits 0 on
+  # its own guard — which would make every positive control here vacuous rather
+  # than measuring the branch it names.
+  cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$dest/hooks/lib/rule-block-v1.js" || return 1
+  cp "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$dest/hooks/lib/zensu-host-path.sh" || return 1
   return 0
 }
 
@@ -548,8 +592,24 @@ if [ -n "$FAKE_BLOCK" ] && build_fake "$FAKE_BLOCK"; then
   grep -vxF "$OPEN_MARKER" "$RULES" > "$BLOCK_FILE"
   block_case "B7c a missing open marker drops the injection (exit 0, no output)"
 
-  { cat "$RULES"; printf '%s\n' "$OPEN_MARKER"; } > "$BLOCK_FILE"
-  block_case "B7d a duplicate open marker drops the injection (exit 0, no output)"
+  # INVERTED, and it is the finding rather than a relaxation: refusing on a second
+  # OPEN made append-only access a silent kill switch, and on the sibling carrier
+  # that directive is documented as not switchable off. The FIRST pair wins, so the
+  # shipped block stays authoritative and an appended one cannot displace it.
+  {
+    cat "$RULES"
+    printf '%s\n' "$OPEN_MARKER"
+    printf '%s\n' '> appended rule that must never be injected'
+    printf '%s\n' "$CLOSE_MARKER"
+  } > "$BLOCK_FILE"
+  CLAUDE_PLUGIN_ROOT="$FAKE_BLOCK" drive '{"hook_event_name":"UserPromptSubmit"}' "$FAKE_BLOCK/hooks/$HOOK_BASENAME"
+  if [ "$RC" -eq 0 ] && [ -n "$OUT" ] \
+     && ! printf '%s' "$OUT" | grep -qF 'appended rule that must never be injected'; then
+    check "B7d a duplicate open marker leaves the SHIPPED block injected, not the appended one" PASS
+  else
+    check "B7d a duplicate open marker changed the injection (exit=$RC bytes=${#OUT})" FAIL
+  fi
+  cp "$RULES" "$BLOCK_FILE"
 
   awk -v o="$OPEN_MARKER" '{ print } $0 == o { print "> spliced second line" }' "$RULES" > "$BLOCK_FILE"
   block_case "B7e a block spanning two lines drops the injection (exit 0, no output)"
@@ -613,16 +673,38 @@ fi
 # Comments are stripped first: the hook's own header names O_NOFOLLOW in prose, so a bare
 # token-presence grep would stay green after the flag was deleted from the open. The
 # composition and the order are pinned, not the vocabulary.
-HOOK_CODE="$(grep -v '^[[:space:]]*//' "$HOOK")"
+HOOK_CODE="$(grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB")"
 B8A_FSTAT="$(printf '%s\n' "$HOOK_CODE" | grep -n 'fs.fstatSync(fd)' | head -1 | cut -d: -f1)"
 B8A_READ="$(printf '%s\n' "$HOOK_CODE" | grep -n 'fs.readSync(fd' | head -1 | cut -d: -f1)"
-if printf '%s\n' "$HOOK_CODE" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | noFollow | nonBlock)' \
-   && printf '%s\n' "$HOOK_CODE" | grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' \
-   && printf '%s\n' "$HOOK_CODE" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) process.exit(0);' \
+if printf '%s\n' "$HOOK_CODE" | grep -qF 'fs.openSync(rulePath, fs.constants.O_RDONLY | platformNoFollow() | platformNonBlock())' \
+   && printf '%s\n' "$HOOK_CODE" | grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" \
+   && printf '%s\n' "$HOOK_CODE" | grep -qF 'if (!post.isFile() || post.dev !== pre.dev || post.ino !== pre.ino) {' \
    && [ -n "$B8A_FSTAT" ] && [ -n "$B8A_READ" ] && [ "$B8A_FSTAT" -lt "$B8A_READ" ]; then
   check "B8a reader opens O_NOFOLLOW|O_NONBLOCK and re-checks dev/ino BEFORE reading" PASS
 else
   check "B8a hardened-open sequence broken (fstat line ${B8A_FSTAT:-?} vs read line ${B8A_READ:-?})" FAIL
+fi
+
+# B8c — the two symlink guards, which B8's behavioural arm cannot discriminate.
+# On POSIX `openSync(..., O_NOFOLLOW)` on a symlink throws ELOOP, the outer catch
+# swallows it and the hook exits 0 — byte-identical to a correct refusal. So B8
+# stays green with BOTH the shell `[ ! -L ]` pre-check and the `!pre.isFile()`
+# check deleted. Each is therefore pinned where it lives, and the module half
+# additionally has an EXECUTED case in tests/structure/rule-block-v1.test.js that
+# drives a real symlink through `readRuleBlock` — the arm B8 cannot be.
+B8C_MISS=""
+grep -qF '[ ! -L "$ZENSU_BEST_SOLUTION_RULE_FILE" ]' "$HOOK" \
+  || B8C_MISS="$B8C_MISS [shell-symlink-precheck-gone]"
+grep -qF '[ ! -L "$ZENSU_RULE_BLOCK_LIB" ]' "$HOOK" \
+  || B8C_MISS="$B8C_MISS [module-symlink-guard-gone]"
+grep -qF 'if (!pre.isFile()) return { text: null, reason: REASONS.NOT_A_FILE };' "$RULE_BLOCK_LIB" \
+  || B8C_MISS="$B8C_MISS [reader-type-check-gone]"
+grep -qF 'a symlinked rule file is refused by the open itself' "$PLUGIN_DIR/tests/structure/rule-block-v1.test.js" \
+  || B8C_MISS="$B8C_MISS [executed-symlink-case-gone]"
+if [ -z "$B8C_MISS" ]; then
+  check "B8c both symlink guards and the reader's type check are pinned where they live, with an executed case for the module half" PASS
+else
+  check "B8c symlink guard coverage:$B8C_MISS" FAIL
 fi
 # The nlink clause is deliberately ABSENT: the path is fixed under the executing plugin
 # root, so a hard link is not a way to reach a file the symlink check refuses, and
@@ -641,10 +723,17 @@ if [ -n "$CFG_OFF" ] && printf '{"hooks":{"bestSolutionFirst":false}}' > "$CFG_O
     && check "B9 hooks.bestSolutionFirst:false suppresses the UserPromptSubmit injection" PASS \
     || check "B9 opt-out did not suppress the injection (exit=$RC bytes=${#OUT})" FAIL
 
+  # INVERTED, and the asymmetry is the point. `zensu_hook_enabled` resolves the
+  # MERGED config and a project-local `.zensu/config.json` wins per key, so one
+  # `hooks.bestSolutionFirst: false` in a repository used to silence both legs. For
+  # the main thread that is the documented bargain — the user chose to open the
+  # project. It does not transfer to a confined reviewer spawned to review that
+  # repository: the reviewer is exactly the process whose instructions must not be
+  # editable by its subject.
   ZENSU_CONFIG="$CFG_OFF" drive '{"hook_event_name":"SubagentStart","agent_id":"a1","agent_type":"zensu:review-aspect"}'
-  [ "$RC" -eq 0 ] && [ -z "$OUT" ] \
-    && check "B9a the opt-out covers the SubagentStart leg too" PASS \
-    || check "B9a opt-out leaves the SubagentStart leg emitting (exit=$RC bytes=${#OUT})" FAIL
+  [ "$RC" -eq 0 ] && [ -n "$OUT" ] \
+    && check "B9a the opt-out does NOT reach the SubagentStart leg — a repo cannot silence its own reviewer" PASS \
+    || check "B9a opt-out silenced the SubagentStart leg (exit=$RC bytes=${#OUT})" FAIL
 else
   check "B9 could not write the opt-out config fixture" FAIL
 fi
@@ -717,9 +806,14 @@ if [ -n "$NODELESS_BIN" ]; then
   elif [ -z "$ABS_BASH" ]; then
     check "B13 could not resolve an absolute bash path" FAIL
   elif ! PATH="$NODELESS_BIN/bin" dirname -- /a/b >/dev/null 2>&1; then
-    # Only a host whose `ln -s` cannot produce a runnable helper reaches this.
+    # Only a host whose `ln -s` cannot produce a runnable helper reaches this. On
+    # such a host the hook cannot resolve its own root and refuses at the
+    # plugin-root guard with exit 2, LONG before the node probe — so nothing about
+    # fail-silence was observed. Reporting PASS there claimed coverage the arm did
+    # not have, which is the exact class this suite's header sets out to remove.
+    # It SKIPS instead, and says which branch went unmeasured.
     if [ "$(node -p 'process.platform === "win32" ? "true" : "false"' 2>/dev/null)" = true ]; then
-      check "B13 missing-node fail-silent (no runnable dirname on a stripped PATH)" PASS
+      skip "B13 missing-node fail-silence (this host's ln -s yields no runnable dirname, so the hook refuses at the plugin-root guard before the node probe)"
     else
       check "B13 could not keep dirname runnable on the node-free PATH" FAIL
     fi
@@ -769,22 +863,48 @@ fi
 # hook and gated on a different flag, so it is pinned here — the suite that owns the rule
 # — rather than left to drift.
 ZEN_HOOK="$PLUGIN_DIR/hooks/user-prompt-zen-mode.sh"
+# The SHIPPED directive, not the whole file. That hook emits three different
+# `additionalContext` payloads — the active contract, a `zen-mode is now OFF`
+# message and a deactivation-failure message — plus a shell header, and a
+# whole-file grep cannot tell which one carries the clause. Moving all three
+# literals into the OFF payload, or into a comment, left every check below green
+# while the active contract had lost them. The payload is recovered by EXECUTING
+# the hook on an active session, so what is asserted is what a model actually
+# receives; if it cannot be driven, the arms say so rather than falling back to a
+# file-wide grep that cannot discriminate.
+ZEN_ACTIVE=""
+if [ -f "$ZEN_HOOK" ] && command -v node >/dev/null 2>&1; then
+  ZEN_STATE_DIR="$(mk_dir)"
+  if [ -n "$ZEN_STATE_DIR" ]; then
+    ZEN_ACTIVE="$(printf '%s' '{"hook_event_name":"UserPromptSubmit","session_id":"zen-probe","prompt":"zen mode"}' \
+      | CLAUDE_PROJECT_DIR="$ZEN_STATE_DIR" bash "$ZEN_HOOK" 2>/dev/null \
+      | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const o=JSON.parse(s);process.stdout.write(String((o.hookSpecificOutput||{}).additionalContext||""))}catch{}})' 2>/dev/null)"
+  fi
+fi
+# Fall back to the file only when the hook could not be driven at all, and label
+# the arms so a reader can tell which evidence they rest on.
+ZEN_SRC="$ZEN_ACTIVE"
+ZEN_WHERE="the emitted active contract"
+if [ -z "$ZEN_SRC" ] && [ -f "$ZEN_HOOK" ]; then
+  ZEN_SRC="$(cat "$ZEN_HOOK")"
+  ZEN_WHERE="the hook source (the active contract could not be emitted here)"
+fi
 if [ -f "$ZEN_HOOK" ]; then
-  if grep -qF 'never drop an option the user is choosing between' "$ZEN_HOOK" \
-     && grep -qF 'demote the one you would defend as best' "$ZEN_HOOK"; then
-    check "B14 zen-mode's SCOPE clause still carries the ranking obligation" PASS
+  if printf '%s' "$ZEN_SRC" | grep -qF 'never drop an option the user is choosing between' \
+     && printf '%s' "$ZEN_SRC" | grep -qF 'demote the one you would defend as best'; then
+    check "B14 zen-mode's SCOPE clause still carries the ranking obligation (checked against $ZEN_WHERE)" PASS
   else
     check "B14 zen-mode lost the ranking clause — bestSolutionFirst:false is no longer the only switch that matters" FAIL
   fi
   # zen-mode's brevity clause must not re-license dropping an option under decision.
-  if grep -qF 'alternatives you were NOT asked to choose between' "$ZEN_HOOK"; then
+  if printf '%s' "$ZEN_SRC" | grep -qF 'alternatives you were NOT asked to choose between'; then
     check "B14a zen-mode's brevity clause exempts options actually under decision" PASS
   else
     check "B14a zen-mode's brevity clause again licenses dropping alternatives wholesale" FAIL
   fi
   # A fallback carrying only the prohibition reconstitutes the exact bias the block's
   # anti-inflation carve-out exists to prevent, so the counterweight is pinned too.
-  if grep -qF 'never licenses inflating scope' "$ZEN_HOOK"; then
+  if printf '%s' "$ZEN_SRC" | grep -qF 'never licenses inflating scope'; then
     check "B14b zen-mode's clause carries the anti-inflation counterweight, not the prohibition alone" PASS
   else
     check "B14b zen-mode carries only the prohibition — it would bias every agent toward inflating scope" FAIL
@@ -843,10 +963,22 @@ fi
 # a state path and a bound session. If such a band failed OPEN when it could not resolve
 # one — the fail-silent convention this hook otherwise follows — B16's two drives would
 # emit identically and the de-bounce would slip through.
-if grep -v '^[[:space:]]*//' "$HOOK" | grep -qE 'zensu-session\.sh|zensu_bind_hook_session|\.zensu/state|transcript_path'; then
-  check "B16a hook gained state/session plumbing — a de-bounce band may now be present" FAIL
+#
+# NARROWED, because the previous alternation pinned the hook into being both
+# unconditional AND stateless, and the second half foreclosed a remedy this PR's own
+# `docs/architecture.md` proposes: nothing can tell an operator the rule stopped
+# injecting in their installation, and the proposal is a read-only diagnostic
+# surface. A `/zensu:doctor` row that READS a state path is not a de-bounce band —
+# what makes a band is a WRITE that a later invocation reads back. So the pin keys
+# on the write, and B16's two behavioural drives remain the arm that catches a band
+# built some other way.
+B16A_HIT="$(grep -v '^[[:space:]]*//' "$HOOK" \
+  | grep -oE 'zensu_bind_hook_session|transcript_path|>[[:space:]]*"?\$?\{?[A-Za-z_/][^|]*\.zensu/state|mkdir[[:space:]]+-p[^|]*\.zensu/state|writeFileSync|appendFileSync' \
+  | head -2 | tr '\n' ' ')"
+if [ -n "$B16A_HIT" ]; then
+  check "B16a hook gained a session bind or a state WRITE — a de-bounce band may now be present ($B16A_HIT)" FAIL
 else
-  check "B16a hook references no state path or session binding, so no de-bounce can exist" PASS
+  check "B16a hook performs no session bind and no state write, so no de-bounce can exist; a read-only diagnostic surface is not foreclosed" PASS
 fi
 
 # ── B17: the quoted-boolean trap ───────────────────────────────────────────
