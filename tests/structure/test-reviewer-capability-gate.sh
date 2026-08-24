@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only names
+# hooks/lib/zensu-doctor.sh inside a `{"command": ...}` payload handed to the
+# capability gate, to check that the gate admits that command shape.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -d "$ROOT/plugins/zensu" ]; then PLUGIN="$ROOT/plugins/zensu"; else PLUGIN="$ROOT"; fi
 GATE="$PLUGIN/hooks/pre-reviewer-capability-gate.sh"

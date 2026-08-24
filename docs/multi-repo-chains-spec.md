@@ -34,7 +34,7 @@ therefore a trusted value derived from the immutable Session Control record.
 Nothing in this proposal weakens that.
 
 Two of the consumers named in §6.3 do NOT sit on that binding: the terminus
-count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1182`) and
+count reads `git -C "${CLAUDE_PROJECT_DIR:-.}"` (`hooks/lib/zensu-log.sh:1270`) and
 the audit's default `--project` is `${CLAUDE_PROJECT_DIR:-.}`
 (`hooks/lib/zensu-edit-landing.sh:36`) — both ambient, both with a `.` fallback.
 Which root that variable names in a multi-root topology, and what the fallback
@@ -45,7 +45,7 @@ means when it is unset, is an open question (§11).
 enumerates the change set with `git -C "$REPO_ROOT"` (`:69-93`). But its receipt
 lands at `<--project>/.zensu/state/edit-landing-<session>.json` (`:266`), while
 `--tdd-complete` looks for it beside the ANCHOR's workflow document
-(`hooks/lib/zensu-log.sh:608`). Running the audit once per repository therefore
+(`hooks/lib/zensu-log.sh:696`). Running the audit once per repository therefore
 writes receipts nothing reads, and each run reports the other repository's claims
 as not landed, so no run can exit 0.
 
@@ -553,12 +553,46 @@ re-verify.
    default in a multi-root topology, and what the `.` fallback means when it is
    unset (§2).
 7. Whether a code root should be allowed to be a worktree of the anchor's own
-   repository. Nothing above forbids it, and nothing above needs it.
+   repository. Nothing above forbids it, and nothing above needs it — but it is no
+   longer a free choice, because the per-workspace exclusion that landed with
+   `feat(autopilot): scope durable runs per owner session and per workspace`
+   answers it by accident. `mayHoldWorkspace` in
+   `hooks/lib/zensu-autopilot-state.sh` is containment in BOTH directions, and
+   three cases were measured against the shipped predicate rather than reasoned
+   about:
+
+   - **Siblings do not collide.** With a durable run recorded on
+     `<anchor>/.claude/worktrees/a`, the occupancy read answers *free* for a
+     sibling worktree `b`, and *held* for `a` itself. A union whose roots are
+     siblings therefore needs nothing from this proposal that it does not already
+     have.
+   - **Parent and child collide, in both directions.** That same run answers
+     *held* for the anchor. A run recorded on the anchor answers *held* for every
+     worktree beneath it, and `autopilot_begin_standalone_tdd` inside one of them
+     is refused with rc 4.
+   - **The tree scoping of `release` is weaker in a nested topology than in the
+     flat one it was designed against.** With the anchor's owner made stale, a
+     caller standing in a nested code root released the anchor's run (rc 0)
+     instead of meeting the out-of-tree refusal (exit 6), because the same
+     bidirectional containment qualifies a nested tree.
+     `skills/autopilot-release/SKILL.md` already states that exit 6 is an accident
+     guard and not an authorization boundary, so this follows the shipped contract
+     rather than breaking it. It is named here because a multi-root design must
+     not read exit 6 as confinement of one root's reach.
+
+   The direction is fail-CLOSED, so nothing unsafe follows from leaving it as it
+   is: a nested union over-blocks, never under-blocks. What does follow is that
+   the nested topology is unusable without an explicit exemption — an anchor's own
+   chain cannot arm an inner standalone generation in one of its own code roots —
+   and any such exemption must name the union. That is the same list §6.1.1 cannot
+   yet source from a channel the session may not write, so answering question 7
+   "yes" costs no carve-out in the predicate; it inherits the provenance problem
+   Stage 2 is already blocked on.
 
 ### Citations to re-verify
 
 - The `--chain-done` dirty-tree refusal was inferred from the comment at
-  `hooks/lib/zensu-log.sh:585`; its own implementation must be read before §6.3's
+  `hooks/lib/zensu-log.sh:673`; its own implementation must be read before §6.3's
   terminus row is implemented.
 - `classifyChain()` was not read; the consumer roster in §7.3 comes from the
   conventions document and must be re-derived from the code.

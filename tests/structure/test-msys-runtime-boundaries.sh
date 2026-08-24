@@ -72,7 +72,13 @@ if printf '%s\n' "$AUTOPILOT_NODE_BLOCK" \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  begin: 6,' \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  apply: 7,' \
     && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget": 5,' \
-    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget-capped": 5,'; then
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "increment-budget-capped": 5,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-workspace": 1,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  release: 4,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  begin: 9,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF '  "read-workspace": 2,' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF 'const canonical = fs.realpathSync.native(path.resolve(requested));' \
+    && printf '%s\n' "$AUTOPILOT_NODE_BLOCK" | grep -qF 'args[workspaceRootIndex] = canonical;'; then
   check "Autopilot canonicalizes every mode-specific physical project root before persistence or comparison" PASS
 else
   check "Autopilot physical project-root canonicalization contract" FAIL

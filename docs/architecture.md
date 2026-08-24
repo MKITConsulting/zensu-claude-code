@@ -113,7 +113,7 @@ Moving it into a library fixes that and adds what the prose never had: a witness
 ## Best Solution First
 
 A second normative rule ships the same way, and the pair is now a **pattern worth naming**: a rule block lives under `docs/` between HTML markers, and a hook reads it out of that file *at run time* and injects it as `additionalContext`. The canonical file is the only copy; the carrier cannot drift from it; and `docs/` sits inside the Session Control runtime digest, so the declared source of truth is tamper-evident within a session — while the executing plugin root is the recorded one. `servesRecordedRuntime` lets a compatible sibling install serve a record it did not mint, and both carriers read from the *executing* root, so across a mid-session upgrade the injected bytes come from a tree no in-session digest measured; each rule's own build-time pins are what bind the text there. A third such rule belongs here too — and one already exists without following it:
-`hooks/user-prompt-zen-mode.sh` injects a ~2.7 KB always-on contract on the same
+`hooks/user-prompt-zen-mode.sh` injects a ~2.9 KB always-on contract on the same
 `UserPromptSubmit` channel, hardcoded as a shell heredoc rather than read from a marker
 block. It is named here so the next reader does not conclude it was overlooked.
 
@@ -163,7 +163,7 @@ as an order of magnitude, not as a measurement, and do not add a new figure here
 suite to keep it honest. Driving the hook directly, each injection
 is **1756 characters / 1764 bytes** of `additionalContext`, identical on both legs. For scale,
 `session-start-evidence-discipline.sh` emits 939 characters, and `hooks/user-prompt-zen-mode.sh`
-injects roughly 2.7 KB on the same prompt channel. A `/zensu:tdd` review round spawns five
+injects roughly 2.9 KB on the same prompt channel. A `/zensu:tdd` review round spawns five
 `review-aspect` agents plus a judge and a code-reviewer, so the `SubagentStart` leg adds about
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
 round. The dominant term, though, is the other leg, and it is the one the design deliberately

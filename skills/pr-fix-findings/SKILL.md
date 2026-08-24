@@ -7,7 +7,9 @@ description: >
   workers only for parallel read-only analysis, implement every fix in the
   interactive main thread through the Zensu workflow (`/zensu:tdd` + review chain, strict
   RED→GREEN TDD by default — run `/zensu:tdd-mode --vanilla` first to opt out), push, resolve
-  the corresponding threads on the PR, and report a summary back. Use whenever the
+  the corresponding threads on the PR, and report a summary back. A standalone run
+  carries the whole procedure through in one pass — pushing and resolving the threads
+  is one unit, never a checkpoint to hand back. Use whenever the
   user wants to address, fix, or resolve PR review feedback / review comments /
   reviewer findings, "work through the review", "fix the review notes", "resolve
   the review threads", or the slash command /zensu:pr-fix-findings. Built to run
@@ -116,6 +118,42 @@ the blocker, and stop without a question. Use the closed codes `fix-provider-unk
 This delegated path supersedes the standalone analysis-parallelism clauses in Procedure steps 3–4.
 All other safety and reporting rules still apply.
 
+## Completion contract (standalone)
+
+Invoking this skill authorizes the WHOLE procedure — through the step 7 report — and
+not the first half of it. Standalone mode is the only mode allowed to ask at all, and
+that permission is narrow: it exists for a fork you genuinely cannot settle, never for
+a checkpoint. A run that keeps handing the turn back costs the user more attention than
+doing the work by hand, which is the failure this contract exists to prevent.
+
+- **Steps 4–7 are ONE unit.** Implement, land, resolve, report. A run that pushed and
+  then stopped short of the last `--resolve-thread` call is INCOMPLETE, not paused: the
+  reviewer is left looking at commits against threads still marked open, which is
+  precisely the state this skill exists to clear. Never end a turn between the push and
+  the final resolved thread.
+- **Never ask permission for a step this procedure already prescribes.** Pushing to the
+  PR branch, replying to a thread, and resolving a thread are this skill's own work,
+  authorized by the invocation that started it. Perform them, then report them.
+- **Settle routine calls yourself and record them.** Which test proves a finding, how to
+  word a fix, whether a thread is praise or actionable, what order to take the worklist
+  in, whether two adjacent fixes travel in one commit — decide, act, and name the
+  decision in the step 7 report. A decision reported afterwards costs the user one line;
+  the same decision raised mid-run costs a round trip.
+- **Legal early stops are a CLOSED list (standalone only).** Stop before step 7 only
+  for: (a) a product or architecture fork where different answers produce materially
+  different code; (b) an auth or permission failure you cannot repair yourself
+  (`zensu auth login`, `gh auth login`, `glab auth login`); (c) the PR/MR is no longer
+  OPEN, or its head moved under you; (d) a gate or test you cannot satisfy without one
+  of the first three. Nothing else qualifies.
+- **These are NOT stops.** A batch boundary. A long worklist. "Shall I continue?" A wish
+  to show intermediate progress. A finding you judged out of scope — skip it, leave its
+  thread open, and name it in the report. A fix that is merely large. A gate you have
+  not run yet — run it.
+- **A legal stop still lands what is already finished.** Before reporting a blocker,
+  commit, push, and resolve every thread whose fix is complete, so even a blocked run
+  leaves the PR strictly better than it found it. Then state what remains and the ONE
+  decision you need. At most one question per run.
+
 ## Procedure
 
 0. **Detect the forge (GitHub or GitLab).** Resolve the driver once:
@@ -198,12 +236,17 @@ All other safety and reporting rules still apply.
      durable PR head.
    - Commit with a Conventional Commit message referencing the addressed comments,
      push to the PR branch. Clean commit messages — no watermark / co-author lines.
+   - The push is not a checkpoint. Continue straight into step 6 in the same turn —
+     a successful push is the middle of the procedure, never a place to hand back.
 
 6. **Resolve the threads.**
    - For each addressed thread:
      `bash "$VCS" --resolve-thread --provider <provider> --repo-id <repo> --reply "<one-line note + commit SHA>" <id> <threadId> <replyTo>`
      — this replies to the thread and resolves it (GitHub: reply to the `replyTo`
      comment + resolve the `threadId`; GitLab: the single discussion id serves as both).
+   - Resolving is part of the fix, not a follow-up: every thread you addressed in this
+     run gets its reply and its resolve call before you report. A pushed-but-unresolved
+     thread is unfinished work, never a delivered result.
    - Leave threads you could NOT resolve open, with a reply explaining why or what
      decision you need.
 
@@ -219,8 +262,12 @@ When run under `/loop` (self-paced): each iteration re-fetches unresolved thread
 - If **none remain**, report "all review comments resolved" and end the loop.
 - Otherwise address the next batch and continue.
 
-In standalone mode only, stop early and ask the user when you hit a fix that needs a product/architecture decision, an auth error (`zensu auth login`), or a failing gate you
-cannot satisfy. In delegated mode, persist `BLOCK` with the appropriate code and report the
+In standalone mode only, stop early and ask the user when you hit a blocker on the closed
+list in **Completion contract (standalone)** above — a fix that needs a product/architecture
+decision, an auth error (`zensu auth login`), a PR/MR that is no longer OPEN or whose head
+moved, or a failing gate you
+cannot satisfy without one of those. Nothing else is a legal stop: everything else is decided
+in-thread and named in the step 7 report. In delegated mode, persist `BLOCK` with the appropriate code and report the
 blocker without asking a mid-run question.
 
 ## Next step
@@ -229,3 +276,7 @@ When invoked standalone — not delegated by `/zensu:autopilot` or `/zensu:pilot
 — offer, once every thread is resolved and only after the user confirms, to
 harden the change with `/zensu:cover`, or `/zensu:pilot` to re-probe the
 feature and continue toward the release gate.
+
+In a standalone run that hits no blocker, this offer is the ONLY user-facing prompt the
+whole procedure produces, and it comes after the step 7 report — never before the last
+thread is resolved.
