@@ -1837,6 +1837,14 @@ easy to miss because none of them mentions the schema:
   three further checks this one deliberately omits; the module header names them. The
   store is per-user and the window is short, which is why it is accepted rather than
   closed.
+- **A reused pid renames history in the `windows` label namespace.** Splitting accounts
+  from windows stopped the two key kinds colliding; it does nothing about one pid being
+  reused by a different process after the first exits. Nothing reaps a `windows` entry,
+  and `endpointLabel` resolves a PERSISTED endpoint's `appPid` through the CURRENT
+  labels file, so a label assigned today renames a months-old handover whose `appPid`
+  matches. It bites hardest where the desktop store is unreachable — there the pid is
+  not the fallback route to a name, it is the only one. Qualifying the key with a
+  process identity is the fix; it needs a labels-file shape change and is not paid for.
 - **The module's name collides with the plugin's existing "runtime lineage" term.**
   `session-lineage-v1.mjs` is about handovers between sessions; §"Runtime Lineage
   (`version_type` is load-bearing)" above is about plugin versions serving a recorded

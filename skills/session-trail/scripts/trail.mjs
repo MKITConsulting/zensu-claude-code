@@ -8,7 +8,8 @@ import {
   ledgerPaths, writeEdge, readEdges, dedupeEdges,
   makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
   readLabels as readLabelsFile, writeLabels, emptyLabels, boundLabel,
-  isSafeHostSessionId, EDGE_REFUSALS, boundText,
+  isSafeHostSessionId, EDGE_REFUSALS, boundText, siblingLedgerVersions,
+  LEDGER_SCHEMA_VERSION,
 } from './session-lineage-v1.mjs';
 
 const HOME = os.homedir();
@@ -2150,6 +2151,20 @@ function cmdLineage(opts) {
     if (LEDGER_SCHEMA_NEWER) {
       print('The ledger holds records written by a NEWER schema than this build can read.');
       print('Update the plugin rather than treating this as an empty history.');
+      return;
+    }
+    const siblings = siblingLedgerVersions(CONFIG_ROOT);
+    if (siblings.length) {
+      // Reached by an ordinary plugin upgrade, not by a rare condition: the store is
+      // partitioned by schema version, so a bump makes every recorded handover read
+      // as none. Saying so BEFORE the --backfill offer is the whole point -- the
+      // offer invites the user to replace intact records with guesses.
+      const total = siblings.reduce((n, v) => n + v.records, 0);
+      print(`No handover is recorded under the schema this build reads (v${LEDGER_SCHEMA_VERSION}).`);
+      print(`${total} record(s) exist under ${siblings.map((v) => `${v.version} (${v.records})`).join(', ')} in ${path.join(CONFIG_ROOT, 'zensu', 'session-lineage')}.`);
+      print('That is your history, written by another build of this plugin. It is NOT lost, and');
+      print('it is NOT reconstructable by --backfill — do not run that here, it would mint guesses');
+      print('beside intact records. Use the build that wrote them, or move the records by hand.');
       return;
     }
     print('No handover has been recorded yet.');

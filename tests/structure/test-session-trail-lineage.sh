@@ -613,6 +613,26 @@ DEEP="$DEEP{\"pid\":21,\"ppid\":1,\"comm\":\"Claude\"}]}"
 OUT="$(probe_window "$DEEP")"
 [ "$(jq_field "$OUT" appPid)" = "null" ] && check "L31c an ancestor past the 12-hop bound is not reported" PASS || check "L31c the hop bound holds (got $(jq_field "$OUT" appPid))" FAIL
 
+# ── L32 — a schema bump must not read as "nothing was ever recorded" ───────
+# The store is partitioned by schema version, so a bump makes readEdges open an
+# absent directory and take the deliberate "absent is not an error" branch. The
+# empty-state arm then offered to reconstruct the lost history as GUESSES -- an
+# ordinary plugin upgrade delivering the one wrong answer this feature exists to
+# prevent, followed by an invitation to fabricate replacements for intact records.
+SIBCFG="$FAKE/sibcfg"
+rm -rf "$SIBCFG"; mkdir -p "$SIBCFG/zensu/session-lineage/v9/edges"
+printf '{"schemaVersion":9,"from":{"sessionId":"aaaaaaaa"},"to":{"sessionId":"bbbbbbbb"}}' > "$SIBCFG/zensu/session-lineage/v9/edges/1000000001-cccccccccccccccc.json"
+OUT="$(cd "$SELF_CWD" 2>/dev/null && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --all --config-dir "$SIBCFG" 2>&1)"
+case "$OUT" in *"record(s) exist under v9"*) check "L32 records under another schema version are named, not reported as no history" PASS ;; *) check "L32 records under another schema version are named (got ${OUT:-<empty>})" FAIL ;; esac
+case "$OUT" in *"do not run that here"*) check "L32a the --backfill offer is WITHHELD, because it would mint guesses beside intact records" PASS ;; *) check "L32a the --backfill offer is withheld" FAIL ;; esac
+# The positive control: with no sibling version present the ordinary empty state --
+# including the --backfill offer -- must still appear, or the disclosure above would
+# be satisfiable by a branch that fires unconditionally.
+rm -rf "$SIBCFG/zensu/session-lineage/v9"
+OUT="$(cd "$SELF_CWD" 2>/dev/null && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --all --config-dir "$SIBCFG" 2>&1)"
+case "$OUT" in *"lineage --backfill"*) check "L32b with no sibling version the ordinary empty state still offers --backfill" PASS ;; *) check "L32b the ordinary empty state is unchanged (got ${OUT:-<empty>})" FAIL ;; esac
+rm -rf "$SIBCFG"
+
 # ── L22 — the cycle guard, which nothing exercised ─────────────────────────
 # walkChain documents `seen` as the difference between a wrong answer and a hang.
 # Nothing planted a cycle, so deleting the guard left all checks green and the

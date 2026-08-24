@@ -93,6 +93,38 @@ export function ledgerPaths(configRoot) {
   return { base, edges: path.join(base, 'edges'), labels: path.join(base, 'labels.json') };
 }
 
+// The partition above is what makes this necessary. When LEDGER_SCHEMA_VERSION moves
+// to 2, `readEdges` opens `.../v2/edges`, gets a clean ENOENT, and returns the
+// deliberate "absent is not an error" empty result -- so every recorded handover
+// reads as "no handover has been recorded yet", and the empty-state arm then offers
+// to reconstruct the lost history as GUESSES. That is the one wrong answer this
+// feature exists to prevent, delivered by an ordinary plugin upgrade rather than by
+// any rare condition.
+//
+// This does NOT migrate anything. It reports that records exist one directory over,
+// so the empty answer is disclosed instead of silent. Migration is still the open
+// decision; being wrong out loud is the part that could not wait for it.
+export function siblingLedgerVersions(configRoot) {
+  const root = path.join(configRoot, 'zensu', 'session-lineage');
+  const mine = `v${LEDGER_SCHEMA_VERSION}`;
+  let names;
+  try { names = fs.readdirSync(root); } catch { return []; }
+  const found = [];
+  for (const n of names) {
+    if (n === mine || !/^v\d+$/.test(n)) continue;
+    let count = 0;
+    try {
+      for (const f of fs.readdirSync(path.join(root, n, 'edges'))) {
+        if (f.endsWith('.json') && !f.startsWith('.')) count += 1;
+      }
+    } catch { continue; }
+    if (count > 0) found.push({ version: n, records: count });
+  }
+  // Newest first, so a reader sees the most likely source of the missing history at
+  // the top rather than having to scan an arbitrary directory order.
+  return found.sort((a, b) => Number(b.version.slice(1)) - Number(a.version.slice(1)));
+}
+
 // Refused rather than created when any component is a symlink or a non-directory.
 // The store is machine-wide and every session can write the config root, so a
 // symlink planted at the leaf would redirect every record AND take the chmod with
@@ -350,9 +382,20 @@ export function chainRoots(edges) {
 }
 
 // Two namespaces, tagged, because the keys are different kinds of thing: an
-// account UUID is stable, an OS pid is reused after its process exits. One flat
-// map made a pid-keyed label silently rename an unrelated window later, and left
-// no way to tell the two apart in the file.
+// account UUID is stable, an OS pid is reused after its process exits. One flat map
+// left no way to tell the two apart in the file, so an account UUID and a pid could
+// collide outright.
+//
+// What the split does NOT fix, stated because the older wording here read as if it
+// did: reuse INSIDE the `windows` namespace. A pid is reused once its process exits,
+// nothing reaps a `windows` entry, and `endpointLabel` resolves a PERSISTED endpoint's
+// appPid through the CURRENT labels file -- so a label assigned today renames a
+// handover recorded months ago whose appPid happens to match. Pid reuse rewrites
+// history here rather than only the present, and it bites hardest exactly where the
+// desktop store is unreachable, because there the pid is not the fallback route to a
+// name, it is the only one. Qualifying the key with a process identity is the fix and
+// is not implemented; the residual is named in CLAUDE.md rather than left in a comment
+// that claims it away.
 export function emptyLabels() {
   // Null-prototype maps: a key named `constructor` or `__proto__` would otherwise
   // resolve to an inherited member and render it as an account's identity.
