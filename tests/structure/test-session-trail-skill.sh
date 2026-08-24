@@ -322,7 +322,12 @@ fi
 # proof that the original pattern still bites.
 # Controlled below by T11-control: T0 proves WRITE_RE bites, which says nothing
 # about this DERIVED literal — a lost `|` would retire a channel with T0 green.
-DESTRUCTIVE_WRITE_RE='\b(appendFileSync|rmSync|rmdirSync|copyFileSync|cpSync|truncateSync|symlinkSync|linkSync|utimesSync|writeSync|createWriteStream)\b|fs\.promises\.|promises\.(write|append|mkdir|rm|unlink|rename|copyFile)|node:fs/promises'
+# `linkSync` moved OUT of this literal and into T11b's target-constrained set:
+# `writeEdge` lands its record with link+unlink rather than rename, because rename
+# REPLACES an existing target silently — which left the five-attempt retry loop
+# guarding the only create that cannot collide. It is constrained by enclosing
+# function below, exactly like the other five.
+DESTRUCTIVE_WRITE_RE='\b(appendFileSync|rmSync|rmdirSync|copyFileSync|cpSync|truncateSync|symlinkSync|utimesSync|writeSync|createWriteStream)\b|fs\.promises\.|promises\.(write|append|mkdir|rm|unlink|rename|copyFile)|node:fs/promises'
 WRITE_HIT=""
 grep -rqE "$DESTRUCTIVE_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT destructive-fs-write"
 grep -rqE "$OPEN_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE_HIT="$WRITE_HIT open-write-mode"
@@ -331,20 +336,20 @@ grep -rqE "$GIT_WORKTREE_WRITE_RE" "$SKILL_DIR" "${SCRIPT_INCLUDES[@]}" && WRITE
 # T11-control — the derived pattern must match every spelling it names, and must
 # NOT match the three the ledger legitimately uses.
 T11_HITS=0
-for spelling in appendFileSync rmSync rmdirSync copyFileSync cpSync truncateSync symlinkSync linkSync utimesSync writeSync createWriteStream; do
+for spelling in appendFileSync rmSync rmdirSync copyFileSync cpSync truncateSync symlinkSync utimesSync writeSync createWriteStream; do
   printf '%s\n' "$spelling" | grep -qE "$DESTRUCTIVE_WRITE_RE" && T11_HITS=$((T11_HITS+1))
 done
 # Arity guard, as GERMAN_RE and GIT_MUTATION_VERBS have: a branch added to the
 # pattern without a control line would otherwise be pinned but never proved.
 DW_BRANCHES="$(printf '%s' "$DESTRUCTIVE_WRITE_RE" | sed 's/|fs\\.promises.*//' | tr '|' '\n' | grep -c .)"
-[ "$DW_BRANCHES" = "11" ] || check "T11-control DESTRUCTIVE_WRITE_RE has $DW_BRANCHES named spellings, the control list has 11" FAIL
-if [ "$T11_HITS" = "11" ]; then
-  check "T11-control the destructive-write pattern still matches all 11 spellings it names" PASS
+[ "$DW_BRANCHES" = "10" ] || check "T11-control DESTRUCTIVE_WRITE_RE has $DW_BRANCHES named spellings, the control list has 10" FAIL
+if [ "$T11_HITS" = "10" ]; then
+  check "T11-control the destructive-write pattern still matches all 10 spellings it names" PASS
 else
-  check "T11-control the destructive-write pattern matched only $T11_HITS of 11 spellings" FAIL
+  check "T11-control the destructive-write pattern matched only $T11_HITS of 10 spellings" FAIL
 fi
 T11_FALSE=0
-for permitted in writeFileSync mkdirSync chmodSync renameSync unlinkSync; do
+for permitted in writeFileSync mkdirSync chmodSync renameSync unlinkSync linkSync; do
   printf '%s\n' "$permitted" | grep -qE "$DESTRUCTIVE_WRITE_RE" && T11_FALSE=$((T11_FALSE+1))
 done
 [ "$T11_FALSE" = "0" ] && check "T11-control the pattern does not match the five primitives the ledger legitimately needs" PASS || check "T11-control the pattern wrongly matches $T11_FALSE permitted primitive(s)" FAIL
@@ -377,9 +382,16 @@ write_sites() { # <file>
     # unlinkSync is in the alternation deliberately: it is absent from
     # DESTRUCTIVE_WRITE_RE so T11-control keeps its meaning, which left the delete
     # primitive unpinned everywhere until it was named here.
-    /(writeFileSync|mkdirSync|chmodSync|renameSync|unlinkSync)\(/ {
+    /(writeFileSync|mkdirSync|chmodSync|renameSync|unlinkSync|linkSync)\(/ {
       ok = 0
       if (fn == "ledgerWrite" || fn == "writeEdge" || fn == "ensureLedgerDir" || fn == "writeLabels") ok = 1
+      # `lineageForget` is the RETRACTION half of the ledger and the only other
+      # function allowed to unlink: a store that only ever grows is one nobody can
+      # correct, and the alternative was telling users to hand-edit JSON in a
+      # machine-wide directory. It is bounded at the call site — the record name
+      # must be a plain component resolving inside LEDGER_DIR, and the entry must
+      # be a regular file — and it is a dry run without --apply.
+      if (fn == "lineageForget") ok = 1
       if (!ok) printf "%s:%s:%d ", FILENAME, (fn == "" ? "<top-level>" : fn), NR
     }
   ' "$1"
@@ -393,7 +405,7 @@ CONTROL_MJS="$(mktemp -t zensu-t11b-control-XXXXXX)" && mv "$CONTROL_MJS" "$CONT
 # both planted writeFileSync would have let mkdirSync, chmodSync, renameSync and
 # unlinkSync be deleted from the rule with every control still green.
 T11B_MISS=""
-for prim in writeFileSync mkdirSync chmodSync renameSync unlinkSync; do
+for prim in writeFileSync mkdirSync chmodSync renameSync unlinkSync linkSync; do
   printf 'function cmdSomething() {\n  fs.%s(somewhereElse, "x");\n}\n' "$prim" > "$CONTROL_MJS"
   [ -n "$(write_sites "$CONTROL_MJS")" ] || T11B_MISS="$T11B_MISS $prim"
 done

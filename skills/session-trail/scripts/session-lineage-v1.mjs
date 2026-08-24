@@ -18,10 +18,19 @@ const MAX_RECORD_BYTES = 256 * 1024;
 const NOFOLLOW = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
   ? fs.constants.O_NOFOLLOW
   : 0;
+// The type check runs AFTER the open, so it cannot protect the open itself. On
+// POSIX `open(path, O_RDONLY)` on a FIFO blocks until a writer arrives, and this
+// directory is writable by every session on the host — so one planted
+// `something.json` FIFO hangs `readEdges` and every command that calls it, with
+// no timeout above it. `O_NONBLOCK` makes that open return immediately; the
+// `isFile()` below then rejects it. It is dropped on win32 with the rest.
+const NON_BLOCK = process.platform !== "win32" && Number.isInteger(fs.constants.O_NONBLOCK)
+  ? fs.constants.O_NONBLOCK
+  : 0;
 
 function readBoundedFile(file) {
   let fd;
-  try { fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW); } catch { return null; }
+  try { fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NON_BLOCK); } catch { return null; }
   try {
     // fstat, not lstat: the properties are asserted on the descriptor that will
     // actually be read, so a path swapped to a symlink after a check cannot be
@@ -78,6 +87,18 @@ export function boundLabel(value) {
 
 function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim() !== '';
+}
+
+// Exactly the spelling `new Date().toISOString()` produces, and re-checked
+// against `Date.parse` so `2026-02-31T00:00:00.000Z` is refused rather than
+// sorted. The shape matters as much as the validity: only a fixed-width UTC
+// instant makes lexicographic order chronological, which is what lets every
+// comparison in this file stay a plain string compare.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+export function isIsoInstant(value) {
+  if (typeof value !== 'string' || !ISO_INSTANT.test(value)) return false;
+  const t = Date.parse(value);
+  return Number.isFinite(t) && new Date(t).toISOString() === value;
 }
 
 // `repo.name` is printed into the CHAIN header a reader acts on, so it is bounded
@@ -139,12 +160,18 @@ export function ensureLedgerDir(edgesDir, stopAt = null) {
   // Bounded ABOVE by the root the caller named. Climbing past it inspected
   // directories the user never chose — and on macOS /var is a symlink, so a config
   // root under it made every write fail permanently while blaming the ledger.
+  // The ceiling itself is EXCLUDED from the checked set, not merely the stop
+  // condition. The caller named that directory, so its shape is the caller's
+  // choice — and `~/.claude` is a symlink under chezmoi/stow, which made the
+  // symlink refusal below fire on the config root and denied every ledger write
+  // permanently while blaming the ledger. Only the components this module
+  // CREATES are judged.
   const parts = [];
   let cur = edgesDir;
   const ceiling = stopAt ? path.resolve(stopAt) : null;
   for (let i = 0; i < 8 && cur && cur !== path.dirname(cur); i += 1) {
-    parts.unshift(cur);
     if (ceiling && path.resolve(cur) === ceiling) break;
+    parts.unshift(cur);
     cur = path.dirname(cur);
   }
   for (const p of parts) {
@@ -157,7 +184,29 @@ export function ensureLedgerDir(edgesDir, stopAt = null) {
   // Windows has no meaningful mode equivalent and fs.chmodSync is inert there.
   // Stated rather than implied: on Windows the records inherit the user profile's
   // ACLs, which is the whole of their confidentiality.
-  if (process.platform !== 'win32') fs.chmodSync(edgesDir, 0o700);
+  if (process.platform !== 'win32') {
+    fs.chmodSync(edgesDir, 0o700);
+    // RE-ASSERTED after the chmod, which is the one omitted sibling check that
+    // was a real weakening rather than a defensible default. `mkdirSync`'s mode
+    // is masked by the process umask and an ALREADY-EXISTING directory keeps its
+    // own mode, so without this a group- or other-readable `edges/` — created by
+    // an earlier build, or by a permissive umask — passed silently and every
+    // record in a machine-wide store stayed readable. Refusing is the right
+    // direction: the alternative is writing session titles and worktree paths
+    // into a directory this function has just been unable to make private.
+    const st = fs.lstatSync(edgesDir);
+    if ((st.mode & 0o077) !== 0) {
+      throw new Error(`refusing to use a group/other-accessible ledger directory: ${edgesDir}`);
+    }
+  }
+  // The two checks NOT carried, named rather than left to be discovered. A
+  // foreign uid is accepted: `~/.claude` is the user's own, but `--config-dir`
+  // and `CLAUDE_CONFIG_DIR` are argv/env-supplied and validated for non-emptiness
+  // only, so pointing either at a shared location lets a foreign-owned `v1/`
+  // render as this user's provenance. That is an INTEGRITY gap, not a
+  // confidentiality one. An aliased realpath is likewise accepted. Both are
+  // deliberate; the check-then-create ordering above also leaves a race window
+  // for a local attacker who can already write the config root.
 }
 
 // No ':' anywhere — legal on POSIX, forbidden on Windows, so an ISO timestamp in
@@ -178,9 +227,18 @@ export function writeEdge(edgesDir, edge, now, stopAt = null) {
       const tmp = path.join(edgesDir, `.edge-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
       fs.writeFileSync(tmp, `${JSON.stringify(edge, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
       try {
-        fs.renameSync(tmp, file);
+        // `link` + `unlink`, not `rename`. `rename` REPLACES an existing target
+        // silently, so the five-attempt loop was guarding the only create that
+        // cannot realistically collide — a pid-scoped temp name with 48 bits of
+        // entropy — while the create that decides the record's identity
+        // overwrote whatever was already there. `link` fails EEXIST instead, so
+        // the retry loop now retries the collision it was written for. Two
+        // writers landing the same millisecond and the same 64 bits is the case
+        // it is guarding; a hand-planted name is the case that made it reachable.
+        fs.linkSync(tmp, file);
+        fs.unlinkSync(tmp);
       } catch (e2) {
-        try { fs.unlinkSync(tmp); } catch { /* the rename failure is the real error */ }
+        try { fs.unlinkSync(tmp); } catch { /* the link failure is the real error */ }
         throw e2;
       }
       return file;
@@ -195,6 +253,15 @@ export function writeEdge(edgesDir, edge, now, stopAt = null) {
 // The endpoint shape has ONE constructor, applied to both slots of every edge.
 // Two hand-kept producers would let the `to` shape depend on which command wrote
 // the record, and every renderer would then degrade silently on the odd one.
+//
+// `cwd` and `title` USED to be here and are gone. Nothing in the feature read
+// either back — no renderer, no walk, no `--json` consumer — so they were pure
+// retained data in a machine-wide store that is already a durable
+// account-to-worktree join. A session TITLE is the most identifying field the
+// transcript carries: it is the user's own first prompt. The minimising direction
+// is the right default for a store nobody asked to keep, and dropping a field
+// costs no schema bump — an older reader sees null, which every renderer already
+// handles. `worktree` and `branch` stay because the chain renderer prints them.
 export function makeEndpoint(input) {
   const src = input || {};
   return {
@@ -204,10 +271,8 @@ export function makeEndpoint(input) {
     accountUuid: boundText(src.accountUuid, 128),
     appPid: Number.isFinite(src.appPid) ? src.appPid : null,
     pid: Number.isFinite(src.pid) ? src.pid : null,
-    cwd: boundText(src.cwd),
     worktree: boundText(src.worktree),
     branch: boundText(src.branch),
-    title: boundText(src.title),
   };
 }
 
@@ -270,18 +335,43 @@ export function classifyEdge(raw) {
   if (!from.sessionId || !to.sessionId) {
     return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
   }
+  // `recordedAt` decides the read order, which successor `walkChain` follows and
+  // which duplicate `dedupeEdges` keeps — and it was the one field that only ever
+  // passed through `boundText`, which accepts any non-empty string. A record
+  // carrying `zzzz` sorted after every real timestamp and captured the walk. It is
+  // now required to be a canonical ISO-8601 UTC instant, because that is what the
+  // writer produces AND what makes the plain `<`/`>` comparisons below correct:
+  // for this spelling, code-unit order IS chronological order.
+  const recordedAt = boundText(raw.recordedAt);
+  if (!isIsoInstant(recordedAt)) {
+    return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
+  }
+  // Built from a KNOWN key set, never spread from `raw`. The spread admitted every
+  // key outside the six this function overwrites — up to the 256 KiB record cap,
+  // untouched by `boundText` — and these objects are not internal: `readEdges`
+  // pushes them, `walkChain` returns them as `links`, and `lineage --where --json`
+  // emits them verbatim into output a model reads back.
   return {
     ok: true,
     edge: {
-      ...raw,
+      schemaVersion: raw.schemaVersion,
       from,
       to,
       repo: normalizeRepo(raw.repo),
       reason: boundText(raw.reason) || 'manual',
-      recordedAt: boundText(raw.recordedAt),
+      inferred: raw.inferred === true,
+      recordedAt,
       recordedBy: boundText(raw.recordedBy),
     },
   };
+}
+
+// ONE comparison for `recordedAt`, used by the read sort, the dedupe and the walk.
+// See the sort in `readEdges` for why it is a plain string compare.
+export function compareRecordedAt(a, b) {
+  const x = String((a && a.recordedAt) || '');
+  const y = String((b && b.recordedAt) || '');
+  return x < y ? -1 : (x > y ? 1 : 0);
 }
 
 // `directoryError` is reported separately from a per-record refusal: an
@@ -309,7 +399,13 @@ export function readEdges(edgesDir) {
     if (!verdict.ok) { refused.push({ file: n, reason: verdict.reason }); continue; }
     edges.push({ ...verdict.edge, file: n });
   }
-  edges.sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')));
+  // Code-unit order, NOT `localeCompare`. `recordedAt` is a canonical ISO-8601 UTC
+  // instant — `classifyEdge` refuses anything else — so its code-unit order is its
+  // chronological order, while `localeCompare` with no arguments resolves the host
+  // locale and makes the ordering depend on the runtime's ICU build and on
+  // LANG/LC_ALL. Two spellings of one comparison also let `dedupeEdges` keep one
+  // record while the sort ordered by a different rule; there is one spelling now.
+  edges.sort((a, b) => compareRecordedAt(a, b));
   return { edges, refused, directoryError: null };
 }
 
@@ -321,9 +417,9 @@ export function dedupeEdges(edges) {
   for (const e of edges) {
     const key = `${e.from.sessionId}>${e.to.sessionId}`;
     const prev = bySide.get(key);
-    if (!prev || String(e.recordedAt || '') > String(prev.recordedAt || '')) bySide.set(key, e);
+    if (!prev || compareRecordedAt(e, prev) > 0) bySide.set(key, e);
   }
-  return [...bySide.values()].sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')));
+  return [...bySide.values()].sort(compareRecordedAt);
 }
 
 // The ledger is a GRAPH, so the walk reports forks instead of dropping them. The
@@ -339,21 +435,35 @@ export function walkChain(sessionId, edges, maxHops = 64) {
   }
   const links = [];
   const forks = [];
+  const returns = [];
   const seen = new Set([sessionId]);
   let cur = sessionId;
   for (let hop = 0; hop < maxHops; hop += 1) {
-    const candidates = (byFrom.get(cur) || [])
+    const all = byFrom.get(cur) || [];
+    const candidates = all
       .filter((e) => !seen.has(e.to.sessionId))
-      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')));
-    if (!candidates.length) break;
+      .sort((a, b) => compareRecordedAt(b, a));
+    if (!candidates.length) {
+      // A successor that exists but was already visited is a RETURN, not an end.
+      // SKILL.md flow 3 step 6 teaches exactly the shape that produces one — after
+      // a reset the user goes back to the original window and runs `adopt` there,
+      // so the store holds `A>B` and later `B>A`. The `seen` filter then cut the
+      // walk at B and every renderer showed a one-hop chain as a COMPLETE answer:
+      // no fork, no truncation, no caveat. The termination guarantee is unchanged;
+      // what is reported changed.
+      const returned = all.filter((e) => seen.has(e.to.sessionId)).sort((a, b) => compareRecordedAt(b, a));
+      if (returned.length) returns.push({ at: cur, backTo: returned.map((e) => e.to.sessionId) });
+      break;
+    }
     const [next, ...rest] = candidates;
     if (rest.length) forks.push({ at: cur, taken: next.to.sessionId, alsoTo: rest.map((e) => e.to.sessionId) });
     links.push(next);
     seen.add(next.to.sessionId);
     cur = next.to.sessionId;
   }
-  // Surfaced, not swallowed: a chain cut at the bound must not render as complete.
-  return { links, forks, truncated: links.length >= maxHops };
+  // Surfaced, not swallowed: a chain cut at the bound must not render as complete —
+  // and neither must one cut by the `seen` filter, which is what `returns` carries.
+  return { links, forks, returns, truncated: links.length >= maxHops };
 }
 
 // A cycle makes every `from` also a `to`, which yields no roots at all — and a

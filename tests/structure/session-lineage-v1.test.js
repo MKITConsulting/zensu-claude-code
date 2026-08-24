@@ -12,11 +12,18 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync } from 'node:child_process';
 
 const mod = await import(new URL('../../skills/session-trail/scripts/session-lineage-v1.mjs', import.meta.url));
 
 const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'zensu-lineage-unit-'));
 const ep = (id, extra = {}) => ({ sessionId: id, ...extra });
+// `recordedAt` is now REQUIRED to be a canonical ISO-8601 UTC instant, because it
+// is the sole ordering and dedupe key and nothing used to parse it. The fixtures
+// used ordinals (`'1'`, `'2'`), which the validation correctly refuses — `iso`
+// keeps the ordinal readable at the call sites while producing a real instant, and
+// preserves the property those call sites rely on: ordinal order IS string order.
+const iso = (n) => new Date(Date.UTC(2026, 0, 1, 0, 0, Number(n))).toISOString();
 const edge = (from, to, at) => ({
   schemaVersion: 1,
   from: mod.makeEndpoint(ep(from)),
@@ -24,7 +31,7 @@ const edge = (from, to, at) => ({
   repo: { name: 'r', root: '/r' },
   reason: 'manual',
   inferred: false,
-  recordedAt: at,
+  recordedAt: iso(at),
   recordedBy: 'adopt',
 });
 
@@ -79,7 +86,59 @@ test('a newer schema is refused with a different reason than a corrupt record', 
   assert.equal(mod.classifyEdge({ schemaVersion: 0, from: { sessionId: 'a' }, to: { sessionId: 'b' } }).reason, mod.EDGE_REFUSALS.SCHEMA_OLDER);
   assert.equal(mod.classifyEdge({ schemaVersion: 1, from: {}, to: { sessionId: 'b' } }).reason, mod.EDGE_REFUSALS.MALFORMED);
   assert.equal(mod.classifyEdge(null).reason, mod.EDGE_REFUSALS.MALFORMED);
-  assert.equal(mod.classifyEdge(edge('a', 'b', 'T')).ok, true);
+  assert.equal(mod.classifyEdge(edge('a', 'b', 3)).ok, true);
+});
+
+test('recordedAt must be a canonical ISO instant, because it is the ordering and dedupe key', () => {
+  // It decides the read order, which successor `walkChain` follows and which
+  // duplicate `dedupeEdges` keeps, and it used to pass through `boundText` only —
+  // which accepts any non-empty string. `zzzz` sorted after every real timestamp.
+  const withAt = (at) => ({ ...edge('a', 'b', 1), recordedAt: at });
+  for (const bad of ['zzzz', '1', '2026-01-01', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00.000+01:00',
+    '2026-02-31T00:00:00.000Z', '', null, 42]) {
+    assert.equal(mod.classifyEdge(withAt(bad)).reason, mod.EDGE_REFUSALS.MALFORMED, String(bad));
+  }
+  assert.equal(mod.classifyEdge(withAt('2026-01-01T00:00:00.000Z')).ok, true);
+  assert.equal(mod.isIsoInstant('2026-01-01T00:00:00.000Z'), true);
+  assert.equal(mod.isIsoInstant('2026-02-31T00:00:00.000Z'), false);
+});
+
+test('classifyEdge returns a closed key set, so an unbounded field cannot ride through', () => {
+  // The `...raw` spread admitted every key outside the six this function
+  // overwrites — untouched by `boundText`, up to the 256 KiB record cap — and
+  // these objects reach `lineage --where --json` verbatim.
+  const raw = { ...edge('a', 'b', 1), evil: 'x'.repeat(5000), nested: { also: 'here' } };
+  const out = mod.classifyEdge(raw);
+  assert.equal(out.ok, true);
+  assert.equal(out.edge.evil, undefined);
+  assert.equal(out.edge.nested, undefined);
+  assert.deepEqual(Object.keys(out.edge).sort(),
+    ['from', 'inferred', 'reason', 'recordedAt', 'recordedBy', 'repo', 'schemaVersion', 'to']);
+});
+
+test('one comparison rule orders, dedupes and walks, and it is not locale-dependent', () => {
+  // Two spellings of one comparison let dedupe keep a record the sort then ordered
+  // by a different rule, and `localeCompare` with no arguments resolves the host
+  // locale, so the order depended on the runtime ICU build and on LANG/LC_ALL.
+  assert.equal(mod.compareRecordedAt({ recordedAt: iso(1) }, { recordedAt: iso(2) }) < 0, true);
+  assert.equal(mod.compareRecordedAt({ recordedAt: iso(2) }, { recordedAt: iso(1) }) > 0, true);
+  assert.equal(mod.compareRecordedAt({ recordedAt: iso(1) }, { recordedAt: iso(1) }), 0);
+  assert.equal(mod.compareRecordedAt({}, {}), 0);
+});
+
+test('a chain that returns to an earlier session reports the return instead of ending silently', () => {
+  // SKILL.md flow 3 step 6 teaches the shape: after a reset the user goes back to
+  // the original window and runs `adopt`, so the store holds A>B and later B>A.
+  // The `seen` filter cut the walk at B and rendered a one-hop chain as complete.
+  const edges = [edge('a', 'b', 1), edge('b', 'a', 2)];
+  const out = mod.walkChain('a', edges);
+  assert.equal(out.links.length, 1);
+  assert.equal(out.truncated, false);
+  assert.equal(out.returns.length, 1);
+  assert.equal(out.returns[0].at, 'b');
+  assert.deepEqual(out.returns[0].backTo, ['a']);
+  // A chain that simply ends reports no return, so the field discriminates.
+  assert.deepEqual(mod.walkChain('a', [edge('a', 'b', 1)]).returns, []);
 });
 
 test('an unreadable directory is reported apart from an absent one', () => {
@@ -121,7 +180,7 @@ test('counts collapse per session pair, keeping the newest record', () => {
   const dup = [edge('a', 'b', '1'), edge('a', 'b', '2'), edge('a', 'c', '3')];
   const out = mod.dedupeEdges(dup);
   assert.equal(out.length, 2);
-  assert.equal(out.find((e) => e.to.sessionId === 'b').recordedAt, '2');
+  assert.equal(out.find((e) => e.to.sessionId === 'b').recordedAt, iso(2));
 });
 
 test('labels keep two namespaces and are bounded', () => {
@@ -240,4 +299,74 @@ test('a NUL-only session id is refused, because trim() and boundText disagree ab
   // The positive control: an ordinary id still classifies, so the guard did not
   // simply start refusing everything.
   assert.equal(mod.classifyEdge(edge('a', 'b', '1')).ok, true);
+});
+
+test('the ledger dir refuses a symlinked component it creates, and accepts a symlinked CEILING', () => {
+  // The ceiling is the directory the CALLER named — `~/.claude` is a symlink under
+  // chezmoi/stow — so type-checking it made every ledger write fail permanently
+  // while blaming the ledger. Only the components this module creates are judged.
+  const root = tmp();
+  const real = path.join(root, 'real-config');
+  const link = path.join(root, 'config');
+  fs.mkdirSync(real);
+  let linked = true;
+  try { fs.symlinkSync(real, link, 'dir'); } catch { linked = false; }
+  if (linked && fs.lstatSync(link).isSymbolicLink()) {
+    const edges = path.join(link, 'zensu', 'session-lineage', 'v1', 'edges');
+    mod.ensureLedgerDir(edges, link);
+    assert.equal(fs.statSync(edges).isDirectory(), true);
+    // and a symlink BELOW the ceiling is still refused.
+    const root2 = tmp();
+    const cfg2 = path.join(root2, 'cfg');
+    fs.mkdirSync(path.join(cfg2, 'zensu'), { recursive: true });
+    const target = path.join(root2, 'elsewhere');
+    fs.mkdirSync(target);
+    fs.symlinkSync(target, path.join(cfg2, 'zensu', 'session-lineage'), 'dir');
+    assert.throws(() => mod.ensureLedgerDir(path.join(cfg2, 'zensu', 'session-lineage', 'v1', 'edges'), cfg2),
+      /symlinked ledger path/);
+    fs.rmSync(root2, { recursive: true, force: true });
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('an edge record never overwrites an existing name, and the retry loop is what handles it', () => {
+  // `rename` REPLACES silently, so the five-attempt loop was guarding the only
+  // create that cannot realistically collide (a pid-scoped temp with 48 bits of
+  // entropy) while the create that decides the record's identity overwrote
+  // whatever was there. `link` fails EEXIST, so the retry now retries a collision.
+  const root = tmp();
+  const edges = path.join(root, 'edges');
+  mod.ensureLedgerDir(edges, root);
+  const now = 1767225600000;
+  const first = mod.writeEdge(edges, edge('a', 'b', 1), now, root);
+  const planted = path.join(edges, path.basename(first));
+  const before = fs.readFileSync(planted, 'utf8');
+  const second = mod.writeEdge(edges, edge('c', 'd', 2), now, root);
+  assert.notEqual(path.basename(second), path.basename(first), 'a second record took its own name');
+  assert.equal(fs.readFileSync(planted, 'utf8'), before, 'the first record was not overwritten');
+  assert.equal(fs.readdirSync(edges).filter((n) => n.endsWith('.json')).length, 2);
+  // No temp file survives either half.
+  assert.deepEqual(fs.readdirSync(edges).filter((n) => n.endsWith('.tmp')), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a FIFO planted in the ledger cannot block the read', { skip: process.platform === 'win32' }, () => {
+  // The type check runs after the open, so it cannot protect the open itself: on
+  // POSIX `open(fifo, O_RDONLY)` blocks until a writer arrives, and this directory
+  // is writable by every session on the host. O_NONBLOCK is what makes it return.
+  const root = tmp();
+  const edges = path.join(root, 'edges');
+  mod.ensureLedgerDir(edges, root);
+  let made = false;
+  try {
+    execFileSync('mkfifo', [path.join(edges, 'blocking.json')], { stdio: 'ignore' });
+    made = true;
+  } catch { /* no mkfifo on this host */ }
+  if (made) {
+    const out = mod.readEdges(edges);
+    assert.equal(out.edges.length, 0);
+    assert.equal(out.refused.length, 1);
+    assert.equal(out.refused[0].reason, mod.EDGE_REFUSALS.UNREADABLE);
+  }
+  fs.rmSync(root, { recursive: true, force: true });
 });

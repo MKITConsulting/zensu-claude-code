@@ -5,11 +5,10 @@ import os from 'node:os';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import {
-  ledgerPaths, writeEdge, readEdges, dedupeEdges,
+  ledgerPaths, writeEdge, readEdges, dedupeEdges, siblingLedgerVersions, LEDGER_SCHEMA_VERSION,
   makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
   readLabels as readLabelsFile, writeLabels, emptyLabels, boundLabel,
-  isSafeHostSessionId, EDGE_REFUSALS, boundText, siblingLedgerVersions,
-  LEDGER_SCHEMA_VERSION,
+  isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
 
 const HOME = os.homedir();
@@ -61,6 +60,7 @@ function parseArgs(argv) {
   const out = {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
+    forget: null, clear: false,
     daysExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -74,6 +74,12 @@ function parseArgs(argv) {
     else if (a === '--backfill') out.backfill = true;
     else if (a === '--apply') out.apply = true;
     else if (a === '--no-record') out.record = false;
+    // A store that only ever grows is a store nobody can correct. `--forget`
+    // takes a session selector and removes every edge naming it; `--clear` is the
+    // label counterpart. `--forget` is a DRY RUN without `--apply`, the same shape
+    // `--backfill` uses, because it destroys machine-wide records.
+    else if (a === '--forget') out.forget = stringOperand(a, argv[++i]);
+    else if (a === '--clear') out.clear = true;
     // A real flag, not a positional: parseArgs rejects every unknown `--token`,
     // so reading `--self` off the positional list could never have worked.
     else if (a === '--self') out.self = true;
@@ -502,10 +508,8 @@ function endpointFromRow(row) {
     accountUuid: (row && row.app && row.app.accountUuid) || null,
     appPid: pid ? windowOf(pid) : null,
     pid,
-    cwd: row && row.cwd,
     worktree: row && row.wt,
     branch: row && row.branch,
-    title: row && row.title,
   });
 }
 
@@ -1830,7 +1834,33 @@ function cmdLabel(opts) {
   if (target === '__proto__' || target === 'constructor' || target === 'prototype') {
     fail(`refusing "${target}" as a label key — it names an object member, not an account`);
   }
-  if (!text) fail('usage: label <accountUuid|appPid|--self> <text>');
+  // A label could be SET but never cleared, and it is the one field designed to
+  // hold a human name — so the only way to remove one was to hand-edit a JSON file
+  // in a machine-wide store. `--clear` removes the key; it is not "set to empty",
+  // because an empty label rendered is a different fact from no label.
+  if (opts.clear) {
+    if (text) fail('label --clear takes no text');
+    const current = readLabels();
+    if (LABELS_UNREADABLE) fail(`${LABELS_FILE} exists but could not be read — refusing to overwrite it; move it aside and re-run`);
+    if (LABELS_SCHEMA_MISMATCH) fail(`${LABELS_FILE} was written by a different label schema — refusing to overwrite it; update the plugin or move it aside`);
+    const bucket = kind === 'window' ? current.windows : current.accounts;
+    if (!Object.prototype.hasOwnProperty.call(bucket, target)) {
+      print(`No label is set for ${kind} ${flatPath(target)}.`);
+      return;
+    }
+    const next = emptyLabels();
+    Object.assign(next.accounts, current.accounts);
+    Object.assign(next.windows, current.windows);
+    delete (kind === 'window' ? next.windows : next.accounts)[target];
+    try {
+      writeLabels(LABELS_FILE, next, CONFIG_ROOT);
+    } catch (e) {
+      fail(`could not write ${LABELS_FILE}: ${e && e.message ? e.message : 'write failed'}`);
+    }
+    print(`Cleared the ${kind} label for ${flatPath(target)}.`);
+    return;
+  }
+  if (!text) fail('usage: label <accountUuid|appPid|--self> <text>   (or: label <target> --clear)');
   // Bounded like every other rendered value: this label is machine-wide and is
   // interpolated into numbered chain lines every other session reads, so an
   // unbounded one could fabricate a line there.
@@ -1854,9 +1884,10 @@ function cmdLabel(opts) {
   const next = emptyLabels();
   Object.assign(next.accounts, current.accounts);
   Object.assign(next.windows, current.windows);
-  // Two namespaces: an account uuid is stable, an OS pid is reused after its
-  // process exits. One flat map let a pid-keyed label silently rename an
-  // unrelated window later, with no way to tell the two kinds apart in the file.
+  // Two namespaces: an account uuid is stable, an OS pid is not. The split fixes
+  // the COLLISION between the two kinds — one flat map could not tell them apart
+  // in the file. It does NOT fix pid reuse inside `windows`, which stays an open
+  // residual; the module's own comment carries the full account.
   if (kind === 'window') next.windows[target] = bounded;
   else next.accounts[target] = bounded;
   try {
@@ -2038,18 +2069,89 @@ function lineageBackfill(opts) {
   if (writeError) print(`BACKFILL INCOMPLETE — stopped after ${written.length} edge(s): ${writeError}`);
 }
 
+// `lineage` is four verbs behind flags — the default chain render, `--diagnose`,
+// `--backfill` and `--forget` — and a silent first-match dispatch let an
+// impossible combination run the earliest one and ignore the rest, so a user who
+// asked for two things got one with no diagnostic. Named and refused instead.
+// The retraction half of the ledger. Without it the store only ever grew and the
+// tool offered no way to remove an entry — so a handover recorded by mistake, a
+// backfilled guess the user disagrees with, or an edge naming a worktree that
+// should never have been written down was permanent. A DRY RUN by default,
+// because this deletes machine-wide records that other windows are reading.
+//
+// It matches on the SESSION ID at either endpoint rather than on a file name: a
+// user knows which session to forget, not which of eight random file names holds
+// it. Prefix selection uses the same six-character floor `--where` does.
+function lineageForget(opts) {
+  const want = String(opts.forget || '').trim();
+  if (want.length < 6) fail('--forget needs a session id or a prefix of at least 6 characters');
+  const { edges, refused, directoryError } = readEdges(LEDGER_DIR);
+  if (directoryError) {
+    fail(`the ledger directory could not be read (${directoryError}) — \`lineage --diagnose\` names what failed`);
+  }
+  const hit = edges.filter((e) => e.from.sessionId.startsWith(want) || e.to.sessionId.startsWith(want));
+  if (!hit.length) {
+    print(`No recorded handover names a session starting with "${flatPath(want)}".`);
+    if (refused.length) print(`${refused.length} record(s) could not be read and were not searched.`);
+    return;
+  }
+  print(`${hit.length} recorded handover(s) name ${flatPath(want)}:\n`);
+  for (const e of hit) {
+    const tag = e.inferred ? ' [inferred]' : '';
+    print(`  ${sessionTag(e.from.sessionId)} → ${sessionTag(e.to.sessionId)}  ${e.recordedAt}  ${flatPath(e.reason)}${tag}  (${flatPath(e.file)})`);
+  }
+  if (refused.length) {
+    print('');
+    print(`${refused.length} record(s) could not be read; one of them may also name this session.`);
+  }
+  if (!opts.apply) {
+    print('');
+    print('Nothing was deleted. Re-run with --apply to remove the records listed above.');
+    return;
+  }
+  const removed = [];
+  const failedRemovals = [];
+  for (const e of hit) {
+    // Refused rather than resolved: the ledger directory is writable by every
+    // session on the host, so a name that is not a plain component, or a component
+    // that is a symlink, is not a record this tool wrote and is not ours to unlink.
+    const file = path.join(LEDGER_DIR, e.file);
+    if (path.basename(e.file) !== e.file || path.dirname(file) !== LEDGER_DIR) {
+      failedRemovals.push(`${e.file}: not a plain record name`);
+      continue;
+    }
+    try {
+      const st = fs.lstatSync(file);
+      if (!st.isFile()) { failedRemovals.push(`${e.file}: not a regular file`); continue; }
+      fs.unlinkSync(file);
+      removed.push(e.file);
+    } catch (err) {
+      failedRemovals.push(`${e.file}: ${err && err.code ? err.code : 'unlink failed'}`);
+    }
+  }
+  print('');
+  print(`Removed ${removed.length} record(s).`);
+  for (const f of failedRemovals) print(`  NOT removed — ${f}`);
+}
+
+const LINEAGE_VERBS = ['diagnose', 'backfill', 'forget'];
 function cmdLineage(opts) {
-  // Three modes with nothing in common ride on flags here: --diagnose reports on
-  // desktop-store probing and not on lineage at all, --backfill --apply is a bulk
-  // WRITE, and the default plus --where are reads. Dispatching on the first flag
-  // that happens to be set meant `lineage --diagnose --backfill --apply` parsed
-  // cleanly and silently ran the diagnostic, so a caller who asked for a write got
-  // a report and no record -- a silent no-op on the one mode that mutates.
-  const modes = [opts.diagnose && '--diagnose', opts.backfill && '--backfill', opts.where && '--where'].filter(Boolean);
+  // Four modes with nothing in common ride on flags here: --diagnose reports on
+  // desktop-store probing and not on lineage at all, --backfill --apply and
+  // --forget --apply are bulk WRITES, and the default plus --where are reads.
+  // Dispatching on the first flag that happens to be set meant
+  // `lineage --diagnose --backfill --apply` parsed cleanly and silently ran the
+  // diagnostic, so a caller who asked for a write got a report and no record -- a
+  // silent no-op on the one kind of mode that mutates.
+  const modes = [opts.diagnose && '--diagnose', opts.backfill && '--backfill',
+    opts.forget && '--forget', opts.where && '--where'].filter(Boolean);
   if (modes.length > 1) fail(`lineage takes one mode at a time; got ${modes.join(' and ')}`);
-  if (opts.apply && !opts.backfill) fail('--apply belongs to lineage --backfill; it does nothing on its own');
+  if (opts.apply && !opts.backfill && !opts.forget) {
+    fail('--apply belongs to lineage --backfill or lineage --forget; it does nothing on its own');
+  }
   if (opts.diagnose) return lineageDiagnose(opts);
   if (opts.backfill) return lineageBackfill(opts);
+  if (opts.forget) return lineageForget(opts);
   const edges = dedupeEdges(ledgerRead());
   const live = liveRegistry();
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
