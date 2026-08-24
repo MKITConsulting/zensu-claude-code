@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.0-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.18.2-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -79,9 +79,9 @@ whether to run the guided workflow with its review chain.
 
 ## What's included
 
-### Skills (24)
+### Skills (27)
 
-> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (25 skills are registered in `plugin.json`).
+> The count is the workflow skills in this table. The read-only diagnostics skill is documented separately in **Diagnostics** below and is intentionally kept out of this table (28 skills are registered in `plugin.json`).
 
 | Skill | What it does |
 |-------|--------------|
@@ -101,6 +101,7 @@ whether to run the guided workflow with its review chain.
 | `/zensu:converge` | Audit the code against the plan and flow real changes back into the spec |
 | `/zensu:docs` | Write code-grounded feature documentation that honestly clears the docs release gate |
 | `/zensu:wargame` | Map a hard task move by move so a cheaper model can execute it blind |
+| `/zensu:gauntlet-loop` | Improve an artifact against a frozen bar under two fresh critics, arbitrating disagreement |
 | `/zensu:self-review` | The terminal self-reflection stage that closes the review chain |
 | `/zensu:pulse` | Developer journal — privacy-first tracking of your coding sessions |
 | `/zensu:session-trail` | See what your other Claude Code instances are doing, and take a session over |
@@ -108,6 +109,8 @@ whether to run the guided workflow with its review chain.
 | `/zensu:setup` | Interactive first-run configuration |
 | `/zensu:reset-review-limit` | Grant the current review chain another auto-fix budget |
 | `/zensu:recover-chain` | Repair the one review-chain state no other command can leave |
+| `/zensu:adopt-session` | Rescue a session after a plugin update landed mid-run |
+| `/zensu:autopilot-release` | Free a working tree an abandoned Autopilot run is still holding |
 | `/zensu:zensu-help` | Ask how Zensu or the plugin works. Read-only Q&A |
 
 ### Diagnostics — `/zensu:doctor`
@@ -202,7 +205,7 @@ supported.
 |----------|---------------|
 | [Architecture](docs/architecture.md) | The three layers, the workflow diagram, evidence discipline, typical flows |
 | [Review chain](docs/review-chain.md) | The reviewer agents, custom repo personas, skill overlays, templates |
-| [Gates](docs/gates.md) | The write gates, the secret scan, and the TDD phase gate |
+| [Gates](docs/gates.md) | The write gates, the secret scan, the TDD phase gate, and the completion-time requirements-table gate |
 | [Session control](docs/session-control.md) | Subagent safety, the security boundary, unbindable sessions |
 | [Configuration](docs/configuration.md) | Every hook, every flag, merge order, environment variables |
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
@@ -231,3 +234,15 @@ plugin or the Zensu SaaS while the restriction is in effect.
 Full text and FAQ at [fsl.software](https://fsl.software/). For commercial-use
 questions outside the Permitted Purpose, contact
 [contact@zensu.dev](mailto:contact@zensu.dev).
+
+### Third-party references
+
+One skill cites external work as the source of a *method* rather than of any text:
+`/zensu:gauntlet-loop` links to
+[How to Run a Gauntlet Loop](https://somethingbig.ai/gauntlet-loop) and its prompt
+generator, and to [Claude-of-Duty](https://github.com/mshumer/Claude-of-Duty), in
+`skills/gauntlet-loop/SKILL.md` § Provenance and
+`skills/gauntlet-loop/references/quality-bars.md` § Method sources. No code, prompt
+text, or asset from those sources is vendored here — the entire third-party surface
+*of those two sources* is the hyperlinks themselves. Build and test dependencies
+are a separate matter and are declared in `package.json`.

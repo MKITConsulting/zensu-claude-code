@@ -43,6 +43,13 @@ start() {
   activate_session "$1" "$3" || return 1
   autopilot_begin_run "$2" "$ZENSU_SESSION_KEY" "$1" >/dev/null
 }
+# The active pointer is keyed by the run owner, which is the resolved session
+# key rather than the raw session id the fixtures pass around.
+pointer() {
+  local key
+  key="$(node "$CORE" session-key "$2")" || return 1
+  autopilot_active_file "$1" "$key"
+}
 invoke() {
   local project="$1" sid="$2" cfg="${3:-$TMP/missing.json}" chain="${4:-}" autopilot="${5:-}"
   activate_session "$project" "$sid" || return 1
@@ -153,7 +160,7 @@ P4="$TMP/cancel"; start "$P4" stop_run_cancel stop_session_cancel
 autopilot_apply_event stop_run_cancel cancel-stop CANCEL '{}' "$P4" >/dev/null
 OUT6="$(invoke "$P4" stop_session_cancel)"
 [ -z "$OUT6" ] && check "S6 CANCELLED is terminal and permits Stop" PASS || check "S6 CANCELLED permits Stop" FAIL
-rm -f "$(autopilot_active_file "$P4")"
+rm -f "$(pointer "$P4" stop_session_cancel)"
 OUT6B="$(invoke "$P4" stop_session_cancel)"
 [ -z "$OUT6B" ] \
   && check "S6b terminal history without a pointer remains compatible with Stop" PASS \
@@ -178,7 +185,7 @@ OUT7TE="$(invoke "$P5T" foreign_terminal_session "$TMP/missing.json" '' off)"
   || check "S7c foreign terminal escape permits Stop" FAIL
 
 P6="$TMP/corrupt"; start "$P6" stop_run_corrupt stop_session_corrupt
-AF6="$(autopilot_active_file "$P6")"
+AF6="$(pointer "$P6" stop_session_corrupt)"
 AF6="$AF6" node -e 'const fs=require("fs"),p=process.env.AF6,j=JSON.parse(fs.readFileSync(p));j.extra=true;fs.writeFileSync(p,JSON.stringify(j))'
 OUT8="$(invoke "$P6" stop_session_corrupt)"
 if [ "$(printf '%s' "$OUT8" | decision)" = block ] && printf '%s' "$OUT8" | grep -qi 'corrupt'; then
@@ -193,7 +200,7 @@ if [ "$(printf '%s' "$OUT8B" | decision)" = block ] && printf '%s' "$OUT8B" | gr
 else check "S8b dangling active pointer fails closed" FAIL; fi
 
 P6D="$TMP/orphan-no-pointer"; start "$P6D" stop_run_orphan stop_session_orphan
-rm -f "$(autopilot_active_file "$P6D")"
+rm -f "$(pointer "$P6D" stop_session_orphan)"
 OUT8D="$(invoke "$P6D" stop_session_orphan)"
 if [ "$(printf '%s' "$OUT8D" | decision)" = block ] && printf '%s' "$OUT8D" | grep -qi 'corrupt'; then
   check "S8d nonterminal run without a pointer blocks Stop" PASS
@@ -233,10 +240,10 @@ else check "S8g adoption contention must fail closed on the proven active Outer"
 P6E="$TMP/hidden-orphan"; start "$P6E" stop_run_old_terminal stop_session_old_terminal
 autopilot_apply_event stop_run_old_terminal cancel-old-terminal CANCEL '{}' "$P6E" >/dev/null
 OLD_POINTER8E="$TMP/old-terminal-pointer.json"
-cp "$(autopilot_active_file "$P6E")" "$OLD_POINTER8E"
-start "$P6E" stop_run_hidden stop_session_hidden
-cp "$OLD_POINTER8E" "$(autopilot_active_file "$P6E")"
-OUT8E="$(invoke "$P6E" stop_session_hidden)"
+cp "$(pointer "$P6E" stop_session_old_terminal)" "$OLD_POINTER8E"
+start "$P6E" stop_run_hidden stop_session_old_terminal
+cp "$OLD_POINTER8E" "$(pointer "$P6E" stop_session_old_terminal)"
+OUT8E="$(invoke "$P6E" stop_session_old_terminal)"
 if [ "$(printf '%s' "$OUT8E" | decision)" = block ] && printf '%s' "$OUT8E" | grep -qi 'corrupt'; then
   check "S8e terminal pointer cannot hide a newer nonterminal run from Stop" PASS
 else check "S8e hidden nonterminal run cannot inherit terminal release" FAIL; fi
@@ -244,7 +251,7 @@ else check "S8e hidden nonterminal run cannot inherit terminal release" FAIL; fi
 P6F="$TMP/orphan-blocked"; start "$P6F" stop_run_orphan_blocked stop_session_orphan_blocked
 autopilot_apply_event stop_run_orphan_blocked block-orphan-fixture BLOCK \
   '{"code":"MANUAL_ORPHAN_BLOCK"}' "$P6F" >/dev/null
-rm -f "$(autopilot_active_file "$P6F")"
+rm -f "$(pointer "$P6F" stop_session_orphan_blocked)"
 OUT8F="$(invoke "$P6F" stop_session_orphan_blocked)"
 if [ "$(printf '%s' "$OUT8F" | decision)" = block ] && printf '%s' "$OUT8F" | grep -qi 'corrupt'; then
   check "S8f orphan BLOCKED run remains nonterminal for inventory safety" PASS
@@ -259,7 +266,7 @@ CLAUDE_PROJECT_DIR="$P6C" bash "$LOG" --tdd-begin --session stop_session_corrupt
 CLAUDE_PROJECT_DIR="$P6C" bash "$LOG" --tdd-complete --session stop_session_corrupt_cap \
   --autopilot-run stop_run_corrupt_cap --autopilot-attempt 1 --autopilot-return-stage GATES \
   --chain-id chain-corrupt-cap-001 >/dev/null
-AF6C="$(autopilot_active_file "$P6C")"
+AF6C="$(pointer "$P6C" stop_session_corrupt_cap)"
 AF6C="$AF6C" node -e 'const fs=require("fs"),p=process.env.AF6C,j=JSON.parse(fs.readFileSync(p));j.extra=true;fs.writeFileSync(p,JSON.stringify(j))'
 CAP_CORRUPT_BLOCKS=true
 for _ in 1 2 3 4 5 6 7 8 9; do
@@ -694,5 +701,46 @@ OUT13B="$(printf '%s' '{"hook_event_name":"Stop","session_id":"stop_session_orph
 [ -z "$OUT13B" ] \
   && check "S13b spawned-agent no-op precedes orphan runtime enforcement" PASS \
   || check "S13b orphan hint must not deadlock a spawned agent" FAIL
+
+# Two note-retire sites inside the Autopilot escape branch. The routing suite
+# cannot reach either — the branch needs a durable run and that suite builds none
+# — so both were unpinned. They matter for the same reason the inner-guard
+# escapes do: once an escape releases Stop, this session never routes the inner
+# chain again, so nothing else can remove a note minted before it and
+# /zensu:doctor would keep reporting a refusal that no longer describes anything.
+plant_denial_note() {
+  printf '{"schemaVersion":1,"kind":"auto-mode-classifier","subagentType":"zensu:code-reviewer","detectedAtMs":1}\n' > "$1"
+}
+
+# Site 1: the escape finds the run already at a terminal stage and exits without
+# auditing anything.
+P14="$TMP/escape-note-terminal"; start "$P14" stop_run_esc_term stop_session_esc_term
+CLAUDE_PROJECT_DIR="$P14" bash "$LOG" --tdd-begin --session stop_session_esc_term >/dev/null
+CLAUDE_PROJECT_DIR="$P14" bash "$LOG" --tdd-complete --session stop_session_esc_term >/dev/null
+autopilot_apply_event stop_run_esc_term cancel-esc-term CANCEL '{}' "$P14" >/dev/null
+activate_session "$P14" stop_session_esc_term || exit 1
+NOTE14="$P14/.zensu/state/reviewer-spawn-denied-$ZENSU_SESSION_KEY.json"
+plant_denial_note "$NOTE14"
+invoke "$P14" stop_session_esc_term "$TMP/missing.json" '' off >/dev/null
+[ ! -f "$NOTE14" ] \
+  && check "S14 a terminal-stage Autopilot escape retires a leftover refusal note" PASS \
+  || check "S14 terminal-stage escape leaves the refusal note behind" FAIL
+
+# Site 2: a DIFFERENT line — the escape audits an ACTIVE run to BLOCKED first and
+# releases afterwards. Asserting the audit too keeps this from passing on an
+# escape that never happened.
+P15="$TMP/escape-note-active"; start "$P15" stop_run_esc_active stop_session_esc_active
+CLAUDE_PROJECT_DIR="$P15" bash "$LOG" --tdd-begin --session stop_session_esc_active >/dev/null
+CLAUDE_PROJECT_DIR="$P15" bash "$LOG" --tdd-complete --session stop_session_esc_active >/dev/null
+activate_session "$P15" stop_session_esc_active || exit 1
+NOTE15="$P15/.zensu/state/reviewer-spawn-denied-$ZENSU_SESSION_KEY.json"
+plant_denial_note "$NOTE15"
+invoke "$P15" stop_session_esc_active "$TMP/missing.json" '' off >/dev/null
+RF15="$(autopilot_run_file stop_run_esc_active "$P15")"
+if [ ! -f "$NOTE15" ] && field_ok "$RF15" 'j.stage==="BLOCKED"'; then
+  check "S15 an audited Autopilot escape retires the note and still records BLOCKED" PASS
+else
+  check "S15 audited escape retires the note and records BLOCKED" FAIL
+fi
 
 echo "----"; echo "test-autopilot-stop-enforcer: $PASS PASS / $FAIL FAIL"; [ "$FAIL" -eq 0 ]

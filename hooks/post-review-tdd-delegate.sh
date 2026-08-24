@@ -172,11 +172,14 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
 ' 2>/dev/null)" || exit 0
 if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   [ "$PREFLIGHT_CONTEXT" = '{}' ] || exit 0
-  # Only an absent or terminal Outer generation permits an unbound claim. Any
-  # nonterminal generation still owns the project, regardless of session; a
-  # corrupt read is authoritative and must fail closed before ticket mutation.
+  # Two separate questions, and only the first is about ownership. WHOSE outer
+  # generation is this chain bound to? Only an absent or terminal one OF THIS
+  # SESSION permits an unbound claim, so that read stays owner-scoped: a foreign
+  # run is not this session's outer generation and legitimately leaves the chain
+  # unbound. A corrupt read is authoritative and must fail closed before ticket
+  # mutation.
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+  if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     PREFLIGHT_OUTER_RC=0
   else
     PREFLIGHT_OUTER_RC=$?
@@ -193,6 +196,20 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
     1) ;;
     *) exit 0 ;;
   esac
+  # And: is anyone ELSE holding the working tree right now? Arming happens once,
+  # at `tdd_begin_session`; this hook runs on every qualifying PostToolUse. A
+  # durable run begun in this tree AFTER the chain armed is therefore refused by
+  # the arm-time gate no longer, and by the owner-scoped read above never — a
+  # window this preflight covered project-wide before it was narrowed. The
+  # question is owner-independent, so it needs the owner-independent read.
+  # rc 0 is a refusal exactly as the arm-time gate treats it, and anything that
+  # is not a clean "free" fails closed.
+  if autopilot_read_workspace "$PROJECT_ROOT" >/dev/null 2>&1; then
+    exit 0
+  else
+    PREFLIGHT_WORKSPACE_RC=$?
+    [ "$PREFLIGHT_WORKSPACE_RC" -eq 1 ] || exit 0
+  fi
 elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   [ "$PREFLIGHT_CONTEXT" != '{}' ] || exit 0
   AUTOPILOT_CTX="$PREFLIGHT_CONTEXT" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
@@ -208,7 +225,7 @@ elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
       } catch (_) { process.exit(3); }
     ' 2>/dev/null || exit 0
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
-  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)" || exit 0
+  PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)" || exit 0
   OUTER="$PREFLIGHT_OUTER" SID="$SESSION_ID" RUN_ID="$PROMPT_AUTOPILOT_RUN" \
     ATTEMPT="$PROMPT_AUTOPILOT_ATTEMPT" CHAIN_ID="$PROMPT_AUTOPILOT_CHAIN" \
     RETURN_STAGE="$PROMPT_AUTOPILOT_STAGE" node -e '
@@ -303,9 +320,11 @@ fi
 
 MAX_ROUNDS="$(zensu_autofix_max_rounds)"
 
-BYPASSES="$(tdd_bypasses "$(tdd_state_file "$SESSION_ID")" 2>/dev/null)"
-[ -z "$BYPASSES" ] && BYPASSES="none"
-BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): in the ## Open section include the literal line: Gates bypassed during this session: '"$BYPASSES"
+BYPASS_RC=0
+BYPASSES="$(zensu_bypass_display "$(tdd_state_file "$SESSION_ID")" text)" || BYPASS_RC=$?
+[ "$BYPASS_RC" -eq 0 ] && [ -z "$BYPASSES" ] && BYPASSES="none"
+BYPASS_DIRECTIVE=$'\n\nBypass ledger (from chain state): as the last line of the ## Open section, include the literal line: Gates bypassed during this session: '"$BYPASSES"
+BYPASS_DIRECTIVE_TRAILING=$'\n\nBypass ledger (from chain state): end your reply with the literal line: Gates bypassed during this session: '"$BYPASSES"
 
 CONVERGE_OFFER_DIRECTIVE=""
 if [ "$AUTOPILOT_BOUND" != "true" ]; then
@@ -322,6 +341,8 @@ fi
 # self-review owns the chain terminus (--chain-done) and renders the report.
 SELF_REVIEW_ON=0
 if zensu_hook_enabled selfReview; then SELF_REVIEW_ON=1; fi
+BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE_TRAILING"
+[ -n "$COMBINED_SUMMARY_DIRECTIVE" ] && BYPASS_TAIL_DIRECTIVE="$BYPASS_DIRECTIVE"
 LOG_HELPER_Q="$(printf '%q' "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh")"
 PLUGIN_DATA_Q="$(printf '%q' "${CLAUDE_PLUGIN_DATA:-}")"
 LOG_COMMAND="CLAUDE_PLUGIN_DATA=${PLUGIN_DATA_Q} bash ${LOG_HELPER_Q}"
@@ -332,7 +353,7 @@ if [ "$SELF_REVIEW_ON" = "1" ]; then
   TAIL_DIRECTIVE=""
 else
   CLOSE_PASS="close only this review generation by running: ${LOG_COMMAND} --chain-done${AUTOPILOT_BOUND_ARGS} --claimed-review-ticket ${REVIEW_TICKET_Q}. Stop only if it exits 0; on failure this completion is stale, so leave the current chain untouched and resume it."
-  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
+  TAIL_DIRECTIVE="${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
 fi
 
 emit_post_context() {
@@ -347,7 +368,9 @@ emit_post_context() {
 
 if [ "$AUTO_FIX_ON" = "0" ]; then
   DISABLED_MSG="Auto-fix is disabled for this ticket-bound review completion. Do NOT modify findings automatically and do NOT spawn another reviewer loop. Report the reviewer verdict and all findings unchanged, then ${CLOSE_PASS}"
-  printf '%s' "${DISABLED_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
+  DISABLED_TAIL=""
+  [ "$SELF_REVIEW_ON" = "0" ] && DISABLED_TAIL="${BYPASS_DIRECTIVE_TRAILING}"
+  printf '%s' "${DISABLED_MSG}${DISABLED_TAIL}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0
 fi
 
@@ -376,7 +399,7 @@ if [ "$NEXT" -gt "$MAX_ROUNDS" ]; then
     else
       tdd_mark_review_converged "$SESSION_ID" "$REVIEW_TICKET" chainDone || exit 0
     fi
-    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_DIRECTIVE}"
+    CONV_MSG="Auto-fix convergence: max ${MAX_ROUNDS} rounds reached. The review chain is now marked complete (chainDone) so you MAY end your turn. Do NOT spawn zensu:code-reviewer again and do NOT keep fixing. Reply with the remaining findings under '### Findings (max rounds reached, manual fix required)' and stop. To grant another budget and resume the review/fix cycle in this same session, the user can invoke the /zensu:reset-review-limit skill — surface this hint at the end of your reply so the user knows the escape hatch exists.${COMBINED_SUMMARY_DIRECTIVE}${BYPASS_TAIL_DIRECTIVE}"
   fi
   printf '%s' "${CONV_MSG}${AUTOPILOT_ENVELOPE_DIRECTIVE}" | emit_post_context
   exit 0

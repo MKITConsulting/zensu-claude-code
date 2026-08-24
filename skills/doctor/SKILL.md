@@ -7,10 +7,13 @@ description: >
   from the repo's provider, lockfile-backed Playwright MCP config/readiness), plugin integrity
   (hooks.json wired to files on disk, plugin.json ↔ marketplace.json version
   sync), config (valid JSON, the quoted-boolean trap where "true"/"false" as a
-  string is silently ignored by strict === checks), and session state (state
-  dir writable, canonical CAS workflow documents valid, each review chain's
-  shape plus any wedged chain and its recovery command, expired pending-review
-  surfaced). The only write is an explicit, user-confirmed cleanup of one
+  string is silently ignored by strict === checks, and whether the permission rules
+  in ~/.claude/settings.json expose the zensu:code-reviewer spawn to a refusal
+  before any chain has wedged), and session state (state dir writable, canonical
+  CAS workflow documents valid, each review chain's shape plus any wedged chain and
+  its recovery command, any reviewer spawn the host permission layer refused,
+  expired pending-review surfaced).
+  The only write is an explicit, user-confirmed cleanup of one
   expired pending-review.json — CAS workflow documents are never deleted. Use
   when the user asks to "diagnose zensu", "check my zensu
   setup", "why is a zensu hook/gate not firing", "zensu doctor", or the slash
@@ -77,9 +80,12 @@ That is not a style rule. `hooks/lib/zensu-doctor-invocation.js` is what keeps
 this diagnostic reachable when the session binding has failed — the state an
 *incompatible* mid-session plugin change produces (a compatible upgrade now binds
 normally), where every other Bash call denies — and it
-admits only this shape: assignments drawn from a closed allowlist followed by one
-`bash <the executing plugin's zensu-doctor.sh>`. Anything else is refused, and the
-doctor goes back to being denied by the very defect it reports.
+admits this diagnostic in only one shape: assignments drawn from a closed
+allowlist followed by one `bash <the executing plugin's zensu-doctor.sh>`.
+Anything else is refused, and the doctor goes back to being denied by the very
+defect it reports. A SECOND command, `/zensu:adopt-session`, is recognized on its
+own separate justification — it WRITES, so it cannot borrow this one; see
+[Session Control](../../docs/session-control.md) "Unbindable sessions".
 
 Playwright readiness travels as `ZDOC_PLAYWRIGHT_TOOLS=ready`; simply omit that
 assignment when the tool set is not loaded. The root preflight now lives inside
@@ -119,7 +125,17 @@ the report, not a failed command. Do not re-render or paraphrase the table.
 ## Phase 2: Interpret
 
 Briefly call out, in one or two lines, the highest-severity findings and the
-concrete next step for each — but only for rows the table actually marked ⚠️/❌:
+concrete next step for each — but only for rows the table actually marked ⚠️/❌,
+plus the one green row named below, which is always relayed.
+
+One bound is stated here rather than in a bullet, because it belongs to the check
+as a whole rather than to any single row: the reviewer-spawn permission check
+reads `~/.claude/settings.json` and nothing else, and the permission mode can be
+in effect for a session without being written there. At least one `permissions:`
+row now prints on every path the check can take, so read the rows rather than their
+absence — a ✅ row means no exposure was found in that one file, never that the
+auto-mode classifier is inactive. Say so whenever the user asks whether the
+classifier will refuse a spawn, not only when the whole table is green.
 
 - **❌ version sync** → bump `plugin.json` and `marketplace.json` together (the
   release train owns this; see `CLAUDE.md`).
@@ -128,6 +144,120 @@ concrete next step for each — but only for rows the table actually marked ⚠�
 - **⚠️ config quoted boolean** → the named key is a string (`"true"`) where a real
   boolean is required; strict `=== true` ignores it, so the feature stays at its
   default. Drop the quotes (offer `/zensu:setup` to rewrite it safely).
+- **⚠️ permissions: … the zensu:code-reviewer spawn** → the proactive counterpart
+  to the refused-spawn state row below: it reads `~/.claude/settings.json` and
+  reports the exposure *before* a chain wedges, so it is a warning about what
+  could happen, never a report that it did. Relay the row's own remedy exactly as
+  it words it — add `"Agent(zensu:code-reviewer)"` to `permissions.allow`, remove
+  the `deny` entry, or `Move the rule to permissions.allow` for an `ask` entry
+  (**move**, not remove — the row says so) — and tell
+  the user they must apply it themselves: **never edit a settings file to widen
+  your own permissions, and never name a project-local settings path as the place
+  to do it.** Both allow-ward remedies here carry their own precedence caveat, and
+  it is the row's literal wording: `a deny rule outranks an allow rule` and the deny
+  has to go first. Relay it with the remedy — an allow rule added while a deny stands
+  takes no effect at all, including a deny in a settings source this check never
+  opens. When a `deny` row is present it OUTRANKS the refused-spawn state row
+  below: `deny` is evaluated before `allow`, so relaying that row's allow-rule
+  remedy while the `deny` entry stands recommends a change that cannot take
+  effect. An `autoMode.allow` entry is classifier guidance in prose, not a
+  permission rule; if the row says so, the user's earlier attempt did not grant
+  anything.
+- **✅ permissions: … switched off by hooks.reviewerSpawnPermissionCheck** → the check did
+  NOT run. It is green because nothing is wrong, not because nothing was found, and the
+  row says so itself — relay that distinction rather than folding this row into an
+  all-clear. The switch exists for a user whose permissions come from a source that
+  outranks `~/.claude/settings.json` — managed settings, or a project-local carrier this
+  skill deliberately does not name, for the same reason the rows do not: never point the
+  model at a settings path it could write itself. For such a user the exposure row would
+  otherwise be a permanent warning about a file that is overridden. It suppresses the ROW
+  only and can never
+  redirect which file the check opens. If the user asks why the check is silent, this row
+  is the answer, and turning it back on is a `.zensu/config.json` edit they make
+  themselves.
+- **❌ config: … (the whole file is ignored, defaults apply)** → a LOADER verdict, and the
+  strongest of the three config-failure rows: the doctor established that the config loader
+  gets nothing from this file. Relay it as such. The `defaults apply` half appears only when
+  the file is the sole config source; with a global and a project config the row instead says
+  `the other config source still applies`, and you must not upgrade that to `defaults apply`.
+- **❌ config: … cannot say what the config loader gets from it** → an explicit REFUSAL to
+  make a loader verdict. The doctor could not read the file, and for this class it also cannot
+  infer what the loader does — a FIFO, for instance, would block the loader rather than make it
+  fall back. Report the file as unreadable by the check; do not tell the user it is ignored.
+- **⚠️ config: … is larger than … bytes** → a MISSING CHECK, never a verdict about the
+  config. The row says the doctor `declined to read it`: the file is over its own memory
+  bound, so it did not
+  parse it and cannot judge it. Say explicitly that the config loader has no size limit,
+  so the file is not skipped for its size — but do not tell the user it is applied, or
+  that it is ignored: neither is knowable from a row that never read the file.
+- **⚠️ permissions: …** `could not be read —` → a filesystem problem: the file could
+  not be opened, is not a regular file, is too large, or was read incompletely.
+- **⚠️ permissions: …** `could not be parsed` → the file WAS read; its bytes are
+  not valid JSON. Do not relay this as a filesystem problem — that sends the user
+  looking for a permissions or disk fault that does not exist.
+- **⚠️ permissions: … has a shape this check cannot judge** → the file was read and
+  parsed, but a value or rule list is not the shape the check understands. This
+  prefix is shared by TWO different rows and the tail is what separates them: one
+  continues `the reviewer-spawn permission check did not run` — fatal, nothing else
+  was judged — and the other names a single row that `could not be determined`, for
+  which see the bullet further down. Read the tail before you relay it.
+  Report every row in this group as a missing check, not an all-clear — never as
+  evidence that nothing is wrong.
+- **⚠️ permissions: … names zensu:code-reviewer in a spelling this check has not verified**
+  → a `deny`/`ask` entry plainly means this spawn but is not one of the two
+  spellings the check verified, so it cannot say whether that entry blocks it.
+  Tell the user to read the entry before adding any allow rule; do not relay an
+  allow-rule remedy here, because `deny` and `ask` both outrank `allow`. This row is
+  reserved for entries that really do CONTAIN the agent name; an unrecognised
+  `Agent(...)` or `Task` spelling that does not contain it reaches the weaker row
+  documented below.
+- **⚠️ permissions: … contains an entry this check cannot read** → a `deny`/`ask`
+  list holds a non-string entry, so the check could not read it and cannot say
+  whether it blocks the spawn. Distinct from the spelling row above: that one is a
+  string the check read and declined to judge. Same remedy, same reason — read the
+  entry before adding any allow rule.
+- **✅ permissions: no reviewer-spawn exposure found** → the check ran and found
+  nothing. Relay its bound with it, and keep these TWO clauses intact — they are
+  the row's own wording and the drift pin matches them literally:
+  it is the `only settings source this check reads`, and the permission mode can be
+  in effect for a session `without being written there`.
+  A green row means no exposure was found in that one file, never that the
+  auto-mode classifier is inactive. Repeat that bound to the user; never act on it
+  yourself.
+  The separate prohibition
+  `no agent may edit a settings file to widen its own permissions`
+  belongs to the rows that INSTRUCT a settings edit — the deny, ask,
+  could-not-judge, exposure and refused-spawn rows — and is deliberately NOT in this
+  one, which instructs nothing. Do not attribute it to the green row.
+- **⚠️ permissions: … `scopes the Agent or Task tool` …** → a `permissions.deny`
+  or `permissions.ask` entry is an `Agent(...)`/`Task(...)` rule in a spelling this
+  check has not verified. It names a DIFFERENT agent, or none at all — the check is
+  saying only that it cannot judge the entry's reach, never that the entry mentions
+  `zensu:code-reviewer`. Do not report it as naming the reviewer. The separate row
+  that says an entry `names zensu:code-reviewer … has not verified` is the stronger
+  claim and is reserved for entries that really do contain the name.
+  This is where a wildcard `deny` lands. Such an entry used to produce no row at all,
+  which read as a clean result while it blocked every run — that silence is the failure
+  this whole check exists to prevent, so never relay this row as merely cosmetic.
+- **⚠️ permissions: … the `<row>` `could not be determined`** → a
+  `missing part of the check`, not a missing check. One malformed key suppressed the row
+  whose claim depended on it; every other row in the block still ran and still
+  means what it says. Two malformed CARRIERS therefore render two of these rows,
+  naming two different keys. Two malformed keys inside ONE carrier render a single
+  row naming only the first, so a repair may uncover a second. And a deferred row is
+  dropped entirely when a deny, ask, could-not-judge or unreadable-entry finding
+  returns above it — deliberate, because the returning row is the stronger finding. Distinguish it from
+  the whole-check row, which says `the reviewer-spawn permission check did not run`
+  and appears only when the file's shape is fatal.
+- **⚠️ permissions: HOME is not set** → the check could not locate
+  `~/.claude/settings.json` at all, so it did not run. Report it as a missing
+  check, never as a clean result.
+- **⚠️ permissions: … incomplete (short read)** → the file was located and
+  opened but the read returned fewer bytes than its size. That is an I/O problem,
+  **not** malformed content — do not tell the user their settings file is broken.
+- **⚠️ permissions: the reviewer-spawn permission check failed to run** → the
+  check itself threw. The rest of the report is intact and trustworthy; only this
+  one row is missing its answer. Treat it as a missing check.
 - **⚠️ forge CLI not authenticated / not found** → authenticate or install the CLI
   the report names for the detected provider: `gh auth login` for GitHub,
   `glab auth login` for GitLab (`unknown` means no github/gitlab remote was
@@ -158,18 +288,19 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   Reaching a failure means the update crossed a **breaking** boundary (a minor
   bump while major is `0`, or a major bump), the executing runtime is **older**
   than the record, a version is not a strict `X.Y.Z`, or the executing root
-  carries no zensu manifest. That cannot be repaired in place — the record is
-  immutable by design and is never rewritten to the new root — so the remedy is a
-  fresh Claude Code session.
-  **Known reporting gap, and you must not paper over it:** the report has no row
-  of its own for that state. `zensu-doctor.sh` asks only whether the recorded
-  project root is gone, so an incompatible runtime falls through to the
-  `unbound` row above and is rendered as *"this session has no valid Session
-  Control record"* — which is false, the record is intact in plugin data. When
-  the user reports a plugin update right before the failure, say so explicitly
-  instead of repeating that row's wording: the record exists and the executing
-  runtime is not a compatible lineage of it. The remedy (a fresh session) is the
-  same either way.
+  carries no zensu manifest.
+- **❌ binding: this session's Session Control record is intact, but the running
+  Zensu installation declares an incompatible lineage** → the state described
+  above, and it has its own row naming BOTH declared versions (`record minted by
+  X, executing Y`). Never report it as a missing record: the record is intact in
+  plugin data. Unlike a fresh-session remedy, this one **can** be repaired in
+  place — run `/zensu:adopt-session` to see whether the running installation may
+  take the record over, then `/zensu:adopt-session --confirm`. Both stay
+  reachable in this state; so does this diagnostic. A refusal names the exact
+  condition that failed, and `workflow-schema-mismatch` in particular means a
+  persisted shape really did change and a fresh session is the only way forward.
+  Adoption re-binds the session from the next tool call onward — do NOT tell the
+  user to restart after a successful one.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares
@@ -195,8 +326,46 @@ concrete next step for each — but only for rows the table actually marked ⚠�
   instead: the specific blocker the row names — see `/zensu:recover-chain` for the full roster. A separate "at a dead end" row means no repair applies at all and
   a fresh `/zensu:tdd` generation is the only exit. A chain that was repaired
   earlier renders `repaired N×`.
+- **⚠️ state: the host permission layer refused the zensu:code-reviewer spawn**
+  → this is NOT a Zensu gate and no Zensu command repairs it. The Stop
+  chain-enforcer saw the refusal in the session transcript and left the note this
+  row reads; the chain cannot close because no review ever ran. Report the
+  remedy the row prints — the `permissions.allow` rule
+  `"Agent(zensu:code-reviewer)"` in `~/.claude/settings.json`, after first removing
+  any deny rule that names the Agent tool, because
+  a deny rule outranks an allow rule and the deny has to go first;
+  or leaving the
+  permission mode that refused it — and say plainly that the user has to apply it,
+  since it is a harness setting no agent can grant itself — and never edit a
+  settings file on their behalf to widen your own permissions. Name only the
+  user-scoped file, the way the row and the Stop reason both do: the project-local
+  spelling sits inside the session root and is a path you could write yourself, so
+  reciting it beside the rule that grants the capability you just lost is the one
+  thing this instruction exists to prevent. Never suggest `--chain-done` or a
+  fresh `/zensu:tdd` generation as the way past it *while the permission is still
+  missing*: both would leave the change unreviewed, and a new generation hits the
+  same refusal. Once the user has applied the rule, re-entering `/zensu:tdd` is
+  exactly what the cap-release message tells them to do. The note is retired
+  automatically once a spawn succeeds or the chain closes, so a standing row means
+  no reviewer has run since. A row whose kind reads `unknown` means this plugin
+  root could not load the classifier module — report the refusal, not the kind.
+  Two neighbouring rows are NOT refusals and must not be reported as one. A
+  "reviewer-spawn refusal note(s) older than Nh" row comes from a session that
+  never ended a turn again and says nothing about the current state; a
+  "reviewer-spawn note(s) this plugin did not write" row failed
+  to vet (unreadable, oversized, an unrecognized kind or schema, an impossible
+  timestamp, or no matching session) — a planted file would otherwise manufacture
+  a recommendation to widen permissions. "No matching session" is the binding
+  check: a note counts only while the workflow document of the session that could
+  have written it still sits beside it. Such a note is also reaped on its own by
+  the next Stop in that project, so this row can clear without anyone acting on
+  it. Offer no cleanup for either row: Phase 3 below is still the only write, and
+  it covers `pending-review.json` alone.
 
-If everything is green, say so in one line and stop — there is nothing to do.
+If everything is green, say so in one line and stop — there is nothing to do,
+except that the line must carry the `~/.claude/settings.json` bound stated in
+Phase 2: a green table means no exposure was found in that one file, never that
+the auto-mode classifier is inactive.
 
 ## Phase 3: Expired pending-review cleanup (the ONLY write, always user-gated)
 

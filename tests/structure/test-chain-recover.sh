@@ -18,6 +18,9 @@ SKILL="$ROOT/skills/recover-chain/SKILL.md"
 PLUGIN_JSON="$ROOT/.claude-plugin/plugin.json"
 README="$ROOT/README.md"
 PASS=0; FAIL=0
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
 check() {
   local label="$1" result="$2"
   if [ "$result" = PASS ]; then echo "  PASS  $label"; PASS=$((PASS+1));
@@ -40,10 +43,11 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM HUP
 
-if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1; then
-  check "P1 the classifier unit suite passes (node --test chain-recovery-v1.test.js)" PASS
+if node --test "$ROOT/tests/structure/chain-recovery-v1.test.js" >"$WORK/unit.out" 2>&1 \
+  && unit_cases_registered_floor "$WORK/unit.out" 21; then
+  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the classifier unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the classifier unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 21 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
 fi
 export CLAUDE_PLUGIN_ROOT="$ROOT"
@@ -671,7 +675,13 @@ esac
 # ---------------------------------------------------------------- doctor surface
 new_chain "chain-recover-doctor"
 seed "$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+# The doctor renderer resolves BOTH the user-scoped zensu config and the
+# reviewer-spawn permission check out of HOME, so an unsandboxed invocation
+# reads whatever the developer running the suite happens to have. Same guard
+# tests/structure/test-doctor.sh applies to its own functional half.
+DOCTOR_HOME="$WORK/doctor-home"
+mkdir -p "$DOCTOR_HOME"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T35 doctor reports the wedged chain and names the recovery command" PASS ;;
@@ -681,7 +691,7 @@ esac
 
 new_chain "chain-recover-doctor-deadend"
 seed 's.codeReviewDone=true;s.reviewRound=2;' || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
     check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
@@ -691,7 +701,7 @@ esac
 
 new_chain "chain-recover-doctor-blocked"
 seed "s.deferredReviewClaim=\"dc_test2\";$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged but not recoverable in place"*"deferred-review claim"*)
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" PASS ;;
@@ -704,7 +714,7 @@ new_chain "chain-recover-doctor-wrapper"
 seed "$STALE_RECEIPT" || true
 WRAPPER_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_ZENSU=absent ZDOC_NODE=vTEST \
   ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI="" ZDOC_FORGE_STATE=missing \
-  ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 bash "$ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+  ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 HOME="$DOCTOR_HOME" bash "$ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
 case "$WRAPPER_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T45 the doctor WRAPPER renders the wedged shape and the recovery command end to end" PASS ;;
@@ -716,7 +726,7 @@ new_chain "chain-recover-doctor-repaired"
 seed "$STALE_RECEIPT" || true
 REPAIRED_RC=0
 bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || REPAIRED_RC=$?
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$REPAIRED_RC:$DOCTOR_OUT" in
   0:*"(repaired 1×)"*)
     check "T52 doctor renders the durable repair count once a chain has actually been recovered" PASS ;;
@@ -829,16 +839,62 @@ else
   check "T38 the skill is registered and its frontmatter name matches" FAIL
 fi
 
+# NOTE ON HOME: T39 below is the repo-wide skill-registry invariant — header count,
+# row count, the "N skills are registered" figure, both set differences and the
+# unlisted exemption — living in a suite named for chain recovery. Its header-vs-rows
+# half is duplicated in test-converge-skill.sh P4c, and every per-skill suite adds a
+# registration pin of its own. That is three places for one invariant, held together
+# by comments. Extracting it into a dedicated tests/structure/test-skill-registry.sh
+# is the right move; it is deliberately NOT done inside a review-fix round, because
+# moving a checked invariant is a change that needs its own review.
 SKILLS_BLOCK="$(awk '/^### Skills \(/{f=1;next} /^### /{f=0} f' "$README")"
 SKILLS_HEADER_N="$(grep -oE '^### Skills \([0-9]+\)' "$README" | grep -oE '[0-9]+' | head -1)"
-SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE '^\| `/zensu:')"
+# The slug class admits digits. This grep and both of its siblings spelled [a-z-]+
+# until this change, so a future skill named like `review-v2` would drop out of the
+# row count AND surface as registered-but-unlisted, failing this check twice for a
+# reason neither message names. The class had THREE hand-maintained encodings, all of
+# them reading README.md. Two of them live in this function, so they now share ONE
+# spelling: the grep below and the JS row regex both take SKILL_SLUG_CLASS. The third,
+# test-converge-skill.sh P4c, now takes the same constant from lib-skill-registry.sh.
+# The INVARIANT is still not shared — that is what the NOTE above defers.
+# (test-gauntlet-loop-skill.sh G13 also spells [a-z0-9-]+, but that is a hook
+# FILENAME class applied to SKILL.md and reads no README row — not a co-moving site.)
+. "$(dirname "$0")/lib-skill-registry.sh"   # SKILL_SLUG_CLASS, shared with test-converge-skill.sh P4c
+SKILLS_ROWS="$(printf '%s\n' "$SKILLS_BLOCK" | grep -cE "^\| \`/zensu:$SKILL_SLUG_CLASS\` \|")"
+# Deliberately registered but kept out of the README table. A second entry here is a
+# real decision, not a typo — see P2h in test-doctor.sh for why doctor is documented
+# under Diagnostics instead.
+README_UNLISTED_SKILLS="doctor"
+# BOTH directions. registered-minus-listed catches a renamed or de-registered skill
+# whose README row went stale. listed-minus-registered catches the mirror case — a
+# row advertising a command plugin.json does not register — which every other
+# conjunct here is blind to, because bumping the header to match repairs the counts.
+SKILLS_SET_DIFF="$(printf '%s\n' "$SKILLS_BLOCK" | node -e '
+const fs = require("node:fs");
+// The slug class arrives from the shell so this regex and the grep above cannot drift.
+const rowRe = new RegExp("^\\| `\\/zensu:(" + process.argv[2] + ")` \\|");
+const rows = new Set(
+  fs.readFileSync(0, "utf8").split("\n")
+    .map((line) => rowRe.exec(line))
+    .filter(Boolean).map((match) => match[1]),
+);
+const manifest = require(process.argv[1]);
+const registered = (manifest.skills || [])
+  .map((entry) => entry.replace(/^\.\/skills\//, ""));
+const unlisted = registered.filter((name) => !rows.has(name)).sort();
+const unregistered = [...rows].filter((name) => !registered.includes(name)).sort();
+process.stdout.write(unlisted.join(",") + "|" + unregistered.join(","));
+' "$PLUGIN_JSON" "$SKILL_SLUG_CLASS" 2>/dev/null)"
+SKILLS_UNLISTED="${SKILLS_SET_DIFF%%|*}"
+SKILLS_UNREGISTERED="${SKILLS_SET_DIFF##*|}"
 REGISTERED_N="$(node -e 'process.stdout.write(String(require(process.argv[1]).skills.length))' "$PLUGIN_JSON" 2>/dev/null)"
 README_REGISTERED_N="$(printf '%s\n' "$SKILLS_BLOCK" | grep -oE '\([0-9]+ skills are registered' | grep -oE '[0-9]+' | head -1)"
 if printf '%s' "$SKILLS_BLOCK" | grep -qF '/zensu:recover-chain' \
-  && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ]; then
-  check "T39 README lists the skill; header, table and registered count all agree" PASS
+  && [ "$SKILLS_HEADER_N" = "$SKILLS_ROWS" ] && [ "$README_REGISTERED_N" = "$REGISTERED_N" ] \
+  && [ "$SKILLS_UNLISTED" = "$README_UNLISTED_SKILLS" ] && [ -z "$SKILLS_UNREGISTERED" ]; then
+  check "T39 README lists the skill; header, table and registered set all agree" PASS
 else
-  check "T39 README lists the skill; header, table and registered count agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N)" FAIL
+  check "T39 README lists the skill; header, table and registered set agree (header=$SKILLS_HEADER_N rows=$SKILLS_ROWS readme=$README_REGISTERED_N plugin=$REGISTERED_N; registered-but-unlisted=[$SKILLS_UNLISTED], must be exactly [$README_UNLISTED_SKILLS] — the diagnostics skill P2h in test-doctor.sh keeps out of the table; listed-but-unregistered=[$SKILLS_UNREGISTERED], must be empty — a row here advertises a command the plugin never loads)" FAIL
 fi
 
 SKILL_CODE="$(awk '/^```/{inside=!inside; next} inside{print}' "$SKILL")"

@@ -154,12 +154,16 @@ fi
 # skip reason and drifting it alone would split the schema just as effectively.
 EVIDENCE_SHAPE='{schema:"zensu-deterministic-release-evidence-v1", gate:$gate, source_git_revision:$source_git_revision, runtime_digest:$runtime_digest, plugin_version:$plugin_version}'
 EVIDENCE_SKIP_SHAPE='+ (if $gate == "skipped" then {gate_skip_reason:$gate_skip_reason} else {} end)'
-if [ "$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
-  && [ "$(grep -Fc "$EVIDENCE_SKIP_SHAPE" "$WORKFLOWS/release.yml")" -eq 2 ] \
+# Counted into variables so the FAIL message can name WHICH half drifted; the
+# negative pin closes the other direction, where a "simplification" back to a
+# hardcoded gate:"passed" would make every skipped release claim it was verified.
+EVIDENCE_N="$(grep -Fc "$EVIDENCE_SHAPE" "$WORKFLOWS/release.yml")"
+EVIDENCE_SKIP_N="$(grep -Fc "$EVIDENCE_SKIP_SHAPE" "$WORKFLOWS/release.yml")"
+if [ "$EVIDENCE_N" -eq 2 ] && [ "$EVIDENCE_SKIP_N" -eq 2 ] \
   && ! grep -Fq 'gate:"passed"' "$WORKFLOWS/release.yml"; then
   check "Prepare and publish emit the same deterministic release evidence schema" PASS
 else
-  check "Prepare and publish emit the same deterministic release evidence schema" FAIL
+  check "Prepare and publish emit the same deterministic release evidence schema (shape=$EVIDENCE_N/2 skip-branch=$EVIDENCE_SKIP_N/2)" FAIL
 fi
 
 if jq -e '.devDependencies.promptfoo | type == "string"' "$PACKAGE" >/dev/null 2>&1 \

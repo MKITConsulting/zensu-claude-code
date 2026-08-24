@@ -102,6 +102,19 @@ persist it from the worktree root:
 CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --autopilot-begin --run "$RUN_ID" --cover "$COVER" --validate "$VALIDATE"
 ```
 
+The run records the working tree it drives, defaulting to the one this session is standing
+in. Two runs may be live in one project at the same time as long as their working trees
+differ, so a second Autopilot session in another git worktree is no longer refused. Two
+runs in the SAME working tree still are — they would collide on the branch, the commits and
+the pull request. Pass `--workspace <path>` only when the run drives a tree other than the
+current one, and only when that tree lies under the project root — a worktree
+outside the project is refused.
+
+A refusal naming a nonterminal run in this working tree quotes the audited release command.
+That command cancels a run owned by ANOTHER session, so it is the user's call: report the
+refusal and the command, and never run it unasked. `/zensu:autopilot-release` is the
+guided form.
+
 This must succeed before `ExitPlanMode`. Append exactly one invisible binding line to the
 plan CONTENT you pass to `ExitPlanMode` — the gate matches the marker in the bytes the
 harness hands back (`tool_response.plan`, saved at `tool_response.filePath`), never in a
@@ -346,10 +359,19 @@ Run these in order. Implement **via the Zensu workflow** throughout.
    exists, else `$ROOT/templates/autopilot-pr-body.md` under the validated session plugin root): it carries a per-AC checklist table keyed
    by the stable `AC-###` IDs — one row per AC, with verification evidence for each active AC
    (deprecated rows stay listed with status `deprecated`, no evidence; status filled in after
-   step 6). The body also carries one audit line `Gates bypassed during build: <list|none>`
+   step 6). The body also carries one audit line
+   `Gates bypassed during build: <list|none|UNREADABLE — …>`
    from the bypass ledger: after EVERY `/zensu:tdd` chain in this build (the initial one and
    each fix loop), run `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "$LOG" --bypass-list`
-   and union the non-`none` entries —
+   and union the non-`none` entries. **Check its exit status, not just its output.** On a
+   non-zero exit the verb did not read a ledger: exit 3 prints an `UNREADABLE — …` line on
+   stdout, and any other non-zero exit leaves stdout empty with the diagnosis on stderr.
+   That sentence is NOT an entry to union — it is prose, and unioning it would splice it
+   into the PR body as if it were a gate name. Instead it POISONS the build union: carry it
+   verbatim as the whole value of the audit line for this build, and never collapse it to
+   `none`. `none` may be rendered only when every chain's `--bypass-list` exited 0 and
+   returned `none` — a ledger nobody could read is not a clean ledger, and this line
+   outlives the session —
    each `--tdd-begin` resets the per-run ledger, so the union is the build-level truth.
    Persist the running union durably after every chain as a `Gates bypassed (build union):`
    line in the autopilot plan artifact — the PR body is rendered FROM that line, never from

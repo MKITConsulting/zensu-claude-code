@@ -11,6 +11,10 @@ set -u
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 LIB="$ROOT/hooks/lib/finding-verify-v1.js"
 UNIT="$ROOT/tests/structure/finding-verify-v1.test.js"
+# Shared, locale-independent `node --test` summary parse (see the file header for
+# why the count matters and why it is not hand-copied here).
+. "$(dirname "$0")/lib-unit-summary.sh"
+
 TDD_MD="$ROOT/skills/tdd/SKILL.md"
 PR_MD="$ROOT/skills/pr-team-review/SKILL.md"
 PR_RULES="$ROOT/skills/pr-team-review/rules/workflow.md"
@@ -48,10 +52,11 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # ── P1 the model-free grader ─────────────────────────────────────────
-if node --test "$UNIT" >"$WORK/unit.out" 2>&1; then
-  check "P1 the grader unit suite passes (node --test finding-verify-v1.test.js)" PASS
+if node --test "$UNIT" >"$WORK/unit.out" 2>&1 \
+  && unit_cases_registered_floor "$WORK/unit.out" 28; then
+  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"))" PASS
 else
-  check "P1 the grader unit suite passes ($(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
+  check "P1 the grader unit suite passes ($(unit_cases_report "$WORK/unit.out"), want >= 28 registered; $(grep -c '^not ok' "$WORK/unit.out" 2>/dev/null) failing)" FAIL
   grep -B2 -A 20 '^not ok' "$WORK/unit.out" | sed 's/^/        /'
 fi
 

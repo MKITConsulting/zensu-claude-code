@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only names
+# hooks/lib/zensu-doctor.sh inside a `{"command": ...}` payload handed to the
+# capability gate, to check that the gate admits that command shape.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ -d "$ROOT/plugins/zensu" ]; then PLUGIN="$ROOT/plugins/zensu"; else PLUGIN="$ROOT"; fi
 GATE="$PLUGIN/hooks/pre-reviewer-capability-gate.sh"
@@ -97,6 +100,24 @@ payload() {
   '
 }
 
+# ONE definition of the environment every gate invocation runs under, shared by
+# decision() and by the deny-REASON probe further down. The scrub is what stops a
+# developer's ambient ZENSU_* state from poisoning an assertion, and it was previously
+# hand-copied: a change to this unset list would have reached one caller and not the
+# other, so two assertions about the SAME payload would have run under different
+# environments and disagreed for an environmental reason rather than a policy one.
+gate_env() {
+  env \
+    -u ZENSU_CLAUDE_PLUGIN_ROOT \
+    -u ZENSU_SESSION_KEY \
+    -u ZENSU_SESSION_CONTEXT \
+    -u ZENSU_RUNTIME_DIGEST \
+    -u ZENSU_PROJECT_ROOT \
+    CLAUDE_PLUGIN_ROOT="$1" \
+    CLAUDE_PLUGIN_DATA="$2" \
+    bash "$GATE" 2>/dev/null
+}
+
 decision() {
   local out status hook_root="$PLUGIN" hook_data="$PLUGIN_DATA"
   case "${GATE_TEST_MODE:-valid}" in
@@ -105,15 +126,7 @@ decision() {
     wrong-root) hook_root="$OTHER" ;;
     wrong-data) hook_data="$OTHER" ;;
   esac
-  out="$(env \
-    -u ZENSU_CLAUDE_PLUGIN_ROOT \
-    -u ZENSU_SESSION_KEY \
-    -u ZENSU_SESSION_CONTEXT \
-    -u ZENSU_RUNTIME_DIGEST \
-    -u ZENSU_PROJECT_ROOT \
-    CLAUDE_PLUGIN_ROOT="$hook_root" \
-    CLAUDE_PLUGIN_DATA="$hook_data" \
-    bash "$GATE" 2>/dev/null)"
+  out="$(gate_env "$hook_root" "$hook_data")"
   status=$?
   if [ "$status" -eq 2 ]; then printf deny; return; fi
   if [ "$status" -ne 0 ]; then printf invalid; return; fi
@@ -208,6 +221,51 @@ assert_case "neutral agent cannot invoke exec_command tool aliases" deny arbitra
 assert_case "neutral agent cannot invoke terminal tool aliases" deny arbitrary-custom terminal '{"script":"pwd"}'
 assert_case "neutral agent cannot invoke command tool aliases" deny arbitrary-custom command '{"command":"pwd"}'
 assert_case "neutral agent keeps external report writes" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\"}"
+
+# The two agent types skills/gauntlet-loop/SKILL.md names by hand. Every other
+# command-tool row above uses the synthetic type "arbitrary-custom", which proves
+# the fallthrough but never these two spellings — so the skill's claim that an
+# Explore critic and a general-purpose builder hold no shell rested on reading
+# classifySubagent rather than on driving it. These drive it.
+assert_case "Explore critic cannot invoke a shell" deny Explore Bash '{"command":"pwd"}'
+assert_case "general-purpose builder cannot invoke a shell" deny general-purpose Bash '{"command":"pwd"}'
+# The premise the two rows above depend on: a payload with NEITHER subagent field
+# is the interactive main thread and is unrestricted. Whether the host reports
+# agent_type for a given spawn shape is a host property this repo cannot verify,
+# so pin the boundary rather than claiming the host's behaviour.
+assert_case "a payload with no agent_type is main-v1 and keeps its shell" allow - Bash '{"command":"pwd"}'
+assert_case "general-purpose builder keeps project writes" allow general-purpose Write "{\"file_path\":\"$PROJECT/note.md\"}"
+# The three rows above assert a VERDICT, and decision() collapses every deny to the
+# same token. Adding Explore to REVIEWER_TYPES would keep them green while the
+# skill's `host-profile-v1` claim went false, because a reviewer is denied a shell
+# too. Assert the REASON for one of them, which names the principal.
+# Runs through the SAME gate_env decision() uses, so this reason and the verdict rows
+# above can never disagree because of the environment they were invoked under.
+EXPLORE_REASON="$(payload Explore Bash '{"command":"pwd"}' | gate_env "$PLUGIN" "$PLUGIN_DATA" | node -e '
+    let s = ""; process.stdin.on("data", c => s += c); process.stdin.on("end", () => {
+      try { process.stdout.write(String(JSON.parse(s).hookSpecificOutput?.permissionDecisionReason || "")); }
+      catch (_) { process.stdout.write(""); }
+    });
+  ')"
+case "$EXPLORE_REASON" in
+  *"host-profile-v1 cannot invoke command-execution tools"*)
+    check "Explore is denied AS host-profile-v1, not merely denied" PASS ;;
+  *)
+    check "Explore deny reason must name host-profile-v1 (got: ${EXPLORE_REASON:-<empty>})" FAIL ;;
+esac
+
+# The deny REASON string, not just the verdict. skills/gauntlet-loop/SKILL.md tells
+# the model that no builder or critic subagent can run a shell, and
+# tests/structure/test-gauntlet-loop-skill.sh G8 greps this exact literal out of the
+# module to prove the skill is not describing a gate that stopped existing. Without
+# an owner here, rewording the message would break that unrelated suite with no
+# warning at the site that changed it.
+DENY_REASON='host-profile-v1 cannot invoke command-execution tools'
+if grep -qF "$DENY_REASON" "$POLICY"; then
+  check "neutral command-tool deny reason is the literal skills/gauntlet-loop G8 pins" PASS
+else
+  check "neutral command-tool deny reason changed — update tests/structure/test-gauntlet-loop-skill.sh G8 with it" FAIL
+fi
 assert_case "neutral report content may discuss protected architecture" allow arbitrary-custom Write "{\"file_path\":\"$OTHER/report.md\",\"content\":\"session-control main-v1 ZENSU_SESSION_KEY\"}"
 assert_case "neutral agent keeps host task updates" allow arbitrary-custom TaskUpdate '{"taskId":"review-1","status":"completed"}'
 assert_case "neutral agent keeps unrelated MCP tools" allow arbitrary-custom mcp__github__get_pull_request '{"pull_number":172}'
