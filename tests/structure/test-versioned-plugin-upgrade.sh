@@ -7,15 +7,92 @@ PASS=0
 FAIL=0
 SKIPPED=0
 
+# SKIP is a THIRD verdict, not a quiet PASS. The tally already carried a SKIPPED
+# counter that nothing incremented, so a row that could not run on this host had only
+# two options: claim a pass it had not earned, or fail for a reason unrelated to the
+# contract it names. Both are worse than saying so. Anything that is neither PASS nor
+# SKIP is still a failure — the default stays fail-closed.
 check() {
   if [ "$2" = PASS ]; then
     printf '  PASS  %s\n' "$1"
     PASS=$((PASS + 1))
+  elif [ "$2" = SKIP ]; then
+    printf '  SKIP  %s\n' "$1"
+    SKIPPED=$((SKIPPED + 1))
   else
     printf '  FAIL  %s\n' "$1"
     FAIL=$((FAIL + 1))
   fi
 }
+
+# HOISTED to the very front on purpose - before the mktemp, before the first
+# synthetic install. These two pins need no fixture, no synthetic install and no
+# session lifecycle: they read $ROOT and compare two strings. They were the LAST
+# checks in the file, behind eleven full tree installs and five session lifecycles,
+# on a Windows ceiling CLAUDE.md records as UNMEASURED. That is the shape in which
+# the source-write-gate suite lost its tail at check ~210 and the plan-payload
+# suite at ~61 of 70, both green for everything before the kill. Same placement,
+# same reason, as the routing suite's unit driver.
+# THE SEAM, replacing two byte-for-byte hand-copy pins that used to stand here.
+# Those pins asserted that `LEASE_RECORD_ID_RE` and `LEASE_RECORD_MAX_BYTES` in the
+# core still equalled their owners in review-evidence-lease-v1.js. Review of PR #252
+# recorded what that bought and what it did not: both compared source SPELLINGS
+# rather than behaviour (`8388608` in the owner turned them red with nothing wrong),
+# neither checked that the two sides applied the constant to the same quantity, and
+# three FURTHER copied elements — the store layout, ensurePrivateDirectory and the
+# ownership predicate — were never pinned at all. CLAUDE.md's own rule for that
+# function ("if it needs a fourth correction, take the seam") had already fired.
+#
+# So the copies are gone. The core cannot require the owner — review-evidence-lease-v1.js
+# requires claude-hook-session-v1.js, which requires session-control-core-v1.js, so
+# that direction is a CYCLE — and the sweep therefore moved OUT of the core into
+# review-evidence-sweep-v1.js, which may require the owner freely. What is pinned now
+# is that arrangement, not a pair of strings: the core defines neither literal and no
+# longer carries the sweep, and the sweep gets both from the owner.
+#
+# WORKING TREE, not HEAD: every side of this pin is read from $ROOT.
+CORE_SRC="$ROOT/hooks/lib/session-control-core-v1.js"
+SWEEP_SRC="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
+OWNER_SRC="$ROOT/hooks/lib/review-evidence-lease-v1.js"
+if [ -f "$SWEEP_SRC" ] \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$CORE_SRC" \
+  && ! grep -qF 'rel1_[a-f0-9]{32}' "$SWEEP_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$CORE_SRC" \
+  && ! grep -qE '8 \* 1024 \* 1024' "$SWEEP_SRC" \
+  && grep -qF "require('./review-evidence-lease-v1.js')" "$SWEEP_SRC"; then
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" PASS
+else
+  check "the sweep consumes the lease-store literals from their owner instead of copying them" FAIL
+fi
+
+# The other half of the seam: the owner actually EXPORTS what the sweep consumes.
+# Without this a copy could come back as a re-declaration in the sweep and the pin
+# above would still pass on the core alone.
+if grep -qE '^  LEASE_ID_RE,' "$OWNER_SRC" \
+  && grep -qE '^  MAX_RECORD_BYTES,' "$OWNER_SRC" \
+  && grep -qE '^  REVIEW_EVIDENCE_SEGMENTS,' "$OWNER_SRC" \
+  && grep -qE '^  ensurePrivateDirectory,' "$OWNER_SRC" \
+  && grep -qE '^  leaseRecordIsOwned,' "$OWNER_SRC"; then
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" PASS
+else
+  check "review-evidence-lease-v1.js exports all five elements the sweep used to copy" FAIL
+fi
+
+# The sweep is no longer part of adoptContext, so an adoption is only complete once
+# the ENTRY POINT has also run it. A host that takes the core delta alone gets a
+# re-minted record with the superseded leases still wedging every lease operation.
+#
+# The caller is the REPORT MODULE, not the shell script: the payload that invokes it
+# moved out of the `node -e` string in the same change. Both halves are pinned, so
+# neither the call nor the script that runs it can quietly disappear.
+REPORT_SRC="$ROOT/hooks/lib/session-adopt-report-v1.js"
+if ! grep -qF 'discardSupersededLeases' "$CORE_SRC" \
+  && grep -qF 'sweepLeases.discardSupersededLeases' "$REPORT_SRC" \
+  && grep -qF 'session-adopt-report-v1.js' "$ROOT/hooks/lib/zensu-session-adopt.sh"; then
+  check "the adoption entry point owns the sweep call now that the core does not" PASS
+else
+  check "the adoption entry point owns the sweep call now that the core does not" FAIL
+fi
 
 TMP_RAW="$(mktemp -d "${TMPDIR:-/tmp}/zensu-versioned-upgrade-XXXXXX")" \
   || { printf '%s\n' 'test-versioned-plugin-upgrade: cannot create isolated temp directory' >&2; exit 1; }
@@ -108,10 +185,34 @@ else
   check "fixture installer rejects tracked symlinks before any external write" FAIL
 fi
 
-# This offline structure test intentionally materializes both roots from the
-# current checkout. It proves create-once, root-binding, and fail-closed
+# This offline structure test materializes both roots from the COMMITTED revision:
+# `ROOT_REVISION` captures `git rev-parse HEAD` above and the install fixture reads
+# the tree with `git ls-tree`. (No line number here on purpose — the previous wording
+# named one and the next hoist made it stale, which is the same drift this comment is
+# warning about.) That split is load-bearing to know: anything reached through a
+# $SYNTHETIC_*_ROOT path — every behavioural row, and the copies of
+# skills/adopt-session/SKILL.md that AC-C04 and CONV-1 read — grades the LAST COMMIT,
+# while a handful of rows read $ROOT, the working tree, directly. Each of those is
+# labelled `WORKING TREE, not HEAD` in place; the count is deliberately NOT written
+# out here, because a hand-maintained number is exactly what a driven loop cannot
+# catch when a row is removed.
+#
+# An uncommitted change under hooks/ or skills/ therefore reports green against the
+# previous commit everywhere except those rows. It cost a full review round here
+# once, so it is now an executable check rather than a warning in prose — see the
+# row immediately below. This suite proves create-once, root-binding, and fail-closed
 # invariants only. The Promptfoo upgrade profile supplies the authoritative
 # real-v0.16.1 provenance and long-lived Claude process evidence.
+#
+# Placed beside the two hoisted pins and for the same reason: it needs no fixture and
+# no session lifecycle, and a Windows timeout that kills the tail must not be able to
+# take the one row that tells you the rest graded the wrong tree.
+if git -C "$ROOT" diff --quiet HEAD -- hooks skills 2>/dev/null; then
+  check "the tree under test is committed (behavioural rows grade $ROOT_REVISION)" PASS
+else
+  check "UNCOMMITTED hooks/ or skills/ changes: behavioural rows grade $ROOT_REVISION, not your edits" FAIL
+  git -C "$ROOT" diff --name-only HEAD -- hooks skills 2>/dev/null | head -10
+fi
 SYNTHETIC_CACHE_PARENT="$TMP/cache/zensu/zensu"
 SHARED_DATA="$TMP/data/zensu-zensu"
 PROJECT="$TMP/project"
@@ -768,6 +869,8 @@ fi
 # every later lease operation for the session. Closing it needs a lease-schema
 # change (the record carries no plugin_version), so this asserts the refusal
 # exists and will fail loudly the day someone changes it silently.
+#
+# WORKING TREE, not HEAD: this greps $ROOT directly, unlike the behavioural rows.
 if grep -qF 'if (record.plugin_root !== binding.pluginRoot) fail(' \
       "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
     && ! grep -qF 'servesRecordedRuntime' "$ROOT/hooks/lib/review-evidence-lease-v1.js" \
@@ -822,8 +925,9 @@ else
     node "$GOLDEN_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GOLDEN_SESSION"
   )"
   GOLDEN_RECORD="$GOLDEN_DATA/session-control/v1/records/$GOLDEN_KEY.json"
-  # Read the previous release's artifacts with the CURRENT tree's core: that is
-  # the direction that matters, and readContext revalidates the digest, the
+  # Read the previous release's artifacts with the WORKING TREE core — one of the
+  # six rows that do, against a suite whose behavioural rows all grade HEAD. That is
+  # the direction that matters here, and readContext revalidates the digest, the
   # manifest version, the schema and the principal profiles as it goes.
   if [ "$GOLDEN_START_RC" -eq 0 ] && [ -f "$GOLDEN_RECORD" ] \
       && CORE="$ROOT/hooks/lib/session-control-core-v1.js" \
@@ -851,6 +955,8 @@ fi
 # AC-011 — the predicate's own truth table. Driven from here rather than
 # registered separately: this suite is already in every profile, so the unit
 # file cannot be silently left out of a shard.
+# WORKING TREE, not HEAD: this requires ../../hooks/lib directly, unlike every
+# behavioural row above, which reaches the fixture-installed copy of that file.
 . "$(dirname "$0")/lib-unit-summary.sh"   # shared, locale-independent summary parse
 RECOGNIZER_UNIT="$ROOT/tests/structure/zensu-doctor-invocation.test.js"
 if [ -f "$RECOGNIZER_UNIT" ] && node --test "$RECOGNIZER_UNIT" >"$TMP/recognizer-unit.out" 2>&1 \
@@ -866,6 +972,7 @@ else
     "$TMP/recognizer-unit.out" 2>/dev/null | head -40
 fi
 
+# WORKING TREE, not HEAD — same split as the recognizer unit row above.
 LINEAGE_UNIT="$ROOT/tests/structure/session-control-lineage.test.js"
 if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out" 2>&1 \
   && unit_cases_registered_floor "$TMP/lineage-unit.out" 13; then
@@ -873,6 +980,37 @@ if [ -f "$LINEAGE_UNIT" ] && node --test "$LINEAGE_UNIT" >"$TMP/lineage-unit.out
 else
   check "AC-011 runtimeLineageCompatible unit suite passes ($(unit_cases_report "$TMP/lineage-unit.out"), want >= 13 registered)" FAIL
   sed -n '1,40p' "$TMP/lineage-unit.out" 2>/dev/null
+fi
+
+# WORKING TREE, not HEAD — same split again. The superseded-lease sweep moved out
+# of session-control-core-v1.js into its own module (requiring the lease owner from
+# the core is a require cycle), which finally gives it a unit driver: its refusal
+# arms used to cost a full synthetic install plus a session lifecycle each, and
+# three of its return shapes were not reachable from here at all. Driven from this
+# file for the same reason the two above are — tests/run-all.sh discovers only
+# test-*.sh, so an undriven *.test.js never executes anywhere.
+SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
+if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" 32; then
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
+else
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 32 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/sweep-unit.out" 2>/dev/null | head -40
+fi
+
+# WORKING TREE, not HEAD — same split. The adoption REPORT moved out of a
+# single-quoted `node -e` shell payload into its own module, which is what finally
+# gives safe() a driver: it had no test in either direction, so deleting its whole
+# guard condition and returning the text unchanged left the suite green.
+REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
+if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
+  && unit_cases_registered_floor "$TMP/report-unit.out" 20; then
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
+else
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 20 registered — driven from here)" FAIL
+  grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
+    "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
 
 # The non-sibling case is the one that cannot be inferred from the version
@@ -980,8 +1118,12 @@ fi
 # fourth branch existed this state fell through to a line asserting the session
 # has no record, which is false.
 DOCTOR_OUT="$TMP/adopt-doctor.out"
+# The doctor renderer resolves the user-scoped zensu config AND the reviewer-spawn
+# permission check out of HOME, so an unsandboxed run here would read whatever the
+# developer running the suite happens to have. Same guard test-doctor.sh applies.
+DOCTOR_HOME="$TMP/doctor-home"; mkdir -p "$DOCTOR_HOME"
 CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-  CLAUDE_PROJECT_DIR="$PROJECT" \
+  CLAUDE_PROJECT_DIR="$PROJECT" HOME="$DOCTOR_HOME" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_OUT" 2>/dev/null
 if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
@@ -1024,7 +1166,25 @@ fi
 # AC-C04 — the remedy has to be INVOCABLE, and a deny from any hook on the Bash
 # matcher wins. Enumerated from hooks.json for the same reason Part A and B do:
 # a hook added later is covered without editing this check.
-ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$PROJECT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# The shape the SKILL emits, so this enumeration grades what a real invocation
+# looks like. It carries no CLAUDE_PROJECT_DIR: the adoption never reads it, and
+# passing it would put a value nobody consumes in front of the recognizer's
+# rooted-literal check — which refuses an empty value, so a harness that rendered
+# the placeholder empty would make the repair unreachable.
+ADOPT_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+# And the correspondence is PINNED, not asserted in prose. Without this the skill
+# could re-add the assignment and every row below would stay green while the real
+# invocation was refused — a green enumeration over a command that never runs. The
+# skill is the only producer of that shape and no other suite reads it.
+ADOPT_SKILL_COMMANDS="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"' \
+  "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md" 2>/dev/null || printf 0)"
+if [ "$ADOPT_SKILL_COMMANDS" = 2 ] \
+    && ! grep -q 'CLAUDE_PROJECT_DIR.*zensu-session-adopt\.sh' \
+      "$SYNTHETIC_BREAKING_ROOT/skills/adopt-session/SKILL.md"; then
+  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C04 the skill emits both adoption forms, neither carrying CLAUDE_PROJECT_DIR (found $ADOPT_SKILL_COMMANDS)" FAIL
+fi
 ADOPT_BASH_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_CMD")"
 # The SAME enumerator Part B uses, called rather than re-spelled: two copies
 # already disagreed on anchoring, and a matcher regex is exactly the thing whose
@@ -1080,6 +1240,38 @@ else
   check "AC-C04 every hook on the Bash matcher $ADOPT_LABEL (unexpected:$ADOPT_GATE_FAILURES missing-from-enumeration:$ADOPT_ENUMERATION_MISSING)" FAIL
 fi
 
+# The LEGACY shape, which is the one property that decides whether an in-flight
+# session survives the upgrade.
+#
+# $ADOPT_CMD used to carry CLAUDE_PROJECT_DIR and went through this same
+# enumeration. It no longer does, and the rows above therefore grade only the NEW
+# shape — so nothing graded the command an older, still-running skill copy emits. It
+# is still admitted (ASSIGNMENTS is unchanged and a rooted literal passes), but that
+# property was left resting on an allowlist entry whose own comment called it free,
+# which is exactly the setup for a future narrowing that turns this green suite into
+# a silently broken remedy for anyone mid-upgrade. A model does not reload its skill
+# body when the plugin updates underneath it.
+ADOPT_LEGACY_CMD="CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR=$SYNTHETIC_BREAKING_ROOT bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh --confirm"
+ADOPT_LEGACY_PAYLOAD="$(bash_payload "$ADOPT_SESSION" "$ADOPT_LEGACY_CMD")"
+ADOPT_LEGACY_FAILURES=''
+while IFS= read -r hook_name; do
+  [ -n "$hook_name" ] || continue
+  hook_expected="$ADOPT_EXPECTED"
+  if [ "$hook_name" = pre-bash-zensu-gate.sh ]; then
+    hook_expected=allow
+  fi
+  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$hook_name" "$ADOPT_LEGACY_PAYLOAD")" != "$hook_expected" ]; then
+    ADOPT_LEGACY_FAILURES="$ADOPT_LEGACY_FAILURES $hook_name"
+  fi
+done <<EOF
+$ADOPT_MATCHER_HOOKS
+EOF
+if [ -n "$ADOPT_MATCHER_HOOKS" ] && [ -z "$ADOPT_LEGACY_FAILURES" ]; then
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted" PASS
+else
+  check "AC-C04 the previous release's adoption shape, carrying CLAUDE_PROJECT_DIR, is still admitted (unexpected:$ADOPT_LEGACY_FAILURES)" FAIL
+fi
+
 # The discrimination test for AC-C04: the recognizer must stay exactly this
 # narrow. An ordinary Bash command in the same state still denies, so an allow
 # above cannot have come from the bind succeeding.
@@ -1094,6 +1286,49 @@ if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-ga
   check "AC-C04 an ordinary Bash command in the same state still denies" PASS
 else
   check "AC-C04 an ordinary Bash command in the same state still denies" FAIL
+fi
+
+# AC-C04 — the SHAPE the skill actually emits, at the GATE layer. AC-C11 below
+# drives the same shapes at the script layer, which cannot see this: the
+# recognizer consumes assignments as an optional whitelist PREFIX, so the form
+# without CLAUDE_PROJECT_DIR — the one the skill emits now that the script never
+# reads it — has to be admitted here or the repair is unreachable no matter what
+# the script does. The empty-value row is the reason the assignment was dropped
+# rather than kept: `isRootedLiteralPath("")` is false, so a harness that rendered
+# the placeholder empty would refuse the whole invocation over a variable nobody
+# reads. Both rows are graded through the ".*" capability gate for the same reason
+# the discrimination test above is.
+# Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer refuses
+# on win32 BY DESIGN, so a literal would make these rows unpassable on the Windows
+# shard — the same defect class the block above was corrected for. The empty-value
+# row below asserts `deny` on every platform and therefore discriminates only on
+# POSIX, where the platform refusal is not already supplying that verdict.
+ADOPT_SHAPE_FAILURES=''
+ADOPT_NO_PROJECT="CLAUDE_PLUGIN_DATA=$SHARED_DATA bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh"
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "$ADOPT_NO_PROJECT --confirm")")" != "$ADOPT_EXPECTED" ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES no-project-dir-confirm"
+fi
+if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh \
+    "$(bash_payload "$ADOPT_SESSION" "CLAUDE_PLUGIN_DATA=$SHARED_DATA CLAUDE_PROJECT_DIR= bash $SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh")")" != deny ]; then
+  ADOPT_SHAPE_FAILURES="$ADOPT_SHAPE_FAILURES empty-project-dir:allowed"
+fi
+# The label follows the grading, exactly as $ADOPT_LABEL does above: on win32 all
+# three rows assert `deny`, and a fixed "is admitted" label would then report the
+# opposite of what was verified.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  ADOPT_SHAPE_LABEL="the emitted shape without CLAUDE_PROJECT_DIR is admitted; an empty value still is not"
+else
+  ADOPT_SHAPE_LABEL="refuses every emitted shape on win32 (documented MSYS spelling gap; the empty-value row does not discriminate here)"
+fi
+if [ -z "$ADOPT_SHAPE_FAILURES" ]; then
+  check "AC-C04 $ADOPT_SHAPE_LABEL" PASS
+else
+  check "AC-C04 $ADOPT_SHAPE_LABEL ($ADOPT_SHAPE_FAILURES)" FAIL
 fi
 
 # FR-C01 — the deny REASON, not just the decision. gate_decision_from discards
@@ -1192,7 +1427,8 @@ recognizer_denies "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm
 for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
   # Positive control on the SAME bare shape first: without it, a recognizer that
   # stopped accepting the bare form would make both gates deny for the wrong
-  # reason and the principal assertion below would stay green.
+  # reason and the principal assertion below would stay green. That argument only
+  # holds where the bare form is admitted at all — see the win32 skip below it.
   # Graded against $ADOPT_EXPECTED, never a hardcoded `allow`: the recognizer
   # refuses on win32 by design, so a fixed expectation is unpassable on the
   # Windows shard — the same defect class AC-C04 was corrected for.
@@ -1200,15 +1436,34 @@ for shell_gate in pre-bash-source-write-gate.sh pre-write-secret-scan.sh; do
       "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm")")" != "$ADOPT_EXPECTED" ]; then
     RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES bare-form-control:$shell_gate"
   fi
-  if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
-      "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
-    RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+  # Only meaningful where the recognizer ADMITS the bare form. On win32 it refuses
+  # every payload before the principal is ever consulted (zensu_doctor_allowed
+  # returns at zensu_doctor_invocation, ahead of zensu_hook_is_main_principal), so
+  # the platform refusal alone satisfies this `deny` and the principal conjunct is
+  # never exercised — a row reporting verified while testing nothing, which is the
+  # exact vacuity the positive control above exists to prevent. Skipped explicitly
+  # rather than left silently green.
+  if [ "$ADOPT_EXPECTED" = allow ]; then
+    if [ "$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" "$shell_gate" \
+        "$(bash_payload "$ADOPT_SESSION" "bash $ADOPT_SCRIPT --confirm" 'zensu:review-aspect')")" != deny ]; then
+      RECOGNIZER_FAILURES="$RECOGNIZER_FAILURES shell-principal:$shell_gate"
+    fi
   fi
 done
-if [ -z "$RECOGNIZER_FAILURES" ]; then
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only" PASS
+# The label follows the grading, exactly as $ADOPT_LABEL and $ADOPT_SHAPE_LABEL do:
+# on win32 every row above asserts deny, the shape-narrowness clause is supplied by
+# the platform refusal and the main-thread conjunct is skipped outright, so a fixed
+# "admitted in exactly one shape, for the main thread only" would report the
+# opposite of what ran.
+if [ "$ADOPT_EXPECTED" = allow ]; then
+  RECOGNIZER_LABEL="the second recognized command is admitted in exactly one shape, for the main thread only"
 else
-  check "FR-C03 the second recognized command is admitted in exactly one shape, for the main thread only (allowed:$RECOGNIZER_FAILURES)" FAIL
+  RECOGNIZER_LABEL="refuses every adoption payload on win32 (documented MSYS spelling gap; neither the shape narrowness nor the main-thread conjunct discriminates here)"
+fi
+if [ -z "$RECOGNIZER_FAILURES" ]; then
+  check "FR-C03 $RECOGNIZER_LABEL" PASS
+else
+  check "FR-C03 $RECOGNIZER_LABEL (allowed:$RECOGNIZER_FAILURES)" FAIL
 fi
 
 # AC-C05 — the self-closing gate, and the single most important check here: a
@@ -1286,13 +1541,205 @@ else
   head -c 400 "$ADOPT_REPORT_OUT" 2>/dev/null
 fi
 
+# Defined HERE rather than beside the lease fixture that motivated it, because
+# AC-C11 below is the first consumer. The full account of why reaching a recorded
+# path from a shell variable takes BOTH steps — and what each one costs when it is
+# skipped on Windows — is the comment block above the lease fixture further down;
+# do not re-state it, and do not inline either step at a call site.
+native_root() {
+  local rendered
+  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
+  ROOT_IN="$rendered" node -e '
+    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
+  ' || return 1
+}
+# Also hoisted above its original site: AC-C11b below is the first consumer, and it
+# has to run BEFORE the adoption, because that is the only window in which `ok` is
+# a reachable verdict at all.
+adoption_reason() {
+  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
+    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
+    const verdict = core.adoptableRecord({
+      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
+      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
+      executingPluginRoot: process.env.EXEC_ROOT,
+    });
+    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
+  ' 2>/dev/null || printf 'threw'
+}
+# Every comparison of a report line or a record field against the shell's own
+# $PROJECT goes through this. On POSIX it is identity; on Git Bash the shell holds
+# /d/a/... while the record and the report hold D:\a\..., so a raw comparison can
+# only ever fail there — silently, since a POSIX run stays green.
+# Asserted as the CORRESPONDENCE its label claims, not as mere non-emptiness: the
+# helper returns an empty string on either failure step, and an empty needle would
+# turn every grep below into a match on the report's fixed label — a row that
+# reports PASS while testing nothing. Compared against the record the adoption is
+# about to be graded on, which is the only thing that makes the rendering right
+# rather than merely present.
+NATIVE_PROJECT="$(native_root "$PROJECT")"
+if [ -n "$NATIVE_PROJECT" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$ADOPT_RECORD")" = "$NATIVE_PROJECT" ]; then
+  check "the project fixture renders to the spelling the record holds" PASS
+else
+  check "the project fixture renders to the spelling the record holds" FAIL
+fi
+
+# AC-C11 — the three CLAUDE_PROJECT_DIR shapes the entry point used to die on,
+# driven through the shipped script rather than through adoptableRecord, because
+# two of them never reached that function: the script required the variable and
+# then rendered it through zensu-host-path.sh, which refuses a path that is not a
+# directory. Both exits happened BEFORE any report, so the one command that can
+# repair the session printed nothing at all in the state it exists for — and
+# neither shape is exotic: the record is minted from the SessionStart payload
+# cwd, so a fork whose cwd was a worktree records that worktree while the harness
+# still reports somewhere else, and a deleted worktree is the harness value gone.
+# The record is still at 0.17.0 here, so ADOPTABLE is the answer in all three. This
+# row owns the SCRIPT's environment handling and nothing else — the `ok` verdict at
+# the function boundary belongs to AC-C11b below, which drives the parameter the
+# entry point no longer passes at all.
+# `env -u` rather than an empty assignment: the suite inherits a real
+# CLAUDE_PROJECT_DIR from the session running it, and `VAR= cmd` is a SET empty
+# value that the `-n` guard would have caught for the wrong reason.
+ABSENT_PROJECT="$TMP/adopt-project-that-was-deleted"
+rm -rf "$ABSENT_PROJECT"
+# Only the CLAUDE_PROJECT_DIR spelling varies, so it is the only thing the caller
+# passes; everything else is fixed here. `env "$@"` keeps each spelling a single
+# quoted word — a word-split variable would break on any path with a space and a
+# leading assignment before a FUNCTION name has shell-dependent persistence.
+adopt_report_shape() {
+  env "$@" \
+    CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" 2>&1
+}
+# The RETAINED precondition, which got no test when the CLAUDE_PROJECT_DIR one was
+# removed. A bare `|| exit 1` here once made this command — the last reachable
+# diagnosis in a wedged session — print NOTHING at all for a plugin-data store that
+# had been pruned, replaced by a file or symlinked, because zensu-host-path.sh exits
+# silently for anything that is not an existing non-symlink directory.
+#
+# Asserted on the MESSAGE, never on the exit status: the pre-change tree also exited
+# non-zero here, so a status-only assertion would not discriminate.
+PLUGIN_DATA_IS_A_FILE="$TMP/plugin-data-is-a-file"
+printf x > "$PLUGIN_DATA_IS_A_FILE"
+CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_IS_A_FILE" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+  >"$TMP/plugin-data-file.out" 2>"$TMP/plugin-data-file.err"
+if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-file.err"; then
+  check "a plugin-data store that is a file names its cause instead of exiting silently" PASS
+else
+  check "a plugin-data store that is a file names its cause instead of exiting silently" FAIL
+  sed -n '1,10p' "$TMP/plugin-data-file.err" 2>/dev/null
+fi
+
+# The same precondition through a SYMLINK, which is the shape the renderer rejects
+# for a different reason than a file does — and the one an operator is most likely to
+# have created on purpose.
+PLUGIN_DATA_LINK="$TMP/plugin-data-is-a-link"
+rm -rf "$PLUGIN_DATA_LINK"
+ln -s "$SHARED_DATA" "$PLUGIN_DATA_LINK" 2>/dev/null
+# ln -s exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy or
+# a shortcut native Node does not follow. Confirm before asserting on it.
+if [ -L "$PLUGIN_DATA_LINK" ]; then
+  CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$PLUGIN_DATA_LINK" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/plugin-data-link.out" 2>"$TMP/plugin-data-link.err"
+  if grep -qF 'CLAUDE_PLUGIN_DATA does not name a readable directory' "$TMP/plugin-data-link.err"; then
+    check "a symlinked plugin-data store names its cause instead of exiting silently" PASS
+  else
+    check "a symlinked plugin-data store names its cause instead of exiting silently" FAIL
+    sed -n '1,10p' "$TMP/plugin-data-link.err" 2>/dev/null
+  fi
+else
+  check "a symlinked plugin-data store names its cause instead of exiting silently" SKIP
+fi
+
+# The ENTRY-POINT-ONLY refusal, which CONV-1's ENTRY_ONLY list now REQUIRES to be
+# documented while nothing checked the code still emits it. It is raised before
+# adoptableRecord runs, when privateRecordsDirectory refuses the store — here a
+# records leaf that is group- and world-accessible. Platform-gated: the binder's
+# mode and ownership checks are POSIX-only.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    check "the entry point still emits private-record-store-unsafe (win32: mode checks are no-ops)" SKIP
+    ;;
+  *)
+    UNSAFE_STORE="$TMP/unsafe-record-store"
+    mkdir -p "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    chmod 0777 "$UNSAFE_STORE/session-control/v1/records" 2>/dev/null
+    env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+      CLAUDE_PLUGIN_DATA="$UNSAFE_STORE" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+      >"$TMP/unsafe-store.out" 2>&1
+    if grep -qF 'NOT adoptable (private-record-store-unsafe)' "$TMP/unsafe-store.out"; then
+      check "the entry point still emits private-record-store-unsafe" PASS
+    else
+      check "the entry point still emits private-record-store-unsafe" FAIL
+      sed -n '1,10p' "$TMP/unsafe-store.out" 2>/dev/null
+    fi
+    ;;
+esac
+
+PROJECT_SHAPE_FAILURES=''
+adopt_report_shape -u CLAUDE_PROJECT_DIR >"$TMP/adopt-projectdir-unset.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES unset"
+adopt_report_shape CLAUDE_PROJECT_DIR="$ABSENT_PROJECT" >"$TMP/adopt-projectdir-absent.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES absent"
+adopt_report_shape CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" >"$TMP/adopt-projectdir-different.out" \
+  || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES different"
+for shape in unset absent different; do
+  shape_out="$TMP/adopt-projectdir-$shape.out"
+  # The -n guard is load-bearing, not defensive: an empty NATIVE_PROJECT makes the
+  # third needle the report's own fixed label, which every ADOPTABLE report carries.
+  [ -n "$NATIVE_PROJECT" ] \
+    && grep -qF 'ADOPTABLE' "$shape_out" \
+    && grep -qF 'Nothing has been changed' "$shape_out" \
+    && grep -qF "project          : $NATIVE_PROJECT" "$shape_out" \
+    || PROJECT_SHAPE_FAILURES="$PROJECT_SHAPE_FAILURES $shape"
+done
+# One token per shape, appended at most once: the exit-status arm above and this
+# grep arm both fire for a broken shape, and a duplicate made the dump below print
+# the same capture twice.
+PROJECT_SHAPE_FAILURES="$(printf '%s' "$PROJECT_SHAPE_FAILURES" | tr ' ' '\n' | grep -v '^$' | sort -u | tr '\n' ' ')"
+# The record must still be untouched: without --confirm every shape is read-only.
+if [ -z "$PROJECT_SHAPE_FAILURES" ] \
+    && [ "$(node -p 'require(process.argv[1]).plugin_version' "$ADOPT_RECORD")" = 0.17.0 ]; then
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR" PASS
+else
+  check "AC-C11 the entry point reports on an unset, deleted or differing CLAUDE_PROJECT_DIR (failed:$PROJECT_SHAPE_FAILURES)" FAIL
+  # Dump what actually failed. A hardcoded shape here once printed a PASSING run
+  # beside a FAIL verdict, which is worse than printing nothing.
+  for failed in $PROJECT_SHAPE_FAILURES; do
+    printf '  --- %s ---\n' "$failed"
+    head -c 300 "$TMP/adopt-projectdir-$failed.out" 2>/dev/null
+    printf '\n'
+  done
+fi
+
+# AC-C11b — the `ok` verdict, at the FUNCTION boundary, under a project root that
+# is not the recorded one. AC-C11 above cannot supply this and must not be read as
+# if it did: it varies CLAUDE_PROJECT_DIR, and the entry point no longer passes any
+# projectRoot into adoptableRecord at all, so those three shapes exercise the
+# script's environment handling and nothing about the parameter. This row is the
+# only place the parameter itself is driven while `ok` is still reachable — after
+# the --confirm below, $SYNTHETIC_BREAKING_ROOT serves the record and every call
+# stops at already-served, which would leave a reintroduced comparison placed after
+# that condition completely invisible.
+REASON_FRESH_FOREIGN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$SYNTHETIC_BREAKING_ROOT" "$SYNTHETIC_BREAKING_ROOT")"
+REASON_FRESH_OWN="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_FRESH_FOREIGN" = ok ] && [ "$REASON_FRESH_OWN" = ok ]; then
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies" PASS
+else
+  check "AC-C11b an adoptable record answers ok whatever project root the caller supplies (foreign='$REASON_FRESH_FOREIGN' own='$REASON_FRESH_OWN')" FAIL
+fi
+
 ADOPT_RECORD_BEFORE="$(cat "$ADOPT_RECORD")"
 cp "$ADOPT_RECORD" "$TMP/adopt-record-before.json"
 
 # AC-C08 — seed the lease store so the sweep has something to sweep. Without this
 # the whole moving branch never runs: discardSupersededLeases returns 0 through
-# its readdir catch when the per-session records directory does not exist, so a
-# --confirm assertion on an empty store proves nothing about the discard.
+# its lstat ENOENT branch when the per-session records directory does not exist,
+# so a --confirm assertion on an empty store proves nothing about the discard.
 # Two leases with exactly one difference: the root they name.
 # Canonicalized: the sweep resolves plugin data through canonicalDirectory, so on
 # a host where the temp root is a symlink (/var -> /private/var on macOS) a
@@ -1302,6 +1749,26 @@ CANONICAL_SHARED_DATA="$(cd -P -- "$SHARED_DATA" && pwd -P)"
 ADOPT_LEASE_DIR="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$ADOPT_KEY"
 ADOPT_LEASE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$ADOPT_KEY"
 mkdir -p "$ADOPT_LEASE_DIR"
+# The two SHARED ancestors are forced 0755 rather than left to the ambient umask,
+# which makes this row the pin for a split that is otherwise only prose:
+# asideIsSafe() checks the SHAPE of every component but the PERMISSIONS of the leaf
+# alone. `review-evidence` and `v1` belong to ensurePrivateDirectory, which repairs
+# them; this guard may only look, and extending the mode check up the chain turns a
+# store an older version created at 0755 into a permanent destination refusal. That
+# is not hypothetical — it shipped for one round and `leases set aside : 3` below is
+# what caught it.
+#
+# Under umask 077 the ancestors would land at 0700 and the row would pass with the
+# ancestor check restored, so the chmod is what makes the bite umask-independent.
+# It is safe for every row after it: AC-C12 refuses through the per-segment shape lstat,
+# AC-C12a through the source lstat, AC-C12b through the leaf mode, and the no-lease
+# sweep returns on ENOENT before asideIsSafe() runs — none consults the mode of these
+# two. Note the asymmetry this chmod does NOT cover: `superseded` IS mode-checked,
+# because nothing in the lease module owns or repairs it. Its 0700 comes from
+# asideIsSafe()'s own per-segment mkdir during the AC-C07 --confirm below; the chmods
+# at AC-C12 and AC-C12b are defensive re-sets so that no row depends on that
+# ordering. No check grades that mode directly.
+chmod 0755 "$CANONICAL_SHARED_DATA/review-evidence" "$CANONICAL_SHARED_DATA/review-evidence/v1"
 # Rendered NATIVE, not with `pwd -P`. discardSupersededLeases compares the lease's
 # recorded plugin_root against the value in the adopted RECORD, which Session
 # Control stores host-natively — `D:\a\...` on Windows. `pwd -P` in Git Bash
@@ -1323,13 +1790,9 @@ mkdir -p "$ADOPT_LEASE_DIR"
 #
 # On POSIX both steps are identity, which is why every one of these failures was
 # invisible locally.
-native_root() {
-  local rendered
-  rendered="$(bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-host-path.sh" "$1")" || return 1
-  ROOT_IN="$rendered" node -e '
-    process.stdout.write(require("node:fs").realpathSync.native(process.env.ROOT_IN));
-  ' || return 1
-}
+#
+# `native_root` itself is defined ABOVE, beside AC-C11, which is now its first
+# consumer; this block stays here because it is the fixture that paid for it.
 CANONICAL_BREAKING_ROOT="$(native_root "$SYNTHETIC_BREAKING_ROOT")"
 CANONICAL_CANDIDATE_ROOT="$(native_root "$SYNTHETIC_CANDIDATE_ROOT")"
 # An empty root would silently make every fixture unmatchable and grade the sweep
@@ -1380,11 +1843,13 @@ else
 fi
 
 # The ORDINARY case: a session that never minted a review-evidence lease has no
-# per-session records directory at all, so the sweep takes its readdir-failure
-# path. That path returned a scalar while every other path returned an object,
-# which made the reporter throw AFTER the record swap had already succeeded — a
-# completed adoption reported as a failure. Driven on its own session, because
-# the seeded one above can never reach it.
+# per-session records directory at all, so the sweep returns through its lstat
+# ENOENT branch. That path once returned a scalar while every other path returned
+# an object, which made the reporter throw AFTER the record swap had already
+# succeeded — a completed adoption reported as a failure. Named precisely: the
+# readdir catch below it is NOT this case, it is a directory that exists and
+# cannot be read, and it reports unsafe. Driven on its own session, because the
+# seeded one above can never reach it.
 NOLEASE_SESSION='versioned-upgrade-adoption-no-lease'
 NOLEASE_START="$(EVENT=SessionStart SESSION="$NOLEASE_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
@@ -1400,25 +1865,267 @@ printf '%s' "$NOLEASE_START" \
     bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
 NOLEASE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$NOLEASE_SESSION")"
 NOLEASE_OUT="$TMP/adopt-nolease.out"
+# CLAUDE_PROJECT_DIR is deliberately NOT the recorded root here — see AC-C11a
+# below, which grades the anchor this same run produced. It changes nothing about
+# what AC-C08 itself pins: the sweep and the report are located from the record,
+# never from where the command was invoked.
 if [ ! -e "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$NOLEASE_KEY" ] \
     && CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-      CLAUDE_PROJECT_DIR="$PROJECT" \
+      CLAUDE_PROJECT_DIR="$SYNTHETIC_BREAKING_ROOT" \
       bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
       >"$NOLEASE_OUT" 2>&1 \
     && grep -qF 'ADOPTED' "$NOLEASE_OUT" \
     && grep -qF 'leases set aside : 0' "$NOLEASE_OUT" \
     && grep -qF 'leases stuck     : 0' "$NOLEASE_OUT" \
-    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT"; then
+    && grep -qF 'bound again from the next tool call' "$NOLEASE_OUT" \
+    && ! grep -qF 'WARNING' "$NOLEASE_OUT"; then
   check "AC-C08 a session with no lease store adopts cleanly and exits 0" PASS
 else
-  check "AC-C08 a session with no lease store adopts cleanly and exits 0" FAIL
+  # Names the second cause on purpose: this run also supplies AC-C11a's foreign
+  # project dir, so a reintroduced CLAUDE_PROJECT_DIR precondition in the entry
+  # script fails HERE first, under a label that would otherwise send the reader
+  # to the lease sweep.
+  check "AC-C08 a session with no lease store adopts cleanly and exits 0 (also the foreign-project-dir input AC-C11a grades)" FAIL
+  head -c 400 "$NOLEASE_OUT" 2>/dev/null
+fi
+
+# The EXISTING-BUT-EMPTY records directory, which no scenario produced. The no-lease
+# row above reaches the lstat ENOENT arm instead — its directory does not exist at
+# all — and every other row seeds at least one entry.
+#
+# The second-order effect is what makes this worth a row rather than only a unit
+# case: AC-C12 and AC-C12b are armed-fixture-safe ONLY because this early return
+# fires before the destination guard. If write_lease ever wrote to the wrong path the
+# directory would be empty, this return would fire, no WARNING would print, and both
+# rows would go red instead of passing against an unarmed fixture. That positive
+# control was itself supplied by untested code.
+EMPTY_RECORDS_DIR="$SHARED_DATA/review-evidence/v1/records/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+EMPTY_ASIDE_DIR="$SHARED_DATA/review-evidence/v1/superseded/$(node -p '
+  require(process.argv[1]).sessionKey(process.argv[2])
+' "$CANONICAL_BREAKING_ROOT/hooks/lib/session-control-core-v1.js" "$NOLEASE_SESSION" 2>/dev/null)"
+if [ -n "${EMPTY_RECORDS_DIR##*/}" ] && mkdir -p "$EMPTY_RECORDS_DIR" 2>/dev/null; then
+  rm -rf "$EMPTY_ASIDE_DIR"
+  # The record is already adopted by the row above, so this takes the in-place repair
+  # branch — which runs the same sweep against the same store.
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$NOLEASE_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/empty-records.out" 2>&1
+  if grep -qF 'leases set aside : 0' "$TMP/empty-records.out" \
+      && ! grep -qF 'WARNING' "$TMP/empty-records.out" \
+      && [ ! -e "$EMPTY_ASIDE_DIR" ]; then
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" PASS
+  else
+    check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf" FAIL
+    sed -n '1,12p' "$TMP/empty-records.out" 2>/dev/null
+    ls -1d "$EMPTY_ASIDE_DIR" 2>/dev/null
+  fi
+else
+  # FAIL, not SKIP: reaching here means the sessionKey substitution produced nothing
+  # or the mkdir failed, and this file states the rule twenty lines earlier — fail
+  # loudly on the fixture rather than quietly on the feature.
+  check "an existing-but-empty records directory sweeps nothing and creates no superseded leaf (FIXTURE could not be built)" FAIL
+fi
+
+# AC-C12 — the DESTINATION refusal, and the only check that reaches either scope
+# string. Both existing sweeps are clean paths: the seeded one passes asideIsSafe()
+# and the no-lease one returns through the lstat ENOENT branch, so before this row
+# nothing in the tree distinguished `source` from `destination`, or either from the
+# bare boolean they replaced. The counts cannot stand in for it — they print BEFORE
+# the unsafe branch, so a refused sweep still reports `set aside : 0`.
+#
+# A regular FILE at the destination, not a symlink: CLAUDE.md §Git Mutation Tables
+# records that `ln -s` exiting 0 is no evidence of a symlink under Git Bash (W167/
+# W168), and the guard's per-segment lstat refuses a file just as usefully. It
+# costs one session lifecycle, which is what makes the scope strings observable.
+DESTUNSAFE_SESSION='versioned-upgrade-adoption-dest-unsafe'
+DESTUNSAFE_START="$(EVENT=SessionStart SESSION="$DESTUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$DESTUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+DESTUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$DESTUNSAFE_SESSION")"
+DESTUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$DESTUNSAFE_KEY"
+DESTUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$DESTUNSAFE_KEY"
+mkdir -p "$DESTUNSAFE_RECORDS" "$(dirname "$DESTUNSAFE_ASIDE")"
+# `superseded` IS mode-checked by asideIsSafe(), unlike its two ancestors, so this
+# mkdir must not be what leaves it at the ambient umask. Today the product code
+# creates it first at 0700 during the AC-C07 --confirm above and this is a no-op —
+# but that makes every later clean sweep depend on row ORDER, and a reorder would
+# turn AC-C08's `leases set aside : 3` red for a reason unrelated to the sweep.
+chmod 0700 "$(dirname "$DESTUNSAFE_ASIDE")"
+DESTUNSAFE_LEASE='rel1_00112233445566778899aabbccddeeff'
+write_lease "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" "$DESTUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+printf 'not a directory\n' > "$DESTUNSAFE_ASIDE"
+DESTUNSAFE_OUT="$TMP/adopt-dest-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$DESTUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$DESTUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$DESTUNSAFE_OUT" \
+    && grep -qF 'SUPERSEDED directory could not be opened safely' "$DESTUNSAFE_OUT" \
+    && ! grep -qF 'lease RECORDS directory of this session could not be' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$DESTUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$DESTUNSAFE_OUT" \
+    && [ -f "$DESTUNSAFE_RECORDS/$DESTUNSAFE_LEASE.json" ]; then
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" PASS
+else
+  check "AC-C12 a refused destination is named as the destination, and no lease is moved" FAIL
+  head -c 400 "$DESTUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12a — the SOURCE refusal, which AC-C12 can only assert the absence of. An
+# absence passes more easily when the text is wrong, so it cannot stand in for the
+# positive case: without this row the `source` scope and one of the two warning arms
+# are never executed at all. It reaches ONE of the four statements that can return
+# `source` — the symlink-or-non-directory refusal. The other three (a non-canonical
+# records path, a non-ENOENT lstat error, a readdir error) are executed by no row in
+# this suite; that is a stated gap, not an implied covered set. Same technique, one component up — a
+# regular FILE where the per-session records directory belongs makes the lstat
+# guard's `!stat.isDirectory()` fire, with no symlink and no ln -s involved.
+SRCUNSAFE_SESSION='versioned-upgrade-adoption-src-unsafe'
+SRCUNSAFE_START="$(EVENT=SessionStart SESSION="$SRCUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$SRCUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+SRCUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$SRCUNSAFE_SESSION")"
+mkdir -p "$CANONICAL_SHARED_DATA/review-evidence/v1/records"
+printf 'not a directory\n' > "$CANONICAL_SHARED_DATA/review-evidence/v1/records/$SRCUNSAFE_KEY"
+SRCUNSAFE_OUT="$TMP/adopt-src-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$SRCUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$SRCUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$SRCUNSAFE_OUT" \
+    && grep -qF 'lease RECORDS directory of this session could not be' "$SRCUNSAFE_OUT" \
+    && ! grep -qF 'SUPERSEDED directory could not be opened safely' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases set aside : 0' "$SRCUNSAFE_OUT" \
+    && grep -qF 'leases stuck     : 0' "$SRCUNSAFE_OUT"; then
+  check "AC-C12a a refused source is named as the records directory, not the destination" PASS
+else
+  check "AC-C12a a refused source is named as the records directory, not the destination" FAIL
+  head -c 400 "$SRCUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C12b — the LEAF permission arm, which neither row above reaches: AC-C12 plants
+# a FILE at the leaf, and the mkdir there raises EEXIST, which the loop tolerates —
+# so the per-segment lstat refuses the non-directory before the leaf mode/uid pair
+# or the realpath check ever run. A pre-existing DIRECTORY at 0777 is what reaches
+# the leaf mode/uid pair: the mkdir neither chmods nor fails on it, so the guard
+# meets a leaf it did not create, which is exactly the case the check exists for.
+# The realpath check below that pair is NOT reached on this arm — the mode check
+# returns first — only on the win32 arm, where privateEnough short-circuits to true.
+# Delete the mode/uid pair and this row is what goes red.
+LEAFUNSAFE_SESSION='versioned-upgrade-adoption-leaf-unsafe'
+LEAFUNSAFE_START="$(EVENT=SessionStart SESSION="$LEAFUNSAFE_SESSION" CWD="$PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+printf '%s' "$LEAFUNSAFE_START" \
+  | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" \
+    bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1
+LEAFUNSAFE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$LEAFUNSAFE_SESSION")"
+LEAFUNSAFE_RECORDS="$CANONICAL_SHARED_DATA/review-evidence/v1/records/$LEAFUNSAFE_KEY"
+LEAFUNSAFE_ASIDE="$CANONICAL_SHARED_DATA/review-evidence/v1/superseded/$LEAFUNSAFE_KEY"
+mkdir -p "$LEAFUNSAFE_RECORDS" "$LEAFUNSAFE_ASIDE"
+# Same rule as AC-C12 above, and this mkdir creates `superseded` as an implicit
+# parent: that segment is mode-checked, so leaving it at the ambient umask would let
+# this row pass through the SEGMENT refusal while claiming the LEAF one — both emit
+# the same text — and would make every later clean sweep order-dependent.
+chmod 0700 "$(dirname "$LEAFUNSAFE_ASIDE")"
+LEAFUNSAFE_LEASE='rel1_0123456789abcdef0123456789abcdef'
+write_lease "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" "$LEAFUNSAFE_LEASE" "$CANONICAL_CANDIDATE_ROOT"
+chmod 0777 "$LEAFUNSAFE_ASIDE"
+# The mode/uid pair is platform-gated in the guard (`process.platform !== 'win32'`),
+# so on win32 the only defect this row plants is invisible BY DESIGN and the sweep
+# proceeds normally. Asserting a refusal there would be unpassable — the same class
+# the four $ADOPT_LABEL / $RECOGNIZER_LABEL branches above exist for — and it would
+# also contradict AC-C08, which needs asideIsSafe() to return true on that host.
+# So both arms are graded, and the label follows the grading.
+case "$(uname -s 2>/dev/null)" in
+  MINGW*|MSYS*|CYGWIN*)
+    LEAFUNSAFE_EXPECT=swept
+    LEAFUNSAFE_LABEL="a world-writable destination leaf is NOT refused on win32 (the mode/uid arm is platform-gated by design)"
+    ;;
+  *)
+    LEAFUNSAFE_EXPECT=refused
+    LEAFUNSAFE_LABEL="a world-writable pre-existing destination leaf is refused"
+    ;;
+esac
+LEAFUNSAFE_OUT="$TMP/adopt-leaf-unsafe.out"
+if env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$LEAFUNSAFE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$LEAFUNSAFE_OUT" 2>&1 \
+    && grep -qF 'ADOPTED' "$LEAFUNSAFE_OUT"; then
+  if [ "$LEAFUNSAFE_EXPECT" = refused ]; then
+    grep -qF 'SUPERSEDED directory could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 0' "$LEAFUNSAFE_OUT" \
+      && [ -f "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  else
+    # The positive control on the other arm: the sweep must actually RUN, not merely
+    # avoid warning, or a guard that refused for some other reason would read green.
+    ! grep -qF 'could not be opened safely' "$LEAFUNSAFE_OUT" \
+      && grep -qF 'leases set aside : 1' "$LEAFUNSAFE_OUT" \
+      && [ ! -e "$LEAFUNSAFE_RECORDS/$LEAFUNSAFE_LEASE.json" ] \
+      && LEAFUNSAFE_OK=1 || LEAFUNSAFE_OK=0
+  fi
+else
+  LEAFUNSAFE_OK=0
+fi
+if [ "$LEAFUNSAFE_OK" = 1 ]; then
+  check "AC-C12b $LEAFUNSAFE_LABEL" PASS
+else
+  check "AC-C12b $LEAFUNSAFE_LABEL" FAIL
+  head -c 400 "$LEAFUNSAFE_OUT" 2>/dev/null
+fi
+
+# AC-C11a — the anchor is CARRIED, and this is the end-to-end half of AC-C09. The
+# run above passed a project dir that is not the recorded one, so an adoption that
+# re-anchored to the caller's value would be visible in both the report line and
+# the minted record. Neither may move: adoptContext builds the new record from
+# verdict.context.project_root, which is the whole reason dropping the caller-side
+# comparison relaxes nothing. Graded off the SAME run rather than a fresh one — a
+# second adoption of an adopted record can only answer already-served.
+NOLEASE_RECORD="$SHARED_DATA/session-control/v1/records/$NOLEASE_KEY.json"
+if grep -qF "project          : $NATIVE_PROJECT" "$NOLEASE_OUT" \
+    && [ -f "$NOLEASE_RECORD" ] \
+    && [ "$(node -p 'require(process.argv[1]).project_root' "$NOLEASE_RECORD")" = "$NATIVE_PROJECT" ]; then
+  check "AC-C11a adoption from a differing project dir still anchors on the record" PASS
+else
+  check "AC-C11a adoption from a differing project dir still anchors on the record" FAIL
   head -c 400 "$NOLEASE_OUT" 2>/dev/null
 fi
 
 # AC-C08 — exactly the stale lease moves, the current one stays, none is deleted,
 # and the count is reported rather than absorbed.
+# The absence of a WARNING is defence in depth on THIS row: `set aside : 3` already
+# excludes a refused sweep, because every unsafe return discards 0. It is the
+# no-lease row above where the conjunct is load-bearing — there the count is 0
+# either way.
 if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && grep -qF 'leases stuck     : 0' "$ADOPT_CONFIRM_OUT" \
+    && ! grep -qF 'WARNING' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_STALE_ID.json" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/$LEASE_STALE_ID.json" ] \
     && [ ! -e "$ADOPT_LEASE_DIR/$LEASE_MISMATCH_ID.json" ] \
@@ -1426,9 +2133,9 @@ if grep -qF 'leases set aside : 3' "$ADOPT_CONFIRM_OUT" \
     && [ ! -e "$ADOPT_LEASE_DIR/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_ASIDE/.partial.tmp" ] \
     && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" PASS
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" PASS
 else
-  check "AC-C08 every entry listRecords rejects is set aside; only a valid current lease is kept" FAIL
+  check "AC-C08 every entry the mirrored conjuncts reject is set aside; only a valid current lease is kept" FAIL
   # Name the two strings that had to match. Every failure of this check so far was
   # a path-SPELLING mismatch invisible from a POSIX host, and each round cost a
   # full CI cycle to identify. Printing them turns the next one into a read.
@@ -1436,8 +2143,117 @@ else
   printf '    recorded root     : %s\n' \
     "$(node -p 'require(process.argv[1]).plugin_root' "$ADOPT_RECORD" 2>/dev/null)"
   grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
-  grep -F 'leases' "$ADOPT_CONFIRM_OUT" 2>/dev/null
   ls -1 "$ADOPT_LEASE_DIR" "$ADOPT_LEASE_ASIDE" 2>/dev/null | head -12
+fi
+
+# The IN-PLACE LEASE-STORE REPAIR. adoptContext commits the record and only then
+# sweeps, and the two are not transactional together — so a run that died in between
+# leaves a committed adoption with the store still wedged, and every later run
+# refused as already-served. The documented remedy was unreachable for exactly the
+# state it repairs.
+#
+# Simulated the way it actually happens: the record is already adopted (the run
+# above did that), and a superseded lease is present that the sweep has not seen.
+REPAIR_LEASE_ID="rel1_$(printf 'e%.0s' $(seq 1 32))"
+node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_LEASE_ID" '/previous/zensu/installation' 2>/dev/null
+if [ -f "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ]; then
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-repair.out" 2>&1
+  REPAIR_STATUS=$?
+  # exit 0, not 1: this is a successful repair, not a refusal.
+  if [ "$REPAIR_STATUS" -eq 0 ] \
+      && grep -qF 'ALREADY SERVED (lease store repaired)' "$TMP/adopt-repair.out" \
+      && grep -qF 'leases set aside : 1' "$TMP/adopt-repair.out" \
+      && [ ! -e "$ADOPT_LEASE_DIR/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_ASIDE/$REPAIR_LEASE_ID.json" ] \
+      && [ -f "$ADOPT_LEASE_DIR/$LEASE_KEEP_ID.json" ]; then
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" PASS
+  else
+    check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+    printf '    exit: %s\n' "$REPAIR_STATUS"
+    sed -n '1,14p' "$TMP/adopt-repair.out" 2>/dev/null
+  fi
+
+  # The read-only form must stay read-only, which is what the recognizer's own
+  # justification for admitting this write-capable command rests on. Same session,
+  # a fresh superseded lease, and NO --confirm: it must refuse and move nothing.
+  REPAIR_RO_ID="rel1_$(printf 'f%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: process.argv[3],
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_RO_ID" '/previous/zensu/installation' 2>/dev/null
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" \
+    >"$TMP/adopt-repair-readonly.out" 2>&1
+  if grep -qF 'NOT adoptable (already-served)' "$TMP/adopt-repair-readonly.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json" ] \
+      && [ ! -e "$ADOPT_LEASE_ASIDE/$REPAIR_RO_ID.json" ]; then
+    check "the report-only form still refuses already-served and sweeps nothing" PASS
+  else
+    check "the report-only form still refuses already-served and sweeps nothing" FAIL
+    sed -n '1,10p' "$TMP/adopt-repair-readonly.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_RO_ID.json"
+
+  # A NON-EMPTY `failed`. Every adoption row asserts `leases stuck     : 0`, so the
+  # catch arm and the warning block it feeds were never observed — and that warning
+  # is the only place safe() is applied to a LIST. The partial sweep is also the one
+  # state the report has to describe correctly while still claiming the adoption
+  # succeeded.
+  #
+  # Driven through a COLLISION, which is now the shape that produces it: the move is
+  # a link/unlink pair, so an entry already sitting in the superseded directory is
+  # refused rather than overwritten.
+  REPAIR_STUCK_ID="rel1_$(printf 'd%.0s' $(seq 1 32))"
+  node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+fs.writeFileSync(path.join(process.argv[1], process.argv[2] + ".json"), JSON.stringify({
+  schema: "zensu.review-evidence-lease",
+  schema_version: 1,
+  lease_id: process.argv[2],
+  plugin_root: "/previous/zensu/installation",
+}), { mode: 0o600 });
+' "$ADOPT_LEASE_DIR" "$REPAIR_STUCK_ID" 2>/dev/null
+  mkdir -p "$ADOPT_LEASE_ASIDE" 2>/dev/null
+  printf 'ALREADY SET ASIDE\n' > "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
+  env -u CLAUDE_PROJECT_DIR CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" \
+    CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    bash "$CANONICAL_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+    >"$TMP/adopt-stuck.out" 2>&1
+  if grep -qF 'leases stuck     : 1' "$TMP/adopt-stuck.out" \
+      && grep -qF 'could NOT be set aside' "$TMP/adopt-stuck.out" \
+      && grep -qF "$REPAIR_STUCK_ID" "$TMP/adopt-stuck.out" \
+      && [ -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" ] \
+      && [ "$(cat "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json")" = 'ALREADY SET ASIDE' ]; then
+    check "a colliding entry is reported stuck and what was already set aside survives" PASS
+  else
+    check "a colliding entry is reported stuck and what was already set aside survives" FAIL
+    sed -n '1,16p' "$TMP/adopt-stuck.out" 2>/dev/null
+  fi
+  rm -f "$ADOPT_LEASE_DIR/$REPAIR_STUCK_ID.json" "$ADOPT_LEASE_ASIDE/$REPAIR_STUCK_ID.json"
+else
+  check "an already-served record re-runs the sweep as an in-place repair under --confirm" FAIL
+  check "the report-only form still refuses already-served and sweeps nothing" FAIL
+  check "a colliding entry is reported stuck and what was already set aside survives" FAIL
 fi
 
 # The point of the whole feature: the session works again, in place. Both are
@@ -1485,17 +2301,8 @@ fi
 # with exactly ONE thing wrong. Run after the adoption because they reuse the
 # record it produced: it now declares 0.18.0, which is what makes the backwards
 # and non-sibling cases expressible from the roots this suite already built.
-adoption_reason() {
-  RECORDS="${1}" SID="${2}" DATA="${3}" PROJECT_IN="${4}" EXEC_ROOT="${5}" node -e '
-    const core = require(process.env.EXEC_ROOT + "/hooks/lib/session-control-core-v1.js");
-    const verdict = core.adoptableRecord({
-      recordsDir: process.env.RECORDS, sessionId: process.env.SID, host: "claude",
-      pluginData: process.env.DATA, projectRoot: process.env.PROJECT_IN,
-      executingPluginRoot: process.env.EXEC_ROOT,
-    });
-    process.stdout.write(verdict.ok ? "ok" : verdict.reason);
-  ' 2>/dev/null || printf 'threw'
-}
+# `adoption_reason` is defined ABOVE, beside native_root: AC-C11b is its first
+# consumer and it runs before the adoption.
 ADOPT_RECORDS_DIR="$SHARED_DATA/session-control/v1/records"
 
 REASON_BACKWARDS="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_CANDIDATE_ROOT")"
@@ -1512,13 +2319,33 @@ else
   check "AC-C09 an installation outside the install parent may not adopt (got '$REASON_DETACHED')" FAIL
 fi
 
+# AC-C09 — the caller's project root is NOT one of the conditions, and this is the
+# check that says so. It was the inverse once: a supplied directory that was not
+# the recorded one refused as `project-root-mismatch`, which made the repair
+# unreachable in the state it exists for — the record is minted from the
+# SessionStart payload cwd while the adoption is handed CLAUDE_PROJECT_DIR, and a
+# session cannot change the latter. Nothing is relaxed by removing it: the anchor
+# is carried from the record (pinned end to end at AC-C11a above), and the write
+# bound is readContext plus the sibling-root and plugin_data checks, all of which
+# the neighbouring rows still exercise.
+#
+# The record here already declares 0.18.0, so $SYNTHETIC_BREAKING_ROOT is the
+# runtime that already serves it and `ok` is not reachable from this row — AC-C11b
+# above owns that verdict, at the function boundary, before the adoption. What this
+# row adds is the property at the OTHER end of the walk: the project argument must
+# change nothing even once an earlier condition answers first. Both halves are
+# needed, and neither alone is sufficient: a comparison reintroduced after
+# already-served is invisible here, and one reintroduced before it is invisible at
+# AC-C11b only if it happens to agree for both arguments — which comparing the two
+# reasons is what rules out.
 FOREIGN_PROJECT="$TMP/foreign-project"
 mkdir -p "$FOREIGN_PROJECT"
 REASON_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$FOREIGN_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
-if [ "$REASON_PROJECT" = project-root-mismatch ]; then
-  check "AC-C09 a record for another project may not be adopted" PASS
+REASON_OWN_PROJECT="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+if [ "$REASON_PROJECT" = already-served ] && [ "$REASON_PROJECT" = "$REASON_OWN_PROJECT" ]; then
+  check "AC-C09 a caller-supplied project root that differs is not an authority" PASS
 else
-  check "AC-C09 a record for another project may not be adopted (got '$REASON_PROJECT')" FAIL
+  check "AC-C09 a caller-supplied project root that differs is not an authority (foreign='$REASON_PROJECT' own='$REASON_OWN_PROJECT')" FAIL
 fi
 
 REASON_ABSENT="$(adoption_reason "$ADOPT_RECORDS_DIR" 'versioned-upgrade-no-such-session' "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
@@ -1531,7 +2358,10 @@ fi
 # The record now names $SYNTHETIC_BREAKING_ROOT, so that root has nothing left to
 # adopt. Without this refusal the adoption would be a way to re-mint a HEALTHY
 # session's record, which is the one thing immutability exists to prevent.
-REASON_SERVED="$(adoption_reason "$ADOPT_RECORDS_DIR" "$ADOPT_SESSION" "$SHARED_DATA" "$PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+# Graded off the call the row above already made with these exact five arguments —
+# a second identical node process buys nothing and this suite's Windows ceiling is
+# explicitly unmeasured.
+REASON_SERVED="$REASON_OWN_PROJECT"
 if [ "$REASON_SERVED" = already-served ]; then
   check "AC-C09 a record this installation already serves is not adoptable" PASS
 else
@@ -1690,8 +2520,29 @@ REFUSAL_GAPS="$(
     const core = require(process.env.CORE);
     const skill = fs.readFileSync(process.env.SKILL, "utf8");
     const reasons = Object.values(core.ADOPTION_REFUSALS);
-    if (reasons.length !== 8) { process.stdout.write("count:" + reasons.length); process.exit(0); }
-    const missing = reasons.filter((r) => !skill.includes(r));
+    if (reasons.length !== 7) { process.stdout.write("count:" + reasons.length); process.exit(0); }
+    // BOTH directions read the same parsed row set, never the whole file. Prose
+    // elsewhere in the skill mentions several of these reasons, so a forward check
+    // against `skill.includes` would stay green after the TABLE ROW was deleted —
+    // which is the drift it exists to catch. The character class is deliberately
+    // wider than any current value: a reason is a kebab-case identifier, and a
+    // future one carrying a digit must not slip past unnoticed in either direction.
+    const rows = skill.split("\n")
+      .map((l) => l.match(/^\|\s*`([a-z0-9_-]+)`\s*\|/))
+      .filter(Boolean)
+      .map((m) => m[1]);
+    // ENTRY-POINT-ONLY refusals. The adoption script emits `private-record-store-unsafe`
+    // itself, before adoptableRecord is ever reached, so it is a refusal a user sees
+    // and the model has to recognize — but it is not an ADOPTION_REFUSALS value. The
+    // stale arm used to reject it, which meant the refusal TABLE had to stay
+    // incomplete in order to keep this pin simple: the test dictated what could be
+    // documented instead of checking that what exists is documented. Naming the
+    // exception explicitly inverts that back.
+    const ENTRY_ONLY = ["private-record-store-unsafe"];
+    const known = reasons.concat(ENTRY_ONLY);
+    const stale = rows.filter((r) => !known.includes(r));
+    if (stale.length) { process.stdout.write("stale:" + stale.join(",")); process.exit(0); }
+    const missing = known.filter((r) => !rows.includes(r));
     process.stdout.write(missing.length ? missing.join(",") : "ok");
   ' 2>/dev/null
 )" || REFUSAL_GAPS=threw
@@ -1701,17 +2552,47 @@ else
   check "CONV-1 every ADOPTION_REFUSALS value is documented in the adoption skill (missing: $REFUSAL_GAPS)" FAIL
 fi
 
-# The lease-id hand-copy. `LEASE_RECORD_ID_RE` in the core must equal `LEASE_ID_RE`
-# in review-evidence-lease-v1.js: the core cannot require that module (it requires
-# the binder, which requires the core), so the two are held in step by hand — and
-# by this pin, the way within() <-> isInside is held. Without it a widened lease id
-# shape would make the sweep silently set aside every new-format lease, green.
-CORE_LEASE_RE="$(grep -oE "const LEASE_RECORD_ID_RE = /[^;]*/" "$ROOT/hooks/lib/session-control-core-v1.js" | sed 's/.*= //')"
-OWNER_LEASE_RE="$(grep -oE "const LEASE_ID_RE = /[^;]*/" "$ROOT/hooks/lib/review-evidence-lease-v1.js" | sed 's/.*= //')"
-if [ -n "$CORE_LEASE_RE" ] && [ "$CORE_LEASE_RE" = "$OWNER_LEASE_RE" ]; then
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte" PASS
+# CONV-2 — the doctor skill must not hand the recognizer an EMPTY assignment.
+#
+# isRootedLiteralPath("") is false, so a harness that renders the placeholder empty
+# makes parseAssignment reject and the ENTIRE invocation is denied — and the command
+# it denies is /zensu:doctor, the FIRST of the two exempt commands and the one a
+# wedged user is told to run first, in exactly the bind-failure state it exists to
+# diagnose. The user gets a gate deny, not the script's own message, because the
+# recognizer runs before it. `CLAUDE_PROJECT_DIR= bash <doctor>` is already pinned as
+# ASSIGNMENT-refused in zensu-doctor-invocation.test.js; what is pinned HERE is that
+# the shipped skill body tells the model to omit the assignment rather than render it
+# empty, the way ZDOC_PLAYWRIGHT_TOOLS already is.
+#
+# Graded on what the skill OFFERS, not on a sentence: at least one shipped doctor
+# invocation must carry no CLAUDE_PROJECT_DIR at all, so the model has a form to
+# reach for. A prose-only pin would go red on a rewording that changed nothing and
+# green on guidance with no command behind it — the first draft of this row did
+# exactly the former.
+DOCTOR_SKILL="$ROOT/skills/doctor/SKILL.md"
+DOCTOR_CMDS_TOTAL="$(grep -c 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null || printf 0)"
+DOCTOR_CMDS_WITHOUT_PROJECT="$(grep 'bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-doctor.sh"' "$DOCTOR_SKILL" 2>/dev/null \
+  | grep -cv 'CLAUDE_PROJECT_DIR' || printf 0)"
+if [ "$DOCTOR_CMDS_TOTAL" -ge 2 ] && [ "$DOCTOR_CMDS_WITHOUT_PROJECT" -ge 1 ] \
+  && grep -qiE 'render(ed)? EMPTY' "$DOCTOR_SKILL"; then
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case" PASS
 else
-  check "the LEASE_ID_RE hand-copy in the core matches its owner byte-for-byte (core='$CORE_LEASE_RE' owner='$OWNER_LEASE_RE')" FAIL
+  check "CONV-2 the doctor skill ships a form with no CLAUDE_PROJECT_DIR for the empty-render case (total=$DOCTOR_CMDS_TOTAL without=$DOCTOR_CMDS_WITHOUT_PROJECT)" FAIL
+fi
+
+# CONV-3 — the recognizer must SAY why it still accepts the assignment at all. It is
+# not a harmless leftover: it is what keeps a model still holding the PREVIOUS
+# release's skill body from having its command refused, which is not exotic, because
+# a mid-session upgrade is the state the whole feature exists for.
+RECOGNIZER_SRC="$ROOT/hooks/lib/zensu-doctor-invocation.js"
+# ANCHORED to the ASSIGNMENTS entry, not the whole file: a whole-file grep is
+# satisfied by any unrelated occurrence anywhere, so it would grade prose that had
+# drifted away from the entry it explains.
+if sed -n '/NOT a harmless leftover/,+18p' "$RECOGNIZER_SRC" \
+  | grep -qE 'previous release|older skill|mid-session upgrade'; then
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" PASS
+else
+  check "CONV-3 the recognizer states why the legacy assignment stays admitted" FAIL
 fi
 
 # The reserved phase cannot be minted by a caller — the same protection

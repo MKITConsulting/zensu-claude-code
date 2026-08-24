@@ -374,8 +374,10 @@ needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
 so changing it silently fails loudly. **Adoption works around it, it does not
-close it:** `discardSupersededLeases` moves every lease naming the previous
-installation OUT of the records directory (into a sibling `superseded/<key>/`,
+close it:** `discardSupersededLeases` moves every entry `listRecords` would REJECT
+— broader than "names the previous installation", narrower than "everything that
+reader rejects"; the entry script's header states the exact selector — OUT of the
+records directory (into a sibling `superseded/<key>/`,
 because `listRecords` fails on any non-`.json` entry, so setting one aside in
 place would be strictly worse). The count is reported, never absorbed.
 
@@ -403,14 +405,41 @@ Do NOT replace either with an explicit version comparison — the self-closing
 property is the whole design, and a hand-written check is the thing that gets
 forgotten.
 
-Seven conditions are ALL required; eight refusal reasons name exactly which one
-failed (condition 6 can fail as either `executing-runtime-unidentified` or
+Six conditions are ALL required; seven refusal reasons name exactly which one
+failed (condition 5 can fail as either `executing-runtime-unidentified` or
 `executing-runtime-older`):
-`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`record-unreadable`, `plugin-data-mismatch`,
 `already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
 `executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
 sibling bound are NOT relaxed here either — the latter is what keeps a
 `--plugin-dir` checkout from adopting an installed session.
+
+**There is deliberately NO condition on the CALLER's project root, and
+`adoptableRecord` does not read `options.projectRoot` at all.** There was one, and
+it made this repair unreachable in exactly the state it exists for. Two sources of
+truth disagree about "the project": the record is minted from the SessionStart
+**payload cwd** (`claude-session-control-v1.js`), while the adoption entry point is
+handed **`CLAUDE_PROJECT_DIR`**, a literal the skill renders from the harness. A
+fork whose cwd was a worktree records that worktree while the harness still reports
+somewhere else — and `cd` cannot change `CLAUDE_PROJECT_DIR`, so the refusal named a
+remedy no one in that session could perform. Removing it relaxes nothing: the anchor
+is CARRIED from the record (`adoptContext` passes `verdict.context.project_root` to
+`buildContext`), no write is located by the caller's value, and the bound stated in
+the entry script's header — `readContext`, the sibling root, `plugin_data` — never
+included this comparison. It also put the module back in step with itself:
+`resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
+payload cwd is never a project authority", and this was the one place a
+caller-supplied directory outranked the record. A record whose project root is GONE
+is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
+condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+`CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
+rejects a non-directory, so an unset or deleted value exited before printing any
+report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
+two share one set — but the shipped skill command STOPPED PASSING it: the recognizer
+holds every PATH assignment in the prefix to a rooted literal value — `ZDOC_PLAYWRIGHT_TOOLS`
+is a Set-membership check, not a path one — so a harness
+that rendered the placeholder empty would have refused the whole invocation over a
+value nobody reads.
 
 **Two invariants, both learned from the chain-recovery precedent:**
 
@@ -448,7 +477,25 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**Three re-encodings move with this, and none of them is checked by a test:**
+**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
+Removing the caller's project-root condition closed one of the two ways the two
+sources of truth diverge in worktree workflows — a cwd that was a worktree while the
+harness reported elsewhere. The other is still a permanent wedge: a worktree later
+REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
+Phase E) makes `readContext` throw at condition 1, so adoption answers
+`record-unreadable` whose remedy says to start a fresh session. Combined with an
+incompatible lineage, `orphanedProjectRootSession` does not fire either, and
+`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
+ALREADY distinguishes *record intact, project root absent* from *record altered or
+pruned*, and the gates already consume it — adoption does not. Widening it is a
+separate and larger decision, because adoption would then have to succeed with an
+anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
+so the next reader does not take "that one still refuses" for "and should".
+
+**Three re-encodings move with this.** Their coverage is stated once, in the
+store-layout bullet below, and nowhere else — a ledger that contradicts itself about
+its own pins is the failure mode it exists to prevent. The wire format and the
+version-shape rule are unchecked:
 
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
@@ -463,34 +510,132 @@ previous version was not pruned.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
-  destination guard landed — that module's `ensurePrivateDirectory` policy and its
-  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
-  it looks: a core -> lease CALL would cycle (that module requires the binder,
-  which requires this core), but an ENTRY-POINT seam would not, because
-  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
-  that it moves the sweep from the core half to an eighth host obligation. If this
-  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
-  branch is also the silent one: it cannot tell "no lease was ever minted" from a
-  layout that moved, so a layout change makes the sweep a SILENT no-op.
+  destination guard landed — that module's `ensurePrivateDirectory` policy, its
+  `LEASE_ID_RE`, and its `MAX_RECORD_BYTES`. FIVE copied elements, not one, of
+  which only two were ever pinned — and both pins compared source SPELLINGS rather
+  than behaviour, so `8388608` in the owner would turn them red with nothing wrong
+  while neither checked that the two sides applied the constant to the same
+  quantity.
+
+  **THE SEAM HAS BEEN TAKEN, and the copies are gone.** The trigger this file
+  recorded — "if this function needs a fourth correction, take the seam" — had
+  fired. The direction is the one that was always available: a core -> lease CALL
+  cycles (that module requires the binder, which requires this core), so the SWEEP
+  moved instead, into `hooks/lib/review-evidence-sweep-v1.js`, where requiring the
+  owner is acyclic. `review-evidence-lease-v1.js` now exports `LEASE_ID_RE`,
+  `MAX_RECORD_BYTES`, `REVIEW_EVIDENCE_SEGMENTS`, a `leaseRecordIsOwned` predicate
+  and `withLock`, and the sweep consumes those five.
+
+  **One copy deliberately SURVIVES, and claiming otherwise was the overstatement
+  review caught.** `privateEnough` in the sweep reproduces `ensurePrivateDirectory`'s
+  mode/uid pair verbatim, because the two do different things with the same
+  predicate: the owner REPAIRS with a chmod, this one may only LOOK. It is a
+  read-only twin, not a removed copy — do not "align" them, and do not read "the
+  copies are gone" as covering it.
+
+  **The stated cost was paid, not avoided:** the sweep is an EIGHTH host obligation
+  now, not part of the cross-host core half. `adoptContext` no longer sweeps at all
+  — the adoption ENTRY POINT calls it after the record swap — so a port that takes
+  only the core delta gets an adoption that never sweeps and leaves every superseded
+  lease wedging the store. What the move bought: the function is exported and driven
+  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  a temp directory each instead of a full synthetic install plus a session
+  lifecycle, and three return shapes the shell layer could not reach are ordinary
+  cases.
+
+  The source `lstat`'s ENOENT branch remains the silent one: it cannot tell "no
+  lease was ever minted" from a layout that moved, so a layout change still makes
+  the sweep a SILENT no-op. That is now bounded rather than open — the layout is one
+  exported constant both sides read — but it is not closed.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
-`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
-plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
-half is SEVEN separate obligations, and a port that takes only the core delta gets
+`executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
+the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
+host obligation enumerated below. Note that
+`adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
+so a port that takes only the core delta (the condition gone) while its own entry
+script still requires and host-path-renders a project-dir variable still exits
+before printing any report, which is the same wedge in a different place. The two
+halves move together. The host
+half is EIGHT separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
-deny scope at every gate that denies in this state, the skill, and — easy to miss
+deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining. A port that copies only
+records directory through it and never by hand-joining, and EIGHTH the sweep itself
+(`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
+entry point's call to it) — a port that skips it re-mints the record and leaves every
+superseded lease wedging the store. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
-It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
-and four session lifecycles, but no Windows wall clock was taken — unlike the two
-suites this file records a measured figure for. Budget against a measurement
-before trusting the headroom. The caveat lives here and NOT in the manifest:
+**Two spellings of one root, and only Windows can tell them apart.** The sweep decides
+ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
+`binding.pluginRoot`, which reached the store through the core's `canonicalDirectory` —
+`fs.realpathSync.native`. The adopt call site passes the record's own `plugin_root` and so
+agrees by construction; the in-place REPAIR call site received `ZADOPT_PLUGIN_ROOT`, which
+`zensu-session-adopt.sh` renders through `zensu-host-path.sh`. On win32 that renderer emits a
+drive-qualified FORWARD-slash path while the native spelling uses backslashes, so the compare
+inverted the selector a second time and the repair set aside the one live lease it had to keep
+— `windows-shard-2` reported `leases set aside : 2` where 1 was correct, with every POSIX shard
+green. `repairSweepRoot` now canonicalizes, falling back to the rendered value rather than
+throwing, because that branch owes the caller a verdict. Anything else that hands a root to
+this module owes it the same canonicalization.
+
+**`ENOENT` is not proof of absence, and the entry point read it as such.** `lstat` on a path
+whose ancestor is a FILE answers ENOTDIR on POSIX and ENOENT on win32, so a `review-evidence`
+file took the "no store here" branch and `discardSupersededLeases` reported a clean sweep over
+a store it never opened. `firstNonTraversableAncestor` re-derives the answer from the
+components instead of the errno; it follows links on purpose, so a symlink to a real directory
+stays traversable and the POSIX verdict is unchanged. It is EXPORTED for the unit layer alone
+— from a POSIX host the branch is unreachable through the public entry point, so without a
+direct handle the fix would ship with no executed case anywhere. Its `path.relative` bound is
+another member of the hand-copied `within()` / `isInside()` family this file tracks.
+
+**`test-versioned-plugin-upgrade.sh` grades the LAST COMMIT, not the working tree.**
+It captures `git rev-parse HEAD` and its install fixture materializes both synthetic
+roots with `git ls-tree`, so every behavioral row — and the copies of
+`skills/adopt-session/SKILL.md` that AC-C04 and CONV-1 read — measures the committed
+revision. An uncommitted change under `hooks/` or `skills/` is therefore reported
+GREEN against the previous commit, which is not a hypothetical: a real regression in
+`discardSupersededLeases` shipped that way for a full review round, because every
+measurement of it had been taken before the commit that carried it. Test-file edits
+DO take effect immediately, and SEVERAL rows read the working tree — the four unit
+drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep and
+the adoption report), the three seam pins hoisted to the front of the file so a
+Windows timeout cannot drop them, the committed-tree check beside them, the
+lease-gap grep, and AC-013 — each labelled `WORKING TREE, not HEAD` in place. The
+count is deliberately NOT written out, matching the rule the suite states about
+itself: a hand-maintained number is exactly what a driven loop cannot catch when a
+row is removed, and the two hand-copy pins this enumeration used to name were
+themselves deleted when the seam was taken. Getting that set wrong is its own hazard, in the
+opposite direction: a reader who believes an uncommitted constant is invisible will
+misread a pin that in fact grades it immediately. Commit first, then measure.
+
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
+measurement is one sample.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
+12%, so about seven eighths of the budget is unused. Taken at the head that carried
+Part C plus the AC-C11/AC-C11b/AC-C12 family.
+
+**That sample is now STALE, and saying so is the point of recording it.** The work
+that took the seam added two further `node --test` drivers to this suite plus roughly
+450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
+figure describes a head that no longer exists. Do not budget against it; re-measure
+on the next green Windows run and replace the number and its provenance sentence
+together.
+
+Read the original sample as ONE sample, not as a bound. The sibling
+`stop-enforcer-self-review-routing` note in this file records a 29% spread across
+two green runs of byte-identical content on the same runner class, so a single
+figure says nothing about the worst case — it says only that the suite is not
+currently close to its ceiling. Budget against the measured figure and re-measure
+after a change that adds process runs; the previous wording tried to substitute a
+hand-counted itemization of node and bash invocations for a wall clock, and that
+itemization went stale on its next row edit, which is exactly why it is gone.
+The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a
@@ -504,6 +649,163 @@ Operator-facing accounts that must move with it: `docs/session-control.md`
 Part C pins the named state, the doctor row, the Stop release, the Bash-matcher
 allowance with its ordinary-command discrimination, the refusal truth table, the
 end-to-end repair, and that the reserved phase cannot be minted through `--phase`.
+
+## Autopilot Run Scope (`hooks/lib/zensu-autopilot-state.sh`)
+
+A durable Autopilot run is scoped by TWO independent axes, and confusing them is the
+mistake this section exists to prevent.
+
+- **Who may see and drive it — the OWNER session.** The active pointer is
+  `.zensu/state/autopilot-active-<sha256(ownerSessionId)>.json`, built by
+  `_autopilot_active_path`. `autopilot_read_active` takes the owner and filters the
+  inventory by it: another session's run is not an orphan, not a hidden run, and not a
+  conflict — it is invisible.
+- **What it may collide on — the WORKSPACE.** The run records `workspaceRoot`, the git
+  working tree it drives. `begin` refuses when any nonterminal run in the inventory holds
+  the same `workspaceRoot`, REGARDLESS of owner, because that is the resource two runs
+  would actually corrupt: one branch, one commit history, one pull request.
+
+Before this split there was one pointer per project root, so two sessions sharing a project
+root serialized even when they drove different worktrees, and a run left nonterminal by a
+session that no longer exists blocked the project forever.
+
+**`read-active` and `read-workspace` are two questions, and collapsing them re-opens a real
+hole.** "What is MY run" is owner-scoped: the resume hook, `plan-approved-delegate.sh`, the
+three `stop-chain-enforcer.sh` sites, both `post-review-tdd-delegate.sh` sites, and
+`--autopilot-status`. "Does ANY session hold this working tree" is owner-INDEPENDENT and
+must stay so: `_autopilot_begin_standalone_tdd_critical`,
+`_autopilot_adopt_pending_review_critical`, and both fences in
+`_autopilot_deferred_contention_result`. All four call
+`_autopilot_read_workspace_critical` DIRECTLY, because each is already inside the
+project lease; there is deliberately no public wrapper, and one that existed
+without a caller carried a second, divergent defaulting policy. Owner-scoping that second group would let a
+standalone `/zensu:tdd` chain arm underneath another session's durable run in the same tree.
+The team-review identity check is a THIRD shape: it resolves the owner from the RUN record
+and then asks the first question, because the pointer that must still designate that run is
+its owner's, not the attesting caller's.
+
+**One resolver decides the workspace for the writer and for every gate.**
+`_autopilot_session_workspace` resolves cwd → git toplevel → canonical path, and falls back
+to the project root when cwd is outside it. `autopilot_begin_run` and all three occupancy
+gates call it. Two different spellings would make a gate silently miss the run it exists to
+see. `--autopilot-begin --workspace <path>` overrides it, but only for a tree that is either the session's own resolved tree or a directory under the project root; anything else refuses with rc 3. Accepted narrowing: a git worktree OUTSIDE the project root can no longer be declared.
+`workspaceRoot` is deliberately NOT a member of any `path_indexes` list in `_autopilot_node`:
+it is a comparison key rather than a path the worker opens, and it may legitimately sit
+outside the project root, which `_autopilot_native_project_path` rejects by design.
+
+**The field is accepted in BOTH key shapes on purpose.** `stateValid` admits `STATE_KEYS`
+and `STATE_KEYS_WORKSPACE`, and `mayHoldWorkspace` short-circuits on an ABSENT field, so a
+record minted before the upgrade holds EVERY workspace in its project — not its `projectRoot`,
+which is what an earlier draft of this paragraph claimed and what the deleted `workspaceOf`
+fallback would have implemented. A single strict key set would make every run minted before
+the upgrade invalid, `readRunInventory` fails the FIRST invalid record, and the whole project
+would then fail closed — strictly worse than the wedge this work removes.
+
+**The occupancy comparison is CONTAINMENT, not equality, and it runs in both directions.**
+The key is a git toplevel resolved from the CALLING process's cwd, and the writer and the
+gates are different processes: a session that begins a run from the project root and later
+reaches a gate from a worktree BELOW it produces two different keys for one branch. `contains`
+answers "held" whenever either tree contains the other, which also covers the git-failure
+fallback — that path yields the project root while a working resolve yields the repository
+toplevel above it. Equality alone reported such a pair as free, and a standalone `/zensu:tdd`
+chain then armed underneath a live durable run.
+
+**The FORWARD direction is the one that is not solved, and concurrency makes it normal.**
+`begin` writes `workspaceRoot` while still declaring `schemaVersion: 1`, so an installation
+WITHOUT this change reads an unknown key at a version it claims to support and rejects the
+record. Two mitigations, and the residue between them is stated rather than glossed. First, the
+blast radius is bounded: `read-active` now passes its owner into `readRunInventory`, which skips
+a record it can prove belongs to someone else BEFORE validating it, so one session's
+unreadable record no longer fails every session in the project. Anything unattributable — a
+record that will not parse at all — still fails closed, because it cannot be proven to be
+someone else's. Second, `begin` and `read-workspace` deliberately pass NO owner and stay strict:
+they genuinely need every record. The residue: an older installation running `begin` in a
+project where a newer one is live still fails closed, and that is not tested because the suite
+has no second installation to run it from. The lineage rule does not cover this — it governs
+Session Control record binding, not the project-local run inventory — so a MINOR release is the
+only thing standing between the two.
+
+**The `--confirm` on `--autopilot-release` is prose-backed, not consent-backed.** It is an argv
+token the model can supply to itself, exactly like `zensu-session-adopt.sh --confirm`, and the
+"wait for the user to say yes" control lives in `skills/autopilot-release/SKILL.md`, not in a
+gate. Say so plainly rather than describing the flag as user confirmation. What bounds the
+damage MECHANICALLY is that it escapes no gate and cannot forge `DONE` — the worker only ever
+applies `CANCEL`. Everything else is prose: the skill tells the model to take the run id from a
+refusal, but nothing enforces that, and any nonterminal run in the project is releasable by id
+from an enumerable directory. Nor is liveness checked: a run whose owner session is very much
+alive is cancelled just as readily. `.zensu/state/` is already writable from inside a session by
+an ungated shell redirect, so the flag is not the narrowest channel to that directory either.
+
+**The legacy pointer is adopted only by its own owner.** `autopilot-active.json` is never
+written any more. When the owner-keyed pointer is absent it is read as a fallback and honored
+only if the run it references belongs to the caller; a legacy pointer owned by anyone else is
+ignored, and that is precisely the unwedge. `activePointerFor` re-implements the same
+resolution inside the worker for `apply` and both budget modes, which receive the state
+DIRECTORY rather than a pointer path and derive the owner from the run record.
+
+**`--autopilot-release` bypasses exactly one check.** It applies a real `CANCEL` under the
+project lock with the ownership comparison skipped, and refuses a terminal run, a caller that
+owns the run, and an exhausted ledger. Provenance is the derived event id (`release-<sha256>`),
+NOT a payload field: `payloadValid` requires `CANCEL` to carry the empty object, so a marked
+payload would make the released run unreadable to any runtime that has not taken this change.
+**No bypass-ledger entry** — the ledger records gate ESCAPES so that everything under "Gates
+bypassed" is true, and this escapes no gate. Same rule, same reason, as `--chain-recover`.
+
+**Version.** The pointer layout and the run schema both move, so this is a **`minor`** release
+under "Runtime Lineage (`version_type` is load-bearing)" above. The version is never set by
+hand; the release pipeline owns it.
+
+**Known gaps, accepted:**
+
+- A refusal names the holding run but the release is a separate, user-confirmed step. It has
+  to be: the run belongs to a session that may still be alive.
+- **`OWNER_SESSION_MISMATCH` in `plan-approved-delegate.sh` is now unreachable, and the plan
+  it used to refuse falls through to the standalone policy instead.** A foreign session that
+  approves a plan carrying another run's `<!-- zensu-autopilot:<run> -->` marker no longer
+  reaches the owner comparison, because the run is invisible to its owner-scoped read; it is
+  asked the ordinary "run /zensu:tdd?" question. Nothing is mutated — the foreign run is not
+  touched and no binding is created — so this is a lost DIAGNOSTIC, not a lost guarantee.
+  Restoring it needs the marker before the read, and the marker is only resolved inside the
+  payload evaluator (see "Plan-Gate Payload Sources"), which reads fields by name and must
+  not be duplicated in shell. The exit-6 arm and its `BLOCK_CODE` are deliberately left in
+  place rather than deleted, so a future evaluator that can answer "this marker names a run
+  you do not own" has its receipt waiting. What the foreign caller now gets is NOTHING: the
+  branch is skipped before any payload source is resolved, so it cannot be used as an
+  existence oracle either — which is what F20/F20a, F32/F32a and F45c in
+  `tests/structure/test-plan-payload-fallback.sh` pin, alongside P6 in
+  `tests/structure/test-autopilot-plan-delegate.sh`. Those five cases were written against
+  the refusal receipt and now assert the silence instead; F45c in particular no longer pins
+  an ORDERING between the ownership and origin refusals, because neither is reachable.
+- `/zensu:doctor` still carries NO Autopilot row of any kind, so a held workspace is visible
+  only in the `--autopilot-begin` refusal and in `/zensu:autopilot-release`. Do not claim
+  doctor visibility until that row exists.
+- The `SESSION_CONTEXT_UNAVAILABLE` arm in `plan-approved-delegate.sh` is defense in depth, not
+  the live path: `zensu_bind_hook_session` refuses an unresolvable session earlier, so the receipt
+  a caller actually sees in that state is `RUNTIME_UNAVAILABLE`. Measured by P8a-P8c in
+  `tests/structure/test-autopilot-plan-delegate.sh`, which therefore pin the fail-closed DIRECTION
+  (a `PLAN_GATE_BLOCKED` receipt rather than the standalone policy) and not the specific code.
+- `_autopilot_storage_safe` validates the legacy pointer by name; the owner-keyed one is
+  checked at `_autopilot_begin_critical`, the only site that writes it. Reads are protected
+  by `regularFile`, which rejects symlinks and hard links.
+
+Moving together with the scope: `_autopilot_owner_key`, `_autopilot_active_path`,
+`_autopilot_legacy_active_path`, `autopilot_workspace_root`, `_autopilot_session_workspace`,
+`_autopilot_read_workspace_critical`, `_autopilot_rendered_dir`, `autopilot_release_run`, the `read-active` / `read-workspace` /
+`begin` / `apply` / `release` / budget worker modes with their `path_indexes`,
+`projectRootIndex` and `workspaceRootIndex` entries, the worker's own second re-encoding of the
+pointer name (`activePointerFor`, `OWNER_POINTER_PREFIX`, `LEGACY_POINTER_NAME`), the SEVEN hook
+`read-active` call sites enumerated above, the three `ACTIVE_POINTER_HINT` probes that name both
+pointer spellings, `hooks/lib/zensu-log.sh` (the `--workspace` flag, the owner-aware
+`--autopilot-status`, and the `--autopilot-release` verb with its derived event id),
+`skills/autopilot/SKILL.md`, `skills/autopilot-release/SKILL.md`, and the plugin manifest's
+skill list. Operator-facing accounts that must move with it: `README.md`'s skill table,
+`docs/tdd-manager-workflow.md` §"Autopilot run scope" and the `session-start-autopilot-resume.sh`
+row in `docs/configuration.md`.
+`tests/structure/test-autopilot-state-machine.sh` pins the pointer, the two refusals and the
+legacy fallback; `test-autopilot-adversarial-recovery.sh` X1a pins the `begin`, `read-active`,
+`release` and `read-workspace` `path_indexes` literals. It does NOT pin every mode in the table
+— `read-run`, `apply`, `team-review-receipt-meta` and the two budget modes are unpinned, so a
+change to one of those fails behaviorally or not at all.
 
 ## CLI Command Classification (`hooks/lib/zensu-mcp-tools.sh` + `hooks/lib/zensu-cli-map.sh`)
 
@@ -1068,16 +1370,24 @@ permission layer refuses that spawn, the call never executes — so no PreToolUs
 or PostToolUse hook can see it, and without this module the enforcer repeats an
 impossible instruction until its cap (`autoFixMaxRounds + 3`) releases the guard.
 
-Five things are coupled and must move together:
+Ten things are coupled and must move together:
 
 - **`DENIAL_MARKERS` are host literals**, read out of the installed Claude Code
-  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.231: `Permission for this action was
+  binary (`DENIAL_MARKERS_SOURCE_BUILD` = 2.1.240: `Permission for this action was
   denied by the Claude Code auto mode classifier.` and `Permission for this action
   has been denied.`). The build is exported and pinned against the module header,
   so the constant cannot drift away from the provenance note beside it. They are
   matched as PREFIXES because the host appends its own `Reason: ...` tail. A host
   that rewords them silently disables the diagnosis — re-verify against the
-  binary, never against memory. The `kind` values are re-encoded in exactly TWO
+  binary, never against memory. Re-verified 2026-08-22 with `strings` over
+  2.1.237, 2.1.239 and 2.1.240: byte-identical in all three, each stored WITH the
+  trailing `Reason: ` the prefix rule declines to contract, and no third
+  refusal-result literal exists to add. The same transcript entry also carries a
+  host-native `toolDenialKind` beside `message` (observed `automode-blocked`); it
+  is deliberately NOT read — an undocumented, unversioned field whose absence
+  would be indistinguishable from a clean spawn — and the module header plus a
+  unit case record that it was seen and declined rather than missed.
+  The `kind` values are re-encoded in exactly TWO
   places outside the module: the `case` arms in `hooks/stop-chain-enforcer.sh`
   that render cause and remedy, and the closed set `reviewerDenialRows` accepts
   from a note. The hook's PROBE deliberately holds no third copy — it reads `kind`
@@ -1102,6 +1412,157 @@ Five things are coupled and must move together:
   `^reviewer-spawn-denied-scv1_[a-f0-9]{64}\.json$`. Rename one and doctor goes
   quiet with everything still green. T25 is the only check that drives both sides
   end to end.
+- **`REVIEWER_SUBAGENT_TYPE` has a registered hand-copy, and the doctor also
+  reports this refusal PROACTIVELY.** `REVIEWER_AGENT` in
+  `hooks/lib/zensu-doctor-report.js` copies it rather than importing it: that
+  module is required LAZILY inside `reviewerDenialRows`, so a load failure
+  degrades one row, while a top-level require would take the whole report down.
+  `DENIAL_RULE` in `stop-chain-enforcer.sh` carries the same identity again — and so
+  do five further files. **Do not treat any enumeration of them as complete.** The
+  literal lives in EIGHT files under `hooks/` (27 occurrences, measured 2026-08-23 —
+  and the grep instruction below is itself one of them, which is why the occurrence
+  number moves when this very paragraph is edited and the FILE count does not),
+  including two functional comparisons a rename breaks silently:
+  `post-review-tdd-delegate.sh`'s `SUBAGENT_TYPE` test and `claude-principal-v1.js`'s
+  list entry. A census in prose goes stale the next time a site is added, which is why
+  the instruction is a GREP and not a list: **before renaming this identity, run
+  `grep -rn 'zensu:code-reviewer' hooks/` and change every site.** ONE pair is
+  machine-checked — `test-doctor.sh` P1by pins `REVIEWER_AGENT` against the exporting
+  `REVIEWER_SUBAGENT_TYPE`, the pair most likely to diverge because the require is lazy
+  and nothing at load time compares them. **The other six files are NOT pinned**, in
+  the same sense `WRAP` is unpinned above. Rename the agent in one place only and
+  the surviving copies keep telling the user to allow a subagent name nothing
+  spawns, with every check green.
+  Beside the reactive row, that file's `permissionExposureRows` reads
+  `$HOME/.claude/settings.json` — and ONLY that path, for the reason
+  §"The model-facing reason names only `~/.claude/settings.json`" below gives — and warns before any spawn is refused.
+  Its host literals carry their own provenance constant `SETTINGS_SOURCE_BUILD`:
+  `permissions.{defaultMode,allow,deny,ask}`, the `auto` value, `autoMode.allow`,
+  the `Agent(<name>)` rule grammar, the file layout — **and the deny -> ask ->
+  allow evaluation order**, which is listed separately because its failure mode is
+  the opposite of the others': a rename makes the check fall SILENT (useless), a
+  REORDER leaves every row rendering and turns the deny row's "adding a
+  permissions.allow rule changes nothing" into a false claim. P1bd cross-checks
+  the constant against the provenance comment that enumerates them, the way
+  `reviewer-spawn-denial-v1.js` cross-checks `DENIAL_MARKERS_SOURCE_BUILD` against
+  its module header; P1bd1 pins the order clause. Its rows are held in step with
+  `skills/doctor/SKILL.md` by P1be, the same drift pin P1qr applies to the reactive
+  rows — `docs/tdd-manager-workflow.md` §"The proactive counterpart, before any
+  chain wedges" is the third account and is NOT covered by that pin.
+- **Every row that INSTRUCTS a settings edit carries `SELF_PERMISSION_BAR`**, and
+  all five call sites consume it — the exposure row, the reactive refused-spawn row,
+  the deny row, the ask row and the could-not-judge row. The two that previously
+  spelled the sentence inline now consume the constant with their emitted bytes
+  unchanged, which is what keeps P1be and P1qr green. A shared constant with an
+  unconsumed copy beside it is worse than either honest duplication or one source,
+  because it advertises a single source that does not exist; do not reintroduce one.
+- **The deny-first caveat sentence is a SIX-member hand-copy class, pinned nowhere
+  across its copies.** `DENY_FIRST_CAVEAT` in `hooks/lib/zensu-doctor-report.js`
+  is consumed by the ask row and the exposure row; the reactive row in the SAME
+  file spells its own lead-in and shares only the trailing clause; `DENIAL_REMEDY`
+  in `hooks/stop-chain-enforcer.sh` is a third; `skills/doctor/SKILL.md`'s
+  refused-spawn bullet is a fourth; and `unjudgeableRow` in the renderer is a
+  FIFTH, which states the same deny-before-allow precedence in its own words and
+  deliberately does NOT consume the constant — that row tells the reader to go and
+  READ the entry, while `DENY_FIRST_CAVEAT` tells them to REMOVE a deny, so reusing
+  it verbatim there would give the wrong instruction. A SIXTH member is the deny row itself,
+  which says "Deny is evaluated before ask and allow" and "while it stands, adding a
+  permissions.allow rule for this spawn changes nothing" in its own words and consumes only
+  `SELF_PERMISSION_BAR`.
+  **State the base or the count means nothing.** The six MEMBERS are: the constant itself,
+  the reactive row, `DENIAL_REMEDY`, the SKILL.md refused-spawn bullet, `unjudgeableRow`, and
+  the deny row. THREE of them carry the trailing clause VERBATIM — the constant, the reactive
+  row and `DENIAL_REMEDY` — and a fourth, the SKILL.md bullet, carries its first half verbatim.
+  That verbatim sharing is exactly what makes the three `grep -qF` pins possible; a genuine
+  paraphrase could not be pinned that way. Only the deny row and `unjudgeableRow` paraphrase it — but the
+  deny row is nonetheless PINNED, by its own clause: `P1bv` and `P1bm3` match
+  `Deny is evaluated before ask and allow` literally. So five of the six are caught by
+  something, and `unjudgeableRow` alone is the copy nothing catches; it is the one to check
+  by hand after any reword. The ask row and the exposure row CONSUME the
+  constant, which keeps them out of the drift class entirely — consumers, not members. The
+  renderer's own comment beside the constant counts the same class as FIVE BESIDES the
+  constant, which is the same six; keep both numbers and both bases, and do not "fix" one
+  into the other. The criterion needs a real discriminator, not a blanket exclusion: a member
+  is a remedy string EMITTED to a user, plus the one skill bullet that STANDS IN for such a
+  string — the refused-spawn bullet, which relays the reactive row's remedy in its own words.
+  The proactive-row bullets in `skills/doctor/SKILL.md` also restate the precedence and stay
+  excluded, but state the test precisely, because two of them DO re-author a sentence: the
+  could-not-judge bullet and the unreadable-entry bullet write their own remedy in their own
+  words. They are excluded because each accompanies a row whose wording the model is sent to
+  read, so a reword of that row is what a maintainer notices; the refused-spawn bullet is a
+  member because it stands in for a string the model never sees rendered. `docs/tdd-manager-workflow.md` is
+  narrative and outside the class. Without that discriminator the class grows until it stops
+  being checkable, which is what an earlier wording of this paragraph did. P1be and P1qr each pin a doctor copy against
+  the skill, and the routing suite pins the enforcer copy against itself — nothing
+  pins the doctor and the enforcer against each other. Reword one and the others
+  go stale with every check green; check them by hand, as with `WRAP` above.
+- **That proactive check's PORT half is not this module's.** A port that renames
+  only the literals still ships a wrong check: the branch LADDER in
+  `permissionExposureLadder` encodes the deny -> ask -> allow precedence, so a host
+  that orders them differently needs the ladder reordered, not the strings renamed.
+  The wrapper is TWO functions, not one, and a port that copies only the outer name
+  ships half of it: `permissionExposureRows` contains the throw so a fault costs one
+  row instead of the whole report, and `permissionExposureRowsInner` turns the
+  ladder's silence into a statement — the ✅ row when the check ran and found nothing,
+  a did-not-run row when `HOME` is unset. The split exists so the row-counting seam
+  sits INSIDE the try; collapsing them would put the counter outside the containment. Counting emitted rows rather than threading a flag through
+  the ladder's exits is deliberate: a branch added later cannot forget to close itself
+  out. A port that copies the ladder without the wrapper ships the silence back.
+  A host with no per-user permission-rule file at all DROPS the check rather than
+  repointing it — there is nothing to read. The accounts a port also owns are
+  `skills/doctor/SKILL.md`'s `⚠️`/`✅ permissions:` bullets and its green-summary bound,
+  `docs/tdd-manager-workflow.md` §"The proactive counterpart", and the bullet above.
+  P1bh requires every suite that NAMES either doctor file to sandbox HOME or to
+  carry an explicit `# zensu-doctor-home-exempt:` sentence — deliberately blunt,
+  because its first version tried to recognise an execution and missed the one
+  suite that binds the path to a variable and runs it six hundred lines later.
+  The renderer reads HOME for both the user-scoped config and the settings file,
+  so a suite without one is environment-dependent. P1bi separately requires every
+  settings key the ladder reads to be shape-vetted, which is the coupling that
+  reopens the original defect if it drifts.
+  **The proactive ladder is now decision-then-text, and the two halves must move
+  together**: `classifyPermissionExposure` answers WHICH verdicts hold — in emission
+  order, as a LIST, so the fact that the auto-mode verdict and the `autoMode.allow`
+  verdict can both hold is visible in the return value instead of asserted in prose —
+  and `ROW_TEXT` is the only place a row is worded. Adding a row means adding a kind to
+  both; neither half can grow a branch the other does not know about. `P1bd2` slices
+  `classifyPermissionExposure` (not the ladder) to derive the deny/ask/allow order, so
+  moving the decision to another function makes that pin report an underivable order
+  rather than passing vacuously.
+  **The check has an off-switch, and it is a boolean, never a path override**:
+  `hooks.reviewerSpawnPermissionCheck` (default `true`), read from the SAME `cfgReads`
+  the Config block already gathered — a second `readJson` pass would double the
+  non-blocking opens the FIFO hardening exists for. It suppresses the ROW and can never
+  redirect which file is opened, which is what keeps `claudeSettingsFile`'s refusal of a
+  `ZDOC_`/`ZENSU_` override intact: that argument is about INJECTION and it still holds,
+  while this closes the SUPPRESSION complaint it never answered. **Disabling does not
+  produce silence** — it emits one ✅ row naming the flag and saying the check was
+  skipped, because silence is the one verdict this check cannot qualify and hiding the
+  rows under a config key would reinstate the defect the feature removed. `P1bz`/`P1bz1`
+  pin both halves and `P1bz2` pins that a quoted `"false"` does not disable it.
+  **The proactive ladder has no unit seam**: this renderer exports nothing and
+  ends in `process.exit(0)`, so `settingsShape`, the rule predicates
+  (`matchesDenyOrAskRule` and `matchesAllowRule` — deliberately TWO named predicates and
+  not one boolean-flag predicate, because the flag named the input while it decided the
+  trim behaviour, so no call site said which side of the asymmetry it meant — plus
+  `namesReviewerSpawn`, `mentionsReviewerAgent`, `hasUnreadableEntry`), the shared
+  `isVerifiedSpelling` test that every exact-match arm consults instead of re-spelling it,
+  the combinator `reviewerSpawnMention` over the deny/ask pair, and the
+  branch ladder are pinned only behaviorally, by shell fixtures. `reviewerSpawnMention` is
+  not a further predicate — it is a reduction over two lists — but it encodes a rule neither
+  the predicates nor the ladder carry: `'named'` outranks `'shaped'` ACROSS the deny and ask
+  lists, and `namesReviewerSpawn` must scan its whole list rather than return at the first
+  match, or the precedence silently becomes positional WITHIN a list. A port that copies
+  only the predicates renders the weaker row for a list that really does name the reviewer. Two of those fixtures reach their branch through a `node --require`
+  preload rather than through a settings file, because neither a short read nor a
+  throw inside the check is producible from file content alone (P1bp, P1bs).
+  `settingsShape` returns TWO deferred carriers, not one: each row is suppressed only
+  by a malformed key its own claim depends on. Collapsing them back into one carrier
+  restores the defect where a malformed `autoMode.allow` deleted the exposure row. Extracting a
+  pure classifier into a `*-v1.js` module would buy one, at the cost of a lazy
+  require, a degraded-row fixture and a `node --test` driver charged to a named
+  Windows shard budget. Deliberately not done; recorded so it is not mistaken for
+  an oversight.
 - **The unit suite needs a driver.** `tests/run-all.sh` discovers only
   `tests/structure/test-*.sh`, so `tests/structure/reviewer-spawn-denial-v1.test.js`
   is invoked from `test-stop-enforcer-self-review-routing.sh` (T26, which asserts a
@@ -1119,6 +1580,18 @@ Five things are coupled and must move together:
   contents would let anything able to write there mint a row telling the user to widen
   `permissions.allow` for the very spawn it wants. Change the workflow-document name and
   the binding silently stops matching; `P1qq` is the pin.
+- **One fixture is a real host capture, and it is the only one that can falsify the
+  hand-authored envelopes.** `tests/structure/fixtures/reviewer-spawn-denied-transcript.v1.jsonl`
+  is a redaction of two entries taken verbatim out of a Claude Code 2.1.237 session whose
+  `zensu:code-reviewer` spawns the classifier refused: the `tool_use`/`tool_result` pair,
+  `is_error`, the full refusal body and `toolDenialKind` are the original bytes; the
+  prompt, ids, cwd and branch are placeholders. Every other transcript in both suites is
+  written by this repo and therefore pins only what this repo BELIEVES the host emits.
+  Driven at the unit layer (four cases, including a shape guard so a gutted redaction
+  fails loudly) and end-to-end by T36/T36a, which sit beside scenario 7 rather than at
+  the tail for the Windows-budget reason below. Like
+  `fixtures/exitplanmode-posttooluse-payload.v1.json`, it CANNOT observe live harness
+  drift — only a fresh capture can.
 
 **The Windows budget for this suite is MEASURED, and the measurement is a RANGE.**
 Two green runs of byte-identical suite content reported `stop-enforcer-self-review-routing`
@@ -1127,6 +1600,12 @@ single sample here says nothing about headroom. Budget against the HIGH figure: 
 `timeoutMs: 1500000` in `tests/profiles/windows-ci.v1.json` the slow run consumes 85% of
 its own cap. The previous ceiling of 1200000 sat BELOW that high sample and the suite
 was killed by it, which is exactly the failure this range exists to prevent.
+**That range no longer covers the file.** Scenario 7b (T36/T36a, the real-host capture)
+added a session and a Stop after the range was taken, and the ceiling was NOT raised —
+85% of cap was already the slow sample's share. Treat the remaining headroom as
+UNMEASURED until a green Windows run reports a new figure; if the shard starts reporting
+`TIMED_OUT`, this is the first thing to re-measure, and note that the 1800000 ms shard
+budget below would surface such a run as a profile abort rather than a suite timeout.
 
 **The shard budget is the SECOND ceiling, and it binds first.** `windows-shard-7`'s
 `profileTimeoutMs` is 1800000 and every profile is pinned to that same value
@@ -1271,9 +1750,39 @@ Only the docs carry the fuller form.
 **Operator-facing accounts that must move with the markers, the block reason, and
 the note:** the host-refusal paragraph in `docs/tdd-manager-workflow.md`, the
 refused-spawn row in `skills/doctor/SKILL.md`, and the `stop-chain-enforcer.sh` row
-in `docs/configuration.md`.
+in `docs/configuration.md`. The PROACTIVE check has three of its own, listed here
+so a maintainer navigating by this paragraph reaches them: §"The proactive
+counterpart, before any chain wedges" in `docs/tdd-manager-workflow.md`, the
+`⚠️`/`✅ permissions:` bullets plus the green-summary bound in `skills/doctor/SKILL.md`,
+and the two bullets above.
 
-**Port-relevant.** Every constant here is host-coupled: a port copies
+**Port-relevant.** The PROACTIVE check has its own port half, stated in the two
+bullets above and NOT covered by this paragraph: `permissionExposureRows`,
+`permissionExposureRowsInner` and `SETTINGS_SOURCE_BUILD` in
+`hooks/lib/zensu-doctor-report.js`, the `permissions.*` / `autoMode.allow` grammar,
+the `Task` / `Task(` spellings the low-claim predicate admits WITHOUT verification
+against `SETTINGS_SOURCE_BUILD`, `reviewerSpawnMention` and its cross-list precedence, the single `~/.claude/settings.json` path, and — the
+two a literal-renaming port misses — the branch ladder, which encodes the
+deny -> ask -> allow precedence in code rather than in a string, and `FATAL_RULE_KEYS`,
+whose membership is DERIVED from that same order, so a port that reorders the ladder and
+leaves the constant alone ships a wrong fatal/deferred split.
+
+**The Config block carries its own host-coupled claim, and it is NOT the settings ladder's.**
+`readJson`'s three flags — `io`, `cap`, `loaderFallback` — encode facts about THIS host's config
+loader, `rd()` in `hooks/lib/zensu-config.sh`: that an open or read error makes it return `{}`,
+that it has no size limit, and that it MERGES a global with a project file so a broken overlay
+does not fall back to defaults. Two rows state those facts to the user verbatim. A port whose
+loader caps size, aborts instead of falling back, or reads a single file would ship both
+sentences as false verdicts with every check green — the same failure class
+`SETTINGS_SOURCE_BUILD` exists to prevent, one block over. Re-decide the three flags against the
+port's own loader, or drop the Config block's loader claims entirely.
+
+**Known gap in the Config block, accepted and recorded.** The `soleSource` axis is present-ness,
+not effectiveness: when BOTH default config files exist and both degrade to `{}`, each failure row
+says "the other config source still applies" while defaults actually apply. Not a regression — the
+predicate that preceded it was wrong in that case too — and self-limiting, because a row prints for
+each broken file. Closing it means counting entries that are present AND not `loaderFallback`.
+For the REACTIVE module below, every constant here is host-coupled: a port copies
 `DENIAL_MARKERS`, `SPAWN_TOOL_NAMES` and the transcript envelope
 (`message.content[]`, `tool_use`/`tool_result`, `tool_use_id`, `input.subagent_type`,
 `is_error`) into its own file and re-decides them against its harness — a port that
@@ -1284,6 +1793,21 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
 
 **Known gaps, accepted and deliberate:**
 
+- **The whole diagnosis is inert on an installation that predates it, and that is the
+  first thing to check before suspecting the scanner.** The probe's
+  `[ -f "$lib" ] && [ ! -L "$lib" ] || return 0` returns before `node` is ever invoked,
+  leaving the verdict `none` and routing byte-identical — the correct fail-open
+  direction for a diagnostic, and indistinguishable from "no refusal happened". The
+  module first shipped in **v0.18.2**; a session on 0.18.1 or earlier gets the ordinary
+  `Resume the /zensu:tdd Phase 6 review sequence` directive on every Stop until the cap
+  releases, and `/zensu:doctor` stays silent because no note is ever minted. Measured
+  2026-08-22: three classifier-refused `zensu:code-reviewer` spawns, seven Stop
+  interceptions, zero notes — and the shipped scanner run against that same transcript
+  afterwards answered `status=blocked kind=auto-mode-classifier spawns=3 denials=3`. The
+  detection was never wrong; the code was not installed. Nothing surfaces the version
+  skew, so diagnose it by checking whether the executing plugin root actually contains
+  `hooks/lib/reviewer-spawn-denial-v1.js` before touching the marker set. T36b pins the
+  guard and its position ahead of the invocation.
 - The verdict has no chain-generation lower bound. After a cap release and a fresh
   `/zensu:tdd`, the newest reviewer result in the transcript is still the old refusal,
   so the branch fires again before any new spawn is attempted. The reason text handles
@@ -1643,3 +2167,5 @@ If `state` is `MERGED` or `CLOSED`, **abort the push**:
 A `gh pr list --head <branch>` check is not sufficient — it does not distinguish OPEN from MERGED/CLOSED. Read the `state` field explicitly.
 
 This applies to AI agents and humans alike. The `/create-pr` slash command's "PR already exists for this branch" guard does NOT cover the merged-branch case. "I just rebased ten minutes ago" is not a substitute for the check — re-run it every push.
+
+**Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution: `.zensu/templates/pr-body.md` at the working-tree toplevel, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's TDD plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).

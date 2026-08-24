@@ -234,7 +234,8 @@ else
 fi
 
 DANGLING_PROJECT="$TMP/dangling-project"; mkdir -p "$DANGLING_PROJECT"
-autopilot_begin_run dangling_resume_run dangling_resume_owner "$DANGLING_PROJECT" >/dev/null
+DANGLING_OWNER="$(node "$CORE" session-key dangling_resume_owner)"
+autopilot_begin_run dangling_resume_run "$DANGLING_OWNER" "$DANGLING_PROJECT" >/dev/null
 rm -f "$(autopilot_run_file dangling_resume_run "$DANGLING_PROJECT")"
 bind_session dangling_resume_owner "$DANGLING_PROJECT" || true
 OUT_DANGLING="$(invoke "$DANGLING_PROJECT" '{"source":"resume","session_id":"dangling_resume_owner"}')"
@@ -246,11 +247,10 @@ fi
 
 bind_session other_session_02 "$PROJECT" || true
 OUT_MISMATCH="$(invoke "$PROJECT" '{"source":"resume","session_id":"other_session_02"}')"
-if printf '%s' "$OUT_MISMATCH" | valid_session_context 'OWNER_MISMATCH' "$RUN_ID" \
-  && ! printf '%s' "$OUT_MISMATCH" | grep -qF 'owner_session_01'; then
-  check "R8 ownership mismatch is explicit without reflecting owner data" PASS
+if [ -z "$OUT_MISMATCH" ]; then
+  check "R8 a foreign session receives no context about a run it does not own" PASS
 else
-  check "R8 ownership mismatch is explicit without reflecting owner data" FAIL
+  check "R8 a foreign session receives no context about a run it does not own" FAIL
 fi
 
 # A resumed owner needs exact, validated PR/review evidence to reconcile remote
@@ -345,27 +345,34 @@ fi
 evidence_event evidence-findings FINDINGS_CLEARED "{\"headSha\":\"$EVIDENCE_HEAD\",\"unresolvedCount\":0}"
 evidence_event evidence-validation VALIDATION_PASSED "{\"headSha\":\"$EVIDENCE_HEAD\"}"
 evidence_event evidence-delivery DELIVERY_COMPLETE "{\"headSha\":\"$EVIDENCE_HEAD\"}"
+bind_session "$EVIDENCE_OWNER_RAW" "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
+OUT_DONE="$(invoke "$EVIDENCE_PROJECT" "{\"source\":\"resume\",\"session_id\":\"$EVIDENCE_OWNER_RAW\"}")"
 bind_session later_session_01 "$EVIDENCE_PROJECT" || EVIDENCE_READY=false
-OUT_DONE="$(invoke "$EVIDENCE_PROJECT" '{"source":"resume","session_id":"later_session_01"}')"
+OUT_DONE_FOREIGN="$(invoke "$EVIDENCE_PROJECT" '{"source":"resume","session_id":"later_session_01"}')"
 if [ "$EVIDENCE_READY" = true ] \
   && printf '%s' "$OUT_DONE" | valid_session_context 'TERMINAL_RUN' "$EVIDENCE_RUN" \
   && printf '%s' "$OUT_DONE" | grep -qF 'stage=DONE' \
   && printf '%s' "$OUT_DONE" | session_context_contains "$EVIDENCE_FRAGMENT" \
-  && ! printf '%s' "$OUT_DONE" | grep -qF 'OWNER_MISMATCH'; then
-  check "R8b DONE is reported as terminal with evidence, not as an owner conflict" PASS
+  && ! printf '%s' "$OUT_DONE" | grep -qF 'OWNER_MISMATCH' \
+  && [ -z "$OUT_DONE_FOREIGN" ]; then
+  check "R8b DONE is terminal with evidence for its owner and silent for anyone else" PASS
 else
-  check "R8b DONE is reported as terminal with evidence, not as an owner conflict" FAIL
+  check "R8b DONE is terminal with evidence for its owner and silent for anyone else" FAIL
 fi
 
 CANCEL_PROJECT="$TMP/cancel-project"; mkdir -p "$CANCEL_PROJECT"
-autopilot_begin_run cancel_resume_run cancel_resume_owner "$CANCEL_PROJECT" >/dev/null 2>&1
+CANCEL_OWNER="$(node "$CORE" session-key cancel_resume_owner_raw)"
+autopilot_begin_run cancel_resume_run "$CANCEL_OWNER" "$CANCEL_PROJECT" >/dev/null 2>&1
 autopilot_apply_event cancel_resume_run cancel-resume-event CANCEL '{}' "$CANCEL_PROJECT" >/dev/null 2>&1
+bind_session cancel_resume_owner_raw "$CANCEL_PROJECT" || true
+OUT_CANCELLED="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"cancel_resume_owner_raw"}')"
 bind_session later_session_02 "$CANCEL_PROJECT" || true
-OUT_CANCELLED="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"later_session_02"}')"
+OUT_CANCELLED_FOREIGN="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"later_session_02"}')"
 if printf '%s' "$OUT_CANCELLED" | valid_session_context 'TERMINAL_RUN' cancel_resume_run \
   && printf '%s' "$OUT_CANCELLED" | grep -qF 'stage=CANCELLED' \
   && printf '%s' "$OUT_CANCELLED" | grep -qF 'does not block a new Autopilot run or standalone plan' \
-  && ! printf '%s' "$OUT_CANCELLED" | grep -qF 'OWNER_MISMATCH'; then
+  && ! printf '%s' "$OUT_CANCELLED" | grep -qF 'OWNER_MISMATCH' \
+  && [ -z "$OUT_CANCELLED_FOREIGN" ]; then
   check "R8c CANCELLED is terminal and does not claim ownership of later work" PASS
 else
   check "R8c CANCELLED is terminal and does not claim ownership of later work" FAIL
@@ -375,17 +382,15 @@ bind_session hx "$EVIDENCE_PROJECT" || true
 bind_session hy "$CANCEL_PROJECT" || true
 OUT_DONE_SHORT_SESSION="$(invoke "$EVIDENCE_PROJECT" '{"source":"resume","session_id":"hx"}')"
 OUT_CANCELLED_SHORT_SESSION="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"hy"}')"
-if printf '%s' "$OUT_DONE_SHORT_SESSION" | valid_session_context 'TERMINAL_RUN' "$EVIDENCE_RUN" \
-  && printf '%s' "$OUT_DONE_SHORT_SESSION" | grep -qF 'stage=DONE' \
-  && ! printf '%s' "$OUT_DONE_SHORT_SESSION" | grep -qF 'CORRUPT_ACTIVE_STATE' \
-  && printf '%s' "$OUT_CANCELLED_SHORT_SESSION" | valid_session_context 'TERMINAL_RUN' cancel_resume_run \
-  && printf '%s' "$OUT_CANCELLED_SHORT_SESSION" | grep -qF 'stage=CANCELLED' \
-  && ! printf '%s' "$OUT_CANCELLED_SHORT_SESSION" | grep -qF 'CORRUPT_ACTIVE_STATE'; then
-  check "R8ca short valid SessionStart ids preserve terminal DONE/CANCELLED recovery" PASS
+# Emptiness already excludes CORRUPT_ACTIVE_STATE, so the old second conjunct
+# was unfalsifiable. The discriminating work is the empty output itself: a
+# rejected short id would render the corrupt-state line instead.
+if [ -z "$OUT_DONE_SHORT_SESSION" ] && [ -z "$OUT_CANCELLED_SHORT_SESSION" ]; then
+  check "R8ca short valid SessionStart ids resolve without inheriting a foreign run" PASS
 else
-  check "R8ca short valid SessionStart ids preserve terminal DONE/CANCELLED recovery" FAIL
+  check "R8ca short valid SessionStart ids resolve without inheriting a foreign run" FAIL
 fi
-rm -f "$(autopilot_active_file "$CANCEL_PROJECT")"
+rm -f "$(autopilot_active_file "$CANCEL_PROJECT" "$CANCEL_OWNER")"
 OUT_CANCELLED_HISTORY="$(invoke "$CANCEL_PROJECT" '{"source":"resume","session_id":"later_session_02"}')"
 if [ -z "$OUT_CANCELLED_HISTORY" ]; then
   check "R8d terminal history without a pointer remains absent-compatible" PASS
@@ -430,8 +435,9 @@ fi
 cp "$TMP/run-good.json" "$RUN_FILE"
 
 ORPHAN_PROJECT="$TMP/orphan-project"; mkdir -p "$ORPHAN_PROJECT"
-autopilot_begin_run orphan_resume_run orphan_resume_owner "$ORPHAN_PROJECT" >/dev/null 2>&1
-rm -f "$(autopilot_active_file "$ORPHAN_PROJECT")"
+ORPHAN_OWNER="$(node "$CORE" session-key orphan_resume_owner)"
+autopilot_begin_run orphan_resume_run "$ORPHAN_OWNER" "$ORPHAN_PROJECT" >/dev/null 2>&1
+rm -f "$(autopilot_active_file "$ORPHAN_PROJECT" "$ORPHAN_OWNER")"
 bind_session orphan_resume_owner "$ORPHAN_PROJECT" || true
 OUT_ORPHAN="$(invoke "$ORPHAN_PROJECT" '{"source":"resume","session_id":"orphan_resume_owner"}')"
 if printf '%s' "$OUT_ORPHAN" | valid_session_context 'CORRUPT_ACTIVE_STATE'; then
@@ -441,12 +447,13 @@ else
 fi
 
 HIDDEN_PROJECT="$TMP/hidden-orphan-project"; mkdir -p "$HIDDEN_PROJECT"
-autopilot_begin_run old_resume_terminal old_resume_owner "$HIDDEN_PROJECT" >/dev/null 2>&1
+HIDDEN_OWNER="$(node "$CORE" session-key hidden_resume_owner)"
+autopilot_begin_run old_resume_terminal "$HIDDEN_OWNER" "$HIDDEN_PROJECT" >/dev/null 2>&1
 autopilot_apply_event old_resume_terminal cancel-old-resume CANCEL '{}' "$HIDDEN_PROJECT" >/dev/null 2>&1
 OLD_RESUME_POINTER="$TMP/old-resume-pointer.json"
-cp "$(autopilot_active_file "$HIDDEN_PROJECT")" "$OLD_RESUME_POINTER"
-autopilot_begin_run hidden_resume_run hidden_resume_owner "$HIDDEN_PROJECT" >/dev/null 2>&1
-cp "$OLD_RESUME_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT")"
+cp "$(autopilot_active_file "$HIDDEN_PROJECT" "$HIDDEN_OWNER")" "$OLD_RESUME_POINTER"
+autopilot_begin_run hidden_resume_run "$HIDDEN_OWNER" "$HIDDEN_PROJECT" >/dev/null 2>&1
+cp "$OLD_RESUME_POINTER" "$(autopilot_active_file "$HIDDEN_PROJECT" "$HIDDEN_OWNER")"
 bind_session hidden_resume_owner "$HIDDEN_PROJECT" || true
 OUT_HIDDEN="$(invoke "$HIDDEN_PROJECT" '{"source":"resume","session_id":"hidden_resume_owner"}')"
 if printf '%s' "$OUT_HIDDEN" | valid_session_context 'CORRUPT_ACTIVE_STATE' \

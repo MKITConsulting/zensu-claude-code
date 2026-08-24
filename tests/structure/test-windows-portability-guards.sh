@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only greps
+# hooks/lib/zensu-doctor-report.js for its secure-open inventory, so no renderer
+# process is started and no HOME is resolved.
 ROOT="$(cd "$(dirname "$0")/../.." && pwd -P)"
 SESSION="$ROOT/tests/structure/test-session-control-claude.sh"
 REVIEWER="$ROOT/tests/structure/test-reviewer-capability-gate.sh"
@@ -24,6 +27,12 @@ BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
 SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"
+# The superseded-lease sweep is the SECOND requireable module carrying the hardened
+# open, and it belongs in this inventory for the reason stated beside the plan-payload
+# entry: every count pin here is per-file and therefore blind to a NEW file that
+# brings its own secure open.
+LEASE_SWEEP="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
+DOCTOR_REPORT="$ROOT/hooks/lib/zensu-doctor-report.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
 RESET_SNAPSHOT="$ROOT/evals/reset-review-limit/lib/state-snapshot.js"
@@ -38,6 +47,7 @@ CORE_SNAPSHOT_BLOCK="$(awk '
   capture
 ' "$CORE")"
 AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
+AUTOPILOT_STATE_WORKSPACE_BLOCK="$(sed -n '/^CONC_PROJECT=/,/^CONC_REFUSAL_OK=true$/p' "$AUTOPILOT_STATE_TEST")"
 PASS=0; FAIL=0
 check() {
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
@@ -212,6 +222,21 @@ if grep -qF 'CONCURRENT_WORKERS="1 2 3 4 5 6 7 8"' <<<"$AUTOPILOT_STATE_CONCURRE
   check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" PASS
 else
   check "Windows Autopilot concurrency tests bounded success and preserves worker diagnostics" FAIL
+fi
+
+if [ -n "$AUTOPILOT_STATE_WORKSPACE_BLOCK" ] \
+  && [ "$(grep -cE '^CONC_PROJECT=' "$AUTOPILOT_STATE_TEST")" -eq 1 ] \
+  && [ "$(grep -cE '^CONC_REFUSAL_OK=true$' "$AUTOPILOT_STATE_TEST")" -eq 1 ] \
+  && grep -qF 'make_directory_symlink "$CONC_PROJECT" "$CONC_ALIAS"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'CONC_B="$CONC_ALIAS/tree-b"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'CONC_B_NATIVE="$(native_directory "$CONC_B")"' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -q '^CONC_B_JSON=.*\$CONC_B_NATIVE' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && grep -qF 'value.workspaceRoot === $CONC_B_JSON' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK" \
+  && [ "$(grep -cF '[ "$CONC_B" != "$CONC_B_NATIVE" ]' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK")" -ge 2 ] \
+  && ! grep -qE '_(JSON|NATIVE)=.*pwd -P' <<<"$AUTOPILOT_STATE_WORKSPACE_BLOCK"; then
+  check "Windows Autopilot workspace expectation stays in the native namespace" PASS
+else
+  check "Windows Autopilot workspace expectation stays in the native namespace" FAIL
 fi
 
 if grep -qF 'PROJECT_HOST_PATHS="$(node - "$PROJECT_ROOT"' "$CLAUDE_WRAPPER" \
@@ -467,6 +492,36 @@ else
   check "session-lineage ledger reader asserts on the descriptor with a Windows-safe flag" FAIL
 fi
 
+# The doctor renderer carries THREE opens, and they differ on purpose — which is the
+# reason it belongs in this inventory rather than being assumed to follow one rule.
+# readNoteJson reads a note in a session-writable directory and therefore refuses a
+# symlink and a hard link. readSettingsJson reads the user's own ~/.claude/settings.json.
+# readJson reads SIX files across two classes: the three plugin manifests (plugin.json,
+# marketplace.json, hooks.json) and the config class (~/.zensu/config.json, the
+# project-local .zensu/config.json, and a caller-named ZENSU_CONFIG). The O_NOFOLLOW
+# justification is stated against the CONFIG class specifically — a dotfile manager links
+# those routinely and their real consumer, rd() in hooks/lib/zensu-config.sh, follows the
+# link — and the manifests simply inherit the same open. Both non-note readers therefore
+# deliberately carry NO O_NOFOLLOW.
+# The open COUNT is asserted too: without it a fourth `fs.openSync(x, O_RDONLY)` with no
+# flags at all satisfies every idiom count below and passes unseen. Adding it to readJson was a measured regression:
+# a symlinked config rendered a ❌ claiming the file was ignored while every hook read it.
+# All three must keep the platform-guarded O_NONBLOCK, because a blocking open on a FIFO
+# would hang a renderer contracted to always exit 0 — also measured, past a 30 s bound.
+# The `|| 0` spelling is banned on BOTH flags, not only on O_NOFOLLOW: it is the idiom
+# that hides an unavailable constant on a Windows build instead of failing visibly.
+if [ "$(grep -cF 'process.platform !== '"'"'win32'"'"' && Number.isInteger(fs.constants.O_NOFOLLOW)' "$DOCTOR_REPORT")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$DOCTOR_REPORT")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.constants.O_RDONLY | nonBlock' "$DOCTOR_REPORT")" -eq 2 ] \
+  && grep -qF 'fs.openSync(file, fs.constants.O_RDONLY | noFollow | nonBlock)' "$DOCTOR_REPORT" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$DOCTOR_REPORT" \
+  && [ "$(grep -oF 'fs.openSync(' "$DOCTOR_REPORT" | wc -l | tr -d ' ')" -eq 3 ] \
+  && ! grep -qF 'fs.constants.O_NONBLOCK || 0' "$DOCTOR_REPORT"; then
+  check "doctor renderer keeps a guarded O_NONBLOCK on all three opens and O_NOFOLLOW only on the note reader" PASS
+else
+  check "doctor renderer keeps a guarded O_NONBLOCK on all three opens and O_NOFOLLOW only on the note reader" FAIL
+fi
+
 if [ "$(grep -cF 'process.platform!=="win32"&&Number.isInteger(fs.constants.O_NOFOLLOW)?fs.constants.O_NOFOLLOW:0' "$VCS")" -eq 10 ] \
   && ! grep -qF 'O_RDONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \
   && ! grep -qF 'O_WRONLY|(fs.constants.O_NOFOLLOW||0)' "$VCS" \
@@ -509,6 +564,19 @@ if grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOF
   check "Promptfoo hook log proves identity before truncating on Windows" PASS
 else
   check "Promptfoo hook log proves identity before truncating on Windows" FAIL
+fi
+
+# The superseded-lease sweep's reader, held to the same two properties the
+# plan-payload reader is: the platform gate resolves O_NOFOLLOW rather than assuming
+# it, and the test seam is a MODE compared against one string — never a mask a caller
+# could OR into the open. A raw mask there would let O_CREAT through, so the reader
+# would CREATE the file it reports unreadable.
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$LEASE_SWEEP" \
+  && grep -qF "settings.mode === LSTAT_PRECHECK_MODE" "$LEASE_SWEEP" \
+  && ! grep -qE 'settings\.noFollow' "$LEASE_SWEEP"; then
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" PASS
+else
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"

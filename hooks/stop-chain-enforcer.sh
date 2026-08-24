@@ -204,6 +204,16 @@ ACTIVE_POINTER_EXISTS=false
 if [ -e "$ACTIVE_POINTER_HINT" ] || [ -L "$ACTIVE_POINTER_HINT" ]; then
   ACTIVE_POINTER_EXISTS=true
 fi
+# The pointer is owner-keyed now; the name above is only the pre-scoping one,
+# which is never written any more. Probe the current spelling too rather than
+# leaning on the run-file glob below to compensate.
+for _zensu_autopilot_pointer_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-active-*.json; do
+  if [ -e "$_zensu_autopilot_pointer_hint" ] || [ -L "$_zensu_autopilot_pointer_hint" ]; then
+    ACTIVE_POINTER_EXISTS=true
+    break
+  fi
+done
+unset _zensu_autopilot_pointer_hint
 AUTOPILOT_RUN_HINT_EXISTS=false
 for _zensu_run_hint in "$PROJECT_ROOT/.zensu/state"/autopilot-run-*.json; do
   if [ -e "$_zensu_run_hint" ] || [ -L "$_zensu_run_hint" ]; then
@@ -572,7 +582,7 @@ OUTER_JSON=""
 if [ -r "$AUTOPILOT_STATE_LIB" ]; then
   # shellcheck disable=SC1090
   source "$AUTOPILOT_STATE_LIB"
-  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     OUTER_STATUS=0
   else
     OUTER_STATUS=$?
@@ -613,7 +623,7 @@ outer_fields() {
 }
 
 outer_reload() {
-  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then OUTER_STATUS=0; else OUTER_STATUS=$?; fi
+  if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then OUTER_STATUS=0; else OUTER_STATUS=$?; fi
 }
 
 outer_is_stop_terminal() {
@@ -738,7 +748,7 @@ outer_finish() {
       # Stage/event generation changed after reconciliation but before the
       # capped mutation. Re-route exactly once from fresh state so the response
       # names the new action and the stale generation remains byte-stable.
-      if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" 2>/dev/null)"; then
+      if OUTER_JSON="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
         OUTER_STATUS=0
         outer_finish true
       else

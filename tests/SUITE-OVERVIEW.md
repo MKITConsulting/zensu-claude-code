@@ -13,25 +13,22 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (136 = 129 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's ten CI group headers sum to 125, and the arithmetic closes at 129
+reconciled to that manifest (140 = 133 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's eleven CI group headers sum to 129, and the arithmetic closes at 133
 only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
 `test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
-(the first and last are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's eleventh header, the local-only group of 7, gives 132 against 136. **A second,
-larger drift sits in this same document and is about CI TOPOLOGY, not group arithmetic:**
-§1's Windows row, §7 and §8 all still describe a five-profile layout, while
-`tests/profiles/windows-ci.v1.json` declares **seven** — `windows-shard-1` through
-`windows-shard-7`, 40 suite entries in total. None of the five profile ids §7 names exists
-in that file any more; only the total, 40, still happens to be right. Nothing
-machine-checks this document, so treat §3's per-group numbers and §7's profile table as
-descriptive rather than authoritative until that sweep happens.
+(the first and fourth are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
+§3's twelfth header, the local-only group of 7, gives 136 against 140. The five-profile
+Windows drift this note used to carry is GONE: §1's Windows row and §7 are re-derived from
+`tests/profiles/windows-ci.v1.json` in this same commit. Nothing machine-checks this
+document, so treat §3's per-group numbers as descriptive rather than authoritative until
+that sweep happens.
 
 ## 1. Totals
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **136** — 129 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **140** — 133 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
@@ -43,8 +40,8 @@ descriptive rather than authoritative until that sweep happens.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 136 structure suites + 5 offline evals | none |
-| `--ci` | 129 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 140 structure suites + 5 offline evals | none |
+| `--ci` | 133 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -194,6 +191,17 @@ contract.
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
 root containing whitespace and an apostrophe, and the Windows CI manifest contract.
 
+### Documentation pins (4)
+`multi-repo-doc-citations` · `multi-repo-doc-consistency` ·
+`multi-repo-doc-contrast` · `multi-repo-doc-structure`
+
+The three hand-written multi-repo design documents under `docs/` have no build step and
+are never rendered in CI, so these four suites are the only thing that grades them:
+`path:line` citations resolve to a substantive line, WCAG contrast holds across all three
+palettes on both pages, the pages carry landmarks, resolved ARIA references and no
+unresolvable `var()` in an SVG presentation attribute, and the three documents agree with
+each other on counts, terminology, navigation and the specification's BLOCKED status.
+
 ### Promptfoo local-only (7 — skipped under `--ci`)
 `claude-promptfoo-wrapper` (~101) · `promptfoo-concurrency` · `promptfoo-context-nudge-reaction` ·
 `promptfoo-reset-review-limit` · `promptfoo-session-upgrade` (~206) ·
@@ -276,7 +284,9 @@ assert, `# ` = comment.
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard:
+of 40 survived the reshard. `tests/structure/windows-ci-contract.test.js` pins exactly
+these seven keys and the 40-entry total, so a shard renamed there and not here is drift
+this table cannot catch on its own:
 
 | Profile | Suites | Members |
 |---|---|---|
@@ -294,7 +304,7 @@ per-profile deadlines; a supervisor alive until the whole process tree is dead;
 disposable home/temp tree; strict env allowlist (no credentials, auth homes,
 interpreter preloads, or live/API modes).
 
-The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 5
+The aggregate check `Deterministic suite (windows-latest)` downloads exactly those 7
 reports and validates SHA / run-attempt consistency, the exact ordered suite inventory,
 and a complete execution-contract digest binding manifest + catalog + runner +
 supervisor + Job-Object helper + summarizer + workflow config + every referenced suite

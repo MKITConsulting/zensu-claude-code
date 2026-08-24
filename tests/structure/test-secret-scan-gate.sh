@@ -1,6 +1,9 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only names
+# hooks/lib/zensu-doctor.sh inside a `{"command": ...}` payload handed to the
+# secret-scan gate, to check that the gate admits that command shape.
 # Structure + functional test for the secret-scan gate (pre-write-secret-scan.sh).
 # Pins: the hook exists, is executable, and is wired in hooks.json under all
 # THREE PreToolUse matcher groups (Edit|Write|MultiEdit, NotebookEdit, Bash —
