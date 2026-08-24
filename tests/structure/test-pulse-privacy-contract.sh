@@ -62,24 +62,53 @@ contains "$PHASE_THREE" "PULSE_START_SHA='<validated full start HEAD SHA remembe
   && contains "$PHASE_THREE" 'CHANGED_FILES_FILE="$(mktemp)"' \
   && contains "$PHASE_THREE" "trap 'rm -f -- \"\$CHANGED_FILES_FILE\"' EXIT" \
   && contains "$PHASE_THREE" 'git diff --name-only -z "$PULSE_START_SHA" -- > "$CHANGED_FILES_FILE"' \
+  && contains "$PHASE_THREE" 'git ls-files --others --exclude-standard -z >> "$CHANGED_FILES_FILE"' \
   && contains "$PHASE_THREE" 'Unable to collect changed files; Pulse session was not ended.' \
+  && contains "$PHASE_THREE" 'Unable to collect untracked files; Pulse session was not ended.' \
   && contains "$PHASE_THREE" 'done < "$CHANGED_FILES_FILE"' \
   && contains "$PHASE_THREE" 'CHANGED_FILE_ARGS+=(--changed-file "$CHANGED_FILE")' \
   && contains "$PHASE_THREE" 'zensu pulse end "$PULSE_SESSION_ID" "${CHANGED_FILE_ARGS[@]}" --minimal-json' \
   && ! contains "$PHASE_THREE" 'HEAD~1' \
   && ! contains "$PHASE_THREE" '--changed-files' \
-  && ok "Pulse end diffs from the remembered start SHA and transports paths losslessly" \
-  || bad "Pulse end must fail closed and use NUL-safe repeated --changed-file argv"
+  && ok "Pulse end diffs from the remembered start SHA, adds untracked files, and transports paths losslessly" \
+  || bad "Pulse end must fail closed on both discoveries and use NUL-safe repeated --changed-file argv"
 
-TRANSPORT_BLOCK="$(awk '
-  /^   ```bash$/ { in_block=1; next }
-  in_block && /^   ```$/ { exit }
-  in_block { sub(/^   /, ""); print }
-' <<<"$PHASE_THREE")"
+# The example is executed, not just grepped. The session id is seeded with a
+# canonical UUID so the id argv slot is asserted exactly: a filename-only
+# assertion still passed when the id was empty, stale or malformed.
+PULSE_UUID='7f1d4c62-0b5e-4a3f-9c21-8d6e5b4a3f21'
+extract_bash_block() {
+  awk -v want="$1" '
+    /^   ```bash$/ { n += 1; if (n == want) { in_block = 1; next } }
+    in_block && /^   ```$/ { exit }
+    in_block { sub(/^   /, ""); print }
+  '
+}
+TRANSPORT_BLOCK="$(extract_bash_block 1 <<<"$PHASE_THREE")"
+SUMMARY_BLOCK="$(extract_bash_block 2 <<<"$PHASE_THREE")"
+TRANSPORT_BLOCK="${TRANSPORT_BLOCK//<canonical UUID remembered in agent context>/$PULSE_UUID}"
+SUMMARY_BLOCK="${SUMMARY_BLOCK//<same canonical UUID remembered in agent context>/$PULSE_UUID}"
+if grep -q '<canonical UUID remembered in agent context>' <<<"$TRANSPORT_BLOCK" \
+  || grep -q '<same canonical UUID remembered in agent context>' <<<"$SUMMARY_BLOCK" \
+  || [ -z "$SUMMARY_BLOCK" ]; then
+  bad "Pulse id placeholders no longer match the seeds this test substitutes"
+else
+  ok "Pulse end and summary examples both carry a substitutable id placeholder"
+fi
 TRANSPORT_TMP="$(mktemp -d)"
-mkdir -p "$TRANSPORT_TMP/bin" "$TRANSPORT_TMP/success" "$TRANSPORT_TMP/failure"
+mkdir -p "$TRANSPORT_TMP/bin" "$TRANSPORT_TMP/success" "$TRANSPORT_TMP/failure" "$TRANSPORT_TMP/untracked-failure"
 cat > "$TRANSPORT_TMP/bin/git" <<'SH'
 #!/bin/bash
+if [ "$1" = ls-files ]; then
+  if [ "${FAIL_GIT_LS_FILES:-0}" = 1 ]; then
+    exit 7
+  fi
+  if [ "$2" = --others ] && [ "$3" = --exclude-standard ] && [ "$4" = -z ]; then
+    printf 'new,untracked.go\0'
+    exit 0
+  fi
+  exit 2
+fi
 if [ "${FAIL_GIT_DIFF:-0}" = 1 ]; then
   exit 7
 fi
@@ -104,25 +133,30 @@ printf '%s\n' "$changed_file" > "$TMP_FILE_DIR/created-path"
 printf '%s\n' "$changed_file"
 SH
 chmod +x "$TRANSPORT_TMP/bin/git" "$TRANSPORT_TMP/bin/zensu" "$TRANSPORT_TMP/bin/mktemp"
-TMP_FILE_DIR="$TRANSPORT_TMP/success" PATH="$TRANSPORT_TMP/bin:$PATH" \
-  ARGV_OUT="$TRANSPORT_TMP/argv" bash -c "$TRANSPORT_BLOCK" >/dev/null 2>&1
-TRANSPORT_ARGS=()
-if [ -f "$TRANSPORT_TMP/argv" ]; then
+read_argv() {
+  TRANSPORT_ARGS=()
+  [ -f "$1" ] || return 0
   while IFS= read -r -d '' TRANSPORT_ARG; do
     TRANSPORT_ARGS+=("$TRANSPORT_ARG")
-  done < "$TRANSPORT_TMP/argv"
-fi
-if [ "${#TRANSPORT_ARGS[@]}" -eq 8 ] \
+  done < "$1"
+}
+TMP_FILE_DIR="$TRANSPORT_TMP/success" PATH="$TRANSPORT_TMP/bin:$PATH" \
+  ARGV_OUT="$TRANSPORT_TMP/argv" bash -c "$TRANSPORT_BLOCK" >/dev/null 2>&1
+read_argv "$TRANSPORT_TMP/argv"
+if [ "${#TRANSPORT_ARGS[@]}" -eq 10 ] \
   && [ "${TRANSPORT_ARGS[0]}" = pulse ] \
   && [ "${TRANSPORT_ARGS[1]}" = end ] \
+  && [ "${TRANSPORT_ARGS[2]}" = "$PULSE_UUID" ] \
   && [ "${TRANSPORT_ARGS[3]}" = --changed-file ] \
   && [ "${TRANSPORT_ARGS[4]}" = 'src/with,comma.go' ] \
   && [ "${TRANSPORT_ARGS[5]}" = --changed-file ] \
   && [ "${TRANSPORT_ARGS[6]}" = ' leading-and-trailing.go ' ] \
-  && [ "${TRANSPORT_ARGS[7]}" = --minimal-json ]; then
-  ok "Pulse end example preserves pathological filenames in real argv"
+  && [ "${TRANSPORT_ARGS[7]}" = --changed-file ] \
+  && [ "${TRANSPORT_ARGS[8]}" = 'new,untracked.go' ] \
+  && [ "${TRANSPORT_ARGS[9]}" = --minimal-json ]; then
+  ok "Pulse end sends the seeded id, both tracked paths and the untracked path in real argv"
 else
-  bad "Pulse end example corrupted pathological filename argv"
+  bad "Pulse end argv lost the seeded id, a pathological filename, or the untracked file"
 fi
 if [ -f "$TRANSPORT_TMP/success/created-path" ] \
   && [ ! -e "$TRANSPORT_TMP/success/changed-files" ]; then
@@ -131,6 +165,18 @@ else
   bad "Pulse end leaked its changed-file temp file after success"
 fi
 rm -f "$TRANSPORT_TMP/argv"
+TMP_FILE_DIR="$TRANSPORT_TMP/success" PATH="$TRANSPORT_TMP/bin:$PATH" \
+  ARGV_OUT="$TRANSPORT_TMP/summary-argv" bash -c "$SUMMARY_BLOCK" >/dev/null 2>&1
+read_argv "$TRANSPORT_TMP/summary-argv"
+if [ "${#TRANSPORT_ARGS[@]}" -eq 3 ] \
+  && [ "${TRANSPORT_ARGS[0]}" = pulse ] \
+  && [ "${TRANSPORT_ARGS[1]}" = summary ] \
+  && [ "${TRANSPORT_ARGS[2]}" = "$PULSE_UUID" ]; then
+  ok "Pulse summary reassigns the same seeded id it was ended with"
+else
+  bad "Pulse summary id does not match the id Pulse end transported"
+fi
+rm -f "$TRANSPORT_TMP/summary-argv"
 if TMP_FILE_DIR="$TRANSPORT_TMP/failure" PATH="$TRANSPORT_TMP/bin:$PATH" \
   ARGV_OUT="$TRANSPORT_TMP/argv" FAIL_GIT_DIFF=1 \
   bash -c "$TRANSPORT_BLOCK" >/dev/null 2>&1; then
@@ -145,6 +191,16 @@ if [ -f "$TRANSPORT_TMP/failure/created-path" ] \
   ok "Pulse end removes its changed-file temp file after failure"
 else
   bad "Pulse end leaked its changed-file temp file after failure"
+fi
+rm -f "$TRANSPORT_TMP/argv"
+if TMP_FILE_DIR="$TRANSPORT_TMP/untracked-failure" PATH="$TRANSPORT_TMP/bin:$PATH" \
+  ARGV_OUT="$TRANSPORT_TMP/argv" FAIL_GIT_LS_FILES=1 \
+  bash -c "$TRANSPORT_BLOCK" >/dev/null 2>&1; then
+  bad "Pulse end example ignored an untracked-file discovery failure"
+elif [ -e "$TRANSPORT_TMP/argv" ]; then
+  bad "Pulse end ran after untracked-file discovery failed"
+else
+  ok "Pulse end aborts before the CLI when untracked-file discovery fails"
 fi
 rm -rf "$TRANSPORT_TMP"
 

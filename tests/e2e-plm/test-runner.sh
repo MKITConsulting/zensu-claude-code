@@ -399,7 +399,7 @@ server-side.
 CAP
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If the response is tracking_disabled, it
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
 succeeds without a session and does not run pulse end or pulse summary.
 CAP
   cat > "$tmp/results/status-transition-20260101-000000.captured.txt" <<'CAP'
@@ -465,7 +465,7 @@ test_pulse_pattern_requires_both_disabled_followup_skips() {
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If the response is tracking_disabled, it
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
 succeeds without a session and does not run pulse summary.
 CAP
   out_missing_end="$tmp/out-missing-end.txt"
@@ -474,7 +474,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If the response is tracking_disabled, it
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
 succeeds without a session and does not run pulse end.
 CAP
   out_missing_summary="$tmp/out-missing-summary.txt"
@@ -483,7 +483,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse end.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse end.
 CAP
   out_runs_end="$tmp/out-runs-end.txt"
   FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
@@ -491,7 +491,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse summary.
 CAP
   out_runs_summary="$tmp/out-runs-summary.txt"
   FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
@@ -499,7 +499,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
 Then it runs pulse end.
 CAP
   out_runs_end_after_sentence="$tmp/out-runs-end-after-sentence.txt"
@@ -508,7 +508,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
 Then it runs pulse summary.
 CAP
   out_runs_summary_after_sentence="$tmp/out-runs-summary-after-sentence.txt"
@@ -517,7 +517,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
 I then run pulse end.
 CAP
   out_i_then_runs_end="$tmp/out-i-then-runs-end.txt"
@@ -526,7 +526,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
 Then I will run zensu pulse summary.
 CAP
   out_i_will_run_summary="$tmp/out-i-will-run-summary.txt"
@@ -535,7 +535,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, no session ID is returned and it does not run pulse end or pulse summary, but I then run pulse end.
+with --head-sha, --branch, and --project. If tracking_disabled, no session ID is returned and it does not run pulse end or pulse summary, but I then run pulse end.
 CAP
   out_no_id_then_runs_end="$tmp/out-no-id-then-runs-end.txt"
   FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
@@ -543,7 +543,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it does not run pulse end or pulse summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
 When no session ID is returned, I then run pulse end.
 CAP
   out_when_no_id_runs_end="$tmp/out-when-no-id-runs-end.txt"
@@ -552,7 +552,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it skips pulse end and summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it skips pulse end and summary.
 With a real session ID, it later runs pulse end and then pulse summary.
 CAP
   out_enabled_path="$tmp/out-enabled-path.txt"
@@ -561,7 +561,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
-with the current git HEAD SHA and branch. If tracking_disabled, it skips pulse end and summary.
+with --head-sha, --branch, and --project. If tracking_disabled, it skips pulse end and summary.
 Then it runs pulse end and pulse summary only when a real session ID was returned.
 CAP
   out_enabled_qualifier_after_command="$tmp/out-enabled-qualifier-after-command.txt"
@@ -570,7 +570,7 @@ CAP
 
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
 I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start
---minimal-json with the current git HEAD SHA and branch. If tracking_disabled, it does not run
+--minimal-json with --head-sha, --branch, and --project. If tracking_disabled, it does not run
 pulse end and does not run
 pulse summary. With a real session ID, it later runs pulse end and pulse summary.
 CAP
@@ -604,29 +604,37 @@ test_pulse_semantic_scope_transitions_and_modal_skips() {
   tmp="$(mktemp -d)"
 
   local invalid_captures=(
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. When no session ID is returned, I then run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a real session ID is unavailable, I run pulse end.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a canonical session ID is absent, I run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. If an empty session ID is returned, I run pulse end.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. If proceeding without a session ID, I run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. No session ID was returned, so I then run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not save a real session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not invent a canonical session ID and I do not run pulse end or pulse summary. Then I run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, the response does not return a valid session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. The session ID is invalid, so I run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. If tracking_disabled, I run pulse end, but with a real session ID I run pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. The next command block is zensu pulse end "$ID".'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not skip pulse end or pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then I perform pulse end.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. I do not save a session ID and run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. When no session ID is returned, I then run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a real session ID is unavailable, I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a canonical session ID is absent, I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If an empty session ID is returned, I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. If proceeding without a session ID, I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. No session ID was returned, so I then run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not save a real session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not invent a canonical session ID and I do not run pulse end or pulse summary. Then I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, the response does not return a valid session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. The session ID is invalid, so I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If tracking_disabled, I run pulse end, but with a real session ID I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The next command block is zensu pulse end "$ID".'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not skip pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then I perform pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. I do not save a session ID and run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nImmediately after start I run pulse end and pulse summary. If tracking_disabled, I do not run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nI skip pulse end and pulse summary only when the status is not tracking_disabled.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The session ID is set to an empty string, so I run pulse end and pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The session ID was set to an invalid value, so I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. I am not skipping pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then I end the Pulse session and request its summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json and uses git.\nIf tracking_disabled, I do not run pulse end or pulse summary.'
   )
   local valid_captures=(
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then it runs pulse end and pulse summary only if the session ID is non-empty.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I will not run pulse end or pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I won\x27t run pulse end or pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not run pulse end or pulse summary. Otherwise, a valid session ID is returned. I then run pulse end and pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not call pulse end or pulse summary.'
-    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with the git HEAD SHA.\nIf tracking_disabled, I do not save a session ID and skip pulse end and skip pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then it runs pulse end and pulse summary only if the session ID is non-empty.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I will not run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I won\x27t run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Otherwise, a valid session ID is returned. I then run pulse end and pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not call pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not save a session ID and skip pulse end and skip pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, neither pulse end nor pulse summary is run.'
   )
 
   for cap in "${invalid_captures[@]}"; do
@@ -707,7 +715,7 @@ case "$prompt_arg" in
     ;;
   *Pulse-Session*|*"Pulse"*)
     echo "I will delegate to the /zensu:pulse Pulse skill and run zensu pulse start --minimal-json"
-    echo "with the current git HEAD SHA and branch. If status is tracking_disabled, I succeed"
+    echo "with --head-sha, --branch, and --project. If status is tracking_disabled, I succeed"
     echo "without a session and do not run pulse end or pulse summary."
     ;;
   *"ZEN-1"*|*released*)

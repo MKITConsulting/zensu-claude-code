@@ -47,14 +47,39 @@ check() {
 # Narrow branch-aware assertion for the Pulse fixture. Regex-only probes cannot
 # distinguish an unconditional walk-back from a command explicitly scoped to a
 # real session ID, especially when the qualifier follows the command.
+#
+# The scan starts at the `pulse start` command and NEVER at the first
+# `tracking_disabled` token. Text ahead of the opt-out evaluation is exactly
+# where an unconditional `pulse end` hides, so slicing it away certified a
+# request issued before the server had answered. The initial state is therefore
+# UNPROVEN: an end/summary is safe only behind an explicit suppression or behind
+# positive, non-empty session-ID evidence.
+#
+# A negated discriminator ("if the status is not tracking_disabled") describes
+# the ENABLED branch and never stands in for the opt-out branch.
 pulse_disabled_followup_safe() {
   printf '%s' "$1" | node -e '
     let input = "";
     process.stdin.on("data", chunk => input += chunk);
     process.stdin.on("end", () => {
       const text = input.toLowerCase().replace(/\s+/g, " ").trim();
-      const disabledAt = text.indexOf("tracking_disabled");
-      if (disabledAt < 0) process.exit(1);
+
+      const startAt = text.search(/\b(?:zensu\s+)?pulse\s+start\b/);
+      const scope = startAt >= 0 ? text.slice(startAt) : text;
+
+      const NEGATED_STATUS_TAIL = /\b(?:not|never|isn\x27t|isn\u2019t|aren\x27t|aren\u2019t|wasn\x27t|wasn\u2019t|weren\x27t|weren\u2019t|other\s+than|anything\s+but|unless|except(?:\s+for)?|besides)\s+(?:(?:the\s+)?(?:status|response|result|value)\s+(?:is|was)\s+)?(?:equal\s+to\s+)?[\x60"\x27]?$/;
+      const affirmativeDisabled = clause => {
+        const probe = /tracking_disabled/g;
+        let hit;
+        while ((hit = probe.exec(clause)) !== null) {
+          if (!NEGATED_STATUS_TAIL.test(clause.slice(0, hit.index))) return true;
+        }
+        return false;
+      };
+      if (!affirmativeDisabled(scope)) process.exit(1);
+
+      const NEGATOR_TAIL = /\b(?:(?:do(?:es)?|did|will|would|should|must|can|am|is|are|was|were|be|been|being)\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|didn\x27t|didn\u2019t|won\x27t|won\u2019t|wouldn\x27t|wouldn\u2019t|shouldn\x27t|shouldn\u2019t|mustn\x27t|mustn\u2019t|can\x27t|can\u2019t|cannot|isn\x27t|isn\u2019t|aren\x27t|aren\u2019t|wasn\x27t|wasn\u2019t|weren\x27t|weren\u2019t|ain\x27t|never|no\s+longer|rather\s+than|instead\s+of|stop(?:s|ped|ping)?)\s*$/;
+      const DIRECT_NEGATION = /\b(?:(?:do(?:es)?|did|will|would|should|must|can|am|is|are|was|were)\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|didn\x27t|didn\u2019t|won\x27t|won\u2019t|wouldn\x27t|wouldn\u2019t|shouldn\x27t|shouldn\u2019t|mustn\x27t|mustn\u2019t|can\x27t|can\u2019t|cannot|isn\x27t|isn\u2019t|aren\x27t|aren\u2019t|wasn\x27t|wasn\u2019t|weren\x27t|weren\u2019t|never|neither|nor|no\s+longer)\s+(?:(?:try|attempt|intend|plan|proceed|need|want)(?:s|ed|ing)?\s+to\s+)?$/;
 
       const firstMatchIndex = (value, expressions) => {
         const hits = expressions.map(expression => value.search(expression)).filter(index => index >= 0);
@@ -62,8 +87,9 @@ pulse_disabled_followup_safe() {
       };
       const bareQualifiedId = /\b(?:real|valid|canonical|non[- ]?empty)\s+(?:session\s+)?id\b/;
       const positiveIdState = [
-        /\b(?:session\s+)?id\s+(?:was\s+|is\s+)?(?:returned|received|created|available|present|real|valid|canonical|non[- ]?empty|set)\b/,
+        /\b(?:session\s+)?id\s+(?:was\s+|is\s+)?(?:returned|received|created|available|present|real|valid|canonical|non[- ]?empty)\b/,
         /\b(?:session\s+)?id\s+exists\b/,
+        /\b(?:session\s+)?id\s+(?:was\s+|is\s+)?(?:set|assigned|initialized)\s+to\s+(?:a\s+|an\s+|the\s+)?(?:real|valid|canonical|actual|non[- ]?empty|uuid)\b/,
         /\bstart\s+(?:returns?|returned|creates?|created)\s+(?:a\s+)?(?:real\s+|valid\s+|canonical\s+)?(?:session\s+)?id\b/
       ];
       const positiveIdEvidenceAt = clause => {
@@ -74,6 +100,7 @@ pulse_disabled_followup_safe() {
         if (bareAt >= 0 && /\b(?:with|when|if|for)\b/.test(clause.slice(0, bareAt))) hits.push(bareAt);
         return hits.length ? Math.min(...hits) : -1;
       };
+      const EMPTY_VALUE = /(?:empty|blank|null|nil|none|undefined|unset|invalid|malformed|placeholder|dummy|fake|zero[- ]?length|non[- ]?canonical|""|\x27\x27)/;
       const hasNegativeIdEvidence = clause =>
         /\b(?:no|without)(?:\s+(?:a|an|the))?\s+(?:real\s+|valid\s+|canonical\s+|non[- ]?empty\s+|invalid\s+|malformed\s+|non[- ]?canonical\s+)?(?:session\s+)?id\b/.test(clause)
         || /\b(?:unavailable|absent|missing|empty|unset|invalid|malformed|non[- ]?canonical)\s+(?:session\s+)?id\b/.test(clause)
@@ -81,6 +108,8 @@ pulse_disabled_followup_safe() {
         || /\b(?:session\s+)?id\s+(?:was\s+|is\s+)?(?:not|never)\s+(?:returned|received|created|available|present|real|valid|canonical|non[- ]?empty|set)\b/.test(clause)
         || /\b(?:session\s+)?id\s+(?:isn\x27t|isn\u2019t|wasn\x27t|wasn\u2019t)\s+(?:returned|received|created|available|present|real|valid|canonical|non[- ]?empty|set)\b/.test(clause)
         || /\b(?:session\s+)?id\s+(?:does\s+not|doesn\x27t|doesn\u2019t)\s+exist\b/.test(clause)
+        || new RegExp("\\b(?:session\\s+)?id\\s+(?:was\\s+|is\\s+|gets\\s+|got\\s+)?(?:set|assigned|initialized|left|defaulted)\\s+to\\s+(?:an?\\s+|the\\s+)?" + EMPTY_VALUE.source + "\\b").test(clause)
+        || new RegExp("\\b(?:set|sets|assign|assigns|assigned|initialize|initializes|initialized)\\s+(?:the\\s+)?(?:session\\s+)?id\\s+to\\s+(?:an?\\s+|the\\s+)?" + EMPTY_VALUE.source + "\\b").test(clause)
         || /\b(?:do(?:es)?\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|did\s+not|didn\x27t|didn\u2019t|will\s+not|won\x27t|won\u2019t|must\s+not|should\s+not|cannot|never)\s+(?:return(?:s|ed|ing)?|creat(?:e|es|ed|ing)|provid(?:e|es|ed|ing)|contain(?:s|ed|ing)?|sav(?:e|es|ed|ing)|stor(?:e|es|ed|ing)|retain(?:s|ed|ing)?|record(?:s|ed|ing)?|persist(?:s|ed|ing)?|invent(?:s|ed|ing)?|fabricat(?:e|es|ed|ing)|yield(?:s|ed|ing)?)\s+(?:a\s+|an\s+|the\s+)?(?:real\s+|valid\s+|canonical\s+|non[- ]?empty\s+)?(?:session\s+)?id\b/.test(clause);
       const hasDisabledIdQualifier = clause => hasNegativeIdEvidence(clause);
 
@@ -90,34 +119,38 @@ pulse_disabled_followup_safe() {
         const skip = before.match(/\b(?:skip(?:s|ped|ping)?|omit(?:s|ted|ting)?|avoid(?:s|ed|ing)?|suppress(?:es|ed|ing)?)\s+(?:the\s+)?$/);
         if (skip) {
           const lead = before.slice(0, skip.index);
-          const negatesSkip = /\b(?:(?:do(?:es)?|did|will|would|should|must|can)\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|didn\x27t|didn\u2019t|won\x27t|won\u2019t|wouldn\x27t|wouldn\u2019t|shouldn\x27t|shouldn\u2019t|mustn\x27t|mustn\u2019t|can\x27t|can\u2019t|cannot|never)\s*$/.test(lead);
-          return !negatesSkip;
+          return !NEGATOR_TAIL.test(lead);
         }
         const without = before.match(/\bwithout(?:\s+(?:running|calling|executing|invoking|using|issuing|performing))?\s+(?:the\s+)?$/);
         if (without) {
           const lead = before.slice(0, without.index);
-          if (!/\b(?:not|never)\s*$|\b(?:isn\x27t|isn\u2019t|wasn\x27t|wasn\u2019t)\s*$/.test(lead)) return true;
+          if (!NEGATOR_TAIL.test(lead)) return true;
         }
-        const negatedAction = /\b(?:(?:do(?:es)?|did|will|would|should|must|can)\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|didn\x27t|didn\u2019t|won\x27t|won\u2019t|wouldn\x27t|wouldn\u2019t|shouldn\x27t|shouldn\u2019t|mustn\x27t|mustn\u2019t|can\x27t|can\u2019t|cannot|never|not)\s+(?:(?:try|attempt|intend|plan|proceed)(?:s|ed|ing)?\s+to\s+)?(?:run(?:s|ning)?|call(?:s|ed|ing)?|execut(?:e|es|ed|ing)|invok(?:e|es|ed|ing)|us(?:e|es|ed|ing)|issu(?:e|es|ed|ing)|perform(?:s|ed|ing)?|trigger(?:s|ed|ing)?|send(?:s|ing)?|request(?:s|ed|ing)?)\s+(?:the\s+)?(?:\x60?zensu\s+)?$/.test(before);
+        if (DIRECT_NEGATION.test(before)) return true;
+        const negatedAction = /\b(?:(?:do(?:es)?|did|will|would|should|must|can|am|is|are|was|were)\s+not|don\x27t|don\u2019t|doesn\x27t|doesn\u2019t|didn\x27t|didn\u2019t|won\x27t|won\u2019t|wouldn\x27t|wouldn\u2019t|shouldn\x27t|shouldn\u2019t|mustn\x27t|mustn\u2019t|can\x27t|can\u2019t|cannot|isn\x27t|isn\u2019t|aren\x27t|aren\u2019t|wasn\x27t|wasn\u2019t|weren\x27t|weren\u2019t|never|neither|nor|not)\s+(?:(?:try|attempt|intend|plan|proceed|need|want)(?:s|ed|ing)?\s+to\s+)?(?:run(?:s|ning)?|call(?:s|ed|ing)?|execut(?:e|es|ed|ing)|invok(?:e|es|ed|ing)|us(?:e|es|ed|ing)|issu(?:e|es|ed|ing)|perform(?:s|ed|ing)?|trigger(?:s|ed|ing)?|send(?:s|ing)?|request(?:s|ed|ing)?)\s+(?:the\s+)?(?:\x60?zensu\s+)?$/.test(before);
         if (negatedAction) return true;
         return /^\s+(?:is|are|was|were|will\s+be|must\s+be|should\s+be)\s+(?:skipped|omitted|avoided|suppressed|not\s+(?:run|called|executed|invoked|used|issued|performed))\b/.test(after.slice(0, 120));
       };
 
-      const segments = text.slice(disabledAt)
+      const COMMAND_SOURCE = "\\b(?:(?:zensu\\s+)?pulse\\s+(?:end|summary)"
+        + "|(?:end|ends|ended|ending|clos(?:e|es|ed|ing)|finish(?:es|ed|ing)?|terminat(?:e|es|ed|ing))\\s+(?:the\\s+|its\\s+|this\\s+|that\\s+|my\\s+)?(?:pulse\\s+)?session"
+        + "|(?:request|requests|requested|requesting|fetch|fetches|fetched|fetching|retrieve|retrieves|retrieved|retrieving|obtain|obtains|obtained|obtaining|produce|produces|produced|producing|generate|generates|generated|generating|print|prints|printed|printing|display|displays|displayed|displaying|show|shows|showed|showing)\\s+(?:its|the|a|an|that|my)\\s+(?:pulse\\s+|session\\s+)?summary)\\b";
+
+      const segments = scope
         .split(/[.!?;]+|\s*,\s*|\bbut\b|\bhowever\b|\botherwise\b|\bthen\b|\band\s+(?=(?:i|it|we|the\s+agent|with|when|if|for)\b)/)
         .map(value => value.trim()).filter(Boolean);
       let enabledScope = false;
       for (const segment of segments) {
-        const disabledStatus = segment.includes("tracking_disabled");
+        const disabledStatus = affirmativeDisabled(segment);
         const disabledId = hasDisabledIdQualifier(segment);
         if (disabledStatus || disabledId) enabledScope = false;
         const positiveAt = disabledStatus || disabledId ? -1 : positiveIdEvidenceAt(segment);
 
-        const command = /\b(?:zensu\s+)?pulse\s+(?:end|summary)\b/g;
+        const command = new RegExp(COMMAND_SOURCE, "g");
         let match, previousCommandEnd = -1, previousCommandSuppressed = false;
         while ((match = command.exec(segment)) !== null) {
           const coordinatedSuppression = previousCommandSuppressed
-            && /^\s*(?:and|or)\s*$/.test(segment.slice(previousCommandEnd, match.index));
+            && /^\s*(?:and|or|nor)\s*$/.test(segment.slice(previousCommandEnd, match.index));
           const suppressed = coordinatedSuppression || commandIsSuppressed(segment, match.index, command.lastIndex);
           previousCommandEnd = command.lastIndex;
           previousCommandSuppressed = suppressed;

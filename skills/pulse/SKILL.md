@@ -79,7 +79,7 @@ This phase runs only when Phase 1 stored a non-empty session ID and the full sta
 When wrapping up your coding session:
 
 1. Recover the validated UUID and full start HEAD SHA from the agent's working context; do not rely on variables from an earlier shell call.
-2. Capture all files changed since the remembered start SHA with NUL delimiters. Check Git's exit status before invoking the CLI: if discovery fails, abort without ending the session. Pass each path with its own quoted `--changed-file` argument so commas and surrounding spaces remain part of the filename. The backend deliberately rejects control characters such as newlines:
+2. Capture all files changed since the remembered start SHA with NUL delimiters. `git diff` reports tracked files only, so a file created during the session is invisible to it — discover untracked, non-ignored files separately and append them, or Pulse attributes no work at all to a session that only added new sources or tests. Check Git's exit status after **each** discovery before invoking the CLI: if either fails, abort without ending the session. Pass each path with its own quoted `--changed-file` argument so commas and surrounding spaces remain part of the filename. The backend deliberately rejects control characters such as newlines:
 
    ```bash
    PULSE_SESSION_ID='<canonical UUID remembered in agent context>'
@@ -90,12 +90,18 @@ When wrapping up your coding session:
      printf '%s\n' 'Unable to collect changed files; Pulse session was not ended.' >&2
      exit 1
    fi
+   if ! git ls-files --others --exclude-standard -z >> "$CHANGED_FILES_FILE"; then
+     printf '%s\n' 'Unable to collect untracked files; Pulse session was not ended.' >&2
+     exit 1
+   fi
    CHANGED_FILE_ARGS=()
    while IFS= read -r -d '' CHANGED_FILE; do
      CHANGED_FILE_ARGS+=(--changed-file "$CHANGED_FILE")
    done < "$CHANGED_FILES_FILE"
    zensu pulse end "$PULSE_SESSION_ID" "${CHANGED_FILE_ARGS[@]}" --minimal-json
    ```
+
+   `--exclude-standard` honors `.gitignore`, so build output and local scratch files stay out. The untracked half carries no since-start bound: a file that was already untracked when the session started is reported as touched by it.
 
 3. Inspect the JSON response. If `status` is `tracking_disabled`, report the successful privacy no-op and stop; do not run `pulse summary`.
 4. Zensu automatically maps changed files -> features via `feature_source_files`
