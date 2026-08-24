@@ -782,6 +782,22 @@ CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR/hooks" drive '{"hook_event_name":"UserPromptSubm
   && check "B11a a sibling-directory CLAUDE_PLUGIN_ROOT is refused too" PASS \
   || check "B11a sibling-directory root not refused (exit=$RC bytes=${#OUT})" FAIL
 
+# The guard has THREE exits and B11/B11a reach only one of them. Both pass a path
+# that RESOLVES, so both land on the string comparison; the `cd` failure arm one
+# line above it — a root that is absent, or a regular file rather than a directory
+# — was unexercised on every carrier. It emits the identical message and status, so
+# the two checks above read as covering the guard whole while covering one third of
+# it.
+CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR/zensu-no-such-root" drive '{"hook_event_name":"UserPromptSubmit"}'
+[ "$RC" -eq 2 ] && [ -z "$OUT" ] \
+  && check "B11b an absent CLAUDE_PLUGIN_ROOT refuses with exit 2" PASS \
+  || check "B11b absent root not refused (exit=$RC bytes=${#OUT})" FAIL
+
+CLAUDE_PLUGIN_ROOT="$HOOK" drive '{"hook_event_name":"UserPromptSubmit"}'
+[ "$RC" -eq 2 ] && [ -z "$OUT" ] \
+  && check "B11c a CLAUDE_PLUGIN_ROOT naming a regular file refuses with exit 2" PASS \
+  || check "B11c regular-file root not refused (exit=$RC bytes=${#OUT})" FAIL
+
 # ── B12: the hook carries no private copy of the rule ───────────────────────
 # A copy pasted into the hook would keep every emission check green while the
 # canonical file silently stopped being the source of truth.

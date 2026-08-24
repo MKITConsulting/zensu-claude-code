@@ -458,16 +458,45 @@ fi
 # An absent or SYMLINKED canonical file must also fail silent: whatever a link
 # resolves to would otherwise be injected verbatim as a non-negotiable directive
 # into every session and every subagent.
+# Driven, not grepped. The fixture directory used to be built and then thrown away
+# while the check asserted the pre-check's SOURCE TEXT — so deleting the guard would
+# have been caught, but a guard that stopped taking effect would not. The control
+# emits from the SAME tree with a regular file in place, so a fixture that could
+# never emit cannot be mistaken for an enforced refusal.
+LINK_BASE="$(basename "$HOOK")"
 LINK_DIR="$(mktemp -d -t zensu-evidence-link-XXXXXX)" || LINK_DIR=""
-if [ -n "$LINK_DIR" ]; then
-  if grep -qF '[ ! -L "$ZENSU_EVIDENCE_RULE_FILE" ]' "$HOOK"; then
-    check "H10b canonical-file load refuses a symlink" PASS
+if [ -n "$LINK_DIR" ] \
+   && mkdir -p "$LINK_DIR/hooks/lib" "$LINK_DIR/docs" \
+   && cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$LINK_DIR/hooks/lib/rule-block-v1.js" \
+   && cp "$PLUGIN_DIR/hooks/lib/zensu-host-path.sh" "$LINK_DIR/hooks/lib/zensu-host-path.sh" \
+   && cp "$HOOK" "$LINK_DIR/hooks/$LINK_BASE" \
+   && cp "$RULES" "$LINK_DIR/real-rules.md" \
+   && cp "$RULES" "$LINK_DIR/docs/evidence-discipline.md"; then
+  LINK_PAYLOAD='{"hook_event_name":"SessionStart","source":"startup"}'
+  LINK_OK="$(printf '%s' "$LINK_PAYLOAD" \
+    | CLAUDE_PLUGIN_ROOT="$LINK_DIR" bash "$LINK_DIR/hooks/$LINK_BASE" 2>/dev/null | wc -c | tr -d ' ')"
+  rm -f "$LINK_DIR/docs/evidence-discipline.md"
+  ln -s "$LINK_DIR/real-rules.md" "$LINK_DIR/docs/evidence-discipline.md" 2>/dev/null
+  # `ln -s` exiting 0 is not evidence of a symlink: Git Bash satisfies it with a copy
+  # that native Node does not follow, and the two files then genuinely differ, so a
+  # refusal there would be correct for the wrong reason. Confirm the link first, and
+  # fall back to the source pin where the host cannot make one.
+  if [ -L "$LINK_DIR/docs/evidence-discipline.md" ]; then
+    LINK_OUT="$(printf '%s' "$LINK_PAYLOAD" \
+      | CLAUDE_PLUGIN_ROOT="$LINK_DIR" bash "$LINK_DIR/hooks/$LINK_BASE" 2>/dev/null)"; LINK_RC=$?
+    if [ "$LINK_OK" -gt 0 ] && [ "$LINK_RC" = "0" ] && [ -z "$LINK_OUT" ]; then
+      check "H10b a symlinked canonical file exits 0 with no output (control emitted ${LINK_OK}B)" PASS
+    else
+      check "H10b symlinked canonical file not refused (control=${LINK_OK}B rc=$LINK_RC len=${#LINK_OUT})" FAIL
+    fi
+  elif grep -qF '[ ! -L "$ZENSU_EVIDENCE_RULE_FILE" ]' "$HOOK"; then
+    check "H10b canonical-file load refuses a symlink (source pin — this host's ln -s made no link)" PASS
   else
     check "H10b canonical-file load follows symlinks — a link would be injected verbatim" FAIL
   fi
   rm -rf "$LINK_DIR"; LINK_DIR=""
 else
-  check "H10b could not create a fixture dir" FAIL
+  check "H10b could not build the symlink fixture tree" FAIL
 fi
 
 # The size ceiling is a NEW refusal path on an UNSWITCHABLE rule: an oversized canonical
