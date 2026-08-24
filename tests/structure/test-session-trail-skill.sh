@@ -703,11 +703,18 @@ printf '%s\n' "$FLOW3" | grep -qF 'Auto-Mode classifier' || ANCHOR_MISS="$ANCHOR
 # `claude --resume` and `handoff brief` already occur in step 2, so needling them
 # alone cannot detect deletion of the routing sentence this change added.
 printf '%s\n' "$FLOW3" | grep -qF 'Routes that do work' || ANCHOR_MISS="$ANCHOR_MISS [routing-sentence-missing]"
-# The SPELLING the script actually prints. `cd <wt>` was wrong: `printResume`'s
-# operand is the recorded cwd, and when the session started in a subdirectory the
-# two differ — a distinction flow 3 now has to make, because anchoring inside the
-# worktree still cannot commit at its root.
+# The SPELLING the script actually prints.
 printf '%s\n' "$FLOW3" | grep -qF 'cd -- <cwd> && claude --resume <id>' || ANCHOR_MISS="$ANCHOR_MISS [terminal-route-missing]"
+# The CORRECTED claim, and it is the opposite of what an earlier revision of this
+# pin held in place. A `--resume` re-anchors nothing: `FRESH_SESSION_SOURCES` is
+# {startup, clear, fork}, so a resume reuses the target session's own immutable
+# record and the cd operand cannot change the anchor. Needling `WORKTREE` alone
+# was satisfied by the old, wrong sentence that told the reader to cd there for a
+# resume, so CI held incorrect routing advice in place. Pin the mechanism by name
+# and pin the fresh-source case that the cd advice actually belongs to.
+printf '%s\n' "$FLOW3" | grep -qF 're-anchors nothing' || ANCHOR_MISS="$ANCHOR_MISS [resume-reanchor-claim-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'FRESH_SESSION_SOURCES' || ANCHOR_MISS="$ANCHOR_MISS [fresh-source-mechanism-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF -- '--fork-session' || ANCHOR_MISS="$ANCHOR_MISS [fork-case-not-named]"
 printf '%s\n' "$FLOW3" | grep -qF 'WORKTREE' || ANCHOR_MISS="$ANCHOR_MISS [cwd-vs-worktree-distinction-missing]"
 printf '%s\n' "$FLOW3" | grep -qF 'handoff brief (flow 4)' || ANCHOR_MISS="$ANCHOR_MISS [desktop-route-missing]"
 # The escape literal belongs in docs/gates.md only — a shipped prefix teaches the
@@ -805,13 +812,23 @@ fi
 # renderer's `allowed` to `writable` or `denied here` to `blocked here` left two of
 # three arms green against a paragraph that documents neither.
 #
-# The probes are those two real words. Each must be present in flow 3 (or the
-# control is inert and says so) and must NOT satisfy the arm, because neither sits
-# on the line that carries the label.
+# The probe must be a word flow 3 REALLY uses, or the control is inert — but it
+# must not be a word the PIN then requires flow 3 to keep. Requiring the literals
+# `writable` and `blocked` made incidental prose contractual: the natural remedy
+# for the hazard this control documents is to reword flow 3 so it stops using them,
+# and that remedy failed the test. So the probe set is DISCOVERED from flow 3 at
+# run time out of a candidate list, and only the words actually present are used.
+# An empty intersection is still a failure — a control with nothing to control
+# proves nothing — but WHICH word carries it is flow 3's business, not the pin's.
 T27B_BAD=""
-for probe in writable blocked; do
-  printf '%s\n' "$FLOW3" | grep -qF "$probe" \
-    || T27B_BAD="$T27B_BAD [$probe-absent-from-flow3-control-inert]"
+T27B_PROBES=""
+for candidate in writable blocked writeable refused permitted allowed-here denied-there; do
+  printf '%s\n' "$FLOW3" | grep -qF "$candidate" && T27B_PROBES="$T27B_PROBES $candidate"
+done
+if [ -z "$T27B_PROBES" ]; then
+  T27B_BAD="$T27B_BAD [no-candidate-word-present-in-flow3-control-inert]"
+fi
+for probe in $T27B_PROBES; do
   writes_verb_documented "$probe" \
     && T27B_BAD="$T27B_BAD [$probe-accepted-as-a-documented-verdict-word]"
 done
@@ -953,10 +970,34 @@ printf '%s\n' "$TRAIL_CODE" | grep -A3 '^function writeAnchorCaution(' | grep -q
 # line-BUILDER that returns strings for someone else to emit is invisible to them.
 # `writesLines` is exactly that shape, and its emitting line carries no `${...}`
 # for the extraction to reach. Same bespoke treatment `writeAnchorCaution` gets.
+WRITES_LINES_BODY="$(printf '%s\n' "$TRAIL_CODE" | sed -n '/^function writesLines(/,/^}/p')"
+[ -n "$WRITES_LINES_BODY" ] || CAUTION_MISS="$CAUTION_MISS [writesLines-body-not-extracted]"
 for root in targetRoot callerRoot; do
-  printf '%s\n' "$TRAIL_CODE" | grep -A24 '^function writesLines(' | grep -qF "flatPath(w.${root})" \
+  printf '%s\n' "$WRITES_LINES_BODY" | grep -qF "flatPath(w.${root})" \
     || CAUTION_MISS="$CAUTION_MISS [writesLines-${root}-unbounded]"
 done
+# ABSENCE, not presence. The loop above asserts two KNOWN names are bounded; a
+# third interpolation added later is bounded by nothing and seen by nothing —
+# neither raw-carrier scan reaches this function, and `grep -A24` silently stopped
+# at a fixed offset the function has already outgrown. Scan the whole extracted
+# body for any `${...}` carrying a value and require each to route through a
+# bound. `target`, `why` and `head` are locals this function computed from values
+# already bounded above, so they are named as the accepted exceptions rather than
+# left to a wildcard.
+# The wrapper alternation is spelled HERE and not taken from `$PRINT_WRAPPED`:
+# that variable is defined ~120 lines below this block, so an unquoted reference
+# expanded to the empty string and `grep -Ev ""` matched every line — the scan
+# filtered out everything it was meant to inspect and reported zero unbounded
+# carriers against a body that had one. It is asserted non-empty for the same
+# reason, and the assertion is what makes a future rename fail loudly.
+WRITES_LINES_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|sessionTag\(|livePid\('
+[ -n "$WRITES_LINES_WRAPPED" ] || CAUTION_MISS="$CAUTION_MISS [writesLines-wrapper-pattern-empty]"
+WRITES_LINES_RAW="$(printf '%s\n' "$WRITES_LINES_BODY" | grep -oE '\$\{[^{}]*\}' \
+  | grep -Ev "$WRITES_LINES_WRAPPED" \
+  | grep -Ev '^\$\{(target|why|head|queueNote|rejectedChannel)\}$' || true)"
+WRITES_LINES_RAW_N="$(printf '%s\n' "$WRITES_LINES_RAW" | grep -c . || true)"
+[ "${WRITES_LINES_RAW_N:-0}" = "0" ] \
+  || CAUTION_MISS="$CAUTION_MISS [writesLines-unbounded-carriers=$WRITES_LINES_RAW_N: $(printf '%s\n' "$WRITES_LINES_RAW" | head -2 | tr '\n' ' ')]"
 # And the shared bound is real: `briefPath` must clip, neutralize backticks, and
 # strip the control class, or routing through it buys nothing. Pinned at the
 # definition because every brief path carrier now depends on it.
@@ -995,11 +1036,21 @@ printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF 'replac
 # exists, that EVERY one of them references it, and that it still covers LF — an earlier
 # spelling excluded TAB by writing two ranges and silently dropped LF out of the
 # class with it, un-doing the whole bound.
-CONTROL_CLASS="$(printf '%s\n' "$TRAIL_CODE" | sed -n 's/^const CONTROL_RUN = \(\/\[[^]]*\]+\/g\);$/\1/p' | head -1)"
+# Match the whole regex LITERAL rather than a bare character class: the class is a
+# non-capturing alternation now (an enumerated range OR `\p{Cf}`) and carries the
+# `u` flag the property escape requires, so a `\[[^]]*\]` shape stopped matching
+# and the arm reported the const as missing while it sat two lines away.
+CONTROL_CLASS="$(printf '%s\n' "$TRAIL_CODE" | sed -n 's/^const CONTROL_RUN = \(\/.*\/gu\{0,1\}\);$/\1/p' | head -1)"
 if [ -z "$CONTROL_CLASS" ]; then
   CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-const-not-found]"
 else
   case "$CONTROL_CLASS" in *'u000a'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-LF($CONTROL_CLASS)]" ;; esac
+  # The zero-advance / bidi FORMAT block. An enumerated C0/C1 class does not cover
+  # U+202A-U+202E, U+2066-U+2069, U+200B-U+200F or U+FEFF, every one of which
+  # reorders or hides part of a path on the line SKILL.md makes authoritative.
+  # `\p{Cf}` is the shape that covers them; `instanceId` already used it, and the
+  # PLAIN-TEXT bound did not.
+  case "$CONTROL_CLASS" in *'p{Cf}'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-the-format-block($CONTROL_CLASS)]" ;; esac
   # `briefPath` belongs here too, and its absence was the defect: it bounded with
   # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
   # was the only one of the three not covered by the shared class.
@@ -1085,7 +1136,11 @@ RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . 
 # for an identifier the reader must COMPARE, where collapsing spaces would alter
 # the spelling; for a title or a task line the collapse is what makes the column
 # readable. Both spellings are accepted; a bare `oneLine(` is not.
-PRINT_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|oneLine\(flatPath\('
+# `sessionTag(` and `livePid(` are compliant wrappers, not exemptions: `sessionTag`
+# is `instanceId(..., 8)` under one name — the single spelling of the 8-character
+# session-id prefix all three renderers share — and `livePid` emits a positive
+# integer or the literal `?`, never a third-party string.
+PRINT_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|sessionTag\(|livePid\(|oneLine\(flatPath\('
 raw_print_carriers() {
   grep -F 'print(' | grep -oE '\$\{[^{}]*\}' | grep -E "$BRIEF_TAINTED" | grep -Ev "$PRINT_WRAPPED" || true
 }

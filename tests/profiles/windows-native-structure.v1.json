@@ -94,7 +94,7 @@
     },
     {
       "path": "tests/structure/test-session-trail-verdict.sh",
-      "reason": "The only native marker is W14's platform guard, whose Windows arm deliberately skips because a backslash really is a path separator there, so the blocking shards would pay for the whole synthetic-HOME block and learn nothing about the branch that made this suite Windows-relevant. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly windows-safety run still executes it. Residual stated rather than implied: canonicalDir's win32 TRAILING_SEP branch is verified on no host, and trail.mjs exports nothing, so no unit layer can reach it either."
+      "reason": "The only native marker is W14a's platform guard, whose Windows arm deliberately skips because a backslash really is a path separator there, so the blocking shards would pay for the whole synthetic-HOME block and learn nothing about the branch that made this suite Windows-relevant. Excluded here scopes to the blocking PR shards only: the suite is in ciStructureTests, so the weekly windows-safety run still executes it, and windows-ci-contract.test.js now enforces that membership rather than leaving it asserted in prose. Residual stated rather than implied, and it is the guard the suite itself flags rather than the separator branch an earlier wording named: canonicalPair's filesystem-root guard (path.parse(p).root === p) is byte-identical on POSIX to the p.length > 1 spelling it replaced, so only a win32 drive root discriminates them. W14c now drives trimDir against path.win32 on every host, so that residual is closed; what remains unverified natively is the win32 TRAILING_SEP selection itself, which is module-scope and platform-selected."
     }
   ]
 }

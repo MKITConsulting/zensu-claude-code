@@ -960,13 +960,14 @@ fi
 # W7b — the two STRUCTURAL properties of the briefs, which W7 does not see. Both
 # already hold; this is a regression pin with its own bite arm, not a bite.
 #
-# (1) The takeover payload must carry NO measured `writes` object. That absence is
-# the design's stated invariant, not an omission: `writeAnchorCaution` is static
-# precisely because a brief is written by one session for a DIFFERENT one to open,
-# so a verdict measured against the writer's anchor would be reported to a reader it
-# was never about. `cmdShow`'s payload carries `writes`; `cmdTakeover`'s must not. A
-# later "consistency" edit adding it would persist the wrong answer with W4 — which
-# only sees `show --json` — still green.
+# (1) The takeover JSON payload must CARRY the measured `writes` object, and the
+# markdown brief must not. The split is the reader, not the verb: `--json` is read
+# by the session that ran the command, in the very process whose environment was
+# measured, so withholding it made this the one single-selector invocation with no
+# write-anchor information at all. The MARKDOWN brief is written by one session for
+# a DIFFERENT one to open later, where a verdict measured against the writer's
+# anchor would be reported to a reader it was never about — which is why
+# `writeAnchorCaution` there stays static. Arm (2) below is what holds that half.
 #
 # (2) The caution must sit INSIDE the parsed body, above the end marker. W7 greps
 # the whole brief, so moving the bullet below `--- END … MARKDOWN ---`, where a
@@ -974,7 +975,7 @@ fi
 W7B_BAD=""
 W7B_TAKEOVER_WRITES="$(HOME="$FAKE" node "$TRAIL_MJS" takeover "$SID_A" --all --json 2>/dev/null \
   | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).writes===undefined?"ABSENT":"PRESENT")}catch{process.stdout.write("PARSE_ERROR")}})')"
-[ "$W7B_TAKEOVER_WRITES" = "ABSENT" ] || W7B_BAD="$W7B_BAD takeover-payload-carries-a-measured-writes(got=$W7B_TAKEOVER_WRITES)"
+[ "$W7B_TAKEOVER_WRITES" = "PRESENT" ] || W7B_BAD="$W7B_BAD takeover-payload-lost-its-measured-writes(got=$W7B_TAKEOVER_WRITES)"
 for verb in takeover handoff; do
   W7B_BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" "$verb" "$SID_A" --all 2>/dev/null)"
   W7B_CAUT_AT="$(printf '%s\n' "$W7B_BRIEF" | grep -an 'Before editing' | head -1 | cut -d: -f1)"
@@ -985,21 +986,22 @@ for verb in takeover handoff; do
     W7B_BAD="$W7B_BAD $verb-caution-outside-the-parsed-body"
   fi
 done
-# The BITE arm. Without it, arm (1) is a check that can only ever pass: it asserts
-# the absence of something nothing puts there. A mutated copy adds the field, and
-# the same extraction must report PRESENT — if it does not, arm (1) is measuring
-# nothing and says so here rather than reading as coverage.
+# The BITE arm, in the direction the assertion now runs. Arm (1) asserts a field is
+# THERE, so the mutation removes it and the same extraction must report ABSENT — if
+# it does not, the extraction is reading something other than the payload field and
+# says so here rather than reading as coverage.
 W7B_MUT="$FAKE/trail-w7b-mutated.mjs"
-sed 's/takeover: tv, skipped: SKIPPED }/takeover: tv, writes: writeAnchor(r.wt), skipped: SKIPPED }/' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
-if ! grep -qF 'writes: writeAnchor(r.wt), skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null; then
+sed 's/takeover: tv, writes: writeAnchor(r\.wt), skipped: SKIPPED }/takeover: tv, skipped: SKIPPED }/' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
+if grep -qF 'writes: writeAnchor(r.wt), skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null \
+  || ! grep -qF 'takeover: tv, skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null; then
   W7B_BAD="$W7B_BAD bite-mutation-did-not-apply(payload-spelling-moved)"
 else
   W7B_MUTOUT="$(HOME="$FAKE" node "$W7B_MUT" takeover "$SID_A" --all --json 2>/dev/null \
     | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{process.stdout.write(JSON.parse(s).writes===undefined?"ABSENT":"PRESENT")}catch{process.stdout.write("PARSE_ERROR")}})')"
-  [ "$W7B_MUTOUT" = "PRESENT" ] || W7B_BAD="$W7B_BAD bite-arm-inert(mutated-copy-reported=$W7B_MUTOUT)"
+  [ "$W7B_MUTOUT" = "ABSENT" ] || W7B_BAD="$W7B_BAD bite-arm-inert(mutated-copy-reported=$W7B_MUTOUT)"
 fi
 if [ -z "$W7B_BAD" ]; then
-  check "W7b the takeover payload carries no measured writes, the caution sits above the end marker, and the absence arm bites" PASS
+  check "W7b the takeover payload carries the measured writes, the markdown caution sits above the end marker, and the removal arm bites" PASS
 else
   check "W7b brief structural invariants:$W7B_BAD" FAIL
 fi
@@ -1498,16 +1500,29 @@ fi
 # deterministic input. Skipped on Windows, where `\` really is a separator and the
 # strip is correct.
 #
-# (b) REGRESSION PIN with a STATED GAP, and the gap is the interesting half. The
-# arm drives the filesystem-root guard (`path.parse(real).root === real`), which no
-# other fixture reaches, and it does bite an UNGUARDED strip. What it cannot do is
-# discriminate the `real.length > 1` spelling the guard replaced: on POSIX
-# `'/'.length` is 1, so that check is false and `/` comes back unchanged — byte
-# identical to the shipped guard. The two diverge only at a win32 drive root
-# (`C:\`, length 3), and `tests/profiles/windows-native-structure.v1.json` excludes
-# this suite from native Windows. So the length-check regression is UNVERIFIED on
-# every host this suite runs on. Closing it needs a `path.win32`-parameterised
-# probe, which `trail.mjs` cannot serve because it exports nothing.
+# (b) REGRESSION PIN for the filesystem-root guard (`path.parse(p).root === p`),
+# which no other fixture reaches, and it does bite an UNGUARDED strip. On POSIX it
+# cannot discriminate the `real.length > 1` spelling the guard replaced: `'/'.length`
+# is 1, so that check is false and `/` comes back unchanged — byte identical.
+# The two diverge only at a win32 drive root (`C:\`, length 3). W14c closes that
+# with a `path.win32`-parameterised probe of `trimDir`, extracted from the source
+# — the same technique this file already uses elsewhere, and it needs no export.
+#
+# The exclusion scope, stated correctly because an earlier revision of this comment
+# had it backwards: `tests/profiles/windows-native-structure.v1.json` excludes this
+# suite from the BLOCKING PR shards only. It stays in `ciStructureTests`, so the
+# weekly windows-safety run still executes it. That membership is now machine-
+# cross-checked in `tests/structure/windows-ci-contract.test.js` rather than
+# asserted in prose.
+#
+# (c) The win32 drive-root probe. (d) The MIXED-canonicalization case: exactly one
+# of the two operands exists on disk, which every other fixture here avoids — the
+# block header notes the worktrees are never created, so `realpathSync` throws for
+# both sides and they stay uniformly lexical. That uniformity is what hid a real
+# defect: canonicalizing per operand put a real anchor and an absent target in
+# DIFFERENT namespaces, so on a host with a symlinked temp root a genuinely nested
+# worktree compared as an escape. `canonicalPair` drops BOTH to lexical when either
+# realpath fails, and (d) is the arm that measures it.
 W14_BAD=""
 case "$(uname -s 2>/dev/null)" in
   MINGW*|MSYS*|CYGWIN*) skip "W14a backslash-in-a-directory-name (this host treats \\ as a separator)" ;;
@@ -1534,15 +1549,81 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
     esac
     ;;
 esac
+if [ -z "$W14_BAD" ]; then
+  check "W14a canonicalPair keeps a backslash in a POSIX directory name" PASS
+else
+  check "W14a canonicalPair normalization:$W14_BAD" FAIL
+fi
+
+# (b) runs on every host and reports under its OWN label. Folding it into (a)'s
+# label meant that on Git Bash — where (a) is skipped — the board showed a PASS
+# for a sentence whose first half had not been measured.
+W14B_BAD=""
 W14_ROOT="$(ZENSU_PROJECT_ROOT="/" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
 case "$W14_ROOT" in
   "WRITES   allowed"*) ;;
-  *) W14_BAD="$W14_BAD filesystem-root-anchor-not-normalized(got='$(printf '%s' "${W14_ROOT:-<empty>}" | head -1)')" ;;
+  *) W14B_BAD="$W14B_BAD filesystem-root-anchor-not-normalized(got='$(printf '%s' "${W14_ROOT:-<empty>}" | head -1)')" ;;
 esac
-if [ -z "$W14_BAD" ]; then
-  check "W14 canonicalDir keeps a backslash in a POSIX name and leaves a filesystem root intact" PASS
+if [ -z "$W14B_BAD" ]; then
+  check "W14b canonicalPair leaves a filesystem root intact" PASS
 else
-  check "W14 canonicalDir normalization:$W14_BAD" FAIL
+  check "W14b filesystem-root guard:$W14B_BAD" FAIL
+fi
+
+# (c) The win32 drive root, on ANY host. `trimDir` is extracted from the source and
+# evaluated against `path.win32`, so the guard the POSIX arm cannot discriminate —
+# `path.parse(p).root === p` versus the `p.length > 1` spelling it replaced — is
+# measured here. A drive root is length 3, so the replaced spelling would strip it
+# to `C:` and the arm fails; the shipped guard returns it unchanged. The extraction
+# asserts it found the function, so a rename cannot make this silently vacuous.
+W14C="$(node -e '
+const fs = require("node:fs"), path = require("node:path");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const m = src.match(/function trimDir\(p\) \{[\s\S]*?\n\}/);
+if (!m) { process.stdout.write("EXTRACT_FAILED"); process.exit(0); }
+const TRAILING_SEP = /[\\/]+$/;
+const make = new Function("path", "TRAILING_SEP", m[0] + "; return trimDir;");
+const trimDir = make(path.win32, TRAILING_SEP);
+const root = trimDir("C:\\") === "C:\\";
+const nested = trimDir("C:\\a\\b\\") === "C:\\a\\b";
+process.stdout.write(root && nested ? "OK" : `root=${trimDir("C:\\")} nested=${trimDir("C:\\a\\b\\")}`);
+' "$TRAIL_MJS" 2>/dev/null)"
+if [ "$W14C" = "OK" ]; then
+  check "W14c the root guard survives a win32 drive root and still strips a nested trailing separator" PASS
+else
+  check "W14c win32 drive-root guard: $W14C" FAIL
+fi
+
+# (d) MIXED canonicalization: the anchor EXISTS, the target does not. Every other
+# fixture in this block leaves both absent, so both keep their lexical spelling and
+# the namespace split cannot show. Under a per-operand canonicalization the real
+# anchor becomes its realpath while the absent target keeps the symlinked spelling,
+# and a genuinely nested worktree reads as an escape. `$FAKE` is under the host temp
+# root, which on macOS is exactly such a symlink (/var -> /private/var), so this is
+# the shipped shape rather than a contrived one. Premise-asserted: if the anchor
+# directory cannot be created the arm skips rather than passing on a missing setup.
+W14D_ANCHOR="$FAKE/work/mixed-anchor"
+W14D_SID=bcbcbcbc-0000-0000-0000-0000000000ca
+if mkdir -p "$W14D_ANCHOR" 2>/dev/null; then
+  W14D_WT="$W14D_ANCHOR/absent-worktree"
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W14D_SID" "$W14D_WT" 2>/dev/null
+  W14D_OUT="$(ZENSU_PROJECT_ROOT="$W14D_ANCHOR" HOME="$FAKE" node "$TRAIL_MJS" show "$W14D_SID" --all --no-git 2>/dev/null | writes_block)"
+  case "$W14D_OUT" in
+    "WRITES   allowed"*) check "W14d a real anchor and an absent nested worktree are compared in ONE namespace" PASS ;;
+    *) check "W14d mixed canonicalization split the namespaces (got='$(printf '%s' "${W14D_OUT:-<empty>}" | head -1)')" FAIL ;;
+  esac
+else
+  skip "W14d mixed-canonicalization arm (could not create the anchor directory)"
 fi
 
 # W16 — `resumedUntil`, the one bound on `stopCause` that was executed but never
@@ -1763,6 +1844,20 @@ fs.writeFileSync(path.join(home, ".claude", "sessions", `${sid}.json`), JSON.str
   sessionId: sid, cwd: { a: 1 }, pid: Number(pid), startedAt: Date.now() - 7200000
 }));
 ' "$FAKE" "$W19_SID" "$FAKE/work/wt-badregistry" "$LIVE_PID" 2>/dev/null
+# PREMISE. The fixture above is built by `node -e ... 2>/dev/null`, so a failure to
+# plant it is silent — and both arms below then pass for the wrong reason: `list`
+# exits 0 because no hostile record exists to crash on, and prints its ordinary
+# rows. Assert the record is on disk and carries the non-string cwd, so a store
+# rename or a typo in the builder fails here instead of reading as coverage.
+W19_PLANTED="$(HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const f = path.join(process.argv[1], ".claude", "sessions", `${process.argv[2]}.json`);
+try {
+  const o = JSON.parse(fs.readFileSync(f, "utf8"));
+  process.stdout.write(o && typeof o.cwd === "object" && o.cwd !== null ? "OK" : `cwd-type=${typeof o.cwd}`);
+} catch (e) { process.stdout.write(`unreadable:${e.code || "ERR"}`); }
+' "$FAKE" "$W19_SID" 2>/dev/null)"
+[ "$W19_PLANTED" = "OK" ] || W19_BAD="$W19_BAD hostile-registry-fixture-not-planted($W19_PLANTED)"
 W19_LIST_RC=0
 HOME="$FAKE" node "$TRAIL_MJS" list --all >/dev/null 2>&1 || W19_LIST_RC=$?
 # `= 0`, not `-le 1`: an uncaught TypeError exits 1 and `cmdList` has no other
@@ -1849,6 +1944,13 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
       case "$W19_ZW_STRIP" in *"$prop"*) ;; *) W19_BAD="$W19_BAD probe-narrower-than-production($prop)" ;; esac
     done
     [ "$W19_ZW_SEEN" = "clean" ] || W19_BAD="$W19_BAD zero-width-forged-the-archived-marker"
+  else
+    # Never a silent vanish. Without this arm the whole zero-width probe — its
+    # regex positive control and the structural superset check against
+    # `ZERO_WIDTH` in trail.mjs included — disappears on a host that refuses a
+    # directory name containing U+2069, and W19 still reports PASS. This file's
+    # own convention (stated at W3c) is that an unrun arm says so on the board.
+    skip "W19 zero-width forge probe (this host refused a directory name containing U+2069)"
   fi
 else
   skip "W19b archived-marker forge (this host refused the crafted directory name)"

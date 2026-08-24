@@ -867,15 +867,29 @@ that claim for as long as the bullet really carries the hook roster. A change to
 `within()`, to how `project_root` is minted (`claude-session-control-v1.js`
 `projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
 six wrong with both session-trail suites green — they drive `trail.mjs` against its
-own definition and grep the prose for literals. `writeAnchor` holds a HAND-COPY of
-`within` because the parser defines it inside its own function scope and exports
-nothing; it is one more copy of that predicate, held in step by nothing. It also
-feeds BOTH operands through `canonicalDir`, whose trailing-separator rule
-(`TRAILING_SEP`, platform-selected, guarded by `path.parse(real).root === real`) is
-NOT a copy of the gate's `stripSlash` but a DIFFERENT rule — forward-slash-only and
-unguarded there. A change to the gate's own canonicalization therefore has no
-recorded re-check site in this file; treat `canonicalDir` as a second, independent
-place where this feature encodes what it believes the gate does. Do not
+own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
+`within`: the parser now defines it at MODULE scope and EXPORTS it, and
+`trail.mjs` requires the parser and CALLS it, so the containment rule has one
+implementation and the two cannot drift. (The parser always had an export surface
+— `detectChannels`, `gitTargets`, `msysToDrive` and the frozen tables, consumed by
+`tests/structure/git-repo-escape.test.js`; what it did not export was `within`
+itself. An earlier wording here said the parser "exports nothing", which read as
+the former and was false.) The same require supplies `msysToDrive`, so the
+comparison is now in the gate's namespace on Windows too. A FAILED load is
+reported as `rejected:gate-unavailable` and yields `covered: null` — there is
+deliberately no local fallback copy, because answering off a weaker rule than the
+gate's is exactly what taking the seam removed. What remains this feature's OWN
+encoding is the canonicalization: `canonicalPair` feeds both operands through
+`msysToDrive` + `path.resolve` + `realpathSync.native` and applies `TRAILING_SEP`
+(platform-selected, guarded by `path.parse(p).root === p`), which is NOT the
+gate's `stripSlash` but a DIFFERENT rule — forward-slash-only and unguarded there.
+A change to the gate's own canonicalization still has no recorded re-check site;
+treat `canonicalPair` as the one remaining place where this feature encodes what
+it believes the gate does. It canonicalizes both sides TOGETHER: one
+`realpathSync` failure drops BOTH back to the lexical spelling, because
+canonicalizing per operand put them in different namespaces whenever exactly one
+path existed — the `!! MISSING` worktree case, where a symlinked anchor compared
+as an escape from its own nested worktree. Do not
 trust an ordinal here — an earlier wording said "sixth" and was already wrong,
 because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
 inside a `node -e`. Read the enumeration below, not a count. THREE

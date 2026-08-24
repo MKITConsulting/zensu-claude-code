@@ -3,6 +3,28 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+
+// The write-anchor comparison below is the GATE's comparison, so it calls the
+// gate's own predicate instead of re-encoding it. `within` and `msysToDrive` are
+// module-scope exports of hooks/lib/bash-source-write-parse.js; taking the seam
+// is what removed a sixth hand-copy of the containment rule AND supplied the
+// MSYS drive normalization this file previously had no equivalent of.
+//
+// A FAILED load must not silently change the verdict, so there is no fallback
+// copy: `GATE` stays null and `writeAnchor` reports `rejected:gate-unavailable`,
+// which every renderer already presents as unknown-assume-denied. The plugin
+// layout is fixed relative to this script, and a skill script that cannot see
+// its own plugin has bigger problems than this line.
+const GATE = (() => {
+  try {
+    const here = path.dirname(fileURLToPath(import.meta.url));
+    const require_ = createRequire(import.meta.url);
+    return require_(path.join(here, '..', '..', '..', 'hooks', 'lib', 'bash-source-write-parse.js'));
+  } catch { return null; }
+})();
+const IS_WINDOWS = process.platform === 'win32';
 
 const HOME = os.homedir();
 const PROJECTS = path.join(HOME, '.claude', 'projects');
@@ -98,11 +120,37 @@ function repoContext(startDir) {
 // rendered as `denied here` from a deterministic input.
 const TRAILING_SEP = process.platform === 'win32' ? /[\\/]+$/ : /\/+$/;
 
-function canonicalDir(p) {
-  const abs = path.resolve(p);
-  let real = abs;
-  try { real = fs.realpathSync.native(abs); } catch { /* an absent path keeps its lexical spelling */ }
-  return path.parse(real).root === real ? real : real.replace(TRAILING_SEP, '');
+function trimDir(p) {
+  return path.parse(p).root === p ? p : p.replace(TRAILING_SEP, '');
+}
+
+// BOTH operands, canonicalized TOGETHER and in ONE namespace. Two things were
+// wrong with doing it per-operand:
+//
+// The MSYS half. Under Git Bash an exported variable arrives as `D:\a\proj`
+// while a path read from a session record is still spelled `/d/a/proj`, and
+// `path.isAbsolute` answers "is rooted" rather than "is fully qualified" — so
+// the POSIX spelling passes the admission guard and `path.resolve` then splices
+// it under whatever drive `process.cwd()` sits on. That is the same
+// current-directory derivation `writeAnchor` refuses to make, arriving one call
+// further down. `msysToDrive` is the gate's own normalizer and bridges it.
+//
+// The realpath half. `realpathSync` keeps the LEXICAL spelling for a path that
+// does not exist, so canonicalizing each side on its own put the two in
+// DIFFERENT namespaces whenever exactly one existed — precisely the `!! MISSING`
+// worktree case. On a host where the anchor's spelling differs from its realpath
+// (macOS /tmp -> /private/tmp, a symlinked home, a symlinked worktrees
+// directory) a genuinely nested worktree then compared as an escape. Either both
+// sides are real or neither is: one failure drops BOTH back to lexical.
+function canonicalPair(a, b) {
+  const absA = path.resolve(GATE ? GATE.msysToDrive(a, IS_WINDOWS) : a);
+  const absB = path.resolve(GATE ? GATE.msysToDrive(b, IS_WINDOWS) : b);
+  let realA = absA;
+  let realB = absB;
+  let bothReal = true;
+  try { realA = fs.realpathSync.native(absA); } catch { bothReal = false; }
+  try { realB = fs.realpathSync.native(absB); } catch { bothReal = false; }
+  return bothReal ? [trimDir(realA), trimDir(realB)] : [trimDir(absA), trimDir(absB)];
 }
 
 // The Bash source-write gate compares every write target against the session's
@@ -122,9 +170,10 @@ function canonicalDir(p) {
 // is the layout this repo mandates (`git worktree add .claude/worktrees/<name>`),
 // so an equality test would report the ordinary case as denied. The `..` test is
 // anchored on a separator and on the exact `..`, because a bare startsWith("..")
-// also rejects a legitimately nested `..bak`. This is a HAND-COPY of that
-// predicate — the parser defines `within` inside its own function scope and
-// exports nothing, so there is no seam to call, and nothing pins the two in step.
+// also rejects a legitimately nested `..bak`. This is NOT a hand-copy: `within`
+// is a module-scope export of the parser and is CALLED here, so the two cannot
+// drift, and the MSYS drive normalization the gate applies to the same
+// comparison (`msysToDrive`) arrives with it rather than being omitted.
 //
 // Three narrowings, stated rather than hidden. Rule (C) also exempts a target
 // under a temp root (`isTemp`), so a worktree in `/tmp` is writable while this
@@ -151,8 +200,14 @@ function canonicalDir(p) {
 // anchored.
 //
 // Which is also why a channel is usable only when it carries an ABSOLUTE path,
-// and why the value that wins is carried VERBATIM. Both halves close a way back
-// to the same defect. A RELATIVE value reaches `canonicalDir`, whose first
+// and why the value that wins is carried VERBATIM — and why the TARGET operand
+// carries the same admission rather than a bare truthiness test. That half is not
+// symmetry: `canonicalPair` begins with `path.resolve`, so a relative recorded
+// worktree is completed from the current directory just as a relative channel
+// value would be, reintroducing the same derivation on the other side of the same
+// comparison, where the structural pin that proves it absent from the caller side
+// does not look. Both halves close a way back
+// to the same defect. A RELATIVE value reaches `canonicalPair`, whose first
 // statement is `path.resolve` — so the current-directory derivation this
 // function refuses to make would be reintroduced one call further down, where
 // the structural pin (W3b extracts this function's body and greps it) cannot
@@ -164,11 +219,18 @@ function canonicalDir(p) {
 // different directory than the one that will actually be judged, erring toward
 // `allowed`.
 //
-// Neither channel is AUTHENTICATED. `ZENSU_PROJECT_ROOT` is an ordinary environment
-// variable, so a per-command prefix produces a confident `allowed` for a worktree the
-// gate will still refuse — no privilege is gained, but the line is only as trustworthy
-// as the environment its caller supplied, which is why SKILL.md keeps "the
-// authoritative check is yours" as the operative instruction.
+// Neither channel is AUTHENTICATED, and the shape that matters is the INVERSE of
+// the one an earlier revision of this paragraph modelled. A per-command
+// `ZENSU_PROJECT_ROOT=` prefix is NOT the hazard: that name is a protected
+// Session Control binding — `CONTROL_BINDINGS` in bash-source-write-parse.js —
+// and pre-bash-source-write-gate.sh denies the rebind ahead of both escape
+// hatches and ahead of the `bashWriteGate` enable check, with no opt-out. What is
+// unauthenticated is the ORDINARY case: this script runs as a plain subprocess,
+// so whatever environment its parent handed it is what gets compared, and a stale
+// or hand-set value produces a confident answer about a root the gate never saw.
+// No privilege is gained either way; the line is only as trustworthy as that
+// environment, which is why SKILL.md keeps "the authoritative check is yours" as
+// the operative instruction.
 //
 // The fail-safe direction is DENIED. When no channel resolves, `covered` is null
 // and every renderer presents it as unknown-assume-denied — answering "writable"
@@ -202,10 +264,17 @@ function writeAnchor(targetWt) {
   const rejected = candidates.find((c) => present(c) && !path.isAbsolute(String(c[1])));
   const callerRoot = fromEnv ? String(fromEnv[1]) : null;
   const source = fromEnv ? fromEnv[0] : (rejected ? `rejected:${rejected[0]}` : 'unknown');
-  const targetRoot = targetWt || null;
-  if (!callerRoot || !targetRoot) return { callerRoot, targetRoot, covered: null, source };
-  const rel = path.relative(canonicalDir(callerRoot), canonicalDir(targetRoot));
-  const contained = rel === '' || (rel !== '..' && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
+  // Absolute-only on the TARGET side too — see the header for why, and note that
+  // the rationale has to live THERE: W3b greps this body for the name of the
+  // rejected derivation, so spelling it here trips the pin that proves it absent.
+  const targetRoot = (targetWt && path.isAbsolute(String(targetWt))) ? String(targetWt) : null;
+  if (!callerRoot || !targetRoot) return { callerRoot, targetRoot: targetWt || null, covered: null, source };
+  // No local fallback when the gate module did not load. A hand-rolled copy here
+  // is exactly what this seam removed, and answering off a weaker rule than the
+  // gate's would be a confident verdict measured with the wrong instrument.
+  if (!GATE) return { callerRoot, targetRoot, covered: null, source: 'rejected:gate-unavailable' };
+  const [callerCanon, targetCanon] = canonicalPair(callerRoot, targetRoot);
+  const contained = GATE.within(callerCanon, targetCanon);
   // The two channels are NOT equally authoritative, and only one direction of the
   // weaker one is sound. `claude-hook-session-v1.js` reads CLAUDE_PROJECT_DIR only
   // as the last resort when no Session Control record exists — its own header says
@@ -268,8 +337,13 @@ function writesLines(w) {
   // `rejected:file:X` would satisfy the guard and then lose four characters of its
   // own name, naming a variable that does not exist.
   const REJECTED_PREFIX = 'rejected:env:';
+  // Bounded at its definition even though `source` is minted from a closed set of
+  // module literals. It reaches a rendered line, and the roster that scans this
+  // function has to account for every carrier here — accounting for it as "safe by
+  // provenance" would be one more claim to keep true across a change to
+  // `writeAnchor`; one `flatPath` call is cheaper than that promise.
   const rejectedChannel = String(w.source || '').startsWith(REJECTED_PREFIX)
-    ? String(w.source).slice(REJECTED_PREFIX.length)
+    ? flatPath(String(w.source).slice(REJECTED_PREFIX.length))
     : null;
   const why = !w.targetRoot
     ? 'the target session has no recorded worktree'
@@ -280,13 +354,23 @@ function writesLines(w) {
         : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case';
   // The deny head must not call a CLAUDE_PROJECT_DIR value "this session's anchor":
   // `writeAnchor` disclaims exactly that two dozen lines above, and this line is a
-  // disclosure surface SKILL.md points the reader at. The VERDICT is sound either
-  // way — non-containment in the wider root implies non-containment in the narrower
-  // one, which is the asymmetry the whole feature rests on — so only the attribution
-  // changes, and it changes to something the reader can act on.
+  // disclosure surface SKILL.md points the reader at.
+  //
+  // It must ALSO not assert that the immutable root lies inside that value. The
+  // asymmetry argument — non-containment in the wider root implies non-containment
+  // in the narrower one — needs ZENSU_PROJECT_ROOT to be CONTAINED BY
+  // CLAUDE_PROJECT_DIR, and nothing enforces that. `claude-session-control-v1.js`
+  // mints the record root once from the SessionStart cwd and REUSES it on every
+  // later resume/compact, whose reported cwd its own comment says "may report a
+  // descendant or external detached-worktree cwd" — so for a resumed session the
+  // two can be arbitrary siblings and the implication fails in both directions.
+  // The deny is KEPT, because it is the one diagnosis this channel buys and its
+  // failure direction is conservative, but the head now ATTRIBUTES instead of
+  // concluding: a strong hint measured off the weaker channel, not a verdict about
+  // a containment relation the code never took.
   const head = w.covered === false
     ? (w.source === 'env:CLAUDE_PROJECT_DIR'
-      ? `WRITES   denied here — this session's CLAUDE_PROJECT_DIR is ${flatPath(w.callerRoot)}, which does not contain that worktree; the anchor the gate compares lies inside it, so the deny holds either way.`
+      ? `WRITES   denied here (hint) — this session's CLAUDE_PROJECT_DIR is ${flatPath(w.callerRoot)}, which does not contain that worktree. That is not the immutable root the gate compares, so treat this as a strong hint rather than a verdict.`
       : `WRITES   denied here — this session is anchored to ${flatPath(w.callerRoot)}, which does not contain that worktree.`)
     : `WRITES   unknown — this session's anchor was not measured (${why}); assume denied and check yourself.`;
   return [
@@ -307,7 +391,17 @@ function writesLines(w) {
 // The range excludes TAB (\u0009) and NOTHING ELSE — an earlier spelling wrote it
 // as \u0000-\u0008 plus \u000b-\u001f, which silently also dropped LF (\u000a) out
 // of the class and un-did the whole bound. W8/W8b caught it in one run.
-const CONTROL_RUN = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]+/g;
+// `\p{Cf}` is part of the class, not an extra pass: U+202A-U+202E and
+// U+2066-U+2069 reorder a rendered line, U+200B-U+200F and U+FEFF advance nothing
+// at all, and every one of them can make a path READ as a different path on the
+// line SKILL.md makes authoritative. They are neutralized to a space like every
+// other member, so the tampering is visible rather than silently dropped.
+// `\p{Mn}`/`\p{Me}` are deliberately NOT here, and the split is the whole point
+// of this class: a combining mark is an ordinary character in a real filename
+// (`cafe\u0301` is how macOS spells `café`), so stripping it would REWRITE the
+// spelling this bound exists to keep comparable. `instanceId` does strip them,
+// because its output is a correlation token that is never compared to a path.
+const CONTROL_RUN = /(?:[\u0000-\u0008\u000a-\u001f\u007f-\u009f\u2028\u2029]|\p{Cf})+/gu;
 
 // A control-strip for paths a reader must COMPARE rather than merely read:
 // `oneLine`'s clip would append an ellipsis and yield a different path, and
@@ -495,6 +589,27 @@ function ccdIndex() {
 // exactly as well as a plain space.
 const ZERO_WIDTH = /[\p{Cf}\p{Mn}\p{Me}]/gu;
 const H_SPACE_RUN = /[\u0020\u0009\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]{2,}/g;
+
+// The 8-character SESSION-id prefix, in ONE place. `cmdList`, `cmdLimited` and
+// `cmdInstances` all print it, and correlating those rows is the only thing the
+// prefix is for — two spellings of one id make the field useless. It is
+// `instanceId`'s bound, not `flatPath(...).slice(0, 8)`: the latter leaves the
+// zero-advance class in a token a reader retypes as a selector, and a `resolve`
+// prefix tier that matches on the raw id cannot find it again.
+// `liveRegistry` accepts a record on `o.sessionId && o.pid` truthiness alone and
+// never constrains the type, and its only filter is `process.kill(o.pid, 0)`,
+// whose throw is swallowed. So `pid` is another runtime's field reaching a line
+// directly above the TAKEOVER verdict — the same carrier `entrypoint` and `name`
+// are bounded for. A non-integer is rendered as `?` rather than flattened,
+// because a pid is a number and anything else is not a value to display.
+function livePid(live) {
+  const raw = live ? live.pid : null;
+  return Number.isInteger(raw) && raw > 0 ? String(raw) : '?';
+}
+
+function sessionTag(value) {
+  return instanceId(String(value == null ? '' : value), 8);
+}
 
 function instanceId(value, width) {
   return flatPath(value)
@@ -961,7 +1076,7 @@ function measuredVerdict(r) {
       level: 'FREE',
       idleMin,
       reason: r.live
-        ? `the desktop app archived this session, though pid ${r.live.pid} is still registered and alive`
+        ? `the desktop app archived this session, though pid ${livePid(r.live)} is still registered and alive`
         : 'the desktop app archived this session — its process was stopped',
     };
   }
@@ -972,16 +1087,16 @@ function measuredVerdict(r) {
     // `queueFresh` is true for an unparseable timestamp, so this branch is
     // reachable with qAt === NaN; `ago(NaN)` would render a bare "?".
     const when = Number.isFinite(qAt) ? `, last enqueued ${ago(qAt)} ago,` : ' (enqueue time not recorded)';
-    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} has ${q.pending} prompt(s) queued${when} and will act on its own.` };
+    return { level: 'BUSY', idleMin, reason: `pid ${livePid(r.live)} has ${q.pending} prompt(s) queued${when} and will act on its own.` };
   }
   if (idleMin < ACTIVE_GRACE_MIN) {
-    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} wrote to its transcript ${idleMin} min ago — too recent to judge, its turn may still be streaming.` };
+    return { level: 'BUSY', idleMin, reason: `pid ${livePid(r.live)} wrote to its transcript ${idleMin} min ago — too recent to judge, its turn may still be streaming.` };
   }
   if (turn.kind === 'awaiting-input') {
     return {
       level: 'PROBABLY_FREE',
       idleMin,
-      reason: `pid ${r.live.pid} ended its last turn (${turn.stopReason}) ${ago(r.mtime)} ago, so it cannot act unless the user types in that window.${queueNote}`,
+      reason: `pid ${livePid(r.live)} ended its last turn (${turn.stopReason}) ${ago(r.mtime)} ago, so it cannot act unless the user types in that window.${queueNote}`,
     };
   }
   if (idleMin < BUSY_IDLE_MIN) {
@@ -990,13 +1105,13 @@ function measuredVerdict(r) {
     const why = turn.kind === 'in-turn'
       ? 'and its last record is a turn in flight — it is working.'
       : 'and no assistant or user record could be read from it, so its state is unmeasured.';
-    return { level: 'BUSY', idleMin, reason: `pid ${r.live.pid} wrote to its transcript ${idleMin} min ago ${why}` };
+    return { level: 'BUSY', idleMin, reason: `pid ${livePid(r.live)} wrote to its transcript ${idleMin} min ago ${why}` };
   }
   // `awaiting-input` returned above, so this is `in-turn` or `unknown`. Only the
   // second justifies "it cannot act unless the user types": a turn in flight that
   // has gone quiet for hours may still be blocked on a long tool call, and that
   // DOES act without its human when it returns.
-  const silent = `pid ${r.live.pid} is alive but has been silent for ${ago(r.mtime)}`;
+  const silent = `pid ${livePid(r.live)} is alive but has been silent for ${ago(r.mtime)}`;
   return {
     level: 'PROBABLY_FREE',
     idleMin,
@@ -1306,8 +1421,8 @@ function cmdList(opts) {
     // `measuredLevel`, not `level`: this command takes no selector, so rendering
     // an authorization here would show one session's approval against every busy
     // row in scope. A survey reports what was measured.
-    const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
-    print(`${statusOf(r).padEnd(4)}  ${flatPath(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}`);
+    const owner = r.live ? `pid ${livePid(r.live)} ${r.takeover.measuredLevel}` : '';
+    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(flatPath(r.title || r.lastPrompt || '(untitled)'), 96)}"`);
     if (!r.cwdExists) print(`      !! worktree directory missing: ${flatPath(r.cwd)}`);
@@ -1344,7 +1459,7 @@ function cmdInstances(opts) {
       // them, and these three sat unbounded one renderer away from their hardened
       // twins. The id uses the identifier spelling, so it stays comparable with the
       // one `appTag` prints on the row below.
-      print(`  ${String(s.pid).padStart(6)}  ${instanceId(String(s.sessionId), 8)}  ${(oneLine(flatPath(s.entrypoint), 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${flatPath(wt)}`);
+      print(`  ${livePid(s).padStart(6)}  ${sessionTag(s.sessionId)}  ${(oneLine(flatPath(s.entrypoint), 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${flatPath(wt)}`);
       print(`          "${oneLine(flatPath(s.name), 92)}"${app ? `   ${appTag(app)}` : ''}`);
     }
     print('');
@@ -1379,7 +1494,7 @@ function resolve(opts, selectorRaw) {
       const byWorktree = new Set(t.map((r) => r.cwd));
       if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${flatPath(r.sessionId).slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(flatPath(r.title || r.lastPrompt), 70)}"`);
+      for (const r of t) print(`  ${sessionTag(r.sessionId)}  ${statusOf(r).padEnd(4)}  ${flatPath(r.worktree)}  "${oneLine(flatPath(r.title || r.lastPrompt), 70)}"`);
       flush();
       process.exit(2);
     }
@@ -1435,7 +1550,7 @@ function cmdShow(opts) {
   // one a reader takes the verdict from. The roster in T29 could not see them —
   // the outer interpolation opens with a compliant `statusOf(`, so a nested
   // `${...}` inside the same template is invisible to a line-anchored scan.
-  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${r.live.pid}  ${oneLine(flatPath(r.live.entrypoint), 40)}  name "${oneLine(flatPath(r.live.name), 92)}"` : ''}`);
+  print(`STATUS   ${statusOf(r)}${r.live ? `  pid ${livePid(r.live)}  ${oneLine(flatPath(r.live.entrypoint), 40)}  name "${oneLine(flatPath(r.live.name), 92)}"` : ''}`);
   if (r.app) {
     // Same bound as `appTag`, at this row's own width: the value is a directory
     // name from another application's store, and `oneLine` leaves the control class
@@ -1546,7 +1661,7 @@ function cmdLimited(opts) {
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${flatPath(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
+    print(`${statusOf(r).padEnd(4)}  ${sessionTag(r.sessionId)}  ${ago(r.mtime).padStart(8)} ago  ${flatPath(r.worktree)}${r.live ? `   pid ${livePid(r.live)} ${r.takeover.measuredLevel}` : ''}`);
     print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
@@ -1576,14 +1691,22 @@ function cmdTakeover(opts) {
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch).replace(/\.md$/, '.takeover.md');
   const tv = activityVerdict(r, opts.force);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, skipped: SKIPPED }, null, 2));
+  // `writes` reaches the JSON branch even though the MARKDOWN branch carries only
+  // the static caution. The two are different artifacts with different readers: a
+  // brief is written by one session for a DIFFERENT one to open later, where a
+  // measurement taken in this process says nothing about the anchor of the session
+  // that will act on it — the static caution is the honest line there. `--json` is
+  // read by the session that ran the command, in the process whose environment was
+  // measured, so withholding the measurement made this the one single-selector
+  // invocation carrying no write-anchor information at all.
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, writes: writeAnchor(r.wt), skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${briefPath(r.title || path.basename(r.wt))}`);
   L.push('');
   L.push('> Reconstructed from the source session\'s transcript on disk. That session contributed nothing to this document and did not need to be running.');
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
+  L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${livePid(r.live)}` : ''})`);
   if (r.app) L.push(`- owning desktop instance: \`${briefPath(r.app.instance)}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
@@ -1715,7 +1838,7 @@ function cmdHandoff(opts) {
   L.push('## Source');
   // Hoisted out of the template: a nested interpolation is structurally invisible
   // to the raw-carrier scan, and `entrypoint` is another process's registry value.
-  const liveSuffix = r.live ? `, pid ${r.live.pid}, ${briefPath(r.live.entrypoint)}` : '';
+  const liveSuffix = r.live ? `, pid ${livePid(r.live)}, ${briefPath(r.live.entrypoint)}` : '';
   L.push(`- session: \`${briefPath(r.sessionId)}\` (${statusOf(r)}${liveSuffix})`);
   L.push(`- worktree: \`${briefPath(r.wt)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(writeAnchorCaution(r.wt));
@@ -1760,7 +1883,7 @@ function cmdHandoff(opts) {
     // a DIFFERENT instance reads later.
     const hv = activityVerdict(r, opts.force);
     L.push('');
-    L.push(`> **Still running** in pid ${r.live.pid} — measured takeover verdict **${hv.measuredLevel}**: ${hv.measuredReason}`);
+    L.push(`> **Still running** in pid ${livePid(r.live)} — measured takeover verdict **${hv.measuredLevel}**: ${hv.measuredReason}`);
     if (hv.authorized) L.push(`> An authorization was recorded at ${new Date().toISOString()} by passing --force to the command that generated this file. It was bounded to that moment and to whoever gave it, and this file cannot carry it forward.`);
     L.push('> Nothing enforces exclusivity here; the hazard is a human typing in that window, not the process holding a claim.');
     L.push('> Re-measure before acting: this line is a snapshot, and any authorization behind it was bounded to the moment this file was written.');

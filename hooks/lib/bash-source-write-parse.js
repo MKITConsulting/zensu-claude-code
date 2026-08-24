@@ -162,6 +162,23 @@ function stripSlash(p) {
   return p && p.length > 1 && p.endsWith("/") ? p.replace(/\/+$/, "") : p;
 }
 
+// Same containment predicate hooks/lib/reviewer-capability-v1.js uses, and that
+// session-control-core-v1.js and review-evidence-lease-v1.js each hand-copy,
+// alongside an inline copy in hooks/lib/zensu-tdd-phase.sh's `node -e`.
+// It sits at MODULE scope and is EXPORTED, so a consumer in this process can
+// call it rather than growing a sixth copy — `skills/session-trail/scripts/
+// trail.mjs` (`writeAnchor`) is the one that took the seam. The shell copies
+// cannot: they run in a `node -e` string with no require of this file.
+// The `..` test must be anchored on a separator and on the exact `..`: a bare
+// startsWith("..") also rejects a legitimately nested `..bak`, whose relative
+// path is `..bak`, and the empty relative path means "is the root itself".
+// It closes over nothing but `stripSlash` and `path`, which is what made the
+// hoist free — moving it changed no verdict, only who can reach it.
+function within(root, p) {
+  const rel = path.relative(stripSlash(root), p);
+  return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
+}
+
 // Git Bash and the native Windows Node this hook launches spell the same
 // absolute path in two namespaces, and only ONE side is converted: MSYS rewrites
 // an EXPORTED variable — which is why `CLAUDE_PROJECT_DIR` arrives as
@@ -743,19 +760,6 @@ function main() {
     const i = b.lastIndexOf(".");
     return i > 0 ? b.slice(i + 1).toLowerCase() : "";
   }
-  // Same containment predicate hooks/lib/reviewer-capability-v1.js uses, and that
-  // session-control-core-v1.js, review-evidence-lease-v1.js,
-  // skills/session-trail/scripts/trail.mjs (`writeAnchor`) and an inline copy in
-  // hooks/lib/zensu-tdd-phase.sh's `node -e` each hand-copy. It is
-  // defined inside this function and exported nowhere, so there is nothing to
-  // import — a consumer copies it or does without. The
-  // `..` test must be anchored on a separator and on the exact `..`: a bare
-  // startsWith("..") also rejects a legitimately nested `..bak`, whose relative
-  // path is `..bak`, and the empty relative path means "is the root itself".
-  function within(root, p) {
-    const rel = path.relative(stripSlash(root), p);
-    return rel === "" || (rel !== ".." && !rel.startsWith(".." + path.sep) && !path.isAbsolute(rel));
-  }
   function isTemp(p) {
     const safe = TEMP_SAFE();
     if (safe.some((t) => p === t || within(t, p))) return true;
@@ -1103,6 +1107,7 @@ if (require.main === module) {
     stripHeredocs,
     gitTargets,
     msysToDrive,
+    within,
     isUnsafeTempEntry,
     splitTempList,
     GIT_MUTATIONS: Object.freeze(Array.from(GIT_MUTATIONS)),
