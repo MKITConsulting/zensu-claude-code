@@ -682,7 +682,7 @@ if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$T
   JSON_EMITS="$(grep -c 'print(JSON\.stringify(' "$TRAIL_MJS")"
   JSON_WITH_SKIPPED="$(grep -c 'skipped: SKIPPED' "$TRAIL_MJS")"
   [ "$JSON_EMITS" = "$JSON_WITH_SKIPPED" ] || GUARD_MISS="$GUARD_MISS [json-skipped($JSON_WITH_SKIPPED/$JSON_EMITS)]"
-  [ "$JSON_EMITS" = "14" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 14)]"
+  [ "$JSON_EMITS" = "15" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 15)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi

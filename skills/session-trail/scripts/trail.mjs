@@ -298,6 +298,24 @@ function windowLabel(appPid) {
 // store is unreachable, this still groups sessions by window correctly.
 let PROC_TABLE = null;
 
+// A probe carrier for the ancestry walk: the suite feeds a synthetic table on stdin
+// and reads back the pid this rule selects. It exists because the live process tree
+// cannot be arranged into the shapes that matter (a helper hop between the session
+// and the app, a chain with no Claude ancestor, the hop bound) from a test.
+function windowProbe(raw) {
+  let spec;
+  try { spec = JSON.parse(raw); } catch { return { error: 'probe input is not JSON' }; }
+  if (!spec || !Array.isArray(spec.table) || !Number.isFinite(spec.pid)) {
+    return { error: 'probe needs { pid: <number>, table: [{ pid, ppid, comm }] }' };
+  }
+  const table = new Map();
+  for (const row of spec.table) {
+    if (!row || !Number.isFinite(row.pid) || !Number.isFinite(row.ppid)) continue;
+    table.set(row.pid, { ppid: row.ppid, comm: String(row.comm || '') });
+  }
+  return { appPid: windowOf(spec.pid, table) };
+}
+
 function processTable() {
   if (PROC_TABLE) return PROC_TABLE;
   PROC_TABLE = new Map();
@@ -307,13 +325,34 @@ function processTable() {
   try {
     if (process.platform === 'win32') {
       // An absolute root only: a relative %SystemRoot% would make the interpreter
-      // path relative to the process cwd, which is the repository directory.
+      // path relative to the process cwd, which is the repository directory. Absolute
+      // is a SHAPE test and not a trust test, so the resolved interpreter is stat'd
+      // before it is spawned — `D:\\evil` is absolute too, and this process's
+      // environment is set by whatever launched it.
       const sysRoot = process.env.SystemRoot;
       const root = sysRoot && path.isAbsolute(sysRoot) ? sysRoot : 'C:\\Windows';
       const shell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      let shellStat;
+      try { shellStat = fs.lstatSync(shell); } catch { return PROC_TABLE; }
+      if (!shellStat.isFile()) return PROC_TABLE;
+      // The environment is pinned here for the same reason it is pinned on the POSIX
+      // arm below, and one reason more: `-NoProfile` does not cover module resolution,
+      // so `Get-CimInstance` is auto-loaded from whatever `PSModulePath` names. An
+      // inherited entry pointing at a writable directory holding a `CimCmdlets` module
+      // is loaded by the real powershell.exe. Degrading here costs only the
+      // window-grouping route, which every caller already treats as optional.
       out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command',
         'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)" }'],
-      { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+      { encoding: 'utf8',
+        timeout: 8000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: {
+          SystemRoot: root,
+          PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+          TEMP: process.env.TEMP || path.join(root, 'Temp'),
+          TMP: process.env.TMP || path.join(root, 'Temp'),
+        } });
     } else {
       // Absolute path and a pinned environment, as hooks/lib/session-control-core-v1.js
       // does for the same probe: the argument vector is a fixed literal, so the only
@@ -344,9 +383,16 @@ function processTable() {
 // (`Contents/Helpers/disclaimer`) that also matches, and it is the app process at
 // the top that owns the window. A session with no such ancestor — a terminal or
 // IDE launch — answers null, which is the honest result, not a fallback to itself.
-function windowOf(pid) {
-  const table = processTable();
-  if (!table.size || !Number.isFinite(pid)) return null;
+// The table is a PARAMETER with a default rather than a hidden read, because it is
+// the only seam this walk has. Every fixture spawns node from a shell, so no
+// ancestor matches /claude/i and this function returns null throughout the suite --
+// which means replacing its body with `return null` left every behavioural check
+// green while SKILL.md sold the ancestry route as the fallback for a missing
+// desktop store. `processTable` is absolute-path and pinned by design, so a PATH
+// shim cannot stand in for it; injecting the table is what makes the selection
+// rule -- highest match, not nearest -- observable at all.
+function windowOf(pid, table = processTable()) {
+  if (!table || !table.size || !Number.isFinite(pid)) return null;
   let cur = table.get(pid);
   let found = null;
   for (let hop = 0; hop < 12 && cur && cur.ppid > 1; hop += 1) {
@@ -2039,6 +2085,22 @@ function cmdLineage(opts) {
     if (!match.length) {
       if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
       print(`No lineage recorded for "${opts.where}".`);
+      // An empty match set has THREE causes and only one of them is "nothing was
+      // recorded". The sibling branch below already refuses to read an unreadable
+      // ledger as an empty history; this branch asserted the opposite for the same
+      // state, and then sent the user to --backfill, which refuses on exactly that
+      // condition. A confident wrong diagnosis is the one answer this feature exists
+      // to prevent, so the cause is named before the conclusion is drawn.
+      if (LEDGER_DIR_ERROR) {
+        print(`The ledger could not be read (${LEDGER_DIR_ERROR}) — this is NOT evidence that it was never handed over.`);
+        print(`Fix ${LEDGER_DIR}, then re-run. \`lineage --diagnose\` names what failed.`);
+        return;
+      }
+      if (LEDGER_REFUSED) {
+        print(`${LEDGER_REFUSED} ledger record(s) could not be read — one of them may name that session.`);
+        print(`Fix or remove them in ${LEDGER_DIR}, then re-run before concluding anything.`);
+        return;
+      }
       print('Either that session was never handed over, or the handover predates the ledger.');
       print(`Try: node ${scriptPath()} lineage --backfill`);
       return;
@@ -2160,5 +2222,10 @@ else if (cmd === 'takeover') cmdTakeover(opts);
 else if (cmd === 'lineage') cmdLineage(opts);
 else if (cmd === 'adopt') cmdAdopt(opts);
 else if (cmd === 'label') cmdLabel(opts);
+// Deliberately absent from the user-facing command list and from SKILL.md: it is a
+// test seam, it reads its table from stdin rather than from the machine, and it
+// writes nothing. Naming it in the help text would advertise a verb with no use
+// outside the suite.
+else if (cmd === 'window-probe') print(JSON.stringify({ ...windowProbe(fs.readFileSync(0, 'utf8')), skipped: SKIPPED }, null, 2));
 else fail(`unknown command: ${cmd} (list | instances | show | handoff | limited | takeover | lineage | adopt | label)`);
 flush();

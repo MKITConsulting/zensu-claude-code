@@ -578,6 +578,41 @@ try {
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --self "")"
 case "$OUT" in *"usage: label"*) check "L21a an empty label is refused rather than silently stored" PASS ;; *) check "L21a an empty label is refused (got ${OUT:-<empty>})" FAIL ;; esac
 
+# ── L31 — the ancestry walk, which returned null in every other check ──────
+# Every fixture here spawns node from a shell, so no ancestor matches /claude/i and
+# windowOf answered null throughout the suite. Replacing its body with `return null`
+# left all 70 checks green while SKILL.md sold the ancestry as the fallback for an
+# unreachable desktop store. The table is injected through the probe verb, because
+# the live process tree cannot be arranged into these shapes from a test and
+# processTable is absolute-path by design, so a PATH shim cannot stand in for it.
+probe_window() { printf '%s' "$1" | env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" window-probe --config-dir "$CFG" 2>&1; }
+
+# HIGHEST match, not nearest: a Contents/Helpers/disclaimer hop sits between the
+# session and the app and also matches /claude/i, so a nearest-match rule answers 90.
+OUT="$(probe_window '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":80,"comm":"Claude Helper (disclaimer)"},{"pid":80,"ppid":1,"comm":"Claude"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "80" ] && check "L31 the ancestry walk keeps the HIGHEST Claude ancestor, not the nearest" PASS || check "L31 the walk keeps the highest Claude ancestor (got $(jq_field "$OUT" appPid))" FAIL
+
+# The positive control for the rule above: with no helper hop the only match IS the
+# nearest one, so a walk that simply returned the first parent would pass L31 alone.
+OUT="$(probe_window '{"pid":100,"table":[{"pid":100,"ppid":80,"comm":"node"},{"pid":80,"ppid":1,"comm":"Claude"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "80" ] && check "L31a a single Claude ancestor is still found — the rule is not only about depth" PASS || check "L31a a single Claude ancestor is found (got $(jq_field "$OUT" appPid))" FAIL
+
+# No Claude anywhere in the chain: null, not the top of the tree. This is the shape
+# a Linux host produces, where the account is unresolvable and the ancestry is the
+# only grouping left — answering with an arbitrary pid there would group every
+# session under one window.
+OUT="$(probe_window '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":1,"comm":"bash"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "null" ] && check "L31b a chain with no Claude ancestor answers null rather than a stray pid" PASS || check "L31b no Claude ancestor answers null (got $(jq_field "$OUT" appPid))" FAIL
+
+# The hop bound: a Claude ancestor beyond 12 hops is not reported. Without the bound
+# a cyclic or very deep table would walk until the table ran out.
+DEEP='{"pid":1,"table":['
+i=1
+while [ "$i" -le 20 ]; do DEEP="$DEEP{\"pid\":$i,\"ppid\":$((i+1)),\"comm\":\"node\"},"; i=$((i+1)); done
+DEEP="$DEEP{\"pid\":21,\"ppid\":1,\"comm\":\"Claude\"}]}"
+OUT="$(probe_window "$DEEP")"
+[ "$(jq_field "$OUT" appPid)" = "null" ] && check "L31c an ancestor past the 12-hop bound is not reported" PASS || check "L31c the hop bound holds (got $(jq_field "$OUT" appPid))" FAIL
+
 # ── L22 — the cycle guard, which nothing exercised ─────────────────────────
 # walkChain documents `seen` as the difference between a wrong answer and a hang.
 # Nothing planted a cycle, so deleting the guard left all checks green and the
@@ -663,7 +698,29 @@ mkdir -p "$CFG/zensu/session-lineage/v1"
 printf 'x' > "$CFG/zensu/session-lineage/v1/edges"
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
 case "$OUT" in *"could not be read"*) check "L27 an unreadable ledger says so instead of asserting nothing was recorded" PASS ;; *) check "L27 an unreadable ledger says so (got ${OUT:-<empty>})" FAIL ;; esac
+# --where reached the same state through a different branch and drew the opposite
+# conclusion -- "never handed over, or predates the ledger" -- then sent the user to
+# --backfill, which refuses on exactly this condition. Same fixture, other carrier.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$OUT" in
+  *"NOT evidence"*) check "L27a --where names the unreadable ledger instead of concluding nothing was handed over" PASS ;;
+  *) check "L27a --where names the unreadable ledger (got ${OUT:-<empty>})" FAIL ;;
+esac
+# Keyed on the phrase only the ORDINARY branch prints. An earlier spelling of this
+# check matched "never handed over", which the new disclosure sentence contains too
+# -- it failed against a correct implementation.
+case "$OUT" in
+  *"predates the ledger"*) check "L27b --where does not ALSO draw the conclusion it just refused" FAIL ;;
+  *) check "L27b --where does not ALSO draw the conclusion it just refused" PASS ;;
+esac
 rm -f "$CFG/zensu/session-lineage/v1/edges"
+# The positive control: with the ledger readable again the ordinary answer returns,
+# so the two checks above cannot be satisfied by a branch that fires unconditionally.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "99999999-0000-0000-0000-000000000000" --all)"
+case "$OUT" in
+  *"never handed over"*) check "L27c a readable ledger still gives the ordinary not-found answer" PASS ;;
+  *) check "L27c a readable ledger still gives the ordinary not-found answer (got ${OUT:-<empty>})" FAIL ;;
+esac
 
 # -- L30 -- --apply is refused while ANY record is unreadable ---------------
 # The duplicate guard is built from the read: one dropped record is one pair
