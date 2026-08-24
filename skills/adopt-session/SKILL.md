@@ -46,12 +46,16 @@ different states with different remedies, and it will refuse.
 
 ## Do NOT Use For
 
-- A session that is binding normally. If tools fail for another reason, that is
+- A session that is binding normally — with ONE exception, which is the whole
+  reason the repair branch exists: if review-evidence operations started failing
+  after a plugin update, the record is fine and the LEASE STORE is wedged. That
+  session binds normally and is still the right caller; run the `--confirm` form and
+  it re-runs the sweep as an idempotent repair. For any other failure, that is
   `/zensu:doctor`.
 - Clearing a review chain or granting a budget. The chain state survives adoption
   untouched and is enforced again on the very next Stop.
 - Any bind failure other than the declared-incompatible lineage — the refusal
-  table above names each one and its own remedy.
+  table in Phase 1 below names each one and its own remedy.
 
 ## What This Skill Does
 
@@ -74,10 +78,10 @@ construction. That is the gate, and it closes itself.
 It mints a NEW record for the same session under the executing runtime, carrying
 the original `created_at`. It sets the previous record aside as
 `<session-key>.superseded-<version>.json` — never overwritten, still readable.
-It appends one `RUNTIME_ADOPTED` entry to the workflow history. It sets aside any
-review-evidence lease that names the previous installation, because those compare
-their recorded plugin root strictly and one stale lease would fail every later
-lease operation.
+It appends one `RUNTIME_ADOPTED` entry to the workflow history. It sets aside every
+review-evidence lease entry the owning reader would reject — which is more than just
+the ones naming the previous installation — because those compare their recorded
+plugin root strictly and one stale lease would fail every later lease operation.
 
 It does NOT relax the lineage rule for anything else, rewrite any record, touch
 the workflow document's decision fields, relax the plugin-data boundary, grant a
@@ -90,9 +94,29 @@ measured code". Do not run it to make an unrelated failure go away.
 ## Prerequisites
 
 None beyond a running session. No network, no API key. The entry point needs
-`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and the three
-values the recognized command carries — `CLAUDE_CODE_SESSION_ID` (inherited),
-`CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR`; it names any that is missing.
+`node`, its own installation's `hooks/lib/zensu-session-adopt.sh`, and two values
+— `CLAUDE_CODE_SESSION_ID` (inherited) and `CLAUDE_PLUGIN_DATA`; it names either
+if it is missing. It does **not** need `CLAUDE_PROJECT_DIR` and never reads it, so
+the command below does not pass it: the project it repairs is the one the RECORD
+names. A session whose **harness** project directory has moved or been deleted
+therefore still gets its report.
+
+**OPEN GAP — a record whose own recorded project root is gone still refuses, and
+that is a limitation rather than a decision.** It answers `record-unreadable`,
+because `readContext` canonicalizes `context.project_root` and throws when it is
+absent. The two sources of truth diverge in two ways in worktree workflows and only
+one is closed: a cwd that was a worktree while the harness reported elsewhere is
+handled, but a worktree later REMOVED — `git worktree remove`, the documented
+cleanup in `skills/pr-team-review` Phase E — is a permanent wedge. Combined with an
+incompatible lineage, `orphanedProjectRootSession` does not fire,
+`resolveIncompatibleRuntime` cannot read the record, `/zensu:doctor` falls back to
+its *no valid record* row, and this skill's own remedy text says to start a fresh
+session. `readOrphanedProjectRootContext` already distinguishes *record intact,
+project root absent* from *record altered or pruned*, and the gates already use it —
+so the distinction exists; adoption simply does not consume it yet. Widening it is a
+separate, larger decision, because adoption would have to succeed with an anchor
+that does not exist. Do not read "that one still refuses" as "and should".
+
 Main thread only: a reviewer or neutral child is refused by every gate.
 
 ## Phase 1: Report, confirm, adopt
@@ -100,18 +124,33 @@ Main thread only: a reviewer or neutral child is refused by every gate.
 **Step 1 of 4 — report.** Run the read-only form. It changes nothing.
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh"
 ```
 
 Render both versions and the verdict verbatim. On a refusal, render the reason
-and its remedy verbatim too and STOP — every refusal names a different cause:
+and its remedy verbatim too and STOP — every refusal names a different cause.
+
+**A quoted, backslash-escaped value is NORMAL output, not corruption.** Every
+non-constant string in the report goes through a positive allowlist: an ordinary
+path — including a localized one with umlauts, accents or CJK — prints as itself,
+and anything outside the set is emitted JSON-quoted with non-ASCII folded to
+`\uXXXX`. Two further shapes force the quoted form even when every character is
+allowed: a run of two or more spaces, and a literal `" : "`. Both exist because the
+report is a list of `label : value` pairs and a directory name must not be able to
+forge another one. Render whatever you get verbatim; do NOT un-escape it, and do not
+report it as damage.
+
+Every refusal a user can see is in the table below. Most are `adoptableRecord`
+verdicts; `private-record-store-unsafe` is emitted by the ENTRY POINT before those
+are ever reached, and is marked as such. Each prints its own remedy inline, so
+render that verbatim too.
 
 | Reason | Meaning |
 |--------|---------|
+| `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
 | `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
-| `project-root-mismatch` | The recorded project root is not this directory. |
-| `already-served` | Nothing to adopt; the failure has another cause. Run `/zensu:doctor`. |
+| `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |
 | `executing-runtime-unidentified` | The executing installation declares no usable version. |
 | `executing-runtime-older` | The executing installation is OLDER. Only forwards is ever allowed. |
@@ -125,23 +164,33 @@ the update has to be re-gathered.
 **Step 3 of 4 — adopt.** Only after the user agrees:
 
 ```bash
-CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" CLAUDE_PROJECT_DIR="${CLAUDE_PROJECT_DIR}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
+CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session-adopt.sh" --confirm
 ```
 
-Render the output verbatim. Three lines are NOT clean states and must be
+Render the output verbatim. Four things are NOT clean states and must be
 surfaced rather than summarized away:
 
 - a `provenance` other than `recorded` or `no-workflow-document` means the
   takeover happened but was not written into the history;
 - a non-zero `leases set aside` means evidence reservations were dropped and
   have to be gathered again;
-- a non-zero `leases stuck` is the serious one — those leases still name the
-  previous installation, and because every lease read validates the whole set,
-  review-evidence operations keep failing for this session until they are moved
-  out of the records directory by hand. The adoption itself is complete; say
-  both things.
+- a non-zero `leases stuck` is the serious one — those entries could NOT be moved
+  out of the records directory, and because every lease read validates the whole
+  set, review-evidence operations keep failing for this session until they are
+  moved by hand. Do NOT assert why: an entry lands there when the move collided
+  with a file already set aside, when the link or the unlink half failed, or on an
+  ordinary I/O error. Relay the rendered warning, which names the collision case
+  first. The adoption itself is complete; say both things;
+- any `WARNING:` line about the review-evidence lease store. Report it verbatim
+  and tell the user to look at the named directory before running the adoption
+  again — never fold it into a summary. Do NOT assert a cause: the same verdict is
+  produced by an entry that is not a plain directory they own, which would be a
+  tamper signal, and by an ordinary I/O failure such as a full or read-only store.
+  The command cannot tell those apart, so neither can you.
 
-Exit codes: `0` on a successful report or adoption, `1` on a refusal or a
+Exit codes: `0` on a successful report, adoption, or in-place lease repair — the
+repair is a third exit-0 shape and prints `ALREADY SERVED (...)` rather than
+`ADOPTED`; a repair whose sweep was refused or left leases stuck exits `1`. `1` on a refusal or a
 precondition failure, `2` on a bad argument. A non-zero exit is not a broken
 command — read the message.
 
@@ -152,14 +201,17 @@ restart.
 ## Invocation Constraints
 
 Both forms are recognized by the PreToolUse Bash gates only in their exact shape:
-the two assignments above, `bash`, the script path in the executing installation,
-and at most the literal `--confirm`. Anything else — a second command, a
-different flag, a copy of the script — is denied. Emit the command exactly as
-written above; do not wrap it, redirect it, or chain anything onto it.
+a whitelisted assignment prefix, `bash`, the script path in the executing
+installation, and at most the literal `--confirm`. Anything else — a second
+command, a different flag, a copy of the script — is denied. Every PATH assignment in
+that prefix must carry a rooted literal value; an empty one is refused, which is
+one reason the form above passes only the variable the script actually reads.
+Emit the command exactly as written above; do not wrap it, redirect it, or chain
+anything onto it.
 
 ## Response Style
 
 Render both command outputs verbatim; they are already formatted. Name both
 versions. Never summarize away a `provenance` other than `recorded`/
-`no-workflow-document`, a non-zero `leases set aside`, or a non-zero
-`leases stuck`. After a successful adoption, do not tell the user to restart.
+`no-workflow-document`, a non-zero `leases set aside`, a non-zero
+`leases stuck`, or any `WARNING:` line about the lease store. After a successful adoption, do not tell the user to restart.

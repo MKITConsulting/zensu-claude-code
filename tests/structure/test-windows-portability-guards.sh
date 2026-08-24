@@ -28,6 +28,11 @@ AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
 EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
+# The superseded-lease sweep is the SECOND requireable module carrying the hardened
+# open, and it belongs in this inventory for the reason stated beside the plan-payload
+# entry: every count pin here is per-file and therefore blind to a NEW file that
+# brings its own secure open.
+LEASE_SWEEP="$ROOT/hooks/lib/review-evidence-sweep-v1.js"
 DOCTOR_REPORT="$ROOT/hooks/lib/zensu-doctor-report.js"
 AUTOPILOT_STATE_TEST="$ROOT/tests/structure/test-autopilot-state-machine.sh"
 VCS="$ROOT/hooks/lib/zensu-vcs.sh"
@@ -628,6 +633,19 @@ if grep -qF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOF
   check "Promptfoo hook log proves identity before truncating on Windows" PASS
 else
   check "Promptfoo hook log proves identity before truncating on Windows" FAIL
+fi
+
+# The superseded-lease sweep's reader, held to the same two properties the
+# plan-payload reader is: the platform gate resolves O_NOFOLLOW rather than assuming
+# it, and the test seam is a MODE compared against one string — never a mask a caller
+# could OR into the open. A raw mask there would let O_CREAT through, so the reader
+# would CREATE the file it reports unreadable.
+if grep -qF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$LEASE_SWEEP" \
+  && grep -qF "settings.mode === LSTAT_PRECHECK_MODE" "$LEASE_SWEEP" \
+  && ! grep -qE 'settings\.noFollow' "$LEASE_SWEEP"; then
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" PASS
+else
+  check "the lease sweep resolves O_NOFOLLOW by platform and takes a mode, not a mask" FAIL
 fi
 
 printf '%s\n' '----' "test-windows-portability-guards: $PASS PASS / $FAIL FAIL"
