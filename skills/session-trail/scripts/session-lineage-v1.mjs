@@ -15,19 +15,43 @@ const MAX_RECORD_BYTES = 256 * 1024;
 
 // Regular files only, size-capped, symlinks refused — trail.mjs bounds its other
 // untrusted reads the same way (FULL_READ_LIMIT); the ledger was the exception.
-const NOFOLLOW = process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)
+const NOFOLLOW = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)
   ? fs.constants.O_NOFOLLOW
   : 0;
 
+// O_RDONLY on a FIFO blocks until a writer opens the other end, and O_NOFOLLOW does
+// not change that — so the fstat/isFile assertions below, correct as they are against
+// a path swap, cannot protect the OPEN itself: they run after it. The ledger
+// directory is writable by every session on this machine, so one planted entry
+// wedged every reader on the host with no deadline above it. O_NONBLOCK makes the
+// open return immediately and leaves the descriptor-level checks to do their work,
+// so the TOCTOU property is kept rather than traded away.
+const NONBLOCK = process.platform !== 'win32' && Number.isInteger(fs.constants.O_NONBLOCK)
+  ? fs.constants.O_NONBLOCK
+  : 0;
+
+// Why a REASON rather than a bare null: five distinct causes — open failure, a
+// non-regular entry, a record past the cap, a mid-read error, and (at the caller) a
+// JSON syntax error — all reached the reader as one word. The module argues three
+// lines above its own refusal table that a record it cannot read for one reason must
+// not be reported as another; this is that argument applied to its own reader.
 function readBoundedFile(file) {
   let fd;
-  try { fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW); } catch { return null; }
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NONBLOCK);
+  } catch (e) {
+    // ELOOP is O_NOFOLLOW refusing a symlink, ENXIO is O_NONBLOCK refusing a FIFO
+    // with no writer: both are "this is not a regular file", not an I/O fault.
+    const code = e && e.code;
+    return { text: null, reason: (code === 'ELOOP' || code === 'ENXIO') ? EDGE_REFUSALS.NOT_A_FILE : EDGE_REFUSALS.UNREADABLE };
+  }
   try {
     // fstat, not lstat: the properties are asserted on the descriptor that will
     // actually be read, so a path swapped to a symlink after a check cannot be
     // followed and a file that grows after a check cannot beat the cap.
     const st = fs.fstatSync(fd);
-    if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;
+    if (!st.isFile()) return { text: null, reason: EDGE_REFUSALS.NOT_A_FILE };
+    if (st.size > MAX_RECORD_BYTES) return { text: null, reason: EDGE_REFUSALS.OVERSIZE };
     const buf = Buffer.allocUnsafe(Math.min(st.size, MAX_RECORD_BYTES));
     let off = 0;
     while (off < buf.length) {
@@ -35,9 +59,9 @@ function readBoundedFile(file) {
       if (n <= 0) break;
       off += n;
     }
-    return buf.subarray(0, off).toString('utf8');
+    return { text: buf.subarray(0, off).toString('utf8'), reason: null };
   } catch {
-    return null;
+    return { text: null, reason: EDGE_REFUSALS.UNREADABLE };
   } finally {
     try { fs.closeSync(fd); } catch { /* the read result is what matters */ }
   }
@@ -80,6 +104,27 @@ function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim() !== '';
 }
 
+// ONE comparison rule for `recordedAt`, used at every site that orders records.
+// There were two: a raw `>` picked the dedupe survivor while `localeCompare` sorted
+// the list beside it. `localeCompare` also resolves the host locale, so the order of
+// a machine-wide ledger depended on the reader's ICU build — and the values are
+// fixed-width UTC ISO stamps, whose code-unit order already IS their chronological
+// order. A collator is both the wrong tool and roughly two orders of magnitude slower.
+function recordedAtKey(e) {
+  return String((e && e.recordedAt) || '');
+}
+
+// Exported because the CLI orders records too, and a rule that only one of two
+// files can reach is a rule the other one re-invents — which is exactly what
+// happened: a `localeCompare` survived in the consumer and made a machine-wide
+// ledger's order depend on the reader's ICU build.
+export function byRecordedAtAsc(a, b) {
+  const ka = recordedAtKey(a);
+  const kb = recordedAtKey(b);
+  if (ka < kb) return -1;
+  return ka > kb ? 1 : 0;
+}
+
 // `repo.name` is printed into the CHAIN header a reader acts on, so it is bounded
 // on both sides like every other persisted string — it was the one pair that was
 // bounded on neither.
@@ -91,6 +136,60 @@ export function normalizeRepo(raw) {
 export function ledgerPaths(configRoot) {
   const base = path.join(configRoot, 'zensu', 'session-lineage', `v${LEDGER_SCHEMA_VERSION}`);
   return { base, edges: path.join(base, 'edges'), labels: path.join(base, 'labels.json') };
+}
+
+// The store lives under `session-lineage/v<schema>/`, so the day the schema moves
+// every existing record becomes invisible to the new build — and the empty-ledger
+// branch then reads as "nothing was ever recorded" and offers to reconstruct
+// GUESSES for handovers the machine still holds as MEASUREMENTS, one directory
+// away. This finds those directories so the caller can say so instead.
+//
+// A directory with no records is NOT reported: an empty `v2/` left behind by a
+// rollback would otherwise send the operator hunting for records nobody wrote.
+// Counting is bounded by MAX_EDGE_RECORDS for the same reason readEdges is —
+// this walks a directory any session on the machine can write.
+export function otherSchemaLedgers(configRoot) {
+  const base = path.dirname(ledgerPaths(configRoot).base);
+  let names;
+  try { names = fs.readdirSync(base); } catch { return []; }
+  const out = [];
+  for (const name of names) {
+    const m = /^v(\d{1,9})$/.exec(name);
+    if (!m) continue;
+    const version = Number(m[1]);
+    if (version === LEDGER_SCHEMA_VERSION) continue;
+    const versionDir = path.join(base, name);
+    const edges = path.join(versionDir, 'edges');
+    let records;
+    // BOTH components are lstat'ed, and that is the whole point. Checking only the
+    // leaf left the level above open: `lstat` declines to follow the FINAL
+    // component only, so a symlink planted at `v0` was resolved as an ordinary
+    // intermediate component and its `edges/` enumerated through it. The count
+    // reported here becomes an instruction the operator acts on, and the config
+    // root is writable by every session on the machine.
+    try {
+      const vs = fs.lstatSync(versionDir);
+      if (vs.isSymbolicLink() || !vs.isDirectory()) continue;
+      const es = fs.lstatSync(edges);
+      if (es.isSymbolicLink() || !es.isDirectory()) continue;
+      records = fs.readdirSync(edges).filter((f) => f.endsWith('.json') && !f.startsWith('.'));
+    } catch { continue; }
+    if (!records.length) continue;
+    out.push({
+      version,
+      dir: edges,
+      // The TRUE count, plus a flag — the clamp bounded only the number reported
+      // while the enumeration above was unbounded, so it constrained nothing and
+      // rendered a bounded answer as a complete one. `readEdges` reports its own
+      // cap the same way, and for the reason stated there.
+      records: records.length,
+      truncated: records.length > MAX_EDGE_RECORDS,
+      // Named rather than inferred by the caller: "older" means this build can be
+      // taught to read it, "newer" means it cannot and the plugin is behind.
+      relation: version < LEDGER_SCHEMA_VERSION ? 'older' : 'newer',
+    });
+  }
+  return out.sort((a, b) => a.version - b.version);
 }
 
 // Refused rather than created when any component is a symlink or a non-directory.
@@ -111,13 +210,28 @@ export function ensureLedgerDir(edgesDir, stopAt = null) {
   let cur = edgesDir;
   const ceiling = stopAt ? path.resolve(stopAt) : null;
   for (let i = 0; i < 8 && cur && cur !== path.dirname(cur); i += 1) {
-    parts.unshift(cur);
+    // The ceiling is the root the CALLER named — the trust anchor, not a candidate.
+    // Checking it too refused a config root that is itself a symlink, which is the
+    // ordinary shape under a dotfile manager: every takeover, adopt and label then
+    // failed while the read side reported "no handover has been recorded yet".
+    // A swapped `~/.claude` would redirect the registry, the transcripts and the
+    // handoffs as well, none of which this module guards; the leaf components below
+    // it are what it can meaningfully defend.
     if (ceiling && path.resolve(cur) === ceiling) break;
+    parts.unshift(cur);
     cur = path.dirname(cur);
   }
   for (const p of parts) {
     let st;
-    try { st = fs.lstatSync(p); } catch { continue; }
+    try {
+      st = fs.lstatSync(p);
+    } catch (e) {
+      // ENOENT is the ordinary "not created yet" case and the whole reason this loop
+      // tolerates a gap. EACCES and ELOOP are not: there the check did NOT happen,
+      // and continuing would mkdir having proven nothing about the path.
+      if (e && e.code === 'ENOENT') continue;
+      throw new Error(`could not check ledger path component ${p}: ${(e && e.code) || 'unknown'}`);
+    }
     if (st.isSymbolicLink()) throw new Error(`refusing to use a symlinked ledger path: ${p}`);
     if (!st.isDirectory()) throw new Error(`ledger path exists and is not a directory: ${p}`);
   }
@@ -125,7 +239,22 @@ export function ensureLedgerDir(edgesDir, stopAt = null) {
   // Windows has no meaningful mode equivalent and fs.chmodSync is inert there.
   // Stated rather than implied: on Windows the records inherit the user profile's
   // ACLs, which is the whole of their confidentiality.
-  if (process.platform !== 'win32') fs.chmodSync(edgesDir, 0o700);
+  if (process.platform !== 'win32') {
+    fs.chmodSync(edgesDir, 0o700);
+    // chmodSync SUCCEEDING is not evidence the mode took. On a filesystem that
+    // ignores POSIX modes — SMB/CIFS, exFAT, many synced-folder mounts, all
+    // reachable through `--config-dir` — this call is a silent no-op, and so is
+    // `mode: 0o600` on every record written below it. The records then carry session
+    // ids, account identifiers, worktree paths and branch names at world-readable
+    // permissions with no error and no disclosure anywhere. Re-reading the mode is
+    // the only thing that notices, and it is also the one detection the documented
+    // check-then-create window would ever get.
+    const st = fs.lstatSync(edgesDir);
+    if (st.isSymbolicLink()) throw new Error(`refusing to use a symlinked ledger path: ${edgesDir}`);
+    if ((st.mode & 0o077) !== 0) {
+      throw new Error(`refusing a group/other-accessible ledger directory: ${edgesDir} is ${(st.mode & 0o777).toString(8)}`);
+    }
+  }
 }
 
 // No ':' anywhere — legal on POSIX, forbidden on Windows, so an ISO timestamp in
@@ -135,29 +264,130 @@ export function edgeFileName(now) {
   return `${now}-${crypto.randomBytes(8).toString('hex')}.json`;
 }
 
-export function writeEdge(edgesDir, edge, now, stopAt = null) {
+// `nameFor` is injectable for the same reason `now` is: the exclusivity contract is
+// otherwise untestable, because the production generator appends 64 bits of
+// randomness and a collision cannot be provoked. Production callers pass nothing.
+export function writeEdge(edgesDir, edge, now, stopAt = null, nameFor = edgeFileName) {
   ensureLedgerDir(edgesDir, stopAt);
+  const body = `${JSON.stringify(edge, null, 2)}\n`;
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    const file = path.join(edgesDir, edgeFileName(now));
+    const file = path.join(edgesDir, nameFor(now));
+    // Written to a temp and LINKED into place, never renamed. Both keep the property
+    // the temp exists for — a concurrent reader never sees a zero-byte record — but
+    // `rename` REPLACES an existing destination silently, so the EEXIST retry below
+    // could only ever fire on the temp name, which carries the pid plus 48 bits and
+    // does not collide. `link` fails EEXIST on the DESTINATION, which is the name the
+    // loop and its terminal message are actually about.
+    const tmp = path.join(edgesDir, `.edge-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
     try {
-      // Landed by rename, like the labels file: a plain create-then-write leaves a
-      // zero-byte window in which a concurrent reader counts a spurious unreadable
-      // record and tells the user the output is incomplete.
-      const tmp = path.join(edgesDir, `.edge-${process.pid}-${crypto.randomBytes(6).toString('hex')}.tmp`);
-      fs.writeFileSync(tmp, `${JSON.stringify(edge, null, 2)}\n`, { flag: 'wx', mode: 0o600 });
-      try {
-        fs.renameSync(tmp, file);
-      } catch (e2) {
-        try { fs.unlinkSync(tmp); } catch { /* the rename failure is the real error */ }
-        throw e2;
-      }
-      return file;
+      fs.writeFileSync(tmp, body, { flag: 'wx', mode: 0o600 });
     } catch (e) {
+      // A temp-name collision is the one case worth another attempt; anything else
+      // (ENOSPC, EACCES) will not improve by retrying. Either way nothing landed.
       if (e && e.code === 'EEXIST') continue;
       throw e;
     }
+    try {
+      fs.linkSync(tmp, file);
+      return file;
+    } catch (e) {
+      if (!(e && e.code === 'EEXIST')) throw e;
+      // Destination taken — try a fresh name.
+    } finally {
+      // Unlinked on EVERY path, not only after a failed landing. A write that died
+      // between create and land used to orphan its temp permanently: `readEdges`
+      // skips dot-prefixed names, so nothing ever counted it and nothing swept it.
+      try { fs.unlinkSync(tmp); } catch { /* best effort — the operation's result stands */ }
+    }
   }
   throw new Error(`could not create a unique edge record in ${edgesDir}`);
+}
+
+// Every component from `dir` up to `stopAt`, refused if any of them is a symlink.
+// The WRITE path has always done this; the read and delete paths checked the LEAF
+// only, and `lstat` declines to follow the final component alone — so a symlink at
+// `session-lineage/` or `v1/` was resolved as an ordinary intermediate component.
+// Reproduced end to end before this existed: `lineage --forget --apply` unlinked a
+// record OUTSIDE the ledger directory and reported no error at all.
+//
+// Returns a boolean rather than throwing, because both callers already have a
+// refusal channel of their own and a throw there would abort a whole command.
+// Without a ceiling it checks nothing above the directory itself — the caller owns
+// how far up the tree it is entitled to look, exactly as `ensureLedgerDir` does.
+export function ledgerPathUnlinked(dir, stopAt = null) {
+  const ceiling = stopAt ? path.resolve(stopAt) : null;
+  let cur = path.resolve(dir);
+  // Without a ceiling this checks the directory ITSELF and climbs no further, which
+  // is the old leaf-only behaviour and is deliberate: on macOS `/var` is a symlink,
+  // so an unbounded climb from a temp-rooted config directory refuses every store
+  // under it. `ensureLedgerDir` bounds its own walk for exactly this reason. A
+  // caller that wants the ancestors checked must say where its tree begins.
+  if (!ceiling) {
+    try { return !fs.lstatSync(cur).isSymbolicLink(); } catch (e) { return !!(e && e.code === 'ENOENT'); }
+  }
+  for (let hop = 0; hop < 64; hop += 1) {
+    let st;
+    try { st = fs.lstatSync(cur); } catch (e) {
+      // ENOENT is the ordinary "not created yet" case and says nothing about links.
+      if (e && e.code === 'ENOENT') { /* keep climbing */ } else return false;
+    }
+    if (st && st.isSymbolicLink()) return false;
+    if (ceiling && cur === ceiling) return true;
+    const up = path.dirname(cur);
+    if (up === cur) return true;
+    cur = up;
+  }
+  return false;
+}
+
+// A single path COMPONENT, and nothing more is asserted. The names this guards
+// come from `readEdges`, which took them from `readdirSync` — but this is the one
+// operation in the store that destroys evidence, so the input is re-checked rather
+// than trusted, which is what keeps a crafted `../` from being normalised into an
+// unlink outside the ledger. Deliberately NOT matched against the write-side name
+// shape: a record that landed under any other spelling is still a record the
+// operator is entitled to forget, and refusing it would leave standing exactly the
+// un-retractable edge the removal path exists to remove.
+export function isEdgeFileName(name) {
+  if (typeof name !== 'string' || name === '') return false;
+  if (!name.endsWith('.json') || name.startsWith('.')) return false;
+  // No control or format character, for the same reason `boundText` strips them
+  // from every persisted field: this name is RENDERED into the destructive verb's
+  // output, three times, and a POSIX name may contain a newline. The dry run is
+  // where an operator decides whether to run `--apply`, so a name able to add a
+  // line to it can describe a removal that is not about to happen.
+  if (/[\p{Cc}\p{Cf}]/u.test(name)) return false;
+  return path.basename(name) === name;
+}
+
+// Reports its failures rather than throwing on the first one: a directory holding
+// ten matching records must not keep the other nine because one of them is already
+// gone, and the caller has to be able to say how many actually went.
+export function removeEdgeFiles(edgesDir, names, stopAt = null) {
+  const removed = [];
+  const failed = [];
+  // Checked ONCE, before any unlink: `path.join` resolves through a symlinked
+  // ancestor, so without this the loop below deletes files in the link target.
+  if (!ledgerPathUnlinked(edgesDir, stopAt)) {
+    return { removed, failed: names.map((n) => ({ file: String(n), reason: 'ledger-path-unsafe' })) };
+  }
+  for (const name of names) {
+    if (!isEdgeFileName(name)) { failed.push({ file: String(name), reason: 'name-refused' }); continue; }
+    const file = path.join(edgesDir, name);
+    try {
+      // lstat, never stat, and a symlink is REFUSED rather than unlinked. Removing
+      // the link would report a record destroyed while the file it names survives,
+      // and `readBoundedFile` opens O_NOFOLLOW — so a symlink here was never a
+      // record this ledger could read in the first place.
+      const st = fs.lstatSync(file);
+      if (!st.isFile()) { failed.push({ file: name, reason: 'not-a-file' }); continue; }
+      fs.unlinkSync(file);
+      removed.push(name);
+    } catch (e) {
+      failed.push({ file: name, reason: (e && e.code) || 'unknown' });
+    }
+  }
+  return { removed, failed };
 }
 
 // The endpoint shape has ONE constructor, applied to both slots of every edge.
@@ -172,30 +402,71 @@ export function makeEndpoint(input) {
     accountUuid: boundText(src.accountUuid, 128),
     appPid: Number.isFinite(src.appPid) ? src.appPid : null,
     pid: Number.isFinite(src.pid) ? src.pid : null,
-    cwd: boundText(src.cwd),
     worktree: boundText(src.worktree),
     branch: boundText(src.branch),
-    title: boundText(src.title),
   };
 }
 
+// `title` and `cwd` are deliberately NOT persisted. Every renderer that consumes a
+// stored endpoint — printChain, `lineage --where`, the `instances` lineage column —
+// reads sessionId, worktree, branch, appPid and pid; neither of those two was read
+// anywhere. They were also the two most sensitive fields in the record: a session
+// title summarises what someone was working on and can name a client, and `cwd` is
+// finer-grained than `worktree`. Both originate in another session's transcript, and
+// this store is durable, machine-wide and outside every repository — so keeping an
+// unread copy bought nothing and cost exactly the disclosure this feature is careful
+// about everywhere else. `repo.root` still carries the location a reader needs.
+
 export const ENDPOINT_KEYS = Object.freeze(Object.keys(makeEndpoint({})));
 
-// `repoRoot` is derived from the HANDED-OVER work, never from the recording
-// process's directory. The documented takeover route runs from a window in a
-// different repo, so filing the edge under the recorder's repo made the default,
-// repo-scoped `lineage` render nothing in the repo where the work actually lives
-// — an empty answer indistinguishable from "no handover happened", which is the
-// one wrong answer this feature exists to prevent.
-export function buildEdge({ from, to, workRoot, repoRootOf, reason, recordedBy, inferred, at }) {
+// How much the ledger is entitled to claim for one edge, weakest first. It is an
+// ORDER, not a label: `dedupeEdges` and `walkChain` rank by it BEFORE `recordedAt`,
+// which is the whole point. `inferred` was carried for a while as a boolean that
+// every renderer displayed and no decision consulted — and because `--backfill`
+// stamps each guess with the moment `--apply` ran, one backfill then promoted
+// guesses above measurements at every site that orders by time.
+//
+// `provisional` exists because generating a takeover brief is not the same event as
+// having taken the session over: the brief is written before the human has decided,
+// so `takeover` may claim only that much. `--force` carries the user's approval on
+// the command line, and `adopt` is the confirmation verb, so both reach `confirmed`.
+export const CONFIDENCE_ORDER = Object.freeze(['inferred', 'provisional', 'confirmed']);
+// What a record with no readable tier becomes. NOT the floor: a record written
+// before this field existed, or by a caller not yet taught the tier, came from
+// takeover or adopt — backfill is the one producer that sets `inferred`. Demoting it
+// to a guess would let any tier-carrying record displace a real handover; promoting
+// it to `confirmed` would claim an approval nobody gave.
+const CONFIDENCE_DEFAULT = 'provisional';
+
+// Total, and an unknown value ranks at the FLOOR rather than throwing: the value
+// arrives from a machine-wide record any session can write, and a tier nobody
+// recognises must never outrank one that is recognised.
+export function confidenceRank(value) {
+  const i = CONFIDENCE_ORDER.indexOf(value);
+  return i === -1 ? 0 : i;
+}
+
+export function normalizeConfidence(value, inferred) {
+  if (CONFIDENCE_ORDER.includes(value)) return value;
+  // A record written before this field existed, or one carrying a value this build
+  // does not know: fall back to what the legacy boolean can still tell us.
+  return inferred === true ? 'inferred' : CONFIDENCE_DEFAULT;
+}
+
+export function buildEdge({ from, to, workRoot, repoRootOf, reason, recordedBy, inferred, confidence, at }) {
   const root = workRoot ? (repoRootOf(workRoot) || workRoot) : null;
+  const tier = normalizeConfidence(confidence, inferred);
   return {
     schemaVersion: LEDGER_SCHEMA_VERSION,
     from: makeEndpoint(from),
     to: makeEndpoint(to),
     repo: normalizeRepo({ name: root ? path.basename(root) : null, root }),
     reason: boundText(reason) || 'manual',
-    inferred: inferred === true,
+    confidence: tier,
+    // Kept, and DERIVED from the tier rather than from the caller, so the two can
+    // never disagree in a persisted record. A reader on an older build still sees
+    // the boolean it understands.
+    inferred: tier === 'inferred',
     recordedAt: at,
     recordedBy: boundText(recordedBy),
   };
@@ -205,11 +476,31 @@ export function buildEdge({ from, to, workRoot, repoRootOf, reason, recordedBy, 
 // because the schema moved is a different fact from a corrupt one, and blaming
 // the ledger for a version skew sends the reader looking in the wrong place.
 export const EDGE_REFUSALS = Object.freeze({
+  // An I/O fault: the open failed for a reason that is not about the file's TYPE,
+  // or the read itself died part-way.
   UNREADABLE: 'unreadable',
+  // Not a regular file — a directory, a device, a symlink O_NOFOLLOW refused, or a
+  // FIFO O_NONBLOCK refused. Distinct from UNREADABLE because the remedy differs:
+  // something was PLANTED here, rather than something being wrong with the disk.
+  NOT_A_FILE: 'not-a-file',
+  // Past MAX_RECORD_BYTES. The store is machine-wide, so this is a bound being
+  // enforced, not a fault — and a user seeing it should look at the record, not the
+  // permissions.
+  OVERSIZE: 'oversize',
+  // Read fine, did not parse. The one cause that means the WRITER was at fault.
+  CORRUPT: 'corrupt',
   SCHEMA_NEWER: 'schema-newer',
   SCHEMA_OLDER: 'schema-older',
   MALFORMED: 'malformed',
 });
+
+// Each record is capped at MAX_RECORD_BYTES; nothing capped how MANY were
+// enumerated, read and parsed. In a directory every session on this machine can
+// write, that is an unbounded multiplier on a bounded quantity — and chainRoots then
+// re-walks per root over the same attacker-chosen count. The cap is reported through
+// `truncated` rather than applied silently, because a bounded answer that reads as a
+// complete one is the failure this module exists to avoid.
+export const MAX_EDGE_RECORDS = 20000;
 
 export function classifyEdge(raw) {
   if (!raw || typeof raw !== 'object') return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
@@ -238,15 +529,38 @@ export function classifyEdge(raw) {
   if (!from.sessionId || !to.sessionId) {
     return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
   }
+  // A session is not its own continuation. Every producer already refuses to write
+  // one, so such a record can only be foreign or hand-written — which is precisely
+  // the case this function exists to judge. Left accepted it rendered as a non-zero
+  // handover count above an empty chain: chainRoots promotes it to a root, walkChain
+  // filters it out through `seen`, and the renderer skips the empty link list.
+  if (from.sessionId === to.sessionId) {
+    return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
+  }
+  // `recordedAt` selects the dedupe survivor, the branch the walk prefers and the
+  // `--where` answer, and it was the one persisted field with no judgement at all.
+  // An unparseable stamp sorts by code unit, so "9999" outranked every ISO value
+  // for as long as the append-only store kept it.
+  const recordedAt = boundText(raw.recordedAt);
+  if (recordedAt === null || !Number.isFinite(Date.parse(recordedAt))) {
+    return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
+  }
   return {
     ok: true,
+    // CLOSED, never a spread. The spread admitted any key an untrusted record
+    // carried — unbounded up to MAX_RECORD_BYTES — straight into the `links` array
+    // that `lineage --where --json` emits verbatim and a model then reads.
     edge: {
-      ...raw,
+      schemaVersion: raw.schemaVersion,
       from,
       to,
       repo: normalizeRepo(raw.repo),
       reason: boundText(raw.reason) || 'manual',
-      recordedAt: boundText(raw.recordedAt),
+      confidence: normalizeConfidence(raw.confidence, raw.inferred),
+      // Coerced on the way IN as well as on the way out: `"no"` and `0` are both
+      // truthy-adjacent spellings that a bare read would have judged wrongly.
+      inferred: normalizeConfidence(raw.confidence, raw.inferred) === 'inferred',
+      recordedAt,
       recordedBy: boundText(raw.recordedBy),
     },
   };
@@ -254,31 +568,37 @@ export function classifyEdge(raw) {
 
 // `directoryError` is reported separately from a per-record refusal: an
 // unreadable DIRECTORY must never render as "nothing was recorded".
-export function readEdges(edgesDir) {
+export function readEdges(edgesDir, stopAt = null) {
   const edges = [];
   const refused = [];
+  if (!ledgerPathUnlinked(edgesDir, stopAt)) {
+    return { edges, refused, directoryError: 'ESYMLINK', truncated: false };
+  }
   let names;
   try {
     names = fs.readdirSync(edgesDir);
   } catch (e) {
-    if (e && e.code === 'ENOENT') return { edges, refused, directoryError: null };
-    return { edges, refused, directoryError: e && e.code ? e.code : 'EUNKNOWN' };
+    if (e && e.code === 'ENOENT') return { edges, refused, directoryError: null, truncated: false };
+    return { edges, refused, directoryError: e && e.code ? e.code : 'EUNKNOWN', truncated: false };
   }
-  for (const n of names) {
-    if (!n.endsWith('.json') || n.startsWith('.')) continue;
+  // Sorted before the cap so the bound is deterministic rather than whatever order
+  // the filesystem happened to hand back.
+  const candidates = names.filter((n) => n.endsWith('.json') && !n.startsWith('.')).sort();
+  const truncated = candidates.length > MAX_EDGE_RECORDS;
+  for (const n of candidates.slice(0, MAX_EDGE_RECORDS)) {
     let raw;
-    const text = readBoundedFile(path.join(edgesDir, n));
-    if (text === null) { refused.push({ file: n, reason: EDGE_REFUSALS.UNREADABLE }); continue; }
-    try { raw = JSON.parse(text); } catch {
-      refused.push({ file: n, reason: EDGE_REFUSALS.UNREADABLE });
+    const read = readBoundedFile(path.join(edgesDir, n));
+    if (read.text === null) { refused.push({ file: n, reason: read.reason }); continue; }
+    try { raw = JSON.parse(read.text); } catch {
+      refused.push({ file: n, reason: EDGE_REFUSALS.CORRUPT });
       continue;
     }
     const verdict = classifyEdge(raw);
     if (!verdict.ok) { refused.push({ file: n, reason: verdict.reason }); continue; }
     edges.push({ ...verdict.edge, file: n });
   }
-  edges.sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')));
-  return { edges, refused, directoryError: null };
+  edges.sort(byRecordedAtAsc);
+  return { edges, refused, directoryError: null, truncated };
 }
 
 // Collapsed at READ time, never at write time: the store stays an append-only
@@ -287,11 +607,21 @@ export function readEdges(edgesDir) {
 export function dedupeEdges(edges) {
   const bySide = new Map();
   for (const e of edges) {
-    const key = `${e.from.sessionId}>${e.to.sessionId}`;
+    // JSON-encoded, not `from>to`: `>` survives boundText, so two different pairs
+    // could spell one key and the loser vanished from every count and every line.
+    const key = JSON.stringify([e.from.sessionId, e.to.sessionId]);
     const prev = bySide.get(key);
-    if (!prev || String(e.recordedAt || '') > String(prev.recordedAt || '')) bySide.set(key, e);
+    if (!prev || outranks(e, prev)) bySide.set(key, e);
   }
-  return [...bySide.values()].sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')));
+  return [...bySide.values()].sort(byRecordedAtAsc);
+}
+
+// Confidence FIRST, recency second. Ordering by time alone let a `--backfill` guess
+// — always stamped with the moment `--apply` ran — supersede a real handover.
+function outranks(candidate, incumbent) {
+  const dc = confidenceRank(candidate.confidence) - confidenceRank(incumbent.confidence);
+  if (dc !== 0) return dc > 0;
+  return recordedAtKey(candidate) > recordedAtKey(incumbent);
 }
 
 // The ledger is a GRAPH, so the walk reports forks instead of dropping them. The
@@ -299,21 +629,54 @@ export function dedupeEdges(edges) {
 // edges can describe a cycle, and a wrong answer is recoverable where a hang is
 // not. When a node has several unvisited successors the walk follows the LATEST
 // and records the others, because "where is this now" wants the newest branch.
-export function walkChain(sessionId, edges, maxHops = 64) {
+// The successor index, built ONCE. `walkChain` rebuilt it on every call, and
+// `chainRoots` calls `walkChain` per root — so a ledger filled to MAX_EDGE_RECORDS,
+// which any session on this machine can do, made `lineage` quadratic in the record
+// count. The cap bounds how many records are READ; it never bounded what is done
+// with them. Measured before this: 315 ms at n=2000, 1669 ms at n=5000, which puts
+// the cap's own 20 000 at roughly 27 s.
+export function indexBySource(edges) {
   const byFrom = new Map();
   for (const e of edges) {
     if (!byFrom.has(e.from.sessionId)) byFrom.set(e.from.sessionId, []);
     byFrom.get(e.from.sessionId).push(e);
   }
+  return byFrom;
+}
+
+// `index` is optional and defaults to building one, so every existing caller keeps
+// working unchanged; a caller that walks repeatedly over ONE edge set passes it.
+// `source` is EITHER an edge array or a prebuilt `indexBySource` map — one
+// parameter, never a pair. The signature carried both, and once an index was
+// supplied the `edges` argument was dead code: a caller could hand it an array and
+// an index built from a DIFFERENT set, and the walk followed the index without a
+// word. Two parameters describing one thing is the seam; taking either spelling of
+// the one thing closes it while keeping the reason the index existed, which is that
+// the caller avoids one rebuild per root.
+export function walkChain(sessionId, source, maxHops = 64) {
+  const byFrom = source instanceof Map ? source : indexBySource(source || []);
   const links = [];
   const forks = [];
   const seen = new Set([sessionId]);
+  let revisited = false;
   let cur = sessionId;
   for (let hop = 0; hop < maxHops; hop += 1) {
+    // Confidence first, then newest — the same order dedupeEdges applies, so the
+    // chain a reader is shown and the record that survives cannot disagree.
     const candidates = (byFrom.get(cur) || [])
       .filter((e) => !seen.has(e.to.sessionId))
-      .sort((a, b) => String(b.recordedAt || '').localeCompare(String(a.recordedAt || '')));
-    if (!candidates.length) break;
+      .sort((a, b) => (confidenceRank(b.confidence) - confidenceRank(a.confidence))
+        || byRecordedAtAsc(b, a));
+    if (!candidates.length) {
+      // WHY the walk stopped is the whole point. "No unseen successor" has two very
+      // different causes: the chain genuinely ended, or it led back into a node this
+      // walk refuses to revisit — the shape the documented reset flow produces
+      // (adopt A>B, then adopt B>A from the original window). Reported as an ordinary
+      // end, the renderer printed CONTINUED IN <b> with no caveat while the newest
+      // edge in the ledger said the work had come back.
+      revisited = (byFrom.get(cur) || []).some((e) => seen.has(e.to.sessionId));
+      break;
+    }
     const [next, ...rest] = candidates;
     if (rest.length) forks.push({ at: cur, taken: next.to.sessionId, alsoTo: rest.map((e) => e.to.sessionId) });
     links.push(next);
@@ -321,29 +684,51 @@ export function walkChain(sessionId, edges, maxHops = 64) {
     cur = next.to.sessionId;
   }
   // Surfaced, not swallowed: a chain cut at the bound must not render as complete.
-  return { links, forks, truncated: links.length >= maxHops };
+  // Computed from what the walk actually LEFT BEHIND, not from the link count:
+  // `links.length >= maxHops` was true for a chain of exactly maxHops links that
+  // ended naturally, and for maxHops 0 with an empty walk — both made the renderer
+  // claim a complete answer was "longer than shown".
+  const remaining = (byFrom.get(cur) || []).some((e) => !seen.has(e.to.sessionId));
+  return { links, forks, truncated: remaining, revisited };
 }
 
 // A cycle makes every `from` also a `to`, which yields no roots at all — and a
 // non-zero handover count rendered above no chain is worse than a wrong chain.
 // Every session not reachable from a computed root therefore becomes a root of
 // its own, so a cycle renders as something rather than as silence.
+// No index parameter, for the same reason, and here the pair was worse than dead:
+// `edges` decides which roots exist while the index decides where each chain goes,
+// so a disagreeing pair returns roots from one set and chains from the other. The
+// index is built HERE instead. That is one extra O(n) pass per render next to the
+// caller's own — not the per-root rebuild R10 removed, which was the quadratic
+// term. Deriving the array back out of a map was the alternative and is rejected:
+// flattening groups edges by source key, and the DISCOVERY ORDER of roots is the
+// order chains render in.
 export function chainRoots(edges) {
+  const byFrom = indexBySource(edges);
   const targets = new Set(edges.map((e) => e.to.sessionId));
   const roots = [];
+  // A Set beside the list, not `roots.includes(...)`: the membership test ran inside
+  // a loop over every edge, so it was the second quadratic term after the per-root
+  // re-index. The LIST is still what is returned, because the order roots are
+  // discovered in is the order chains render in.
+  const seenRoot = new Set();
   for (const e of edges) {
-    if (!targets.has(e.from.sessionId) && !roots.includes(e.from.sessionId)) roots.push(e.from.sessionId);
+    if (!targets.has(e.from.sessionId) && !seenRoot.has(e.from.sessionId)) {
+      seenRoot.add(e.from.sessionId);
+      roots.push(e.from.sessionId);
+    }
   }
   const covered = new Set();
   for (const r of roots) {
     covered.add(r);
-    for (const l of walkChain(r, edges).links) covered.add(l.to.sessionId);
+    for (const l of walkChain(r, byFrom).links) covered.add(l.to.sessionId);
   }
   for (const e of edges) {
     if (!covered.has(e.from.sessionId)) {
       roots.push(e.from.sessionId);
       covered.add(e.from.sessionId);
-      for (const l of walkChain(e.from.sessionId, edges).links) covered.add(l.to.sessionId);
+      for (const l of walkChain(e.from.sessionId, byFrom).links) covered.add(l.to.sessionId);
     }
   }
   return roots;
@@ -373,13 +758,21 @@ export function normalizeLabels(raw) {
   if (labelsSchemaMismatch(raw)) return out;
   const accounts = raw.accounts && typeof raw.accounts === 'object' ? raw.accounts : {};
   const windows = raw.windows && typeof raw.windows === 'object' ? raw.windows : {};
+  // The KEY is bounded too, and an out-of-shape one is dropped rather than stored.
+  // Values went through boundLabel from the start; keys did not, so an oversized one
+  // round-tripped through read -> normalize -> write indefinitely. Once labels.json
+  // crossed MAX_RECORD_BYTES the reader refused it permanently: every label silently
+  // disappeared from every rendered chain, and `label` failed from then on with
+  // "move it aside and re-run". Normalisation cannot heal a file it does not bound.
   for (const [k, v] of Object.entries(accounts)) {
+    const key = boundLabel(k);
     const bounded = boundLabel(v);
-    if (bounded) out.accounts[k] = bounded;
+    if (key && bounded) out.accounts[key] = bounded;
   }
   for (const [k, v] of Object.entries(windows)) {
+    const key = boundLabel(k);
     const bounded = boundLabel(v);
-    if (bounded) out.windows[k] = bounded;
+    if (key && bounded) out.windows[key] = bounded;
   }
   return out;
 }
@@ -403,12 +796,47 @@ export function writeLabels(labelsFile, labels, stopAt = null) {
   }
 }
 
+// Owns the WHOLE read-modify-write, which is what `writeLabels` alone could not.
+// `writeLabels` landed atomically but replaced the entire document, and the read that
+// produced its argument happened in the caller — so two windows labelling two
+// different accounts lost one of them. A lost label is not a missing answer: the map
+// still resolves the PREVIOUS name and renders it with exactly the confidence a
+// correct one gets, while the process that lost the update printed success and
+// exited 0.
+//
+// The retry is bounded and the check is the file's identity plus size, read
+// immediately before the landing. This is not a lock — two writers can still
+// interleave — but it closes the window that was wide open, and an update that
+// cannot be landed is REPORTED rather than silently dropped.
+export function updateLabels(labelsFile, mutate, stopAt = null, attempts = 5) {
+  for (let i = 0; i < attempts; i += 1) {
+    const before = labelsFingerprint(labelsFile);
+    const current = readLabels(labelsFile);
+    if (current.unreadable) throw new Error(`refusing to overwrite an unreadable labels file: ${labelsFile}`);
+    if (current.schemaMismatch) throw new Error(`refusing to overwrite a labels file from another schema: ${labelsFile}`);
+    const next = mutate(current.labels);
+    if (labelsFingerprint(labelsFile) !== before) continue; // someone landed first — redo on their copy
+    writeLabels(labelsFile, next, stopAt);
+    return next;
+  }
+  throw new Error(`could not land a labels update in ${attempts} attempts — another window kept writing`);
+}
+
+function labelsFingerprint(labelsFile) {
+  try {
+    const st = fs.statSync(labelsFile);
+    return `${st.ino}:${st.size}:${st.mtimeMs}`;
+  } catch {
+    return 'absent';
+  }
+}
+
 export function readLabels(labelsFile) {
   if (!fs.existsSync(labelsFile)) return { labels: emptyLabels(), unreadable: false, schemaMismatch: false };
-  const raw = readBoundedFile(labelsFile);
-  if (raw === null) return { labels: emptyLabels(), unreadable: true, schemaMismatch: false };
+  const read = readBoundedFile(labelsFile);
+  if (read.text === null) return { labels: emptyLabels(), unreadable: true, schemaMismatch: false };
   let parsed;
-  try { parsed = JSON.parse(raw); } catch { return { labels: emptyLabels(), unreadable: true, schemaMismatch: false }; }
+  try { parsed = JSON.parse(read.text); } catch { return { labels: emptyLabels(), unreadable: true, schemaMismatch: false }; }
   return { labels: normalizeLabels(parsed), unreadable: false, schemaMismatch: labelsSchemaMismatch(parsed) };
 }
 

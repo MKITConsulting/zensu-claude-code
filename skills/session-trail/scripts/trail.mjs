@@ -3,13 +3,52 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   ledgerPaths, writeEdge, readEdges, dedupeEdges,
   makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
-  readLabels as readLabelsFile, writeLabels, emptyLabels, boundLabel,
+  readLabels as readLabelsFile, updateLabels, emptyLabels, boundLabel,
+  removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc, indexBySource,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
+
+// Shared, never re-spelled. CLAUDE.md records `msysDrivePrefix` in
+// hooks/lib/claude-path-v1.js as the ONE MSYS drive rule in this repo, and a
+// second copy is exactly the drift that rule exists to prevent. It is a CommonJS
+// module, so it comes in through createRequire rather than an import.
+const requireFromHere = createRequire(import.meta.url);
+let msysDrivePrefix = null;
+try {
+  ({ msysDrivePrefix } = requireFromHere('../../../hooks/lib/claude-path-v1.js'));
+} catch { msysDrivePrefix = null; }
+
+// Every externally supplied root passes through here before `path.resolve` sees
+// it. The hazard is a root that reaches this process still spelled `/d/work`:
+// `path.resolve` reads that leading slash as drive-RELATIVE and splices the whole
+// POSIX path under the current drive, so the store is written somewhere nobody
+// reads back.
+//
+// How likely that is, stated honestly rather than assumed. CLAUDE.md's pinned
+// premise — measured for `bash-source-write-parse.js` — is that MSYS rewrites
+// exported variables AND the argument vector on the way into a native binary, and
+// that stdin is the one channel it never touches. `CLAUDE_CONFIG_DIR` is an
+// exported variable and `--config-dir` is an argv token, so on that premise both
+// arrive already native and this call is identity. It is kept as defence in depth
+// for the spellings that premise does not cover — an `MSYS2_ENV_CONV_EXCL` opt-out,
+// a value read from a file, a future carrier — and NOT because an unconverted root
+// was observed here. Nobody has run this under Git Bash; treat the premise as the
+// repo's, not as something this code measured.
+//
+// A missing module FAILS rather than falling back to identity: an identity
+// fallback would silently restore the split namespace on the one platform the
+// call exists for, and a plugin tree missing its own lib is broken anyway.
+function hostPath(value) {
+  if (typeof msysDrivePrefix !== 'function') {
+    fail('hooks/lib/claude-path-v1.js could not be loaded, so a path cannot be normalised for this host — the plugin tree is incomplete');
+  }
+  return msysDrivePrefix(value);
+}
 
 const HOME = os.homedir();
 // The config root is resolved, not hardcoded: an instance started with its own
@@ -30,12 +69,12 @@ let LABELS_FILE;
 
 function defaultConfigRoot() {
   const env = process.env.CLAUDE_CONFIG_DIR;
-  if (env && env.trim()) return path.resolve(env.trim());
+  if (env && env.trim()) return path.resolve(hostPath(env.trim()));
   return path.join(HOME, '.claude');
 }
 
 function resolveRoots(configDir) {
-  CONFIG_ROOT = configDir && configDir.trim() ? path.resolve(configDir.trim()) : defaultConfigRoot();
+  CONFIG_ROOT = configDir && configDir.trim() ? path.resolve(hostPath(configDir.trim())) : defaultConfigRoot();
   PROJECTS = path.join(CONFIG_ROOT, 'projects');
   SESSIONS = path.join(CONFIG_ROOT, 'sessions');
   HANDOFFS = path.join(CONFIG_ROOT, 'handoffs');
@@ -43,7 +82,17 @@ function resolveRoots(configDir) {
   LEDGER_DIR = led.edges;
   LABELS_FILE = led.labels;
 }
-resolveRoots(null);
+// NOT called at module load. It was, and `fail()` is reachable from it through
+// `hostPath` — but `fail` calls `flush`, `flush` calls `skippedNote`, and that
+// reads `SKIPPED` and `JSON_MODE`, both declared BELOW where the call stood. The
+// carefully worded "the plugin tree is incomplete" diagnostic was therefore
+// replaced by `ReferenceError: Cannot access 'SKIPPED' before initialization`, on
+// exactly the path it exists for. The same hazard the note under `JSON_MODE`
+// already records for `parseArgs`, one call site earlier.
+//
+// The call was also redundant: the dispatcher resolves every root from
+// `opts.configDir` before any command runs, and no module-scope statement between
+// here and there reads one.
 // Records that could not be read at all. Counted rather than swallowed: a
 // silently short answer is indistinguishable from an idle machine, and the
 // skill's own docs route "no sessions found" to a different cause.
@@ -60,6 +109,7 @@ function parseArgs(argv) {
   const out = {
     _: [], days: 21, prompts: 12, json: false, all: false, live: false, git: true, repo: null, force: false,
     configDir: null, where: null, diagnose: false, backfill: false, apply: false, record: true, reason: null, self: false,
+    forget: null, remove: null,
     daysExplicit: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -78,6 +128,11 @@ function parseArgs(argv) {
     else if (a === '--self') out.self = true;
     else if (a === '--config-dir') out.configDir = stringOperand(a, argv[++i]);
     else if (a === '--where') out.where = stringOperand(a, argv[++i]);
+    // Both take an operand rather than reading a positional: they are the two
+    // destructive spellings in this file, and a positional silently swallowed from
+    // a neighbouring flag would name a target the user never typed.
+    else if (a === '--forget') out.forget = stringOperand(a, argv[++i]);
+    else if (a === '--remove') out.remove = stringOperand(a, argv[++i]);
     else if (a === '--reason') out.reason = stringOperand(a, argv[++i]);
     // Both operands are validated. An unvalidated `--prompts` was the worse of
     // the two: `Number("--json")` is NaN, `Math.max(1, NaN)` is NaN, and
@@ -196,7 +251,7 @@ function ccdStoreCandidates() {
   // accounts read out of a store the operator did not choose, and the fallback would
   // be invisible in every output except --diagnose.
   const env = process.env.ZENSU_CCD_STORE;
-  if (env && env.trim()) return [{ source: 'ZENSU_CCD_STORE (authoritative)', dir: path.resolve(env.trim()) }];
+  if (env && env.trim()) return [{ source: 'ZENSU_CCD_STORE (authoritative)', dir: path.resolve(hostPath(env.trim())) }];
   out.push({ source: 'macOS (verified)', dir: path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions') });
   const appData = process.env.APPDATA;
   if (appData && appData.trim()) out.push({ source: 'Windows APPDATA (unverified)', dir: path.join(appData.trim(), 'Claude', 'claude-code-sessions') });
@@ -285,7 +340,11 @@ function accountLabel(key) {
 
 function windowLabel(appPid) {
   const w = readLabels().windows;
-  const l = Object.prototype.hasOwnProperty.call(w, String(appPid)) ? w[String(appPid)] : undefined;
+  // The qualified key ONLY. A bare-pid fallback would restore exactly the reuse
+  // hazard the qualification removes — and silently, since a label that resolves
+  // renders identically whether or not it belongs to the window in front of you.
+  const key = windowKey(appPid);
+  const l = key && Object.prototype.hasOwnProperty.call(w, key) ? w[key] : undefined;
   return l ? `window ${appPid} (${l})` : `window pid ${appPid}`;
 }
 
@@ -312,13 +371,22 @@ function processTable() {
       const root = sysRoot && path.isAbsolute(sysRoot) ? sysRoot : 'C:\\Windows';
       const shell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
       out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command',
-        'Get-CimInstance Win32_Process | ForEach-Object { "$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.Name)" }'],
+        // The CreationDate is rendered explicitly, in UTC and under the invariant
+        // culture. `"$($_.CreationDate)"` follows the ambient culture, so changing
+        // the machine's locale or timezone changed the token and silently unbound
+        // every window label — the POSIX branch pins LC_ALL/TZ for the same reason
+        // and the token's own comment leans on that pin.
+        "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }"],
       { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
     } else {
       // Absolute path and a pinned environment, as hooks/lib/session-control-core-v1.js
       // does for the same probe: the argument vector is a fixed literal, so the only
       // exposure left is program resolution and an inherited environment.
-      out = execFileSync('/bin/ps', ['-Ao', 'pid=,ppid=,comm='], {
+      // `lstart` rather than `etime`: an elapsed time changes on every read, so it
+      // cannot key anything. The `LC_ALL=C` pin below is what makes it parseable at
+      // all: the weekday and month are rendered in the caller's locale, so without
+      // the pin the column carries localized abbreviations no ASCII shape matches.
+      out = execFileSync('/bin/ps', ['-Ao', 'pid=,ppid=,lstart=,comm='], {
         encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'],
         env: { PATH: '/usr/bin:/bin', LC_ALL: 'C', LANG: 'C', TZ: 'UTC' },
       });
@@ -327,23 +395,88 @@ function processTable() {
   for (const line of out.split('\n')) {
     const t = line.trim();
     if (!t) continue;
-    const m = process.platform === 'win32'
-      ? t.split('\t')
-      : /^(\d+)\s+(\d+)\s+(.*)$/.exec(t)?.slice(1);
-    if (!m || m.length < 3) continue;
-    const pid = Number(m[0]);
-    const ppid = Number(m[1]);
+    let pid; let ppid; let comm; let started = null;
+    if (process.platform === 'win32') {
+      const f = t.split('\t');
+      if (f.length < 3) continue;
+      // Four fields now, but a three-field line is still accepted: losing the start
+      // time must cost the LABEL, never the ppid walk that windowOf depends on.
+      pid = Number(f[0]); ppid = Number(f[1]);
+      if (f.length >= 4) { started = String(f[2]).trim(); comm = String(f[3]).trim(); }
+      else comm = String(f[2]).trim();
+    } else {
+      // Two patterns, tried widest-first, for the same reason: a row whose `lstart`
+      // does not parse still contributes its parent link. Dropping the row instead
+      // would break the ancestor walk on exactly the hosts whose `ps` differs.
+      const withStart = /^(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d{2}:\d{2}:\d{2}\s+\d{4})\s+(.*)$/.exec(t);
+      const m = withStart || /^(\d+)\s+(\d+)\s+(.*)$/.exec(t);
+      if (!m) continue;
+      pid = Number(m[1]); ppid = Number(m[2]);
+      if (withStart) { started = m[3].trim(); comm = m[4].trim(); }
+      else comm = m[3].trim();
+    }
     if (!Number.isFinite(pid) || !Number.isFinite(ppid)) continue;
-    PROC_TABLE.set(pid, { ppid, comm: String(m[2]).trim() });
+    PROC_TABLE.set(pid, { ppid, comm, started });
   }
   return PROC_TABLE;
 }
 
-// The HIGHEST ancestor whose command names Claude, excluding the CLI process
-// itself. Highest rather than nearest: the chain passes through a helper
-// (`Contents/Helpers/disclaimer`) that also matches, and it is the app process at
-// the top that owns the window. A session with no such ancestor — a terminal or
-// IDE launch — answers null, which is the honest result, not a fallback to itself.
+// An OS pid is reused the moment its process exits, so a label keyed by the bare
+// number silently renames whatever window inherits it next — and renders with
+// exactly the confidence a correct one gets. The key names the INCARNATION: the
+// pid plus the process's own start time, taken from the table windowOf already
+// builds, so no second probe is spawned for it.
+//
+// The token is the raw start string with its punctuation flattened, NOT a parsed
+// instant. `Date.parse` would introduce a timezone: `ps` renders under the pinned
+// TZ=UTC of its own environment while the parse happens in this process's local
+// zone, and the two only have to AGREE WITH THEMSELVES for the key to discriminate.
+// Anything that round-trips a clock invites a mismatch that silently unbinds every
+// label on the machine.
+// Whether the start-time column parsed at all. When the locale pin does not hold —
+// a wrapper that re-exports LANG, a host whose `ps` ignores it — the widest parse
+// fails, `started` is null for every row, and every window label silently stops
+// resolving with nothing anywhere saying why. This is the command whose entire job
+// is explaining why something does not resolve.
+function processStartTimeHealth() {
+  const table = processTable();
+  if (!table.size) return 'no-process-table';
+  let withStart = 0;
+  for (const e of table.values()) if (e && e.started) withStart += 1;
+  if (withStart === 0) return 'unreadable — window labels cannot resolve';
+  return withStart === table.size ? 'ok' : `partial (${withStart}/${table.size})`;
+}
+
+function incarnationToken(entry) {
+  const raw = entry && entry.started ? String(entry.started).trim() : '';
+  if (!raw) return null;
+  return raw.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || null;
+}
+
+// null when the pid names no running process, and every caller treats that as
+// "there is no window to label" rather than falling back to the bare number.
+// Deliberate consequence: a window-keyed label stops resolving once its process is
+// gone. That is the safe direction — the alternative is the label resurfacing on an
+// unrelated window, which is the defect this exists to remove.
+function windowKey(appPid) {
+  const pid = Number(appPid);
+  if (!Number.isFinite(pid)) return null;
+  const tok = incarnationToken(processTable().get(pid));
+  return tok ? `${pid}@${tok}` : null;
+}
+
+// The HIGHEST ancestor whose PROGRAM names Claude, excluding the CLI process
+// itself. Highest rather than nearest: the chain passes through a helper under
+// `Contents/Helpers/`, and it is the app process at the top that owns the window.
+// A session with no such ancestor — a terminal or IDE launch — answers null, which
+// is the honest result, not a fallback to itself.
+//
+// The basename, never the whole string. `ps -o comm=` yields the full executable
+// PATH on macOS, so the previous whole-string test matched any ancestor that
+// merely LIVED under a claude-named directory — `~/claude-tools/bin/watcher`, or a
+// checkout of this plugin. The session was then grouped under a window that is not
+// one, and this walk is the fallback that exists precisely for when the desktop
+// store (the only other source of that grouping) is unreachable.
 function windowOf(pid) {
   const table = processTable();
   if (!table.size || !Number.isFinite(pid)) return null;
@@ -352,7 +485,7 @@ function windowOf(pid) {
   for (let hop = 0; hop < 12 && cur && cur.ppid > 1; hop += 1) {
     const next = table.get(cur.ppid);
     if (!next) break;
-    if (/claude/i.test(next.comm)) found = cur.ppid;
+    if (/claude/i.test(path.basename(next.comm))) found = cur.ppid;
     cur = next;
   }
   return found;
@@ -362,12 +495,11 @@ function windowOf(pid) {
 // The schema, the store layout and the chain walk live in session-lineage-v1.mjs.
 // These wrappers only bind the module to this process's resolved roots and to the
 // module-scope SKIPPED counter, so the record shape has exactly one owner.
-let LEDGER_DIR_ERROR = null;
-let LEDGER_SCHEMA_NEWER = false;
-// Per-record refusals, kept apart from the whole-directory failure: they are the
-// narrow half of the same hazard -- one dropped record is one pair missing from
-// the duplicate guard -- and the remedies differ.
-let LEDGER_REFUSED = 0;
+// The read's status travels with its RESULT and no longer through module-scope
+// state. Three globals meant every later reader saw whatever the last call left
+// behind: two reads in one command reported the first one's failures against the
+// second one's records, and a consumer that never read at all still rendered a
+// clean null ledger error as though it had measured one.
 
 function ledgerWrite(edge) {
   return writeEdge(LEDGER_DIR, edge, Date.now(), CONFIG_ROOT);
@@ -378,15 +510,24 @@ function ledgerWrite(edge) {
 // reads exactly like a session nobody ever took over, which is the one wrong
 // answer this whole feature exists to prevent.
 function ledgerRead() {
-  const { edges, refused, directoryError } = readEdges(LEDGER_DIR);
-  LEDGER_DIR_ERROR = directoryError;
-  LEDGER_REFUSED = refused.length;
+  // CONFIG_ROOT is the ceiling, the same one ledgerWrite passes: without it the
+  // read and delete paths check the leaf only, and a symlink at `session-lineage/`
+  // or `v1/` is resolved as an ordinary intermediate component — which let
+  // `lineage --forget --apply` unlink a record OUTSIDE the ledger directory.
+  const { edges, refused, directoryError, truncated } = readEdges(LEDGER_DIR, CONFIG_ROOT);
   if (directoryError) SKIPPED += 1;
+  let schemaNewer = false;
   for (const r of refused) {
     SKIPPED += 1;
-    if (r.reason === EDGE_REFUSALS.SCHEMA_NEWER) LEDGER_SCHEMA_NEWER = true;
+    if (r.reason === EDGE_REFUSALS.SCHEMA_NEWER) schemaNewer = true;
   }
-  return edges;
+  // `truncated` is the record-COUNT cap readEdges applies, and it used to be
+  // dropped here. A ledger past the bound then answered from a prefix and rendered
+  // exactly like a complete one -- the silent truncation the bound was added to
+  // make visible. Per-record refusals stay a separate number: they are the narrow
+  // half of the same hazard, one dropped record is one pair missing from the
+  // duplicate guard, and the remedies differ.
+  return { edges, refused: refused.length, directoryError, schemaNewer, truncated };
 }
 
 
@@ -412,10 +553,11 @@ function selfIdentity() {
     accountUuid,
     appPid: Number.isFinite(pid) ? windowOf(pid) : null,
     pid: Number.isFinite(pid) ? pid : null,
-    cwd,
+    // `cwd` and `title` are deliberately absent: makeEndpoint persists six fields
+    // and drops anything else, so passing them advertised a shape the record does
+    // not have. `cwd` is still read above, for `wt`.
     worktree: wt,
     branch: git(wt, ['rev-parse', '--abbrev-ref', 'HEAD']),
-    title: null,
   });
 }
 
@@ -455,10 +597,8 @@ function endpointFromRow(row) {
     accountUuid: (row && row.app && row.app.accountUuid) || null,
     appPid: pid ? windowOf(pid) : null,
     pid,
-    cwd: row && row.cwd,
     worktree: row && row.wt,
     branch: row && row.branch,
-    title: row && row.title,
   });
 }
 
@@ -466,7 +606,19 @@ function endpointFromRow(row) {
 // The documented takeover route runs from a window in a different repo, so
 // deriving the repo from the recorder filed the edge under the taker's repo and
 // made the default, repo-scoped `lineage` render nothing where the work lives.
-function buildEdge(fromRow, to, reason, recordedBy, inferred) {
+// `confidence` and `at` are both CALLER decisions and neither may be defaulted here.
+// The tier is what the caller is entitled to claim: generating a takeover brief is
+// not the same event as having taken the session over, so a plain `takeover` claims
+// `provisional`, while `--force` (the user's approval, on the command line) and
+// `adopt` (the confirmation verb) claim `confirmed`.
+//
+// `at` is when the handover HAPPENED, which for a reconstructed edge is the stalled
+// session's own last activity — not the moment `--apply` ran. Stamping every guess
+// with the apply instant made it newer than every real handover by construction, and
+// `recordedAt` is the sole ordering key at four sites, so one backfill promoted
+// guesses above measurements permanently and printChain printed the backfill date as
+// the date of the handover.
+function buildEdge(fromRow, to, reason, recordedBy, confidence, at) {
   return buildLedgerEdge({
     from: endpointFromRow(fromRow),
     to,
@@ -474,9 +626,34 @@ function buildEdge(fromRow, to, reason, recordedBy, inferred) {
     repoRootOf: (root) => nearestRepoRoot(root, new Map()),
     reason,
     recordedBy,
-    inferred,
-    at: new Date().toISOString(),
+    confidence,
+    at,
   });
+}
+
+const nowStamp = () => new Date().toISOString();
+
+// The reader-facing half of the confidence tier. Recording the tier and rendering
+// nothing would leave the user exactly where they were: unable to tell a brief that
+// was generated from a handover that actually happened. `confirmed` is deliberately
+// silent — annotating the ordinary case would drain the marker of meaning.
+// The one-word form, for renderings that carry a list rather than a numbered chain.
+// Same owner as the long form so a new tier lands in one place; `confirmed` is the
+// silent tier on both, because a marker every line carries marks nothing.
+function confidenceMark(edge) {
+  const tier = edgeTier(edge);
+  return tier === 'confirmed' ? '' : ` [${tier === 'inferred' ? 'inferred' : 'unconfirmed'}]`;
+}
+
+function edgeTier(edge) {
+  return (edge && edge.confidence) || (edge && edge.inferred ? 'inferred' : 'provisional');
+}
+
+function confidenceNote(edge) {
+  const tier = edgeTier(edge);
+  if (tier === 'inferred') return '   [inferred — a guess from --backfill, not a recorded handover]';
+  if (tier === 'provisional') return '   [unconfirmed — a takeover brief was generated; no confirmation followed]';
+  return '';
 }
 
 function liveState(sessionId, live) {
@@ -634,7 +811,16 @@ function extractPrompts(text) {
       : Array.isArray(c) ? c.filter((x) => x && x.type === 'text').map((x) => x.text).join('\n') : '';
     push(o.timestamp, t);
   }
-  out.sort((a, b) => String(a.at || '').localeCompare(String(b.at || '')));
+  // Code units, not `localeCompare`: these are ISO-8601 stamps, where the two
+  // agree on every input that matters — but `localeCompare` resolves the host
+  // locale, so the ONE rule this file now holds for ledger records may as well
+  // hold for the only other timestamp ordering in it. Same defect class, caught
+  // beside its sibling rather than left as the exception that invites the next one.
+  out.sort((a, b) => {
+    const x = String(a.at || ''); const y = String(b.at || '');
+    if (x < y) return -1;
+    return x > y ? 1 : 0;
+  });
   return out;
 }
 
@@ -1289,12 +1475,17 @@ function cmdInstances(opts) {
   // The lineage is rendered HERE because the window that ran out of quota cannot
   // ask anything — one `instances` call from any working window has to answer
   // "where did that session go" for every session on the machine.
-  const edges = dedupeEdges(ledgerRead());
+  const led = ledgerRead();
+  const edges = dedupeEdges(led.edges);
   const lineageOf = (sessionId) => {
     const out = [];
     for (const e of edges) {
-      if (e.from.sessionId === sessionId) out.push(`→ continued in ${e.to.sessionId.slice(0, 8)} (${endpointLabel(e.to)})${e.inferred ? ' [inferred]' : ''}`);
-      if (e.to.sessionId === sessionId) out.push(`← taken over from ${e.from.sessionId.slice(0, 8)} (${endpointLabel(e.from)})${e.inferred ? ' [inferred]' : ''}`);
+      // The SHORT tier marker, not the legacy `inferred` boolean this used to read.
+      // SKILL.md says the tier is annotated in every rendering, and this is the view
+      // it names as the machine-wide answer — so a `provisional` edge rendered here
+      // as a completed handover, which is the one claim the tier exists to prevent.
+      if (e.from.sessionId === sessionId) out.push(`→ continued in ${e.to.sessionId.slice(0, 8)} (${endpointLabel(e.to)})${confidenceMark(e)}`);
+      if (e.to.sessionId === sessionId) out.push(`← taken over from ${e.from.sessionId.slice(0, 8)} (${endpointLabel(e.from)})${confidenceMark(e)}`);
     }
     return out;
   };
@@ -1302,8 +1493,8 @@ function cmdInstances(opts) {
     return print(JSON.stringify({
       rows: rows.map((r) => ({ ...r, lineage: lineageOf(r.sessionId) })),
       edgeCount: edges.length,
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerTruncated: led.truncated, ledgerError: led.directoryError,
+      schemaNewer: led.schemaNewer,
       skipped: SKIPPED,
     }, null, 2));
   }
@@ -1319,7 +1510,15 @@ function cmdInstances(opts) {
   const accounts = new Set();
   for (const s of rows) { const a = ccdIndex().get(s.sessionId); if (a && a.accountUuid) accounts.add(a.accountUuid); }
   print(`LIVE CLAUDE CODE SESSIONS: ${rows.length} (every session process on this machine)`);
-  print(`ACCOUNTS INVOLVED: ${accounts.size}${accounts.size ? ` — ${[...accounts].map((i) => accountLabel(i)).join(', ')}` : ''}\n`);
+  print(`ACCOUNTS INVOLVED: ${accounts.size}${accounts.size ? ` — ${[...accounts].map((i) => accountLabel(i)).join(', ')}` : ''}`);
+  // This view is the machine-wide answer to "where did that session go" — the one
+  // a window with no quota left cannot ask for itself — so a lineage line that is
+  // MISSING must not render as one that is absent. The --json carrier said so from
+  // the start; the text carrier printed the sessions and nothing else.
+  { const t = truncatedNote(led); if (t) print(`!  ${t}`); }
+  if (led.directoryError) print(`!  the ledger could not be read (${led.directoryError}) — the lineage lines below are missing, not absent.`);
+  if (led.schemaNewer) print('!  the ledger holds records from a NEWER schema than this build reads — the lineage below is incomplete.');
+  print('');
   for (const [root, list] of [...groups.entries()].sort()) {
     print(`${root}  (${list.length})`);
     for (const s of list) {
@@ -1656,7 +1855,10 @@ function recordTakeoverEdge(opts, row) {
   }
   const reason = opts.reason || (row.stopCause && row.stopCause.error) || 'manual';
   let file;
-  try { file = ledgerWrite(buildEdge(row, me, reason, 'takeover', false)); } catch (e) {
+  // `--force` is the flag that carries the user's approval onto the command line, so
+  // it is the one spelling of `takeover` entitled to claim a completed handover.
+  const tier = opts.force ? 'confirmed' : 'provisional';
+  try { file = ledgerWrite(buildEdge(row, me, reason, 'takeover', tier, nowStamp())); } catch (e) {
     return { recorded: false, reason: 'write-failed', message: `NOT RECORDED — ${e && e.message ? e.message : 'write failed'}` };
   }
   return {
@@ -1760,7 +1962,20 @@ function cmdLabel(opts) {
   let target = '';
   let text = '';
   let kind = 'account';
-  if (opts.self) {
+  // The removal spelling names its key on the flag, so neither the --self probe nor
+  // the positional split applies: `label --remove <key>` carries no text to read.
+  // `--self` resolves its own kind because it names an identity rather than a
+  // typed key; the two typed spellings decide theirs from the SHAPE, which is why
+  // they wait until the value has been bounded below.
+  let shapeRule = null;
+  if (opts.remove !== null) {
+    target = String(opts.remove).trim();
+    // `<digits>` OR `<digits>@…`: the set path stores the QUALIFIED window key and
+    // then ECHOES it, so an all-digits test sent a user who copied that echo into
+    // the account namespace, where it reported "nothing was removed" while the
+    // label sat on disk — the permanent state this verb exists to end.
+    shapeRule = /^\d+(@|$)/;
+  } else if (opts.self) {
     const me = selfIdentity();
     if (me.accountUuid) { target = me.accountUuid; kind = 'account'; }
     else if (me.appPid) { target = String(me.appPid); kind = 'window'; }
@@ -1770,11 +1985,42 @@ function cmdLabel(opts) {
     target = String(positional[0] || '').trim();
     text = positional.slice(1).join(' ').trim();
     // A pid is not a uuid; the key kind is decided by shape rather than guessed.
-    kind = /^\d+$/.test(target) ? 'window' : 'account';
+    shapeRule = /^\d+$/;
   }
   if (!target) fail('usage: label <accountUuid|appPid|--self> <text>');
+  // Bounded HERE, once, before anything else looks at it. Every reader resolves
+  // `boundLabel(key)` (normalizeLabels bounds keys as well as values), so a raw key
+  // that differs from its bounded form became a different key on the next read:
+  // the set path reported success, the entry rendered under a name nothing typed,
+  // and `--remove` could not name it either. The reserved-name refusal below now
+  // compares the same value that will be stored, rather than a spelling that
+  // collapses onto it afterwards.
+  //
+  // Refused rather than restored to the raw spelling. `|| target` made the bound a
+  // no-op for exactly the input it exists to reject — a key of nothing but control
+  // characters bounds to nothing, and the fallback then stored and PRINTED the raw
+  // bytes, straight into the terminal a model reads back.
+  const boundedTarget = boundLabel(target);
+  if (!boundedTarget) fail('refusing that label key — it carries no usable character once control and format characters are removed');
+  target = boundedTarget;
+  // AFTER the bound, never before: the raw spelling and the stored one can disagree
+  // about the shape, and deciding here on the raw value looked the key up in the
+  // account namespace while it sat under windows — reporting "nothing was removed"
+  // for a label the tool itself had just written.
+  if (shapeRule) kind = shapeRule.test(target) ? 'window' : 'account';
   if (target === '__proto__' || target === 'constructor' || target === 'prototype') {
     fail(`refusing "${target}" as a label key — it names an object member, not an account`);
+  }
+  // Below the key guards and above the text one: a removal has a key to validate
+  // and no text, so requiring text first would refuse every `--remove`.
+  if (opts.remove !== null) return labelRemove(opts, target, kind);
+  // Qualified on the SET path only. `--remove` keeps taking the bare pid, because
+  // that is what the operator has to type — the incarnation half is machine state
+  // they never saw and cannot reconstruct once the window is gone.
+  if (kind === 'window') {
+    const key = windowKey(target);
+    if (!key) fail(`${target} names no running process — there is no window to label. Run \`instances\` to see the live ones.`);
+    target = key;
   }
   if (!text) fail('usage: label <accountUuid|appPid|--self> <text>');
   // Bounded like every other rendered value: this label is machine-wide and is
@@ -1794,25 +2040,91 @@ function cmdLabel(opts) {
   if (LABELS_SCHEMA_MISMATCH) {
     fail(`${LABELS_FILE} was written by a different label schema — refusing to overwrite it; update the plugin or move it aside`);
   }
-  // Object.assign onto the module's own maps: an object-literal spread would give
-  // them Object.prototype back, and a `__proto__` key would then hit the inherited
-  // setter, store nothing, and still be reported as written.
-  const next = emptyLabels();
-  Object.assign(next.accounts, current.accounts);
-  Object.assign(next.windows, current.windows);
-  // Two namespaces: an account uuid is stable, an OS pid is reused after its
-  // process exits. One flat map let a pid-keyed label silently rename an
-  // unrelated window later, with no way to tell the two kinds apart in the file.
-  if (kind === 'window') next.windows[target] = bounded;
-  else next.accounts[target] = bounded;
+  // Landed through updateLabels, which owns the whole read-modify-write. The
+  // caller-side version this replaces read here, merged here and wrote here, so two
+  // windows labelling two different accounts lost one of them — and the process that
+  // lost it printed success and exited 0. `current` above is still read, for the two
+  // refusals it feeds; the merge itself runs on the copy updateLabels re-reads inside
+  // its own bounded retry.
+  let next;
   try {
-    writeLabels(LABELS_FILE, next, CONFIG_ROOT);
+    next = updateLabels(LABELS_FILE, (cur) => {
+      // Object.assign onto the module's own maps: an object-literal spread would give
+      // them Object.prototype back, and a `__proto__` key would then hit the inherited
+      // setter, store nothing, and still be reported as written.
+      const merged = emptyLabels();
+      Object.assign(merged.accounts, cur.accounts);
+      Object.assign(merged.windows, cur.windows);
+      // Two namespaces: an account uuid is stable, an OS pid is reused after its
+      // process exits. One flat map let a pid-keyed label silently rename an
+      // unrelated window later, with no way to tell the two kinds apart in the file.
+      if (kind === 'window') merged.windows[target] = bounded;
+      else merged.accounts[target] = bounded;
+      return merged;
+    }, CONFIG_ROOT);
   } catch (e) {
     fail(`could not write ${LABELS_FILE}: ${e && e.message ? e.message : 'write failed'}`);
   }
   LABEL_CACHE = next;
   if (opts.json) return print(JSON.stringify({ labelled: target, kind, text: bounded, file: LABELS_FILE, skipped: SKIPPED }, null, 2));
   print(`labelled ${kind} ${target} → "${bounded}"   (${LABELS_FILE})`);
+}
+
+// The clear path. `label` has had a set path from the start and no way to undo it,
+// so a label typed into the wrong window stayed on that account for every session
+// that renders it, on every window of the machine. Namespace-aware, because `label`
+// writes into two maps and a remove that swept both would clear an unrelated window
+// whose pid happens to spell the same digits as the account key being cleared.
+function labelRemove(opts, target, kind) {
+  const current = readLabels();
+  // The same two refusals the set path takes, and for the same reason: both land a
+  // WHOLE document, so writing on top of a file this build could not read replaces
+  // every label in it with the one edit being made.
+  if (LABELS_UNREADABLE) {
+    fail(`${LABELS_FILE} exists but could not be read — refusing to overwrite it; move it aside and re-run`);
+  }
+  if (LABELS_SCHEMA_MISMATCH) {
+    fail(`${LABELS_FILE} was written by a different label schema — refusing to overwrite it; update the plugin or move it aside`);
+  }
+  const held = kind === 'window' ? current.windows : current.accounts;
+  // Used only to decide whether to report "nothing was removed"; the DELETION below
+  // recomputes its own set from the copy updateLabels re-reads, so an incarnation
+  // added between the two reads is deleted rather than reported-and-kept.
+  // A window key names an incarnation (`<pid>@<start>`) and the operator types the
+  // bare pid, so every incarnation recorded under that pid goes — which is what
+  // "forget this window" means to the person asking. The bare form is matched too,
+  // and that is the only way a label written before the qualification existed can
+  // ever be cleared: it no longer resolves, so nothing else would ever name it.
+  const matches = kind === 'window'
+    ? Object.keys(held).filter((k) => k === target || k.startsWith(`${target}@`))
+    : (Object.prototype.hasOwnProperty.call(held, target) ? [target] : []);
+  const present = matches.length > 0;
+  // Reported, never smoothed into a success. A "removed" for a key that was never
+  // there tells the operator that a label they can still see was cleared, and they
+  // stop looking for the entry that is actually rendering it.
+  if (!present) {
+    if (opts.json) return print(JSON.stringify({ removed: false, key: target, kind, reason: 'not-labelled', file: LABELS_FILE, skipped: SKIPPED }, null, 2));
+    return print(`no ${kind} label is recorded for ${target} — nothing was removed   (${LABELS_FILE})`);
+  }
+  let next;
+  try {
+    next = updateLabels(LABELS_FILE, (cur) => {
+      const merged = emptyLabels();
+      Object.assign(merged.accounts, cur.accounts);
+      Object.assign(merged.windows, cur.windows);
+      if (kind === 'window') {
+        for (const k of Object.keys(merged.windows)) {
+          if (k === target || k.startsWith(`${target}@`)) delete merged.windows[k];
+        }
+      } else delete merged.accounts[target];
+      return merged;
+    }, CONFIG_ROOT);
+  } catch (e) {
+    fail(`could not write ${LABELS_FILE}: ${e && e.message ? e.message : 'write failed'}`);
+  }
+  LABEL_CACHE = next;
+  if (opts.json) return print(JSON.stringify({ removed: true, key: target, kind, reason: null, file: LABELS_FILE, skipped: SKIPPED }, null, 2));
+  print(`removed the ${kind} label for ${target}   (${LABELS_FILE})`);
 }
 
 function cmdAdopt(opts) {
@@ -1822,7 +2134,9 @@ function cmdAdopt(opts) {
     fail('this process has no CLAUDE_CODE_SESSION_ID, so it cannot record itself as the continuing session');
   }
   if (me.sessionId === row.sessionId) fail('refusing to record a session as its own continuation');
-  const edge = buildEdge(row, me, opts.reason || 'manual', 'adopt', false);
+  // `adopt` IS the confirmation verb — the documented step a user runs once they have
+  // actually taken the session over — so it is entitled to `confirmed`.
+  const edge = buildEdge(row, me, opts.reason || 'manual', 'adopt', 'confirmed', nowStamp());
   // Guarded exactly as the takeover path is: the same unwritable-ledger condition
   // must not kill one verb with a stack trace while its sibling reports it.
   let file;
@@ -1838,7 +2152,8 @@ function cmdAdopt(opts) {
 function lineageDiagnose(opts) {
   const probes = ccdStoreCandidates().map((c) => ({ ...c, exists: dirExists(c.dir) }));
   const resolved = probes.find((p) => p.exists) || null;
-  const edges = ledgerRead();
+  const led = ledgerRead();
+  const edges = led.edges;
   if (opts.json) {
     return print(JSON.stringify({
       configRoot: CONFIG_ROOT,
@@ -1846,19 +2161,22 @@ function lineageDiagnose(opts) {
       ledgerDir: LEDGER_DIR,
       labelsFile: LABELS_FILE,
       edgeCount: edges.length,
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerTruncated: led.truncated, ledgerError: led.directoryError,
+      schemaNewer: led.schemaNewer,
       store: resolved,
       probes,
       platform: process.platform,
+      processStartTimes: processStartTimeHealth(),
       skipped: SKIPPED,
     }, null, 2));
   }
   print(`PLATFORM     ${process.platform}`);
   print(`CONFIG ROOT  ${CONFIG_ROOT}   (${opts.configDir ? '--config-dir' : (process.env.CLAUDE_CONFIG_DIR ? 'CLAUDE_CONFIG_DIR' : 'default ~/.claude')})`);
   print(`LEDGER       ${LEDGER_DIR}   (${edges.length} edge record(s))`);
-  if (LEDGER_DIR_ERROR) print(`LEDGER ERROR ${LEDGER_DIR_ERROR} — the count above is NOT a measurement of what exists.`);
-  if (LEDGER_SCHEMA_NEWER) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  { const t = truncatedNote(led); if (t) print(`LEDGER CAP   ${t}`); }
+  if (led.directoryError) print(`LEDGER ERROR ${led.directoryError} — the count above is NOT a measurement of what exists.`);
+  if (led.schemaNewer) print('LEDGER SCHEMA A record from a NEWER schema was refused; upgrade the plugin to read it.');
+  print(`START TIMES  ${processStartTimeHealth()}`);
   print(`LABELS       ${LABELS_FILE}`);
   print('');
   print('DESKTOP STORE PROBES (first existing wins; only the macOS path is verified):');
@@ -1879,8 +2197,14 @@ function lineageBackfill(opts) {
   // exactly those while reporting "0 candidates" on a machine that has them.
   const days = opts.daysExplicit ? opts.days : 0;
   const { rows } = buildIndex({ ...opts, days, live: false });
-  const existing = ledgerRead();
-  const known = new Set(existing.map((e) => `${e.from.sessionId}>${e.to.sessionId}`));
+  const led = ledgerRead();
+  const existing = led.edges;
+  // JSON-encoded, for the reason `dedupeEdges` gives: `>` survives boundText, so
+  // two different pairs could spell one key. Here a collision suppresses a
+  // legitimate candidate rather than minting a duplicate, but it is the same
+  // defect and the module already states the rule.
+  const pairKey = (e) => JSON.stringify([e.from.sessionId, e.to.sessionId]);
+  const known = new Set(existing.map(pairKey));
   // The duplicate guard below is exactly as good as this read. An unreadable
   // directory yields an EMPTY `known` set, so every edge that IS already recorded
   // re-proposes and --apply mints a second copy machine-wide. The dry run still
@@ -1889,16 +2213,16 @@ function lineageBackfill(opts) {
   // drops an unreadable, malformed or wrong-schema record, and each one is a pair
   // missing from `known` above. The gate names which of the two it is, because the
   // remedies differ -- fix the directory, versus find the one bad record.
-  const refusedCount = LEDGER_REFUSED;
-  const applyBlocked = Boolean(opts.apply && (LEDGER_DIR_ERROR || refusedCount > 0));
-  const applyRefusal = LEDGER_DIR_ERROR ? 'ledger-unreadable' : 'records-refused';
+  const refusedCount = led.refused;
+  // The cap belongs in this gate for the identical reason a refused record does:
+  // `known` is built from THIS read, so a pair beyond the bound is missing from it
+  // and --apply mints a second copy of an edge the machine already holds. The
+  // refusal text below already made that argument for the per-record cause.
+  const applyBlocked = Boolean(opts.apply && (led.directoryError || refusedCount > 0 || led.truncated));
+  const applyRefusal = led.directoryError ? 'ledger-unreadable' : (refusedCount > 0 ? 'records-refused' : 'ledger-truncated');
   const stalled = rows.filter((r) => r.stopCause && r.stopCause.final);
   const candidates = [];
   for (const s of stalled) {
-    // Ordered by START, not by last activity: `mtime` is the transcript's last
-    // write, so a session that was already running when the other stalled would
-    // satisfy `mtime > s.mtime` and be minted as a causal handover that never
-    // happened. A successor whose start precedes the stall is skipped outright.
     // Ordered by last activity, and the start guard applies ONLY where a start is
     // actually observable. `r.live` is null for every finished session — the whole
     // population this verb reconstructs — so the previous `startedAt(r) >= s.mtime`
@@ -1916,7 +2240,7 @@ function lineageBackfill(opts) {
     // not evidence of a DIFFERENT one, so they are excluded too. A heuristic that
     // guessed here would mint edges nobody can distinguish from measured ones.
     if (!fromAcct || !toAcct || fromAcct === toAcct) continue;
-    if (known.has(`${s.sessionId}>${successor.sessionId}`)) continue;
+    if (known.has(JSON.stringify([s.sessionId, successor.sessionId]))) continue;
     candidates.push({ from: s, to: successor });
   }
   if (opts.json && !opts.apply) {
@@ -1927,8 +2251,8 @@ function lineageBackfill(opts) {
         from: c.from.sessionId, to: c.to.sessionId, worktree: c.to.wt,
         cause: c.from.stopCause.error || 'rate_limit',
       })),
-      ledgerError: LEDGER_DIR_ERROR,
-      schemaNewer: LEDGER_SCHEMA_NEWER,
+      ledgerTruncated: led.truncated, ledgerError: led.directoryError,
+      schemaNewer: led.schemaNewer,
       skipped: SKIPPED,
     }, null, 2));
   }
@@ -1953,11 +2277,12 @@ function lineageBackfill(opts) {
       return print(JSON.stringify({
         dryRun: false, applied: false, refusal: applyRefusal,
         written: 0, files: [], writeError: null, refusedRecords: refusedCount,
-        ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED,
+        ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED,
       }, null, 2));
     }
-    if (LEDGER_DIR_ERROR) print(`BACKFILL REFUSED — the ledger could not be read (${LEDGER_DIR_ERROR}).`);
-    else print(`BACKFILL REFUSED — ${refusedCount} ledger record(s) could not be read.`);
+    if (led.directoryError) print(`BACKFILL REFUSED — the ledger could not be read (${led.directoryError}).`);
+    else if (refusedCount > 0) print(`BACKFILL REFUSED — ${refusedCount} ledger record(s) could not be read.`);
+    else print(`BACKFILL REFUSED — ${truncatedNote(led)}.`);
     print('Nothing was written. The already-recorded edges could not be listed in full, so a');
     print('candidate above may already exist and --apply would mint a duplicate of it.');
     print(`Fix the ledger (${LEDGER_DIR}) and re-run; \`lineage --diagnose\` names what failed.`);
@@ -1966,7 +2291,15 @@ function lineageBackfill(opts) {
   const written = [];
   let writeError = null;
   for (const c of candidates) {
-    const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', true);
+    // Stamped from the SUCCESSOR's first observable activity, not from now: this edge
+    // reconstructs a handover that happened when the stalled session went quiet and
+    // the next one picked the worktree up. `c.to.mtime` is that session's last write,
+    // which is the closest observable instant the transcripts offer — and any past
+    // stamp is enough to stop a guess from outranking every measurement by
+    // construction. Stated rather than implied: it is an approximation of when, not a
+    // measurement of it, which is exactly why the edge is `inferred`.
+    const occurredAt = new Date(c.to.mtime || c.from.mtime || Date.now()).toISOString();
+    const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', 'inferred', occurredAt);
     // Reported, not abandoned: a batch that dies mid-way had already written real
     // records, and claiming none were written is the wrong half of the truth.
     try { written.push(path.basename(ledgerWrite(edge))); } catch (e) {
@@ -1974,15 +2307,194 @@ function lineageBackfill(opts) {
       break;
     }
   }
-  if (opts.json) return print(JSON.stringify({ dryRun: false, applied: true, refusal: null, written: written.length, files: written, writeError, refusedRecords: refusedCount, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ dryRun: false, applied: true, refusal: null, written: written.length, files: written, writeError, refusedRecords: refusedCount, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
   print(`BACKFILL APPLIED — ${written.length} inferred edge(s) recorded in ${LEDGER_DIR}`);
   if (writeError) print(`BACKFILL INCOMPLETE — stopped after ${written.length} edge(s): ${writeError}`);
 }
 
+// The record cap, in one sentence with one owner. Every payload carried the flag
+// and no TEXT renderer did, so a ledger past the bound answered from a prefix and
+// rendered exactly like a complete one — beside LEDGER ERROR and LEDGER SCHEMA
+// lines that do disclose. Four hand-written copies would drift, and three of them
+// saying it is not a disclosure.
+// One owner for the "the read FAILED, so this is not an absence" answer, for the
+// reason truncatedNote has one: the listing branch disclosed both causes while its
+// `--where` sibling disclosed neither, so one ledger answered "no handover was
+// recorded" through one code path and named the fault through the other — and the
+// --where branch then closed with the reconstruction offer, the one line in this
+// file that mints machine-wide guesses. Returns true when it rendered, so a caller
+// knows to stop.
+function renderLedgerFault(led) {
+  if (led.directoryError) {
+    print(`The ledger could not be read (${led.directoryError}) — this is NOT evidence that no handover was recorded.`);
+    print(`Check ${LEDGER_DIR}, then re-run.`);
+    return true;
+  }
+  if (led.schemaNewer) {
+    print('The ledger holds records written by a NEWER schema than this build can read.');
+    print('Update the plugin rather than treating this as an empty history.');
+    return true;
+  }
+  return false;
+}
+
+function truncatedNote(led) {
+  return led && led.truncated
+    ? `only the first ${MAX_EDGE_RECORDS} record(s) were read — this is a prefix of the ledger, not a measurement of it`
+    : null;
+}
+
+// A migration is a fact about the STORE, so both callers ask the same question of
+// the same quantity: does THIS BUILD's own directory hold nothing while a sibling
+// schema directory holds something. Gating it on a repo-scoped count instead made
+// a repo that simply has no handovers report machine-wide blindness while the
+// current store held plenty for other repos — and suppressed the ordinary guidance
+// while doing it. Returns true when it rendered, so a caller knows to stop.
+function renderMigration(ownCount) {
+  if (ownCount > 0) return false;
+  const foreign = otherSchemaLedgers(CONFIG_ROOT);
+  if (!foreign.length) return false;
+  print('This build reads none of the records this machine already holds:\n');
+  for (const f of foreign) print(`  v${f.version} (${f.relation} schema)   ${f.records} record(s)${f.truncated ? ' (bounded read)' : ''}   ${f.dir}`);
+  print('');
+  print('That is a MIGRATION, not an empty history. Do not reconstruct anything here —');
+  print('a guess would duplicate a handover already recorded above as a measurement.');
+  print(foreign.some((f) => f.relation === 'newer')
+    ? 'A newer schema directory means this plugin is behind: update it, then re-run.'
+    : 'Update the plugin, or move those records forward once a migration exists.');
+  return true;
+}
+
+// The only verb in this file that DESTROYS a record, and the reason it exists: the
+// store is append-only and machine-wide, so until now a mistaken takeover — or a
+// guess `--backfill` minted — was permanent for every window on the machine, and
+// the operator's only recourse was deleting a file whose name the tool never
+// showed them. A dry run first, for the same reason `--backfill` has one.
+function lineageForget(opts) {
+  const want = String(opts.forget).trim().toLowerCase();
+  // The same floor `--where` applies, and it carries more here: a prefix short
+  // enough to match everything would empty the whole ledger from one typo.
+  if (want.length < 6) fail('--forget needs a session id or a prefix of at least 6 characters');
+  // NOT deduped. `dedupeEdges` collapses the rendered view to one line per pair;
+  // forgetting a session has to reach every RECORD naming it, and the collapsed
+  // view would leave the losers of that collapse behind — invisible and, because
+  // nothing renders them, undeletable.
+  const led = ledgerRead();
+  const edges = led.edges;
+  if (led.directoryError) {
+    if (opts.json) {
+      return print(JSON.stringify({
+        mode: 'forget', query: opts.forget, dryRun: !opts.apply, applied: false, refusal: 'ledger-unreadable',
+        matched: 0, removed: 0, files: [], failed: [], refusedRecords: led.refused,
+        ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED,
+      }, null, 2));
+    }
+    print(`FORGET REFUSED — the ledger could not be read (${led.directoryError}).`);
+    print('Nothing was removed, and this is NOT evidence that no record names that session.');
+    print(`Fix the ledger (${LEDGER_DIR}) and re-run; \`lineage --diagnose\` names what failed.`);
+    return;
+  }
+  const startsWant = (id) => String(id || '').toLowerCase().startsWith(want);
+  const hits = edges.filter((e) => startsWant(e.from.sessionId) || startsWant(e.to.sessionId));
+  const distinctSet = new Set();
+  for (const e of hits) {
+    if (startsWant(e.from.sessionId)) distinctSet.add(e.from.sessionId);
+    if (startsWant(e.to.sessionId)) distinctSet.add(e.to.sessionId);
+  }
+  const distinct = [...distinctSet];
+  // Refused, never resolved. `--where` picks the first candidate and prints an
+  // answer a reader can check; an unlink cannot be re-read afterwards, so an
+  // ambiguous prefix has to stop the command rather than choose for the user.
+  if (distinct.length > 1) {
+    print(`ambiguous --forget "${opts.forget}" — ${distinct.length} candidates:\n`);
+    for (const sid of distinct) print(`  ${sid}`);
+    print('\nNothing was removed. Name one of them in full.');
+    flush();
+    process.exit(2);
+  }
+  const target = distinct[0] || null;
+  const files = hits.map((e) => e.file).filter((f) => typeof f === 'string' && f);
+  // Disclosed rather than blocking, unlike `--backfill`'s. A refused record is one
+  // this command cannot see and therefore cannot remove, so the removal stays
+  // correct for everything it did see — it is the COUNT that would otherwise read
+  // as "that is all of them".
+  // BOTH causes, because both mean the same thing to the operator: the count below
+  // is not "all of them". A capped read is the worse of the two here — "N of N
+  // record(s) removed" on a prefix is the most confident wrong sentence in the file.
+  const notes = [];
+  if (led.refused > 0) notes.push(`${led.refused} record(s) could not be read and were not examined — one of them may also name this session.`);
+  { const t = truncatedNote(led); if (t) notes.push(`${t}, so records naming this session may remain beyond it.`); }
+  const refusedNote = notes.length ? notes.join(' ') : null;
+  if (!opts.apply) {
+    if (opts.json) {
+      return print(JSON.stringify({
+        mode: 'forget', query: opts.forget, dryRun: true, applied: false, refusal: null,
+        session: target, matched: files.length, removed: 0, files, failed: [],
+        refusedRecords: led.refused, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED,
+      }, null, 2));
+    }
+    // Nothing matched is its own answer, not a zero-count dry run: pointing the
+    // operator at --apply there names a destructive command that would do nothing,
+    // and the offer is the one line of this output that carries a consequence.
+    if (!files.length) {
+      print(`No record names ${target || opts.forget}.`);
+      if (refusedNote) print(`! ${refusedNote}`);
+      return;
+    }
+    print(`FORGET (dry run) — ${files.length} record(s) name ${target || opts.forget}`);
+    // Bounded like every persisted field, and for the identical reason: the name
+    // comes off a directory every session on this machine can write, and these
+    // lines are what an operator reads before authorising a deletion.
+    for (const f of files) print(`  ${boundText(f)}`);
+    if (refusedNote) print(`\n! ${refusedNote}`);
+    print('\nNothing was removed. Re-run with --apply to remove them — the ledger is');
+    print('machine-wide, so this takes them from every window and cannot be undone.');
+    return;
+  }
+  const { removed, failed } = removeEdgeFiles(LEDGER_DIR, files, CONFIG_ROOT);
+  if (opts.json) {
+    return print(JSON.stringify({
+      mode: 'forget', query: opts.forget, dryRun: false, applied: true, refusal: null,
+      session: target, matched: files.length, removed: removed.length, files: removed, failed,
+      refusedRecords: led.refused, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED,
+    }, null, 2));
+  }
+  print(`FORGET APPLIED — ${removed.length} of ${files.length} record(s) removed from ${LEDGER_DIR}`);
+  for (const f of removed) print(`  removed ${boundText(f)}`);
+  // Named individually rather than summed into the count above: "3 of 4" tells the
+  // operator a record survived, not WHICH one, and the survivor keeps asserting a
+  // handover they just asked to retract.
+  for (const f of failed) print(`  ! kept ${boundText(f.file)} (${f.reason})`);
+  if (refusedNote) print(`! ${refusedNote}`);
+}
+
 function cmdLineage(opts) {
+  // The dispatch below is a first-match ladder, so before this guard
+  // `--diagnose --backfill` ran the diagnostic and discarded the backfill without
+  // a word — and a user who typed both read the output of whichever arm came
+  // first as the answer to the other. That was survivable while every mode only
+  // READ. `--forget` is not: paired with `--apply` it destroys records, and a
+  // ladder that silently drops it prints a diagnostic while the removal the user
+  // asked for never happened. `--where` is in the set for the same reason: it
+  // selects a different rendering, and every mode above it ignores it.
+  const modes = [];
+  if (opts.diagnose) modes.push('--diagnose');
+  if (opts.backfill) modes.push('--backfill');
+  if (opts.forget !== null) modes.push('--forget');
+  if (opts.where !== null) modes.push('--where');
+  if (modes.length > 1) fail(`lineage takes one mode at a time — got ${modes.join(' and ')}`);
+  // `--apply` is not a mode of its own: it turns a dry run into a write, and a mode
+  // with no dry run to turn simply swallows it. Refused rather than dropped — the
+  // user typed the flag that authorises a write, and hearing nothing back about it
+  // reads as "applied".
+  if (opts.apply && !opts.backfill && opts.forget === null) {
+    fail('--apply has no effect on its own — it applies `lineage --backfill` or `lineage --forget <session>`');
+  }
   if (opts.diagnose) return lineageDiagnose(opts);
   if (opts.backfill) return lineageBackfill(opts);
-  const edges = dedupeEdges(ledgerRead());
+  if (opts.forget !== null) return lineageForget(opts);
+  const led = ledgerRead();
+  const edges = dedupeEdges(led.edges);
   const live = liveRegistry();
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   // Absolute roots only. A basename arm made ~/work/clientA/api and
@@ -2037,9 +2549,18 @@ function cmdLineage(opts) {
       process.exit(2);
     }
     if (!match.length) {
-      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
+      // The same migration check the listing path takes. Without it this sibling
+      // branch kept offering the reconstruction on a store the schema had moved out
+      // from under — the exact offer the listing path stopped making, surviving one
+      // code path over.
+      // Ahead of the migration check and the offer below, both of which describe a
+      // ledger that was actually READ.
+      if (renderLedgerFault(led)) return;
+      if (renderMigration(led.edges.length)) return;
       print(`No lineage recorded for "${opts.where}".`);
       print('Either that session was never handed over, or the handover predates the ledger.');
+      { const t = truncatedNote(led); if (t) print(`! ${t}`); }
       print(`Try: node ${scriptPath()} lineage --backfill`);
       return;
     }
@@ -2052,54 +2573,77 @@ function cmdLineage(opts) {
     // A leaf has no outgoing edge, so the answer is the INCOMING edge's real
     // endpoint — a fabricated one printed "CONTINUED IN <the id you asked about>"
     // with an unknown worktree and no chain, discarding what the ledger holds.
+    // The module's comparator, not a local one. `localeCompare` resolves the host
+    // locale, so the order of a machine-wide ledger depended on the reader's ICU
+    // build — and this sort decides which endpoint a leaf query answers with.
     const incoming = edges.filter((e) => e.to.sessionId === start)
-      .sort((a, b) => String(a.recordedAt || '').localeCompare(String(b.recordedAt || '')))
+      .sort(byRecordedAtAsc)
       .pop();
     const last = links.length ? links[links.length - 1].to
       : (incoming ? incoming.to : makeEndpoint({ sessionId: start }));
     const isLeaf = !links.length;
     if (opts.json) {
-      return print(JSON.stringify({ query: opts.where, found: true, start, current: last, live: liveState(last.sessionId, live), links, forks: walk.forks, truncated: walk.truncated, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+      return print(JSON.stringify({ query: opts.where, found: true, start, current: last, live: liveState(last.sessionId, live), links, forks: walk.forks, truncated: walk.truncated, revisited: walk.revisited, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
     }
     print(`${isLeaf ? 'THIS IS THE END OF THE CHAIN' : 'CONTINUED IN'}  ${last.sessionId.slice(0, 8)}   ${endpointLabel(last)}   ${liveState(last.sessionId, live)}`);
     print(`WORKTREE      ${last.worktree || '(unknown)'}${last.branch ? `   branch ${last.branch}` : ''}`);
     if (last.pid) print(`PID           ${last.pid}${last.appPid ? `   window pid ${last.appPid}` : ''}`);
     print('');
     printChain(links, live, me, walk.forks);
+    { const t = truncatedNote(led); if (t) print(`  ! ${t}`); }
     if (walk.truncated) print('  ! chain truncated at the hop bound — it is longer than shown');
+    // `revisited` was computed and read by nobody, so the reset flow it exists for
+    // — adopt A>B, then adopt B>A from the original window — still printed
+    // CONTINUED IN with no caveat while the newest edge said the work had come back.
+    if (walk.revisited) print('  ! the work came back to a session already in this chain — the line above is where the walk stopped, not where the work is');
     return;
   }
 
   if (opts.json) {
+    // One index for the whole render's WALKS: without it the walk re-indexed the
+    // entire edge set once per root, which was the quadratic term. chainRoots builds
+    // its own — it owns root discovery, which needs the edge order, and taking both
+    // an array and an index let the two disagree about which ledger was walked.
+    const idx = indexBySource(scoped);
     const chains = chainRoots(scoped).map((root) => {
-      const w = walkChain(root, scoped);
-      return { root, links: w.links, forks: w.forks };
+      const w = walkChain(root, idx);
+      // Both bounds travel with the chain. The --where rendering carries them and
+      // this one dropped them, so the reset flow (adopt A>B, then adopt B>A) and a
+      // chain past the hop bound both rendered here as complete.
+      return { root, links: w.links, forks: w.forks, truncated: w.truncated, revisited: w.revisited };
     });
-    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, ledgerError: LEDGER_DIR_ERROR, schemaNewer: LEDGER_SCHEMA_NEWER, skipped: SKIPPED }, null, 2));
+    // Keyed on the OWN store, not on the repo-scoped view: "this build reads none
+    // of the records this machine holds" is a claim about the store, and a repo
+    // with no handovers of its own is not evidence for it. Computed only when the
+    // own store is empty, which keeps a directory read off every ordinary call.
+    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, otherSchemaLedgers: led.edges.length ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
   }
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`RECORDED HANDOVERS: ${scoped.length}\n`);
+  { const t = truncatedNote(led); if (t) print(`! ${t}\n`); }
   if (!scoped.length) {
-    if (LEDGER_DIR_ERROR) {
-      print(`The ledger could not be read (${LEDGER_DIR_ERROR}) — this is NOT evidence that no handover was recorded.`);
-      print(`Check ${LEDGER_DIR}, then re-run.`);
-      return;
-    }
-    if (LEDGER_SCHEMA_NEWER) {
-      print('The ledger holds records written by a NEWER schema than this build can read.');
-      print('Update the plugin rather than treating this as an empty history.');
-      return;
-    }
+    if (renderLedgerFault(led)) return;
+    // A schema move leaves every existing record under the PREVIOUS `v<n>/`
+    // directory, invisible to this build. Saying "nothing was recorded" there — and
+    // then offering to reconstruct guesses — would mint inferred edges for handovers
+    // the machine still holds as measurements, one directory away. That is the worst
+    // outcome the confidence axis exists to prevent, reached by a command this tool
+    // itself recommends. The reconstruction offer below is deliberately NOT printed
+    // on that branch.
+    if (renderMigration(led.edges.length)) return;
     print('No handover has been recorded yet.');
     print(`Past ones can be reconstructed as GUESSES: node ${scriptPath()} lineage --backfill`);
     return;
   }
+  const idx = indexBySource(scoped);
   for (const root of chainRoots(scoped)) {
-    const { links, forks } = walkChain(root, scoped);
+    const { links, forks, truncated: walkTruncated, revisited } = walkChain(root, idx);
     if (!links.length) continue;
     const wt = links[0].to.worktree || links[0].from.worktree;
     print(`CHAIN  ${links[0].repo && links[0].repo.name ? links[0].repo.name : '(unknown repo)'}${wt ? `   ${path.basename(wt)}` : ''}`);
     printChain(links, live, me, forks);
+    if (walkTruncated) print('  ! chain truncated at the hop bound — it is longer than shown');
+    if (revisited) print('  ! the work came back to a session already in this chain — the line above is where the walk stopped, not where the work is');
     print('');
   }
 }
@@ -2113,10 +2657,15 @@ function printChain(links, live, me, forks = []) {
   seq.forEach((ep, i) => {
     const edge = i === 0 ? null : links[i - 1];
     const here = me.sessionId && ep.sessionId === me.sessionId ? '   ← HERE' : '';
-    const inferred = edge && edge.inferred ? '   [inferred — a guess from --backfill, not a recorded handover]' : '';
+    // One annotation per non-confirmed tier, and NONE for `confirmed` — an ordinary
+    // link must stay quiet or the marker means nothing. `provisional` is the case
+    // this rendering exists for: `takeover` writes its edge while it generates the
+    // brief, before the user has been asked to confirm, so without a marker a
+    // declined takeover reads exactly like a completed one.
+    const tier = edge ? confidenceNote(edge) : '';
     print(`  ${String(i + 1).padStart(2)}. ${ep.sessionId.slice(0, 8)}   ${endpointLabel(ep).padEnd(26)} ${liveState(ep.sessionId, live).padEnd(12)}${here}`);
     if (ep.worktree) print(`      ${ep.worktree}${ep.branch ? `   ${ep.branch}` : ''}`);
-    if (edge) print(`      handed over ${String(edge.recordedAt || '').slice(0, 16)}   reason: ${edge.reason}${inferred}`);
+    if (edge) print(`      handed over ${String(edge.recordedAt || '').slice(0, 16)}   reason: ${edge.reason}${tier}`);
   });
 }
 
@@ -2151,14 +2700,72 @@ JSON_MODE = opts.json && cmd !== 'handoff';
 // is only known once argv is parsed, and a command that read the default root first
 // would write its ledger into ~/.claude while reading sessions from elsewhere.
 resolveRoots(opts.configDir);
-if (cmd === 'list') cmdList(opts);
-else if (cmd === 'instances') cmdInstances(opts);
-else if (cmd === 'show') cmdShow(opts);
-else if (cmd === 'handoff') cmdHandoff(opts);
-else if (cmd === 'limited') cmdLimited(opts);
-else if (cmd === 'takeover') cmdTakeover(opts);
-else if (cmd === 'lineage') cmdLineage(opts);
-else if (cmd === 'adopt') cmdAdopt(opts);
-else if (cmd === 'label') cmdLabel(opts);
-else fail(`unknown command: ${cmd} (list | instances | show | handoff | limited | takeover | lineage | adopt | label)`);
+// The two tables are adjacent because the invariant between them is the whole
+// point: every dispatched command needs a flag row, or it accepts every flag in
+// the namespace again. Keys drive the usage string too, so a tenth command cannot
+// be added to one and forgotten in the other.
+const COMMANDS = {
+  list: cmdList,
+  instances: cmdInstances,
+  show: cmdShow,
+  handoff: cmdHandoff,
+  limited: cmdLimited,
+  takeover: cmdTakeover,
+  lineage: cmdLineage,
+  adopt: cmdAdopt,
+  label: cmdLabel,
+};
+
+// The flag namespace is global — parseArgs accepts every flag for every command —
+// while the rules about them lived inside two handlers. The dispatcher routes NINE,
+// so `takeover x --forget y --apply` parsed both, recorded an edge, and named
+// neither: exactly the silence the mode-exclusivity guard refuses INSIDE `lineage`,
+// surviving one layer up. The rule belongs where the command name is decided.
+//
+// `--force` on `list` and `limited` is a DOCUMENTED deliberate ignore — one
+// session's approval is not approval for every busy row in a survey — so it is
+// listed there rather than refused. `instances` emits no verdict at all, so it
+// has no such contract to keep and refuses it.
+const COMMAND_FLAGS = {
+  list: ['--force'],
+  instances: [],
+  show: ['--force'],
+  handoff: ['--force'],
+  limited: ['--force'],
+  takeover: ['--force', '--no-record', '--reason'],
+  lineage: ['--diagnose', '--backfill', '--forget', '--where', '--apply'],
+  // `adopt` IS the record, so `--no-record` would leave a verb whose entire
+  // output is suppressed. It used to be accepted and then ignored, which wrote the
+  // machine-wide record the flag said it was skipping.
+  adopt: ['--reason'],
+  label: ['--remove', '--self'],
+};
+
+function refuseForeignFlags(opts, cmd) {
+  const mine = COMMAND_FLAGS[cmd];
+  // Fail closed rather than `|| []`: a command present in COMMANDS and missing
+  // from COMMAND_FLAGS would otherwise silently accept every flag, which is the
+  // defect this function exists to remove.
+  if (!mine) fail(`internal: \`${cmd}\` has no flag table`);
+  const supplied = [];
+  if (opts.diagnose) supplied.push('--diagnose');
+  if (opts.backfill) supplied.push('--backfill');
+  if (opts.apply) supplied.push('--apply');
+  if (opts.self) supplied.push('--self');
+  if (opts.force) supplied.push('--force');
+  if (!opts.record) supplied.push('--no-record');
+  if (opts.reason !== null) supplied.push('--reason');
+  if (opts.forget !== null) supplied.push('--forget');
+  if (opts.remove !== null) supplied.push('--remove');
+  if (opts.where !== null) supplied.push('--where');
+  const foreign = supplied.filter((f) => !mine.includes(f));
+  if (foreign.length) fail(`${foreign.join(' and ')} is not a flag of \`${cmd}\` — it would have been parsed and then ignored`);
+}
+
+// The unknown-command refusal stays FIRST: a typo must be reported as a typo, not
+// as a flag that does not belong to the command the user did not name.
+const handler = Object.prototype.hasOwnProperty.call(COMMANDS, cmd) ? COMMANDS[cmd] : null;
+if (!handler) fail(`unknown command: ${cmd} (${Object.keys(COMMANDS).join(' | ')})`);
+refuseForeignFlags(opts, cmd);
+handler(opts);
 flush();

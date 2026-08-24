@@ -53,21 +53,34 @@ fi
 # accepts a file that registered zero cases.
 UNIT_OUT="$(node --test "$PLUGIN_DIR/tests/structure/session-lineage-v1.test.js" 2>&1)"
 UNIT_RC=$?
-# BOTH counters, as tests/structure/test-stop-enforcer-self-review-routing.sh does:
-# the TOTAL is the real floor, and the pass floor is lower because TWO cases skip
-# themselves on Windows -- both symlink cases. Keying the floor to `pass` alone would have failed
-# this suite on the one platform it was just registered to run on — by
-# construction, with nothing actually broken.
 # BOTH summary spellings: `# tests`/`# pass` is the TAP reporter's form, and
 # capturing only the other one made an empty capture look like a module failure.
-UNIT_TOTAL="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# tests \([0-9][0-9]*\)$/\1/p;s/^. tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
-UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^# pass \([0-9][0-9]*\)$/\1/p;s/^. pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+# `^.*[[:space:]]` rather than a leading `.`: the spec reporter prefixes each
+# summary with a three-BYTE glyph, and `.` matches one byte -- so under a non-UTF-8
+# locale the capture came back empty, UNIT_TOTAL fell to 0, and a healthy module
+# was reported as a failure. Anchored on the WORD and the digits instead.
+UNIT_TOTAL="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]tests \([0-9][0-9]*\)$/\1/p' | tail -1)"
+UNIT_PASS="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]pass \([0-9][0-9]*\)$/\1/p' | tail -1)"
+UNIT_SKIP="$(printf '%s' "$UNIT_OUT" | sed -n 's/^.*[[:space:]]skipped \([0-9][0-9]*\)$/\1/p' | tail -1)"
 case "$UNIT_TOTAL" in ''|*[!0-9]*) UNIT_TOTAL=0 ;; esac
 case "$UNIT_PASS" in ''|*[!0-9]*) UNIT_PASS=0 ;; esac
-if [ "$UNIT_RC" = "0" ] && [ "$UNIT_TOTAL" -ge 19 ] && [ "$UNIT_PASS" -ge 17 ]; then
-  check "L-unit session-lineage-v1.test.js passes ($UNIT_PASS/$UNIT_TOTAL cases)" PASS
+case "$UNIT_SKIP" in ''|*[!0-9]*) UNIT_SKIP=0 ;; esac
+# EXACT, not a floor. A pass floor accepts a case that quietly started skipping
+# itself -- which is precisely how a platform-gated case dies: the gate widens, the
+# case stops running, and the suite still reports green with a smaller pass count
+# than the floor allows for. TWELVE cases carry `skip: process.platform === 'win32'`
+# (symlinks, modes, and the O_NONBLOCK probe); TWO of those ALSO skip as root,
+# where a mode guard cannot be observed at all. Both numbers are hand-maintained on
+# purpose: deriving them from the file under test would make the check agree with
+# whatever that file currently says.
+UNIT_PLATFORM="$(node -p 'process.platform' 2>/dev/null)"
+UNIT_ROOT="$(node -p 'process.platform !== "win32" && typeof process.getuid === "function" && process.getuid() === 0 ? 2 : 0' 2>/dev/null)"
+case "$UNIT_ROOT" in ''|*[!0-9]*) UNIT_ROOT=0 ;; esac
+if [ "$UNIT_PLATFORM" = "win32" ]; then UNIT_SKIP_WANT=12; else UNIT_SKIP_WANT="$UNIT_ROOT"; fi
+if [ "$UNIT_RC" = "0" ] && [ "$UNIT_TOTAL" -ge 61 ] && [ "$UNIT_SKIP" = "$UNIT_SKIP_WANT" ] && [ "$UNIT_PASS" = "$((UNIT_TOTAL - UNIT_SKIP))" ]; then
+  check "L-unit session-lineage-v1.test.js passes ($UNIT_PASS/$UNIT_TOTAL cases, $UNIT_SKIP skipped on $UNIT_PLATFORM)" PASS
 else
-  check "L-unit session-lineage-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0}, floors 17/19)" FAIL
+  check "L-unit session-lineage-v1.test.js (rc=$UNIT_RC pass=${UNIT_PASS:-0} total=${UNIT_TOTAL:-0} skipped=${UNIT_SKIP:-0}, want total>=61 and exactly $UNIT_SKIP_WANT skipped on $UNIT_PLATFORM)" FAIL
   printf '%s\n' "$UNIT_OUT" | tail -20
 fi
 
@@ -294,7 +307,16 @@ const link = first && first.links && first.links[0];
 process.stdout.write(link ? String(link.from.accountUuid) : "NO_LINK");
 ' "$OUT")"
 [ "$NOSTORE_ACCT" = "null" ] && check "L6 with no reachable store the account is null rather than guessed" PASS || check "L6 with no reachable store the account is null (got ${NOSTORE_ACCT:-<empty>})" FAIL
-[ "$CHAINS" != "ABSENT" ] && [ "$CHAINS" != "[]" ] && check "L6a the chain still renders with no store — the ledger does not depend on it" PASS || check "L6a the chain still renders with no store" FAIL
+# A payload that never parsed is not a rendered chain. jq_field answers
+# PARSE_ERROR there, which is neither ABSENT nor "[]", so the previous two-armed
+# test reported the ledger as store-independent on exactly the output that proves
+# nothing. The rule is a helper so its own rejection can be controlled.
+renders_chain() { # <jq value>
+  case "$1" in ''|ABSENT|PARSE_ERROR|'[]') return 1 ;; *) return 0 ;; esac
+}
+renders_chain "$CHAINS" && check "L6a the chain still renders with no store — the ledger does not depend on it" PASS || check "L6a the chain still renders with no store (got ${CHAINS:-<empty>})" FAIL
+renders_chain "PARSE_ERROR" && check "L6a-control an unparseable payload is still accepted as a rendered chain" FAIL || check "L6a-control an unparseable payload is not accepted as a rendered chain" PASS
+renders_chain '[{"root":"a"}]' && check "L6a-control a real chains array is accepted" PASS || check "L6a-control a real chains array is accepted" FAIL
 
 # Rebuild the two-edge chain L7/L8 read, now that L6 has cleared the ledger.
 reset_ledger
@@ -363,7 +385,12 @@ case "$TXT" in *"record(s) unreadable and skipped"*) check "L11a the text channe
 # would let a future shape be read with today's field meanings.
 printf '{"schemaVersion":99,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v1/edges/9999999998-deadbee2.json"
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
-[ "$(jq_field "$OUT" skipped)" -ge 2 ] 2>/dev/null && check "L11b an edge record with an unknown schemaVersion is refused, not read with today's meanings" PASS || check "L11b an edge record with an unknown schemaVersion is refused (skipped=$(jq_field "$OUT" skipped))" FAIL
+# The CAUSE, not only the count. `skipped` rises for an unreadable record, a
+# malformed one and a wrong-schema one alike, so the count alone would have stayed
+# green if the schema check were deleted outright -- the neighbouring corrupt
+# record from L11 already supplies a skip of its own.
+[ "$(jq_field "$OUT" schemaNewer)" = "true" ] && check "L11b an edge record with an unknown schemaVersion is refused AS a newer schema, not read with today's meanings" PASS || check "L11b the refusal names the schema as the cause (schemaNewer=$(jq_field "$OUT" schemaNewer))" FAIL
+[ "$(jq_field "$OUT" skipped)" -ge 2 ] 2>/dev/null && check "L11c and the record is counted among the skipped, so the output declares itself incomplete" PASS || check "L11c the refused record is counted among the skipped (skipped=$(jq_field "$OUT" skipped))" FAIL
 rm -f "$CFG/zensu/session-lineage/v1/edges/9999999999-deadbeef.json" "$CFG/zensu/session-lineage/v1/edges/9999999998-deadbee2.json"
 
 # ── L12 — takeover records automatically; --no-record opts out ─────────────
@@ -382,6 +409,51 @@ reset_ledger
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --json)"
 [ "$(jq_field "$OUT" lineage.recorded)" = "true" ] && check "L12c the --json path records the edge as well as the text path" PASS || check "L12c the --json path records the edge (got $(jq_field "$OUT" lineage.recorded))" FAIL
 [ "$(edge_count)" = "1" ] && check "L12d the --json takeover left exactly one record on disk" PASS || check "L12d the --json takeover left exactly one record (got $(edge_count))" FAIL
+
+# ── L12h — what a takeover is entitled to CLAIM ───────────────────────────
+# Generating a takeover brief is not the same event as having taken the session over:
+# the record is written at step 2 of the documented flow while the user is asked to
+# confirm at step 5, so a plain takeover may claim `provisional` and no more. --force
+# carries the user's approval on the command line, and `adopt` is the confirmation
+# verb — both reach `confirmed`. Before the tier existed, every declined takeover
+# left a permanent, unretractable assertion that the handover had happened.
+edge_field() { # <dotted-field>
+  node -e '
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1], field = process.argv[2];
+const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+if (files.length !== 1) { process.stdout.write(`FILES:${files.length}`); process.exit(0); }
+const o = JSON.parse(fs.readFileSync(path.join(dir, files[0]), "utf8"));
+process.stdout.write(String(field.split(".").reduce((a, k) => (a == null ? a : a[k]), o)));
+' "$CFG/zensu/session-lineage/v1/edges" "$1"
+}
+
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+[ "$(edge_field confidence)" = "provisional" ] && check "L12h a plain takeover claims provisional, not a completed handover" PASS || check "L12h a plain takeover claims provisional (got $(edge_field confidence))" FAIL
+
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --force >/dev/null
+[ "$(edge_field confidence)" = "confirmed" ] && check "L12i --force carries the approval, so the edge is confirmed" PASS || check "L12i --force records a confirmed edge (got $(edge_field confidence))" FAIL
+
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all >/dev/null
+[ "$(edge_field confidence)" = "confirmed" ] && check "L12j adopt is the confirmation verb and records confirmed" PASS || check "L12j adopt records a confirmed edge (got $(edge_field confidence))" FAIL
+
+# A confirmed link carries no annotation — the ordinary case must stay quiet, or the
+# marker means nothing.
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$TXT" in *"[unconfirmed"*) check "L12l a confirmed link is not annotated" FAIL ;; *) check "L12l a confirmed link is not annotated, so the marker keeps its meaning" PASS ;; esac
+
+# The tier has to REACH the reader. Recording it and rendering nothing leaves the
+# user exactly where they were: unable to tell a brief that was generated from a
+# handover that actually happened.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$TXT" in *"[unconfirmed"*) check "L12k a provisional link is marked, so a generated brief never reads as a completed handover" PASS ;; *) check "L12k a provisional link is marked" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all --json)"
+case "$OUT" in *'"confidence": "provisional"'*) check "L12m the --json payload carries the tier for a machine consumer" PASS ;; *) check "L12m the --json payload carries the tier" FAIL ;; esac
 
 # Taking over yourself is not a handover, and a process outside Claude Code cannot
 # name the continuing session at all — both must decline rather than invent one.
@@ -403,6 +475,7 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --json --all)"
 [ "$(edge_count)" = "0" ] && check "L13 --backfill without --apply writes nothing" PASS || check "L13 --backfill without --apply writes nothing (got $(edge_count))" FAIL
 [ "$(jq_field "$OUT" dryRun)" = "true" ] && check "L13a --backfill reports itself as a dry run" PASS || check "L13a --backfill reports itself as a dry run" FAIL
 
+APPLY_INSTANT="$(date -u +%Y-%m-%dT%H:%M:%S)"
 trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --all >/dev/null
 BF_COUNT="$(edge_count)"
 [ "$BF_COUNT" -ge 1 ] && check "L13b --backfill --apply records the reconstructed edge" PASS || check "L13b --backfill --apply records the reconstructed edge (got $BF_COUNT)" FAIL
@@ -422,6 +495,23 @@ process.stdout.write(bad.length ? `BAD:${bad.length}` : "ALL_INFERRED");
 
 TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
 case "$TXT" in *"[inferred"*) check "L13d a rendered chain marks an inferred link, so a guess never reads like a measurement" PASS ;; *) check "L13d a rendered chain marks an inferred link" FAIL ;; esac
+
+# A reconstructed edge is stamped from the STALLED SESSION'S activity, never from the
+# moment --apply ran. recordedAt is the sole ordering key at four sites, so an
+# apply-time stamp made every guess newer than every real handover by construction —
+# one backfill then promoted guesses above measurements permanently, and printChain
+# printed the backfill date as the date of the handover.
+BF_LATEST="$(node -e '
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1];
+const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+if (!files.length) { process.stdout.write("NO_FILES"); process.exit(0); }
+const stamps = files.map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), "utf8")).recordedAt).sort();
+process.stdout.write(stamps[stamps.length - 1]);
+' "$CFG/zensu/session-lineage/v1/edges")"
+# Everything the fixture builds is well in the past, so an mtime-derived stamp is
+# strictly older than the instant this suite reached the apply.
+[ -n "$BF_LATEST" ] && [ "$BF_LATEST" \< "$APPLY_INSTANT" ] && check "L13f a backfilled edge is stamped from the stalled session, not from the apply" PASS || check "L13f a backfilled edge is stamped from the stalled session (got $BF_LATEST, apply ran at $APPLY_INSTANT)" FAIL
 
 # Re-running must not duplicate what the ledger already holds.
 BEFORE="$(edge_count)"
@@ -682,6 +772,1016 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --json --a
 rm -f "$CFG/zensu/session-lineage/v1/edges/1-deadbeefdeadbeef.json"
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --apply --json --all)"
 [ "$(jq_field "$OUT" applied)" = "true" ] && check "L30c and a readable ledger still applies -- the gate is not unconditional" PASS || check "L30c a readable ledger still applies (applied=$(jq_field "$OUT" applied))" FAIL
+reset_ledger
+
+# -- L31 -- lineage --forget: the removal path ------------------------------
+# The store is append-only and machine-wide, so until now a wrong edge -- a
+# mistaken takeover, or a guess --backfill minted -- was permanent. Nothing the
+# skill offered could retract it, and the operator's only recourse was deleting a
+# file whose name the tool never showed them. --forget is a dry run first for the
+# same reason --backfill is: it names what it would destroy before destroying it.
+# Both edges below share the SAME `to` endpoint deliberately -- a removal keyed on
+# a shared endpoint rather than on the named session would take both and still
+# satisfy a check that only counted the survivors.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_B" --no-git --all >/dev/null
+FORGET_BEFORE="$(edge_count)"
+[ "$FORGET_BEFORE" = "2" ] || check "L31-setup two edges were recorded before the removal (got $FORGET_BEFORE)" FAIL
+
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --json --all)"
+[ "$(edge_count)" = "2" ] && check "L31 --forget without --apply destroys nothing" PASS || check "L31 --forget without --apply destroys nothing (got $(edge_count) of 2)" FAIL
+[ "$(jq_field "$OUT" dryRun)" = "true" ] && check "L31a --forget reports itself as a dry run" PASS || check "L31a --forget reports itself as a dry run (got $(jq_field "$OUT" dryRun))" FAIL
+[ "$(jq_field "$OUT" matched)" = "1" ] && check "L31b the dry run names how many records it would destroy" PASS || check "L31b the dry run names the count (got $(jq_field "$OUT" matched))" FAIL
+
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --json --all)"
+[ "$(jq_field "$OUT" removed)" = "1" ] && check "L31c --apply removes the records naming that session" PASS || check "L31c --apply removes the records naming that session (removed=$(jq_field "$OUT" removed))" FAIL
+[ "$(edge_count)" = "1" ] && check "L31d and it removes only those -- the unrelated edge survives" PASS || check "L31d the unrelated edge survives (ledger holds $(edge_count), want 1)" FAIL
+SURVIVOR="$(node -e '
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1];
+const files = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
+if (files.length !== 1) { process.stdout.write(`FILES:${files.length}`); process.exit(0); }
+process.stdout.write(JSON.parse(fs.readFileSync(path.join(dir, files[0]), "utf8")).from.sessionId);
+' "$CFG/zensu/session-lineage/v1/edges")"
+[ "$SURVIVOR" = "$SID_B" ] && check "L31e the survivor is the OTHER predecessor, not whichever record sorted last" PASS || check "L31e the survivor is the other predecessor (got $SURVIVOR)" FAIL
+
+# A prefix that names two sessions must be refused: deletion cannot be undone, so
+# resolving the ambiguity by picking one would destroy records the user never named.
+SID_F="abcdef12-0000-0000-0000-000000000001"
+SID_G="abcdef12-0000-0000-0000-000000000002"
+fix "$SID_F" "$DEAD_PID" 90 forget "$ACCT_A" stalled
+fix "$SID_G" "$DEAD_PID" 60 forget "$ACCT_B"
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_F" --no-git --all >/dev/null
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_G" --no-git --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget abcdef12 --apply --all)"
+case "$OUT" in *ambiguous*) check "L31f an ambiguous --forget prefix is refused rather than resolved" PASS ;; *) check "L31f an ambiguous --forget prefix is refused (got ${OUT:-<empty>})" FAIL ;; esac
+[ "$(edge_count)" = "2" ] && check "L31g and the refusal destroyed nothing" PASS || check "L31g the refusal destroyed nothing (ledger holds $(edge_count), want 2)" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget abc --apply --all)"
+case "$OUT" in *"at least 6"*) check "L31h a --forget prefix under the floor is refused, as --where's is" PASS ;; *) check "L31h a short --forget prefix is refused (got ${OUT:-<empty>})" FAIL ;; esac
+
+# -- L32 -- label --remove -------------------------------------------------
+# The set path existed from the start and the clear path did not, so a label typed
+# into the wrong window stayed on the account forever. Namespace-aware, because
+# `label` writes into two maps and a remove that swept both would clear an
+# unrelated window whose pid happens to spell the same digits.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "Keep Me" >/dev/null
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_B" "Drop Me" >/dev/null
+label_at() { # <namespace> <key>
+  node -e '
+const fs = require("fs");
+try {
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  const ns = (o[process.argv[2]] || {});
+  const v = ns[process.argv[3]];
+  process.stdout.write(v === undefined ? "ABSENT" : String(v));
+} catch (e) { process.stdout.write("UNREADABLE"); }
+' "$CFG/zensu/session-lineage/v1/labels.json" "$1" "$2"
+}
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_B" --json)"
+[ "$(label_at accounts "$ACCT_B")" = "ABSENT" ] && check "L32 label --remove clears the entry it names" PASS || check "L32 label --remove clears the entry it names (got $(label_at accounts "$ACCT_B"))" FAIL
+[ "$(label_at accounts "$ACCT_A")" = "Keep Me" ] && check "L32a and leaves every other label standing" PASS || check "L32a it leaves every other label standing (got $(label_at accounts "$ACCT_A"))" FAIL
+[ "$(jq_field "$OUT" removed)" = "true" ] && check "L32b the removal is reported to a machine consumer" PASS || check "L32b the removal is reported (got $(jq_field "$OUT" removed))" FAIL
+
+# A LIVE pid: the window namespace keys on the process incarnation (L35), so a
+# number with no running process behind it cannot be labelled at all.
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$LIVE_PID" "A Window" >/dev/null
+label_keys() { # <namespace>
+  node -e '
+const fs = require("fs");
+try {
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(Object.keys(o[process.argv[2]] || {}).join(","));
+} catch (e) { process.stdout.write("UNREADABLE"); }
+' "$CFG/zensu/session-lineage/v1/labels.json" "$1"
+}
+window_keys() { label_keys windows; }
+[ -n "$(window_keys)" ] && check "L32c-control a pid-shaped key lands in the window namespace" PASS || check "L32c-control a pid-shaped key lands in the window namespace (windows is empty)" FAIL
+trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LIVE_PID" >/dev/null
+[ -z "$(window_keys)" ] && check "L32c label --remove reaches the window namespace too, not only accounts" PASS || check "L32c label --remove reaches the window namespace (windows holds $(window_keys))" FAIL
+
+# Removing what is not there must not read as a removal that happened -- the
+# operator would otherwise believe a label they can still see was cleared.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_C" --json)"
+[ "$(jq_field "$OUT" removed)" = "false" ] && check "L32d removing an absent key reports that nothing was removed" PASS || check "L32d removing an absent key reports nothing removed (got $(jq_field "$OUT" removed))" FAIL
+
+# -- L33 -- the label write lands through the merging updater ---------------
+# Nothing behavioural can see this from a shell: the loss window needs two
+# processes interleaving between the caller's read and its write, so it is pinned
+# at source. updateLabels owns the whole read-modify-write; a caller that reads,
+# merges and calls writeLabels itself reintroduces exactly the lost update the
+# module gained updateLabels to close, and prints success while doing it.
+LBL_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+grep -q 'updateLabels(LABELS_FILE' "$LBL_SRC" && L33_USES=YES || L33_USES=NO
+grep -q 'writeLabels(LABELS_FILE' "$LBL_SRC" && L33_RAW=YES || L33_RAW=NO
+if [ "$L33_USES" = "YES" ] && [ "$L33_RAW" = "NO" ]; then
+  check "L33 the label command lands through updateLabels, not a caller-side read-modify-write" PASS
+else
+  check "L33 the label command lands through updateLabels (updateLabels=$L33_USES rawWriteLabels=$L33_RAW)" FAIL
+fi
+L33_CTRL="$(mktemp -t zensu-l33-XXXXXX)"
+printf '  writeLabels(LABELS_FILE, next, CONFIG_ROOT);\n' > "$L33_CTRL"
+grep -q 'writeLabels(LABELS_FILE' "$L33_CTRL" && check "L33-control the raw-write scan matches a planted caller-side write" PASS || check "L33-control the raw-write scan matched nothing, so the absence above is vacuous" FAIL
+rm -f "$L33_CTRL"
+reset_ledger
+
+# -- L34 -- one mode at a time, and --apply is not a mode ------------------
+# cmdLineage dispatches on a first-match ladder, so `--diagnose --backfill` ran
+# the diagnostic and discarded the backfill without a word. That was survivable
+# while both modes only READ. --forget is not: paired with --apply it destroys
+# records, and a ladder that silently drops it prints a diagnostic while the
+# removal the user asked for never happened. The controls matter more than the
+# refusals -- a check that refused every combination would satisfy the four
+# assertions below and make the command unusable.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --backfill --all)"
+case "$OUT" in *"one mode at a time"*) check "L34 two mode flags are refused, not silently resolved to one" PASS ;; *) check "L34 two mode flags are refused (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --forget "$SID_A" --all)"
+case "$OUT" in *"one mode at a time"*) check "L34a a read mode paired with the destructive one is refused" PASS ;; *) check "L34a a read mode paired with the destructive one is refused (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --backfill --all)"
+case "$OUT" in *"one mode at a time"*) check "L34b a query paired with a mode is refused rather than dropped" PASS ;; *) check "L34b a query paired with a mode is refused (got ${OUT:-<empty>})" FAIL ;; esac
+
+# --apply is the flag that turns a dry run into a write. On a mode that has no
+# dry run to turn it is swallowed, and hearing nothing back reads as "applied".
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --apply --all)"
+case "$OUT" in *"--apply has no effect on its own"*) check "L34c --apply with no mode is refused, never ignored" PASS ;; *) check "L34c --apply with no mode is refused (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --apply --all)"
+case "$OUT" in *"--apply has no effect on its own"*) check "L34d --apply on a mode that never writes is refused too" PASS ;; *) check "L34d --apply on a read-only mode is refused (got ${OUT:-<empty>})" FAIL ;; esac
+
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --all)"
+case "$OUT" in *LEDGER*) check "L34e-control --diagnose alone still runs -- the refusal is not unconditional" PASS ;; *) check "L34e-control --diagnose alone still runs (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --json --all)"
+[ "$(jq_field "$OUT" dryRun)" = "true" ] && check "L34f-control --backfill alone still runs its dry run" PASS || check "L34f-control --backfill alone still runs (got $(jq_field "$OUT" dryRun))" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --json --all)"
+[ "$(jq_field "$OUT" dryRun)" = "true" ] && check "L34g-control --forget alone still runs its dry run" PASS || check "L34g-control --forget alone still runs (got $(jq_field "$OUT" dryRun))" FAIL
+
+# -- L35 -- a window label names an INCARNATION, not a reusable number -----
+# An OS pid is reused the moment its process exits, so a label keyed by the bare
+# number silently renames whatever window inherits it next -- and it renders with
+# exactly the confidence a correct one gets. The key is qualified with the
+# process's start time, read from the same table windowOf already builds. The
+# fail direction is deliberate: a key that no longer matches a running process
+# stops resolving, rather than resolving to the wrong window.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$LIVE_PID" "That Window" >/dev/null
+W_KEYS="$(label_keys windows)"
+case "$W_KEYS" in
+  "$LIVE_PID@"*) check "L35 a window label is keyed by pid AND start time, so a reused pid inherits nothing" PASS ;;
+  *) check "L35 a window label is keyed by pid and start time (got ${W_KEYS:-<empty>})" FAIL ;;
+esac
+[ "$W_KEYS" = "$LIVE_PID" ] && check "L35a the bare pid is not the key -- the qualification is real" FAIL || check "L35a the bare pid is not the key -- the qualification is real" PASS
+
+# A pid with no running process cannot be qualified, and inventing a key for it
+# would put the label straight back into the reuse hazard. The value is DERIVED
+# rather than hardcoded: the comment here used to name pid 2 while the check used
+# 999999, and a Linux host with a raised `kernel.pid_max` can have a live 999999 --
+# which would resolve, and the refusal would never fire.
+DEAD_LABEL_PID="$(node -e '
+let p = 4194304;
+for (let i = 0; i < 64; i += 1, p -= 1) {
+  try { process.kill(p, 0); } catch (e) { if (e && e.code === "ESRCH") { process.stdout.write(String(p)); process.exit(0); } }
+}
+process.stdout.write("");
+')"
+[ -n "$DEAD_LABEL_PID" ] && check "L35b-control an unused pid was found to test the refusal with" PASS || check "L35b-control no unused pid could be found, so the refusal below is untested" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$DEAD_LABEL_PID" "Ghost")"
+case "$OUT" in *"$DEAD_LABEL_PID"*) L35B_NAMES=YES ;; *) L35B_NAMES=NO ;; esac
+case "$OUT" in *"no running process"*) L35B_SAYS=YES ;; *) L35B_SAYS=NO ;; esac
+{ [ "$L35B_NAMES" = YES ] && [ "$L35B_SAYS" = YES ]; } && check "L35b labelling a pid with no running process is refused, and the refusal names it" PASS || check "L35b labelling a dead pid is refused (got ${OUT:-<empty>})" FAIL
+
+# --remove takes the BARE pid, because that is what the operator has: the
+# qualification is machine state they never typed and cannot reconstruct once the
+# window is gone. Every incarnation recorded under that pid goes.
+trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LIVE_PID" >/dev/null
+[ -z "$(label_keys windows)" ] && check "L35c --remove takes the bare pid and clears every incarnation recorded under it" PASS || check "L35c --remove clears the qualified key (windows still holds $(label_keys windows))" FAIL
+
+# The read half cannot be driven from here: rendering a window label needs a live
+# process whose ancestor names Claude, which a sandbox cannot fabricate. Pinned at
+# source instead, with a control -- a scan that matched nothing would pass for the
+# wrong reason.
+WL_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+WL_BODY="$(awk '/^function windowLabel\(/{f=1} f{print} f&&/^\}/{exit}' "$WL_SRC")"
+case "$WL_BODY" in *windowKey*) L35D_USES=YES ;; *) L35D_USES=NO ;; esac
+case "$WL_BODY" in *'String(appPid)'*|*'[appPid]'*) L35D_BARE=YES ;; *) L35D_BARE=NO ;; esac
+{ [ "$L35D_USES" = YES ] && [ "$L35D_BARE" = NO ]; } && check "L35d the reader resolves the qualified key and keeps no bare-pid fallback" PASS || check "L35d the reader resolves the qualified key (windowKey=$L35D_USES barePidLookup=$L35D_BARE)" FAIL
+[ -n "$WL_BODY" ] && check "L35d-control the windowLabel body was actually extracted" PASS || check "L35d-control the windowLabel body was not found, so the scan above is vacuous" FAIL
+# The extraction control above proves awk found SOMETHING; it says nothing about
+# whether the needle can bite. A negative with only an extraction control reports a
+# clean body for a reintroduced fallback spelled any other way. Both bare-pid
+# spellings a reader would actually write are planted here.
+L35D_CTRL="$(printf 'function windowLabel(appPid) {\n  const l = w[String(appPid)];\n}\n')"
+case "$L35D_CTRL" in *'String(appPid)'*) check "L35d-control the bare-pid needle bites a planted lookup" PASS ;; *) check "L35d-control the bare-pid needle matched nothing, so L35d is vacuous" FAIL ;; esac
+# And the OTHER spelling, which the needle deliberately does not cover: recorded as
+# a known bound of this pin rather than left to be discovered as a false clean.
+L35D_ALT="$(printf 'const l = w[appPid];\n')"
+case "$L35D_ALT" in *'String(appPid)'*|*'[appPid]'*) check "L35d-bound the needle also covers an unwrapped w[appPid] lookup" PASS ;; *) check "L35d-bound the needle misses the unwrapped w[appPid] spelling, so L35d reports clean for a reintroduced fallback" FAIL ;; esac
+reset_ledger
+
+# -- L36 -- the record cap reaches the operator ----------------------------
+# readEdges bounds how many records it enumerates and returns `truncated` saying
+# so. ledgerRead dropped that field on the floor, so a ledger past the cap
+# answered from a prefix and rendered exactly like a complete one -- the silent
+# truncation the module-level bound was added to make visible. The unit suite
+# proves the flag is COMPUTED (it plants MAX_EDGE_RECORDS + 5 records); these
+# checks prove it TRAVELS, which no module test can see.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+[ "$(jq_field "$OUT" ledgerTruncated)" = "false" ] && check "L36 the lineage payload carries the record-cap flag" PASS || check "L36 the lineage payload carries the record-cap flag (got $(jq_field "$OUT" ledgerTruncated))" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json --all)"
+[ "$(jq_field "$OUT" ledgerTruncated)" = "false" ] && check "L36a --diagnose carries it too -- it is the command an operator runs when counts look wrong" PASS || check "L36a --diagnose carries the record-cap flag (got $(jq_field "$OUT" ledgerTruncated))" FAIL
+
+# Structural, because a payload added later cannot be caught behaviourally: every
+# payload that reports the ledger's other two failure signals must report this one.
+# Anchored on ledgerError, which is the field that marks a payload as ledger-aware.
+LG_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+LG_ERR="$(grep -c 'ledgerError:' "$LG_SRC")"
+LG_TRUNC="$(grep -c 'ledgerTruncated:' "$LG_SRC")"
+[ "$LG_ERR" -ge 5 ] && check "L36b-control the ledger-aware payload anchor still matches ($LG_ERR sites)" PASS || check "L36b-control the ledgerError anchor matched $LG_ERR sites, so the count below is vacuous" FAIL
+# CO-OCCURRENCE, not two independent line counts: every current carrier happens to
+# put both fields on one line, so the two counts moved together by construction and
+# a payload emitting one without the other could still balance the totals.
+LG_BOTH="$(grep -c 'ledgerTruncated:.*ledgerError:\|ledgerError:.*ledgerTruncated:' "$LG_SRC")"
+[ "$LG_BOTH" = "$LG_ERR" ] && check "L36b every ledger-aware payload reports the record cap on the same payload, not only in the same file" PASS || check "L36b every ledger-aware payload reports the record cap ($LG_BOTH of $LG_ERR carry both)" FAIL
+
+# And the refactor this step is named for: the read returns its own status rather
+# than assigning module-scope globals a later reader might see stale.
+grep -q 'let LEDGER_DIR_ERROR' "$LG_SRC" && check "L36c ledgerRead no longer publishes its status through module globals" FAIL || check "L36c ledgerRead no longer publishes its status through module globals" PASS
+reset_ledger
+
+# -- L37 -- the window ancestor is matched on the program, not the path ----
+# `ps -o comm=` yields the full executable PATH on macOS, so /claude/i against the
+# whole string matches any ancestor that merely LIVES under a claude-named
+# directory -- ~/claude-tools/bin/watcher, or a checkout of this very plugin. The
+# session is then grouped under a window that is not one, and the grouping is the
+# fallback that exists precisely for when the desktop store is unreachable.
+#
+# NOT driven behaviourally, and the reason is worth stating: reaching windowOf
+# needs a real ancestor process whose executable path contains "claude" and whose
+# basename does not, which means planting an executable and a two-level process
+# tree that would have to be skipped on Windows. Pinned at source with a control.
+WO_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+WO_BODY="$(awk '/^function windowOf\(/{f=1} f{print} f&&/^\}/{exit}' "$WO_SRC")"
+[ -n "$WO_BODY" ] && check "L37-control the windowOf body was actually extracted" PASS || check "L37-control the windowOf body was not found, so the scan below is vacuous" FAIL
+case "$WO_BODY" in *"path.basename(next.comm)"*) L37_BASE=YES ;; *) L37_BASE=NO ;; esac
+case "$WO_BODY" in *"test(next.comm)"*) L37_WHOLE=YES ;; *) L37_WHOLE=NO ;; esac
+{ [ "$L37_BASE" = YES ] && [ "$L37_WHOLE" = NO ]; } && check "L37 the ancestor match reads the program name, not the whole path" PASS || check "L37 the ancestor match reads the program name (basename=$L37_BASE wholePath=$L37_WHOLE)" FAIL
+# The planted control the extraction check is not: a scan that cannot match reports
+# a clean body for the very regression it exists to catch.
+L37_CTRL="$(printf 'if (/claude/i.test(next.comm)) found = cur.ppid;\n')"
+case "$L37_CTRL" in *"test(next.comm)"*) check "L37-control the whole-path needle bites a planted match" PASS ;; *) check "L37-control the whole-path needle matched nothing, so L37 is vacuous" FAIL ;; esac
+
+# -- L38 -- the backfill filter is described once, by the paragraph that is true
+# Two comment paragraphs sat above the successor filter and they contradicted each
+# other: the first claimed "a successor whose start precedes the stall is skipped
+# outright", which was a guard the code no longer has. A reader auditing whether a
+# guessed edge can invert causality read the first one and stopped. A comment is
+# not testable, so this is a source pin -- but a stale claim about a SAFETY guard
+# is exactly the kind that gets believed.
+BF_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+grep -q 'A successor whose start precedes the stall is skipped outright' "$BF_SRC" \
+  && check "L38 the retired start-guard claim is gone from the backfill filter" FAIL \
+  || check "L38 the retired start-guard claim is gone from the backfill filter" PASS
+# The survivor must still be there: deleting both would leave the real filter -- the
+# one whose start claim is deliberately NOT established -- undescribed.
+grep -q 'is NOT established for finished sessions' "$BF_SRC" \
+  && check "L38a-control the paragraph that describes the real filter survives" PASS \
+  || check "L38a-control the paragraph that describes the real filter survives" FAIL
+
+# -- L39 -- the MSYS drive rule is shared, not re-spelled ------------------
+# Under Git Bash a root handed in as `/d/work` reaches this script unconverted,
+# and path.resolve reads that leading slash as drive-RELATIVE: the whole POSIX
+# path is spliced under the current drive and the ledger is written somewhere
+# nobody reads back. hooks/lib/claude-path-v1.js owns the one MSYS drive rule in
+# this repo; a private copy here is exactly the drift CLAUDE.md records that rule
+# to prevent. No behavioural check on a POSIX host can see any of this -- the
+# function is identity off win32 -- so the three call sites are pinned at source
+# and the module's reachability is proven by actually loading it.
+PR_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+PR_LOAD="$(node -e '
+const { createRequire } = require("node:module");
+const r = createRequire(process.argv[1]);
+const m = r("../../../hooks/lib/claude-path-v1.js");
+process.stdout.write(typeof m.msysDrivePrefix === "function" ? "OK" : "MISSING");
+' "$PR_SRC" 2>&1)"
+[ "$PR_LOAD" = "OK" ] && check "L39-control the shared path module resolves from the script's own directory" PASS || check "L39-control the shared path module resolves from the script's directory (got $PR_LOAD)" FAIL
+# By NAME, not by count. A bare count catches a removal but not a substitution: a
+# fourth externally supplied root added WITHOUT the normaliser holds the count at
+# three, and moving normalisation off one carrier onto another holds it too. The
+# count is kept as a secondary bound, using -o so two calls on one line still count
+# as two.
+# Scoped to the enclosing FUNCTION, not to a single line: two of the three read
+# their variable one line above the resolve, so a line-scoped match found only the
+# one that happens to name its carrier inline.
+fn_body() { awk -v f="$2" '$0 ~ ("^function " f "\\(") {inside=1} inside {print} inside && /^\}/ {exit}' "$1"; }
+PR_BY_NAME=0
+for pair in 'defaultConfigRoot:CLAUDE_CONFIG_DIR' 'resolveRoots:configDir.trim()' 'ccdStoreCandidates:ZENSU_CCD_STORE'; do
+  fn="${pair%%:*}"; carrier="${pair#*:}"
+  body="$(fn_body "$PR_SRC" "$fn")"
+  case "$body" in
+    *"$carrier"*) case "$body" in *'path.resolve(hostPath('*) PR_BY_NAME=$((PR_BY_NAME+1)) ;; esac ;;
+  esac
+done
+[ "$PR_BY_NAME" = "3" ] && check "L39 each of the three externally supplied roots is normalised inside the function that reads it" PASS || check "L39 each of the three roots is normalised by name (got $PR_BY_NAME of 3)" FAIL
+PR_HOSTED="$(grep -o 'path.resolve(hostPath(' "$PR_SRC" | grep -c .)"
+[ "$PR_HOSTED" = "3" ] && check "L39-bound and there are exactly three such sites, so a fourth root cannot be added unnormalised in silence" PASS || check "L39-bound exactly three normalised sites (got $PR_HOSTED)" FAIL
+# `[[:space:]]`, not `\s`: this is a plain BRE grep, where `\s` is a GNU extension.
+# The first spelling of this rule used it, so on a BSD host the scan could not match
+# and reported a clean file for the wrong reason -- the same trap this suite's own
+# language guard fell into one round earlier.
+grep -q 'msysDrive[[:space:]]*=[[:space:]]*/\^' "$PR_SRC" && check "L39a no private copy of the drive rule reappears in this script" FAIL || check "L39a no private copy of the drive rule reappears in this script" PASS
+L39A_CTRL="$(mktemp -t zensu-l39a-XXXXXX)"
+printf 'const msysDrive = /^\\/([A-Za-z])(\\/|$)/;\n' > "$L39A_CTRL"
+grep -q 'msysDrive[[:space:]]*=[[:space:]]*/\^' "$L39A_CTRL" && check "L39a-control the private-copy needle bites a planted rule" PASS || check "L39a-control the private-copy needle matched nothing, so L39a is vacuous" FAIL
+rm -f "$L39A_CTRL"
+
+# -- L40 -- a ledger under another schema directory is a MIGRATION ---------
+# The store lives under `session-lineage/v<schema>/`, so the day the schema moves,
+# every existing record becomes invisible to the new build. The empty-ledger branch
+# then printed "No handover has been recorded yet" and offered `lineage --backfill`
+# -- which would mint GUESSES for handovers the machine already held as
+# MEASUREMENTS, one directory away. That is the worst outcome the confidence axis
+# exists to prevent, reached by a command the tool itself recommends.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+printf '{"schemaVersion":0,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v0/edges/1-aaaaaaaaaaaaaaaa.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$OUT" in *"No handover has been recorded yet"*) check "L40 an empty current ledger beside a populated older one no longer reads as no history" FAIL ;; *) check "L40 an empty current ledger beside a populated older one no longer reads as no history" PASS ;; esac
+case "$OUT" in *"--backfill"*) check "L40a and it does not offer to reconstruct guesses for records the machine already holds" FAIL ;; *) check "L40a and it does not offer to reconstruct guesses for records the machine already holds" PASS ;; esac
+case "$OUT" in *v0*) check "L40b the older schema directory is named, so the operator can find it" PASS ;; *) check "L40b the older schema directory is named (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+[ "$(jq_field "$OUT" otherSchemaLedgers)" != "ABSENT" ] && [ "$(jq_field "$OUT" otherSchemaLedgers)" != "[]" ] && check "L40c the machine channel reports it too, not only the rendered text" PASS || check "L40c the machine channel reports it too (got $(jq_field "$OUT" otherSchemaLedgers))" FAIL
+
+# The control that keeps every assertion above honest: with no foreign directory
+# the ordinary empty-ledger guidance must come back, offer and all. A branch that
+# fired unconditionally would satisfy L40/L40a and silently retire the one message
+# a first-time user is meant to see.
+rm -rf "$CFG/zensu/session-lineage/v0"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$OUT" in *"No handover has been recorded yet"*) check "L40d-control a genuinely empty store still says so and still offers the reconstruction" PASS ;; *) check "L40d-control a genuinely empty store still says so (got ${OUT:-<empty>})" FAIL ;; esac
+
+# An EMPTY foreign directory is not a migration: reporting one would send the
+# operator hunting for records that were never written.
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$OUT" in *"No handover has been recorded yet"*) check "L40e an empty foreign schema directory is not reported as a migration" PASS ;; *) check "L40e an empty foreign schema directory is not reported as a migration (got ${OUT:-<empty>})" FAIL ;; esac
+rm -rf "$CFG/zensu/session-lineage/v0"
+reset_ledger
+
+# -- L41 -- the coverage tooling for these scripts ------------------------
+# The coverage number is the evidence the plan's 90% target is measured against,
+# so the command that produces it is part of the contract. Three defects, all
+# invisible while it happened to work on one developer's machine: a caret range on
+# c8 lets a minor release change what "90%" means between two runs of the same
+# tree; the run covered ONE of the three suites that exercise these scripts, so
+# every branch only the verdict and skill suites reach counted as uncovered; and
+# the single-quoted --include is not a quote to cmd.exe, which passes the quotes
+# INTO the glob and matches nothing at all on Windows.
+PKG="$PLUGIN_DIR/package.json"
+C8_RANGE="$(node -p 'require(process.argv[1]).devDependencies.c8' "$PKG" 2>/dev/null)"
+case "$C8_RANGE" in [0-9]*.[0-9]*.[0-9]*) check "L41 c8 is pinned exactly ($C8_RANGE), as promptfoo and yaml already are" PASS ;; *) check "L41 c8 is pinned exactly (got ${C8_RANGE:-<absent>})" FAIL ;; esac
+COV="$(node -p 'require(process.argv[1]).scripts["session-trail:coverage"] || ""' "$PKG" 2>/dev/null)"
+# Resolved through whatever the script actually invokes, because the command that
+# drives the suites is a FILE: npm hands its script to `sh -c` on POSIX and to
+# cmd.exe on Windows, and no inline quoting form survives both -- the double-quoted
+# one reached c8 as a single filename it then tried to open. Reading the referenced
+# script keeps this check about WHICH SUITES RUN rather than about how they are
+# spelled, so moving them behind a driver does not silently retire it.
+COV_TEXT="$COV"
+for ref in $(printf '%s' "$COV" | tr ' ' '\n' | grep -o 'tests/structure/[A-Za-z0-9._-]*\.sh'); do
+  [ -f "$PLUGIN_DIR/$ref" ] && COV_TEXT="$COV_TEXT
+$(cat "$PLUGIN_DIR/$ref")"
+done
+# Comment lines are stripped first. The driver explains ITSELF by naming this very
+# file, which supplied the `lineage` arm on its own -- so dropping that suite from
+# the driver would have left this check green. Count what RUNS, not what is
+# mentioned.
+COV_CODE="$(printf '%s\n' "$COV_TEXT" | grep -v '^[[:space:]]*#')"
+COV_SUITES=0
+for suite in lineage verdict skill; do
+  case "$COV_CODE" in *"test-session-trail-$suite.sh"*) COV_SUITES=$((COV_SUITES+1)) ;; esac
+done
+# The control: with comments stripped the driver must still name all three, and the
+# stripping must actually have removed something -- otherwise this is the old check.
+[ "${#COV_CODE}" -lt "${#COV_TEXT}" ] && check "L41a-strip the comment stripping removed something, so the count above is about code" PASS || check "L41a-strip the comment stripping removed nothing, so the count is still satisfiable by prose" FAIL
+[ "$COV_SUITES" = "3" ] && check "L41a the coverage run drives all three suites that exercise these scripts" PASS || check "L41a the coverage run drives all three suites (got $COV_SUITES of 3)" FAIL
+# The resolution must have actually happened: if the referenced driver were
+# unreadable, COV_TEXT would collapse back to the npm script and the count above
+# would silently measure the wrong thing.
+case "$COV" in *run-session-trail-coverage.sh*) [ "${#COV_TEXT}" -gt "${#COV}" ] && check "L41a-control the referenced driver was read, not silently skipped" PASS || check "L41a-control the referenced driver was not read, so the count above is about the npm script alone" FAIL ;; *) check "L41a-control the coverage script names its suites inline, so no resolution was needed" PASS ;; esac
+case "$COV" in *"--include='"*) check "L41b the include glob survives cmd.exe -- single quotes there are literal characters, not quotes" FAIL ;; *) check "L41b the include glob survives cmd.exe -- single quotes there are literal characters, not quotes" PASS ;; esac
+case "$COV" in *'--include='*) check "L41c-control the coverage script still names an include glob at all" PASS ;; *) check "L41c-control the coverage script still names an include glob (got ${COV:-<empty>})" FAIL ;; esac
+
+# -- L42 -- the destructive verbs on a store they could not read -----------
+# Coverage for the branches this change ADDED, and they are the ones that matter
+# most: both say "I could not look" rather than "there is nothing there". A
+# removal that reported success against a failed read would tell the operator a
+# record is gone while it is still on disk, asserting a handover they retracted.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1"
+printf 'x' > "$CFG/zensu/session-lineage/v1/edges"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --json --all)"
+[ "$(jq_field "$OUT" refusal)" = "ledger-unreadable" ] && check "L42 --forget on an unreadable ledger refuses and names the cause" PASS || check "L42 --forget on an unreadable ledger refuses (refusal=$(jq_field "$OUT" refusal))" FAIL
+[ "$(jq_field "$OUT" removed)" = "0" ] && check "L42a and it claims no removal it did not make" PASS || check "L42a it claims no removal it did not make (removed=$(jq_field "$OUT" removed))" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --all)"
+case "$OUT" in *"NOT evidence that no record names that session"*) check "L42b the text channel refuses to read absence out of a failed read" PASS ;; *) check "L42b the text channel refuses to read absence out of a failed read (got ${OUT:-<empty>})" FAIL ;; esac
+rm -f "$CFG/zensu/session-lineage/v1/edges"
+
+# The labels half: a file this build cannot parse reduces to an EMPTY map on read,
+# so a removal written on top of it would replace every label on the machine with
+# the caller's one edit. Refused, exactly as the set path is.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1"
+printf 'not json at all' > "$CFG/zensu/session-lineage/v1/labels.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A")"
+case "$OUT" in *"refusing to overwrite it"*) check "L42c label --remove refuses an unreadable labels file instead of replacing it" PASS ;; *) check "L42c label --remove refuses an unreadable labels file (got ${OUT:-<empty>})" FAIL ;; esac
+printf '{"schemaVersion":99,"accounts":{},"windows":{}}' > "$CFG/zensu/session-lineage/v1/labels.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A")"
+case "$OUT" in *"different label schema"*) check "L42d and a labels file from another schema, which reads as empty for the same reason" PASS ;; *) check "L42d a labels file from another schema is refused (got ${OUT:-<empty>})" FAIL ;; esac
+rm -f "$CFG/zensu/session-lineage/v1/labels.json"
+reset_ledger
+
+# -- L43 -- what a destructive verb SHOWS before and after it destroys -----
+# The dry run is the whole safety surface of --forget: an operator decides from
+# what it prints. Every earlier check drove the JSON channel, so the rendered
+# text -- the only channel a person reads -- was unexercised.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_B" --no-git --all >/dev/null
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --all)"
+case "$TXT" in *"FORGET (dry run)"*) check "L43 the text dry run announces itself as one" PASS ;; *) check "L43 the text dry run announces itself (got ${TXT:-<empty>})" FAIL ;; esac
+case "$TXT" in *"cannot be undone"*) check "L43a it states that the removal is machine-wide and final before asking for --apply" PASS ;; *) check "L43a it states the removal is final" FAIL ;; esac
+[ "$(edge_count)" = "2" ] && check "L43b and the text dry run removed nothing, like the --json one" PASS || check "L43b the text dry run removed nothing (ledger holds $(edge_count) of 2)" FAIL
+
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --all)"
+case "$TXT" in *"FORGET APPLIED"*) check "L43c the applied run says so" PASS ;; *) check "L43c the applied run says so (got ${TXT:-<empty>})" FAIL ;; esac
+case "$TXT" in *"  removed "*) check "L43d and names each record it removed, not only how many" PASS ;; *) check "L43d it names each record removed" FAIL ;; esac
+[ "$(edge_count)" = "1" ] && check "L43e-control the text apply really did remove one, so the lines above are not decoration" PASS || check "L43e-control the text apply removed one (ledger holds $(edge_count) of 1)" FAIL
+
+# A record the reader refused is a record --forget cannot see, so the count it
+# prints is not "all of them". Disclosed rather than blocking: what it DID see is
+# still removed correctly.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+printf 'not json' > "$CFG/zensu/session-lineage/v1/edges/1-deadbeefdeadbeef.json"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --all)"
+case "$TXT" in *"were not examined"*) check "L43f an unreadable record is disclosed beside the count, which is therefore not a total" PASS ;; *) check "L43f an unreadable record is disclosed beside the count (got ${TXT:-<empty>})" FAIL ;; esac
+reset_ledger
+
+# -- L44 -- the plain-text channels AC-028 named ---------------------------
+# Four surfaces the suite drove only through --json, or not at all. A person reads
+# the text; --json is what a script reads. A branch exercised on one channel only
+# is a branch that renders unverified prose to the operator.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_A" "$SID_C"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$TXT" in *"was taken over more than once"*) check "L44 the fork warning reaches the rendered chain, not only the --json payload" PASS ;; *) check "L44 the fork warning reaches the rendered chain (got ${TXT:-<empty>})" FAIL ;; esac
+
+# --where, in the three shapes a person can land in.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$TXT" in *"CONTINUED IN"*) check "L44a --where answers in plain text where a session went" PASS ;; *) check "L44a --where answers in plain text (got ${TXT:-<empty>})" FAIL ;; esac
+case "$TXT" in *WORKTREE*) check "L44b and names the worktree, which is what makes the answer actionable" PASS ;; *) check "L44b --where names the worktree" FAIL ;; esac
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "ffffffff-0000-0000-0000-00000000000f" --all)"
+case "$TXT" in *"No lineage recorded"*) check "L44c an unknown session is reported as unrecorded, not as an end of chain" PASS ;; *) check "L44c an unknown session is reported as unrecorded (got ${TXT:-<empty>})" FAIL ;; esac
+
+# Ambiguity exits 2, and the exit STATUS is the half a caller acts on -- the text
+# alone would let a script treat a refusal as an answer.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_F" --no-git --all >/dev/null
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_G" --no-git --all >/dev/null
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where abcdef12 --all)"; WHERE_RC=$?
+case "$TXT" in *"ambiguous --where"*) check "L44d an ambiguous --where lists its candidates instead of picking one" PASS ;; *) check "L44d an ambiguous --where lists its candidates (got ${TXT:-<empty>})" FAIL ;; esac
+[ "$WHERE_RC" = "2" ] && check "L44e and exits 2, so a caller can tell a refusal from an answer" PASS || check "L44e an ambiguous --where exits 2 (got $WHERE_RC)" FAIL
+
+# adopt is the CONFIRMATION verb, so its two refusals decide whether a confirmed
+# edge -- the top of the confidence order -- can be minted at all.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_A" "$LIVE_PID" adopt "$SID_A" --no-git --all)"
+case "$OUT" in *"its own continuation"*) check "L44f adopt refuses to record a session as its own continuation" PASS ;; *) check "L44f adopt refuses a self-adoption (got ${OUT:-<empty>})" FAIL ;; esac
+[ "$(edge_count)" = "0" ] && check "L44g and the refusal wrote nothing" PASS || check "L44g the refused self-adoption wrote nothing (got $(edge_count))" FAIL
+# An EMPTY session id rather than an unset one, deliberately: selfIdentity()
+# reduces both to null, and a second `env -u` here would not match the isolation
+# scan's literal at the end of this file -- it would have read as a SECOND
+# CLAUDE_CONFIG_DIR exemption and failed L28 for a reason unrelated to isolation.
+OUT="$(trail "$STORE" "" "$LIVE_PID" adopt "$SID_A" --no-git --all)"
+case "$OUT" in *"no CLAUDE_CODE_SESSION_ID"*) check "L44h without a session id of its own, adopt refuses rather than inventing an endpoint" PASS ;; *) check "L44h adopt refuses without a session id (got ${OUT:-<empty>})" FAIL ;; esac
+[ "$(edge_count)" = "0" ] && check "L44i-control neither refusal left a record behind" PASS || check "L44i-control a refusal left a record behind (got $(edge_count))" FAIL
+reset_ledger
+
+# The ledger holding a record from a NEWER schema must not read as an empty
+# history either -- same failure, one directory closer than L40's.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1/edges"
+printf '{"schemaVersion":99,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v1/edges/1-deadbeefdeadbee9.json"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$TXT" in *"NEWER schema"*) check "L44j a record from a newer schema is reported, not counted as no history" PASS ;; *) check "L44j a newer-schema record is reported (got ${TXT:-<empty>})" FAIL ;; esac
+reset_ledger
+
+# -- L45 -- --forget with nothing to forget --------------------------------
+# A dry run that matched nothing still printed "Re-run with --apply to remove
+# them", pointing the operator at a destructive command that would do nothing.
+# Found by running the verb rather than by a check -- worth its own case because
+# the offer is the one line of this output that carries a consequence.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "ffffffff-0000-0000-0000-00000000000f" --all)"
+case "$OUT" in *"--apply"*) check "L45 a dry run that matched nothing does not offer the destructive re-run" FAIL ;; *) check "L45 a dry run that matched nothing does not offer the destructive re-run" PASS ;; esac
+case "$OUT" in *"No record names"*) check "L45a and it says plainly that nothing names that session" PASS ;; *) check "L45a it says plainly that nothing names that session (got ${OUT:-<empty>})" FAIL ;; esac
+# The control: a dry run that DID match must still carry the offer, or the fix
+# above would simply have deleted the instruction the verb needs.
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --all)"
+case "$OUT" in *"--apply"*) check "L45b-control a dry run that matched something still offers the re-run" PASS ;; *) check "L45b-control a dry run that matched something still offers the re-run" FAIL ;; esac
+reset_ledger
+
+# -- L46 -- a plugin tree missing its shared lib says so, and does not crash ---
+# hostPath is reached from resolveRoots, which ran at MODULE LOAD. fail() calls
+# flush(), flush() calls skippedNote(), and skippedNote() reads two module-scope
+# `let`s declared BELOW that call — so the carefully worded "the plugin tree is
+# incomplete" message was replaced by `ReferenceError: Cannot access 'SKIPPED'
+# before initialization`, on exactly the path it exists for. Found by the review
+# panel and reproduced before the fix. The eager call is redundant: the dispatcher
+# re-resolves every root before any command runs, and nothing at module scope
+# between the two reads them.
+TDZ_TREE="$(mktemp -d -t zensu-tdz-XXXXXX)"
+mkdir -p "$TDZ_TREE/skills/session-trail/scripts"
+cp "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" "$PLUGIN_DIR/skills/session-trail/scripts/session-lineage-v1.mjs" "$TDZ_TREE/skills/session-trail/scripts/" 2>/dev/null
+TDZ_OUT="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$TDZ_TREE/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
+case "$TDZ_OUT" in *ReferenceError*) check "L46 a tree without hooks/lib does not crash before its own diagnostic" FAIL ;; *) check "L46 a tree without hooks/lib does not crash before its own diagnostic" PASS ;; esac
+case "$TDZ_OUT" in *"plugin tree is incomplete"*) check "L46a and the authored diagnostic is what the user actually sees" PASS ;; *) check "L46a the authored diagnostic is what the user sees (got ${TDZ_OUT:-<empty>})" FAIL ;; esac
+# The control: with the shared module reachable the same invocation must still
+# work, or the two checks above would be satisfied by a build that never resolves
+# a root at all.
+TDZ_OK="$( CLAUDE_CONFIG_DIR="$TDZ_TREE/cfg2" HOME="$TDZ_TREE" USERPROFILE="$TDZ_TREE" node "$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs" lineage --all 2>&1 )"
+case "$TDZ_OK" in *"No handover has been recorded yet"*) check "L46b-control the same invocation from the real tree still resolves its roots" PASS ;; *) check "L46b-control the same invocation from the real tree still works (got ${TDZ_OK:-<empty>})" FAIL ;; esac
+rm -rf "$TDZ_TREE"
+
+# -- L47 -- the tier reaches the instances view too -------------------------
+# SKILL.md states the tier is annotated in EVERY rendering, and names `instances`
+# as the machine-wide answer a window with no quota is told to run. That view
+# annotated the legacy `inferred` boolean only, so a `provisional` edge -- a brief
+# that was generated and never confirmed -- rendered there as a completed handover.
+# Raised by the review panel; the earlier tier work reached printChain and stopped.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --json)"
+INST_MARKED="$(node -e '
+let o; try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const lines = (o.rows || []).flatMap((r) => r.lineage || []);
+if (!lines.length) { process.stdout.write("NO_LINEAGE"); process.exit(0); }
+process.stdout.write(lines.some((l) => l.includes("unconfirmed")) ? "MARKED" : `UNMARKED:${lines[0]}`);
+' "$OUT")"
+[ "$INST_MARKED" = "MARKED" ] && check "L47 a provisional edge is marked in the instances view, not only in the rendered chain" PASS || check "L47 a provisional edge is marked in instances (got $INST_MARKED)" FAIL
+# The control: a confirmed edge must stay unmarked there, or the annotation stops
+# meaning anything.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_B" --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --json)"
+INST_CLEAN="$(node -e '
+let o; try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const lines = (o.rows || []).flatMap((r) => r.lineage || []);
+if (!lines.length) { process.stdout.write("NO_LINEAGE"); process.exit(0); }
+process.stdout.write(lines.some((l) => l.includes("unconfirmed")) ? `MARKED:${lines[0]}` : "CLEAN");
+' "$OUT")"
+[ "$INST_CLEAN" = "CLEAN" ] && check "L47a-control a confirmed edge is NOT marked there, so the marker keeps its meaning" PASS || check "L47a-control a confirmed edge is not marked (got $INST_CLEAN)" FAIL
+
+# -- L48 -- a chain that came back is not reported as an ordinary end -------
+# walkChain computes `revisited` for the documented reset flow -- adopt A>B, then
+# adopt B>A from the original window -- and nothing read it, so `--where` still
+# printed CONTINUED IN with no caveat while the newest edge said the work had come
+# back. The fix landed in the module and never in the consumer.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_B" "$SID_A"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$TXT" in *"came back"*) check "L48 a revisited chain says so instead of reading as an ordinary continuation" PASS ;; *) check "L48 a revisited chain says so (got ${TXT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --json --all)"
+[ "$(jq_field "$OUT" revisited)" = "true" ] && check "L48a and the machine channel carries it beside truncated" PASS || check "L48a the machine channel carries revisited (got $(jq_field "$OUT" revisited))" FAIL
+# The control: an ordinary two-session chain must NOT be flagged.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --json --all)"
+[ "$(jq_field "$OUT" revisited)" = "false" ] && check "L48b-control a chain that never came back is not flagged" PASS || check "L48b-control a chain that never came back is not flagged (got $(jq_field "$OUT" revisited))" FAIL
+reset_ledger
+
+# -- L49 -- a migration is a fact about the STORE, not about this repo ------
+# The branch gated on the repo-SCOPED count, so a repo that simply has no
+# handovers, beside one stale sibling record, printed "This build reads none of
+# the records this machine already holds" while v1/ held plenty for other repos --
+# and suppressed the ordinary guidance while doing it. Every earlier check drove
+# it with --all, where the scoped and unscoped counts coincide, so the suite could
+# not see the difference. Raised by the review panel.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+printf '{"schemaVersion":0,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v0/edges/1-aaaaaaaaaaaaaaaa.json"
+# A REAL repo context is required to reach the scoped/unscoped divergence at all:
+# repoContext answers null outside a git repo, ctx is then null, inScope is
+# unconditionally true and the two counts coincide -- which is exactly why every
+# earlier check, all of which pass --all, could never observe this. `cyc` files its
+# edge under repo root /r, so this context scopes it out while the store holds it.
+OTHER_REPO="$FAKE/other-repo"
+mkdir -p "$OTHER_REPO"
+git -C "$OTHER_REPO" init -q >/dev/null 2>&1
+cyc 1 "$SID_A" "$SID_B"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --repo "$OTHER_REPO")"
+case "$TXT" in *MIGRATION*) check "L49 a populated current store is not reported as a migration just because THIS repo has no handovers" FAIL ;; *) check "L49 a populated current store is not reported as a migration just because THIS repo has no handovers" PASS ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --repo "$OTHER_REPO" --json)"
+[ "$(jq_field "$OUT" otherSchemaLedgers)" = "[]" ] && check "L49a and the machine channel agrees -- the probe did not run" PASS || check "L49a the machine channel agrees (got $(jq_field "$OUT" otherSchemaLedgers))" FAIL
+# The control: with the current store genuinely empty, the migration report must
+# still fire without --all, or the fix would simply have disabled the feature.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+printf '{"schemaVersion":0,"from":{"sessionId":"a"},"to":{"sessionId":"b"}}' > "$CFG/zensu/session-lineage/v0/edges/1-aaaaaaaaaaaaaaaa.json"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --repo "$OTHER_REPO")"
+case "$TXT" in *MIGRATION*) check "L49b-control an empty current store still reports the migration, and without --all" PASS ;; *) check "L49b-control an empty current store still reports the migration (got ${TXT:-<empty>})" FAIL ;; esac
+rm -rf "$CFG/zensu/session-lineage/v0"
+
+# -- L50 -- --where must not offer the reconstruction on a migrated store ---
+# The listing path stopped offering it; the --where path did not, so the exact
+# offer that would mint guesses for handovers the machine already holds as
+# measurements survived on the sibling code path. Found by the main thread.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges"
+printf '{"schemaVersion":0,"from":{"sessionId":"aaaaaaaa-1"},"to":{"sessionId":"bbbbbbbb-2"}}' > "$CFG/zensu/session-lineage/v0/edges/1-aaaaaaaaaaaaaaaa.json"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "aaaaaaaa-1" --all)"
+case "$TXT" in *"--backfill"*) check "L50 --where on a migrated store does not offer to reconstruct what the store already holds" FAIL ;; *) check "L50 --where on a migrated store does not offer to reconstruct what the store already holds" PASS ;; esac
+case "$TXT" in *MIGRATION*) check "L50a and it names the migration instead" PASS ;; *) check "L50a it names the migration instead (got ${TXT:-<empty>})" FAIL ;; esac
+rm -rf "$CFG/zensu/session-lineage/v0"
+# The control: with no sibling directory the ordinary unknown-session guidance,
+# reconstruction offer included, must come back.
+reset_ledger
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "ffffffff-0000-0000-0000-00000000000f" --all)"
+case "$TXT" in *"--backfill"*) check "L50b-control an ordinary unknown session still gets the reconstruction offer" PASS ;; *) check "L50b-control an ordinary unknown session still gets the offer (got ${TXT:-<empty>})" FAIL ;; esac
+reset_ledger
+
+# -- L51 -- the record cap reaches the channel a PERSON reads ---------------
+# readEdges bounds how many records it enumerates and every payload carries the
+# flag -- but all eleven carriers were inside JSON.stringify, so the text channel
+# rendered from a capped prefix exactly like a complete answer, beside LEDGER ERROR
+# and LEDGER SCHEMA lines that do disclose. That is the silent truncation the bound
+# was added to make visible. Raised by the review panel.
+#
+# NOT driven behaviourally, and the reason is a measurement rather than a hunch:
+# tripping the cap needs MAX_EDGE_RECORDS + 1 records, which costs 1.3 s to create
+# on macOS and is then READ, and this suite's Windows ceiling is already recorded
+# as unmeasured after it doubled. The unit suite proves the flag is COMPUTED (it
+# plants exactly that many); these pins prove every renderer consults it, and each
+# negative carries a planted control.
+TR_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+TR_TEXT_SITES="$(grep -c 'ledgerTruncatedNote\|truncatedNote(' "$TR_SRC")"
+[ "$TR_TEXT_SITES" -ge 4 ] && check "L51 the record cap is rendered on the text channel, not only inside JSON payloads ($TR_TEXT_SITES sites)" PASS || check "L51 the record cap is rendered on the text channel (got $TR_TEXT_SITES sites, want >= 4)" FAIL
+# One owner for the sentence, as confidenceNote is for the tier: four hand-written
+# copies of a disclosure drift, and three of them saying it is not a disclosure.
+[ "$(grep -c 'function truncatedNote' "$TR_SRC")" = "1" ] && check "L51a the disclosure sentence has exactly one owner" PASS || check "L51a the disclosure sentence has exactly one owner (got $(grep -c 'function truncatedNote' "$TR_SRC"))" FAIL
+# --forget's own note must cover truncation as well as refused records: it is the
+# destructive verb, and "N of N removed" on a capped read is the worst spelling of
+# this defect in the file.
+FG_BODY="$(awk '/^function lineageForget\(/{f=1} f{print} f&&/^\}/{exit}' "$TR_SRC")"
+[ -n "$FG_BODY" ] && check "L51b-control the lineageForget body was actually extracted" PASS || check "L51b-control the lineageForget body was not found, so the scan below is vacuous" FAIL
+# The NOTE, not merely the identifier: `led.truncated` already appears in this
+# function's JSON payloads, so scanning for it would have passed before the fix.
+case "$FG_BODY" in *"truncatedNote("*) check "L51b the destructive verb's disclosure covers a capped read, not only refused records" PASS ;; *) check "L51b the destructive verb's disclosure covers a capped read" FAIL ;; esac
+# The planted control both negatives above lack on their own: the scan must be able
+# to report an absence, or "no site found" and "no site needed" read the same.
+L51_CTRL="$(mktemp -t zensu-l51-XXXXXX)"
+printf 'const x = 1;\n' > "$L51_CTRL"
+[ "$(grep -c 'truncatedNote(' "$L51_CTRL")" = "0" ] && check "L51c-control the site scan reports zero on a file that has none" PASS || check "L51c-control the site scan reports zero on a file that has none" FAIL
+rm -f "$L51_CTRL"
+
+# -- L52 -- a label key the tool prints is a key the tool can remove --------
+# The set path echoes the QUALIFIED window key it stored; `--remove` classified
+# anything that is not all digits as an account, so copying the echoed key back
+# searched the wrong namespace and reported "nothing was removed" while the label
+# was still on disk. And the account path stored the RAW key while every reader
+# resolves a BOUNDED one, so an over-long or control-carrying key round-tripped
+# into a state nothing could name. Both raised by the review panel; both leave a
+# label permanent, which is the state --remove exists to end.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$LIVE_PID" "A Window" >/dev/null
+ECHOED="$(node -e '
+const fs = require("fs");
+try {
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(Object.keys(o.windows || {})[0] || "");
+} catch (e) { process.stdout.write(""); }
+' "$CFG/zensu/session-lineage/v1/labels.json")"
+[ -n "$ECHOED" ] && check "L52-control the set path stored a window key to copy" PASS || check "L52-control the set path stored a window key to copy" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ECHOED" --json)"
+[ "$(jq_field "$OUT" removed)" = "true" ] && check "L52 the qualified key the tool printed is one --remove can name" PASS || check "L52 the qualified key the tool printed is removable (removed=$(jq_field "$OUT" removed))" FAIL
+[ -z "$(label_keys windows)" ] && check "L52a and the entry is really gone, not merely reported gone" PASS || check "L52a the entry is really gone (windows holds $(label_keys windows))" FAIL
+
+# An account key longer than the reader's bound: stored raw, it becomes a
+# different key on the next read and nothing can ever name it again.
+reset_ledger
+LONG_KEY="$(node -e 'process.stdout.write("k".repeat(200))')"
+trail "$STORE" "$SID_C" "$LIVE_PID" label "$LONG_KEY" "Too Long" >/dev/null
+STORED_KEY="$(node -e '
+const fs = require("fs");
+try {
+  const o = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(String((Object.keys(o.accounts || {})[0] || "").length));
+} catch (e) { process.stdout.write("ERR"); }
+' "$CFG/zensu/session-lineage/v1/labels.json")"
+{ [ "$STORED_KEY" != "ERR" ] && [ "$STORED_KEY" -gt 0 ] && [ "$STORED_KEY" -lt 200 ]; } 2>/dev/null \
+  && check "L52b an over-long account key is stored in the form the reader will resolve (length $STORED_KEY)" PASS \
+  || check "L52b an over-long account key is stored bounded (stored length $STORED_KEY — 'ERR' or 0 means nothing was stored, which this check used to pass on)" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$LONG_KEY" --json)"
+[ "$(jq_field "$OUT" removed)" = "true" ] && check "L52c and the same spelling the user typed still removes it" PASS || check "L52c the same spelling still removes it (removed=$(jq_field "$OUT" removed))" FAIL
+reset_ledger
+
+# -- L53 -- the two rules the module states are actually held by its consumer
+# The module says there is ONE comparison rule for recordedAt and that the pair key
+# is JSON-encoded because `>` survives boundText. Its only consumer held neither:
+# a localeCompare ordered the endpoint `--where` renders (so a machine-wide
+# ledger's order depended on the reader's ICU build), and the backfill duplicate
+# guard rebuilt the very `from>to` key dedupeEdges abandoned. Both raised by the
+# review panel; both are the module's own stated invariant, contradicted one file
+# over.
+CMP_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+grep -q 'localeCompare(' "$CMP_SRC" && check "L53 the consumer holds the module's single timestamp comparison rule" FAIL || check "L53 the consumer holds the module's single timestamp comparison rule" PASS
+grep -q '`${e.from.sessionId}>${e.to.sessionId}`' "$CMP_SRC" && check "L53a the backfill duplicate key cannot be spelled by two different pairs" FAIL || check "L53a the backfill duplicate key cannot be spelled by two different pairs" PASS
+# Planted controls: a negative scan that cannot match reports a clean file for the
+# wrong reason, which is the defect the panel found in two sibling checks.
+L53_CTRL="$(mktemp -t zensu-l53-XXXXXX)"
+printf 'const x = a.localeCompare(b);\n' > "$L53_CTRL"
+grep -q 'localeCompare' "$L53_CTRL" && check "L53b-control the comparator scan matches a planted localeCompare" PASS || check "L53b-control the comparator scan matched nothing, so L53 is vacuous" FAIL
+printf 'const k = `${e.from.sessionId}>${e.to.sessionId}`;\n' > "$L53_CTRL"
+grep -q '`${e.from.sessionId}>${e.to.sessionId}`' "$L53_CTRL" && check "L53c-control the pair-key scan matches a planted from>to key" PASS || check "L53c-control the pair-key scan matched nothing, so L53a is vacuous" FAIL
+rm -f "$L53_CTRL"
+# And the ordering must still WORK: a pin that only forbids a spelling is satisfied
+# by deleting the sort altogether.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_A" "$SID_C"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$TXT" in *"$(printf '%s' "$SID_C" | cut -c1-8)"*) check "L53d-control the walk still prefers the newest branch after the comparator change" PASS ;; *) check "L53d-control the walk still prefers the newest branch (got ${TXT:-<empty>})" FAIL ;; esac
+reset_ledger
+
+# -- L54 -- a record's FILE NAME is as untrusted as its fields --------------
+# Every persisted field goes through boundText because "they are rendered into
+# numbered chain lines a reader acts on". The file name is a sixth such carrier and
+# was the one this change newly rendered: --forget prints it three times, raw, and
+# a POSIX name may contain a newline. The dry run is the whole safety surface of a
+# destructive verb -- an operator decides from what it prints. Raised by the judge.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1/edges"
+# A newline is legal in a POSIX file name and illegal in every Windows one, so the
+# fixture itself cannot exist there. Probed rather than assumed: the write is
+# attempted and the checks are SKIPPED with the reason when the host refuses it,
+# which keeps the coverage boundary visible instead of reporting a green run for a
+# case that never ran.
+L54_PLANTED="$(node -e '
+const fs = require("fs"), path = require("path");
+const dir = process.argv[1];
+const rec = { schemaVersion: 1, from: { sessionId: process.argv[2] }, to: { sessionId: process.argv[3] },
+  repo: { name: "r", root: "/r" }, reason: "manual", inferred: false,
+  recordedAt: "2026-01-01T00:00:00.000Z", recordedBy: "adopt" };
+try {
+  fs.writeFileSync(path.join(dir, "1-aaaaaaaaaaaaaaaa\nFORGET APPLIED — 99 record(s) removed.json"), JSON.stringify(rec));
+  process.stdout.write("YES");
+} catch { process.stdout.write("NO"); }
+' "$CFG/zensu/session-lineage/v1/edges" "$SID_A" "$SID_B")"
+TXT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --all)"
+if [ "$L54_PLANTED" != YES ]; then
+  skip "L54/L54a/L54b a record name carrying a newline (this filesystem refuses the fixture)"
+else
+case "$TXT" in *"
+FORGET APPLIED — 99"*) check "L54 a record file name cannot fabricate a line in the destructive verb's output" FAIL ;; *) check "L54 a record file name cannot fabricate a line in the destructive verb's output" PASS ;; esac
+# The control: the record must actually have been FOUND, or the absence above is
+# just an empty dry run proving nothing.
+case "$TXT" in *"1 record(s) name"*) check "L54a-control the planted record was matched, so the check above is not vacuous" PASS ;; *) check "L54a-control the planted record was matched (got ${TXT:-<empty>})" FAIL ;; esac
+# And the removal itself must refuse the name rather than unlink through it: the
+# pre-unlink re-check is the last place a crafted name is still a string.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --json --all)"
+[ "$(jq_field "$OUT" removed)" = "0" ] && check "L54b a name carrying a control character is refused, not unlinked" PASS || check "L54b a name carrying a control character is refused (removed=$(jq_field "$OUT" removed))" FAIL
+fi
+rm -rf "$CFG/zensu/session-lineage/v1"
+# The control for THAT: an ordinary name must still be removable, or the refusal
+# would simply have disabled the verb.
+reset_ledger
+trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all >/dev/null
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --forget "$SID_A" --apply --json --all)"
+[ "$(jq_field "$OUT" removed)" = "1" ] && check "L54c-control an ordinary record name is still removed" PASS || check "L54c-control an ordinary record name is still removed (removed=$(jq_field "$OUT" removed))" FAIL
+reset_ledger
+
+# -- L55 -- the remaining panel items that change behaviour ------------------
+# A flag that belongs to another command must be refused, not dropped. The parser
+# accepts every flag for every command, so `lineage --remove <key>` parsed and then
+# fell through to the default listing -- the shape the exclusivity block's own
+# comment names, surviving on the flags it did not list.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --remove 4242 --all)"
+case "$OUT" in *"not a flag of"*) check "L55 a flag belonging to another command is refused by lineage, not silently dropped" PASS ;; *) check "L55 lineage refuses a flag of another command (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --forget "$SID_A" "$ACCT_A" "x")"
+case "$OUT" in *"not a flag of"*) check "L55a and label refuses one of lineage's, so the rule is not one-sided" PASS ;; *) check "L55a label refuses one of lineage's flags (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+[ "$(jq_field "$OUT" edgeCount)" = "0" ] && check "L55b-control an ordinary invocation is unaffected by the new refusal" PASS || check "L55b-control an ordinary invocation is unaffected (got $(jq_field "$OUT" edgeCount))" FAIL
+
+# A symlinked EDGES directory is refused on the read and delete paths too. The
+# write path already refuses one; read and delete followed it, so the guard held
+# for the operation that creates the store and not for the one that empties it.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1" "$FAKE/elsewhere-edges"
+ln -s "$FAKE/elsewhere-edges" "$CFG/zensu/session-lineage/v1/edges" 2>/dev/null
+IS_LINK="$(node -e '
+const fs = require("node:fs");
+try { process.stdout.write(fs.lstatSync(process.argv[1]).isSymbolicLink() ? "YES" : "NO"); }
+catch { process.stdout.write("NO"); }
+' "$CFG/zensu/session-lineage/v1/edges")"
+[ "$IS_LINK" = YES ] && check "L55c-control the edges path is really a symlink, not a copy this host substituted" PASS || check "L55c-control the edges path is really a symlink (got $IS_LINK)" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)"
+case "$(jq_field "$OUT" ledgerError)" in ''|null|ABSENT|PARSE_ERROR) check "L55c a symlinked edges directory is reported, not read through (got $(jq_field "$OUT" ledgerError))" FAIL ;; *) check "L55c a symlinked edges directory is reported, not read through" PASS ;; esac
+rm -f "$CFG/zensu/session-lineage/v1/edges"
+reset_ledger
+
+# The process table's start-time parse fails SILENTLY when the locale pin does not
+# hold: every window label stops resolving and nothing anywhere says why. The
+# command whose entire job is explaining why something does not resolve must say so.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json --all)"
+case "$(jq_field "$OUT" processStartTimes)" in ABSENT|PARSE_ERROR|'') check "L55d --diagnose reports whether process start times could be read at all (got $(jq_field "$OUT" processStartTimes))" FAIL ;; *) check "L55d --diagnose reports whether process start times could be read at all" PASS ;; esac
+
+# -- L56 -- the flag-scoping rule must cover every command, not two ----------
+# R13 put the refusal inside the two handlers that had the flags. The dispatcher
+# routes NINE, so `takeover x --forget y` still parsed both, recorded an edge and
+# named neither -- the same silence one layer out. The rule belongs where the
+# command name is decided, and the table must be exhaustive over that set or a
+# command missing from it accepts everything again.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --forget "$SID_B")"
+case "$OUT" in *"not a flag of"*) check "L56 takeover refuses a flag of another command" PASS ;; *) check "L56 takeover refuses a flag of another command (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" show "$SID_A" --no-git --all --apply)"
+case "$OUT" in *"not a flag of"*) check "L56a show refuses a flag of another command" PASS ;; *) check "L56a show refuses a flag of another command (got $(printf '%s' "${OUT:-<empty>}" | head -c 80))" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --all --self)"
+case "$OUT" in *"not a flag of"*) check "L56b instances refuses a flag of another command" PASS ;; *) check "L56b instances refuses a flag of another command (got $(printf '%s' "${OUT:-<empty>}" | head -c 80))" FAIL ;; esac
+
+# `adopt` is the verb whose ENTIRE output is the record it just wrote, so the
+# documented `--no-record` inspection has no meaning there -- it never read the
+# flag and wrote the machine-wide record anyway, while SKILL.md told the user that
+# spelling opts out. Refusing is the honest answer; silently obeying the doc would
+# leave a verb that does nothing.
+reset_ledger
+BEFORE_ADOPT="$(edge_count)"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" adopt "$SID_A" --all --no-record)"
+case "$OUT" in *"not a flag of"*) check "L56c adopt refuses --no-record rather than writing the record it says it skipped" PASS ;; *) check "L56c adopt refuses --no-record (got $(printf '%s' "${OUT:-<empty>}" | head -c 80))" FAIL ;; esac
+[ "$(edge_count)" = "$BEFORE_ADOPT" ] && check "L56d and the refused adopt wrote nothing to the ledger" PASS || check "L56d the refused adopt wrote nothing (before=$BEFORE_ADOPT after=$(edge_count))" FAIL
+
+# The two documented deliberate ignores must SURVIVE the rule. SKILL.md states
+# that `--force` is accepted and ignored by the selector-less surveys on purpose,
+# so a table that refused it there would break a documented contract, not tighten
+# one. Positive controls, not bites: they pass on both sides of the fix.
+reset_ledger
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" list --no-git --all --json --force)"
+case "$OUT" in *"not a flag of"*) check "L56e-control --force stays accepted by list, which documents ignoring it" FAIL ;; *) check "L56e-control --force stays accepted by list, which documents ignoring it" PASS ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" limited --no-git --all --json --force)"
+case "$OUT" in *"not a flag of"*) check "L56f-control --force stays accepted by limited for the same documented reason" FAIL ;; *) check "L56f-control --force stays accepted by limited for the same documented reason" PASS ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" takeover "$SID_A" --no-git --all --json --no-record --reason handover)"
+[ "$(jq_field "$OUT" lineage.recorded)" = "false" ] && check "L56g-control takeover still honours --no-record, which is its own flag" PASS || check "L56g-control takeover honours --no-record (recorded=$(jq_field "$OUT" lineage.recorded))" FAIL
+
+# The table must be EXHAUSTIVE over the dispatched set. Both sides are derived
+# from source rather than hardcoded here, so a tenth command added to the
+# dispatcher without a flag table fails this check instead of quietly accepting
+# every flag in the namespace again.
+L56_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+DISPATCHED="$(node -e '
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const m = src.match(/const COMMANDS = \{([\s\S]*?)\n\};/);
+if (!m) { process.stdout.write("NO_COMMANDS"); process.exit(0); }
+const keys = [...m[1].matchAll(/^\s{2}([A-Za-z]+):/gm)].map((x) => x[1]);
+process.stdout.write(keys.sort().join(","));
+' "$L56_SRC")"
+TABLED="$(node -e '
+const fs = require("node:fs");
+const src = fs.readFileSync(process.argv[1], "utf8");
+const m = src.match(/const COMMAND_FLAGS = \{([\s\S]*?)\n\};/);
+if (!m) { process.stdout.write("NO_TABLE"); process.exit(0); }
+const keys = [...m[1].matchAll(/^\s{2}([A-Za-z]+):/gm)].map((x) => x[1]);
+process.stdout.write(keys.sort().join(","));
+' "$L56_SRC")"
+if [ "$DISPATCHED" = "$TABLED" ] && [ "$DISPATCHED" != "NO_COMMANDS" ] && [ -n "$DISPATCHED" ]; then
+  check "L56h every dispatched command has a flag table ($DISPATCHED)" PASS
+else
+  check "L56h every dispatched command has a flag table (dispatched=$DISPATCHED tabled=$TABLED)" FAIL
+fi
+
+# -- L57 -- the disclosures that reach one carrier and not its sibling -------
+# Every one of these is the same defect the listing branch already fixed, alive in
+# a sibling code path: a read that FAILED rendered exactly like a read that found
+# nothing. The listing branch names both causes; its `--where` sibling named
+# neither and closed with the reconstruction offer, which is the one line here
+# that mints machine-wide guesses.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1"
+printf 'x' > "$CFG/zensu/session-lineage/v1/edges"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$OUT" in *"could not be read"*) check "L57 --where on an unreadable ledger names the fault instead of reporting no lineage" PASS ;; *) check "L57 --where on an unreadable ledger names the fault (got $(printf '%s' "${OUT:-<empty>}" | head -c 100))" FAIL ;; esac
+case "$OUT" in *"--backfill"*) check "L57a and it does not offer to reconstruct from a read that failed" FAIL ;; *) check "L57a and it does not offer to reconstruct from a read that failed" PASS ;; esac
+rm -f "$CFG/zensu/session-lineage/v1/edges"
+
+# The newer-schema half of the same branch. `--where` reported "either that session
+# was never handed over, or the handover predates the ledger" for a ledger this
+# build simply cannot read yet.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1/edges"
+printf '{"schemaVersion":99,"from":{"sessionId":"%s"},"to":{"sessionId":"%s"},"recordedAt":"2026-01-01T00:00:00.000Z"}' "$SID_A" "$SID_B" \
+  > "$CFG/zensu/session-lineage/v1/edges/9999999999-deadbeef.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all)"
+case "$OUT" in *"NEWER schema"*) check "L57b --where on a newer-schema ledger says so instead of asserting no handover" PASS ;; *) check "L57b --where on a newer-schema ledger says so (got $(printf '%s' "${OUT:-<empty>}" | head -c 100))" FAIL ;; esac
+reset_ledger
+
+# `instances` is the view SKILL.md names as the machine-wide answer to "where did
+# that session go" -- the one a window with no quota left cannot ask for itself.
+# Its --json carrier reported the ledger fault; its TEXT carrier printed the
+# sessions with no lineage lines and nothing to say they were missing rather than
+# absent.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v1"
+printf 'x' > "$CFG/zensu/session-lineage/v1/edges"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --all)"
+case "$OUT" in *"could not be read"*) check "L57c the text instances view discloses a ledger it could not read" PASS ;; *) check "L57c the text instances view discloses an unreadable ledger (got $(printf '%s' "${OUT:-<empty>}" | head -c 100))" FAIL ;; esac
+rm -f "$CFG/zensu/session-lineage/v1/edges"
+reset_ledger
+
+# --diagnose is the command whose entire job is explaining why something does not
+# resolve. The start-time parse is the single point of failure for every window
+# label, and its health reached the machine carrier only.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --all)"
+case "$OUT" in *"START TIMES"*) check "L57d --diagnose reports the start-time parse on the channel a person reads" PASS ;; *) check "L57d --diagnose reports the start-time parse on the text channel (got $(printf '%s' "${OUT:-<empty>}" | head -c 100))" FAIL ;; esac
+
+# `revisited` reaches the --where rendering and is dropped by the listing one, on
+# BOTH carriers -- the reset flow it exists for (adopt A>B, then adopt B>A) renders
+# a chain that stops with no caveat while the newest edge says the work came back.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+cyc 2 "$SID_B" "$SID_A"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$OUT" in *"came back"*) check "L57e the listing view discloses that the work came back to a session already in the chain" PASS ;; *) check "L57e the listing view discloses a revisited chain (got $(printf '%s' "${OUT:-<empty>}" | head -c 120))" FAIL ;; esac
+REV_JSON="$(node -e '
+let o; try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PARSE_ERROR"); process.exit(0); }
+const c = (o.chains || [])[0];
+if (!c) { process.stdout.write("NO_CHAIN"); process.exit(0); }
+process.stdout.write(["revisited","truncated"].every((k) => k in c) ? "BOTH" : "MISSING:" + ["revisited","truncated"].filter((k) => !(k in c)).join(","));
+' "$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --json --all)")"
+[ "$REV_JSON" = "BOTH" ] && check "L57f and the machine carrier keeps both walk bounds per chain" PASS || check "L57f the machine carrier keeps both walk bounds per chain (got $REV_JSON)" FAIL
+reset_ledger
+
+# The record cap is pinned at SOURCE, not driven: tripping it needs
+# MAX_EDGE_RECORDS + 1 files, whose cost L51 already measured and declined for a
+# suite whose Windows ceiling is recorded as unmeasured. Same decision, same
+# reason, and each negative carries the planted control L51 established.
+L57_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+# --apply is refused while the read was capped, for the identical reason it is
+# refused while a record is unreadable: the duplicate guard is built from that
+# read, so a pair beyond the cap re-proposes and --apply mints a second copy of an
+# edge the machine already holds. The refusal text already states that argument for
+# the per-record cause.
+BF_BLOCK="$(grep -n 'const applyBlocked' "$L57_SRC" | head -1 | cut -d: -f1)"
+[ -n "$BF_BLOCK" ] && check "L57g-control the --apply gate expression was located" PASS || check "L57g-control the --apply gate expression was not found, so the scan below is vacuous" FAIL
+case "$(sed -n "${BF_BLOCK:-1}p" "$L57_SRC")" in *"truncated"*) check "L57g --apply is gated on a capped read as well as an unreadable record" PASS ;; *) check "L57g --apply is gated on a capped read (got $(sed -n "${BF_BLOCK:-1}p" "$L57_SRC" | head -c 90))" FAIL ;; esac
+# And the cap reaches the instances text view, which renders lineage per session.
+IN_BODY="$(awk '/^function cmdInstances\(/{f=1} f{print} f&&/^\}/{exit}' "$L57_SRC")"
+[ -n "$IN_BODY" ] && check "L57h-control the cmdInstances body was actually extracted" PASS || check "L57h-control the cmdInstances body was not found, so the scan below is vacuous" FAIL
+case "$IN_BODY" in *"truncatedNote("*) check "L57h the record cap reaches the instances text view too" PASS ;; *) check "L57h the record cap reaches the instances text view" FAIL ;; esac
+
+# -- L58 -- the label key is bounded BEFORE anything reads its shape ---------
+# R13 bounded the key so the stored spelling and the typed one agree. Two things
+# above and below that line still read the raw value. `kind` is decided by regex
+# on the RAW target and the bound runs afterwards, so a key whose bounded form is
+# a window key but whose raw form is not was looked up in the account namespace --
+# "no account label is recorded" while the label sits under windows, which is the
+# permanent state this verb exists to end. The fallback `|| target` then restores
+# the unbounded value in exactly the case the bound matters: a key that bounds to
+# nothing at all is stored and printed raw.
+CTRL_CHAR="$(printf '\001')"
+reset_ledger
+LBL_PID="$LIVE_PID"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$LBL_PID" "window under test" --all)"
+STORED_KEY="$(window_keys)"
+case "$STORED_KEY" in ''|UNREADABLE) check "L58-control the set path stored a window label to remove" FAIL ;; *) check "L58-control the set path stored a window label to remove" PASS ;; esac
+# The raw spelling fails /^\d+(@|$)/ and the bounded one passes it, so the two
+# disagree about which namespace to look in.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${LBL_PID}" --all --json)"
+[ "$(jq_field "$OUT" kind)" = "window" ] && check "L58 the key kind is decided on the bounded spelling, not the raw one" PASS || check "L58 the key kind is decided on the bounded spelling (kind=$(jq_field "$OUT" kind))" FAIL
+[ "$(jq_field "$OUT" removed)" = "true" ] && check "L58a and the label the tool stored is one that spelling can remove" PASS || check "L58a the label is removable through the bounded spelling (removed=$(jq_field "$OUT" removed))" FAIL
+
+# A key that bounds to nothing must be refused, not restored to its raw form. The
+# `|| target` fallback made the bound a no-op for precisely the input it exists to
+# reject, and that value then became a stored key and a printed one.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "${CTRL_CHAR}${CTRL_CHAR}" --all 2>&1)"
+case "$OUT" in *"no usable"*|*"not a usable"*) check "L58b a key that bounds to nothing is refused rather than used raw" PASS ;; *) check "L58b a key that bounds to nothing is refused (got $(printf '%s' "${OUT:-<empty>}" | tr -d '\001' | head -c 90))" FAIL ;; esac
+# The same rule on the SET path, which stores the key rather than only reading it.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "${CTRL_CHAR}${CTRL_CHAR}" "some text" --all 2>&1)"
+case "$OUT" in *"no usable"*|*"not a usable"*) check "L58c and the set path refuses it too, before it reaches the file" PASS ;; *) check "L58c the set path refuses an unusable key (got $(printf '%s' "${OUT:-<empty>}" | tr -d '\001' | head -c 90))" FAIL ;; esac
+# The ordinary spellings must survive both changes -- a guard that refused every
+# key would satisfy the two assertions above on its own.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label "$ACCT_A" "ordinary account label" --all --json)"
+[ "$(jq_field "$OUT" kind)" = "account" ] && check "L58d-control an ordinary account key still sets, and still reads as an account" PASS || check "L58d-control an ordinary account key still sets (kind=$(jq_field "$OUT" kind))" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A" --all --json)"
+[ "$(jq_field "$OUT" removed)" = "true" ] && check "L58e-control and removing it still works through the plain spelling" PASS || check "L58e-control removing an ordinary account key still works (removed=$(jq_field "$OUT" removed))" FAIL
 reset_ledger
 
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------

@@ -706,7 +706,12 @@ that — unlike `ZENSU_BASH_WRITE_GATE=off` — lands no bypass-ledger entry.
 
 **The MSYS drive rule is SHARED, not copied.** `claude-path-v1.js` exports
 `msysDrivePrefix` as a TOTAL function — anything that is not an MSYS drive spelling comes
-back unchanged — and both consumers apply their own policy on top: its own
+back unchanged — and each consumer applies its own policy on top. There are FOUR, not
+two: `normalizeHostPathInput` in that same file, `msysToDrive` in the parser,
+`hooks/lib/zensu-doctor-invocation.js`, and — the first outside `hooks/` —
+`hostPath` in `skills/session-trail/scripts/trail.mjs`, whose policy is a third one
+again (it FAILS when the module cannot be loaded). The two the sentence below
+contrasts are the two whose policies are opposites: its own
 `normalizeHostPathInput` layers a fail-closed-by-THROWING policy for the session-control
 trust boundary, while `msysToDrive` in the parser declines that policy. It has to: the
 parser RETURNS a deny reason, so an exception would exit non-zero and the hook's fail-closed
@@ -1379,6 +1384,14 @@ closed", never "the watcher cannot false-positive".
 
 ## Session Lineage Ledger (`skills/session-trail/scripts/session-lineage-v1.mjs`)
 
+**Not the same "lineage" as either section above it.** §"Runtime Lineage
+(`version_type` is load-bearing)" is about whether an EXECUTING PLUGIN may serve a
+Session Control record it did not mint, and §"Adopting a Record Across a Lineage
+Break" is the explicit exit from that refusal. This section is about a chain of
+CLAUDE SESSIONS handing work to each other, has no relationship to plugin versions,
+and shares no code with either. The three collide on one English word; a change to
+one of them lands in none of the others.
+
 `/zensu:session-trail` records every takeover as one edge in a **machine-wide,
 multi-writer** store, and this module is the single source of truth for its schema,
 its layout, its refusal table and the chain walk. It is the reason the skill has a
@@ -1412,14 +1425,150 @@ indistinguishable from "no handover happened".
 segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
 and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
 
-**Known gap, stated rather than fixed:** `ledgerPaths` partitions the store by
-`v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges `schemaVersion` inside a
-record. The partition wins — a v2 build reads an empty `v2/edges` and reports no
-history rather than refusing v1 records — so `SCHEMA_NEWER`/`SCHEMA_OLDER` are
-reachable only from a hand-planted record. Closing this means either dropping the
-derived segment or having `readEdges` enumerate sibling `v*` directories.
+**Two couplings fire in the UNOBVIOUS direction**, the same shape §"Gate-Disable
+Prefixes" records for G12 — an ordinary edit elsewhere reddens a suite named for
+something else, and nothing points at it from the side that changes:
 
-**`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED.**
+- `tests/structure/test-windows-portability-guards.sh` binds
+  `SESSION_LINEAGE="$ROOT/skills/session-trail/scripts/session-lineage-v1.mjs"` and
+  hardcodes eight source literals out of `readBoundedFile` — both platform gates, the
+  `fs.openSync` flag expression, the `fstatSync` line and both refusal returns. So
+  rewording that reader, or normalising a quote style in it, reddens a suite named for
+  Windows portability. (It already did: the module carried a double-quoted `"win32"`
+  beside a single-quoted one, and the pin held the inconsistency in place.)
+- `package.json` is asserted by four checks in `tests/structure/test-session-trail-lineage.sh`
+  (`L41` the exact `c8` pin, `L41a` that the coverage run drives all three suites, `L41b`
+  the include glob's quoting, `L41c-control`). So an ordinary dependency bump or npm-script
+  edit reddens the session-trail lineage suite.
+
+**The DISPATCHER owns command-flag scoping, and two tables must stay key-identical.**
+`parseArgs` accepts every flag for every command, so a flag belonging to another verb
+parsed and was then ignored — `takeover x --forget y` recorded an edge and named
+neither flag, and `adopt --no-record` wrote the machine-wide record the flag said it
+was skipping. `COMMANDS` and `COMMAND_FLAGS` sit adjacent in `trail.mjs` for that
+reason: `COMMANDS` drives the routing AND the usage string, `COMMAND_FLAGS` must carry
+a row for every one of its keys, and `refuseForeignFlags` fails closed on a missing row
+rather than defaulting to `[]`. The unknown-command refusal stays FIRST, so a typo is
+reported as a typo. Two entries are DELIBERATE accept-and-ignore, not oversights:
+`--force` on `list` and `limited`, which SKILL.md documents as a survey rule —
+`instances` emits no verdict and so refuses it. `L56h` derives both key sets from
+source and compares them, so a tenth command cannot be added to one alone;
+`test-session-trail-skill.sh`'s `T16` and its `json-mode-order` guard read `COMMANDS`
+and `handler(opts)` and BOTH went red when the if/else chain was replaced — they are
+part of this coupling, not collateral.
+
+**Every disclosure has ONE owner and must reach BOTH carriers.** The recurring defect
+in this file is a read that FAILED rendering exactly like a read that found nothing,
+and it kept surviving one code path over: `truncatedNote` was added when eleven
+carriers of `led.truncated` were all inside `JSON.stringify`, and `renderLedgerFault`
+was added when the listing branch disclosed `directoryError` and `schemaNewer` while
+its `--where` sibling disclosed neither and still closed with the `--backfill` offer,
+the one line in the file that mints machine-wide guesses. Same rule for the walk's own
+bounds — `truncated` and `revisited` reached the `--where` rendering and were dropped
+by the listing one on both carriers. A new renderer calls the owner; it never writes
+the sentence again. `lineage --backfill --apply` is gated on a capped read for the
+reason it is gated on an unreadable record: the duplicate guard is built from that read.
+
+**The chain walk takes ONE source of successors.** `walkChain(sessionId, source, maxHops)`
+accepts an edge array or a prebuilt `indexBySource` map. It used to take both, and once
+an index was supplied the array was dead — a caller could hand it two that disagree and
+the walk followed the index silently. `chainRoots(edges)` builds its own index for the
+same reason, and there the pair was worse than dead: `edges` decides which roots exist
+while the index decides where each chain goes. Deriving the array back out of a map is
+rejected — flattening groups edges by source key, and the DISCOVERY ORDER of roots is
+the order chains render in. Measured after the change, with the shared index
+`cmdLineage` uses: n=5000 renders in 4 ms, against the 1669 ms recorded before R10
+removed the per-root re-index; rebuilding per root still reproduces the quadratic shape
+at 1834 ms, which is the control that keeps the first figure meaningful.
+
+**The two ledger writes land by DIFFERENT primitives, and the difference is the
+guarantee.** An edge record lands with `fs.linkSync`, which refuses a name that already
+exists — that is what makes the store append-only. `labels.json` lands with
+`fs.renameSync`, which replaces the whole document by design because it is a
+read-modify-write. SKILL.md claimed both landed by rename, which describes the opposite
+guarantee for one of them. `T11b`'s write-site allowlist names `linkSync` for this
+reason, and its control loop must plant one per named primitive or the branch can be
+deleted with every control green.
+
+**Sites that move with the ENDPOINT field set**, which is separate and was got wrong
+once: `makeEndpoint` owns the shape and `ENDPOINT_KEYS` is derived from it rather than
+hand-listed, but three PROSE copies are not derived — the persisted-field sentence in
+`skills/session-trail/SKILL.md` and its two `--json` disclosure paragraphs. Those are
+a PRIVACY claim a reader decides from, so an over-list is as wrong as an under-list;
+`test-session-trail-skill.sh` T26 pins both directions, scoped to the ledger lines
+because the data-sources table legitimately documents `cwd` and `title` for three
+OTHER files.
+
+**Sites that move with a new `print(JSON.stringify(` payload in `trail.mjs`:** every
+one must carry `skipped: SKIPPED`, and `test-session-trail-skill.sh` T22 pins the
+COUNT as well — a new payload fails that suite until the expected number is raised,
+which is the registration, not an obstacle. Every payload that reports the ledger's
+state must additionally carry `ledgerTruncated`, `ledgerError` and `schemaNewer`
+together; `L36b` counts the first against the second so a payload cannot report two
+of the three.
+
+**Permission posture, stated because nothing enforces it.** The ledger write happens
+INSIDE the node process, so no PreToolUse hook sees it: not `pre-write-secret-scan.sh`,
+not `pre-edit-tdd-reminder.sh`, not the Bash source-write gate. It is the only
+persistence in this skill the user never approves a Write for, its target is whatever
+`--config-dir`/`CLAUDE_CONFIG_DIR` names, and what it persists includes both
+endpoints' absolute worktree path and branch. `--no-record` is the opt-out, and
+`lineage --forget <session> --apply` is the only way a landed record leaves. Flow 3
+step 0 in `skills/session-trail/SKILL.md` states this where the decision is taken;
+keep it there, not only in that file's Safety section.
+
+**The v-partition is now REPORTED, not read.** `ledgerPaths` still partitions the
+store by `v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges `schemaVersion`
+inside a record, and the partition still wins — so `SCHEMA_NEWER`/`SCHEMA_OLDER` remain
+reachable only from a hand-planted record. What changed is the CONSEQUENCE:
+`otherSchemaLedgers` enumerates sibling `v*` directories, and a build whose own
+directory is empty beside a populated one reports a MIGRATION instead of "No handover
+has been recorded yet" — which had been followed by an offer to reconstruct guesses
+for handovers the machine still held as measurements, one directory away. It does not
+READ those records, and closing that still means dropping the derived segment or
+teaching `readEdges` to enumerate siblings.
+
+**Deferrals this ledger carries, each accepted rather than overlooked:**
+
+- **The confidence tier is not authenticated.** `confirmed` is a field in a JSON file
+  every session on the machine can write, so it records what a WRITER CLAIMED, never
+  what happened. The order gates ranking, not trust. Authenticating it means a MAC
+  over the record, which is a schema change.
+- **A concurrent label can still be lost.** `updateLabels` owns the whole
+  read-modify-write and re-checks the file's identity plus size immediately before
+  landing, and it REPORTS a failure to land instead of printing success — but it is a
+  bounded retry, not a lock. Two windows can still interleave; the window is narrowed,
+  not closed.
+- **A window label written before incarnation keying stops resolving.** The key is now
+  `<pid>@<start>` (§ the `label` row in SKILL.md), so a bare-pid key no longer matches
+  anything. That is the safe direction — the alternative is the label resurfacing on
+  an unrelated window that inherited the number — and `label --remove <pid>` clears the
+  old form, which is the only thing that can still name it.
+- **Three properties are pinned at SOURCE because no behavioural check can reach them
+  from a sandbox**, and each says so in its own check comment: `windowOf`'s basename
+  match (needs a real ancestor process whose executable PATH contains "claude" and
+  whose basename does not), the `msysDrivePrefix` routing (identity off win32 by
+  construction), and `cmdLabel` landing through `updateLabels` (the loss window needs
+  two processes interleaving). Source pins rot differently from behavioural ones —
+  each carries a control that fails if its own scan matches nothing.
+- **The record-count cap is proven COMPUTED but not proven end-to-end.** The unit suite
+  plants `MAX_EDGE_RECORDS + 5` records; the shell checks prove `ledgerTruncated`
+  travels on every ledger-aware payload. Nothing drives a real over-cap ledger through
+  the CLI, because 20 000 files is a Windows-budget problem, not a correctness one.
+
+**`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED, and
+the measurement is now STALE — say so rather than quoting it as headroom.** The figure
+below was taken at 70 checks; the suite is at 233. The rule this section exists to
+record is that the ceiling is set from the FIRST GREEN WALL CLOCK on the shard, never
+estimated from the macOS time and never raised speculatively — so the number stands
+until a green Windows run replaces it, and until then the 9x ratio is what new checks
+are budgeted against, not the remaining percentage. The ceiling was deliberately NOT
+raised in the change that more than doubled the suite: raising it without a measurement
+would trade a visible `TIMED_OUT` for a silent tail truncation. And the caveat cannot
+live in the manifest — `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
+`{id, runner, path, args, timeoutMs}` and aborts every Windows shard at manifest load,
+so a `note` field there is a CI-wide outage rather than documentation.
+
 It is `timeoutMs: 900000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`.
 First green-shard measurement, run 32598374524 on `win25-vs2026`: **273905 ms at 70
 checks** — 30% of its own cap, against **31 s on macOS** (measured 2026-08-22, idle
@@ -1433,9 +1582,13 @@ of it across seven suites — `deferred-reset-races` alone took 584150 ms at the
 900000 cap, plus five more suites whose caps sum to a further 1260000. Two 900000
 caps under one 1800000 profile means whichever runs second cannot receive its own
 ceiling; the same failure §Host-Refused Reviewer Spawn records verbatim ("read the
-shard's remaining budget", not the suite's `timeoutMs`). At 1213416 of 1800000 there
-is roughly 33% headroom left, and a shard abort truncates the tail of the second
-suite silently. The caveat lives here and NOT in the manifest:
+shard's remaining budget", not the suite's `timeoutMs`). **That 1213416 ms is now STALE for the same reason the per-suite figure above is** —
+it was taken with `session-trail-lineage` at 70 checks, and the suite is at 233 — the SAME figure the per-suite paragraph above now quotes. The two once disagreed (157 against "past 200") while describing one measurement, which is the drift a single number in two paragraphs invites.
+On this document's own 9x ratio the suite alone projects to roughly 614000 ms, which
+would put the shard near 1.55M of its 1.8M rather than the 1213416 recorded here. Do
+NOT quote a headroom percentage from it; replace both figures from the next green
+Windows shard, and until then treat the shard as the ceiling that binds. A shard abort
+truncates the tail of the second suite silently. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at manifest load.
 

@@ -11,10 +11,10 @@
     "session-control:adversarial": "bash evals/session-control/run-eval.sh adversarial",
     "session-control:release": "bash evals/session-control/run-eval.sh release",
     "reset-review-limit:eval": "bash evals/reset-review-limit/run-eval.sh",
-    "session-trail:coverage": "c8 --reporter=text --reporter=text-summary --include='skills/session-trail/scripts/*.mjs' --all bash tests/structure/test-session-trail-lineage.sh"
+    "session-trail:coverage": "c8 --reporter=text --reporter=text-summary --include=\"skills/session-trail/scripts/*.mjs\" --all bash tests/structure/run-session-trail-coverage.sh"
   },
   "devDependencies": {
-    "c8": "^12.0.0",
+    "c8": "12.0.0",
     "promptfoo": "0.121.20",
     "yaml": "2.9.0"
   },
