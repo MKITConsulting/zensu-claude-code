@@ -161,8 +161,8 @@ injects roughly 2.7 KB on the same prompt channel. A `/zensu:tdd` review round s
 **at least** 12 KB across one fan-out — more with repo-custom personas, and again per auto-fix
 round. The dominant term, though, is the other leg, and it is the one the design deliberately
 leaves unbounded: `UserPromptSubmit` fires every prompt with no de-bounce, so with zen-mode active
-— the shipped default — the standing per-prompt injection is 2804 + 1764 = about **4.5 KB every
-turn**, roughly 89 KiB over 20 turns and 268 KiB over 60. That is the real price of "resident
+— the shipped default — the standing per-prompt injection is 2951 + 1764 = about **4.6 KB every
+turn**, roughly 92 KiB over 20 turns and 276 KiB over 60. That is the real price of "resident
 rather than periodic", and it should be argued on those numbers rather than on the fan-out figure.
 The subagent leg deliberately has no per-`agent_type` filter — the requirement
 was that the rule reach subagents, and the block's own precedence clause tells a confined reviewer
