@@ -13,6 +13,7 @@
     "test-autopilot-inner-termination.sh",
     "test-autopilot-plan-delegate.sh",
     "test-autopilot-post-review-max-rounds.sh",
+    "test-autopilot-release-cli.sh",
     "test-autopilot-review-rearm.sh",
     "test-autopilot-session-resume.sh",
     "test-autopilot-skill.sh",

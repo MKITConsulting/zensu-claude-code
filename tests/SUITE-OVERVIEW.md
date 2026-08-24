@@ -13,12 +13,13 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (141 = 134 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's eleven CI group headers sum to 130, and the arithmetic closes at 134
-only because **four** CI suites appear nowhere in §3 at all — `test-evidence-crosscheck.sh`,
-`test-orphaned-project-root.sh`, `test-run-all-sharding.sh` and `test-session-control-core.sh`
-(the first and fourth are mentioned elsewhere, in §4 and §7, but in no §3 group). Counting
-§3's twelfth header, the local-only group of 7, gives 137 against 141. The five-profile
+reconciled to that manifest (142 = 135 + 7). **Known drift, pre-existing and NOT
+reconciled here:** §3's eleven CI group headers sum to 130, and the arithmetic closes at 135
+only because **five** CI suites appear nowhere in §3 at all — `test-autopilot-release-cli.sh`,
+`test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
+and `test-session-control-core.sh` (the second and fifth are mentioned elsewhere, in §4 and
+§7, but in no §3 group). Counting
+§3's twelfth header, the local-only group of 7, gives 137 against 142. The five-profile
 Windows drift this note used to carry is GONE: §1's Windows row and §7 are re-derived from
 `tests/profiles/windows-ci.v1.json`. Nothing machine-checks this
 document, so treat §3's per-group numbers as descriptive rather than authoritative until
@@ -42,7 +43,7 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **141** — 134 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| `tests/structure/test-*.sh` (deterministic shell) | **142** — 135 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
 | `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |

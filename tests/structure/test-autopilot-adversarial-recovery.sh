@@ -191,7 +191,24 @@ seed_exhausted_review() {
 
 check "X1 durable state libraries exist" PASS
 
-if grep -qF "path_indexes=(0 1 2 3 6)" "$STATE_LIB" \
+# Both children `autopilot_workspace_root` spawns run inside the project lease on
+# the gate path. A child that inherits the keeper's pipe prevents EOF and hangs
+# the release, which surfaces as an unrelated suite that never returns.
+WORKSPACE_FN="$(awk '/^autopilot_workspace_root\(\) \{/,/^\}/' "$STATE_LIB")"
+WORKSPACE_SPAWNS="$(printf '%s\n' "$WORKSPACE_FN" | grep -cE 'rev-parse --show-toplevel|zensu-host-path\.sh|_autopilot_rendered_dir')"
+WORKSPACE_REDIRECTS="$(printf '%s\n' "$WORKSPACE_FN" | grep -cF '</dev/null')"
+RENDER_FN="$(awk '/^_autopilot_rendered_dir\(\) \{/,/^\}/' "$STATE_LIB")"
+RENDER_REDIRECTS="$(printf '%s\n' "$RENDER_FN" | grep -cF '</dev/null')"
+if [ "$WORKSPACE_SPAWNS" -ge 2 ] && [ "$WORKSPACE_REDIRECTS" -ge 1 ] && [ "$RENDER_REDIRECTS" -ge 1 ]; then
+  check "X1b every child spawned under the project lease redirects stdin" PASS
+else
+  check "X1b lease-safe stdin redirects (spawns=$WORKSPACE_SPAWNS redirects=$WORKSPACE_REDIRECTS render=$RENDER_REDIRECTS)" FAIL
+fi
+
+if grep -qF "path_indexes=(0 1 2 3 6 10)" "$STATE_LIB" \
+  && grep -qF "path_indexes=(0 1 2 4)" "$STATE_LIB" \
+  && grep -qF "path_indexes=(0 1 4 6)" "$STATE_LIB" \
+  && grep -qF "path_indexes=(0 1)" "$STATE_LIB" \
   && grep -qF "MSYS2_ARG_CONV_EXCL='*' node -" "$STATE_LIB" \
   && grep -qF '_tdd_native_project_path "$input"' "$STATE_LIB" \
   && grep -qF '_autopilot_native_project_root "$input"' "$STATE_LIB" \
@@ -200,9 +217,9 @@ if grep -qF "path_indexes=(0 1 2 3 6)" "$STATE_LIB" \
   && ! grep -qF 'PAYLOAD_FILE="$payload_file"' "$STATE_LIB" \
   && ! grep -qF 'TARGET_FILE="$target" node -e' "$STATE_LIB" \
   && ! grep -qF 'STATE_FILE="$state_file" SID=' "$STATE_LIB"; then
-  check "X1a native Node filesystem boundaries are explicit and mode-complete" PASS
+  check "X1a native Node filesystem boundaries are explicit for the pinned modes" PASS
 else
-  check "X1a native Node filesystem boundaries are explicit and mode-complete" FAIL
+  check "X1a native Node filesystem boundaries are explicit for the pinned modes" FAIL
 fi
 
 # A bound Inner generation is proof that an outer run exists. Removing only
@@ -215,7 +232,7 @@ C2=adversarial-pointer-active-chain
 prepare_session "$P2" "$S2" S2 || exit 1
 approve "$P2" "$R2" "$S2" && begin_bound "$P2" "$R2" "$S2" 1 "$C2" \
   && mark_complete "$P2" "$R2" "$S2" 1 "$C2" || exit 1
-rm -f "$(autopilot_active_file "$P2")"
+rm -f "$(autopilot_active_file "$P2" "$S2")"
 RF2="$(autopilot_run_file "$R2" "$P2")"
 TF2="$(tdd_state_file "$S2")"
 BEFORE2_OUTER="$(digest "$RF2")"; BEFORE2_INNER="$(digest "$TF2")"
@@ -238,7 +255,7 @@ approve "$P3" "$R3" "$S3" && begin_bound "$P3" "$R3" "$S3" 1 "$C3" \
   && mark_complete "$P3" "$R3" "$S3" 1 "$C3" \
   && CLAUDE_PROJECT_DIR="$P3" tdd_finish_autopilot_chain \
     "$S3" "$R3" 1 "$C3" pass >/dev/null || exit 1
-rm -f "$(autopilot_active_file "$P3")"
+rm -f "$(autopilot_active_file "$P3" "$S3")"
 RF3="$(autopilot_run_file "$R3" "$P3")"
 TF3="$(tdd_state_file "$S3")"
 BEFORE3_OUTER="$(digest "$RF3")"; BEFORE3_INNER="$(digest "$TF3")"
@@ -589,9 +606,11 @@ autopilot_begin_run "$R14" "$O14" "$P14" >/dev/null \
     tdd_write_pending_review corrupt.ts "corrupt outer fixture" >/dev/null || exit 1
 prepare_session "$P14" "$S14" S14 || exit 1
 TF14="$(tdd_state_file "$S14")"; BEFORE14_INNER="$(digest "$TF14")"
-AF14="$(autopilot_active_file "$P14")"; RF14="$(autopilot_run_file "$R14" "$P14")"
-AF14="$AF14" node -e '
-  const fs=require("fs"),p=process.env.AF14,j=JSON.parse(fs.readFileSync(p));
+AF14="$(autopilot_active_file "$P14" "$O14")"; RF14="$(autopilot_run_file "$R14" "$P14")"
+# Adoption judges workspace occupancy from the run inventory, so the run
+# record is where corruption has to fail it closed.
+RF14="$RF14" node -e '
+  const fs=require("fs"),p=process.env.RF14,j=JSON.parse(fs.readFileSync(p));
   j.extra=true;fs.writeFileSync(p,JSON.stringify(j));
 '
 PF14="$P14/.zensu/state/pending-review.json"
@@ -619,7 +638,8 @@ _adversarial_publish_begin_critical() {
   local project="$1" run_id="$2" owner="$3" entered="$4" release="$5"
   : > "$entered"
   while [ ! -e "$release" ]; do sleep 0.01; done
-  _autopilot_begin_critical "$project" "$run_id" "$owner" false true
+  _autopilot_begin_critical "$project" "$run_id" "$owner" false true \
+    "$(autopilot_workspace_root "$project")"
 }
 P15="$ROOT/adopt-race"
 R15=adversarial_adopt_race_run
@@ -884,7 +904,9 @@ _autopilot_locked_run() {
   return 1
 }
 _autopilot_node() {
-  if [ "${1:-}" = read-active ] && [ ! -e "$READ_MARKER16D" ]; then
+  # The contention proof reads workspace occupancy, so that is the mode whose
+  # first answer has to be forced to absence for the fence to be observable.
+  if [ "${1:-}" = read-workspace ] && [ ! -e "$READ_MARKER16D" ]; then
     : > "$READ_MARKER16D"
     return 1
   fi

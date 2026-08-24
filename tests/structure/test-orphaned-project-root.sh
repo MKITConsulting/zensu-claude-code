@@ -641,8 +641,14 @@ else
 fi
 
 # --- O4 the doctor names this state instead of "no record" ------------------
+# The doctor renderer resolves the user-scoped zensu config AND its reviewer-spawn
+# permission check out of HOME, so an unsandboxed run here reads whatever the
+# developer running the suite happens to have and makes DOCTOR_OUT/UNBOUND_OUT
+# environment-dependent. Same guard tests/structure/test-doctor.sh applies to its
+# own functional half; P1bh there requires it of every suite that runs the doctor.
+DOCTOR_HOME="$STATE_DIR/doctor-home"; mkdir -p "$DOCTOR_HOME"
 DOCTOR_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
-  CLAUDE_CODE_SESSION_ID="orphan-gone" CLAUDE_PROJECT_DIR="$GATE_PROJECT" \
+  CLAUDE_CODE_SESSION_ID="orphan-gone" CLAUDE_PROJECT_DIR="$GATE_PROJECT" HOME="$DOCTOR_HOME" \
   ZENSU_CONFIG="$STATE_DIR/no-such-config.json" bash "$DOCTOR" 2>/dev/null)"
 if printf '%s' "$DOCTOR_OUT" | grep -qF 'the project root recorded for this session no longer exists' \
   && printf '%s' "$DOCTOR_OUT" | grep -qF "$GONE_ROOT"; then
@@ -663,7 +669,7 @@ else
 fi
 # A session that is merely unbound for another reason must keep the old line.
 UNBOUND_OUT="$(env CLAUDE_PLUGIN_ROOT="$PLUGIN_DIR" CLAUDE_PLUGIN_DATA="$GONE_DATA" \
-  CLAUDE_CODE_SESSION_ID="a-session-that-was-never-registered" \
+  CLAUDE_CODE_SESSION_ID="a-session-that-was-never-registered" HOME="$DOCTOR_HOME" \
   CLAUDE_PROJECT_DIR="$GATE_PROJECT" ZENSU_CONFIG="$STATE_DIR/no-such-config.json" \
   bash "$DOCTOR" 2>/dev/null)"
 if printf '%s' "$UNBOUND_OUT" | grep -qF 'has no valid Session Control record' \

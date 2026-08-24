@@ -1,6 +1,10 @@
 #!/bin/bash
 set -u
 
+# zensu-doctor-home-exempt: this suite never RUNS the doctor. It only names
+# hooks/lib/zensu-doctor.sh inside a command STRING handed to the write gate, to
+# check that the gate admits that shape. Its own HOME= is a pass-through of the
+# ambient HOME into the gate, not a sandbox, so it cannot stand in for one.
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
 HOOK="$PLUGIN_DIR/hooks/pre-bash-source-write-gate.sh"
 PARSER="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
