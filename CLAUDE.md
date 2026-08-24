@@ -1866,10 +1866,16 @@ originally been reasoned against.
 **The shard budget binds FIRST and is the tighter of the two:** `windows-shard-3`
 carries a `profileTimeoutMs` of 1800000, and that same run consumed **1213416 ms**
 of it across seven suites — `deferred-reset-races` alone took 584150 ms at the same
-900000 cap, plus five more suites whose caps sum to a further 1260000. Two 900000
-caps under one 1800000 profile means whichever runs second cannot receive its own
-ceiling; the same failure §Host-Refused Reviewer Spawn records verbatim ("read the
-shard's remaining budget", not the suite's `timeoutMs`). At 1213416 of 1800000 there
+900000 cap. The shard now carries EIGHT suites: besides those two, SIX more whose caps
+sum to a further 1860000. **Recount this after every merge from `main`**, because that
+is exactly how it moves — the figure read five and 1260000 until a merge brought
+`autopilot-release-cli` (600000) onto the shard and this sentence was not re-derived.
+The eight caps sum to 3360000 against a 1800000 profile, so a suite scheduled late
+cannot receive its own ceiling — that is the ordinary state of this shard, not an
+anomaly, and it is the same failure §Host-Refused Reviewer Spawn records verbatim
+("read the shard's remaining budget", not the suite's `timeoutMs`). It was worse
+before: this suite sat at 900000 beside `deferred-reset-races`'s 900000, half the
+profile budget committed to two entries. At 1213416 of 1800000 there
 is roughly 33% headroom left, and a shard abort truncates the tail of the second
 suite silently. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside

@@ -2258,10 +2258,11 @@ else if (cmd === 'takeover') cmdTakeover(opts);
 else if (cmd === 'lineage') cmdLineage(opts);
 else if (cmd === 'adopt') cmdAdopt(opts);
 else if (cmd === 'label') cmdLabel(opts);
-// Deliberately absent from the user-facing command list and from SKILL.md: it is a
+// Deliberately absent from the help text and from the unknown-command list: it is a
 // test seam, it reads its table from stdin rather than from the machine, and it
-// writes nothing. Naming it in the help text would advertise a verb with no use
-// outside the suite.
+// writes nothing. SKILL.md DOES document it, marked as a seam and not for use --
+// the structure suite pins that no dispatched command is undocumented, and that pin
+// is right: a hidden verb is exactly what it exists to catch.
 else if (cmd === 'window-probe') print(JSON.stringify({ ...windowProbe(fs.readFileSync(0, 'utf8')), skipped: SKIPPED }, null, 2));
 else fail(`unknown command: ${cmd} (list | instances | show | handoff | limited | takeover | lineage | adopt | label)`);
 flush();
