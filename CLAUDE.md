@@ -374,8 +374,10 @@ needs a lease-schema change — the lease record carries no `plugin_version`, so
 there is nothing to judge a lineage against. It is pinned as CURRENT behavior in
 `tests/structure/test-versioned-plugin-upgrade.sh` rather than left accidental,
 so changing it silently fails loudly. **Adoption works around it, it does not
-close it:** `discardSupersededLeases` moves every lease naming the previous
-installation OUT of the records directory (into a sibling `superseded/<key>/`,
+close it:** `discardSupersededLeases` moves every entry `listRecords` would REJECT
+— broader than "names the previous installation", narrower than "everything that
+reader rejects"; the entry script's header states the exact selector — OUT of the
+records directory (into a sibling `superseded/<key>/`,
 because `listRecords` fails on any non-`.json` entry, so setting one aside in
 place would be strictly worse). The count is reported, never absorbed.
 
@@ -403,14 +405,41 @@ Do NOT replace either with an explicit version comparison — the self-closing
 property is the whole design, and a hand-written check is the thing that gets
 forgotten.
 
-Seven conditions are ALL required; eight refusal reasons name exactly which one
-failed (condition 6 can fail as either `executing-runtime-unidentified` or
+Six conditions are ALL required; seven refusal reasons name exactly which one
+failed (condition 5 can fail as either `executing-runtime-unidentified` or
 `executing-runtime-older`):
-`record-unreadable`, `plugin-data-mismatch`, `project-root-mismatch`,
+`record-unreadable`, `plugin-data-mismatch`,
 `already-served`, `not-a-sibling-installation`, `executing-runtime-unidentified`,
 `executing-runtime-older`, `workflow-schema-mismatch`. `plugin_data` and the
 sibling bound are NOT relaxed here either — the latter is what keeps a
 `--plugin-dir` checkout from adopting an installed session.
+
+**There is deliberately NO condition on the CALLER's project root, and
+`adoptableRecord` does not read `options.projectRoot` at all.** There was one, and
+it made this repair unreachable in exactly the state it exists for. Two sources of
+truth disagree about "the project": the record is minted from the SessionStart
+**payload cwd** (`claude-session-control-v1.js`), while the adoption entry point is
+handed **`CLAUDE_PROJECT_DIR`**, a literal the skill renders from the harness. A
+fork whose cwd was a worktree records that worktree while the harness still reports
+somewhere else — and `cd` cannot change `CLAUDE_PROJECT_DIR`, so the refusal named a
+remedy no one in that session could perform. Removing it relaxes nothing: the anchor
+is CARRIED from the record (`adoptContext` passes `verdict.context.project_root` to
+`buildContext`), no write is located by the caller's value, and the bound stated in
+the entry script's header — `readContext`, the sibling root, `plugin_data` — never
+included this comparison. It also put the module back in step with itself:
+`resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
+payload cwd is never a project authority", and this was the one place a
+caller-supplied directory outranked the record. A record whose project root is GONE
+is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
+condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+`CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
+rejects a non-directory, so an unset or deleted value exited before printing any
+report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
+two share one set — but the shipped skill command STOPPED PASSING it: the recognizer
+holds every PATH assignment in the prefix to a rooted literal value — `ZDOC_PLAYWRIGHT_TOOLS`
+is a Set-membership check, not a path one — so a harness
+that rendered the placeholder empty would have refused the whole invocation over a
+value nobody reads.
 
 **Two invariants, both learned from the chain-recovery precedent:**
 
@@ -448,7 +477,25 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**Three re-encodings move with this, and none of them is checked by a test:**
+**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
+Removing the caller's project-root condition closed one of the two ways the two
+sources of truth diverge in worktree workflows — a cwd that was a worktree while the
+harness reported elsewhere. The other is still a permanent wedge: a worktree later
+REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
+Phase E) makes `readContext` throw at condition 1, so adoption answers
+`record-unreadable` whose remedy says to start a fresh session. Combined with an
+incompatible lineage, `orphanedProjectRootSession` does not fire either, and
+`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
+ALREADY distinguishes *record intact, project root absent* from *record altered or
+pruned*, and the gates already consume it — adoption does not. Widening it is a
+separate and larger decision, because adoption would then have to succeed with an
+anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
+so the next reader does not take "that one still refuses" for "and should".
+
+**Three re-encodings move with this.** Their coverage is stated once, in the
+store-layout bullet below, and nowhere else — a ledger that contradicts itself about
+its own pins is the failure mode it exists to prevent. The wire format and the
+version-shape rule are unchecked:
 
 - the `recorded<TAB>executing` wire format — one producer
   (`claude-hook-session-v1.js`) and five parsers (`zensu-doctor.sh`,
@@ -463,34 +510,132 @@ previous version was not pruned.
 - the review-evidence store layout, hardcoded in `discardSupersededLeases` as
   `review-evidence/v1/{records,superseded}/<key>` and re-implementing the
   ownership predicate that `review-evidence-lease-v1.js` owns, plus — since the
-  destination guard landed — that module's `ensurePrivateDirectory` policy and its
-  `LEASE_ID_RE`. Four copied elements, not one. The stated reason is narrower than
-  it looks: a core -> lease CALL would cycle (that module requires the binder,
-  which requires this core), but an ENTRY-POINT seam would not, because
-  `zensu-session-adopt.sh` already requires both. The real cost of the seam is
-  that it moves the sweep from the core half to an eighth host obligation. If this
-  function needs a fourth correction, take the seam. The source `lstat`'s ENOENT
-  branch is also the silent one: it cannot tell "no lease was ever minted" from a
-  layout that moved, so a layout change makes the sweep a SILENT no-op.
+  destination guard landed — that module's `ensurePrivateDirectory` policy, its
+  `LEASE_ID_RE`, and its `MAX_RECORD_BYTES`. FIVE copied elements, not one, of
+  which only two were ever pinned — and both pins compared source SPELLINGS rather
+  than behaviour, so `8388608` in the owner would turn them red with nothing wrong
+  while neither checked that the two sides applied the constant to the same
+  quantity.
+
+  **THE SEAM HAS BEEN TAKEN, and the copies are gone.** The trigger this file
+  recorded — "if this function needs a fourth correction, take the seam" — had
+  fired. The direction is the one that was always available: a core -> lease CALL
+  cycles (that module requires the binder, which requires this core), so the SWEEP
+  moved instead, into `hooks/lib/review-evidence-sweep-v1.js`, where requiring the
+  owner is acyclic. `review-evidence-lease-v1.js` now exports `LEASE_ID_RE`,
+  `MAX_RECORD_BYTES`, `REVIEW_EVIDENCE_SEGMENTS`, a `leaseRecordIsOwned` predicate
+  and `withLock`, and the sweep consumes those five.
+
+  **One copy deliberately SURVIVES, and claiming otherwise was the overstatement
+  review caught.** `privateEnough` in the sweep reproduces `ensurePrivateDirectory`'s
+  mode/uid pair verbatim, because the two do different things with the same
+  predicate: the owner REPAIRS with a chmod, this one may only LOOK. It is a
+  read-only twin, not a removed copy — do not "align" them, and do not read "the
+  copies are gone" as covering it.
+
+  **The stated cost was paid, not avoided:** the sweep is an EIGHTH host obligation
+  now, not part of the cross-host core half. `adoptContext` no longer sweeps at all
+  — the adoption ENTRY POINT calls it after the record swap — so a port that takes
+  only the core delta gets an adoption that never sweeps and leaves every superseded
+  lease wedging the store. What the move bought: the function is exported and driven
+  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  a temp directory each instead of a full synthetic install plus a session
+  lifecycle, and three return shapes the shell layer could not reach are ordinary
+  cases.
+
+  The source `lstat`'s ENOENT branch remains the silent one: it cannot tell "no
+  lease was ever minted" from a layout that moved, so a layout change still makes
+  the sweep a SILENT no-op. That is now bounded rather than open — the layout is one
+  exported constant both sides read — but it is not closed.
 
 **Port-relevant.** The core half is `adoptableRecord` / `adoptContext` /
-`discardSupersededLeases` / `executingPluginVersion` / `adoptionWorkflowStatePath`
-plus `ADOPTION_REFUSALS`, in the cross-host `session-control-core-v1.js`. The host
-half is SEVEN separate obligations, and a port that takes only the core delta gets
+`executingPluginVersion` / `adoptionWorkflowStatePath` plus `ADOPTION_REFUSALS`, in
+the cross-host `session-control-core-v1.js`. `discardSupersededLeases` is NO LONGER
+among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
+host obligation enumerated below. Note that
+`adoptableRecord`'s `options.projectRoot` is now INERT — accepted and never read —
+so a port that takes only the core delta (the condition gone) while its own entry
+script still requires and host-path-renders a project-dir variable still exits
+before printing any report, which is the same wedge in a different place. The two
+halves move together. The host
+half is EIGHT separate obligations, and a port that takes only the core delta gets
 `adoptContext` with no reachable caller and keeps the wedge: the entry script, the
 recognizer's `RECOGNIZED` entry, the doctor branch and row, the Stop release, the
-deny scope at every gate that denies in this state, the skill, and — easy to miss
+deny scope at every gate that denies in this state, the skill, — easy to miss
 — a binder exporting a `privateRecordsDirectory` equivalent that applies the
 symlink/alias/permission/ownership checks, because the entry script resolves the
-records directory through it and never by hand-joining. A port that copies only
+records directory through it and never by hand-joining, and EIGHTH the sweep itself
+(`hooks/lib/review-evidence-sweep-v1.js`, plus the owner exports it consumes and the
+entry point's call to it) — a port that skips it re-mints the record and leaves every
+superseded lease wedging the store. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
-**The Windows timeout for `test-versioned-plugin-upgrade.sh` is now UNMEASURED.**
-It was raised 600000 -> 900000 when Part C added roughly five synthetic installs
-and four session lifecycles, but no Windows wall clock was taken — unlike the two
-suites this file records a measured figure for. Budget against a measurement
-before trusting the headroom. The caveat lives here and NOT in the manifest:
+**Two spellings of one root, and only Windows can tell them apart.** The sweep decides
+ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
+`binding.pluginRoot`, which reached the store through the core's `canonicalDirectory` —
+`fs.realpathSync.native`. The adopt call site passes the record's own `plugin_root` and so
+agrees by construction; the in-place REPAIR call site received `ZADOPT_PLUGIN_ROOT`, which
+`zensu-session-adopt.sh` renders through `zensu-host-path.sh`. On win32 that renderer emits a
+drive-qualified FORWARD-slash path while the native spelling uses backslashes, so the compare
+inverted the selector a second time and the repair set aside the one live lease it had to keep
+— `windows-shard-2` reported `leases set aside : 2` where 1 was correct, with every POSIX shard
+green. `repairSweepRoot` now canonicalizes, falling back to the rendered value rather than
+throwing, because that branch owes the caller a verdict. Anything else that hands a root to
+this module owes it the same canonicalization.
+
+**`ENOENT` is not proof of absence, and the entry point read it as such.** `lstat` on a path
+whose ancestor is a FILE answers ENOTDIR on POSIX and ENOENT on win32, so a `review-evidence`
+file took the "no store here" branch and `discardSupersededLeases` reported a clean sweep over
+a store it never opened. `firstNonTraversableAncestor` re-derives the answer from the
+components instead of the errno; it follows links on purpose, so a symlink to a real directory
+stays traversable and the POSIX verdict is unchanged. It is EXPORTED for the unit layer alone
+— from a POSIX host the branch is unreachable through the public entry point, so without a
+direct handle the fix would ship with no executed case anywhere. Its `path.relative` bound is
+another member of the hand-copied `within()` / `isInside()` family this file tracks.
+
+**`test-versioned-plugin-upgrade.sh` grades the LAST COMMIT, not the working tree.**
+It captures `git rev-parse HEAD` and its install fixture materializes both synthetic
+roots with `git ls-tree`, so every behavioral row — and the copies of
+`skills/adopt-session/SKILL.md` that AC-C04 and CONV-1 read — measures the committed
+revision. An uncommitted change under `hooks/` or `skills/` is therefore reported
+GREEN against the previous commit, which is not a hypothetical: a real regression in
+`discardSupersededLeases` shipped that way for a full review round, because every
+measurement of it had been taken before the commit that carried it. Test-file edits
+DO take effect immediately, and SEVERAL rows read the working tree — the four unit
+drivers (`zensu-doctor-invocation`, `session-control-lineage`, the lease sweep and
+the adoption report), the three seam pins hoisted to the front of the file so a
+Windows timeout cannot drop them, the committed-tree check beside them, the
+lease-gap grep, and AC-013 — each labelled `WORKING TREE, not HEAD` in place. The
+count is deliberately NOT written out, matching the rule the suite states about
+itself: a hand-maintained number is exactly what a driven loop cannot catch when a
+row is removed, and the two hand-copy pins this enumeration used to name were
+themselves deleted when the seam was taken. Getting that set wrong is its own hazard, in the
+opposite direction: a reader who believes an uncommitted constant is invisible will
+misread a pin that in fact grades it immediately. Commit first, then measure.
+
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
+measurement is one sample.** `windows-shard-2` logged
+`PASSED versioned-plugin-upgrade (107613ms)` against the 900000 ms ceiling — roughly
+12%, so about seven eighths of the budget is unused. Taken at the head that carried
+Part C plus the AC-C11/AC-C11b/AC-C12 family.
+
+**That sample is now STALE, and saying so is the point of recording it.** The work
+that took the seam added two further `node --test` drivers to this suite plus roughly
+450 lines of rows, and no Windows wall clock was taken afterwards. The 107613 ms
+figure describes a head that no longer exists. Do not budget against it; re-measure
+on the next green Windows run and replace the number and its provenance sentence
+together.
+
+Read the original sample as ONE sample, not as a bound. The sibling
+`stop-enforcer-self-review-routing` note in this file records a 29% spread across
+two green runs of byte-identical content on the same runner class, so a single
+figure says nothing about the worst case — it says only that the suite is not
+currently close to its ceiling. Budget against the measured figure and re-measure
+after a change that adds process runs; the previous wording tried to substitute a
+hand-counted itemization of node and bash invocations for a wall clock, and that
+itemization went stale on its next row edit, which is exactly why it is gone.
+The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and throws at manifest load, which aborts
 EVERY Windows shard before a single suite runs — a `note` field there is a

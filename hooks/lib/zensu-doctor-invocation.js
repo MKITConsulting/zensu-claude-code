@@ -71,8 +71,8 @@ const DOCTOR_SEGMENTS = ["hooks", "lib", "zensu-doctor.sh"];
 // what BOUNDS those writes is readContext (session
 // hash, digest recomputed against the RECORDED root, that root's declared
 // version) plus the sibling-root and plugin_data checks — NOT derivation, since
-// the two path assignments are caller-supplied literals here exactly as they are
-// for the diagnostic. Without --confirm it is read-only.
+// CLAUDE_PLUGIN_DATA is a caller-supplied literal here exactly as it is for the
+// diagnostic. Without --confirm it is read-only.
 //
 // Admitting it is what makes the lineage diagnosis actionable: the state it
 // repairs denies Edit, Write and every other Bash call, so a remedy the user
@@ -94,12 +94,28 @@ const RECOGNIZED = {
 const ASSIGNMENT_TOKEN = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 // The UNION of names the recognized scripts read and the Bash tool does not
-// supply. `CLAUDE_PLUGIN_DATA` and `CLAUDE_PROJECT_DIR` are read by both;
-// `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only, and accepting it on the adoption form
-// costs nothing because that script never reads it. Kept as one shared set
+// supply. `CLAUDE_PLUGIN_DATA` is read by both; `CLAUDE_PROJECT_DIR` is
+// doctor-only in practice — the adoption is bounded by the record and ignores it
+// — and `ZDOC_PLAYWRIGHT_TOOLS` is doctor-only outright. Accepting either on the
+// adoption form costs nothing, because that script reads neither. Kept as one shared set
 // rather than per-entry: unlike `args`, an assignment cannot change what a
 // script DOES, only what it can see. `path` requires a rooted, traversal-free
 // literal; a Set requires one of its members.
+//
+// `CLAUDE_PROJECT_DIR` is NOT a harmless leftover now that the adoption ignores it,
+// and it must not be dropped on that reasoning. It is what keeps a model still
+// holding the PREVIOUS release's skill body — which emits the assignment — from
+// having its command refused. That is not an exotic case: a mid-session upgrade is
+// precisely the state this whole feature exists for, and the skill text a running
+// model holds is the one thing an upgrade does not replace.
+//
+// The residual it leaves sits on the READ command rather than the write one:
+// `isRootedLiteralPath("")` is false, so a harness rendering the placeholder empty
+// makes the assignment reject and denies the entire invocation — /zensu:doctor
+// included, the first thing a wedged user is told to run. `skills/doctor/SKILL.md`
+// therefore instructs the model to OMIT the assignment rather than render it empty;
+// the recognizer cannot fix that end, because by the time it sees the command the
+// empty value is already there.
 const ASSIGNMENTS = {
   CLAUDE_PLUGIN_DATA: "path",
   CLAUDE_PROJECT_DIR: "path",
