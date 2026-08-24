@@ -633,6 +633,27 @@ OUT="$(cd "$SELF_CWD" 2>/dev/null && HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_
 case "$OUT" in *"lineage --backfill"*) check "L32b with no sibling version the ordinary empty state still offers --backfill" PASS ;; *) check "L32b the ordinary empty state is unchanged (got ${OUT:-<empty>})" FAIL ;; esac
 rm -rf "$SIBCFG"
 
+# ── L33 — the --diagnose TEXT carrier, which no check ever executed ────────
+# All five diagnose invocations elsewhere pass --json, so the payload fields were
+# pinned and none of the print lines were. That block is this feature's own remedy
+# for its largest stated unknown -- the Windows and Linux store paths nobody has
+# observed -- and the human-facing half of that answer had no coverage at all.
+OUT="$(trail "$NOSTORE" "$SID_C" "$LIVE_PID" lineage --diagnose)"
+case "$OUT" in *"CONFIG ROOT"*) check "L33 the text carrier prints the resolved config root" PASS ;; *) check "L33 the text carrier prints the config root (got ${OUT:-<empty>})" FAIL ;; esac
+case "$OUT" in *"absent "*) check "L33a each probed candidate is listed with its verdict, not only the one that won" PASS ;; *) check "L33a probed candidates are listed with a verdict" FAIL ;; esac
+case "$OUT" in *"ZENSU_CCD_STORE"*) check "L33b the no-store guidance names the override the user is meant to reach for" PASS ;; *) check "L33b the no-store guidance names ZENSU_CCD_STORE" FAIL ;; esac
+# The unreadable-ledger arm of the same carrier: the count printed above it is not a
+# measurement, and the line saying so is what stops it being read as one.
+mkdir -p "$CFG/zensu/session-lineage/v1"
+if [ ! -d "$CFG/zensu/session-lineage/v1/edges" ]; then printf 'x' > "$CFG/zensu/session-lineage/v1/edges"; DIAG_PLANTED=1; else DIAG_PLANTED=0; fi
+if [ "$DIAG_PLANTED" = "1" ]; then
+  OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose)"
+  case "$OUT" in *"NOT a measurement"*) check "L33c an unreadable ledger says the edge count above it is not a measurement" PASS ;; *) check "L33c the unreadable-ledger line is printed (got ${OUT:-<empty>})" FAIL ;; esac
+  rm -f "$CFG/zensu/session-lineage/v1/edges"
+else
+  check "L33c fixture could not plant an unreadable ledger (edges/ already a directory)" FAIL
+fi
+
 # ── L22 — the cycle guard, which nothing exercised ─────────────────────────
 # walkChain documents `seen` as the difference between a wrong answer and a hang.
 # Nothing planted a cycle, so deleting the guard left all checks green and the

@@ -513,7 +513,14 @@ function endpointFromRow(row) {
 // The documented takeover route runs from a window in a different repo, so
 // deriving the repo from the recorder filed the edge under the taker's repo and
 // made the default, repo-scoped `lineage` render nothing where the work lives.
-function buildEdge(fromRow, to, reason, recordedBy, inferred) {
+// `at` is a PARAMETER for the backfill path's sake. `recordedAt` is the sole ordering
+// key in four places -- walkChain's branch preference, dedupeEdges' survivor,
+// readEdges' display order, and the --where leaf -- so stamping a reconstructed
+// handover with the moment `--apply` ran makes every guess newer than every
+// measurement BY CONSTRUCTION, and one backfill then wins each of those four
+// decisions against records that were actually observed. A measured takeover keeps
+// the clock; a guess is stamped with the instant it is guessing ABOUT.
+function buildEdge(fromRow, to, reason, recordedBy, inferred, at = new Date().toISOString()) {
   return buildLedgerEdge({
     from: endpointFromRow(fromRow),
     to,
@@ -522,7 +529,7 @@ function buildEdge(fromRow, to, reason, recordedBy, inferred) {
     reason,
     recordedBy,
     inferred,
-    at: new Date().toISOString(),
+    at,
   });
 }
 
@@ -1942,11 +1949,12 @@ function lineageBackfill(opts) {
   const stalled = rows.filter((r) => r.stopCause && r.stopCause.final);
   const candidates = [];
   for (const s of stalled) {
-    // Ordered by START, not by last activity: `mtime` is the transcript's last
-    // write, so a session that was already running when the other stalled would
-    // satisfy `mtime > s.mtime` and be minted as a causal handover that never
-    // happened. A successor whose start precedes the stall is skipped outright.
-    // Ordered by last activity, and the start guard applies ONLY where a start is
+    // Ordered by last activity, and there is deliberately NO start guard. An earlier
+    // design ordered by START and skipped a successor whose start preceded the stall;
+    // that argument used to stand here beside the code that replaced it, which left
+    // the next reader to work out which paragraph was live -- and the natural repair
+    // it invited would have restored the very defect the rule below fixes.
+    // The rule: the start guard applies ONLY where a start is
     // actually observable. `r.live` is null for every finished session — the whole
     // population this verb reconstructs — so the previous `startedAt(r) >= s.mtime`
     // conjunct rejected nothing there while wrongly excluding a live window that
@@ -2013,7 +2021,11 @@ function lineageBackfill(opts) {
   const written = [];
   let writeError = null;
   for (const c of candidates) {
-    const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', true);
+    // The successor's last activity is the closest observable instant to when the
+    // handover it reconstructs actually happened. Falling back to now only when that
+    // is unusable keeps the guess from silently outranking every measurement.
+    const inferredAt = Number.isFinite(c.to.mtime) ? new Date(c.to.mtime).toISOString() : undefined;
+    const edge = buildEdge(c.from, endpointFromRow(c.to), c.from.stopCause.error || 'rate_limit', 'backfill', true, inferredAt);
     // Reported, not abandoned: a batch that dies mid-way had already written real
     // records, and claiming none were written is the wrong half of the truth.
     try { written.push(path.basename(ledgerWrite(edge))); } catch (e) {
@@ -2027,6 +2039,15 @@ function lineageBackfill(opts) {
 }
 
 function cmdLineage(opts) {
+  // Three modes with nothing in common ride on flags here: --diagnose reports on
+  // desktop-store probing and not on lineage at all, --backfill --apply is a bulk
+  // WRITE, and the default plus --where are reads. Dispatching on the first flag
+  // that happens to be set meant `lineage --diagnose --backfill --apply` parsed
+  // cleanly and silently ran the diagnostic, so a caller who asked for a write got
+  // a report and no record -- a silent no-op on the one mode that mutates.
+  const modes = [opts.diagnose && '--diagnose', opts.backfill && '--backfill', opts.where && '--where'].filter(Boolean);
+  if (modes.length > 1) fail(`lineage takes one mode at a time; got ${modes.join(' and ')}`);
+  if (opts.apply && !opts.backfill) fail('--apply belongs to lineage --backfill; it does nothing on its own');
   if (opts.diagnose) return lineageDiagnose(opts);
   if (opts.backfill) return lineageBackfill(opts);
   const edges = dedupeEdges(ledgerRead());
