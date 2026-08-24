@@ -460,11 +460,19 @@ fi
 # pin above is per-file and therefore blind to a NEW file carrying a secure open,
 # so a file that is merely correct today has nothing keeping it correct. The
 # properties are the ones that make the read safe against a store the session can
-# write: the flag is resolved once in the Windows-safe spelling, the descriptor --
-# not the path -- carries the regular-file and size assertions, and the size cap
+# write: both flags are resolved once in the Windows-safe spelling, the descriptor
+# -- not the path -- carries the regular-file and size assertions, and the size cap
 # is applied to the fstat result rather than to a prior lstat.
+#
+# O_NONBLOCK is pinned beside O_NOFOLLOW because the type check runs AFTER the
+# open and therefore cannot protect the open itself: on POSIX a FIFO planted in
+# this directory -- writable by every session on the host -- blocks
+# `open(path, O_RDONLY)` until a writer arrives, with no timeout above it. Both
+# are platform-gated the same way, so neither is passed on win32 where the
+# constants are absent or meaningless.
 if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$SESSION_LINEAGE")" -eq 1 ] \
-  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NONBLOCK)' "$SESSION_LINEAGE")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(file, fs.constants.O_RDONLY | NOFOLLOW | NON_BLOCK)' "$SESSION_LINEAGE")" -eq 1 ] \
   && [ "$(grep -cF 'const st = fs.fstatSync(fd);' "$SESSION_LINEAGE")" -eq 1 ] \
   && grep -qF 'if (!st.isFile() || st.size > MAX_RECORD_BYTES) return null;' "$SESSION_LINEAGE" \
   && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$SESSION_LINEAGE" \
