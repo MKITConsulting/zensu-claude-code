@@ -12,11 +12,21 @@
 #     private plugin-data store; one workflow history entry in the recorded
 #     project; and any review-evidence lease naming the previous installation,
 #     MOVED (never deleted) out of that session's own lease records directory
-#     into a sibling `superseded/` one. Nothing else, and nothing outside
+#     into a sibling `superseded/` one. The selector is broader than "names the
+#     previous installation" and narrower than "everything listRecords rejects":
+#     the keep-predicate is a SUPERSET of that reader's accept set, mirroring three
+#     of its conjuncts, so a stale lease, one whose id disagrees with its filename,
+#     a malformed record, a symlinked or oversized one and a non-.json leftover are
+#     all moved — while an entry that fails only the checks NOT mirrored
+#     (multiply-linked, non-canonical, otherwise validateRecord-invalid) and still
+#     names the executing root is KEPT, and keeps wedging later lease operations. That
+#     residual is documented in review-evidence-sweep-v1.js beside the predicate —
+#     the sweep is no longer part of adoptContext, and THIS script is what invokes
+#     it. Nothing else, and nothing outside
 #     <plugin_data>/{session-control,review-evidence} and the recorded project.
-#   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA and
-#     CLAUDE_PROJECT_DIR are caller-supplied literals, exactly as they are for
-#     the diagnostic — it is readContext: the session-hash must match, the
+#   - What BOUNDS that write is not derivation — CLAUDE_PLUGIN_DATA is a
+#     caller-supplied literal, exactly as it is for the diagnostic — it is
+#     readContext: the session-hash must match, the
 #     runtime digest is recomputed against the RECORDED root, and that root's
 #     manifest must still declare the recorded version. Add the sibling-root
 #     bound and the plugin_data equality check, and a record the caller authored
@@ -24,7 +34,13 @@
 #     not already own. State it this way and not as "every location is derived
 #     from the record": that is the stronger claim, and it is not what the code
 #     enforces.
-#   - It refuses unless every adoptableRecord condition holds.
+#   - The record and history writes require every adoptableRecord condition to
+#     hold. There is exactly ONE bounded exception, and it is stated here because
+#     this header is what the recognizer's admission rests on: with `--confirm`, an
+#     `already-served` refusal re-runs write class 3 — the lease sweep — as an
+#     idempotent repair. It re-mints nothing and touches nothing outside
+#     <plugin_data>/review-evidence/v1/{records,superseded}/<session key>. Without
+#     `--confirm` that refusal is read-only like every other.
 #   - It cannot reach project source files, cannot run a build or a test, and
 #     takes no argument other than the single literal `--confirm`.
 #   - Without `--confirm` it is strictly read-only and answers the same question
@@ -51,13 +67,42 @@ CORE="$DIR/session-control-core-v1.js"
   printf '%s\n' 'zensu:adopt-session: the Session Control runtime is missing or symlinked; repair the Zensu plugin installation' >&2
   exit 1
 }
-# The binder is loaded from inside the node payload for its private-store
-# constructor, so it gets the same guard the core does — zensu-session.sh applies
-# it to this exact file at three sites, and a symlinked binder must not be the one
-# library this write-capable script loads unchecked.
+# The binder is loaded by the report module for its private-store constructor, so it
+# gets the same guard the core does — zensu-session.sh applies it to this exact file
+# at three sites, and a symlinked binder must not be the one library this
+# write-capable script loads unchecked.
 BINDER="$DIR/claude-hook-session-v1.js"
 [ -f "$BINDER" ] && [ ! -L "$BINDER" ] || {
   printf '%s\n' 'zensu:adopt-session: the Session Control binder is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+# The report itself. It used to be a `node -e` payload carried inside this script as a
+# single-quoted string, which is why safe() had no test in either direction; it is a
+# real module now and gets the same missing-or-symlinked guard as the two libraries
+# above, because this is the file the write-capable command actually executes.
+REPORT="$DIR/session-adopt-report-v1.js"
+[ -f "$REPORT" ] && [ ! -L "$REPORT" ] || {
+  printf '%s\n' 'zensu:adopt-session: the adoption report module is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+# The sweep the report invokes after adoptContext, guarded for the same reason: a
+# missing or symlinked sweep must stop this command BEFORE any record is mutated,
+# not after.
+SWEEP="$DIR/review-evidence-sweep-v1.js"
+[ -f "$SWEEP" ] && [ ! -L "$SWEEP" ] || {
+  printf '%s\n' 'zensu:adopt-session: the review-evidence sweep module is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+# The lease-store OWNER, which the sweep requires. It is new to this command's load
+# graph — before the seam the core hand-copied its constants precisely to avoid the
+# require cycle — and it is the module that decides WHICH leases move
+# (leaseRecordIsOwned) and that creates and chmods the store (ensurePrivateDirectory,
+# storage). Leaving it unguarded while its four siblings are guarded would mean the
+# one command still reachable in a tamper-suspicious state loads its move selector
+# from a file nothing checked.
+LEASE="$DIR/review-evidence-lease-v1.js"
+[ -f "$LEASE" ] && [ ! -L "$LEASE" ] || {
+  printf '%s\n' 'zensu:adopt-session: the review-evidence lease module is missing or symlinked; repair the Zensu plugin installation' >&2
   exit 1
 }
 
@@ -87,23 +132,39 @@ command -v node >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: CLAUDE_PLUGIN_DATA is unset, so the record store cannot be located' >&2
   exit 1
 }
-[ -n "${CLAUDE_PROJECT_DIR:-}" ] || {
-  printf '%s\n' 'zensu:adopt-session: CLAUDE_PROJECT_DIR is unset, so the recorded project cannot be checked' >&2
-  exit 1
-}
+# CLAUDE_PROJECT_DIR is deliberately NOT required, and is not read at all. It was
+# required once, and rendered through the host-path script, which rejects a path
+# that is not a directory — so a session whose harness project dir had been
+# deleted exited here, before any report, in exactly the state this command
+# exists to diagnose. adoptableRecord no longer judges the caller's project root:
+# the anchor is carried from the record, and every write below is bounded by
+# readContext, the sibling-root check and plugin_data. The recognizer still
+# ACCEPTS the assignment, because the diagnostic reads it and the two share one
+# set — this script simply ignores it.
 
-# All three crossings into native Node go through the host-path renderer, as
-# every other stateful helper does, and are excluded from Git Bash's heuristic
+# Both crossings into native Node go through the host-path renderer, as every
+# other stateful helper does, and are excluded from Git Bash's heuristic
 # environment conversion so a drive spelling is not reinterpreted twice.
 # shellcheck disable=SC1090
 source "$DIR/zensu-session.sh" >/dev/null 2>&1 || {
   printf '%s\n' 'zensu:adopt-session: the Session Control shell library is unavailable' >&2
   exit 1
 }
-NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || exit 1
-NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || exit 1
-NATIVE_PROJECT_DIR="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PROJECT_DIR")" || exit 1
-MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA ZADOPT_PROJECT_DIR)" || {
+# Both renders name their cause. zensu-host-path.sh exits SILENTLY for anything that
+# is not an existing, non-symlink directory, and a bare `|| exit 1` here made this
+# command — the last reachable diagnosis in a wedged session — produce no output at
+# all for a plugin-data store that had been pruned, replaced by a file, or symlinked.
+# The `private-record-store-unsafe` branch below already carries the right wording
+# for exactly those shapes and never got the chance to run.
+NATIVE_PLUGIN_ROOT="$(bash "$DIR/zensu-host-path.sh" "$PLUGIN_ROOT")" || {
+  printf '%s\n' 'zensu:adopt-session: the executing plugin root is not a readable directory; repair the Zensu plugin installation' >&2
+  exit 1
+}
+NATIVE_PLUGIN_DATA="$(bash "$DIR/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || {
+  printf '%s\n' 'zensu:adopt-session: CLAUDE_PLUGIN_DATA does not name a readable directory, so the record store cannot be located. It is missing, a file, or a symlink.' >&2
+  exit 1
+}
+MSYS_EXCL="$(zensu_msys_env_exclusions ZADOPT_PLUGIN_ROOT ZADOPT_PLUGIN_DATA)" || {
   printf '%s\n' 'zensu:adopt-session: the host-path environment library is unavailable; repair the Zensu plugin installation' >&2
   exit 1
 }
@@ -112,132 +173,6 @@ cd -P -- "$DIR" || exit 1
 MSYS2_ENV_CONV_EXCL="$MSYS_EXCL" \
 ZADOPT_PLUGIN_ROOT="$NATIVE_PLUGIN_ROOT" \
 ZADOPT_PLUGIN_DATA="$NATIVE_PLUGIN_DATA" \
-ZADOPT_PROJECT_DIR="$NATIVE_PROJECT_DIR" \
 ZADOPT_SESSION_ID="$CLAUDE_CODE_SESSION_ID" \
 ZADOPT_CONFIRM="$CONFIRM" \
-node -e '
-const path = require("node:path");
-const core = require("./session-control-core-v1.js");
-
-const pluginRoot = process.env.ZADOPT_PLUGIN_ROOT;
-const pluginData = process.env.ZADOPT_PLUGIN_DATA;
-const projectRoot = process.env.ZADOPT_PROJECT_DIR;
-const sessionId = process.env.ZADOPT_SESSION_ID;
-// The binder OWNS the private-store constructor, and this uses it rather than a
-// hand-joined path: it additionally rejects a records directory that is a
-// symlink, an alias, group- or world-accessible, or owned by another user.
-// Skipping those checks would let the repair mint a record into a store that the
-// very next tool call refuses for exactly those reasons — a false success, and a
-// new record sitting somewhere another local user can rewrite it.
-//
-// Resolved INSIDE main(), never at module top level: all five of its refusal
-// conditions throw, and a throw out here would escape the handler below and print
-// a raw stack trace — in the one state where every other channel is already
-// denied, and where those conditions are exactly the diagnosis the user needs
-// stated plainly.
-const privateRecordsDirectory = require("./claude-hook-session-v1.js").privateRecordsDirectory;
-const buildRequest = () => ({
-  recordsDir: privateRecordsDirectory(pluginData),
-  sessionId,
-  host: "claude",
-  pluginData,
-  projectRoot,
-  executingPluginRoot: pluginRoot,
-});
-
-// Every refusal names the condition that was not met, and every one of them has
-// a different remedy. A generic "not adoptable" would put the user back where
-// the misleading doctor row left them.
-const REMEDY = {
-  [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
-    "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.PROJECT_ROOT]:
-    "The recorded project root is not this directory. Run this from the project the session was started in, or start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
-    "Nothing to adopt: this installation already serves the record. If tools are still failing, the cause is a different one — run /zensu:doctor.",
-  [core.ADOPTION_REFUSALS.NOT_SIBLING]:
-    "The executing installation is not a sibling of the one that minted the record, so it cannot be an upgrade of it. A --plugin-dir checkout never adopts an installed session. Start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.EXECUTING_UNIDENTIFIED]:
-    "The executing installation does not declare a usable version, so no lineage judgement is possible. Repair the plugin installation; /zensu:doctor reports plugin integrity.",
-  [core.ADOPTION_REFUSALS.BACKWARDS]:
-    "The executing installation is OLDER than the one that minted the record. Only a newer runtime may take over the state of an older one, never the reverse. Re-install the newer version, or start a fresh Claude Code session.",
-  [core.ADOPTION_REFUSALS.WORKFLOW_SCHEMA]:
-    "The workflow document of this session cannot be read by the executing runtime, which means a persisted shape really did change. This is the case adoption must refuse. Start a fresh Claude Code session.",
-};
-
-// Wrapped in a function because `node -e` evaluates at module top level, where a
-// bare `return` is a syntax error — and a syntax error here would surface as a
-// crashed helper rather than as the refusal it was meant to print.
-function main() {
-  let request;
-  try {
-    request = buildRequest();
-  } catch (error) {
-    process.stdout.write("Zensu session adoption — NOT adoptable (private-record-store-unsafe)\n\n");
-    process.stdout.write("The private Session Control record store could not be opened safely: "
-      + (error && error.message ? error.message : "unknown") + "\n");
-    process.stdout.write("It is missing, aliased, or has unsafe permissions or ownership. Repair the store\n");
-    process.stdout.write("or start a fresh Claude Code session; adoption cannot mint a record into it.\n");
-    process.exitCode = 1;
-    return;
-  }
-  const verdict = core.adoptableRecord(request);
-  if (!verdict.ok) {
-    process.stdout.write("Zensu session adoption — NOT adoptable (" + verdict.reason + ")\n\n");
-    process.stdout.write((REMEDY[verdict.reason] || "No remedy is known for this refusal. Start a fresh Claude Code session.") + "\n");
-    process.exitCode = 1;
-    return;
-  }
-
-  if (process.env.ZADOPT_CONFIRM !== "1") {
-    process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
-    process.stdout.write("  record minted by : " + verdict.recorded + "\n");
-    process.stdout.write("  executing        : " + verdict.executing + "\n");
-    process.stdout.write("  project          : " + verdict.context.project_root + "\n\n");
-    process.stdout.write("The record is intact and this installation can take it over in place.\n");
-    process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
-    return;
-  }
-
-  const adopted = core.adoptContext(request);
-  process.stdout.write("Zensu session adoption — ADOPTED\n\n");
-  process.stdout.write("  record minted by : " + adopted.recorded + "\n");
-  process.stdout.write("  now served by    : " + adopted.executing + "\n");
-  process.stdout.write("  superseded record: " + adopted.supersededFile + "\n");
-  process.stdout.write("  provenance       : " + adopted.provenance + "\n");
-  process.stdout.write("  leases set aside : " + adopted.leasesDiscarded + "\n");
-  process.stdout.write("  leases stuck     : " + adopted.leasesFailed.length + "\n\n");
-  process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
-  if (adopted.provenance === "no-workflow-document") {
-    process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
-    process.stdout.write("takeover in. That is a normal state, not a fault.\n");
-  } else if (adopted.provenance !== "recorded") {
-    process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
-    process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
-  }
-  if (adopted.leasesDiscarded > 0) {
-    process.stdout.write("\nNOTE: " + adopted.leasesDiscarded + " review-evidence lease(s) were set aside because they name the previous\n");
-    process.stdout.write("installation. Any review evidence they reserved has to be gathered again.\n");
-  }
-  if (adopted.leasesUnsafe) {
-    process.stdout.write("\nWARNING: the review-evidence lease store of this session could not be opened safely,\n");
-    process.stdout.write("so no lease was inspected or set aside. If any lease there names the previous\n");
-    process.stdout.write("installation, review-evidence operations keep failing until it is moved out by hand.\n");
-  }
-  if (adopted.leasesFailed.length > 0) {
-    process.stdout.write("\nWARNING: " + adopted.leasesFailed.length + " review-evidence lease(s) could NOT be set aside: " + adopted.leasesFailed.join(", ") + "\n");
-    process.stdout.write("They still name the previous installation, and because every lease read validates the\n");
-    process.stdout.write("whole set, review-evidence operations will keep failing for this session until they are\n");
-    process.stdout.write("moved out of the records directory by hand. The adoption itself is complete.\n");
-  }
-}
-
-try {
-  main();
-} catch (error) {
-  process.stderr.write("zensu:adopt-session: " + (error && error.message ? error.message : "unknown failure") + "\n");
-  process.exitCode = 1;
-}
-'
+node "$DIR/session-adopt-report-v1.js"
