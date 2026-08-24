@@ -1787,21 +1787,70 @@ so deriving it from the recorder filed the edge under the taker's repo and made 
 default repo-scoped `lineage` render nothing where the work lives — an empty answer
 indistinguishable from "no handover happened".
 
-**Sites that move with the schema:** the module, `trail.mjs`'s wrappers, the `v1`
-segment quoted in `skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`,
-and the `v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
+**Sites that move with the STORE LAYOUT** — anything that re-spells the `v1` segment
+or the record shape: the module, `trail.mjs`'s wrappers, the `v1` segment quoted in
+`skills/session-trail/SKILL.md`, `tests/structure/session-lineage-v1.test.js`, and the
+`v1` path spelled throughout `tests/structure/test-session-trail-lineage.sh`.
 
-**Known gap, stated rather than fixed:** `ledgerPaths` partitions the store by
-`v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges `schemaVersion` inside a
-record. The partition wins — a v2 build reads an empty `v2/edges` and reports no
-history rather than refusing v1 records — so `SCHEMA_NEWER`/`SCHEMA_OLDER` are
-reachable only from a hand-planted record. Closing this means either dropping the
-derived segment or having `readEdges` enumerate sibling `v*` directories.
+**Sites that move with the module's SOURCE SHAPE** — a rename, a reformat, or a new
+writer breaks these even when the layout is untouched, and they are the half that is
+easy to miss because none of them mentions the schema:
+
+- `tests/structure/test-session-trail-skill.sh` — `write_sites()` hardcodes the four
+  writer function names as an awk allowlist (`ledgerWrite`, `writeEdge`,
+  `ensureLedgerDir`, `writeLabels`); `T22a` asserts the module mints exactly TWO temp
+  families; `T22b` asserts a floor of bare-slice session-id sites in `trail.mjs` AND
+  names the `instances` row literally; the guard block pins the `JSON_EMITS` count.
+- `tests/structure/test-windows-portability-guards.sh` — pins four exact source lines
+  of `readBoundedFile` with `grep -cF`, so reformatting the open/fstat/size lines
+  fails that suite.
+- `tests/profiles/windows-ci.v1.json`, `windows-native-structure.v1.json`,
+  `windows-ci-command-catalog.v1.json` and `promptfoo-local-only.v1.json` each name
+  the suite path.
+- `tests/structure/windows-ci-contract.test.js` and `windows-profile-contract.test.js`
+  hold a suite COUNT and a command digest. Both are easy to merge wrongly: two
+  branches that each add one suite both raise the count by one, so git merges it
+  cleanly at the wrong value. Recompute the digest from the merged catalog rather
+  than taking either side's literal.
+- `package.json` — the `session-trail:coverage` script names the suite path.
+
+**Known gaps, accepted and named:**
+
+- **The schema partition outranks the record's own version.** `ledgerPaths` partitions
+  the store by `v${LEDGER_SCHEMA_VERSION}` while `classifyEdge` ALSO judges
+  `schemaVersion` inside a record. The partition wins — a v2 build reads an empty
+  `v2/edges` and reports no history rather than refusing v1 records — so
+  `SCHEMA_NEWER`/`SCHEMA_OLDER` are reachable only from a hand-planted record. Closing
+  it means either dropping the derived segment or having `readEdges` enumerate sibling
+  `v*` directories.
+- **`readEdges` caps each record at 256 KiB but not the record COUNT.** The store is
+  append-only, has no prune verb, and `cmdInstances` reads it on every call, so growth
+  is bounded only by user behaviour. A machine that has run for a year pays that cost
+  on every listing.
+- **`chainRoots` rebuilds its index per walk.** It calls `walkChain(root, edges)` once
+  per root and each call rebuilds `byFrom` from scratch, so the read is quadratic in
+  the number of distinct chain roots. Acceptable at the six-window scale this exists
+  for; it is the first thing to fix if the store ever grows a prune verb instead.
+- **`ensureLedgerDir` checks then creates.** The symlink and non-directory refusals run
+  against an `lstat` taken before `mkdirSync`, so a component swapped in between is not
+  caught. The sibling `ensurePrivateDirectory` in `review-evidence-lease-v1.js` carries
+  three further checks this one deliberately omits; the module header names them. The
+  store is per-user and the window is short, which is why it is accepted rather than
+  closed.
+- **The module's name collides with the plugin's existing "runtime lineage" term.**
+  `session-lineage-v1.mjs` is about handovers between sessions; §"Runtime Lineage
+  (`version_type` is load-bearing)" above is about plugin versions serving a recorded
+  session. Nothing shares code between them. The collision is in the reader's head, and
+  renaming the module would cost every site in the two lists above.
 
 **`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED.**
-It is `timeoutMs: 900000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`.
+It is `timeoutMs: 600000` in `tests/profiles/windows-ci.v1.json` on `windows-shard-3`,
+lowered from 900000 once the figure below existed. Reserving 900000 for a suite that
+measures 274 s put two 900000 caps on one shard whose whole profile budget is 1800000,
+which is what starves the suites scheduled after it; 600000 still leaves 2.2x headroom
+over the measurement.
 First green-shard measurement, run 32598374524 on `win25-vs2026`: **273905 ms at 70
-checks** — 30% of its own cap, against **31 s on macOS** (measured 2026-08-22, idle
+checks** — 46% of its own cap after that reduction, against **31 s on macOS** (measured 2026-08-22, idle
 machine, at 66 checks). Windows is roughly 9x slower here, which is the ratio to
 budget new checks against. An earlier note in this section claimed ~4 s on macOS;
 that figure predated the suite roughly doubling and was what the 900000 ceiling had

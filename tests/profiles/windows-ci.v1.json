@@ -193,7 +193,7 @@
           "runner": "bash",
           "path": "tests/structure/test-session-trail-lineage.sh",
           "args": [],
-          "timeoutMs": 900000
+          "timeoutMs": 600000
         },
         {
           "id": "vcs-review-marker-reconcile",
