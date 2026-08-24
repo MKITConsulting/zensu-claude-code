@@ -61,9 +61,17 @@ test('every endpoint has the same key set, whichever producer built it', () => {
   // `title` from the constructor moved both and the assertion stayed green. The
   // third line is what keeps the exported constant honest; the first two are what
   // make a key removal in the constructor fail.
-  const EXPECTED = ['sessionId', 'accountUuid', 'appPid', 'pid', 'cwd', 'worktree', 'branch', 'title'];
+  // `cwd` and `title` were REMOVED, deliberately: nothing in the feature read
+  // either back, and this store is a durable machine-wide account-to-worktree
+  // join — a session title is the user's own first prompt. The literal is what
+  // makes that removal a decision rather than a drift, in both directions.
+  const EXPECTED = ['sessionId', 'accountUuid', 'appPid', 'pid', 'worktree', 'branch'];
   const a = mod.makeEndpoint({ sessionId: 's' });
-  const b = mod.makeEndpoint({ sessionId: 's', cwd: '/x', extra: 'ignored' });
+  const b = mod.makeEndpoint({ sessionId: 's', cwd: '/x', title: 'secret prompt', extra: 'ignored' });
+  // The two dropped fields are not merely absent from the key set; a caller that
+  // still supplies them cannot get them persisted.
+  assert.equal(b.cwd, undefined);
+  assert.equal(b.title, undefined);
   assert.deepEqual(Object.keys(a), EXPECTED);
   assert.deepEqual(Object.keys(b), EXPECTED);
   assert.deepEqual([...mod.ENDPOINT_KEYS], EXPECTED);
