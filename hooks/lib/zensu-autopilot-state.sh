@@ -2327,6 +2327,20 @@ _autopilot_begin_standalone_tdd_critical() {
   tdd_begin_session "$session_id" "$vanilla" false false ""
 }
 
+# Owner-INDEPENDENT occupancy, for a caller that must not act underneath ANOTHER
+# session's durable run in the same working tree. `autopilot_read_active` cannot
+# answer this: it is owner-scoped by construction, so a foreign run is invisible
+# to it. Exit 0 means the tree is held and prints the holding record, 1 means it
+# is free, anything else is a read that failed and must be treated as held.
+autopilot_read_workspace() {
+  local root workspace
+  root="$(_autopilot_project_root "${1:-${CLAUDE_PROJECT_DIR:-.}}")" || return 2
+  workspace="${2:-}"
+  [ -n "$workspace" ] || workspace="$(_autopilot_session_workspace "$root")" || return 2
+  _autopilot_prepare_storage "$root" || return 2
+  _autopilot_locked_run "$root" "" _autopilot_read_workspace_critical "$root" "$workspace"
+}
+
 autopilot_begin_standalone_tdd() {
   local root session_id="${2:-}" vanilla="${3:-false}" workspace
   [ "$#" -eq 3 ] || return 3

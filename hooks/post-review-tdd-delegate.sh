@@ -172,12 +172,12 @@ PREFLIGHT_CONTEXT="$(STATE_FILE="$NATIVE_TDD_STATE_FILE" SID="$SESSION_ID" node 
 ' 2>/dev/null)" || exit 0
 if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
   [ "$PREFLIGHT_CONTEXT" = '{}' ] || exit 0
-  # Only an absent or terminal Outer generation OF THIS SESSION permits an
-  # unbound claim. The read is owner-scoped: a nonterminal run owned by another
-  # session is invisible here, and owner-independent workspace occupancy is
-  # enforced earlier, when the inner chain is armed
-  # (`_autopilot_begin_standalone_tdd_critical`). A corrupt read is
-  # authoritative and must fail closed before ticket mutation.
+  # Two separate questions, and only the first is about ownership. WHOSE outer
+  # generation is this chain bound to? Only an absent or terminal one OF THIS
+  # SESSION permits an unbound claim, so that read stays owner-scoped: a foreign
+  # run is not this session's outer generation and legitimately leaves the chain
+  # unbound. A corrupt read is authoritative and must fail closed before ticket
+  # mutation.
   source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-autopilot-state.sh"
   if PREFLIGHT_OUTER="$(autopilot_read_active "$PROJECT_ROOT" "$SESSION_ID" 2>/dev/null)"; then
     PREFLIGHT_OUTER_RC=0
@@ -196,6 +196,20 @@ if [ "$PROMPT_AUTOPILOT_KIND" = standalone ]; then
     1) ;;
     *) exit 0 ;;
   esac
+  # And: is anyone ELSE holding the working tree right now? Arming happens once,
+  # at `tdd_begin_session`; this hook runs on every qualifying PostToolUse. A
+  # durable run begun in this tree AFTER the chain armed is therefore refused by
+  # the arm-time gate no longer, and by the owner-scoped read above never — a
+  # window this preflight covered project-wide before it was narrowed. The
+  # question is owner-independent, so it needs the owner-independent read.
+  # rc 0 is a refusal exactly as the arm-time gate treats it, and anything that
+  # is not a clean "free" fails closed.
+  if autopilot_read_workspace "$PROJECT_ROOT" >/dev/null 2>&1; then
+    exit 0
+  else
+    PREFLIGHT_WORKSPACE_RC=$?
+    [ "$PREFLIGHT_WORKSPACE_RC" -eq 1 ] || exit 0
+  fi
 elif [ "$PROMPT_AUTOPILOT_KIND" = bound ]; then
   [ "$PREFLIGHT_CONTEXT" != '{}' ] || exit 0
   AUTOPILOT_CTX="$PREFLIGHT_CONTEXT" RUN_ID="$PROMPT_AUTOPILOT_RUN" \

@@ -84,6 +84,21 @@ run_hook() {
   ' | env CLAUDE_PROJECT_DIR="$ambient" bash "$HOOK" 2>/dev/null
 }
 
+run_hook_in() {
+  local cwd="$1" ambient="$2" ticket="$3"
+  SID="$CLAUDE_CODE_SESSION_ID" TICKET="$ticket" MARKER="$MARKER" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: "PostToolUse",
+      tool_name: "Agent",
+      tool_input: {
+        subagent_type: "zensu:code-reviewer",
+        prompt: `${process.env.MARKER}\nREVIEW-TICKET: ${process.env.TICKET}\nVerdict: PASS`
+      },
+      session_id: process.env.SID
+    }));
+  ' | ( cd "$cwd" && env CLAUDE_PROJECT_DIR="$ambient" bash "$HOOK" 2>/dev/null )
+}
+
 ticket_consumed() {
   FILE="$1" node -e '
     try {
@@ -132,25 +147,70 @@ else
   check "O2a review ticket was consumed despite the refusal" FAIL
 fi
 
-# --- O2b a nonterminal outer run owned by ANOTHER session ---
-# The read at this site is owner-scoped, so a foreign run leaves this chain
-# unbound and the claim proceeds. Pin that decision explicitly: the alternative
-# — refusing here too — is what the owner-independent arm-time gate does, and
-# the two must not be confused for one another.
+# --- O2b a foreign nonterminal run HOLDING THIS WORKING TREE ---
+# Two independent questions meet here and only the first is about ownership.
+# WHOSE outer generation is this chain bound to stays owner-scoped — a foreign
+# run is not this session's outer generation. But whether anyone else holds the
+# TREE is owner-independent, and the arm-time gate cannot answer it for this
+# moment: arming happens once, this hook runs on every qualifying PostToolUse,
+# so a durable run begun in this tree afterwards sits in a window the arm-time
+# gate has already left. This preflight covered that window project-wide before
+# PR #256 narrowed it; O2c is the control that the narrowing is not simply undone.
 arm outer-foreign || { echo "O2b fixture failed" >&2; exit 1; }
 FOREIGN_PROJECT="$ARMED_PROJECT"
 FOREIGN_STATE="$(tdd_state_file "$ARMED_KEY")"
 autopilot_begin_run outer-foreign-run outer_foreign_other_session "$FOREIGN_PROJECT" >/dev/null 2>&1 \
   || { echo "O2b fixture: foreign outer run could not be started" >&2; exit 1; }
 OUT2B="$(run_hook "$FOREIGN_PROJECT" "$ARMED_TICKET")"
+if [ -z "$OUT2B" ]; then
+  check "O2b a foreign run holding this working tree refuses the unbound claim" PASS
+else
+  check "O2b foreign holder must refuse (out='$OUT2B')" FAIL
+fi
+if ! ticket_consumed "$FOREIGN_STATE"; then
+  check "O2b1 the review ticket survives the foreign-holder refusal unconsumed" PASS
+else
+  check "O2b1 review ticket was consumed despite the foreign-holder refusal" FAIL
+fi
+
+# --- O2c the same foreign run holding a DIFFERENT tree of the same project ---
+# The mandatory positive control. Without it, refusing every foreign run —
+# which is strictly more than the occupancy question asks — would leave O2b
+# green while every standalone claim in the project was blocked. Real git
+# worktrees are required: two plain directories have no toplevel of their own,
+# so both collapse onto the project root and the trees cannot differ.
+arm outer-sibling || { echo "O2c fixture failed" >&2; exit 1; }
+SIBLING_PROJECT="$ARMED_PROJECT"
+SIBLING_READY=true
+command -v git >/dev/null 2>&1 || SIBLING_READY=false
+if [ "$SIBLING_READY" = true ]; then
+  mkdir -p "$SIBLING_PROJECT/.claude/worktrees"
+  git -C "$SIBLING_PROJECT" init -q >/dev/null 2>&1 || SIBLING_READY=false
+  git -C "$SIBLING_PROJECT" -c user.email=t@example.invalid -c user.name=t \
+    commit -q --allow-empty -m init >/dev/null 2>&1 || SIBLING_READY=false
+  git -C "$SIBLING_PROJECT" worktree add -q "$SIBLING_PROJECT/.claude/worktrees/pa" -b pf-a >/dev/null 2>&1 \
+    || SIBLING_READY=false
+  git -C "$SIBLING_PROJECT" worktree add -q "$SIBLING_PROJECT/.claude/worktrees/pb" -b pf-b >/dev/null 2>&1 \
+    || SIBLING_READY=false
+fi
+OUT2C=""
+if [ "$SIBLING_READY" = true ]; then
+  autopilot_begin_run outer-sibling-run outer_sibling_other_session "$SIBLING_PROJECT" \
+    false true "$SIBLING_PROJECT/.claude/worktrees/pa" >/dev/null 2>&1 || SIBLING_READY=false
+fi
+if [ "$SIBLING_READY" = true ]; then
+  OUT2C="$(run_hook_in "$SIBLING_PROJECT/.claude/worktrees/pb" "$SIBLING_PROJECT" "$ARMED_TICKET")"
+fi
 # "The claim proceeded" means the UNBOUND routing directive was emitted — the
 # one that hands the terminus to --code-review-done — and not an Autopilot-bound
 # one. Asserting only that some text appeared would not tell those apart.
-if printf '%s' "$OUT2B" | grep -qF -- '--code-review-done' \
-  && ! printf '%s' "$OUT2B" | grep -qF 'ZENSU_AUTOPILOT'; then
-  check "O2b a foreign session's nonterminal outer run leaves this chain unbound" PASS
+if [ "$SIBLING_READY" != true ]; then
+  check "O2c sibling-worktree fixture unavailable" FAIL
+elif printf '%s' "$OUT2C" | grep -qF -- '--code-review-done' \
+  && ! printf '%s' "$OUT2C" | grep -qF 'ZENSU_AUTOPILOT'; then
+  check "O2c a foreign run holding a sibling tree leaves this chain unbound and permits the claim" PASS
 else
-  check "O2b foreign outer run (out='$OUT2B')" FAIL
+  check "O2c sibling-tree claim must proceed (out='$OUT2C')" FAIL
 fi
 
 # --- O3 the hook must not read an ambient project dir anywhere ---
