@@ -654,6 +654,22 @@ else
   check "L33c fixture could not plant an unreadable ledger (edges/ already a directory)" FAIL
 fi
 
+# ── L34 — the argument refusals, which shipped with no pin at all ──────────
+# Both were added in response to a review finding and neither had a check. A fix
+# with no regression pin is exactly the shape that comes back on the next refactor
+# of parseArgs, and the pre-fix behaviour was silent: `--diagnose --backfill --apply`
+# ran the diagnostic, so a caller who asked for a WRITE got a report and no record.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --backfill --all)"
+case "$OUT" in *"one mode at a time"*) check "L34 lineage refuses two modes instead of silently running the first" PASS ;; *) check "L34 lineage refuses two modes (got ${OUT:-<empty>})" FAIL ;; esac
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --apply --all)"
+case "$OUT" in *"belongs to lineage --backfill"*) check "L34a --apply without --backfill is refused rather than ignored" PASS ;; *) check "L34a orphan --apply is refused (got ${OUT:-<empty>})" FAIL ;; esac
+# The positive control: each mode alone must still work, or the two refusals above
+# would be satisfiable by a guard that rejects everything.
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --diagnose --json)"
+[ "$(jq_field "$OUT" platform)" != "PARSE_ERROR" ] && check "L34b --diagnose alone still runs — the guard is not blanket" PASS || check "L34b --diagnose alone still runs" FAIL
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --backfill --json --all)"
+[ "$(jq_field "$OUT" dryRun)" = "true" ] && check "L34c --backfill alone still runs" PASS || check "L34c --backfill alone still runs (got $(jq_field "$OUT" dryRun))" FAIL
+
 # ── L22 — the cycle guard, which nothing exercised ─────────────────────────
 # walkChain documents `seen` as the difference between a wrong answer and a hang.
 # Nothing planted a cycle, so deleting the guard left all checks green and the

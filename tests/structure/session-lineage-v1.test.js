@@ -48,10 +48,18 @@ test('bounded text flattens newlines and truncates, so a value cannot fabricate 
 });
 
 test('every endpoint has the same key set, whichever producer built it', () => {
+  // Against a LITERAL, not against ENDPOINT_KEYS. That constant is
+  // Object.freeze(Object.keys(makeEndpoint({}))), so comparing it with
+  // Object.keys(makeEndpoint(x)) puts the same expression on both sides: deleting
+  // `title` from the constructor moved both and the assertion stayed green. The
+  // third line is what keeps the exported constant honest; the first two are what
+  // make a key removal in the constructor fail.
+  const EXPECTED = ['sessionId', 'accountUuid', 'appPid', 'pid', 'cwd', 'worktree', 'branch', 'title'];
   const a = mod.makeEndpoint({ sessionId: 's' });
   const b = mod.makeEndpoint({ sessionId: 's', cwd: '/x', extra: 'ignored' });
-  assert.deepEqual(Object.keys(a), mod.ENDPOINT_KEYS);
-  assert.deepEqual(Object.keys(b), mod.ENDPOINT_KEYS);
+  assert.deepEqual(Object.keys(a), EXPECTED);
+  assert.deepEqual(Object.keys(b), EXPECTED);
+  assert.deepEqual([...mod.ENDPOINT_KEYS], EXPECTED);
   assert.equal(b.extra, undefined);
 });
 

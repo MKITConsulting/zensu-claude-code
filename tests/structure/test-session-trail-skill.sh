@@ -619,7 +619,11 @@ GUARD_PINS
 # count of temp-file prefixes in the module must equal the count the prose names --
 # so adding a third temp family without amending the sentence fails here rather
 # than turning the enumeration into a quiet falsehood.
-TEMP_FAMILIES="$(grep -cE '\.[a-z]+-\$\{process\.pid\}' "$LEDGER_MJS")"
+# grep -o and sort -u, not grep -c: the label says FAMILIES and grep -c counts LINES,
+# so a third family introduced on a line that already carries one would keep the count
+# at 2 and leave the SKILL.md sentence below a false safety claim. Same defect T22b
+# records fixing twenty lines down.
+TEMP_FAMILIES="$(grep -oE '\.[a-z]+-\$\{process\.pid\}' "$LEDGER_MJS" | sort -u | wc -l | tr -d ' ')"
 SKILL_FAMILIES=0
 grep -qF '`.edge-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
 grep -qF '`.labels-*.tmp`' "$SKILL_MD" && SKILL_FAMILIES=$((SKILL_FAMILIES+1))
