@@ -378,10 +378,18 @@ else
   # that registers ZERO cases, so the status alone cannot tell a green run from a
   # suite that stopped being discovered.
   B0_PASS="$(printf '%s\n' "$B0_OUT" | sed -n 's/^# pass \([0-9]*\)$/\1/p;s/^. pass \([0-9]*\)$/\1/p' | head -1)"
-  if [ "$B0_RC" -eq 0 ] && [ -n "$B0_PASS" ] && [ "$B0_PASS" -ge 9 ]; then
-    check "B0 the shared reader's unit contract passes ($B0_PASS cases)" PASS
+  # Two cases skip themselves on win32 — a real symlink and a FIFO, neither of which
+  # that host can produce — so a single pass floor cannot hold on both platforms. The
+  # REGISTERED floor (pass + skipped) is what catches a file that stopped being
+  # discovered; the pass floor below it is what keeps an all-skipped file from
+  # satisfying the registered one.
+  B0_SKIP="$(printf '%s\n' "$B0_OUT" | sed -n 's/^# skipped \([0-9]*\)$/\1/p;s/^. skipped \([0-9]*\)$/\1/p' | head -1)"
+  [ -n "$B0_SKIP" ] || B0_SKIP=0
+  B0_SEEN=$(( ${B0_PASS:-0} + B0_SKIP ))
+  if [ "$B0_RC" -eq 0 ] && [ -n "$B0_PASS" ] && [ "$B0_SEEN" -ge 9 ] && [ "$B0_PASS" -ge 7 ]; then
+    check "B0 the shared reader's unit contract passes ($B0_PASS cases, $B0_SKIP skipped)" PASS
   else
-    check "B0 rule-block unit contract: rc=$B0_RC pass=${B0_PASS:-none} (want >= 9): $(printf '%s' "$B0_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
+    check "B0 rule-block unit contract: rc=$B0_RC pass=${B0_PASS:-none} skipped=$B0_SKIP (want registered >= 9 and pass >= 7): $(printf '%s' "$B0_OUT" | grep -E '^.?[[:space:]]*(not ok|✖)' | head -2 | tr '\n' ' ')" FAIL
   fi
 fi
 
