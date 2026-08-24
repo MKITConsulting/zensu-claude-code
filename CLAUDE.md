@@ -571,6 +571,29 @@ superseded lease wedging the store. A port that copies only
 the script gets a TypeError rendered as the wrong refusal. `zensu-codex`,
 `zensu-kiro` and `zensu-antigravity` were NOT included in this change.
 
+**Two spellings of one root, and only Windows can tell them apart.** The sweep decides
+ownership with `record.plugin_root === executingPluginRoot`, a STRING compare. Leases carry
+`binding.pluginRoot`, which reached the store through the core's `canonicalDirectory` —
+`fs.realpathSync.native`. The adopt call site passes the record's own `plugin_root` and so
+agrees by construction; the in-place REPAIR call site received `ZADOPT_PLUGIN_ROOT`, which
+`zensu-session-adopt.sh` renders through `zensu-host-path.sh`. On win32 that renderer emits a
+drive-qualified FORWARD-slash path while the native spelling uses backslashes, so the compare
+inverted the selector a second time and the repair set aside the one live lease it had to keep
+— `windows-shard-2` reported `leases set aside : 2` where 1 was correct, with every POSIX shard
+green. `repairSweepRoot` now canonicalizes, falling back to the rendered value rather than
+throwing, because that branch owes the caller a verdict. Anything else that hands a root to
+this module owes it the same canonicalization.
+
+**`ENOENT` is not proof of absence, and the entry point read it as such.** `lstat` on a path
+whose ancestor is a FILE answers ENOTDIR on POSIX and ENOENT on win32, so a `review-evidence`
+file took the "no store here" branch and `discardSupersededLeases` reported a clean sweep over
+a store it never opened. `firstNonTraversableAncestor` re-derives the answer from the
+components instead of the errno; it follows links on purpose, so a symlink to a real directory
+stays traversable and the POSIX verdict is unchanged. It is EXPORTED for the unit layer alone
+— from a POSIX host the branch is unreachable through the public entry point, so without a
+direct handle the fix would ship with no executed case anywhere. Its `path.relative` bound is
+another member of the hand-copied `within()` / `isInside()` family this file tracks.
+
 **`test-versioned-plugin-upgrade.sh` grades the LAST COMMIT, not the working tree.**
 It captures `git rev-parse HEAD` and its install fixture materializes both synthetic
 roots with `git ls-tree`, so every behavioral row — and the copies of

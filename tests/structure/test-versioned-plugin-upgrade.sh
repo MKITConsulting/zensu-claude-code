@@ -991,10 +991,10 @@ fi
 # test-*.sh, so an undriven *.test.js never executes anywhere.
 SWEEP_UNIT="$ROOT/tests/structure/review-evidence-sweep-v1.test.js"
 if [ -f "$SWEEP_UNIT" ] && node --test "$SWEEP_UNIT" >"$TMP/sweep-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/sweep-unit.out" 30; then
+  && unit_cases_registered_floor "$TMP/sweep-unit.out" 32; then
   check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), driven from here)" PASS
 else
-  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 30 registered — driven from here)" FAIL
+  check "the superseded-lease sweep unit suite passes ($(unit_cases_report "$TMP/sweep-unit.out"), want >= 32 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/sweep-unit.out" 2>/dev/null | head -40
 fi
@@ -1005,10 +1005,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 18; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 20; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 18 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 20 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi

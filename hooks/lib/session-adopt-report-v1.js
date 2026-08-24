@@ -15,6 +15,7 @@
 // Run as a program by that script; required as a module by
 // tests/structure/session-adopt-report-v1.test.js.
 
+const fs = require("node:fs");
 const path = require("node:path");
 const core = require("./session-control-core-v1.js");
 // The superseded-lease sweep. It is NOT part of adoptContext any more: requiring the
@@ -146,10 +147,29 @@ const leasesScope = (leases) => {
 // the stale entries wedging listRecords were kept and the live ones set aside,
 // and the report printed a clean repair over it.
 //
-// The value is already canonical: zensu-session-adopt.sh renders it through
-// zensu-host-path.sh, which resolves with `cd -P && pwd -P`. That is the same
-// spelling adoptContext puts into a re-minted record.
-const repairSweepRoot = (request) => request.executingPluginRoot;
+// The value is canonical but NOT necessarily the spelling this comparison needs,
+// and that distinction is invisible from a POSIX host. zensu-session-adopt.sh
+// renders it through zensu-host-path.sh; on win32 that renderer emits a
+// drive-qualified FORWARD-slash path (`D:/a/x`), while every lease is minted with
+// `binding.pluginRoot`, which reached the store through the core's
+// canonicalDirectory — `fs.realpathSync.native`, so `D:\a\x`. The sweep compares
+// `record.plugin_root === executingPluginRoot` as a STRING, so on Windows the two
+// spellings inverted the selector a second time: the live lease this branch must
+// keep was set aside. Measured on windows-shard-2, which reported `leases set
+// aside : 2` where 1 was correct while every POSIX shard stayed green.
+//
+// The adopt path below never carried the defect because it passes the record's own
+// `plugin_root`, which is already the native spelling.
+const repairSweepRoot = (request) => {
+  try {
+    return fs.realpathSync.native(request.executingPluginRoot);
+  } catch {
+    // zensu-session-adopt.sh already proved this root readable, so a failure here
+    // means it vanished mid-run. Fall back to the rendered value rather than
+    // throw: this branch owes the caller a verdict, not a crash.
+    return request.executingPluginRoot;
+  }
+};
 
 // The headline is CHOSEN from the sweep verdict. It used to be printed before the
 // verdict was consulted, so a refused sweep still announced a repair.

@@ -431,6 +431,32 @@ function sweepUnderLock(pluginData, key, executingPluginRoot) {
 // or aliased store rather than repairing it. That refusal must reach the caller as a
 // verdict, never as a throw: this runs AFTER the record swap, so an exception here
 // would report failure for an adoption that has already succeeded.
+// Walks the components between `base` (exclusive) and `leaf` (inclusive) and names
+// the first one that EXISTS but cannot be traversed into. `statSync` follows links
+// on purpose: a symlink to a real directory is traversable, and refusing it here
+// would change the POSIX verdict for a shape the leaf's own guards still judge.
+// A component that does not exist is not a blocker — that is ordinary absence, and
+// the caller's ENOENT arm owns it. This runs only on the ENOENT path, so on POSIX
+// it can find nothing (a file ancestor raises ENOTDIR before it is reached) and the
+// verdict there is unchanged.
+function firstNonTraversableAncestor(base, leaf) {
+  const relative = path.relative(base, leaf);
+  if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return '';
+  let current = base;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    let stat;
+    try {
+      stat = fs.statSync(current);
+    } catch {
+      // Absent, or unreadable for a reason this function does not adjudicate.
+      return '';
+    }
+    if (!stat.isDirectory()) return current;
+  }
+  return '';
+}
+
 function discardSupersededLeases(pluginData, key, executingPluginRoot) {
   const recordsDirectory = path.join(pluginData, ...REVIEW_EVIDENCE_SEGMENTS, 'records', key);
   // UNLOCKED pre-check, and it is not an optimization. `withLock` runs the owner's
@@ -447,6 +473,14 @@ function discardSupersededLeases(pluginData, key, executingPluginRoot) {
     fs.lstatSync(recordsDirectory);
   } catch (error) {
     if (error && error.code === 'ENOENT') {
+      // ENOENT is not proof of absence on every host, and reading it as such made
+      // this entry point report a clean sweep over a store it never looked at.
+      // Traversing a path whose ancestor is a FILE answers ENOTDIR on POSIX — the
+      // arm below — but win32 answers ENOENT, so a `review-evidence` file silently
+      // took the "no store here" branch. Re-derive the answer from the components
+      // themselves rather than from the errno.
+      const blocker = firstNonTraversableAncestor(pluginData, recordsDirectory);
+      if (blocker) return { discarded: 0, failed: [], unsafe: 'source', unsafeAt: blocker };
       return { discarded: 0, failed: [], unsafe: '', unsafeAt: '' };
     }
     return { discarded: 0, failed: [], unsafe: 'source', unsafeAt: recordsDirectory };
@@ -492,6 +526,11 @@ module.exports = {
   asideIsSafe,
   destinationStillSafe,
   discardSupersededLeases,
+  // Exported for the unit layer only. The branch it serves is unreachable from a
+  // POSIX host through discardSupersededLeases — that path raises ENOTDIR and never
+  // enters the ENOENT arm — so without a direct handle the win32 fix would ship
+  // with no executed case anywhere.
+  firstNonTraversableAncestor,
   moveAside,
   privateEnough,
   readLeaseEntry,

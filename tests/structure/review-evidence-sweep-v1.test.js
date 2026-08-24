@@ -376,6 +376,34 @@ test('S2 an unopenable store is refused as source rather than thrown', () => {
   assert.deepEqual(result.failed, []);
 });
 
+test('S2b a file ancestor is named as the blocker on the host that reports ENOENT', () => {
+  // win32 answers ENOENT — not ENOTDIR — for a path whose ancestor is a FILE, so
+  // discardSupersededLeases took its "no store here" arm and reported a clean sweep
+  // over a store it never opened. windows-shard-2 is where that surfaced; S2 above
+  // cannot show it, because on POSIX the ENOTDIR arm answers first and the ENOENT
+  // branch is never entered. This drives the re-derivation directly, so the fix has
+  // an executed case on every host rather than only on the one that failed.
+  const pluginData = tempRoot();
+  const evidence = path.join(pluginData, 'review-evidence');
+  fs.writeFileSync(evidence, 'not a directory', { mode: 0o600 });
+  const leaf = path.join(pluginData, 'review-evidence', 'v1', 'records', KEY);
+  assert.equal(sweep().firstNonTraversableAncestor(pluginData, leaf), evidence);
+
+  // Discrimination: a store that is merely ABSENT must not be named, or every
+  // session that never minted a lease would be reported as a malformed store.
+  const empty = tempRoot();
+  assert.equal(
+    sweep().firstNonTraversableAncestor(empty, path.join(empty, 'review-evidence', 'v1', 'records', KEY)),
+    '',
+  );
+
+  // A real directory chain is traversable all the way down and names nothing.
+  const whole = tempRoot();
+  const full = path.join(whole, 'review-evidence', 'v1', 'records', KEY);
+  fs.mkdirSync(full, { recursive: true, mode: 0o700 });
+  assert.equal(sweep().firstNonTraversableAncestor(whole, full), '');
+});
+
 // ── S4: the refusal arms that had never been driven ─────────────────────────
 
 test('S4 the per-segment superseded permission check is reachable and load-bearing', (t) => {

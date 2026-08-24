@@ -215,6 +215,42 @@ test('F1 the repair sweeps against the EXECUTING root, never the recorded one', 
   assert.notEqual(repairSweepRoot(request), '/cache/zensu/zensu/0.18.1');
 });
 
+test('F1b the repair root is canonicalized to the spelling leases are minted with', (t) => {
+  // zensu-session-adopt.sh hands this value over as zensu-host-path.sh rendered it.
+  // Leases carry `binding.pluginRoot`, which reached the store through the core's
+  // canonicalDirectory — fs.realpathSync.native — and the sweep compares the two as
+  // STRINGS. On win32 the renderer's drive-qualified forward-slash spelling and the
+  // native one differ, and windows-shard-2 set aside the live lease because of it.
+  //
+  // Driven here through a symlinked parent, which is a non-canonical spelling every
+  // host can produce, so the property has an executed case off Windows too.
+  const os = require('node:os');
+  const base = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'zadopt-root-')));
+  const real = path.join(base, 'installed', '0.18.2');
+  fs.mkdirSync(real, { recursive: true });
+  const link = path.join(base, 'via-link');
+  try {
+    fs.symlinkSync(path.join(base, 'installed'), link, 'dir');
+  } catch {
+    return t.skip('this host refused an unprivileged symbolic link');
+  }
+  const spelled = path.join(link, '0.18.2');
+  assert.notEqual(spelled, real, 'the fixture must actually offer two spellings');
+
+  const { repairSweepRoot } = report();
+  assert.equal(repairSweepRoot({ executingPluginRoot: spelled }), real);
+});
+
+test('F1c an unresolvable repair root falls back instead of throwing', () => {
+  // The branch owes the caller a verdict. zensu-session-adopt.sh already proved the
+  // root readable, so a failure here means it vanished mid-run — reporting the
+  // rendered value is wrong-but-visible; a throw would crash the command after the
+  // user asked for a repair.
+  const { repairSweepRoot } = report();
+  const absent = path.join('/', 'zensu-absent-' + process.pid, '0.18.2');
+  assert.equal(repairSweepRoot({ executingPluginRoot: absent }), absent);
+});
+
 test('F1 the repair headline is chosen from the verdict, not printed unconditionally', () => {
   const { repairHeadline } = report();
   assert.match(repairHeadline({ discarded: 2, failed: [], unsafe: '' }), /repaired/);
