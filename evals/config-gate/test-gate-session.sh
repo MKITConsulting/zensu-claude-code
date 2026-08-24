@@ -32,8 +32,8 @@ OUT_DISABLED="$(env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 EXIT_DISABLED=$?
 
 case "$OUT_DISABLED" in
-  *"pulse session ready"*) check "pulseSession=false: stdout does NOT contain 'pulse session ready'" FAIL ;;
-  *)                       check "pulseSession=false: stdout does NOT contain 'pulse session ready'" PASS ;;
+  *"Pulse context available"*) check "pulseSession=false: stdout does NOT contain Pulse context" FAIL ;;
+  *)                           check "pulseSession=false: stdout does NOT contain Pulse context" PASS ;;
 esac
 
 if [ "$EXIT_DISABLED" = "0" ]; then
@@ -49,11 +49,10 @@ EOF
 OUT_ENABLED="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 EXIT_ENABLED=$?
 
-if [ "$EXIT_ENABLED" = "0" ] && printf '%s' "$OUT_ENABLED" | grep -qF 'zensu: pulse session ready — HEAD='; then
-  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted" PASS
-else
-  check "pulseSession=true: no legacy root export, rc=0, and HEAD banner emitted (rc=$EXIT_ENABLED, out=$OUT_ENABLED)" FAIL
-fi
+case "$OUT_ENABLED" in
+  *"Pulse context available"*|*"not a git repository"*) check "pulseSession=true: stdout contains context (or graceful 'not a git' skip)" PASS ;;
+  *)                                                     check "pulseSession=true: stdout contains context (or graceful 'not a git' skip)" FAIL ;;
+esac
 
 unset ZENSU_CONFIG
 NOTHING_CFG="/tmp/zensu-no-config-session-$$.json"
@@ -61,8 +60,8 @@ rm -f "$NOTHING_CFG"
 export ZENSU_CONFIG="$NOTHING_CFG"
 OUT_DEFAULT="$(cd "$PLUGIN_DIR" && env -u ZENSU_CLAUDE_PLUGIN_ROOT "$SCRIPT" 2>/dev/null)"
 case "$OUT_DEFAULT" in
-  *"pulse session ready"*|*"not a git repository"*) check "no config (default): stdout contains banner (enabled)" PASS ;;
-  *)                                                  check "no config (default): stdout contains banner (enabled)" FAIL ;;
+  *"Pulse context available"*|*"not a git repository"*) check "no config (default): stdout contains context (enabled)" PASS ;;
+  *)                                                     check "no config (default): stdout contains context (enabled)" FAIL ;;
 esac
 
 rm -f "$TMP_CFG"

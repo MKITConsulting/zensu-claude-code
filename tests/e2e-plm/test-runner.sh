@@ -398,7 +398,9 @@ create_user_journey to seed brownfield user journeys; the v1 baseline is minted
 server-side.
 CAP
   cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
-I will call pulse_start_session with the current git HEAD SHA and branch name.
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
+succeeds without a session and does not run pulse end or pulse summary.
 CAP
   cat > "$tmp/results/status-transition-20260101-000000.captured.txt" <<'CAP'
 Status transitions are not handled by an MCP tool. You need to call the Zensu REST API endpoint
@@ -452,6 +454,226 @@ CAP
   rm -rf "$tmp"
 }
 
+test_pulse_pattern_requires_both_disabled_followup_skips() {
+  local tmp out_missing_end out_missing_summary out_runs_end out_runs_summary
+  local out_runs_end_after_sentence out_runs_summary_after_sentence
+  local out_i_then_runs_end out_i_will_run_summary out_no_id_then_runs_end
+  local out_when_no_id_runs_end out_enabled_path
+  local out_enabled_qualifier_after_command out_wrapped_valid
+  tmp="$(mktemp -d)"
+  mkdir -p "$tmp/fixtures/pulse-session" "$tmp/prompts" "$tmp/results"
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
+succeeds without a session and does not run pulse summary.
+CAP
+  out_missing_end="$tmp/out-missing-end.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_missing_end" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If the response is tracking_disabled, it
+succeeds without a session and does not run pulse end.
+CAP
+  out_missing_summary="$tmp/out-missing-summary.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_missing_summary" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse end.
+CAP
+  out_runs_end="$tmp/out-runs-end.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_runs_end" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary; then it runs pulse summary.
+CAP
+  out_runs_summary="$tmp/out-runs-summary.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_runs_summary" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
+Then it runs pulse end.
+CAP
+  out_runs_end_after_sentence="$tmp/out-runs-end-after-sentence.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_runs_end_after_sentence" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
+Then it runs pulse summary.
+CAP
+  out_runs_summary_after_sentence="$tmp/out-runs-summary-after-sentence.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_runs_summary_after_sentence" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
+I then run pulse end.
+CAP
+  out_i_then_runs_end="$tmp/out-i-then-runs-end.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_i_then_runs_end" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
+Then I will run zensu pulse summary.
+CAP
+  out_i_will_run_summary="$tmp/out-i-will-run-summary.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_i_will_run_summary" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, no session ID is returned and it does not run pulse end or pulse summary, but I then run pulse end.
+CAP
+  out_no_id_then_runs_end="$tmp/out-no-id-then-runs-end.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_no_id_then_runs_end" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it does not run pulse end or pulse summary.
+When no session ID is returned, I then run pulse end.
+CAP
+  out_when_no_id_runs_end="$tmp/out-when-no-id-runs-end.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_when_no_id_runs_end" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it skips pulse end and summary.
+With a real session ID, it later runs pulse end and then pulse summary.
+CAP
+  out_enabled_path="$tmp/out-enabled-path.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_enabled_path" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start --minimal-json
+with --head-sha, --branch, and --project. If tracking_disabled, it skips pulse end and summary.
+Then it runs pulse end and pulse summary only when a real session ID was returned.
+CAP
+  out_enabled_qualifier_after_command="$tmp/out-enabled-qualifier-after-command.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_enabled_qualifier_after_command" 2>&1
+
+  cat > "$tmp/results/pulse-session-20260101-000000.captured.txt" <<'CAP'
+I will delegate to the /zensu:pulse Pulse skill. It runs zensu pulse start
+--minimal-json with --head-sha, --branch, and --project. If tracking_disabled, it does not run
+pulse end and does not run
+pulse summary. With a real session ID, it later runs pulse end and pulse summary.
+CAP
+  out_wrapped_valid="$tmp/out-wrapped-valid.txt"
+  FIXTURES_DIR="$tmp/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$tmp/prompts" \
+    RESULTS_DIR="$tmp/results" "$RUNNER" --offline > "$out_wrapped_valid" 2>&1
+
+  if grep -qE "FAIL\s+pulse-session" "$out_missing_end" \
+     && grep -qE "FAIL\s+pulse-session" "$out_missing_summary" \
+     && grep -qE "FAIL\s+pulse-session" "$out_runs_end" \
+     && grep -qE "FAIL\s+pulse-session" "$out_runs_summary" \
+     && grep -qE "FAIL\s+pulse-session" "$out_runs_end_after_sentence" \
+     && grep -qE "FAIL\s+pulse-session" "$out_runs_summary_after_sentence" \
+     && grep -qE "FAIL\s+pulse-session" "$out_i_then_runs_end" \
+     && grep -qE "FAIL\s+pulse-session" "$out_i_will_run_summary" \
+     && grep -qE "FAIL\s+pulse-session" "$out_no_id_then_runs_end" \
+     && grep -qE "FAIL\s+pulse-session" "$out_when_no_id_runs_end" \
+     && grep -qE "PASS\s+pulse-session" "$out_enabled_path" \
+     && grep -qE "PASS\s+pulse-session" "$out_enabled_qualifier_after_command" \
+     && grep -qE "PASS\s+pulse-session" "$out_wrapped_valid"; then
+    check "test_pulse_pattern_requires_both_disabled_followup_skips" PASS
+  else
+    check "test_pulse_pattern_requires_both_disabled_followup_skips" FAIL \
+      "expected missing/contradicted skips to FAIL and enabled paths to PASS; missing-end:$(printf '\n')$(cat "$out_missing_end") missing-summary:$(printf '\n')$(cat "$out_missing_summary") runs-end:$(printf '\n')$(cat "$out_runs_end") runs-summary:$(printf '\n')$(cat "$out_runs_summary") runs-end-after-sentence:$(printf '\n')$(cat "$out_runs_end_after_sentence") runs-summary-after-sentence:$(printf '\n')$(cat "$out_runs_summary_after_sentence") i-then-runs-end:$(printf '\n')$(cat "$out_i_then_runs_end") i-will-run-summary:$(printf '\n')$(cat "$out_i_will_run_summary") no-id-then-runs-end:$(printf '\n')$(cat "$out_no_id_then_runs_end") when-no-id-runs-end:$(printf '\n')$(cat "$out_when_no_id_runs_end") enabled-path:$(printf '\n')$(cat "$out_enabled_path") enabled-qualifier-after-command:$(printf '\n')$(cat "$out_enabled_qualifier_after_command") wrapped-valid:$(printf '\n')$(cat "$out_wrapped_valid")"
+  fi
+  rm -rf "$tmp"
+}
+
+test_pulse_semantic_scope_transitions_and_modal_skips() {
+  local tmp failures=0 details="" idx=0 sub out cap
+  tmp="$(mktemp -d)"
+
+  local invalid_captures=(
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. When no session ID is returned, I then run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a real session ID is unavailable, I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If a canonical session ID is absent, I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If an empty session ID is returned, I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. If proceeding without a session ID, I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. No session ID was returned, so I then run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not save a real session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not invent a canonical session ID and I do not run pulse end or pulse summary. Then I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, the response does not return a valid session ID and I do not run pulse end or pulse summary. Then I run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. With a real session ID, I run pulse end. The session ID is invalid, so I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. If tracking_disabled, I run pulse end, but with a real session ID I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The next command block is zensu pulse end "$ID".'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not skip pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then I perform pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. I do not save a session ID and run pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nImmediately after start I run pulse end and pulse summary. If tracking_disabled, I do not run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nI skip pulse end and pulse summary only when the status is not tracking_disabled.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The session ID is set to an empty string, so I run pulse end and pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. The session ID was set to an invalid value, so I run pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. I am not skipping pulse end.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then I end the Pulse session and request its summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json and uses git.\nIf tracking_disabled, I do not run pulse end or pulse summary.'
+  )
+  local valid_captures=(
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Then it runs pulse end and pulse summary only if the session ID is non-empty.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I will not run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I won\x27t run pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not run pulse end or pulse summary. Otherwise, a valid session ID is returned. I then run pulse end and pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not call pulse end or pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, I do not save a session ID and skip pulse end and skip pulse summary.'
+    $'I delegate to /zensu:pulse and run zensu pulse start --minimal-json with --head-sha, --branch, and --project.\nIf tracking_disabled, neither pulse end nor pulse summary is run.'
+  )
+
+  for cap in "${invalid_captures[@]}"; do
+    idx=$((idx + 1))
+    sub="$tmp/invalid-$idx"
+    mkdir -p "$sub/fixtures/pulse-session" "$sub/prompts" "$sub/results"
+    printf '%s\n' "$cap" > "$sub/results/pulse-session-20260101-000000.captured.txt"
+    out="$sub/out.txt"
+    FIXTURES_DIR="$sub/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$sub/prompts" \
+      RESULTS_DIR="$sub/results" "$RUNNER" --offline > "$out" 2>&1
+    if ! grep -qE "FAIL\s+pulse-session" "$out"; then
+      failures=$((failures + 1))
+      details="$details$(printf '\ninvalid case %d wrongly PASSed:\n%s\n%s' "$idx" "$cap" "$(cat "$out")")"
+    fi
+  done
+
+  idx=0
+  for cap in "${valid_captures[@]}"; do
+    idx=$((idx + 1))
+    sub="$tmp/valid-$idx"
+    mkdir -p "$sub/fixtures/pulse-session" "$sub/prompts" "$sub/results"
+    printf '%s\n' "$cap" > "$sub/results/pulse-session-20260101-000000.captured.txt"
+    out="$sub/out.txt"
+    FIXTURES_DIR="$sub/fixtures" EXPECTED_DIR="$TEST_DIR/expected" PROMPTS_DIR="$sub/prompts" \
+      RESULTS_DIR="$sub/results" "$RUNNER" --offline > "$out" 2>&1
+    if ! grep -qE "PASS\s+pulse-session" "$out"; then
+      failures=$((failures + 1))
+      details="$details$(printf '\nvalid case %d wrongly FAILed:\n%s\n%s' "$idx" "$cap" "$(cat "$out")")"
+    fi
+  done
+
+  if [ "$failures" -eq 0 ]; then
+    check "test_pulse_semantic_scope_transitions_and_modal_skips" PASS
+  else
+    check "test_pulse_semantic_scope_transitions_and_modal_skips" FAIL "$failures semantic Pulse corpus cases failed:$details"
+  fi
+  rm -rf "$tmp"
+}
+
 test_end_to_end_with_shim_claude() {
   local tmp out shim_log
   tmp="$(mktemp -d)"
@@ -492,7 +714,9 @@ case "$prompt_arg" in
     echo "create_user_journey to seed brownfield user journeys; the v1 baseline is minted server-side."
     ;;
   *Pulse-Session*|*"Pulse"*)
-    echo "I will call pulse_start_session with the current git HEAD SHA and branch name."
+    echo "I will delegate to the /zensu:pulse Pulse skill and run zensu pulse start --minimal-json"
+    echo "with --head-sha, --branch, and --project. If status is tracking_disabled, I succeed"
+    echo "without a session and do not run pulse end or pulse summary."
     ;;
   *"ZEN-1"*|*released*)
     echo "Status transitions are not handled by an MCP tool. Use the Zensu REST API endpoint"
@@ -1072,6 +1296,8 @@ test_missing_prompt_file_diagnostic
 test_setup_fixtures_idempotent
 test_shipped_patterns_pass_against_ideal_capture
 test_shipped_patterns_reject_bad_captures
+test_pulse_pattern_requires_both_disabled_followup_skips
+test_pulse_semantic_scope_transitions_and_modal_skips
 test_end_to_end_with_shim_claude
 test_status_transition_pattern_rejects_multiline_violation
 test_status_transition_pattern_rejects_reversed_order

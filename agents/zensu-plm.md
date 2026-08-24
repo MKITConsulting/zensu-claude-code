@@ -136,8 +136,8 @@ Roadmaps/milestones are a separate **product-level** axis (many features across 
 - `zensu knowledge sources` — List indexed knowledge sources with type and sync status
 
 ### Pulse (Developer Journal)
-- `zensu pulse start` — Start a dev session (with git HEAD SHA and branch)
-- `zensu pulse end <id>` — End a session (with changed file paths)
+- `zensu pulse start --minimal-json` — Start a dev session or detect the server-side privacy no-op through the agent-safe response
+- `zensu pulse end <id> --changed-file <path>... --minimal-json` — End a real session with lossless repeated changed-file arguments
 - `zensu pulse summary <id>` — Review session activity
 
 ### Ghost Scan
@@ -196,10 +196,10 @@ No separate skill — the hybrid is ghost-scan followed by direct `zensu feature
 
 ### When the user asks about their dev session
 Use the `/zensu:pulse` skill workflow:
-1. Start session with git HEAD SHA
-2. Work as normal (session captured at its boundaries)
-3. End session with changed files
-4. Review session summary
+1. Obtain a visible and validated full git HEAD SHA, then pass that exact value to `zensu pulse start --minimal-json`
+2. If the response is `tracking_disabled`, treat it as a successful no-op and run neither `pulse end` nor `pulse summary`
+3. Otherwise retain the canonical session ID and exact start SHA in working context while work proceeds
+4. End with lossless repeated `--changed-file` arguments, then summarize only the real enabled session
 
 ### When the user wants documentation
 **Read `docs/documentation-guide.md`** first, then follow its read-source-first procedure:
@@ -223,7 +223,7 @@ Never condense the context metadata straight into a wiki page — that is the fo
 - When a user mentions a specific feature ID (KEY-N, e.g. ZEN-42) and wants to code → start **implement** workflow
 - When a user asks about security of a feature → start **security review** workflow
 - When a user wants to import or scan an existing codebase → start **ghost scan** workflow
-- When a user asks "what did I work on?" or starts/ends a session → use **pulse** commands
+- When a user asks "what did I work on?" or starts/ends a session → use the **pulse skill**
 - When a user asks about release readiness → use `zensu security validate` and `zensu journeys health`
 - When a user asks about tier pricing → use the tier commands (`zensu tiers create`, `zensu tiers set-feature`, `zensu tiers matrix`)
 - Before planning or implementing a feature, or when the user asks what the org already knows about a topic → `zensu knowledge search` for related context

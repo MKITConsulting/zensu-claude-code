@@ -1,1 +1,1 @@
-Please start a Pulse session for my current work. Which MCP tools do you call and what information from the current git state do you need?
+Please start a Pulse session for my current work. Explain how you delegate to `/zensu:pulse`, name the agent-safe CLI start command and the git values it needs, and explain what happens when the server returns tracking_disabled. Do not use obsolete MCP Pulse tool names.

@@ -1,4 +1,17 @@
-# Pulse workflow — must start a session and reference git HEAD or branch.
-# Decision Rule (agents/zensu-plm.md:169): "session start/end / 'what did I work on?' → pulse".
-(pulse_start_session|pulse_session_summary)
-(git|HEAD|branch|SHA)
+# Pulse workflow — delegate to the Pulse skill and use the minimal CLI response.
+# Decision Rule (agents/zensu-plm.md): session start/end / "what did I work on?" -> Pulse skill.
+(/zensu:pulse|zensu:pulse|Pulse skill)
+zensu pulse start.*--minimal-json
+# Start provenance. Each of the three start arguments is asserted on its own
+# line: a single alternation over (git|HEAD|branch|SHA) passed on the bare word
+# "git", so a capture could name no SHA, no branch and no project root at all.
+(--head-sha|PULSE_START_SHA|HEAD[[:space:]]+SHA)
+(--branch|BRANCH=|(current|active|checked-out)[[:space:]]+branch|branch[[:space:]]+name)
+(--project|PROJECT_ROOT|project[[:space:]]+root)
+tracking_disabled
+(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never|neither)[^.;!?]{0,80}|(skip(s)?|without([[:space:]]+(running|calling|executing|invoking|using))?)[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+end
+(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never|neither)[^.;!?]{0,80}|(skip(s)?|without([[:space:]]+(running|calling|executing|invoking|using))?)[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+summary|(((do(es)?|will|must|should|can)[[:space:]]+not|won'?t|cannot|never|neither)[^.;!?]{0,80}|skip(s)?[[:space:]]+)(the[[:space:]]+)?pulse[[:space:]]+end[[:space:]]+(and|or|nor)[[:space:]]+(pulse[[:space:]]+)?summary
+@pulse-disabled-followup-safe
+!pulse_start_session
+!pulse_end_session
+!pulse_session_summary
