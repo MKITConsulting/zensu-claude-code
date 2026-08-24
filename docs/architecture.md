@@ -191,19 +191,34 @@ The **single carrier on the subagent leg** is the honest weak spot. Its failure 
 
 Pinning the clauses separately matters because the block's two halves pull against each other. It forbids letting a shortcut take the first slot by default, and it forbids treating that as licence to inflate scope: when the durable answer genuinely is to do less, that option goes first, on the merits. A block carrying only the prohibition would push every agent toward over-engineering, so the carve-out is pinned as its own check rather than trusted to survive an edit.
 
-**Known open gap, recorded in the same voice as the two divergences above.** The pins the previous
-paragraphs describe do not close everything: nothing can tell an operator that the rule stopped
-injecting in *their* installation. Build-time pins govern only this repository's copy of the file.
-At run time every refusal but one is silent by design — the exception is a mismatched inherited
-`CLAUDE_PLUGIN_ROOT`, which exits `2` on stderr, and it is the only failure an operator sees. And `/zensu:doctor`
-verifies that `hooks.json` points at files on disk, so it catches a missing hook but not a block
-that is present yet unreadable-as-a-block — nor, separately, a project that simply set the flag to
-`false`, since its config row reports JSON validity and quoted-boolean traps but never resolved flag
-state. A doctor row would have to report block health as present / malformed / **oversized** —
-an over-long block is well-formed and refused on length alone, which is its own branch — alongside
-the resolved flag, to close what is actually open here. It would then cover BOTH marker-block
-readers at once. It is not filed as an issue, so this paragraph and the corresponding one in
-[`docs/best-solution-first.md`](best-solution-first.md) are the only record.
+**The gap this paragraph used to record is closed, and the shape of the fix is worth keeping.**
+Build-time pins govern only this repository's copy of the file, and at run time every refusal but
+one is silent by design — the exception is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which
+exits `2` on stderr. So on an installed tree nothing reported a rule that had stopped injecting:
+`/zensu:doctor` verified that `hooks.json` points at files on disk, which catches a missing hook
+but not a block that is present yet unreadable-as-a-block — nor a project that simply set the flag
+to `false`, since the config row reports JSON validity and quoted-boolean traps but never resolved
+flag state.
+
+`ruleCarrierRows` in [`hooks/lib/zensu-doctor-report.js`](../hooks/lib/zensu-doctor-report.js) now
+emits one row per carrier and distinguishes the four states that have four different remedies:
+intact, intact-but-suppressed-by-its-own-flag, refused (absent, symlinked, malformed, short-read or
+**oversized** — an over-long block is well-formed and refused on length alone, which is its own
+branch), and not-checked-at-all when the reader module cannot be loaded. That last state is a row
+rather than silence for the same reason the feature exists: a clean report must never mean "nobody
+looked".
+
+Two properties hold it up. It calls the same `hooks/lib/rule-block-v1.js` the hooks call instead of
+re-implementing the marker parse, so the diagnostic cannot report on bytes the hook would have
+refused. And every state is proven to DISCRIMINATE — `P5a`-`P5h` in
+[`tests/structure/test-doctor.sh`](../tests/structure/test-doctor.sh) drive an intact fixture, a
+re-wrapped block, an absent file, a disabled flag and a missing module, and assert that each
+renders differently from the others. A row that rendered unconditionally would have reinstated the
+silence it was added to remove.
+
+Still open, and narrower: the row reports the carrier this plugin root ships, so a lineage-served
+sibling install — which `servesRecordedRuntime` permits — is diagnosed through the executing tree
+rather than the recorded one. That is the same limit the tamper-evidence sentence above states.
 
 Finally, the rule yields where another contract already fixes an order. A skill that prescribes its offer sequence — `/zensu:pilot` derives its offers from a decision table — keeps that sequence, and this rule then governs only which options are in the set. Output whose shape an agent contract fixes, such as a reviewer's `CRITICAL` before `IMPORTANT`, is never reordered by it. The precedence is stated inside the injected block, so it travels with the directive instead of living only here.
 

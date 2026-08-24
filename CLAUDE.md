@@ -1901,6 +1901,21 @@ ONE hardened reader, ONE `MAX_FILE` and ONE `MAX_BLOCK`, and they are NOT interc
   `docs/best-solution-first.md`, opt-out `hooks.bestSolutionFirst`. It additionally loads
   `zensu-config.sh`, which is its only extra refusal path.
 
+**A THIRD consumer reads the same block, and it must never grow its own parser.**
+`ruleCarrierRows` in `hooks/lib/zensu-doctor-report.js` is the operator's only signal that a
+carrier stopped injecting: build-time pins govern this repository's copy, never an installed
+tree, and every run-time refusal but the plugin-root mismatch is silent. It `require`s
+`rule-block-v1.js` LAZILY and guarded, exactly as `reviewerDenialRows` does — a load fault costs
+that row, not the whole report — and a hand-copied marker parse there would report on bytes the
+hook would have refused. `RULE_CARRIERS` re-encodes the two `doc` paths and both marker pairs, so
+a renamed rule file or a reworded marker lands here as well as in the hook. `RULE_REASON_TEXT`
+re-encodes the module's `REASONS` values: one added there and not here renders as unrecognized
+rather than as health, which is the safe direction and is deliberate. `P5a`-`P5h` in
+`tests/structure/test-doctor.sh` pin that all four states — intact, suppressed by flag, refused,
+and not-checked — render DIFFERENTLY from one another; a row that rendered unconditionally would
+reinstate the silence it exists to remove. That suite's green fixture copies the real module and
+both real docs rather than stubbing them, so it cannot go green against a parser nothing ships.
+
 **`MAX_BLOCK` is declared twice, hand-copied once more, and bound by three checks.** The two
 declarations are the hooks; the one hand copy is `tests/structure/test-best-solution-first.sh`
 (a suite variable, bound by B2h). Do not spell the number anywhere else — name the constant.

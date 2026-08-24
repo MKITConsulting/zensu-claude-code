@@ -163,6 +163,23 @@ classifier will refuse a spawn, not only when the whole table is green.
 - **⚠️ config quoted boolean** → the named key is a string (`"true"`) where a real
   boolean is required; strict `=== true` ignores it, so the feature stays at its
   default. Drop the quotes (offer `/zensu:setup` to rewrite it safely).
+- **❌ rule carriers: … is NOT injecting** → one of the two hooks that read a rule
+  at run time from a marker block under `docs/` cannot use its file, so that rule
+  reaches no prompt and no subagent. The row names the file and the fault — absent,
+  not a regular file, past a size ceiling, or not carrying the block as exactly one
+  line between its markers. Re-wrapping that line is the common cause and the
+  quietest one: the hook exits 0 with no output, so nothing else reports it.
+  Reinstall the plugin, or restore the block to a single line. Do **not** read a
+  green `hooks wiring` row as contradicting this — that row checks the script,
+  never the data the script depends on.
+- **⚠️ rule carriers: … but hooks.bestSolutionFirst is false** → the block is
+  intact and the rule is switched off on purpose. That is a live choice, not
+  damage; raise it only if the user is asking why the rule stopped arriving. The
+  evidence-discipline carrier never shows this clause, because it has no flag.
+- **⚠️ rule carriers: … was NOT checked** → the reader module
+  `hooks/lib/rule-block-v1.js` could not be loaded, so carrier health is unknown.
+  Report it as unknown, never as healthy — the row exists precisely so a clean
+  report cannot mean "nobody looked".
 - **⚠️ permissions: … the zensu:code-reviewer spawn** → the proactive counterpart
   to the refused-spawn state row below: it reads `~/.claude/settings.json` and
   reports the exposure *before* a chain wedges, so it is a warning about what

@@ -142,13 +142,20 @@ it **drops the injection entirely**. The hook exits 0 with no output and the ses
 never receives the rule. That is the quietest failure available: nothing is logged, nothing
 appears in the transcript, and no downstream check notices a reminder that never arrived.
 
-The hard failure therefore exists only at build time.
+The hard failure exists at build time.
 `tests/structure/test-best-solution-first.sh` B2 hard-aborts on a multi-line block, B2a
 through B2e pin the individual clauses (present, first, anti-inflation, self-closing,
 precedence), B7c-B7g drive all five malformed-block refusals against the hook's own
 parser, and B14 pins the zen-mode carrier; a run-time carrier cannot report its own silence.
-Do not weaken those pins — they are the only thing standing between a re-wrapped paragraph
-and a feature that is switched off everywhere without anyone being told.
+Do not weaken those pins — in this repository they are what stands between a re-wrapped
+paragraph and a feature that is switched off everywhere without anyone being told.
+
+Those pins run here, not on an installed tree, so they were never the operator's signal.
+That one is `/zensu:doctor`, whose `rule carriers:` row reads this file through the same
+`hooks/lib/rule-block-v1.js` the hook uses and reports intact, suppressed-by-flag, refused,
+or — when the reader module itself cannot be loaded — not checked at all. Run it when the
+rule seems to have stopped arriving; it is the only surface that can tell a broken block
+apart from a `hooks.bestSolutionFirst: false` somebody set and forgot.
 
 The clause set is deliberately balanced and each half is pinned separately, because a block
 carrying only the prohibition would push every agent toward inflating scope. Whatever is
