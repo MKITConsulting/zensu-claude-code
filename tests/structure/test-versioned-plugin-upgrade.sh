@@ -980,8 +980,12 @@ fi
 # fourth branch existed this state fell through to a line asserting the session
 # has no record, which is false.
 DOCTOR_OUT="$TMP/adopt-doctor.out"
+# The doctor renderer resolves the user-scoped zensu config AND the reviewer-spawn
+# permission check out of HOME, so an unsandboxed run here would read whatever the
+# developer running the suite happens to have. Same guard test-doctor.sh applies.
+DOCTOR_HOME="$TMP/doctor-home"; mkdir -p "$DOCTOR_HOME"
 CLAUDE_CODE_SESSION_ID="$ADOPT_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
-  CLAUDE_PROJECT_DIR="$PROJECT" \
+  CLAUDE_PROJECT_DIR="$PROJECT" HOME="$DOCTOR_HOME" \
   bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_OUT" 2>/dev/null
 if grep -qF 'declares an incompatible lineage' "$DOCTOR_OUT" \
     && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$DOCTOR_OUT" \
