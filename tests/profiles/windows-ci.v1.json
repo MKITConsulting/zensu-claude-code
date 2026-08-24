@@ -151,6 +151,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "autopilot-release-cli",
+          "runner": "bash",
+          "path": "tests/structure/test-autopilot-release-cli.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
           "id": "deferred-reset-races",
           "runner": "bash",
           "path": "tests/structure/test-deferred-review-claim.sh",

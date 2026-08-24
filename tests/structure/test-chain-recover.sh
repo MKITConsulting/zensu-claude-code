@@ -675,7 +675,13 @@ esac
 # ---------------------------------------------------------------- doctor surface
 new_chain "chain-recover-doctor"
 seed "$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+# The doctor renderer resolves BOTH the user-scoped zensu config and the
+# reviewer-spawn permission check out of HOME, so an unsandboxed invocation
+# reads whatever the developer running the suite happens to have. Same guard
+# tests/structure/test-doctor.sh applies to its own functional half.
+DOCTOR_HOME="$WORK/doctor-home"
+mkdir -p "$DOCTOR_HOME"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T35 doctor reports the wedged chain and names the recovery command" PASS ;;
@@ -685,7 +691,7 @@ esac
 
 new_chain "chain-recover-doctor-deadend"
 seed 's.codeReviewDone=true;s.reviewRound=2;' || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"self-review-unbindable"*"at a dead end"*"/zensu:tdd"*)
     check "T35b doctor raises a dead-end chain as its own warning row with the fresh-generation remedy" PASS ;;
@@ -695,7 +701,7 @@ esac
 
 new_chain "chain-recover-doctor-blocked"
 seed "s.deferredReviewClaim=\"dc_test2\";$STALE_RECEIPT" || true
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$DOCTOR_OUT" in
   *"wedged but not recoverable in place"*"deferred-review claim"*)
     check "T36 doctor distinguishes a blocked wedge and prints its real next step" PASS ;;
@@ -708,7 +714,7 @@ new_chain "chain-recover-doctor-wrapper"
 seed "$STALE_RECEIPT" || true
 WRAPPER_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" ZDOC_ZENSU=absent ZDOC_NODE=vTEST \
   ZDOC_FORGE_PROVIDER=unknown ZDOC_FORGE_CLI="" ZDOC_FORGE_STATE=missing \
-  ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 bash "$ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
+  ZDOC_PLAYWRIGHT=absent ZDOC_TTL_HOURS=6 HOME="$DOCTOR_HOME" bash "$ROOT/hooks/lib/zensu-doctor.sh" 2>/dev/null)"
 case "$WRAPPER_OUT" in
   *"wedged-stale-rearm"*"/zensu:recover-chain"*)
     check "T45 the doctor WRAPPER renders the wedged shape and the recovery command end to end" PASS ;;
@@ -720,7 +726,7 @@ new_chain "chain-recover-doctor-repaired"
 seed "$STALE_RECEIPT" || true
 REPAIRED_RC=0
 bash "$LOG" --chain-recover --session "$SID" >/dev/null 2>&1 || REPAIRED_RC=$?
-DOCTOR_OUT="$(ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
+DOCTOR_OUT="$(HOME="$DOCTOR_HOME" ZENSU_DOCTOR_PLUGIN_DIR="$ROOT" node "$ROOT/hooks/lib/zensu-doctor-report.js" 2>/dev/null)"
 case "$REPAIRED_RC:$DOCTOR_OUT" in
   0:*"(repaired 1×)"*)
     check "T52 doctor renders the durable repair count once a chain has actually been recovered" PASS ;;

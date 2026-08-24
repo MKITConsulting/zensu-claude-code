@@ -41,6 +41,7 @@
     {"runner":"bash","path":"tests/structure/test-autopilot-bound-payload-windows.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-file-exists-replacement.sh","args":[]},
     {"runner":"bash","path":"tests/structure/test-tdd-state-path-safety.sh","args":[]},
-    {"runner":"bash","path":"tests/structure/test-plan-payload-fallback.sh","args":[]}
+    {"runner":"bash","path":"tests/structure/test-plan-payload-fallback.sh","args":[]},
+    {"runner":"bash","path":"tests/structure/test-autopilot-release-cli.sh","args":[]}
   ]
 }

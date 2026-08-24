@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-repo chains — the principle</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --surface: #ffffff;
+    --surface-2: #f0efec;
+    --ink: #1c1b19;
+    --ink-2: #55524d;
+    --ink-3: #6b6862;
+    --line: #dddad4;
+    --line-2: #c4c0b8;
+    --line-strong: #8a867e;
+    --accent: #a54a24;
+    --accent-soft: #f6e5dd;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, -apple-system, "Segoe UI", Inter, system-ui, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16151a;
+      --surface: #1e1d23;
+      --surface-2: #26252c;
+      --ink: #eceaf0;
+      --ink-2: #b3afba;
+      --ink-3: #9d99a6;
+      --line: #34323c;
+      --line-2: #55515f;
+      --line-strong: #7e7a89;
+      --accent: #e08a63;
+      --accent-soft: #3a2620;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16151a;
+    --surface: #1e1d23;
+    --surface-2: #26252c;
+    --ink: #eceaf0;
+    --ink-2: #b3afba;
+    --ink-3: #9d99a6;
+    --line: #34323c;
+    --line-2: #55515f;
+    --line-strong: #7e7a89;
+    --accent: #e08a63;
+    --accent-soft: #3a2620;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: var(--sans); font-size: 16px; line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 60rem; margin: 0 auto; padding: 4rem 1.5rem 5rem; }
+
+  .eyebrow {
+    font-family: var(--mono); font-size: .75rem; letter-spacing: .08em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 1rem;
+  }
+  h1 {
+    font-size: clamp(1.9rem, 4.5vw, 2.9rem); line-height: 1.12;
+    margin: 0 0 1rem; letter-spacing: -.025em; max-width: 24ch;
+  }
+  .lede { font-size: 1.05rem; color: var(--ink-2); margin: 0 0 3rem; max-width: 44rem; }
+
+  .scroll {
+    overflow-x: auto; border: 1px solid var(--line); border-radius: 12px;
+    background: var(--surface); padding: 1.25rem; margin: 0 0 1rem;
+  }
+  svg.diagram { display: block; min-width: 900px; width: 100%; height: auto; font-family: var(--sans); }
+  figure { margin: 0 0 3rem; }
+  figcaption { font-size: .85rem; color: var(--ink-3); }
+
+  /* SVG paint — custom properties do not resolve inside presentation
+     attributes, so every fill and stroke is set through a class instead. */
+  .box-anchor { fill: var(--accent-soft); stroke: var(--accent); stroke-width: 1.5; }
+  .box-anchor-open { fill: var(--surface); stroke: var(--accent); stroke-width: 1.5; }
+  .box        { fill: var(--surface-2);   stroke: var(--line-strong); }
+  .t-ink  { fill: var(--ink); }
+  .t-ink2 { fill: var(--ink-2); }
+  .t-ink3 { fill: var(--ink-3); }
+  .t-acc  { fill: var(--accent); }
+  .flow      { fill: none; stroke: var(--line-strong); }
+  .flow-acc  { fill: none; stroke: var(--accent); }
+  .flow-dash { fill: none; stroke: var(--line-strong); stroke-dasharray: 4 4; }
+  .arrowhead { fill: var(--line-strong); stroke: none; }
+  .rule      { stroke: var(--line); }
+  .code-svg { font-family: var(--mono); }
+  .bold-svg { font-weight: 600; }
+  .band-label {
+    font-family: var(--mono); font-size: 11px; letter-spacing: .09em;
+    text-transform: uppercase; fill: var(--accent);
+  }
+
+  h2 { font-size: 1.15rem; margin: 0 0 1.25rem; letter-spacing: -.01em; }
+  .laws { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); margin: 0 0 3rem; }
+  .law {
+    background: var(--surface); border: 1px solid var(--line);
+    border-radius: 10px; padding: 1.2rem 1.3rem;
+  }
+  .law .n {
+    font-family: var(--mono); font-size: .7rem; letter-spacing: .08em;
+    color: var(--accent); display: block; margin-bottom: .5rem;
+  }
+  .law h3 { font-size: .98rem; margin: 0 0 .5rem; line-height: 1.35; }
+  .law p { margin: 0; font-size: .9rem; color: var(--ink-2); }
+
+  .consequences { border-top: 1px solid var(--line); padding-top: 1.5rem; margin: 0 0 3rem; }
+  .consequences dl { margin: 0; display: grid; gap: .9rem; }
+  .consequences dt { font-size: .9rem; font-weight: 600; margin: 0; }
+  .consequences dd { margin: .15rem 0 0; font-size: .9rem; color: var(--ink-2); }
+
+  code { font-family: var(--mono); font-size: .875em; background: var(--surface-2); border: 1px solid var(--line); border-radius: 4px; padding: .05em .35em; }
+  .scroll:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  details.longdesc { margin: .6rem 0 0; font-size: .9rem; color: var(--ink-2); }
+  details.longdesc summary { cursor: pointer; color: var(--accent); font-size: .85rem; }
+  details.longdesc li { margin-bottom: .4rem; }
+
+  footer { border-top: 1px solid var(--line); padding-top: 1.5rem; font-size: .82rem; color: var(--ink-3); }
+  footer .mono { font-family: var(--mono); }
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <p class="eyebrow">Zensu · Multi-Repo</p>
+  <h1>Identity stays one. Reach is declared.</h1>
+  <p class="lede">The whole multi-repo proposal rests on a single distinction: what the session
+  <em>is</em> exists exactly once. Where it may reach is a declared list. And what it must verify is
+  always that same list — never less.</p>
+  <p class="lede"><strong>Status: proposed, and stages 2 and 3 are BLOCKED.</strong> The three rules
+  below are requirements, not achieved properties. No carrier has been chosen that the session
+  cannot itself rewrite, so rule 2 is stated and not yet satisfied — see §6.1.1 and §8.1 of the
+  specification.</p>
+
+  <figure>
+    <div class="scroll" tabindex="0" role="group" aria-labelledby="p1-cap">
+      <svg class="diagram" viewBox="0 0 900 580" role="img" aria-labelledby="p1-title" aria-describedby="p1-desc">
+        <title id="p1-title">Three layers: identity, reach, evidence duty</title>
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+            <path class="arrowhead" d="M0,0 L10,5 L0,10 z"/>
+          </marker>
+        </defs>
+
+        <!-- Layer 1 -->
+        <text class="band-label" x="40" y="40">1 — Identity</text>
+        <rect class="box-anchor" x="330" y="56" width="240" height="82" rx="10"/>
+        <text class="t-ink bold-svg" x="450" y="84"  text-anchor="middle" font-size="16">Anchor</text>
+        <text class="t-ink3"        x="450" y="105" text-anchor="middle" font-size="11.5">the orchestrator repository</text>
+        <text class="t-ink2"        x="450" y="126" text-anchor="middle" font-size="11">record · state · logs · resume · doctor</text>
+        <text class="t-acc" x="600" y="102" font-size="12.5">exactly one — never more</text>
+
+        <g class="flow-dash">
+          <path d="M400,138 L280,196" marker-end="url(#ah)"/>
+        </g>
+        <text class="t-ink3" text-anchor="end" x="320" y="172" font-size="11">the anchor is a root too</text>
+
+        <!-- Layer 2 -->
+        <text class="band-label" x="40" y="196">2 — Reach</text>
+        <rect class="box-anchor-open" x="180" y="206" width="180" height="66" rx="9"/>
+        <rect class="box"      x="380" y="206" width="180" height="66" rx="9"/>
+        <rect class="box"      x="580" y="206" width="180" height="66" rx="9"/>
+        <text class="t-ink bold-svg" x="270" y="234" text-anchor="middle" font-size="13.5">anchor</text>
+        <text class="t-ink3"         x="270" y="254" text-anchor="middle" font-size="11">identity + code</text>
+        <text class="t-ink bold-svg" x="470" y="234" text-anchor="middle" font-size="13.5">backend/</text>
+        <text class="t-ink3"         x="470" y="254" text-anchor="middle" font-size="11">code only</text>
+        <text class="t-ink bold-svg" x="670" y="234" text-anchor="middle" font-size="13.5">frontend/</text>
+        <text class="t-ink3"         x="670" y="254" text-anchor="middle" font-size="11">code only</text>
+
+        <g class="flow-acc">
+          <path d="M180,286 L180,296 L760,296 L760,286"/>
+          <path d="M470,296 L470,312"/>
+        </g>
+        <text class="t-acc code-svg" x="470" y="330" text-anchor="middle" font-size="12.5">codeRoots[]</text>
+        <text class="t-ink2" x="470" y="348" text-anchor="middle" font-size="11.5">must freeze at arming · carrier not yet chosen</text>
+
+        <g class="flow">
+          <path d="M470,358 L470,388"/>
+          <path d="M130,388 L770,388"/>
+          <path d="M130,388 L130,416" marker-end="url(#ah)"/>
+          <path d="M290,388 L290,416" marker-end="url(#ah)"/>
+          <path d="M450,388 L450,416" marker-end="url(#ah)"/>
+          <path d="M610,388 L610,416" marker-end="url(#ah)"/>
+          <path d="M770,388 L770,416" marker-end="url(#ah)"/>
+        </g>
+
+        <!-- Layer 3 -->
+        <text class="band-label" x="40" y="380">3 — Evidence duty</text>
+        <rect class="box" x="56"  y="420" width="148" height="56" rx="8"/>
+        <rect class="box" x="216" y="420" width="148" height="56" rx="8"/>
+        <rect class="box" x="376" y="420" width="148" height="56" rx="8"/>
+        <rect class="box" x="536" y="420" width="148" height="56" rx="8"/>
+        <rect class="box" x="696" y="420" width="148" height="56" rx="8"/>
+        <g text-anchor="middle" font-size="12">
+          <text class="t-ink"  x="130" y="444">Edit landing</text>
+          <text class="t-ink3" x="130" y="462" font-size="10.5">did every claim land?</text>
+          <text class="t-ink"  x="290" y="444">Review packet</text>
+          <text class="t-ink3" x="290" y="462" font-size="10.5">does the reviewer see it?</text>
+          <text class="t-ink"  x="450" y="444">Write gate</text>
+          <text class="t-ink3" x="450" y="462" font-size="10.5">may this be written?</text>
+          <text class="t-ink"  x="610" y="444">Terminus</text>
+          <text class="t-ink3" x="610" y="462" font-size="10.5">was there any work?</text>
+          <text class="t-ink"  x="770" y="444">Cross-repo review</text>
+          <text class="t-ink3" x="770" y="462" font-size="10.5">does it fit together?</text>
+        </g>
+
+        <line class="rule" x1="56" y1="514" x2="844" y2="514"/>
+        <text class="t-acc bold-svg" x="450" y="542" text-anchor="middle" font-size="14">Reach and evidence duty are the same set.</text>
+        <text class="t-ink2"         x="450" y="562" text-anchor="middle" font-size="12.5">Identity never is.</text>
+      </svg>
+    </div>
+    <figcaption id="p1-cap">Layer 1 stays singular, layer 2 is declared, layer 3 follows layer 2 without exception.</figcaption>
+    <details id="p1-desc" class="longdesc">
+      <summary>Text description of the diagram</summary>
+      <ol>
+        <li>Layer 1, identity: one anchor — the orchestrator repository, holding record, state, logs, resume and doctor. Exactly one, never more.</li>
+        <li>Layer 2, reach: the anchor (identity plus code) alongside backend/ and frontend/ (code only). Together they form codeRoots[], which must freeze at arming and must never be derived from model-authored text — a requirement no chosen carrier yet satisfies. The anchor is a root too.</li>
+        <li>Layer 3, evidence duty: five checks read that same list — Edit landing (did every claim land?), Review packet (does the reviewer see it?), Write gate (may this be written?), Terminus (was there any work?), Cross-repo review (does it fit together?).</li>
+        <li>Reach and evidence duty are the same set. Identity never is.</li>
+      </ol>
+    </details>
+  </figure>
+
+  <h2>The three rules everything else follows from</h2>
+  <div class="laws">
+    <div class="law">
+      <span class="n">Rule 1</span>
+      <h3>Identity is never multiplied</h3>
+      <p>One record, one state directory, one log, one resume point, one doctor view. The moment a
+      second root carried identity there would be two truths about which session this is, and no
+      rule for which one wins.</p>
+    </div>
+    <div class="law">
+      <span class="n">Rule 2</span>
+      <h3>Reach is declared, never inferred</h3>
+      <p>The list must be written once at arming and be immutable afterwards, and must not come
+      from a plan, a specification, or a review comment. A root the model can name is a confinement
+      the model can leave. This is the rule the design does not yet meet: the workflow document is
+      writable from inside the session and its validator is shape-only, so it cannot enforce the
+      immutability the rule demands, and no other carrier has been chosen.</p>
+    </div>
+    <div class="law">
+      <span class="n">Rule 3</span>
+      <h3>Evidence duty follows reach</h3>
+      <p>Every site that judges sees exactly the set that may be written to. If one check falls
+      behind the reach, the chain reports success for work it never saw — which is today's defect,
+      only larger.</p>
+    </div>
+  </div>
+
+  <div class="consequences">
+    <h2>What follows immediately</h2>
+    <dl>
+      <dt>The anchor is also a code root, but no code root is ever an anchor.</dt>
+      <dd>That is why the resume point stays the anchor. A resume inside a satellite would present a
+      different <code>CLAUDE_PROJECT_DIR</code>, and the session would no longer bind.</dd>
+
+      <dt>The list governs two confinements, not one.</dt>
+      <dd>It opens Bash write access and reviewer read access. Both are capability grants, not
+      settings — hence one list, one validation, one moment.</dd>
+
+      <dt>Wherever the list lands, a new persisted field costs a minor release.</dt>
+      <dd>The runtime-lineage rule makes every schema change a breaking change while the plugin is
+      at major 0. The workflow document is the obvious place and is ruled out on integrity grounds,
+      so which document pays that cost is still open.</dd>
+
+      <dt>Without a list, everything behaves exactly as it does today.</dt>
+      <dd>With <code>codeRoots[]</code> absent, the union is the anchor alone. That is the state of
+      every existing chain and must remain so.</dd>
+    </dl>
+  </div>
+
+  <footer>
+    Principle illustration for <a href="multi-repo-chains-spec.md">the specification</a>,
+    alongside <a href="multi-repo-chains-overview.html">the overview page</a>.
+    Proposal — nothing in this repository implements it, and stages 2 and 3 are BLOCKED until a
+    carrier for the root list is chosen.
+  </footer>
+
+</main>
+</body>
+</html>
