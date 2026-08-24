@@ -132,6 +132,27 @@ else
   check "P4b docs/review-chain.md documents the override contract for all three" FAIL
 fi
 
+# P5 — shared pr-body.md template + pilot consumer + doc listing
+TPL_PRBODY="$PLUGIN_DIR/templates/pr-body.md"
+PILOT_MD="$PLUGIN_DIR/skills/pilot/SKILL.md"
+if [ -f "$TPL_PRBODY" ] && grep -qxF '## Acceptance criteria' "$TPL_PRBODY" && grep -qF '| AC | Criterion | Status | Evidence |' "$TPL_PRBODY"; then
+  check "P5a shared pr-body.md exists with the per-AC table" PASS
+else
+  check "P5a shared pr-body.md exists with the per-AC table" FAIL
+fi
+if grep -qF 'rev-parse --show-toplevel)/.zensu/templates/pr-body.md' "$PILOT_MD" \
+  && grep -qF '${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md' "$PILOT_MD" \
+  && grep -qF 'hooks/lib/zensu-plan-requirements.sh' "$PILOT_MD"; then
+  check "P5b pilot resolves pr-body.md and fills AC rows from the Requirements table" PASS
+else
+  check "P5b pilot resolves pr-body.md and fills AC rows from the Requirements table" FAIL
+fi
+if grep -qF '`pr-body.md`' "$REVIEW_DOC"; then
+  check "P5c docs/review-chain.md lists the shared pr-body.md template" PASS
+else
+  check "P5c docs/review-chain.md lists the shared pr-body.md template" FAIL
+fi
+
 echo "----"
 echo "test-templates: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

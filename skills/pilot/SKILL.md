@@ -235,7 +235,15 @@ and the relevant slice of the status card as the skill's input. Rules:
   else is delegated to a sibling skill. Branch safety for that offer: when the
   probed current branch IS the base/default branch, create a feature branch
   first, then commit and open the PR (never commit to the base branch, and
-  `gh pr create` with head == base would fail anyway).
+  `gh pr create` with head == base would fail anyway). Render the PR body from
+  the shared template — `$(git rev-parse --show-toplevel)/.zensu/templates/pr-body.md`
+  when that file exists, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md` — and
+  pass it via `gh pr create --body-file`. Fill its **Acceptance criteria** table
+  with one row per `AC-###`/`FR-###` from the feature's TDD plan `## Requirements`
+  table, judged usable via
+  `bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-plan-requirements.sh" --plan <plan>`
+  (exit 0 = present and filled); when no usable table exists, keep the template's
+  single stub row rather than shipping an empty table.
 - **The backend is authoritative.** Pilot proposes transitions; the server
   validates them (FSM + release gate). Pilot never overrides a rejection — it
   translates the violations into the next offers.
