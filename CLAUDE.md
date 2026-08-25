@@ -1993,6 +1993,30 @@ by the listing one on both carriers. A new renderer calls the owner; it never wr
 the sentence again. `lineage --backfill --apply` is gated on a capped read for the
 reason it is gated on an unreadable record: the duplicate guard is built from that read.
 
+**The ceiling is a BOUND on the ancestor walk, never a candidate for it.**
+`ledgerPathUnlinked(dir, stopAt)` refuses a symlink at any component between `dir` and
+the caller's ceiling — `lstat` declines to follow the FINAL component alone, so a link
+at `session-lineage/` or `v1/` was resolved as an ordinary intermediate one and
+`lineage --forget --apply` unlinked a record OUTSIDE the ledger. The ceiling ITSELF is
+tested first and never lstat'ed, matching `ensureLedgerDir`, which breaks before pushing
+it into its checked set. Judging it instead made the two halves disagree about one tree:
+a symlinked `~/.claude` is the ordinary shape under a dotfile manager, so the write path
+kept landing records while every read answered `ESYMLINK` and the only retraction channel
+refused forever. **All four readers of this store take the ceiling** — `readEdges`,
+`removeEdgeFiles`, `readLabels` and `otherSchemaLedgers` — because each one's WRITER
+already refuses that tree, and a reader that did not made read and write disagree.
+`session-lineage-v1.test.js` pins the write side, the read side, the delete side and the
+discriminating case that a component BELOW a symlinked ceiling is still refused;
+`test-session-trail-lineage.sh` L59a/L59b drive the same root end to end.
+
+**Accepted residual, stated rather than implied:** `removeEdgeFiles` checks the ancestors
+ONCE and each iteration then re-derives its path, so a directory component swapped for a
+symlink after the guard resolves through the new link. The per-file `lstat`+`unlink` pair
+is safe on its own, because `unlink` never follows a final symlink — the exposure is the
+directory swap, not the leaf — and Node exposes no `unlinkat`/dirfd, so it cannot be
+closed in this shape. `ensureLedgerDir` documents its own analogous check-then-create
+window the same way.
+
 **The chain walk takes ONE source of successors.** `walkChain(sessionId, source, maxHops)`
 accepts an edge array or a prebuilt `indexBySource` map. It used to take both, and once
 an index was supplied the array was dead — a caller could hand it two that disagree and

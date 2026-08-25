@@ -322,7 +322,9 @@ let LABELS_SCHEMA_MISMATCH = false;
 
 function readLabels() {
   if (LABEL_CACHE) return LABEL_CACHE;
-  const { labels, unreadable, schemaMismatch } = readLabelsFile(LABELS_FILE);
+  // CONFIG_ROOT as the ceiling, the same one ledgerRead and lineageForget pass:
+  // the writer already refuses a symlinked ancestor, so the reader must too.
+  const { labels, unreadable, schemaMismatch } = readLabelsFile(LABELS_FILE, CONFIG_ROOT);
   LABELS_UNREADABLE = unreadable;
   LABELS_SCHEMA_MISMATCH = !!schemaMismatch;
   if (unreadable || schemaMismatch) SKIPPED += 1;
@@ -1463,7 +1465,7 @@ function cmdList(opts) {
     print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
-    if (!r.cwdExists) print(`      !! worktree directory missing: ${r.cwd}`);
+    if (!r.cwdExists) print(`      !! worktree directory missing: ${oneLine(r.cwd, 200)}`);
     print('');
   }
   print(`next: node ${scriptPath()} show <session-id|worktree|branch|PR#|text>`);
@@ -1746,7 +1748,7 @@ function cmdTakeover(opts) {
   if (tv.authorized) {
     L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
   }
-  L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
+  L.push(`- worktree: \`${oneLine(r.wt, 200)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
@@ -2267,7 +2269,7 @@ function lineageBackfill(opts) {
       // The absolute worktree and the same cause fallback the write uses: this is
       // the only review surface before --apply mints machine-wide inferred edges,
       // so it has to show what will actually be recorded.
-      print(`      worktree: ${c.to.wt}   cause: ${c.from.stopCause.error || 'rate_limit'}`);
+      print(`      worktree: ${oneLine(c.to.wt, 200)}   cause: ${c.from.stopCause.error || 'rate_limit'}`);
     }
     if (!candidates.length) print('  (none)');
     return;
@@ -2591,6 +2593,7 @@ function cmdLineage(opts) {
     print('');
     printChain(links, live, me, walk.forks);
     { const t = truncatedNote(led); if (t) print(`  ! ${t}`); }
+    if (led.schemaNewer) print('  ! the ledger also holds records written by a NEWER schema than this build can read — update the plugin.');
     if (walk.truncated) print('  ! chain truncated at the hop bound — it is longer than shown');
     // `revisited` was computed and read by nobody, so the reset flow it exists for
     // — adopt A>B, then adopt B>A from the original window — still printed
@@ -2616,11 +2619,16 @@ function cmdLineage(opts) {
     // of the records this machine holds" is a claim about the store, and a repo
     // with no handovers of its own is not evidence for it. Computed only when the
     // own store is empty, which keeps a directory read off every ordinary call.
-    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, otherSchemaLedgers: led.edges.length ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
+    return print(JSON.stringify({ repo: ctx && ctx.root, chains, edgeCount: scoped.length, otherSchemaLedgers: (led.edges.length || led.directoryError) ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
   }
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`RECORDED HANDOVERS: ${scoped.length}\n`);
   { const t = truncatedNote(led); if (t) print(`! ${t}\n`); }
+  // Above the split, not inside the empty arm. A NEWER-schema record is refused
+  // individually while its neighbours parse, so a non-empty listing was rendered
+  // with no hint that this build cannot read part of the store — the generic
+  // skipped NOTE names no cause and no remedy.
+  if (led.schemaNewer) print('! the ledger also holds records written by a NEWER schema than this build can read — update the plugin.\n');
   if (!scoped.length) {
     if (renderLedgerFault(led)) return;
     // A schema move leaves every existing record under the PREVIOUS `v<n>/`

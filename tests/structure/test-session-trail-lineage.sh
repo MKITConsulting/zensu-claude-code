@@ -1784,6 +1784,51 @@ OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" label --remove "$ACCT_A" --all --json
 [ "$(jq_field "$OUT" removed)" = "true" ] && check "L58e-control and removing it still works through the plain spelling" PASS || check "L58e-control removing an ordinary account key still works (removed=$(jq_field "$OUT" removed))" FAIL
 reset_ledger
 
+# -- L59 -- the round-3 security seat's findings, driven ---------------------
+# A NEWER-schema record is refused INDIVIDUALLY while its neighbours parse, so a
+# non-empty listing rendered with no hint that this build cannot read part of the
+# store. R17 moved the fault disclosure above the offer; it did not reach the
+# NON-EMPTY arm, where the only surviving line is the generic skipped NOTE, which
+# names neither cause nor remedy.
+reset_ledger
+cyc 1 "$SID_A" "$SID_B"
+printf '{"schemaVersion":99,"from":{"sessionId":"%s"},"to":{"sessionId":"%s"},"recordedAt":"2026-01-01T00:00:00.000Z"}' "$SID_D" "$SID_E" \
+  > "$CFG/zensu/session-lineage/v1/edges/9999999999-deadbee9.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --all)"
+case "$OUT" in *"RECORDED HANDOVERS: 1"*) check "L59-control the listing is NON-empty, so the empty-arm disclosure cannot be what fires" PASS ;; *) check "L59-control the listing is non-empty (got $(printf '%s' "${OUT:-<empty>}" | head -c 70))" FAIL ;; esac
+case "$OUT" in *"NEWER schema"*) check "L59 a non-empty listing still discloses that part of the store is unreadable by this build" PASS ;; *) check "L59 a non-empty listing discloses the newer-schema records (got $(printf '%s' "${OUT:-<empty>}" | head -c 90))" FAIL ;; esac
+reset_ledger
+
+# The config root itself may be a SYMLINK -- the ordinary dotfile-manager layout --
+# and the write path accepts it on purpose. The round-2 ancestor guard judged the
+# ceiling instead of bounding at it, so records kept being written while every read
+# answered ESYMLINK and `--forget`, the only retraction channel, refused forever.
+ALT_REAL="$FAKE/real-cfg-root"
+ALT_LINK="$FAKE/linked-cfg-root"
+mkdir -p "$ALT_REAL"
+ln -s "$ALT_REAL" "$ALT_LINK" 2>/dev/null
+LINK_OK="$(node -e '
+const fs = require("node:fs");
+try { process.stdout.write(fs.lstatSync(process.argv[1]).isSymbolicLink() ? "YES" : "NO"); } catch { process.stdout.write("NO"); }
+' "$ALT_LINK")"
+if [ "$LINK_OK" != YES ]; then
+  skip "L59a/L59b a symlinked config root (this filesystem did not create the link)"
+else
+  check "L59a-control the alternate config root is really a symlink" PASS
+  OUT="$( ( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"
+    HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" \
+    CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" \
+    env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" adopt "$SID_A" --all --json --config-dir "$ALT_LINK" 2>&1 ) )"
+  [ "$(jq_field "$OUT" file)" != "ABSENT" ] && check "L59a a write through a symlinked config root still lands" PASS || check "L59a a write through a symlinked config root lands (got $(printf '%s' "${OUT:-<empty>}" | head -c 80))" FAIL
+  OUT="$( ( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"
+    HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$STORE" \
+    CLAUDE_CODE_SESSION_ID="$SID_C" CLAUDE_PID="$LIVE_PID" \
+    env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --json --all --config-dir "$ALT_LINK" 2>&1 ) )"
+  case "$(jq_field "$OUT" ledgerError)" in ''|null) check "L59b and the SAME tree is readable -- the two halves cannot disagree about one root" PASS ;; *) check "L59b the same tree is readable (ledgerError=$(jq_field "$OUT" ledgerError))" FAIL ;; esac
+fi
+rm -rf "$ALT_REAL" "$ALT_LINK"
+reset_ledger
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added

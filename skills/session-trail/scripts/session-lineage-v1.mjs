@@ -150,6 +150,12 @@ export function ledgerPaths(configRoot) {
 // this walks a directory any session on the machine can write.
 export function otherSchemaLedgers(configRoot) {
   const base = path.dirname(ledgerPaths(configRoot).base);
+  // The level above the two this function already lstats. `readdirSync` follows a
+  // symlinked final component, so a link planted at `zensu` or `session-lineage`
+  // was enumerated through and its contents rendered as "records this machine
+  // already holds". Read-only, but that sentence is what tells an operator NOT to
+  // reconstruct — so a planted directory could suppress a legitimate backfill.
+  if (!ledgerPathUnlinked(base, configRoot)) return [];
   let names;
   try { names = fs.readdirSync(base); } catch { return []; }
   const out = [];
@@ -198,10 +204,11 @@ export function otherSchemaLedgers(configRoot) {
 // it — fs.chmodSync follows links, and there is no lchmod on Linux. This mirrors
 // review-evidence-lease-v1.js's ensurePrivateDirectory. Deliberate DELTA, stated
 // rather than implied: that function also re-lstats after chmod and rejects a
-// group/other-readable mode, a foreign uid and an aliased realpath. Those three
-// are NOT carried here — this guard covers the symlink and non-directory half
-// only, and the check-then-create ordering leaves a window a local attacker with
-// write access to the config root could race.
+// group/other-readable mode, a foreign uid and an aliased realpath. The first of
+// those IS carried here — the re-lstat and the mode test are below — so only the
+// foreign-uid and aliased-realpath checks are genuinely absent; this guard covers
+// the symlink, non-directory and mode half. The check-then-create ordering still
+// leaves a window a local attacker with write access to the config root could race.
 export function ensureLedgerDir(edgesDir, stopAt = null) {
   // Bounded ABOVE by the root the caller named. Climbing past it inspected
   // directories the user never chose — and on macOS /var is a symlink, so a config
@@ -326,13 +333,23 @@ export function ledgerPathUnlinked(dir, stopAt = null) {
     try { return !fs.lstatSync(cur).isSymbolicLink(); } catch (e) { return !!(e && e.code === 'ENOENT'); }
   }
   for (let hop = 0; hop < 64; hop += 1) {
+    // The ceiling is tested FIRST, so it is a bound on the walk and never a
+    // candidate for it — exactly as `ensureLedgerDir` breaks before pushing the
+    // ceiling into its checked set, and for the identical reason its comment gives:
+    // a config root that is itself a symlink is the ordinary shape under a dotfile
+    // manager, and it is the root the CALLER named, i.e. the trust anchor.
+    //
+    // Judging it here made the two halves disagree about one tree: the write path
+    // kept landing records while this one answered ESYMLINK, so `lineage --forget`
+    // — the only way a machine-wide record ever leaves — was permanently
+    // unavailable exactly where records kept arriving.
+    if (ceiling && cur === ceiling) return true;
     let st;
     try { st = fs.lstatSync(cur); } catch (e) {
       // ENOENT is the ordinary "not created yet" case and says nothing about links.
       if (e && e.code === 'ENOENT') { /* keep climbing */ } else return false;
     }
     if (st && st.isSymbolicLink()) return false;
-    if (ceiling && cur === ceiling) return true;
     const up = path.dirname(cur);
     if (up === cur) return true;
     cur = up;
@@ -363,6 +380,13 @@ export function isEdgeFileName(name) {
 // Reports its failures rather than throwing on the first one: a directory holding
 // ten matching records must not keep the other nine because one of them is already
 // gone, and the caller has to be able to say how many actually went.
+// Residual, stated rather than implied, exactly as `ensureLedgerDir` states its
+// own: the ancestor check runs ONCE and each iteration then re-derives the path
+// with `path.join`, so a directory component swapped for a symlink after the guard
+// resolves through the new link. The per-file `lstat`+`unlink` pair is safe on its
+// own — `unlink` never follows a final symlink — so the exposure is the directory
+// swap, not the leaf. Node exposes no `unlinkat`/dirfd, so it cannot be closed in
+// this shape.
 export function removeEdgeFiles(edgesDir, names, stopAt = null) {
   const removed = [];
   const failed = [];
@@ -831,7 +855,17 @@ function labelsFingerprint(labelsFile) {
   }
 }
 
-export function readLabels(labelsFile) {
+// `stopAt` is the same ceiling `readEdges` and `removeEdgeFiles` take, and this
+// reader needs it for the same reason: `readBoundedFile`'s O_NOFOLLOW declines the
+// FINAL component alone, so a symlink at `session-lineage/` or `v1/` was resolved as
+// an ordinary intermediate component. Its own WRITER already refuses that tree —
+// `writeLabels` goes through `ensureLedgerDir` — so without this the two halves
+// disagreed about the same directory, and the labels rendered into every window's
+// output could be sourced from outside the 0700 tree.
+export function readLabels(labelsFile, stopAt = null) {
+  if (stopAt && !ledgerPathUnlinked(path.dirname(labelsFile), stopAt)) {
+    return { labels: emptyLabels(), unreadable: true, schemaMismatch: false };
+  }
   if (!fs.existsSync(labelsFile)) return { labels: emptyLabels(), unreadable: false, schemaMismatch: false };
   const read = readBoundedFile(labelsFile);
   if (read.text === null) return { labels: emptyLabels(), unreadable: true, schemaMismatch: false };

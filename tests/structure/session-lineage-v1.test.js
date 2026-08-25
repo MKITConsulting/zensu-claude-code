@@ -454,6 +454,89 @@ test('a symlinked config root does not refuse every write', { skip: process.plat
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('the READ and DELETE sides accept the same symlinked ceiling the write side does', { skip: process.platform === 'win32' }, () => {
+  // The write side was relaxed at the ceiling deliberately (the case above). The
+  // round-2 ancestor guard judged the ceiling instead, so on the ordinary
+  // dotfile-manager layout records kept being WRITTEN while readEdges answered
+  // ESYMLINK and removeEdgeFiles refused every name — `lineage --forget`, the only
+  // way a machine-wide record ever leaves, permanently unavailable exactly where
+  // records keep arriving. The existing read-side case supplies a REAL directory as
+  // the ceiling, so it could not see this.
+  const root = tmp();
+  const real = path.join(root, 'real-config');
+  fs.mkdirSync(real);
+  const link = path.join(root, 'cfg');
+  fs.symlinkSync(real, link);
+  const p2 = mod.ledgerPaths(link);
+  mod.ensureLedgerDir(p2.edges, link);
+  assert.equal(mod.ledgerPathUnlinked(p2.edges, link), true,
+    'the ceiling is a BOUND on the walk, not a candidate for it');
+  const written = mod.writeEdge(p2.edges, {
+    schemaVersion: 1, from: { sessionId: 'aaaaaaaa' }, to: { sessionId: 'bbbbbbbb' },
+    repo: { name: 'r', root: '/r' }, reason: 'manual', inferred: false,
+    recordedAt: '2026-01-01T00:00:00.000Z', recordedBy: 'adopt',
+  }, Date.parse('2026-01-01T00:00:00.000Z'), link);
+  const read = mod.readEdges(p2.edges, link);
+  assert.equal(read.directoryError, null, 'a tree the write side accepts must be readable');
+  assert.equal(read.edges.length, 1);
+  const gone = mod.removeEdgeFiles(p2.edges, [path.basename(written)], link);
+  assert.equal(gone.removed.length, 1, 'and the retraction channel must work there too');
+  assert.deepEqual(gone.failed, []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('the READ side still refuses a symlinked component below a symlinked ceiling', { skip: process.platform === 'win32' }, () => {
+  // The discriminator for the case above: relaxing the ceiling must not relax the
+  // walk, or the fix is indistinguishable from deleting the guard.
+  const root = tmp();
+  const real = path.join(root, 'real-config');
+  fs.mkdirSync(real);
+  const link = path.join(root, 'cfg');
+  fs.symlinkSync(real, link);
+  const p2 = mod.ledgerPaths(link);
+  fs.mkdirSync(path.dirname(p2.edges), { recursive: true });
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(elsewhere);
+  fs.symlinkSync(elsewhere, p2.edges);
+  assert.equal(mod.ledgerPathUnlinked(p2.edges, link), false);
+  assert.equal(mod.readEdges(p2.edges, link).directoryError, 'ESYMLINK');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('readLabels refuses a symlinked ancestor, as its own writer already does', { skip: process.platform === 'win32' }, () => {
+  // The THIRD reader of this store. readEdges and removeEdgeFiles took the ceiling
+  // in round 2 and this one did not, so read and write disagreed about the same
+  // tree: writeLabels refuses a symlinked ancestor through ensureLedgerDir, while
+  // readLabels resolved straight through it. readBoundedFile's O_NOFOLLOW declines
+  // the FINAL component only, which is the same gap the ancestor walk exists for.
+  const root = tmp();
+  const p2 = mod.ledgerPaths(root);
+  fs.mkdirSync(path.dirname(path.dirname(p2.labels)), { recursive: true });
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(elsewhere);
+  fs.writeFileSync(path.join(elsewhere, 'labels.json'), JSON.stringify({ schemaVersion: 1, accounts: { a: 'planted' }, windows: {} }));
+  fs.symlinkSync(elsewhere, path.dirname(p2.labels));
+  const got = mod.readLabels(p2.labels, root);
+  assert.equal(got.unreadable, true, 'a label document reached through a symlinked ancestor is refused, not rendered');
+  assert.deepEqual(Object.keys(got.labels.accounts), [], 'and nothing from it reaches a caller');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('otherSchemaLedgers refuses a symlinked base rather than enumerating through it', { skip: process.platform === 'win32' }, () => {
+  // It readdirSync's <root>/zensu/session-lineage with no guard, and readdirSync
+  // follows a symlinked final component. Read-only, but it renders a path and a
+  // count as "records this machine already holds".
+  const root = tmp();
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(path.join(elsewhere, 'v0', 'edges'), { recursive: true });
+  fs.writeFileSync(path.join(elsewhere, 'v0', 'edges', '1-aaaaaaaa.json'), '{}');
+  fs.mkdirSync(path.join(root, 'zensu'), { recursive: true });
+  fs.symlinkSync(elsewhere, path.join(root, 'zensu', 'session-lineage'));
+  assert.deepEqual(mod.otherSchemaLedgers(root), [],
+    'a planted directory must not be reported as a migration this machine holds');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('a symlinked component BELOW the ceiling is still refused', { skip: process.platform === 'win32' }, () => {
   // The discriminating half: relaxing the ceiling must not relax the walk. Without
   // this the fix above is indistinguishable from deleting the guard.
