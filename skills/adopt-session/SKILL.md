@@ -101,21 +101,25 @@ the command below does not pass it: the project it repairs is the one the RECORD
 names. A session whose **harness** project directory has moved or been deleted
 therefore still gets its report.
 
-**OPEN GAP — a record whose own recorded project root is gone still refuses, and
-that is a limitation rather than a decision.** It answers `record-unreadable`,
-because `readContext` canonicalizes `context.project_root` and throws when it is
-absent. The two sources of truth diverge in two ways in worktree workflows and only
-one is closed: a cwd that was a worktree while the harness reported elsewhere is
-handled, but a worktree later REMOVED — `git worktree remove`, the documented
-cleanup in `skills/pr-team-review` Phase E — is a permanent wedge. Combined with an
-incompatible lineage, `orphanedProjectRootSession` does not fire,
-`resolveIncompatibleRuntime` cannot read the record, `/zensu:doctor` falls back to
-its *no valid record* row, and this skill's own remedy text says to start a fresh
-session. `readOrphanedProjectRootContext` already distinguishes *record intact,
-project root absent* from *record altered or pruned*, and the gates already use it —
-so the distinction exists; adoption simply does not consume it yet. Widening it is a
-separate, larger decision, because adoption would have to succeed with an anchor
-that does not exist. Do not read "that one still refuses" as "and should".
+**A record whose own recorded project root is GONE is adoptable — with one limit,
+and say the limit whenever you offer the repair.** A worktree removed while the
+session was still open (`git worktree remove`, the documented cleanup in
+`skills/pr-team-review` Phase E) used to be a permanent wedge when it coincided
+with an incompatible lineage: `orphanedProjectRootSession` did not fire, the
+lineage read strictly and threw, `/zensu:doctor` fell back to its *no valid
+record* row, and this skill said to start a fresh session. Condition 1 now reads
+strictly first and falls back to `readOrphanedProjectRootContext`, which REFUSES a
+root that still exists — so a vanished worktree is the one disagreement admitted
+alongside the lineage break, and every other one still answers
+`record-unreadable`. Nothing is waived by admitting it: the workflow document
+lived under that root and died with it.
+
+The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
+in the ordinary orphaned-project-root state, so Bash and the read-only diagnostics
+work again while `Edit` and `Write` stay denied until that directory is
+re-created. The report says so before and after `--confirm`; repeat it rather than
+announcing an unqualified success, or the user walks straight into a deny they
+were just told was fixed. The adoption never re-creates the deleted directory.
 
 Main thread only: a reviewer or neutral child is refused by every gate.
 
@@ -148,7 +152,7 @@ render that verbatim too.
 | Reason | Meaning |
 |--------|---------|
 | `private-record-store-unsafe` | Entry-point refusal, raised before `adoptableRecord` runs: the private record store itself could not be opened safely — missing, aliased, or carrying unsafe permissions or ownership. |
-| `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. |
+| `record-unreadable` | The record no longer re-verifies against the installation that minted it — pruned from the cache, altered, or a real schema change. A recorded project root that is merely GONE is no longer one of these: that state is adoptable, so the disagreement here is one of the others. |
 | `plugin-data-mismatch` | The record belongs to a different plugin-data store. Never relaxed. |
 | `already-served` | Nothing to RE-MINT. The record is correct, but the lease store may still be wedged: an adoption writes the record first and sweeps the store afterwards, so a run that died in between leaves exactly this state. Re-running with `--confirm` repeats the sweep idempotently and re-mints nothing. If tools still fail after that, run `/zensu:doctor`. |
 | `not-a-sibling-installation` | The executing tree is not an upgrade of the recorded one (for example a `--plugin-dir` checkout). |

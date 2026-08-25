@@ -535,20 +535,52 @@ the misleading wording exactly when the repair is impossible. Do not describe th
 lineage row as covering every mid-session upgrade; it covers the ones whose
 previous version was not pruned.
 
-**A vanished recorded PROJECT root is an OPEN gap, not a settled distinction.**
-Removing the caller's project-root condition closed one of the two ways the two
-sources of truth diverge in worktree workflows — a cwd that was a worktree while the
-harness reported elsewhere. The other is still a permanent wedge: a worktree later
+**A vanished recorded PROJECT root is ADMITTED at condition 1, and it is the only
+disagreement that is.** Both ways the two sources of truth diverge in worktree
+workflows are closed now: removing the caller's project-root condition handled a cwd
+that was a worktree while the harness reported elsewhere, and condition 1 reads
+strictly first and falls back to `readOrphanedProjectRootContext` for a worktree later
 REMOVED (`git worktree remove`, the documented cleanup in `skills/pr-team-review`
-Phase E) makes `readContext` throw at condition 1, so adoption answers
-`record-unreadable` whose remedy says to start a fresh session. Combined with an
-incompatible lineage, `orphanedProjectRootSession` does not fire either, and
-`/zensu:doctor` falls back to the same `unbound` row. `readOrphanedProjectRootContext`
-ALREADY distinguishes *record intact, project root absent* from *record altered or
-pruned*, and the gates already consume it — adoption does not. Widening it is a
-separate and larger decision, because adoption would then have to succeed with an
-anchor that does not exist. Word it as open here and in `skills/adopt-session/SKILL.md`,
-so the next reader does not take "that one still refuses" for "and should".
+Phase E), which used to make `readContext` throw and answer `record-unreadable` while
+`/zensu:doctor` fell back to the `unbound` row. The fallback cannot widen: the orphan
+reader waives exactly one check and REFUSES a root that still exists, so every other
+disagreement throws in BOTH readers and still lands on `record-unreadable`. Nothing is
+waived by admitting it — the workflow document lived under that root and died with it,
+the same argument that already relaxes a vanished root for a COMPATIBLE upgrade.
+
+`buildContext` gained `allowMissingProjectRoot` for the re-mint. It waives exactly the
+existence check `validateContext` waives and re-applies that function's shape half
+through a SHARED `requireAbsentDirectoryPath` — the orphan reader calls it too, so the
+split rule has one implementation rather than two copies. No record field moves, so
+invariant 1 above still holds and this stays a `patch`.
+
+**Three things are load-bearing and easy to undo by accident.** First, the verdict
+carries `orphanedProjectRoot` and `adoptContext` passes it through rather than
+re-deriving it: asking the filesystem a second time would let a directory re-created
+between the two reads turn a waived check into a canonicalized one. Second, the deleted
+root must NOT be recreated — the provenance write is guarded by the workflow document's
+own `existsSync`, so `mutateWorkflowState`, which mkdirs every missing component of
+`<project>/.zensu/state`, is never reached; AC-C16 pins it. Third, the repair fixes the
+LINEAGE and not the anchor: the adopted session lands in the ordinary
+orphaned-project-root state, where `Edit`/`Write` still deny. The report says so before
+and after `--confirm` and the doctor row says so too, because announcing an unqualified
+success there sends the user into a deny they were just told was repaired.
+
+**The DIAGNOSIS moved with it, and deliberately not into a fourth predicate.**
+`resolveIncompatibleRuntime` takes the same strict-then-orphan fallback, so the combined
+state is reported by the predicate every deny site already consults — which is what gives
+all five the `incompatible-runtime` scope, whose text names `/zensu:adopt-session`,
+instead of the generic "start a fresh session" that would now contradict the doctor. Its
+`recorded<TAB>executing` line stays TWO fields for the reason the wire-format bullet below
+gives; the third fact travels on a model-side-only mode,
+`model-orphaned-incompatible-root`, whose sole consumer is `/zensu:doctor`'s fourth
+binding row (`orphaned-project-root+incompatible-runtime`, set in `zensu-doctor.sh` and
+rendered in `zensu-doctor-report.js`). Do NOT relax `resolveOrphanedProjectRoot` to accept
+an incompatible lineage instead: that would let an incompatible runtime SERVE a session
+with no user decision and no provenance, which is what the lineage rule exists to prevent.
+Re-anchoring the record to a live directory was also considered and refused — a session
+may delete its own root, so a caller-named anchor would become a cross-project write
+escape.
 
 **Three re-encodings move with this.** Their coverage is stated once, in the
 store-layout bullet below, and nowhere else — a ledger that contradicts itself about

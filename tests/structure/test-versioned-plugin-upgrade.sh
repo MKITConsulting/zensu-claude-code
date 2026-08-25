@@ -556,9 +556,17 @@ gate_decision_from() {
   # bind makes the binder print its "context plugin root is neither the
   # executing plugin nor a compatible upgrade of it" diagnostic before any gate
   # decides, so requiring an empty stderr would grade every allow as a failure.
-  # Anything OTHER than that diagnostic — a crash, a node stack — still fails,
+  # Anything OTHER than such a diagnostic — a crash, a node stack — still fails,
   # so a real regression stays visible.
-  if [ -s "$err" ] && grep -qv '^claude hook session binder: ' "$err"; then
+  #
+  # TWO prefixes, because the bind can fail one layer deeper: a record whose
+  # project root is gone is refused by the core library's own fail(), which is
+  # prefixed `session-control-v1: `, and never reaches the binder's message at
+  # all. That shape was unreachable here until a check drove an ORPHANED session
+  # through a gate, and grading its correct deny as `hook-stderr` reports a
+  # working gate as broken. Both prefixes are library diagnostics; neither is a
+  # stack trace, which still fails on its unprefixed lines.
+  if [ -s "$err" ] && grep -qvE '^(claude hook session binder|session-control-v1): ' "$err"; then
     printf 'hook-stderr\n'
     return
   fi
@@ -2505,6 +2513,163 @@ if [ -n "$PRUNED_ROOT" ] && [ -n "$PRUNED_SUCCESSOR" ] \
   fi
 else
   check "JUDGE-3 a pruned recorded installation is neither named nor adoptable (fixture unavailable)" FAIL
+fi
+
+# ---------------------------------------------------------------------------
+# Part C2 — the OTHER way the two sources of truth diverge: the recorded project
+# root is GONE (a `git worktree remove` on a live session, the documented cleanup
+# in skills/pr-team-review Phase E) while the executing runtime declares an
+# incompatible lineage. Each of the two narrow predicates answers "not me" for
+# that combination — the orphan one re-applies servesRecordedRuntime, the lineage
+# one used to read strictly — so it fell through to the `unbound` row and to
+# `record-unreadable`, wedging the session permanently with every write channel
+# denied.
+#
+# Its own session and its own project on purpose: the checks below DELETE that
+# project, and every fixture above needs $PROJECT to keep existing.
+# ---------------------------------------------------------------------------
+
+GONE_PROJECT="$TMP/gone-project"
+mkdir -p "$GONE_PROJECT"
+GONE_SESSION='versioned-upgrade-gone-project-root'
+GONE_START="$(EVENT=SessionStart SESSION="$GONE_SESSION" CWD="$GONE_PROJECT" node -e '
+  process.stdout.write(JSON.stringify({
+    hook_event_name: process.env.EVENT,
+    source: "startup",
+    session_id: process.env.SESSION,
+    cwd: process.env.CWD,
+  }));
+')"
+GONE_KEY="$(node "$SYNTHETIC_CANDIDATE_ROOT/hooks/lib/session-control-core-v1.js" session-key "$GONE_SESSION")"
+GONE_RECORD="$SHARED_DATA/session-control/v1/records/$GONE_KEY.json"
+if printf '%s' "$GONE_START" \
+    | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$GONE_PROJECT" \
+      bash "$SYNTHETIC_CANDIDATE_ROOT/hooks/session-start-session-control.sh" >/dev/null 2>&1 \
+    && [ -f "$GONE_RECORD" ]; then
+  # Positive control BEFORE the deletion, for the same reason JUDGE-3 takes one:
+  # without it every assertion below is satisfied just as well by a fixture that
+  # never registered at all.
+  GONE_BEFORE="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$GONE_SESSION" "$SHARED_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  rm -rf "$GONE_PROJECT"
+  GONE_AFTER="$(adoption_reason "$SHARED_DATA/session-control/v1/records" "$GONE_SESSION" "$SHARED_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+  if [ "$GONE_BEFORE" = ok ] && [ "$GONE_AFTER" = ok ] && [ ! -e "$GONE_PROJECT" ]; then
+    check "AC-C13 a record whose project root is gone is still adoptable across the lineage break" PASS
+  else
+    check "AC-C13 a record whose project root is gone is still adoptable (before='$GONE_BEFORE' after='$GONE_AFTER')" FAIL
+  fi
+
+  # The discrimination half. A vanished project root is the ONE disagreement
+  # admitted alongside the lineage; anything else must still refuse, or the
+  # fallback would have widened `record-unreadable` into an unconditional pass.
+  # Driven on a COPY so the record the checks below act on stays intact.
+  TAMPER_DATA="$TMP/gone-tamper-data"
+  rm -rf "$TAMPER_DATA"
+  mkdir -p "$TAMPER_DATA/session-control/v1/records" && chmod 700 "$TAMPER_DATA"
+  chmod 700 "$TAMPER_DATA/session-control" "$TAMPER_DATA/session-control/v1" \
+    "$TAMPER_DATA/session-control/v1/records"
+  cp "$GONE_RECORD" "$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json"
+  if RECORD_IN="$TAMPER_DATA/session-control/v1/records/$GONE_KEY.json" DATA_IN="$TAMPER_DATA" node -e '
+      const fs = require("node:fs");
+      const file = process.env.RECORD_IN;
+      const record = JSON.parse(fs.readFileSync(file, "utf8"));
+      // plugin_data has to follow the copy or the refusal would be
+      // plugin-data-mismatch, which proves nothing about the digest.
+      record.plugin_data = process.env.DATA_IN;
+      record.runtime_digest = "sha256:" + "0".repeat(64);
+      record.source_revision = record.runtime_digest;
+      fs.writeFileSync(file, JSON.stringify(record, null, 2) + "\n");
+    '; then
+    GONE_TAMPERED="$(adoption_reason "$TAMPER_DATA/session-control/v1/records" "$GONE_SESSION" "$TAMPER_DATA" "$GONE_PROJECT" "$SYNTHETIC_BREAKING_ROOT")"
+    if [ "$GONE_TAMPERED" = record-unreadable ]; then
+      check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable" PASS
+    else
+      check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (got '$GONE_TAMPERED')" FAIL
+    fi
+  else
+    check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (fixture unavailable)" FAIL
+  fi
+
+  # The doctor row. Both facts, and never the `unbound` wording — which is the
+  # line this whole state used to receive.
+  GONE_DOCTOR_OUT="$TMP/adopt-gone-doctor.out"
+  GONE_DOCTOR_HOME="$TMP/gone-doctor-home"; mkdir -p "$GONE_DOCTOR_HOME"
+  CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DOCTOR_OUT" 2>/dev/null
+  if grep -qF 'is gone and the running Zensu installation declares an incompatible lineage' "$GONE_DOCTOR_OUT" \
+      && grep -qF "$GONE_PROJECT" "$GONE_DOCTOR_OUT" \
+      && grep -qF 'record minted by 0.17.0, executing 0.18.0' "$GONE_DOCTOR_OUT" \
+      && ! grep -qF 'no valid Session Control record' "$GONE_DOCTOR_OUT"; then
+    check "AC-C15 the doctor row names both facts and never claims 'no valid record'" PASS
+  else
+    check "AC-C15 the doctor row names both facts and never claims 'no valid record'" FAIL
+    grep -F 'binding:' "$GONE_DOCTOR_OUT" 2>/dev/null
+  fi
+
+  # The repair, end to end through the shipped entry point. Three claims in one
+  # arm because they are one transaction: it adopts, it re-mints around the SAME
+  # absent anchor, and it does not recreate the directory — the last is the one a
+  # naive implementation breaks, because the provenance writer mkdirs every
+  # missing component of <project>/.zensu/state.
+  GONE_CONFIRM_OUT="$TMP/adopt-gone-confirm.out"
+  if CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+      CLAUDE_PROJECT_DIR="$PROJECT" \
+      bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-session-adopt.sh" --confirm \
+      >"$GONE_CONFIRM_OUT" 2>&1 \
+      && grep -qF 'ADOPTED' "$GONE_CONFIRM_OUT" \
+      && grep -qF '(GONE)' "$GONE_CONFIRM_OUT" \
+      && grep -qF 'Edit and' "$GONE_CONFIRM_OUT" \
+      && [ ! -e "$GONE_PROJECT" ] \
+      && [ "$(node -p 'require(process.argv[1]).plugin_version' "$GONE_RECORD")" = 0.18.0 ] \
+      && [ "$(node -p 'require(process.argv[1]).project_root' "$GONE_RECORD")" = "$GONE_PROJECT" ]; then
+    check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root" PASS
+  else
+    check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (project recreated: $([ -e "$GONE_PROJECT" ] && echo yes || echo no))" FAIL
+    head -c 400 "$GONE_CONFIRM_OUT" 2>/dev/null
+  fi
+
+  # What the repair does NOT buy. The session is now in the ordinary
+  # orphaned-project-root state, so the Edit gate must still deny — the row and
+  # the report both promise exactly that, and a relaxation here would be the
+  # gate widening this design deliberately refused.
+  GONE_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$GONE_SESSION" CWD="$PROJECT" node -e '
+    process.stdout.write(JSON.stringify({
+      hook_event_name: process.env.EVENT,
+      session_id: process.env.SESSION,
+      cwd: process.env.CWD,
+      tool_name: "Edit",
+      tool_input: {file_path: "README.md", old_string: "a", new_string: "b"},
+    }));
+  ')"
+  GONE_EDIT_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-edit-tdd-reminder.sh "$GONE_EDIT_PAYLOAD")"
+  if [ "$GONE_EDIT_DECISION" = deny ]; then
+    check "AC-C17 Edit stays denied after the adoption — the anchor is still gone" PASS
+  else
+    check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (got '$GONE_EDIT_DECISION')" FAIL
+  fi
+
+  # And what it DOES buy, which is the half that makes the check above a
+  # discrimination rather than a constant: the lineage break is gone, so the
+  # doctor now reports the plain orphaned state instead of the combined one.
+  GONE_DOCTOR_AFTER="$TMP/adopt-gone-doctor-after.out"
+  CLAUDE_CODE_SESSION_ID="$GONE_SESSION" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
+    CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+    bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$GONE_DOCTOR_AFTER" 2>/dev/null
+  if grep -qF 'the project root recorded for this session no longer exists' "$GONE_DOCTOR_AFTER" \
+      && ! grep -qF 'declares an incompatible lineage' "$GONE_DOCTOR_AFTER"; then
+    check "AC-C18 after the adoption the doctor reports the plain orphaned state" PASS
+  else
+    check "AC-C18 after the adoption the doctor reports the plain orphaned state" FAIL
+    grep -F 'binding:' "$GONE_DOCTOR_AFTER" 2>/dev/null
+  fi
+else
+  check "AC-C13 a record whose project root is gone is still adoptable across the lineage break (fixture unavailable)" FAIL
+  check "AC-C14 a gone project root plus any second disagreement still refuses record-unreadable (fixture unavailable)" FAIL
+  check "AC-C15 the doctor row names both facts and never claims 'no valid record' (fixture unavailable)" FAIL
+  check "AC-C16 --confirm adopts, keeps the absent anchor, and never recreates the deleted root (fixture unavailable)" FAIL
+  check "AC-C17 Edit stays denied after the adoption — the anchor is still gone (fixture unavailable)" FAIL
+  check "AC-C18 after the adoption the doctor reports the plain orphaned state (fixture unavailable)" FAIL
 fi
 
 # CONV-1 — the skill's refusal table is the one independent re-encoding of
