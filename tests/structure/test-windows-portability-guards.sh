@@ -26,6 +26,7 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+ARTIFACT_REDACT="$ROOT/hooks/lib/zensu-artifact-redact-v1.js"
 BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
 EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
 # The superseded-lease sweep is the SECOND requireable module carrying the hardened
@@ -482,6 +483,61 @@ else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
 fi
 
+# The artifact redactor is another requireable module carrying a hardened
+# open — the inventory above is deliberately not numbered, because an ordinal in
+# a comment goes stale the next time a module is enrolled and nothing checks it.
+# It is enrolled here for the same reason the plan-payload reader is:
+# every count pin in this file is per-file, so a NEW file with a secure open is
+# invisible to all of them. It carries THREE descriptor-judged opens of the
+# artifact — the read in redactFile, the append in writeArtifactLine, and the
+# read that validates the target before replaceArtifactFile publishes by rename —
+# and all three fstat the DESCRIPTOR, which is what makes the symlink and
+# hard-link refusals unraceable. The third arrived when `replace` stopped
+# truncating in place: an ftruncate commits the destroy before the new bytes
+# exist, so that mode now writes an O_EXCL temp and renames, and the counts below
+# moved with it. The absent O_TRUNC is still part of the contract: truncating at
+# open would run BEFORE the nlink check could refuse a hard link. The dev/ino
+# comparison and the pre-rename re-stat are pinned here for
+# the same reason the opens are: its REJECT direction is a race no behavioral
+# suite can stage, so the structural pin is the only place it can be held.
+#
+# `fs.fstatSync(fd)` is FOUR, not three: writeArtifactLine fstats a second time
+# AFTER its write, because a rename landing between the checks and the write
+# sends the line to an orphaned inode and the old spelling reported that as
+# success. That call site is asserted separately below, so raising the count
+# alone cannot satisfy this check.
+#
+# The pre-rename re-stat is TWO spellings and both are asserted, because the
+# `stat`-based one holds only `redactFile`. `replaceArtifactFile` compares against
+# `prior` instead, and while only the first literal was here, deleting that whole
+# guard left every assertion in this block green: the `concurrent-write` reason is
+# still minted by `redactFile` and both `fsyncSync` calls are untouched. The
+# `prior === null` arm is asserted separately for the same reason — it is the half
+# that defends a target APPEARING between the tolerated ENOENT and the rename, and
+# nothing else in this file or in the behavioral suite reaches it. R45 covers the
+# post-write re-check of writeArtifactLine in APPEND mode, not this one.
+if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.O_NOFOLLOW)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'const NON_BLOCK = Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0;' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | noFollow | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(target.path, fs.constants.O_RDONLY | platformNoFollow() | NON_BLOCK)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF '| platformNoFollow() | NON_BLOCK' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && [ "$(grep -cF 'fs.fstatSync(fd)' "$ARTIFACT_REDACT")" -eq 4 ] \
+  && [ "$(grep -cF '!sameInode(fs.fstatSync(fd), target)' "$ARTIFACT_REDACT")" -eq 1 ] \
+  && [ "$(grep -cF 'stat.nlink !== 1' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF '!sameInode(stat, target)' "$ARTIFACT_REDACT")" -eq 3 ] \
+  && [ "$(grep -cF 'fs.fsyncSync(out)' "$ARTIFACT_REDACT")" -eq 2 ] \
+  && grep -qF 'expected.dev === stat.dev && expected.ino === stat.ino' "$ARTIFACT_REDACT" \
+  && grep -qF "err.code === 'ELOOP' || err.code === 'EMLINK'" "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== stat.size || now.mtimeMs !== stat.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'now.size !== prior.size || now.mtimeMs !== prior.mtimeMs' "$ARTIFACT_REDACT" \
+  && grep -qF 'prior === null' "$ARTIFACT_REDACT" \
+  && grep -qF "reason: 'concurrent-write'" "$ARTIFACT_REDACT" \
+  && ! grep -qF 'fs.constants.O_TRUNC' "$ARTIFACT_REDACT" \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$ARTIFACT_REDACT"; then
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" PASS
+else
+  check "artifact redactor omits unsupported O_NOFOLLOW on Windows and judges the descriptor" FAIL
+fi
 # The rule-block reader is the third file carrying a hardened open, and it is now
 # ONE file rather than two carriers to be compared. It is enrolled here for the
 # reason stated above: every count pin in this suite is per-file, so a NEW file

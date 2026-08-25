@@ -1,5 +1,15 @@
 # TDD Plan: {Feature Title}
 
+<!--
+Authoring rules — this file is written to be COMMITTED. Consuming repos keep
+.zensu/plans/ as an audit trail and may later open-source the repository.
+  * English only, whatever language the session is conducted in.
+  * No absolute paths: name files by their repo-root-relative path. The
+    PostToolUse redactor (hooks/post-artifact-redact.sh) rewrites the roots it
+    recognizes into <project> / ~ / <home>, but it cannot recognize a customer
+    name, an internal hostname, or a credential pasted into the Context section.
+-->
+
 ## Context
 {Spec verbatim}
 **Approach**: Strict Red/Green TDD | **Tech Stack**: {stack} | **Coverage**: {coverage_cmd or "SKIPPED"} @ {threshold} ({threshold_source})
