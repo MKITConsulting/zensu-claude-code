@@ -354,6 +354,7 @@ done
 check "L9 --diagnose reports config root, ledger, labels, edge count, probes and platform" "$D_OK"
 [ "$(jq_field "$OUT" store)" = "null" ] && check "L9a --diagnose reports a null store when none was found, instead of pretending" PASS || check "L9a --diagnose reports a null store when none was found" FAIL
 
+
 # An explicit override must be authoritative: falling through to a guessed path
 # would attribute sessions to accounts read out of a store nobody chose.
 PROBE_COUNT="$(node -e '
@@ -361,6 +362,61 @@ let o; try { o = JSON.parse(process.argv[1]); } catch { process.stdout.write("PA
 process.stdout.write(String((o.probes || []).length));
 ' "$OUT")"
 [ "$PROBE_COUNT" = "1" ] && check "L9b ZENSU_CCD_STORE is authoritative — no fallback probe behind it" PASS || check "L9b ZENSU_CCD_STORE is authoritative (probe count ${PROBE_COUNT:-<empty>})" FAIL
+
+# ── L9c..L9h — the --diagnose TEXT carrier, which no check ever executed ───
+# Every other --diagnose invocation in this file passes --json, so the payload FIELDS
+# were pinned and none of the print lines were -- and --diagnose exists to explain, to
+# a PERSON, why attribution did not happen. Its human half is the answer to this
+# feature's largest stated unknown: the Windows and Linux store paths nobody has
+# observed. Its own variable throughout, never the shared `OUT`: the checks in this
+# file hand `OUT` forward across blocks, and a text payload landing in it is read by
+# the next JSON consumer as a parse error rather than as a mistake here.
+DTXT="$(trail "$NOSTORE" "$SID_C" "$LIVE_PID" lineage --diagnose --all)"
+case "$DTXT" in *"CONFIG ROOT"*) check "L9c the --diagnose text carrier prints the resolved config root" PASS ;; *) check "L9c the text carrier prints the config root (got $(printf '%s' "${DTXT:-<empty>}" | head -c 80))" FAIL ;; esac
+# The guidance names the override a user is meant to reach for. Saying no store was
+# found without naming ZENSU_CCD_STORE leaves the remedy undiscoverable on exactly the
+# two platforms whose paths are inferred rather than measured.
+case "$DTXT" in *ZENSU_CCD_STORE*) check "L9d the no-store guidance names the override the user is meant to set" PASS ;; *) check "L9d the no-store guidance names ZENSU_CCD_STORE" FAIL ;; esac
+# EVERY probed candidate with its verdict, not only the one that won -- and therefore
+# with NO override set, because L9b above pins that an override collapses the list to
+# one. A report naming the winner alone cannot answer "which path did you try on this
+# machine", which is the question the unverified paths make someone ask.
+DTXT_ALL="$( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"
+  # `unset` rather than a second `-u` on the env call: L28 below scans for the exact
+  # `env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS"` literal, and an extra unset spliced
+  # into it reads as one more EXEMPTION from the isolation rule. Widening that scan to
+  # accept the longer form would trade a precise guard for a vaguer one; keeping the
+  # idiom costs one line here.
+  unset ZENSU_CCD_STORE
+  HOME="$FAKE" USERPROFILE="$FAKE" \
+  env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --diagnose --all --config-dir "$CFG" 2>&1 )"
+PROBE_LINES="$(printf '%s\n' "$DTXT_ALL" | grep -cE '^ +(absent|found) ' || true)"
+if [ "$PROBE_LINES" -ge 2 ]; then
+  check "L9e every probed store candidate is listed with its verdict, not only the winner ($PROBE_LINES)" PASS
+else
+  check "L9e every probed store candidate is listed with its verdict (matched=$PROBE_LINES)" FAIL
+fi
+# The unreadable-ledger arm of the same carrier. --diagnose prints an edge COUNT, and a
+# directory it could not read yields zero -- so the line saying that zero is not a
+# measurement is the whole difference between a diagnostic and a wrong answer. A
+# dedicated config root, because $CFG holds the records the rest of this file needs.
+L9_CFG="$(mktemp -d -t zensu-l9-XXXXXX)"
+mkdir -p "$L9_CFG/zensu/session-lineage/v1"
+printf 'x' > "$L9_CFG/zensu/session-lineage/v1/edges"
+DTXT_BAD="$( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"
+  HOME="$FAKE" USERPROFILE="$FAKE" ZENSU_CCD_STORE="$NOSTORE" \
+  env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" lineage --diagnose --all --config-dir "$L9_CFG" 2>&1 )"
+rm -rf "$L9_CFG"
+case "$DTXT_BAD" in
+  *"NOT a measurement"*) check "L9f an unreadable ledger says the edge count above it is NOT a measurement" PASS ;;
+  *) check "L9f the unreadable-ledger disclaimer is printed (got $(printf '%s' "${DTXT_BAD:-<empty>}" | head -c 120))" FAIL ;;
+esac
+# And it names the CAUSE. "could not read" without an errno sends an operator looking
+# for a missing directory when the real state is a file sitting on the name.
+case "$DTXT_BAD" in *"LEDGER ERROR ENOTDIR"*) check "L9g the disclaimer names the errno, not just that something failed" PASS ;; *) check "L9g the disclaimer names the errno" FAIL ;; esac
+# Control: the same carrier against a READABLE ledger must NOT print it, or L9f is
+# satisfied by a line the command always emits.
+case "$DTXT" in *"NOT a measurement"*) check "L9h-control a readable ledger prints no unreadable disclaimer" FAIL ;; *) check "L9h-control a readable ledger prints no unreadable disclaimer" PASS ;; esac
 
 # ── L10 — CLAUDE_CONFIG_DIR redirects the ledger ───────────────────────────
 ALTCFG="$FAKE/altcfg"
@@ -2000,6 +2056,18 @@ case "$(jq_field "$OUT" appPid)" in null) check "L63c a Claude ancestor beyond t
 # falling back to the real process table.
 OUT="$(probe 'not json')"
 case "$(jq_field "$OUT" error)" in ABSENT|null) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" FAIL ;; *) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" PASS ;; esac
+# The BASENAME, never the whole string. `ps -o comm=` yields the full executable path
+# on macOS, so a whole-string test matched any ancestor that merely LIVED under a
+# claude-named directory -- a checkout of this plugin, or ~/claude-tools/bin/watcher.
+# The session was then grouped under a "window" that is not one, and this walk is the
+# fallback that exists precisely for when the desktop store is unreachable. Until
+# `window-probe` existed this rule was pinned at SOURCE only; it is behavioural now.
+OUT="$(probe '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":1,"comm":"/Users/x/claude-tools/bin/watcher"}]}')"
+case "$(jq_field "$OUT" appPid)" in null) check "L63e a path that merely LIVES under a claude-named directory is not a window" PASS ;; *) check "L63e a claude-named DIRECTORY is not a window (got $(jq_field "$OUT" appPid))" FAIL ;; esac
+# The positive half of the same rule, so L63e is not satisfied by a walk that stopped
+# matching anything: the identical tree with the name moved into the basename matches.
+OUT="$(probe '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":1,"comm":"/Users/x/tools/bin/claude-watcher"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "90" ] && check "L63f-control the same tree matches once the name is in the basename" PASS || check "L63f-control the same tree matches once the name is in the basename (got $(jq_field "$OUT" appPid))" FAIL
 
 # -- L64 -- the process probe spawns nothing it has not pinned -------------
 # Neither arm of `processTable` is reachable from a test on the other platform, so

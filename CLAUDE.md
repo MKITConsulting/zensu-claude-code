@@ -2097,13 +2097,21 @@ teaching `readEdges` to enumerate siblings.
   anything. That is the safe direction — the alternative is the label resurfacing on
   an unrelated window that inherited the number — and `label --remove <pid>` clears the
   old form, which is the only thing that can still name it.
-- **Three properties are pinned at SOURCE because no behavioural check can reach them
-  from a sandbox**, and each says so in its own check comment: `windowOf`'s basename
-  match (needs a real ancestor process whose executable PATH contains "claude" and
-  whose basename does not), the `msysDrivePrefix` routing (identity off win32 by
-  construction), and `cmdLabel` landing through `updateLabels` (the loss window needs
-  two processes interleaving). Source pins rot differently from behavioural ones —
-  each carries a control that fails if its own scan matches nothing.
+- **Two properties are pinned at SOURCE because no behavioural check can reach them
+  from a sandbox**, and each says so in its own check comment: the `msysDrivePrefix`
+  routing (identity off win32 by construction) and `cmdLabel` landing through
+  `updateLabels` (the loss window needs two processes interleaving). Source pins rot
+  differently from behavioural ones — each carries a control that fails if its own
+  scan matches nothing. **`windowOf`'s basename match was the third and no longer is.**
+  It read as unreachable because every fixture starts `node` from a shell, so no
+  ancestor ever matched — neutering the function to `return null` cost exactly one
+  check. The `window-probe` command takes the table as a parameter over stdin, so
+  `L63`–`L63f` now drive the rule that decides the answer, INCLUDING the negative case
+  the old source pin existed for: a path that merely lives under a claude-named
+  directory (`~/claude-tools/bin/watcher`) is not a window, with the same tree matching
+  once the name moves into the basename. A property listed here as untestable, once a
+  seam makes it testable, is a stale claim rather than a residual — check this list
+  when a seam lands.
 - **The record-count cap is proven COMPUTED but not proven end-to-end.** The unit suite
   plants `MAX_EDGE_RECORDS + 5` records; the shell checks prove `ledgerTruncated`
   travels on every ledger-aware payload. Nothing drives a real over-cap ledger through
@@ -2111,7 +2119,7 @@ teaching `readEdges` to enumerate siblings.
 
 **`tests/structure/test-session-trail-lineage.sh`'s Windows ceiling is MEASURED, and
 the measurement is now STALE — say so rather than quoting it as headroom.** The figure
-below was taken at 70 checks; the suite is at 233. The rule this section exists to
+below was taken at 70 checks; the suite is at 268. The rule this section exists to
 record is that the ceiling is set from the FIRST GREEN WALL CLOCK on the shard, never
 estimated from the macOS time and never raised speculatively — so the number stands
 until a green Windows run replaces it, and until then the 9x ratio is what new checks
@@ -2136,11 +2144,29 @@ of it across seven suites — `deferred-reset-races` alone took 584150 ms at the
 caps under one 1800000 profile means whichever runs second cannot receive its own
 ceiling; the same failure §Host-Refused Reviewer Spawn records verbatim ("read the
 shard's remaining budget", not the suite's `timeoutMs`). **That 1213416 ms is now STALE for the same reason the per-suite figure above is** —
-it was taken with `session-trail-lineage` at 70 checks, and the suite is at 233 — the SAME figure the per-suite paragraph above now quotes. The two once disagreed (157 against "past 200") while describing one measurement, which is the drift a single number in two paragraphs invites.
-On this document's own 9x ratio the suite alone projects to roughly 614000 ms, which
-would put the shard near 1.55M of its 1.8M rather than the 1213416 recorded here. Do
-NOT quote a headroom percentage from it; replace both figures from the next green
-Windows shard, and until then treat the shard as the ceiling that binds. A shard abort
+it was taken with `session-trail-lineage` at 70 checks, and the suite is at 268 — the SAME figure the per-suite paragraph above now quotes. The two once disagreed (157 against "past 200") while describing one measurement, which is the drift a single number in two paragraphs invites.
+**The projection is now derived from a measurement rather than from a check count**,
+and the method is the part worth keeping: a local wall clock means nothing on its own,
+because the machine that produced the 31 s baseline is not the machine anyone is
+sitting at. Run the OTHER suite as a cross-machine control. Measured 2026-08-25 on the
+author's machine: the parallel working copy's variant of this suite took **108.5 s at
+88 checks** (1.23 s/check) where this document records 0.47 s/check for the baseline
+machine — so that machine is roughly **2.6x slower per check**. This suite measured
+**213 s at 260 checks** there (0.82 s/check), i.e. about 0.32 s/check on the baseline
+machine, which through the 8.3x Windows ratio projects to roughly **2.6 s/check** and,
+at 268 checks, to **about 700000 ms**. That would put the shard near 1.7M of its 1.8M
+rather than the 1213416 recorded here.
+
+**That projection is why 600000 was REJECTED for this suite, not merely not adopted.**
+The parallel working copy lowered its own ceiling to 600000 on the strength of the
+same green run — correctly, for a suite of 70 checks measuring 274 s. This suite is
+nearly four times that size, and 700000 is already past 600000: adopting the number
+would have traded a suite that fits for one that reports `TIMED_OUT` on every Windows
+run. A ceiling is not portable between two suites sharing an `id`; only the RATIO is.
+
+Do NOT quote a headroom percentage from any of this; a projection is not a measurement
+and does not authorize raising anything either. Replace both figures from the next
+green Windows shard, and until then treat the shard as the ceiling that binds. A shard abort
 truncates the tail of the second suite silently. The caveat lives here and NOT in the manifest:
 `tests/run-profile.js`'s `SUITE_KEYS` rejects any key outside
 `{id, runner, path, args, timeoutMs}` and aborts every Windows shard at manifest load.
