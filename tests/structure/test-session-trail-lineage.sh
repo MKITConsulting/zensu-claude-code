@@ -1845,6 +1845,55 @@ case "$(jq_field "$OUT" otherSchemaLedgers)" in ABSENT|PARSE_ERROR) check "L60 t
 rm -rf "$CFG/zensu/session-lineage/v0"
 reset_ledger
 
+# -- L61 -- no render of a path-shaped transcript value is left raw ---------
+# Rounds 3 and 4 each found ANOTHER unbounded render of the same values rather
+# than a wrong one: list's row header survived while the line below it was fixed,
+# the handoff brief survived while its takeover twin was fixed, and cmdLimited
+# reproduced the same shape inside one function. A per-site pin needs
+# hand-extending every time, which is how the twin survived a whole round. This
+# scans for the SHAPE instead: any interpolation of one of these identifiers,
+# unwrapped, on a line that prints or pushes.
+L61_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
+L61_PAT='(print|L\.push)\(.*\$\{(r\.wt|r\.cwd|r\.worktree|r\.branch|r\.title)\}'
+# The one exemption is a DOCUMENTED class, not an oversight, and it is asserted
+# below rather than assumed. SKILL.md states that the `cd <cwd> && claude --resume
+# <id>` line is assembled without shell quoting and tells the reader to read it
+# before running and rewrite it before persisting a brief. Bounding it would be the
+# WRONG fix: boundText collapses a whitespace run to a single space, yielding a
+# DIFFERENT path that still looks runnable, which would make that warning false.
+# The remedy there is quoting, a separate decision this suite does not pre-empt.
+L61_RAW="$(grep -nE "$L61_PAT" "$L61_SRC" | grep -vF 'cd ${' || true)"
+if [ -z "$L61_RAW" ]; then
+  check "L61 every rendered path-shaped transcript value goes through a bound" PASS
+else
+  check "L61 an unbounded path-shaped render remains: $(printf '%s' "$L61_RAW" | head -2 | tr '\n' ' ' | cut -c1-140)" FAIL
+fi
+# The control: the scan must be able to REPORT one, or "none found" and "none
+# looked for" read the same -- the defect this suite has now repaired six times.
+L61_CTRL="$(mktemp -t zensu-l61-XXXXXX)"
+printf 'print(`WORKTREE ${r.wt}`);\n' > "$L61_CTRL"
+if grep -qE "$L61_PAT" "$L61_CTRL"; then
+  check "L61-control the raw-render scan bites a planted unbounded interpolation" PASS
+else
+  check "L61-control the raw-render scan matched nothing, so L61 is vacuous" FAIL
+fi
+rm -f "$L61_CTRL"
+# And the exemption filter must not be inert: if the shell-command class ever stops
+# matching, L61 would silently start reporting a clean tree for a reason unrelated
+# to the property it names.
+L61_CD="$(grep -cF 'cd ${' "$L61_SRC" || true)"
+[ "$L61_CD" -ge 1 ] && check "L61b-control the exempted shell-command class is present, so the filter is not inert ($L61_CD lines)" PASS || check "L61b-control the exempted shell-command class was not found, so the exemption filter is inert" FAIL
+if grep -qF 'assembled without shell quoting' "$PLUGIN_DIR/skills/session-trail/SKILL.md"; then
+  check "L61c the shell-command exemption is documented where the user is told to run it" PASS
+else
+  check "L61c the shell-command exemption is documented in SKILL.md" FAIL
+fi
+# The file_path extractor binds at its SOURCE, so all three of its renderers are
+# covered by one site rather than three chances to miss one.
+ETF_BODY="$(awk '/^function extractTouchedFiles\(/{f=1} f{print} f&&/^\}/{exit}' "$L61_SRC")"
+[ -n "$ETF_BODY" ] && check "L61a-control the extractTouchedFiles body was actually extracted" PASS || check "L61a-control the extractTouchedFiles body was not found, so the scan below is vacuous" FAIL
+case "$ETF_BODY" in *"boundText("*) check "L61a the transcript file_path values are bounded where they are extracted" PASS ;; *) check "L61a the transcript file_path values are bounded at the source" FAIL ;; esac
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added

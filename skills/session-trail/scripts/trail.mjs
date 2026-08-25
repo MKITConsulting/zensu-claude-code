@@ -1230,7 +1230,13 @@ function extractTouchedFiles(text, limit) {
   while ((m = re.exec(text)) !== null) {
     let p;
     try { p = JSON.parse(`"${m[1]}"`); } catch { continue; }
-    counts.set(p, (counts.get(p) || 0) + 1);
+    // Bounded HERE, like every other transcript-derived value in this file — the
+    // same argument `safePr` states. This one reaches `show` AND both persisted
+    // briefs, so binding it at three renderers would be three chances to miss one.
+    // A path that bounds away to nothing names no file and is dropped.
+    const bounded = boundText(p, 200);
+    if (!bounded) continue;
+    counts.set(bounded, (counts.get(bounded) || 0) + 1);
   }
   return [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, limit).map(([p, n]) => ({ path: p, hits: n }));
 }
@@ -1563,7 +1569,7 @@ function resolve(opts, selectorRaw) {
       const byWorktree = new Set(t.map((r) => r.cwd));
       if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${r.sessionId.slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${r.worktree}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
+      for (const r of t) print(`  ${r.sessionId.slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${oneLine(r.worktree, 120)}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
       flush();
       process.exit(2);
     }
@@ -1700,7 +1706,7 @@ function cmdLimited(opts) {
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
+    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
     print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
@@ -1898,12 +1904,12 @@ function cmdHandoff(opts) {
   const ctx = opts.all ? null : repoContext(opts.repo || process.cwd());
   const target = handoffPath(r, ctx, g && g.branch);
   const L = [];
-  L.push(`# Handoff: ${r.title || path.basename(r.cwd)}`);
+  L.push(`# Handoff: ${oneLine(r.title || path.basename(r.cwd), 120) || '(untitled)'}`);
   L.push('');
   L.push('## Source');
   L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
-  L.push(`- worktree: \`${r.wt}\`${r.cwdExists ? '' : '  **MISSING**'}`);
-  L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
+  L.push(`- worktree: \`${oneLine(r.wt, 200)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
+  L.push(`- branch: \`${oneLine((g && g.branch) || r.branch, 120) || '?'}\``);
   L.push(`- transcript: \`${r.transcript}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
