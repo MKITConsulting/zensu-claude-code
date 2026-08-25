@@ -12,6 +12,7 @@
     "tests/structure/test-autopilot-plan-delegate.sh",
     "tests/structure/test-autopilot-state-machine.sh",
     "tests/structure/test-bash-source-write-gate.sh",
+    "tests/structure/test-best-solution-first.sh",
     "tests/structure/test-file-exists-replacement.sh",
     "tests/structure/test-msys-runtime-boundaries.sh",
     "tests/structure/test-plan-payload-fallback.sh",

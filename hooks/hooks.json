@@ -103,7 +103,8 @@
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-evidence-discipline.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-evidence-discipline.sh\"",
+            "timeout": 10
           },
           {
             "type": "command",
@@ -133,7 +134,13 @@
           },
           {
             "type": "command",
-            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-evidence-discipline.sh\""
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/session-start-evidence-discipline.sh\"",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-best-solution-first.sh\"",
+            "timeout": 10
           },
           {
             "type": "command",
@@ -182,6 +189,11 @@
           {
             "type": "command",
             "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-zen-mode.sh\""
+          },
+          {
+            "type": "command",
+            "command": "bash \"${CLAUDE_PLUGIN_ROOT}/hooks/user-prompt-best-solution-first.sh\"",
+            "timeout": 10
           }
         ]
       }

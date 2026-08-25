@@ -13,17 +13,15 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (142 = 135 + 7). **Known drift, pre-existing and NOT
-reconciled here:** §3's eleven CI group headers sum to 130, and the arithmetic closes at 135
-only because **five** CI suites appear nowhere in §3 at all — `test-autopilot-release-cli.sh`,
-`test-evidence-crosscheck.sh`, `test-orphaned-project-root.sh`, `test-run-all-sharding.sh`
-and `test-session-control-core.sh` (the second and fifth are mentioned elsewhere, in §4 and
-§7, but in no §3 group). Counting
-§3's twelfth header, the local-only group of 7, gives 137 against 142. The five-profile
-Windows drift this note used to carry is GONE: §1's Windows row and §7 are re-derived from
-`tests/profiles/windows-ci.v1.json`. Nothing machine-checks this
-document, so treat §3's per-group numbers as descriptive rather than authoritative until
-that sweep happens.
+reconciled to that manifest (143 = 136 + 7), **and §3 is too**: its eleven CI group headers
+sum to 136, the twelfth (local-only) adds 7, and every one of the 143 manifest suites appears
+in exactly one group. §7's profile table was re-derived from
+`tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
+membership are the JSON's own, and the entry total is **42**.
+
+**Nothing machine-checks any of this.** The reconciliation above is a hand audit performed
+at this commit, not an invariant: the next suite added without touching §3 silently breaks
+it again, and no test will say so. Re-derive rather than trust when the numbers matter.
 
 **Windows coverage of `test-artifact-redaction.sh` is deliberately
 STRUCTURAL-ONLY.** The suite is in `ciStructureTests`, so POSIX `run-all.sh --ci`
@@ -43,11 +41,12 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **142** — 135 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| `tests/structure/*.test.js` (`node --test` units) | **19 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **143** — 136 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **136 structure suites + 5 offline evals = 141 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 143 − 136 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **23 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
-| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 40 suite entries) | `ci.yml` matrix, `run-profile.js` |
+| Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
 | Windows safety shards | scheduled/manual matrix | `windows-safety.yml` |
 | Approx. assertions in structure layer | **~4,200** (~3,740 in the CI set) | — |
 
@@ -55,8 +54,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 140 structure suites + 5 offline evals | none |
-| `--ci` | 133 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 143 structure suites + 5 offline evals | none |
+| `--ci` | 135 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -79,8 +78,9 @@ Runner-level guarantees (themselves pinned by `test-run-all-preflight-watchdog.s
 
 ## 3. Deterministic structure suites — grouped by what they cover
 
-### Session Control & workflow state (12)
-`session-control-claude` · `session-control-sandbox-hook-integration` · `session-id-v1` ·
+### Session Control & workflow state (14)
+`orphaned-project-root` · `session-control-claude` · `session-control-core` ·
+`session-control-sandbox-hook-integration` · `session-id-v1` ·
 `session-start-banner` · `state-verb-diagnostics` · `tdd-log-path-anchor` ·
 `tdd-no-flock-external-lease` · `tdd-state-corruption-fail-closed` ·
 `tdd-state-path-safety` · `versioned-plugin-upgrade` · `workflow-scope` ·
@@ -110,9 +110,10 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (25)
+### Review chain & findings (26)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
-`deferred-review-fallback` · `finding-verification` · `pending-review-ttl` ·
+`deferred-review-fallback` · `evidence-crosscheck` · `finding-verification` ·
+`pending-review-ttl` ·
 `post-review-autopilot-claim` · `post-review-outer-ownership-root` ·
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
 `reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
@@ -129,12 +130,12 @@ one-shot review ticket CAS and budget rearm, deferred/pending review markers plu
 their TTL, `--chain-status` / `--chain-recover`, and the zero-file-change gate on the
 unqualified chain terminus.
 
-### Autopilot (15)
+### Autopilot (16)
 `autopilot-adversarial-recovery` · `autopilot-bound-payload-windows` ·
 `autopilot-chain-integration` · `autopilot-delegated-skill-contract` ·
 `autopilot-durable-skill` · `autopilot-full-cycle` · `autopilot-id-and-start-boundaries` ·
 `autopilot-inner-termination` · `autopilot-plan-delegate` ·
-`autopilot-post-review-max-rounds` · `autopilot-review-rearm` ·
+`autopilot-post-review-max-rounds` · `autopilot-release-cli` · `autopilot-review-rearm` ·
 `autopilot-session-resume` · `autopilot-skill` · `autopilot-state-machine` ·
 `autopilot-stop-enforcer`
 
@@ -174,9 +175,10 @@ taking a session over, which its structural sibling can only pin as vocabulary. 
 loudly where `os.homedir()` does not follow `$HOME`, rather than reporting against the
 developer's real sessions.
 
-### Prompt routing & payloads (6)
-`agent-context` · `context-nudge-hook` · `intent-router-hook` · `plan-approved-delegate` ·
-`plan-payload-fallback` · `zensu-plm-arg-guidance`
+### Prompt routing & payloads (7)
+`agent-context` · `best-solution-first` · `context-nudge-hook` ·
+`intent-router-hook` · `plan-approved-delegate` · `plan-payload-fallback` ·
+`zensu-plm-arg-guidance`
 
 Covers the trusted-payload principal / event discriminator, the UserPromptSubmit
 context-occupancy nudge, the intent router, and how the PostToolUse(ExitPlanMode)
@@ -190,12 +192,12 @@ GitHub/GitLab provider detection, PR/MR operations, review publishing, marker
 reconciliation (~107), commentable-diff-line validation, credential handling.
 `workflow-checkout-credentials` needs `node_modules` → `BLOCK` without `npm ci`.
 
-### Release & repo hygiene (13)
+### Release & repo hygiene (14)
 `changelog-unreleased-resolver-entries` · `drift-assertion-or-logic` · `drift-audit-regex` ·
 `file-exists-replacement` · `gitignore-zensu` · `immutable-marketplace-release` ·
 `promptfoo-config-refs` · `promptfoo-local-only` · `readme-hook-count-sync` ·
 `release-session-control-gate` · `run-all-preflight-watchdog` ·
-`run-all-required-offline-suites` · `version-sync`
+`run-all-required-offline-suites` · `run-all-sharding` · `version-sync`
 
 Enforces the `plugin.json` ↔ marketplace version ↔ marketplace `ref` ↔ README badge
 invariant, the immutable-tag release rule, CHANGELOG coverage, that Promptfoo configs
@@ -207,7 +209,22 @@ contract.
 `windows-ci-contract` · `windows-portability-guards`
 
 Git-Bash/MSYS path translation boundaries, native-Node module loading from a plugin
-root containing whitespace and an apostrophe, and the Windows CI manifest contract.
+root containing whitespace and an apostrophe, the Windows CI manifest contract, and — in
+`test-windows-portability-guards.sh` — the per-file secure-open inventory plus the
+marker-block-carrier contract that binds the two rule-injecting hooks to one reader, one `MAX_FILE` and one
+`MAX_BLOCK`. Those three read the two hook files and sit directly beneath the per-file
+secure-open pins, so the adjacency is real. A FOURTH arm in the same suite compares the two
+suites' declared `REVIEW_HEADROOM` — it reads no hook and nothing platform-related, so it is a
+policy invariant lodged here rather than an extension of the reader contract. The Windows-PR
+constraint recorded below does NOT bind it: it has no platform dimension, so POSIX `run-all.sh`
+plus the weekly Windows Safety shard cover it wherever it lives. Relocating it is an open item
+WITH A CONSTRAINT: `test-evidence-discipline.sh` is the natural semantic owner but is absent
+from `windows-ci.v1.json`, so moving the contract there would silently drop it from the
+Windows PR shard — the exact regression the check's own comment records as having happened
+once. `test-best-solution-first.sh` (windows-shard-4) is the only destination that preserves
+that coverage as-is; anything else has to add the suite to `windows-ci.v1.json` in the same
+commit.
+
 
 ### Documentation pins (4)
 `multi-repo-doc-citations` · `multi-repo-doc-consistency` ·
@@ -228,7 +245,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (19 files)
+## 4. `node --test` unit suites (23 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -245,6 +262,7 @@ that suite's failure.
 | `zensu-doctor-invocation.test.js` | 24 | *none found* | `/zensu:doctor` invocation allowlist — no `.sh` suite and no `run-all.sh` entry drives this file |
 | `playwright-mcp-proxy.test.js` | 16 | `test-verify-feature-skill.sh` | pinned Playwright MCP proxy |
 | `verify-feature-transcript-check.test.js` | 14 | `test-promptfoo-verify-feature.sh` | transcript assertion contract |
+| `fixture-mutation-watch.test.js` | 19 | `test-claude-promptfoo-wrapper.sh` | fixture-event classification: the gated classes (`.git`, the watch root's own name, run-owned ancestors) adjudicated by the manifest, ordinary paths by touch-after-start, and that both watch backends route through one decision spelled once |
 | `session-control-lineage.test.js` | 13 | `test-versioned-plugin-upgrade.sh` | runtime-lineage axis: same-major (same-minor while major is `0`), never-backwards, sibling plugin root |
 | `deferred-review-claim-cases.test.js` | 11 | `test-deferred-review-claim.sh` | deferred-claim case table |
 | `windows-ci-contract.test.js` | 11 | `test-windows-ci-contract.sh` | Windows CI manifest invariants |
@@ -297,21 +315,22 @@ assert, `# ` = comment.
 
 ## 7. Windows contract profiles (`tests/profiles/windows-ci.v1.json`)
 
-7 bounded profiles, 40 suite entries, run as a blocking PR matrix in `ci.yml` via
+7 bounded profiles, 42 suite entries, run as a blocking PR matrix in `ci.yml` via
 `node tests/run-profile.js <profile>`. The table below is re-derived from the JSON rather
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard. `tests/structure/windows-ci-contract.test.js` pins exactly
-these seven keys and the 40-entry total, so a shard renamed there and not here is drift
-this table cannot catch on its own:
+of 40 survived the reshard, and this branch's new suite takes it to 41.
+`tests/structure/windows-ci-contract.test.js` pins exactly these seven keys and the
+42-entry total, so a shard renamed there and not here is drift this table cannot catch
+on its own:
 
 | Profile | Suites | Members |
 |---|---|---|
 | `windows-shard-1` | 9 | autopilot-bound-payload-windows, autopilot-state-machine, deferred-lease-refresh, deferred-review-fallback, installed-plugin-provisioner, tdd-no-flock-external-lease, upgrade-linux-sandbox-host-paths, windows-ci-metadata-contract, workflow-checkout-credentials |
 | `windows-shard-2` | 8 | installed-wrapper, msys-runtime-boundaries, pre-edit-hook-mirror, reviewer-capability-gate, runtime-fixture-installer-concurrency, session-control-core, upgrade-hook-large-identity, versioned-plugin-upgrade |
-| `windows-shard-3` | 6 | deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
-| `windows-shard-4` | 3 | deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
+| `windows-shard-3` | 7 | autopilot-release-cli, deferred-reset-races, file-exists-path-transport, msys-special-plugin-module-boundaries, session-start-banner, vcs-review-marker-reconcile, windows-profile-lifecycle-contract |
+| `windows-shard-4` | 4 | best-solution-first, deferred-claim-adoption, plan-payload-path-transport, tdd-state-junction-safety |
 | `windows-shard-5` | 7 | autopilot-plan-delegate, coverage-report-windows-paths, post-review-self-review-handoff, session-id-v1, session-safe-file-read, upgrade-provider-zero-launch, windows-portability-guards |
 | `windows-shard-6` | 5 | bash-source-write-gate, deferred-transfer-reset, marketplace-fixture, session-control-claude, upgrade-process-windows-boundaries |
 | `windows-shard-7` | 2 | review-worker-evidence-lease, stop-enforcer-self-review-routing |
@@ -361,3 +380,13 @@ preflight gate fails the whole run — that gate, not this file, is the enforcem
 This overview is descriptive: update the group lists and totals in §1/§3 when suites are
 added or removed.
 
+## Suite-prologue re-entry guard (cross-suite convention)
+
+`test-evidence-discipline.sh`,
+`test-best-solution-first.sh` and `test-windows-portability-guards.sh` each set
+`ZENSU_SUITE_PROLOGUE_ENTERED` and refuse a second pass through their own prologue. A suite
+file containing a spliced copy of itself otherwise resets `PASS`/`FAIL` and reports a
+plausible total; that happened for real. It is a three-way hand copy in the three suites this
+convention started in — every other `tests/structure/test-*.sh` is still unguarded. Adopting
+it corpus-wide is an open item; at a fourth adopter, hoist the block into a sourced helper
+instead of taking another copy.

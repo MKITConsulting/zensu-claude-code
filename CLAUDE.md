@@ -600,6 +600,29 @@ The version/ref invariant above is machine-enforced: the gate runs `tests/run-al
 
 If marketplace version or source `ref` ever lags `plugin.json` (for example, a hand bump forgot one field), fix both in the release PR before any tag is created or any user-side `claude plugin install <name>@<name>` attempt.
 
+## Windows Budget for `best-solution-first`
+
+The suite cap was raised 300000 -> 600000, matching its siblings, but **the cap is
+not the ceiling that binds** and the measurement says which one is. On the last
+green run `windows-shard-4` completed in **1591 s** against its `profileTimeoutMs`
+of 1800000 — roughly **209 s of headroom for the whole shard**. A suite never
+receives its configured `timeoutMs`; it receives the shard's remaining budget, so
+raising this number buys nothing while the shard is that close to its own ceiling.
+
+The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
+it builds five fixture plugin trees, and it now also drives
+`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
+also carries `plan-payload-path-transport`, which this file records at a measured
+714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
+not by raising a number. If the shard starts reporting an abort, the tail of
+whichever suite ran last went unverified regardless of how many checks passed
+before it.
+
+The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
+The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
+outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is
+a CI-wide outage rather than documentation.
+
 ## Runtime Lineage (`version_type` is load-bearing)
 
 A plugin update that lands while a session is running leaves the Session Control
@@ -623,8 +646,10 @@ against the executing runtime. The axis:
 
 **While the plugin is at major `0`, MINOR is therefore the breaking axis.** A
 breaking change costs a `minor` release and a non-breaking feature is a `patch`.
-Anything below forces the breaking bump, because a running session would
-otherwise be served by a runtime that cannot read what it wrote:
+The list below is signed: entries are breaking unless the entry says otherwise.
+A breaking one forces the bump because a running session would otherwise be
+served by a runtime that cannot read what it wrote; the two marked NOT are
+carve-outs kept here so a releaser meets them where they will look:
 
 - the context record or workflow-state **schema** (`SCHEMA_VERSION`, any field
   added, removed or retyped);
@@ -632,6 +657,39 @@ otherwise be served by a runtime that cannot read what it wrote:
   `deferredReviewCancellation`, and every other validator that rejects an
   unknown or missing key rather than ignoring it;
 - **removing or renaming a registered hook, or changing a hook's matcher**;
+  **adding** one is NOT in this list and is a `patch`. **Provenance, because it
+  matters here:** this exemption and the config-key one below were WRITTEN BY the
+  change that needed them — the release that added the best-solution-first hook and
+  its `bestSolutionFirst` key. A commit amending the policy that classifies it is
+  the shape that deserves a second reader, so it got one: the exemption was
+  challenged in review and survived on the argument below, not on the author's own
+  say-so. Anyone widening either exemption should expect the same standard. The
+  argument has two halves
+  and the second is the load-bearing one. First, `runtimeLineageCompatible`
+  compares version tuples only and never inspects the hook inventory, an older
+  harness never loads a hook its own `hooks.json` does not declare, and the new
+  hook is invoked from the tree that declares it. Second — and this is the part a
+  reader will otherwise miss — adding a file DOES change the runtime digest, since
+  `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale; what keeps an
+  in-flight bind alive is that `readContextInternal` measures the **recorded**
+  root, and the upgraded case re-measures the executing tree against the caller's
+  claim rather than against the record. Do not over-bump defensively; do
+  re-derive this if the added hook writes session state, participates in a strict
+  key set, **or can DENY**. The third disqualifier is the one an earlier wording
+  left out, and it is the one that matters: a hook that can refuse a tool call
+  changes the capability set of every session an older runtime is still serving,
+  which is exactly what makes a matcher change breaking in the bullet above. A new
+  `PreToolUse` entry on the existing `Bash` matcher returning
+  `permissionDecision: deny` writes no session state and touches no strict key
+  set, so it passed both original tests while being as breaking as anything in
+  this list. The test is CAPABILITY, not storage: an ADVISORY hook — one whose
+  only output is `additionalContext` — is the exempt shape, and that is what the
+  two hooks this exemption was written for are;
+- **adding a permissively-read config key** is likewise NOT in this list and is
+  a `patch`, for a reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
+  `j.hooks[key] === false`, so an older runtime ignores a key it does not know
+  rather than failing on it. A key read by a STRICT validator is the opposite
+  case and belongs under the strict-key-set bullet above;
 - the **attestation shape**, which is itself a schema two versions must agree
   on. A change to it has to ship in the release that *introduces* the policy it
   serves, never one release later.
@@ -2112,6 +2170,121 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   good. The row it would have rendered was already suppressed by the same TTL, so
   the sweep changes which files exist, never which findings are reported.
 
+## Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)
+
+Two hooks inject a rule read at run time from a one-line marker block under `docs/`. They share
+ONE hardened reader, ONE `MAX_FILE` and ONE `MAX_BLOCK`, and they are NOT interchangeable:
+
+- `session-start-evidence-discipline.sh` — SessionStart + SubagentStart, block in
+  `docs/evidence-discipline.md`, **no opt-out flag**. Nothing silences it.
+- `user-prompt-best-solution-first.sh` — UserPromptSubmit + SubagentStart, block in
+  `docs/best-solution-first.md`, opt-out `hooks.bestSolutionFirst`. It additionally loads
+  `zensu-config.sh`, which is its only extra refusal path.
+
+**A THIRD consumer reads the same block, and it must never grow its own parser.**
+`ruleCarrierRows` in `hooks/lib/zensu-doctor-report.js` is the operator's only signal that a
+carrier stopped injecting: build-time pins govern this repository's copy, never an installed
+tree, and every run-time refusal but the plugin-root mismatch is silent. It `require`s
+`rule-block-v1.js` LAZILY and guarded, exactly as `reviewerDenialRows` does — a load fault costs
+that row, not the whole report — and a hand-copied marker parse there would report on bytes the
+hook would have refused. `RULE_CARRIERS` re-encodes the two `doc` paths and both marker pairs, so
+a renamed rule file or a reworded marker lands here as well as in the hook. `RULE_REASON_TEXT`
+re-encodes the module's `REASONS` values: one added there and not here renders as unrecognized
+rather than as health, which is the safe direction and is deliberate. `P5a`-`P5h` in
+`tests/structure/test-doctor.sh` pin that all four states — intact, suppressed by flag, refused,
+and not-checked — render DIFFERENTLY from one another; a row that rendered unconditionally would
+reinstate the silence it exists to remove. That suite's green fixture copies the real module and
+both real docs rather than stubbing them, so it cannot go green against a parser nothing ships.
+
+**`MAX_BLOCK` is declared twice, hand-copied once more, and bound by three checks.** The two
+declarations are the hooks; the one hand copy is `tests/structure/test-best-solution-first.sh`
+(a suite variable, bound by B2h). Do not spell the number anywhere else — name the constant.
+The prose copy in `docs/architecture.md` was removed for exactly that reason. H4e in
+`test-evidence-discipline.sh` (which reads the value out of the SIBLING file rather than
+hand-copying it, and therefore fails if that file is renamed — deliberate: the alternative is a
+third copy of the number), B2h in `test-best-solution-first.sh`, and the cross-carrier equality
+in `test-windows-portability-guards.sh`. `MAX_FILE` is bound only by that last one, because both
+per-file pins grep its declaration without the value.
+
+**The cross-carrier comparison extracts a RANGE and its boundaries are load-bearing.** It strips
+full-line comments, then selects from `const pre = fs.lstatSync(rulePath);` to the enforcement
+`block.length > MAX_BLOCK`, so it covers the hardened reader, the marker-position parse and the
+bound's use. Two properties keep it from going vacuous, and both were learned by probe:
+
+1. **The end address is a substring match**, so a trailing `// … block.length > MAX_BLOCK …` on a
+   code line survives the full-line strip and truncates the range. Added to BOTH carriers it kept
+   the bodies equal and satisfied a bare `grep` for the needle, with both enforcements deleted and
+   the suite fully green. The probe and its numbers live in the comment above the check; do not
+   re-author them here. What closes it: the extracted body's LAST LINE must be the enforcement
+   statement, and each literal must occur exactly ONCE per carrier — the count is what removes
+   the class rather than the probed spellings, and it also covers a shadowing redeclaration
+   between `const rulePath` and `const pre`, which is inside the hook's `try` block.
+2. **Comment TEXT inside the range is deliberately not compared.** That is what lets the two
+   carriers carry differently-worded notes on the shared constant; it also means a one-sided edit
+   to an in-range comment no longer fails the check. Stated, not accidental.
+
+**The refusal set is prose in EIGHT places and forks easily** — one shared reader, eight
+restatements, and no test pins the wording. It is a hand sweep, so the roster is the control:
+
+- `hooks/session-start-evidence-discipline.sh` (header)
+- `hooks/user-prompt-best-solution-first.sh` (header)
+- `docs/architecture.md` §Evidence Discipline
+- `docs/architecture.md` §Best Solution First
+- `docs/evidence-discipline.md`
+- `docs/best-solution-first.md`
+- `docs/configuration.md` — the evidence-discipline hook row
+- `docs/configuration.md` — the best-solution-first hook row
+
+The shape: an unknown event, a malformed payload, and a rule file that is absent, symlinked,
+swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or
+malformed — plus a missing `node`, and for the sibling its config
+library. Every one exits `0` silently. The only branch that REPORTS a cause is a mismatched inherited
+`CLAUDE_PLUGIN_ROOT`, which exits `2` on stderr; the plugin-root RESOLUTION failure a line above
+it also exits `2` but prints nothing, so it is neither silent-zero nor operator-visible. A site that names only the file ceiling sends an operator
+whose rule silently stopped injecting to check the file size and conclude the hook is broken. The
+count above drifted once already (it read SEVEN while listing eight), which is exactly how a site
+gets missed.
+
+**A review ceiling, not a ratio.** Each suite carries a `REVIEW_CEILING` below the `MAX_BLOCK`
+fail-safe so the next clause is argued rather than absorbed. The criterion is ABSOLUTE headroom,
+identical on both carriers, never a preserved percentage: ratio parity hands the larger slack to
+whichever block is bigger and self-erodes as the block grows.
+
+**`REVIEW_HEADROOM` is enforced ONE-SIDEDLY, in the suite that owns the ceiling.** Each owning
+suite asserts that its remaining slack — `REVIEW_CEILING` minus the measured block — never
+EXCEEDS the declared headroom, and the cross-carrier arm compares the two declared headrooms so
+they cannot drift apart. Both earlier shapes were wrong and are recorded so neither is retried:
+deriving the ceiling from the live block over-constrained it (with both ceilings fixed it reduces
+to a constraint on the two rule TEXTS' length difference that no file states, and a
+one-character edit turned the guards suite red at 88 against 89), while comparing two inert
+literals constrained nothing at all (raising one ceiling from 900 to 1000 left every check green
+while the realized headroom became 189 against 89 — measured, both times). One-sided and
+per-suite is what avoids both: block growth only shrinks the slack and stays green, and a
+unilateral ceiling raise fails in the suite where the edit was made. Accepted consequence: a
+block that shrinks far below its ceiling also trips it, which is correct — a ceiling that has
+drifted away from its text has stopped being a tripwire.
+
+Provenance of the number, stated because the comments call it "roughly one clause": 89 is the
+remainder of the evidence carrier's pre-existing round ceiling (900 minus 811), retained rather
+than re-derived, and the sibling moved from 1800 to 1741 to match it. It admits the shorter
+sentences of these blocks and not the longer ones. That is a defensible policy but it is not a
+measurement of a clause; re-deriving it from the two blocks' actual sentence lengths is open.
+
+Both suites measure through `node`, not `${#var}`: bash counts bytes under `LC_ALL=C` and code
+points otherwise, while the hooks compare `String.length` — UTF-16 code units — and both blocks
+carry non-ASCII characters. `test-evidence-discipline.sh` passes identically under `LC_ALL=C`,
+which is the claim tested rather than asserted.
+
+`test-evidence-discipline.sh` C6 pins the one measured figure in `docs/architecture.md` — the emitted
+character length — against a value it derives. C5 works the other way for the carrier population: it
+FORBIDS restating the total as a literal and requires the prose to name `EXPECTED_AGENTS` and
+`EXPECTED_SKILLS` instead, because a numeral there goes stale on every new skill. Both directions were
+learned the hard way — C5 first pinned the numeral, and the count moved from 32 to 33 in a merge before
+this branch even landed. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
+the same document — its emitted length and the per-turn total derived from it — are NOT pinned. The suite is absent from `tests/profiles/windows-ci.v1.json`, so it never runs on
+the Windows PR shard; it IS in `ciStructureTests`, which the weekly Windows Safety structure
+shards execute.
+
 ## Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12
 
 **Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
@@ -2201,3 +2374,5 @@ If `state` is `MERGED` or `CLOSED`, **abort the push**:
 A `gh pr list --head <branch>` check is not sufficient — it does not distinguish OPEN from MERGED/CLOSED. Read the `state` field explicitly.
 
 This applies to AI agents and humans alike. The `/create-pr` slash command's "PR already exists for this branch" guard does NOT cover the merged-branch case. "I just rebased ten minutes ago" is not a substitute for the check — re-run it every push.
+
+**Every plugin-opened PR body carries an Acceptance Criteria table.** The shared, repo-overridable template is `templates/pr-body.md` (resolution: `.zensu/templates/pr-body.md` at the working-tree toplevel, else `${CLAUDE_PLUGIN_ROOT}/templates/pr-body.md`). Its `## Acceptance criteria` table takes one row per stable `AC-###`/`FR-###` id read from the feature's TDD plan `## Requirements` table via `hooks/lib/zensu-plan-requirements.sh` (exit 0 = usable); when no usable table exists the template's single stub row stays in place — never ship an empty table. Both PR openers honor this: `/zensu:pilot` renders `pr-body.md`, and `/zensu:autopilot` uses its richer `autopilot-pr-body.md` variant (the same table plus the build-time bypass-ledger audit line).

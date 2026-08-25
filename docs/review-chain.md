@@ -62,13 +62,14 @@ Three skills carry an overlay anchor (`<!-- zensu:overlay <name> -->`): `tdd`, `
 
 #### Templates (repo-overridable)
 
-Three artifact skeletons ship as plugin defaults under `templates/` and resolve with the repo winning: a consumer uses `.zensu/templates/<name>.md` at the git toplevel of the working checkout (`git rev-parse --show-toplevel` — worktree-aware, same anchor as persona discovery) when it exists, else `<absolute-plugin-root>/templates/<name>.md`. The top-level Skill obtains that concrete root from Claude's native `${CLAUDE_PLUGIN_ROOT}` substitution; a supporting file loaded with `Read` must receive the already-resolved value from its parent instead of expecting another substitution pass. An override REPLACES the default wholesale — it MUST keep the mandatory sections, because the Phase 5/6 audits and `/zensu:converge` anchor on them (a structure test can only pin the plugin defaults, so for overrides this is a documented contract):
+Four artifact skeletons ship as plugin defaults under `templates/` and resolve with the repo winning: a consumer uses `.zensu/templates/<name>.md` at the git toplevel of the working checkout (`git rev-parse --show-toplevel` — worktree-aware, same anchor as persona discovery) when it exists, else `<absolute-plugin-root>/templates/<name>.md`. The top-level Skill obtains that concrete root from Claude's native `${CLAUDE_PLUGIN_ROOT}` substitution; a supporting file loaded with `Read` must receive the already-resolved value from its parent instead of expecting another substitution pass. An override REPLACES the default wholesale — it MUST keep the mandatory sections, because the Phase 5/6 audits and `/zensu:converge` anchor on them (a structure test can only pin the plugin defaults, so for overrides this is a documented contract):
 
 | Template | Consumer | Mandatory sections |
 |----------|----------|--------------------|
 | `tdd-plan.md` | `/zensu:tdd` Phase 2 | `## Requirements` (ID/Covers), `## Preconditions`, `## Cross-Layer Value Flow Pairings`, Status Legend, Steps table with Status+Covers, `## Final Verification` |
 | `autopilot-spec.md` | `/zensu:autopilot` Phase 0.C | numbered stable `AC-###` criteria, out-of-scope section, resolved recipe |
 | `autopilot-pr-body.md` | `/zensu:autopilot` step 3 | per-AC checklist table (deprecated rows kept), `Gates bypassed during build:` audit line |
+| `pr-body.md` | `/zensu:pilot` "Commit + open PR" (shared default for any PR opener) | `## Acceptance criteria` table filled from the feature's `## Requirements` rows, with a stub-row fallback |
 
 #### Code Reviewer — 5 Sequential Specialist Perspectives
 

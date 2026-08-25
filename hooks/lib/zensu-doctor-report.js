@@ -333,6 +333,107 @@ function pluginBlock() {
   }
 }
 
+// Two hooks inject a rule read at RUN TIME from a one-line marker block under docs/,
+// and both fail silent on every input fault: an absent, symlinked, oversized or
+// malformed file exits 0 with no output. On an installed tree no suite runs, so an
+// operator error — a hand-edited or re-wrapped block, a symlinked docs/, a partial
+// install — persists indefinitely and is byte-identical to a healthy install from
+// outside. `hooks wiring` above reports that the SCRIPT is on disk; it never looks at
+// the data file that script depends on, so it goes green either way. That green is
+// what makes this row necessary rather than merely nice.
+//
+// The marker parse is NOT re-implemented here. The row calls the same
+// hooks/lib/rule-block-v1.js the hooks call, so the diagnostic cannot disagree with
+// the thing it diagnoses — a hand-copied parser would report on bytes the hook would
+// have refused. The require is lazy and guarded for the reason reviewerDenialRows
+// states: a load fault costs this row, not the whole report.
+var RULE_CARRIERS = [
+  {
+    id: 'best-solution-first',
+    doc: 'docs/best-solution-first.md',
+    open: '<!-- zensu:best-solution-first -->',
+    close: '<!-- /zensu:best-solution-first -->',
+    flag: 'bestSolutionFirst',
+  },
+  {
+    id: 'evidence-discipline',
+    doc: 'docs/evidence-discipline.md',
+    open: '<!-- zensu:evidence-discipline -->',
+    close: '<!-- /zensu:evidence-discipline -->',
+    flag: null,
+  },
+];
+
+// Every refusal the reader can name, worded as a remedy rather than as a code. An
+// unknown reason renders as unknown rather than as health: a reason added to the
+// module and not here must never read as "fine".
+var RULE_REASON_TEXT = {
+  'not-a-file': 'is not a regular file — a symlink or a directory, which the reader refuses',
+  swapped: 'was replaced between the check and the read',
+  'file-too-large': "exceeds the reader's file-size ceiling",
+  'short-read': 'could not be read completely',
+  unreadable: 'is absent or unreadable',
+  'no-open-marker': 'has no opening marker',
+  'no-close-marker': 'does not carry the block as exactly one line between the markers',
+  'empty-block': 'has an empty block between the markers',
+  'block-too-large': 'carries a block past the injection size ceiling',
+};
+
+// Precedence follows configFiles(), exactly as reviewerSpawnCheckDisabled documents:
+// the project config is read last and wins over the global one, in both directions.
+function hookFlagDisabled(cfgReads, key) {
+  var disabled = false;
+  cfgReads.forEach(function (entry) {
+    var data = entry.r && entry.r.ok ? entry.r.data : null;
+    if (!data || typeof data !== 'object') return;
+    var hooks = data.hooks;
+    if (!hooks || typeof hooks !== 'object') return;
+    if (hooks[key] === false) disabled = true;
+    else if (hooks[key] === true) disabled = false;
+  });
+  return disabled;
+}
+
+function ruleCarrierRows(cfgReads) {
+  var mod = null;
+  try {
+    mod = require(path.join(pluginDir(), 'hooks', 'lib', 'rule-block-v1.js'));
+  } catch (e) {
+    line(WARN, 'rule carriers: hooks/lib/rule-block-v1.js could not be loaded ('
+      + String((e && e.message) || e) + ') — carrier health was NOT checked');
+    return;
+  }
+  if (typeof mod.readRuleBlock !== 'function') {
+    line(WARN, 'rule carriers: hooks/lib/rule-block-v1.js exports no readRuleBlock — carrier health was NOT checked');
+    return;
+  }
+  RULE_CARRIERS.forEach(function (c) {
+    var out = null;
+    try {
+      out = mod.readRuleBlock(path.join(pluginDir(), c.doc), c.open, c.close);
+    } catch (e) {
+      line(WARN, 'rule carriers: ' + c.id + ' could not be checked ('
+        + String((e && e.message) || e) + ')');
+      return;
+    }
+    if (out && out.block) {
+      if (c.flag && hookFlagDisabled(cfgReads, c.flag)) {
+        line(WARN, 'rule carriers: ' + c.id + ' block is intact (' + out.block.length
+          + ' chars) but hooks.' + c.flag + ' is false — the rule is not injected');
+      } else {
+        line(OK, 'rule carriers: ' + c.id + ' block is intact (' + out.block.length + ' chars)');
+      }
+      return;
+    }
+    var known = Object.prototype.hasOwnProperty.call(RULE_REASON_TEXT, String(out && out.reason));
+    var why = known
+      ? RULE_REASON_TEXT[out.reason]
+      : 'was refused for an unrecognized reason (' + String(out && out.reason) + ')';
+    line(BAD, 'rule carriers: ' + c.id + ' is NOT injecting — ' + c.doc + ' ' + why
+      + '. The hook exits 0 silently, so nothing else reports this.');
+  });
+}
+
 function walkQuotedBooleans(obj, prefix, hits) {
   if (obj === null || typeof obj !== 'object') return;
   Object.keys(obj).forEach(function (k) {
@@ -1114,6 +1215,10 @@ function configBlock() {
     line(OK, 'config: no config file present — built-in defaults apply');
   }
   permissionExposureRows(reviewerSpawnCheckDisabled(cfgReads));
+  // Here rather than in pluginBlock() because the row needs the resolved flag, and
+  // cfgReads is gathered in this block. It reports on plugin DATA, so it reads as a
+  // continuation of `hooks wiring` above.
+  ruleCarrierRows(cfgReads);
 }
 
 function ttlHours() {

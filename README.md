@@ -211,6 +211,7 @@ supported.
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
+| [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing
 
