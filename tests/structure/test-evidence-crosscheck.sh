@@ -67,6 +67,18 @@ else
   sed -n '1,40p' "$WORK/unit.out"
 fi
 
+# A case-count FLOOR, for the reason this repo records for the sibling driver:
+# `node --test` also exits 0 for a file that registers ZERO cases, so P1's exit
+# code alone cannot tell "all green" from "the cases were deleted".
+# node --test prints the summary as `ℹ pass <n>` on this runtime and `# pass <n>`
+# on the TAP-style one; accept either so the floor does not silently stop biting.
+UNIT_PASS="$(grep -Eo '^[#ℹ] pass [0-9]+' "$WORK/unit.out" 2>/dev/null | grep -Eo '[0-9]+$' | head -1)"
+if [ -n "$UNIT_PASS" ] && [ "$UNIT_PASS" -ge 25 ]; then
+  check "P1a the unit suite registered at least 25 cases (actual: $UNIT_PASS)" PASS
+else
+  check "P1a the unit suite registered at least 25 cases (actual: ${UNIT_PASS:-none})" FAIL
+fi
+
 # ── P2: end-to-end CLI ──────────────────────────────────────────────────────
 # witness_line <cmd> <tail> <interrupted> -> the exact format post-bash-witness.sh writes
 witness_line() {

@@ -7,6 +7,143 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **artifacts**: Publication-safe `.zensu/` plans and logs. Consuming repos commit
+  `.zensu/plans/{ts}_tdd-{slug}.md` and `.zensu/logs/{ts}_tdd-{slug}.log` as an audit
+  trail and may later open-source the repository. A scan of ~27k committed log lines
+  across four such repos found **no credential values** and ~436 lines carrying an
+  absolute developer path (`/Users/<name>/…`), almost all inside the `cmd="…"` field of
+  a CHECKPOINT/AUDIT line — that field quotes a shell command verbatim, and those
+  commands routinely begin `cd "/Users/<name>/IdeaProjects/<product>/<repo>/.claude/worktrees/<name>"`.
+  New `hooks/lib/zensu-artifact-redact-v1.js` is the single source of truth and applies
+  three rules **in this order**: project root(s) → `<project>`, `$HOME` → `~`, residual
+  `/Users/<seg>` / `/home/<seg>` / `/root` → `<home>`. Rule 1 must precede rule 2
+  because the project root is normally nested under `$HOME`; the residual rule is what
+  makes the guarantee checkable ("no `/Users/` in the file") rather than best-effort.
+  **Every rule is bounded on both sides** — without the right bound `/homework` becomes
+  `<home>work`, without the left one the rules fire inside `src/home/index.ts` — and the
+  segment class excludes quotes, because eating the closing `"` of a `cmd="…"` field
+  desynchronizes the claim from its witness entry and produces the exact `EVIDENCE GAP`
+  the design exists to prevent. Secret **names** are deliberately NOT redacted: a name
+  grants no access, this repo's own workflows carry `secrets.GITHUB_TOKEN` in public,
+  and redacting names would only make the audit trail harder to read; credential
+  **values** remain the job of `hooks/pre-write-secret-scan.sh`.
+  **There was no writer-side chokepoint to add a filter to**, which is the part of this
+  change that is not obvious: `zensu-log.sh` only ever returned the timestamp PREFIX and
+  the model appended the line itself with `printf … >> {log}`, while the plan is written
+  with the Write tool. Three writers now exist. `zensu-log.sh append --log <file>
+  --message <text> [--start <epoch>] [--truncate]` is the narrative-log writer and
+  replaces that recipe in `skills/tdd/SKILL.md` and `docs/tdd-manager-workflow.md`; it
+  deliberately carries no leading `--` so it never selects the Session Control binding
+  case, and it is **contained**: the destination must resolve to a real
+  `<root>/.zensu/{plans,logs}/<file>` or the verb refuses. That containment is not
+  hygiene — without it the verb performs exactly the write rules (A)/(B) of the
+  source-write gate exist to judge, while carrying none of the redirect/tee/heredoc
+  tokens that make a command parseable as a channel, so no Bash gate could see it.
+  The line is WRITTEN by the module too, not by a shell redirect: a `>>` names a path
+  and follows what it finds, and `[ -L ]` is blind to a hard link, so one planted in
+  `.zensu/logs/` turned the verb into an append/truncate primitive on any file on the
+  same filesystem. `writeArtifactLine` opens with `O_NOFOLLOW`, judges the descriptor
+  (`isFile`, `nlink === 1`, and the expected dev/ino re-derived from the canonical
+  parent), keeps `O_TRUNC` out of the open flags so the `nlink` check can still refuse,
+  and refuses any bucket but `logs` and any name starting with `witness-` — so
+  the log verb can never destroy a committed plan or the evidence the crosscheck
+  matches against. The destructive `mode: 'replace'` does not truncate in place at all:
+  it validates through a read-only descriptor, writes an `O_EXCL` temp, `fsync`s and
+  renames, so a failed write leaves the previous bytes addressable.
+  `hooks/post-bash-witness.sh` redacts the witness `cmd` — **not** for the witness's own
+  sake — it is gitignored in THIS repo only, and a consuming repo must add `.zensu/state/` and `.zensu/logs/witness-*.log` itself — but because
+  `zensu-evidence-crosscheck.js` matches a claim against a witness entry by EQUALITY.
+  Its `tail` is deliberately left raw: nothing compares it, its only reader is the
+  failure-marker scan, and redaction there is purely subtractive, so a `failed` token
+  inside an absolute path would vanish and an `EVIDENCE CONTRADICTION` would downgrade
+  to `verified`. Both writers pass BOTH candidate project roots, since they derive the
+  root from different authorities and must substitute identically.
+  New PostToolUse hook `hooks/post-artifact-redact.sh` is the net under both: BOTH
+  registered matchers sweep the artifacts modified in the last 5 minutes — which catches
+  a hand-rolled `printf >>` and a subagent-written artifact. In the steady state that
+  window also keeps the hundreds of tracked plans a consuming repo can hold out of the
+  read set, but the window is NOT what bounds the sweep and this note no longer implies
+  it is: a `git checkout` refreshes every tracked artifact mtime at once and puts all of
+  them inside it. `SWEEP_MAX_TARGETS` (25 per invocation, newest mtime first) is the
+  bound, and an mtime is not knowable without a stat, so the enumeration was never
+  bounded by the window either. The write matchers
+  additionally redact the tool's own `file_path`, which is the only way an artifact
+  outside that window is reached. A `witness-` prefixed name is excluded in the
+  `logs` bucket only — where the witness actually lives; the same name under
+  `.zensu/plans/` is an ordinary plan and is redacted like one. A refusal names
+  whether the target was swept or written. Every path exits 0 — a
+  PostToolUse hook cannot un-run the call it follows — but no refusal is silent: an
+  artifact left un-redacted (too large, hard-linked, unreadable) is reported on stderr,
+  because shipping one with `/Users/<name>/…` intact and nothing recording it is the
+  worst outcome the hook can produce.
+  **Containment is canonicalized, and the comparison shape matters.** `redactFile`
+  refuses a symlinked, non-regular or hard-linked target, opens read-only with
+  `O_NOFOLLOW` and judges the DESCRIPTOR rather than the path (so the refusal cannot be
+  raced), refuses a non-UTF-8 artifact rather than rewriting its bytes lossily, writes
+  through an `O_EXCL` temp with `fsync` before the rename, and abandons the rename when
+  the artifact changed underneath it rather than destroying a concurrently appended
+  line. The directory check compares the canonical parent against the canonical root's
+  own join — comparing two realpaths of the same lexical path resolves both through the
+  same symlink and proves nothing, which is how a `.zensu/logs -> /var/log` link would
+  otherwise have carried the rewrite out of the project. A no-op redaction writes
+  nothing at all, so an unchanged artifact keeps its inode and a `tail -f` keeps
+  following.
+  Artifacts are now **English-only**: `templates/tdd-plan.md` and `skills/tdd/SKILL.md`
+  Phase 2 state it, and the `CLAUDE.md` carve-out that exempted `.zensu/plans` and
+  `.zensu/logs` from the repo's English-only rule is removed — a German plan written in a
+  German session would otherwise land in someone else's public history. `CLAUDE.md` also
+  gains an `## Artifact Path Redaction` section naming every coupled site and the
+  core/host split for the ports.
+  **One protection narrows, and it is disclosed rather than glossed.** The old recipe
+  wrote the log with `printf … >> {log}`, which `hooks/lib/bash-source-write-parse.js`
+  reports as a write channel, so `hooks/pre-write-secret-scan.sh` scanned the command
+  text — including the log message — against `hooks/lib/secret-patterns.js`. The
+  `append` verb carries no redirect, so that incidental scan no longer fires on a log
+  line. It was never a DESIGNED protection, but the reason an earlier revision of this entry
+  gave was wrong: `hooks/lib/secret-scan-decide.js` has no extension filter at all — it
+  scans the whole command text whenever a channel is present — so the old redirect form
+  genuinely was scanned and the loss is real rather than incidental, across both artifact
+  buckets. What makes it acceptable is that the gate declares itself not a security
+  boundary, that the ~27k-line scan found no credential values in any committed artifact,
+  and that the scan still covers every non-`pathExempt` Edit/Write/MultiEdit payload and
+  every real Bash write channel, and teaching the
+  shared parser a new channel form would pull rules (A)/(B)/(C) onto it as well — which
+  is why the verb enforces its own containment instead. Recorded here so the trade is
+  visible. The control is then RESTORED at the new chokepoint: `append` runs the same
+  curated rules over the message before writing and REFUSES on a match — a credential
+  value is not a location, and redacting one silently would hide it from whoever has to
+  rotate it — honouring `ZENSU_SECRET_SCAN=off` so a false positive is not a wedge. What
+  is genuinely gone is only the incidental coverage of the surrounding shell command.
+  **Bounds, stated rather than implied:** the rule is textual, so a path spelled through
+  a symlink or an alias matching no known root is not caught (macOS's `/private/{tmp,var}`
+  is the one alias pair handled by hand); a git repository root ABOVE the project root is
+  covered only insofar as `$HOME` covers it; artifacts from earlier runs are out of reach
+  by design; the `msysSpelling` inverse is a hand-copy validated by round-tripping through
+  `msysDrivePrefix`, so a change to that shared rule silently drops the MSYS spelling; and
+  nothing here recognizes a customer name or an internal hostname, which is why the
+  authoring rules ship alongside the redactor. Email addresses and internal URLs are NOT
+  redacted.
+  Pinned by new `tests/structure/test-artifact-redaction.sh`. The suite was
+  written first, and its first 19 checks measured 1 PASS / 18 FAIL against the pre-change
+  tree — so its sensitivity is proven rather than assumed: **1 PASS / 18 FAIL is the RED
+  reading of those first 19 checks, never a count of the shipped suite.** The suite as
+  shipped is **100 checks**, grown across the review rounds, the PR #255 team review and the
+  terminal self-review round. Its shape answers two ways a pin like this
+  goes vacuous: every "carries no `/Users/`" arm is paired with a content assertion, since
+  an emptied artifact satisfies the absence check; and every guard check asserts the exit
+  status AND that the on-disk shape the guard protects still holds, since a writer that
+  never wrote for an unrelated reason satisfies a naive refusal check. A skipped check is
+  counted separately and never as a PASS. `test-windows-portability-guards.sh` gains the
+  module in its secure-open inventory, whose other pins are per-file and therefore blind
+  to a new file.
+  **Release note:** this adds a registered hook and a new PostToolUse matcher group.
+  `CLAUDE.md`'s runtime-lineage breaking list names only *removing or renaming* a hook, or
+  changing a matcher, so `minor` here is a **conservative choice, not a consequence of that
+  rule**: no persisted shape moved. It errs in the safe direction — an over-cautious bump
+  costs a lineage break, it never ships a compatibility claim the code cannot honour.
+
 ## [0.19.0] - 2026-08-25
 
 ### Added

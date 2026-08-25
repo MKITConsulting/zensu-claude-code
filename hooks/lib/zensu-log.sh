@@ -1388,40 +1388,378 @@ case "${1:-}" in
     ;;
 esac
 
+# The inline timestamp prefix, resolved from logging.timestampStyle. Both the
+# legacy `timestamp` verb and the `append` writer below call it, so the two can
+# never drift into printing different prefixes for the same configuration.
+_zensu_log_timestamp_prefix() {
+  local start="${1:-}" style now diff days rem
+  case "$start" in
+    ''|*[!0-9]*) start=$(date +%s) ;;
+  esac
+  style=$(_zensu_log_style)
+  case "$style" in
+    none)
+      printf ""
+      ;;
+    relative)
+      now=$(date +%s)
+      diff=$((now - 10#$start))
+      [ "$diff" -lt 0 ] && diff=0
+      if [ "$diff" -lt 86400 ]; then
+        printf "[+%02d:%02d:%02d] " $((diff/3600)) $(((diff%3600)/60)) $((diff%60))
+      else
+        days=$((diff/86400))
+        rem=$((diff%86400))
+        printf "[+%dd %02d:%02d:%02d] " "$days" $((rem/3600)) $(((rem%3600)/60)) $((rem%60))
+      fi
+      ;;
+    *)
+      printf "[%s] " "$(date +%H:%M:%S)"
+      ;;
+  esac
+}
+
 cmd="${1:-timestamp}"
 case "$cmd" in
   timestamp)
-    start="${2:-$(date +%s)}"
-    case "$start" in
-      ''|*[!0-9]*) start=$(date +%s) ;;
-    esac
-    style=$(_zensu_log_style)
-    case "$style" in
-      none)
-        printf ""
-        ;;
-      relative)
-        now=$(date +%s)
-        diff=$((now - 10#$start))
-        [ "$diff" -lt 0 ] && diff=0
-        if [ "$diff" -lt 86400 ]; then
-          printf "[+%02d:%02d:%02d] " $((diff/3600)) $(((diff%3600)/60)) $((diff%60))
-        else
-          days=$((diff/86400))
-          rem=$((diff%86400))
-          printf "[+%dd %02d:%02d:%02d] " "$days" $((rem/3600)) $(((rem%3600)/60)) $((rem%60))
-        fi
-        ;;
-      *)
-        printf "[%s] " "$(date +%H:%M:%S)"
-        ;;
-    esac
+    _zensu_log_timestamp_prefix "${2:-}"
+    ;;
+  append)
+    # The narrative-log WRITER. It exists because the old recipe
+    # (`printf "$(zensu-log.sh timestamp …)" "<msg>" >> {log}`) never routed the
+    # MESSAGE through this helper at all — only the prefix — so nothing could
+    # rewrite the absolute developer paths that a quoted `cmd="cd \"/Users/…\""`
+    # drags into an artifact consuming repos commit.
+    #
+    # Deliberately NOT a `--append` verb: a leading `--` selects the Session
+    # Control binding case at the top of this file, and a log append must keep
+    # working in a shell where CLAUDE_CODE_SESSION_ID or CLAUDE_PLUGIN_DATA is
+    # absent. The project root comes from the log path instead, which is
+    # self-anchoring and needs no environment at all.
+    shift
+    log_val=""
+    msg_val=""
+    msg_seen=0
+    start_val=""
+    truncate_val=0
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        --log)      log_val="${2:-}";   shift 2 || break ;;
+        --message)
+          # `msg_seen` is set only when a VALUE was actually consumed. Setting it
+          # on the flag alone leaves the malformed `--message` as the last token
+          # indistinguishable from a supplied empty string, which is exactly the
+          # timestamp-only line this guard exists to refuse.
+          if [ "$#" -lt 2 ]; then
+            echo "zensu-log.sh append: --message needs a value" >&2
+            exit 2
+          fi
+          msg_val="$2"; msg_seen=1; shift 2
+          ;;
+        --start)    start_val="${2:-}"; shift 2 || break ;;
+        --truncate) truncate_val=1;     shift ;;
+        *)
+          echo "zensu-log.sh append: unknown option '$1'" >&2
+          exit 2
+          ;;
+      esac
+    done
+
+    if [ -z "$log_val" ]; then
+      echo "zensu-log.sh append: --log <file> is required" >&2
+      exit 2
+    fi
+    # A flag consumed as the last token leaves ${2:-} empty and `shift 2` fails
+    # into the loop break, so an absent VALUE is indistinguishable from an
+    # absent flag unless it is tracked. Writing a timestamp-only line into a
+    # committed audit log is not a reasonable answer to a malformed call.
+    if [ "$msg_seen" -ne 1 ]; then
+      echo "zensu-log.sh append: --message <text> is required" >&2
+      exit 2
+    fi
+    if [ -L "$log_val" ]; then
+      echo "zensu-log.sh append: refusing to write through a symlinked log path" >&2
+      exit 2
+    fi
+    # NOT gated on CLAUDE_PROJECT_DIR, and the reason is worth writing down: an
+    # earlier revision made `--truncate` refuse without it, which broke the
+    # shipped Phase 2 recipe outright — that variable is absent from the model's
+    # Bash environment on this host, and `{log_file}` is rendered from
+    # `${CLAUDE_PROJECT_DIR:-.}` precisely because it may be. The binding would
+    # also have bought little: an env var the caller sets is not an authority.
+    # What actually constrains the destructive mode is the module — the `logs`
+    # bucket only, never a `witness-` name, a canonicalized artifact directory,
+    # and a descriptor judged for isFile, nlink and dev+ino. When the variable IS set
+    # it is still passed through as `expectedRoot`, so a bound session gets the
+    # stricter check for free.
+
+    # Module transport, mechanism 2 of the two this repo accepts (see
+    # tests/structure/test-msys-special-plugin-module-boundaries.sh): the lib
+    # DIRECTORY is rendered natively by zensu-host-path.sh, the file name is
+    # appended, and the guarded result travels in an ENVIRONMENT variable — never
+    # as an argv token carrying the plugin root.
+    redact_lib_dir="$(bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-host-path.sh" \
+      "${CLAUDE_PLUGIN_ROOT}/hooks/lib")" || redact_lib_dir=""
+    redact_lib="$redact_lib_dir/zensu-artifact-redact-v1.js"
+    secret_lib="$redact_lib_dir/secret-patterns.js"
+    # Fail LOUD rather than write an unredacted line. A host without node cannot
+    # arm a chain at all (--tdd-begin needs Session Control, which needs node),
+    # so this refusal is unreachable in any session that has a log to write to.
+    if ! command -v node >/dev/null 2>&1; then
+      # The wording here deliberately avoids the bind-failure hint phrase used
+      # further up this file: test-session-control-claude greps the WHOLE file
+      # for those three literals and pins their order against the guards in
+      # zensu_bind_model_session, so a second occurrence anywhere — comments
+      # included — breaks the mirror.
+      echo "zensu-log.sh append: node is required to redact the message — refusing to write an unredacted log line" >&2
+      exit 2
+    fi
+    # The guard ACTS: it drops the path, so the node side takes its own
+    # fail-open branch and reports the scan as unavailable. It used to warn and
+    # then do nothing — a symlinked-but-valid scanner was still required, still
+    # ran, and refused the line, so the warning claimed an outcome that did not
+    # happen and the refusal arrived after a message saying it would not. A
+    # branch that warns about an outcome it does not produce trains the reader
+    # to ignore it.
+    #
+    # A symlink is refused rather than followed for the same reason the redactor
+    # refuses one: this is a path the session itself can write, and a scanner
+    # that can be repointed is not a control. It fails OPEN here rather than
+    # exiting, because the scan is an improvement and the redaction is the
+    # guarantee — losing the scan must not cost the log line.
+    if [ ! -f "$secret_lib" ] || [ -L "$secret_lib" ]; then
+      echo "zensu-log.sh append: the credential scanner is missing or is a symlink; the line will be written unscanned" >&2
+      secret_lib=""
+    fi
+    if [ -z "$redact_lib_dir" ] || [ ! -f "$redact_lib" ] || [ -L "$redact_lib" ]; then
+      echo "zensu-log.sh append: the artifact redactor is missing — refusing to write an unredacted log line" >&2
+      exit 2
+    fi
+    # Every sibling gate records its own `ZENSU_*=off` escape, and the chain-end
+    # report renders that ledger under "Gates bypassed" — a list the reader takes
+    # as complete. This chokepoint honoured the opt-out and recorded nothing, so
+    # a session that turned the credential scan off read as one that never did.
+    #
+    # Best-effort BY DESIGN, and in a subshell so the phase library never enters
+    # the append path: a ledger write must not be able to cost a log line. The
+    # bound is real and worth stating — `zensu_resolve_session_id` with no
+    # argument reads `ZENSU_SESSION_KEY`, which SessionStart injects, so an
+    # `append` run outside a Zensu-started session records nothing. That is the
+    # same identity every other ledger writer needs; there is no second source
+    # for it here, because this verb deliberately carries no session bind.
+    if [ "${ZENSU_SECRET_SCAN:-}" = "off" ]; then
+      (
+        # BOTH libraries, and the second is not optional: `append` skips the
+        # binding `case` this file runs for every `--verb`, so nothing has
+        # sourced `zensu-session.sh` by here and `zensu_resolve_session_id` is
+        # simply undefined. The failure is silent — an empty id, a no-op write,
+        # exit 0 — which is exactly the under-reporting this branch exists to fix.
+        source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-session.sh"
+        source "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-tdd-phase.sh"
+        bypass_sid="$(zensu_resolve_session_id "" 2>/dev/null)" || bypass_sid=""
+        [ -n "$bypass_sid" ] && tdd_record_bypass "$bypass_sid" ZENSU_SECRET_SCAN
+      ) >/dev/null 2>&1 || true
+    fi
+    # CONTAINMENT, and it is not optional. Without it this verb is a write /
+    # truncate primitive with a caller-supplied destination that no Bash gate
+    # can see: it carries none of the redirect, tee, sed -i, dd or heredoc
+    # tokens `bash-source-write-parse.js` recognizes as a channel, so rules
+    # (A)/(B) of the source-write gate never judge it. The module refuses any
+    # `--log` that does not resolve to a real `<root>/.zensu/logs/<file>`
+    # — canonicalizing the artifact directory, so a symlinked `.zensu/logs`
+    # cannot carry the write out of the project — and a refusal is a non-zero
+    # exit, which this branch turns into a loud failure rather than a write.
+    #
+    # The same check closes the quieter half: an unrecognized shape used to make
+    # the derived project root empty, which SKIPPED rule 1 and wrote a partially
+    # redacted line under exit 0.
+    #
+    # `--project` is passed when CLAUDE_PROJECT_DIR is set so that this writer
+    # and hooks/post-bash-witness.sh — which resolves the root from the Session
+    # Control record — substitute identically. They must, or the equality match
+    # in zensu-evidence-crosscheck.js reports an EVIDENCE GAP; supplying both
+    # candidate roots makes the result the same whenever EITHER is right.
+    # The WRITE happens inside the module, not through a shell redirect. A `>>`
+    # names a path and follows whatever it finds, so the validation above and the
+    # write would name different objects — and `[ -L ]` is blind to a hard link
+    # planted in the artifact directory, which would turn this verb into an
+    # append/truncate primitive on any file on the same filesystem. The module
+    # opens with O_NOFOLLOW and judges the DESCRIPTOR, so the object checked is
+    # the object written.
+    if ! printf '%s' "$msg_val" \
+      | ZENSU_REDACT_LIB="$redact_lib" \
+        ZENSU_APPEND_LOG="$log_val" \
+        ZENSU_APPEND_PREFIX="$(_zensu_log_timestamp_prefix "$start_val")" \
+        ZENSU_APPEND_TRUNCATE="$truncate_val" \
+        ZENSU_APPEND_PROJECT="${CLAUDE_PROJECT_DIR:-}" \
+        ZENSU_SECRET_PATTERNS="$secret_lib" \
+        node -e '
+        // Wrapped in a function because `node -e` evaluates at true top level,
+        // where `return` is a syntax error.
+        (function main() {
+          const fs = require("node:fs");
+          const path = require("node:path");
+          const mod = require(process.env.ZENSU_REDACT_LIB);
+          const refuse = (reason) => {
+            // process.exit() does not flush an async pipe write, so the specific
+            // reason would be lost and the operator would see only the shells
+            // catch-all. Set the code and return instead.
+            process.stderr.write("zensu-log.sh append: refused (" + reason + ")\n");
+            process.exitCode = 2;
+          };
+          const log = process.env.ZENSU_APPEND_LOG;
+          const expected = process.env.ZENSU_APPEND_PROJECT || undefined;
+          const target = mod.resolveArtifactTarget(log, expected);
+          if (!target.ok) { refuse(target.reason); return; }
+          // CONTAINMENT for the DESTRUCTIVE mode when the caller supplied no
+          // authority, which is the DEFAULT path and not an edge case:
+          // CLAUDE_PROJECT_DIR is absent from the Bash environment the model runs
+          // on this host, which is exactly why the shipped recipe renders
+          // {log_file} from ${CLAUDE_PROJECT_DIR:-.}.
+          // (No apostrophes anywhere in this block: it lives inside a
+          // single-quoted node -e program, where one terminates the shell string
+          // and turns the next brace into a bash syntax error.)
+          //
+          // Without this, `resolveArtifactTarget` skips its binding block and
+          // containment reduces to artifact SHAPE: any absolute --log resolving
+          // to a real <anyroot>/.zensu/logs/<name>.log is an accepted
+          // destination. The verb this replaced carried a redirect, so the
+          // source-write gate judged its destination against the session root;
+          // leaving this unbound made the change a NARROWING of an existing
+          // control, and the reachable targets are the committed audit logs of
+          // sibling checkouts.
+          //
+          // SCOPED TO `replace`, and the scope was MEASURED rather than assumed.
+          // Applying cwd-or-ancestor to every mode denies a working and ordinary
+          // call shape: an absolute --log issued from an unrelated cwd, which is
+          // how five checks in the suite, and the log commands of the TDD chains
+          // in this repo, invoke the verb. An unbound append adds a line to a
+          // foreign audit log; an unbound --truncate DESTROYS one, and only the
+          // second is worth denying that shape over.
+          //
+          // ACCEPTED RESIDUAL, stated rather than implied: the additive mode is
+          // still bound by artifact SHAPE only, so an absolute --log naming any
+          // project .zensu/logs artifact on the host is appendable. R44b pins
+          // that judgement so closing it later is deliberate.
+          //
+          // ANCESTOR rather than equality, because running the verb from a
+          // subdirectory of the project is ordinary. It lives HERE rather than in
+          // `resolveArtifactTarget` because `redactFile` and the sweep resolve
+          // with no expectedRoot and a caller root that need not be an ancestor
+          // of the cwd, so the same check in the shared resolver denies them.
+          //
+          // WHAT THIS ANCHOR IS WORTH, stated because the paragraph above rejects
+          // `CLAUDE_PROJECT_DIR` as "an env var the caller sets" and then anchors
+          // on something the caller sets more freely still. The anchor is the
+          // PROCESS CWD, and `cd` selects it in the same command with no write
+          // channel for `bash-source-write-parse.js` to recognize — so
+          // `cd <sibling> && … append --truncate --log <sibling>/.zensu/logs/x.log`
+          // satisfies this check and is judged by no gate at any point.
+          //
+          // AND IT IS VACUOUS FOR THE SHIPPED SPELLING, which an earlier revision
+          // of this paragraph got backwards. `resolveArtifactTarget` is called
+          // with no `base`, so a RELATIVE `--log` resolves against the cwd and the
+          // project root is then derived from that same resolution — this check
+          // compares the cwd against itself and cannot fail. `skills/tdd/SKILL.md`
+          // renders `{log_file}` from `${CLAUDE_PROJECT_DIR:-.}`, and that
+          // variable is unset on some hosts, which is exactly the relative form
+          // (R28 pins it as succeeding). So the drifted-cwd shape is the one shape
+          // this cannot see: a drifted cwd REDEFINES the root it would be judged
+          // against.
+          //
+          // What it does bound is an ABSOLUTE `--log` naming another project,
+          // issued from this one (R44). Real, and narrower than it reads.
+          // It does NOT restore what the pre-change redirect form had: that
+          // was judged against the session root, an authority outside the command,
+          // while this is state the command sets in its own first token. Anchoring
+          // on the `project_root` of the Session Control record — the authority
+          // `hooks/post-bash-witness.sh` uses — is the stronger spelling and is
+          // deliberately NOT taken here, because this verb carries no session bind
+          // and adding one would make every log line depend on a bind that the
+          // append path exists to work without. R44c pins the passing shape as a
+          // residual so that narrowing it later is a decision, not a discovery.
+          const replaceMode = process.env.ZENSU_APPEND_TRUNCATE === "1";
+          if (expected === undefined && replaceMode) {
+            // BOTH sides are canonicalized. `resolveArtifactTarget` returns
+            // `projectRoot` un-realpathed, so on macOS it reads /var/folders/...
+            // while process.cwd() resolves to /private/var/folders/... — the
+            // same alias pair the redaction rules handle by hand. Comparing the
+            // two spellings directly refuses every legitimate call under a temp
+            // directory, which is how this was caught.
+            let here;
+            let rootReal;
+            try {
+              here = fs.realpathSync(process.cwd());
+              rootReal = fs.realpathSync(target.projectRoot);
+            } catch (_) {
+              refuse("project-root-unusable");
+              return;
+            }
+            if (here !== rootReal && !here.startsWith(rootReal + path.sep)) {
+              refuse("foreign-project");
+              return;
+            }
+          }
+          let message;
+          try {
+            message = fs.readFileSync(0, "utf8");
+          } catch (_) {
+            // A read fault must NOT degrade to an empty message: that writes the
+            // timestamp-only line the --message guard exists to refuse, under a
+            // success exit.
+            refuse("message-unreadable");
+            return;
+          }
+          // The message is scanned for credential VALUES before it is written.
+          // This restores, at the new chokepoint, the control the move off the
+          // command line removed: the old `printf … >> {log}` form carried a
+          // write channel, so pre-write-secret-scan.sh saw the message; `append`
+          // carries none, and the narrative log is an artifact consuming repos
+          // commit. It REFUSES rather than redacting — a credential value is not
+          // a location, and silently rewriting one would hide it from the person
+          // who has to rotate it. `ZENSU_SECRET_SCAN=off` is honoured, the same
+          // escape the gate itself teaches, so a false positive is not a wedge.
+          if (process.env.ZENSU_SECRET_SCAN !== "off") {
+            try {
+              const patterns = require(process.env.ZENSU_SECRET_PATTERNS);
+              const hit = patterns.scan(message);
+              if (hit && hit.matches && hit.matches.length) {
+                const rules = [...new Set(hit.matches.map((m) => m.rule))].join(", ");
+                // The surgical escape first, matching the sibling gate: the
+                // marker is visible in the committed artifact, the env opt-out
+                // is not.
+                refuse("secret-value-detected: " + rules
+                  + " — remove it, or append the zensu-secret-allow marker to that line,"
+                  + " or set ZENSU_SECRET_SCAN=off for this call if it is a false positive");
+                return;
+              }
+            } catch (_) {
+              // Fail OPEN — the scan is an improvement, never a precondition —
+              // but never SILENTLY: a control that quietly became a no-op is
+              // indistinguishable from one that passed.
+              process.stderr.write(
+                "zensu-log.sh append: credential scan unavailable; the line was written unscanned\n");
+            }
+          }
+          const roots = expected ? [expected, target.projectRoot] : target.projectRoot;
+          const line = (process.env.ZENSU_APPEND_PREFIX || "")
+            + mod.redact(message, { projectRoot: roots, home: mod.defaultHome() }) + "\n";
+          const result = mod.writeArtifactLine(log, line, {
+            mode: process.env.ZENSU_APPEND_TRUNCATE === "1" ? "replace" : "append",
+            expectedRoot: expected,
+          });
+          if (!result.written) { refuse(result.reason); }
+        }());
+        '; then
+      echo "zensu-log.sh append: refusing to write — the log path is not a .zensu artifact of this project, is not a plain unlinked file, or redaction failed" >&2
+      exit 2
+    fi
     ;;
   style)
     _zensu_log_style
     ;;
   *)
-    echo "usage: zensu-log.sh {timestamp <epoch> | style}" >&2
+    echo "usage: zensu-log.sh {append --log <file> --message <text> [--start <epoch>] [--truncate] | timestamp <epoch> | style}" >&2
     exit 2
     ;;
 esac
