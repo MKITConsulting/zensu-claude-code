@@ -1461,7 +1461,7 @@ function cmdList(opts) {
   for (const r of rows) {
     const g = opts.git ? gitState(r.wt, false) : null;
     const gitPart = g
-      ? `${g.branch || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
+      ? `${oneLine(g.branch, 120) || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
       : (oneLine(r.branch, 120) || '?');
     const pr = r.pr ? `PR #${r.pr.number}` : 'PR —';
     // `measuredLevel`, not `level`: this command takes no selector, so rendering
@@ -1533,7 +1533,7 @@ function cmdInstances(opts) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${String(s.sessionId).slice(0, 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${oneLine(wt, 200)}`);
+      print(`  ${String(s.pid).padStart(6)}  ${showId(s.sessionId).slice(0, 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${oneLine(wt, 200)}`);
       print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
       for (const l of lineageOf(s.sessionId)) print(`          ${l}`);
     }
@@ -1614,13 +1614,13 @@ function cmdShow(opts) {
   print(`WORKTREE ${oneLine(r.wt, 200)}${r.cwdExists ? '' : '   !! MISSING'}`);
   if (r.cwd !== r.wt) print(`CWD      ${oneLine(r.cwd, 200)}   (session started in a subdirectory)`);
   print(`BRANCH   ${oneLine((g && g.branch) || r.branch, 120) || '?'}`);
-  print(`LAST     ${ago(r.mtime)} ago   transcript ${r.transcript}`);
+  print(`LAST     ${ago(r.mtime)} ago   transcript ${oneLine(r.transcript, 200)}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
   if (r.stopCause && r.stopCause.final) print(`STOPPED  ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)} — "${oneLine(r.stopCause.message, 90)}"`);
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
   if (r.truncated) print('NOTE     transcript is large — head+tail only, middle not scanned');
   const sib = siblings(buildIndex({ ...opts, live: false }).rows, r);
-  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${s.sessionId.slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
+  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${showId(s.sessionId).slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
   for (const advice of (ADVICE[v.level] || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
@@ -1910,7 +1910,7 @@ function cmdHandoff(opts) {
   L.push(`- session: \`${showId(r.sessionId)}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
   L.push(`- worktree: \`${oneLine(r.wt, 200)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(`- branch: \`${oneLine((g && g.branch) || r.branch, 120) || '?'}\``);
-  L.push(`- transcript: \`${r.transcript}\``);
+  L.push(`- transcript: \`${oneLine(r.transcript, 200)}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.truncated) L.push('- note: transcript large, only head+tail scanned');

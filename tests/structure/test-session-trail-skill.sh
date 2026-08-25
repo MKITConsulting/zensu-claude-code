@@ -742,10 +742,20 @@ fi
 # The count is over SITES, not lines: three of these lines carry two renderings
 # each, so `grep -c` reported 12 for a population of 15 and either member of those
 # three pairs stayed deletable. `grep -o | wc -l` counts what the label claims.
+# The instances row now renders through showId(), a DISPLAY bound added because the
+# live registry validates only truthiness and an escape byte in a planted id reached
+# the terminal. That does not reintroduce the ellipsis hazard this check exists for,
+# and the reason is measured rather than assumed: showId bounds at 128 and the render
+# slices to 8, so the ellipsis can only ever appear at position 127 and never inside
+# the prefix. Verified for an ordinary uuid and for a 400-character id -- the 8-byte
+# prefix is byte-identical to the raw one in both. The oneLine ABSENCE below is
+# unchanged and still forbids binding an id directly, which WOULD put U+2026 inside a
+# rendered prefix; showId is the one indirection allowed, and L62 in the lineage suite
+# drives the property it protects.
 SID_ONELINE="$(grep -cE 'oneLine\([^)]*[sS]essionId' "$TRAIL_MJS" || true)"
 SID_SLICE="$(grep -oE '[sS]essionId\)?\.slice\(0, 8\)' "$TRAIL_MJS" | wc -l | tr -d ' ')"
 SID_INSTANCES=0
-grep -qF '${String(s.sessionId).slice(0, 8)}' "$TRAIL_MJS" && SID_INSTANCES=1
+grep -qF '${showId(s.sessionId).slice(0, 8)}' "$TRAIL_MJS" && SID_INSTANCES=1
 if [ "$SID_ONELINE" = "0" ] && [ "$SID_SLICE" -ge 15 ] && [ "$SID_INSTANCES" = "1" ]; then
   check "T22b every short session id is rendered by a bare slice, and the instances row by name ($SID_SLICE sites)" PASS
 else

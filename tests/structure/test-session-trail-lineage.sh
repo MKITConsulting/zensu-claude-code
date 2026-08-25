@@ -1919,6 +1919,33 @@ ETF_BODY="$(awk '/^function extractTouchedFiles\(/{f=1} f{print} f&&/^\}/{exit}'
 [ -n "$ETF_BODY" ] && check "L61a-control the extractTouchedFiles body was actually extracted" PASS || check "L61a-control the extractTouchedFiles body was not found, so the scan below is vacuous" FAIL
 case "$ETF_BODY" in *"boundText("*) check "L61a the transcript file_path values are bounded where they are extracted" PASS ;; *) check "L61a the transcript file_path values are bounded at the source" FAIL ;; esac
 
+# -- L62 -- the display bound on the session id, pinned by BEHAVIOUR -----------
+# The showId() bound was pinned by nothing: its only occurrence anywhere in tests/
+# was inside L61's own ALLOWLIST, so deleting every call left the suite green. A
+# source pin is also the wrong instrument here -- `sessionId` has many legitimate
+# non-render uses (lookups, comparisons, Map keys), and an identifier scan over it
+# needs an allowlist longer than the property it protects. So this drives the
+# PROPERTY instead: an escape byte planted in the live registry -- which validates
+# only truthiness -- must not reach the terminal. `.slice(0, 8)` bounds LENGTH and
+# not content, and eight bytes is a complete SGR sequence.
+reset_ledger
+ESC="$(printf '\033')"
+mkdir -p "$CFG/sessions"
+node -e '
+const fs = require("node:fs"), path = require("node:path");
+const E = String.fromCharCode(27);
+fs.writeFileSync(path.join(process.argv[1], "planted.json"), JSON.stringify({
+  sessionId: E + "[31mPWNED" + E + "[0m-bbbb-cccc-dddddddddddd",
+  pid: Number(process.argv[2]), startedAt: Date.now() - 60000,
+  cwd: process.argv[3], name: "planted", entrypoint: "cli",
+}));
+' "$CFG/sessions" "$LIVE_PID" "$SELF_CWD"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --all)"
+case "$OUT" in *"[31mPWNE"*) check "L62-control the planted row rendered with the ESC stripped and its visible bytes kept" PASS ;; *) check "L62-control the planted row rendered" FAIL ;; esac
+case "$OUT" in *"$ESC"*) check "L62 an escape byte planted in a registry session id does not reach the terminal" FAIL ;; *) check "L62 an escape byte planted in a registry session id does not reach the terminal" PASS ;; esac
+rm -f "$CFG/sessions/planted.json"
+reset_ledger
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added
