@@ -59,9 +59,9 @@ dirty-tree refusal; the `--chain-done` site itself was not read for this documen
 
 **The write gate confines Bash writes, the edit gate does not confine paths.**
 Rule (B) denies at `!within(projectRoot, p)`
-(`hooks/lib/bash-source-write-parse.js:808`) and rule (C) at the same predicate
-for git targets (`:854`), with `projectRoot` taken from the passed
-`CLAUDE_PROJECT_DIR` (`:695`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
+(`hooks/lib/bash-source-write-parse.js:817`) and rule (C) at the same predicate
+for git targets (`:863`), with `projectRoot` taken from the passed
+`CLAUDE_PROJECT_DIR` (`:712`). `hooks/pre-edit-tdd-reminder.sh:137-164` resolves a
 relative path against the project root and then classifies it only as `state`,
 `zensu`, or `other` — an absolute path outside the root is not denied there. So
 `Edit`/`Write` reach a sibling repository today and Bash writes do not. Neither of
@@ -276,7 +276,7 @@ dropped: a dropped root is a root nothing audits.
 |---|---|---|
 | Edit-landing | Enumerate the union; resolve each claim through its label; write ONE merged receipt beside the anchor's workflow document, carrying a per-root verdict. | `hooks/lib/zensu-edit-landing.sh`, receipt path `:266` |
 | Review packet | Enumerate `changed_files` per root and emit them label-prefixed. | `skills/tdd/SKILL.md` step 10.2 |
-| Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:808`, `:854` |
+| Write gate | Rules (B) and (C) accept a path inside ANY union member. | `hooks/lib/bash-source-write-parse.js:817`, `:863` |
 | Terminus | The zero-change scoping of `--tdd-complete` and `--chain-done` counts the union, and reads the receipt's verdict (§5). | `hooks/lib/zensu-log.sh:668-670` |
 | Capability confinement (stage 3) | The reviewer's root check and its protected-root set both take the union. | `hooks/lib/reviewer-capability-v1.js:319`, `:300` |
 
@@ -290,7 +290,7 @@ never from the parser's own environment.
 has exactly one `cwd` and one transcript. What degrades is fidelity, and one part
 of it degrades dangerously.
 
-`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:769`) takes a
+`gitState(cwd, full)` (`skills/session-trail/scripts/trail.mjs:1254`) takes a
 single path, and that path is the anchor. In this topology the anchor is clean
 while the changed files sit in the code roots, so a `takeover` brief would report
 no uncommitted changes for a session with a dirty tree in two other repositories.
@@ -304,7 +304,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd <cwd> && claude --resume <id>` (`trail.mjs:1067`) already lands there.
+  `cd <cwd> && claude --resume <id>` (`trail.mjs:1610`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.

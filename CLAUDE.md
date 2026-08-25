@@ -1305,7 +1305,89 @@ enumerated there. The parser header must NAME every accepted gap — W192 matche
 gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
 security boundary" framing to survive. `docs/gates.md` §"Source-Write Gate", the
 hook-reference row and the `bashWriteGate` config row in `docs/configuration.md` point at
-the tables rather than listing them, for the same reason; they are not pinned.
+the tables rather than listing them, for the same reason; their VERB CONTENT is not
+pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T29 in
+`tests/structure/test-session-trail-skill.sh` — `cross-worktree takeover`,
+`session-trail` and `does **not** cover a nested worktree`. The last IS the
+containment claim, so rewording it fails the suite. That file is no longer wholly
+unpinned; see the section below.
+
+**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
+in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
+`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
+`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
+difference is what decides where an edit is owed. All of them state the CONTAINMENT
+rule.
+
+**The two env channels are NOT equally authoritative, and only one direction of the
+weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
+as the last resort when no Session Control record exists — its own header says "The
+mutable payload cwd is never a project authority" — while the record's `projectRoot`
+is what it exports as `ZENSU_PROJECT_ROOT`, and that is the value the gate compares.
+For a session started in a subdirectory the ambient variable is therefore the WIDER
+root. `writeAnchor` downgrades `covered` to `null` when containment was measured off
+that channel, and leaves `covered: false` alone: containment in a wider root does not
+imply containment in the narrower one, but NON-containment does. The downgrade travels
+in the field rather than only in the render, so a `--json` consumer is not misled
+either, and `source`/`callerRoot` still report what was measured. A channel is also
+usable only when ABSOLUTE (a relative value would reach `path.resolve` inside
+`canonicalDir` and be resolved against the process cwd — the derivation `W3b` exists
+to forbid, one call further down than `W3b` can see) and the winning value is compared
+VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
+directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
+four. The environment variables are named by `writeAnchor`'s header,
+`writesLines`'
+emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
+(C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
+into a brief a stranger reads. The Limits bullet withholds only those two things: it
+restates the asymmetry IN FULL, naming both Edit-matcher hook filenames, the
+capability gate and its main-principal exemption, and the containment definition,
+then points at flow 3 for the routing rule. Do not describe it as an index entry —
+an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
+that claim for as long as the bullet really carries the hook roster. A change to
+`within()`, to how `project_root` is minted (`claude-session-control-v1.js`
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
+six wrong with both session-trail suites green — they drive `trail.mjs` against its
+own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
+`within`: the parser now defines it at MODULE scope and EXPORTS it, and
+`trail.mjs` requires the parser and CALLS it, so the containment rule has one
+implementation and the two cannot drift. (The parser always had an export surface
+— `detectChannels`, `gitTargets`, `msysToDrive` and the frozen tables, consumed by
+`tests/structure/git-repo-escape.test.js`; what it did not export was `within`
+itself. An earlier wording here said the parser "exports nothing", which read as
+the former and was false.) The same require supplies `msysToDrive`, so the
+comparison is now in the gate's namespace on Windows too. A FAILED load is
+reported as `rejected:gate-unavailable` and yields `covered: null` — there is
+deliberately no local fallback copy, because answering off a weaker rule than the
+gate's is exactly what taking the seam removed. What remains this feature's OWN
+encoding is the canonicalization: `canonicalPair` feeds both operands through
+`msysToDrive` + `path.resolve` + `realpathSync.native` and applies `TRAILING_SEP`
+(platform-selected, guarded by `path.parse(p).root === p`), which is NOT the
+gate's `stripSlash` but a DIFFERENT rule — forward-slash-only and unguarded there.
+A change to the gate's own canonicalization still has no recorded re-check site;
+treat `canonicalPair` as the one remaining place where this feature encodes what
+it believes the gate does. It canonicalizes both sides TOGETHER: one
+`realpathSync` failure drops BOTH back to the lexical spelling, because
+canonicalizing per operand put them in different namespaces whenever exactly one
+path existed — the `!! MISSING` worktree case, where a symlinked anchor compared
+as an escape from its own nested worktree. Do not
+trust an ordinal here — an earlier wording said "sixth" and was already wrong,
+because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
+inside a `node -e`. Read the enumeration below, not a count. THREE
+narrowings are deliberate and stated at the copy, and they do NOT share a direction:
+only rule (C)'s `isTemp` carve-out errs toward WARNING. The other two err toward
+`allowed`: rule (A) fires on an IN-ANCHOR target — a raw shell overwrite of tracked
+source — which is exactly where this answers `allowed`, and the third realpaths BOTH
+sides while the gate realpaths only its roots and resolves a `cd` operand
+lexically. That asymmetry is the property to re-check before letting the
+hand-copy
+drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
+`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+STATIC containment sentence, deliberately unmeasured because a brief is read by a
+session it was not measured against. A correction to that WORDING does not reach
+files already written.
 
 The `worktree`/`remove|move` literals appear three times — the `GIT_READONLY_FORMS`
 entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
@@ -1425,9 +1507,17 @@ paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 same wrapped invocation is gated by one Bash gate and not its sibling.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and the same
-predicate exists in `session-control-core-v1.js` and `review-evidence-lease-v1.js`,
-with an UNANCHORED `startsWith("..")` variant in `finding-verify-v1.js` that has the
-`..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
+predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
+`hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
+native-path validator), with an UNANCHORED `startsWith("..")` variant in
+`finding-verify-v1.js` that has the `..bak` defect this gate fixed.
+`skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and is the one
+consumer that proves the seam works: `within` is now defined at MODULE scope here
+and EXPORTED, and that file requires this parser and CALLS it, so the only copy a
+user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
+export, the specifier and the degrade-on-load-failure behaviour. Removing either
+`within` or `msysToDrive` from the export list therefore breaks a shipped skill,
+not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
 against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the
