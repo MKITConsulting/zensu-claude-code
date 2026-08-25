@@ -1462,13 +1462,13 @@ function cmdList(opts) {
     const g = opts.git ? gitState(r.wt, false) : null;
     const gitPart = g
       ? `${g.branch || '?'}  +${g.ahead ?? '?'}/-${g.behind ?? '?'}  dirty ${g.dirty}`
-      : (r.branch || '?');
+      : (oneLine(r.branch, 120) || '?');
     const pr = r.pr ? `PR #${r.pr.number}` : 'PR —';
     // `measuredLevel`, not `level`: this command takes no selector, so rendering
     // an authorization here would show one session's approval against every busy
     // row in scope. A survey reports what was measured.
     const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}`);
+    print(`${statusOf(r).padEnd(4)}  ${showId(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
     if (!r.cwdExists) print(`      !! worktree directory missing: ${oneLine(r.cwd, 200)}`);
@@ -1569,7 +1569,7 @@ function resolve(opts, selectorRaw) {
       const byWorktree = new Set(t.map((r) => r.cwd));
       if (byWorktree.size === 1) return select(t.sort((a, b) => b.mtime - a.mtime)[0]);
       print(`ambiguous selector "${sel}" — ${t.length} candidates:\n`);
-      for (const r of t) print(`  ${r.sessionId.slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${oneLine(r.worktree, 120)}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
+      for (const r of t) print(`  ${showId(r.sessionId).slice(0, 8)}  ${statusOf(r).padEnd(4)}  ${oneLine(r.worktree, 120)}  "${oneLine(r.title || r.lastPrompt, 70)}"`);
       flush();
       process.exit(2);
     }
@@ -1601,7 +1601,7 @@ function cmdShow(opts) {
   const g = opts.git ? gitState(r.wt, true) : null;
   const v = activityVerdict(r, opts.force);
   if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, skipped: SKIPPED }, null, 2));
-  print(`SESSION  ${r.sessionId}`);
+  print(`SESSION  ${showId(r.sessionId)}`);
   print(`TITLE    ${oneLine(r.title, 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
   // instance's JSON, and a newline in `name` or `entrypoint` would fabricate a
@@ -1706,7 +1706,7 @@ function cmdLimited(opts) {
   print(`SCOPE  ${ctx ? `${ctx.name} (${ctx.root})` : 'ALL REPOS'}`);
   print(`STALLED AT AN API LIMIT/ERROR: ${stalled.length}   RECOVERED AFTERWARDS: ${recovered.length}   (of ${rows.length} scanned)\n`);
   const line = (r) => {
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
+    print(`${statusOf(r).padEnd(4)}  ${showId(r.sessionId).slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}${r.live ? `   pid ${r.live.pid} ${r.takeover.measuredLevel}` : ''}`);
     print(`      cause: ${r.stopCause.error}${r.stopCause.status ? ` (${r.stopCause.status})` : ''} at ${(r.stopCause.at || '').slice(0, 16)}${r.truncated ? '   [transcript >8 MB — read head+tail only, this classification saw the tail]' : ''}`);
     if (r.app) print(`      ${appTag(r.app)}`);
     if (r.stopCause.message) print(`      "${oneLine(r.stopCause.message, 110)}"`);
@@ -1748,7 +1748,7 @@ function cmdTakeover(opts) {
   L.push('> Reconstructed from the source session\'s transcript on disk. That session contributed nothing to this document and did not need to be running.');
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
+  L.push(`- session: \`${showId(r.sessionId)}\` (${statusOf(r)}${r.live ? `, STILL RUNNING as pid ${r.live.pid}` : ''})`);
   if (r.app) L.push(`- owning account: \`${r.app.accountUuid || '(not resolvable)'}\`${r.app.archived ? ' — **ARCHIVED**: its process was stopped and the worktree may have been cleaned up' : ''}`);
   L.push(`- takeover verdict when this brief was written: **${tv.measuredLevel}** — ${tv.measuredReason}`);
   if (tv.authorized) {
@@ -1907,7 +1907,7 @@ function cmdHandoff(opts) {
   L.push(`# Handoff: ${oneLine(r.title || path.basename(r.cwd), 120) || '(untitled)'}`);
   L.push('');
   L.push('## Source');
-  L.push(`- session: \`${r.sessionId}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
+  L.push(`- session: \`${showId(r.sessionId)}\` (${statusOf(r)}${r.live ? `, pid ${r.live.pid}, ${oneLine(r.live.entrypoint, 40)}` : ''})`);
   L.push(`- worktree: \`${oneLine(r.wt, 200)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
   L.push(`- branch: \`${oneLine((g && g.branch) || r.branch, 120) || '?'}\``);
   L.push(`- transcript: \`${r.transcript}\``);
@@ -2704,6 +2704,14 @@ function flush() {
 // fileURLToPath, not URL.pathname: the latter is percent-encoded and carries a
 // leading slash before a Windows drive letter, so the printed hint was unusable
 // there and on any path containing a space.
+// Display-only bound for the session id. The value is a filename with the suffix
+// stripped and is never validated as an id, so it can carry anything a POSIX name
+// can — including a newline, inside the inline-code span both persisted briefs put
+// it in. The RAW value remains the identity for lookup and matching; only what is
+// rendered is bounded, which is the same split the ledger module applies with
+// `boundText(src.sessionId, 128)`.
+function showId(id, n = 128) { return oneLine(String(id || ''), n) || '(unnamed session)'; }
+
 function scriptPath() { return fileURLToPath(import.meta.url); }
 
 const argv = process.argv.slice(2);

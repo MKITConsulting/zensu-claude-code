@@ -1854,17 +1854,30 @@ reset_ledger
 # scans for the SHAPE instead: any interpolation of one of these identifiers,
 # unwrapped, on a line that prints or pushes.
 L61_SRC="$PLUGIN_DIR/skills/session-trail/scripts/trail.mjs"
-L61_PAT='(print|L\.push)\(.*\$\{(r\.wt|r\.cwd|r\.worktree|r\.branch|r\.title)\}'
-# The one exemption is a DOCUMENTED class, not an oversight, and it is asserted
-# below rather than assumed. SKILL.md states that the `cd <cwd> && claude --resume
-# <id>` line is assembled without shell quoting and tells the reader to read it
-# before running and rewrite it before persisting a brief. Bounding it would be the
-# WRONG fix: boundText collapses a whitespace run to a single space, yielding a
-# DIFFERENT path that still looks runnable, which would make that warning false.
-# The remedy there is quoting, a separate decision this suite does not pre-empt.
-L61_RAW="$(grep -nE "$L61_PAT" "$L61_SRC" | grep -vF 'cd ${' || true)"
+# Assignments as well as renders: the value can reach a printed line through an
+# intermediate local, which is how `${r.branch}` on a `const gitPart =` line
+# survived the first spelling of this scan while only `${gitPart}` reached the
+# print. And `[^}]*` inside the braces, because `${r.wt || '(unknown)'}` is an
+# idiom this file already uses and a bare-token pattern does not see it.
+# The value can reach a rendered line WITHOUT ever being interpolated at its own
+# site: `: (r.branch || '?')` assigns a bare expression to a local, and only the
+# LOCAL is interpolated four lines later. A `${...}` pattern cannot see that, which
+# is how the branch defect survived two spellings of this scan. So the scan is on
+# the IDENTIFIER, anywhere it appears unwrapped, and the non-rendering consumers
+# are allowlisted BY NAME. That allowlist is the maintenance cost, and it fails in
+# the right direction: a new consumer added without an entry is reported, not
+# silently passed.
+L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
+# Wrappers that bound, and consumers that provably do not render their argument:
+# rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
+# findPlanDocs/nearestRepoRoot take it as a filesystem path, Set/toLowerCase build
+# a match structure, and ===/!==/typeof/.length compare it.
+L61_OK='(oneLine|boundText|showId|rel\(|path\.|dirExists|worktreeRoot|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|new Set\(|===|!==|\?\?|typeof|\.length|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+# The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
+# raw interpolation on one of those four lines stays visible.
+L61_RAW="$(sed -e 's/cd \${[^}]*}//g' "$L61_SRC" | grep -nE "$L61_PAT" | grep -vE "$L61_OK" || true)"
 if [ -z "$L61_RAW" ]; then
-  check "L61 every rendered path-shaped transcript value goes through a bound" PASS
+  check "L61 every r.wt/cwd/worktree/branch/title reference is wrapped, consumed by an allowlisted callee, or the documented cd exemption" PASS
 else
   check "L61 an unbounded path-shaped render remains: $(printf '%s' "$L61_RAW" | head -2 | tr '\n' ' ' | cut -c1-140)" FAIL
 fi
@@ -1876,6 +1889,18 @@ if grep -qE "$L61_PAT" "$L61_CTRL"; then
   check "L61-control the raw-render scan bites a planted unbounded interpolation" PASS
 else
   check "L61-control the raw-render scan matched nothing, so L61 is vacuous" FAIL
+fi
+printf 'const gitPart = g ? x : (${r.branch} || 1);\n' > "$L61_CTRL"
+if grep -qE "$L61_PAT" "$L61_CTRL"; then
+  check "L61-control2 the scan bites the INTERMEDIATE-LOCAL shape, which is how the last defect evaded it" PASS
+else
+  check "L61-control2 the scan misses an intermediate local, so the evasion that already happened is still open" FAIL
+fi
+printf 'print(`${r.wt || "(unknown)"}`);\n' > "$L61_CTRL"
+if grep -qE "$L61_PAT" "$L61_CTRL"; then
+  check "L61-control3 the scan bites a || fallback inside the braces" PASS
+else
+  check "L61-control3 the scan misses a || fallback inside the braces" FAIL
 fi
 rm -f "$L61_CTRL"
 # And the exemption filter must not be inert: if the shell-command class ever stops
