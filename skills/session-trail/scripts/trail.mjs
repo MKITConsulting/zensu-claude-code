@@ -479,9 +479,8 @@ function windowKey(appPid) {
 // checkout of this plugin. The session was then grouped under a window that is not
 // one, and this walk is the fallback that exists precisely for when the desktop
 // store (the only other source of that grouping) is unreachable.
-function windowOf(pid) {
-  const table = processTable();
-  if (!table.size || !Number.isFinite(pid)) return null;
+function windowOf(pid, table = processTable()) {
+  if (!table || !table.size || !Number.isFinite(pid)) return null;
   let cur = table.get(pid);
   let found = null;
   for (let hop = 0; hop < 12 && cur && cur.ppid > 1; hop += 1) {
@@ -2712,6 +2711,26 @@ function flush() {
 // `boundText(src.sessionId, 128)`.
 function showId(id, n = 128) { return oneLine(String(id || ''), n) || '(unnamed session)'; }
 
+// A test seam, and a narrow one: it reads a table from stdin, runs the ancestry rule
+// against it and returns the answer. It touches no process table, no store and no
+// file. It exists because the live tree cannot be arranged into the shapes that
+// decide the rule — a helper hop between the session and the app, a chain with no
+// Claude ancestor, the hop bound — and the real probe resolves an absolute
+// interpreter path by design, so no PATH shim can stand in for it.
+function windowProbe(raw) {
+  let spec;
+  try { spec = JSON.parse(raw); } catch { return { error: 'probe input is not JSON' }; }
+  if (!spec || !Array.isArray(spec.table) || !Number.isFinite(spec.pid)) {
+    return { error: 'probe needs { pid: <number>, table: [{ pid, ppid, comm }] }' };
+  }
+  const table = new Map();
+  for (const row of spec.table) {
+    if (!row || !Number.isFinite(row.pid) || !Number.isFinite(row.ppid)) continue;
+    table.set(row.pid, { ppid: row.ppid, comm: String(row.comm || '') });
+  }
+  return { appPid: windowOf(spec.pid, table) };
+}
+
 function scriptPath() { return fileURLToPath(import.meta.url); }
 
 const argv = process.argv.slice(2);
@@ -2739,6 +2758,7 @@ const COMMANDS = {
   lineage: cmdLineage,
   adopt: cmdAdopt,
   label: cmdLabel,
+  'window-probe': (opts) => print(JSON.stringify({ ...windowProbe(fs.readFileSync(0, 'utf8')), skipped: SKIPPED }, null, 2)),
 };
 
 // The flag namespace is global — parseArgs accepts every flag for every command —
@@ -2764,6 +2784,7 @@ const COMMAND_FLAGS = {
   // machine-wide record the flag said it was skipping.
   adopt: ['--reason'],
   label: ['--remove', '--self'],
+  'window-probe': [],
 };
 
 function refuseForeignFlags(opts, cmd) {

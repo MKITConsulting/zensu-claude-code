@@ -569,7 +569,7 @@ fi
 # once scanned for `cmd === '<name>'` was replaced by that table so the flag rows
 # and the routed set could be held adjacent, and the old grep then reported zero
 # dispatched commands while every one of them still routed.
-DISPATCHED="$(awk '/^const COMMANDS = \{/{f=1;next} f&&/^\};/{exit} f&&match($0,/^  [A-Za-z0-9_-]+:/){print substr($0,3,RLENGTH-3)}' "$TRAIL_MJS" | sort -u)"
+DISPATCHED="$(awk '/^const COMMANDS = \{/{f=1;next} f&&/^\};/{exit} f&&match($0,/^  '"'"'?[A-Za-z0-9_-]+'"'"'?:/){k=substr($0,3,RLENGTH-3); gsub(/'"'"'/,"",k); print k}' "$TRAIL_MJS" | sort -u)"
 DISPATCH_N="$(printf '%s\n' "$DISPATCHED" | grep -c .)"
 # Scoped to the '## The tool' section, not to line-start: the TAKEOVER verdict
 # table carries the same token shape and is excluded today only by its list
@@ -795,8 +795,9 @@ if grep -qE 'skippedNote\(\)' "$TRAIL_MJS" && grep -qE '^function flush\(\)' "$T
   JSON_WITH_SKIPPED="$(grep -c 'skipped: SKIPPED' "$TRAIL_MJS")"
   [ "$JSON_EMITS" = "$JSON_WITH_SKIPPED" ] || GUARD_MISS="$GUARD_MISS [json-skipped($JSON_WITH_SKIPPED/$JSON_EMITS)]"
   # 14 -> 19: `lineage --forget` emits three payloads (unreadable ledger, dry run,
-  # applied) and `label --remove` two (nothing to remove, removed).
-  [ "$JSON_EMITS" = "19" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 19)]"
+  # applied) and `label --remove` two (nothing to remove, removed). 19 -> 20: the
+  # window-probe test seam emits its result on the same machine carrier.
+  [ "$JSON_EMITS" = "20" ] || GUARD_MISS="$GUARD_MISS [json-emit-count($JSON_EMITS, expected 20)]"
 else
   GUARD_MISS="$GUARD_MISS [note-not-in-flush]"
 fi

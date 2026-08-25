@@ -454,6 +454,38 @@ test('a symlinked config root does not refuse every write', { skip: process.plat
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a path survives as the path it was, or not at all', () => {
+  // boundText treats its input as PROSE: it collapses whitespace RUNS to a single
+  // space and ellipsizes past the cap. Applied to a path that silently produced a
+  // DIFFERENT directory that still looked valid — `/Users/me/My  Projects` was
+  // persisted as `/Users/me/My Projects` — and a long path became a truncation
+  // that still parsed. A truncated path is a WRONG answer; an absent one is a
+  // missing answer a reader can act on. Both properties were unpinned: the change
+  // that introduced boundPath broke no existing check.
+  const spaced = '/Users/me/My  Projects/api';
+  assert.equal(mod.makeEndpoint({ worktree: spaced }).worktree, spaced,
+    'a doubled space is part of the path, not prose to be tidied');
+  assert.equal(mod.makeEndpoint({ worktree: '/x'.repeat(4000) }).worktree, null,
+    'past the cap the answer is absent, never a truncation that still parses');
+  assert.equal(mod.normalizeRepo({ name: 'r', root: spaced }).root, spaced,
+    'the repo root is a path too');
+});
+
+test('an omitted provenance marker ranks as a GUESS, never above one', () => {
+  // The store is machine-wide and writable by every local process. Nothing here can
+  // authenticate provenance — a planted record can still claim 'confirmed' — but an
+  // OMITTED marker used to answer 'provisional', which outranks 'inferred', so the
+  // cheapest possible forgery was to leave the field out. A record must SAY what it
+  // is to be ranked above a guess.
+  assert.equal(mod.normalizeConfidence(undefined, undefined), 'inferred',
+    'said nothing must not outrank a record that honestly declared itself inferred');
+  assert.equal(mod.normalizeConfidence(undefined, false), 'provisional',
+    'an explicit legacy inferred:false still gets the default');
+  assert.equal(mod.normalizeConfidence(undefined, true), 'inferred');
+  assert.equal(mod.normalizeConfidence('confirmed', undefined), 'confirmed',
+    'a known value still wins over the fallback');
+});
+
 test('the READ and DELETE sides accept the same symlinked ceiling the write side does', { skip: process.platform === 'win32' }, () => {
   // The write side was relaxed at the ceiling deliberately (the case above). The
   // round-2 ancestor guard judged the ceiling instead, so on the ordinary

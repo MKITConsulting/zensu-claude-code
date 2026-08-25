@@ -1965,6 +1965,42 @@ case "$OUT" in *"$ESC"*) check "L62 an escape byte planted in a registry session
 rm -f "$CFG/sessions/planted.json"
 reset_ledger
 
+# -- L63 -- the ancestry rule, which no fixture could reach ------------------
+# Every fixture in this suite spawns node from a shell, so no ancestor ever matches
+# /claude/i and windowOf returned null throughout -- the walk was effectively
+# untestable and neutering it to `return null` cost almost nothing. The table is a
+# parameter now and `window-probe` feeds it from stdin, so the shapes that actually
+# decide the rule can be arranged. Ported from the parallel working copy on this
+# branch, which found this first; the basename rule the walk applies is this line's.
+probe() { printf '%s' "$1" | ( cd "$SELF_CWD" 2>/dev/null || cd "$FAKE"; HOME="$FAKE" USERPROFILE="$FAKE" env -u CLAUDE_CONFIG_DIR node "$TRAIL_MJS" window-probe --config-dir "$CFG" 2>&1 ); }
+# HIGHEST match, not nearest. A helper process between the session and the app also
+# matches /claude/i, and the window a user sees is the OUTERMOST one -- answering
+# with the helper would group sessions under a process the user cannot point at.
+OUT="$(probe '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":80,"comm":"claude-helper"},{"pid":80,"ppid":1,"comm":"/Applications/Claude.app/Contents/MacOS/Claude"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "80" ] && check "L63 the ancestry walk answers with the OUTERMOST Claude ancestor, not the nearest" PASS || check "L63 the walk answers with the outermost match (appPid=$(jq_field "$OUT" appPid), want 80)" FAIL
+# A single ancestor is still found -- without this the check above is satisfied by a
+# walk that simply climbs to the top and reports whatever it lands on.
+OUT="$(probe '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":1,"comm":"/Applications/Claude.app/Contents/MacOS/Claude"}]}')"
+[ "$(jq_field "$OUT" appPid)" = "90" ] && check "L63a a single Claude ancestor is found" PASS || check "L63a a single Claude ancestor is found (appPid=$(jq_field "$OUT" appPid), want 90)" FAIL
+# No Claude ancestor answers NULL rather than a stray pid. This is the arm that keeps
+# the window grouping honest when the desktop store is unreachable.
+OUT="$(probe '{"pid":100,"table":[{"pid":100,"ppid":90,"comm":"node"},{"pid":90,"ppid":80,"comm":"zsh"},{"pid":80,"ppid":1,"comm":"login"}]}')"
+case "$(jq_field "$OUT" appPid)" in null) check "L63b a chain with no Claude ancestor answers null, never a stray pid" PASS ;; *) check "L63b a chain with no Claude ancestor answers null (got $(jq_field "$OUT" appPid))" FAIL ;; esac
+# The hop bound. A match beyond it must not be reached, or a deep tree costs an
+# unbounded walk on every row rendered.
+DEEP="$(node -e '
+const rows = [{ pid: 100, ppid: 101, comm: "node" }];
+for (let i = 101; i < 130; i += 1) rows.push({ pid: i, ppid: i + 1, comm: "sh" });
+rows.push({ pid: 130, ppid: 1, comm: "Claude" });
+process.stdout.write(JSON.stringify({ pid: 100, table: rows }));
+')"
+OUT="$(probe "$DEEP")"
+case "$(jq_field "$OUT" appPid)" in null) check "L63c a Claude ancestor beyond the hop bound is not reached" PASS ;; *) check "L63c a match beyond the hop bound is not reached (got $(jq_field "$OUT" appPid))" FAIL ;; esac
+# The seam reaches nothing on the machine: malformed input is refused rather than
+# falling back to the real process table.
+OUT="$(probe 'not json')"
+case "$(jq_field "$OUT" error)" in ABSENT|null) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" FAIL ;; *) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" PASS ;; esac
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added

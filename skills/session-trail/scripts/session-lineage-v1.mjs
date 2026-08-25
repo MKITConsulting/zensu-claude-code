@@ -84,6 +84,7 @@ export const LEDGER_SCHEMA_VERSION = 1;
 // exactly this reason; the ledger adds durable carriers, so it needs the bound
 // more, not less.
 const FIELD_MAX = 200;
+const PATH_MAX = 4096;
 const LABEL_MAX = 120;
 
 export function boundText(value, max = FIELD_MAX) {
@@ -94,6 +95,15 @@ export function boundText(value, max = FIELD_MAX) {
   const flat = String(value).replace(/[\p{Cc}\p{Cf}\u2028\u2029\s]+/gu, ' ').trim();
   if (!flat) return null;
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+export function boundPath(value) {
+  if (value === null || value === undefined) return null;
+  // Stripped, not replaced by a space: removing the control and format class keeps
+  // the SPELLING intact, so a path that survives is the path that was given.
+  const flat = String(value).replace(/[\p{Cc}\p{Cf}\u2028\u2029]/gu, '');
+  if (!flat || flat.length > PATH_MAX) return null;
+  return flat;
 }
 
 export function boundLabel(value) {
@@ -130,7 +140,7 @@ export function byRecordedAtAsc(a, b) {
 // bounded on neither.
 export function normalizeRepo(raw) {
   const r = raw && typeof raw === 'object' ? raw : {};
-  return { name: boundText(r.name), root: boundText(r.root) };
+  return { name: boundText(r.name), root: boundPath(r.root) };
 }
 
 export function ledgerPaths(configRoot) {
@@ -426,7 +436,7 @@ export function makeEndpoint(input) {
     accountUuid: boundText(src.accountUuid, 128),
     appPid: Number.isFinite(src.appPid) ? src.appPid : null,
     pid: Number.isFinite(src.pid) ? src.pid : null,
-    worktree: boundText(src.worktree),
+    worktree: boundPath(src.worktree),
     branch: boundText(src.branch),
   };
 }
@@ -474,7 +484,12 @@ export function normalizeConfidence(value, inferred) {
   if (CONFIDENCE_ORDER.includes(value)) return value;
   // A record written before this field existed, or one carrying a value this build
   // does not know: fall back to what the legacy boolean can still tell us.
-  return inferred === true ? 'inferred' : CONFIDENCE_DEFAULT;
+  // Fails toward GUESS. An omitted marker is not evidence of a measurement, and this
+  // store is writable by every local process, so "said nothing" must not outrank a
+  // record that honestly declared itself inferred. A legacy record that explicitly
+  // says `inferred: false` still gets the default; one that says nothing does not.
+  if (inferred === true) return 'inferred';
+  return inferred === false ? CONFIDENCE_DEFAULT : 'inferred';
 }
 
 export function buildEdge({ from, to, workRoot, repoRootOf, reason, recordedBy, inferred, confidence, at }) {
