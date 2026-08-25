@@ -304,7 +304,7 @@ grouped by label.
 Two properties stay as they are, deliberately:
 
 - **Resume happens in the anchor, always.** The printed
-  `cd <cwd> && claude --resume <id>` (`trail.mjs:1610`) already lands there.
+  `cd <cwd> && claude --resume <id>` (`trail.mjs:1863`) already lands there.
   Resuming inside a code root would present a different `CLAUDE_PROJECT_DIR` while
   the recorded `project_root` still EXISTS, and a present-but-different root is
   never relaxed — the orphaned relaxation requires the recorded path to be absent.
