@@ -761,8 +761,26 @@ LINK_OK="$(HOME="$FAKE" node -e '
 try { const fs=require("node:fs");
   process.stdout.write(fs.realpathSync.native(process.argv[1]) === fs.realpathSync.native(process.argv[2]) ? "yes" : "no");
 } catch { process.stdout.write("no"); }' "$LINK_ANCHOR" "$REAL_ANCHOR" 2>/dev/null)"
+# SECOND premise, and the one this check silently rested on. The fixture anchors on
+# the SYMLINKED spelling and targets the REAL one, so the two readings inside
+# `containment` disagree — and produce `unknown` — only while `$FAKE` is not its own
+# realpath. On macOS that holds because `/var` is a symlink; on a host whose
+# `mktemp -d` root is canonical both readings land inside and the answer is
+# `allowed`. The blocking job runs on ubuntu-latest, so a single hardcoded
+# expectation is red on one of the two hosts whatever it says.
+#
+# It BRANCHES rather than skipping, because skipping on a canonical temp root would
+# throw away the only coverage of the anchor-side realpath on exactly the host CI
+# uses. Measured both ways: on a canonical root the shipped code renders `allowed`,
+# and the same fixture with the anchor-side realpath removed renders `denied here`.
+FAKE_CANONICAL="$(HOME="$FAKE" node -e '
+try { const fs=require("node:fs");
+  process.stdout.write(fs.realpathSync.native(process.argv[1]) === process.argv[1] ? "yes" : "no");
+} catch { process.stdout.write("unknown"); }' "$FAKE" 2>/dev/null)"
 if [ "$LINK_OK" != "yes" ]; then
   skip "W1c canonicalDir realpath probe (this host did not produce a real symlink)"
+elif [ "$FAKE_CANONICAL" = "unknown" ]; then
+  skip "W1c symlinked-anchor verdict (this host would not report whether its temp root is canonical, so neither expectation can be selected)"
 else
   HOME="$FAKE" node -e '
 const fs=require("node:fs"), path=require("node:path");
@@ -776,10 +794,44 @@ fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
 ].join("\n") + "\n");
 ' "$FAKE" "$SID_LINK" "$REAL_ANCHOR/wt-linked" 2>/dev/null
   W1C="$(ZENSU_PROJECT_ROOT="$LINK_ANCHOR" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_LINK" --all --no-git 2>/dev/null | writes_block)"
-  case "$W1C" in
-    "WRITES   allowed"*) check "W1c a symlinked anchor spelling resolves, so canonicalDir is load-bearing" PASS ;;
-    *) check "W1c symlinked anchor should resolve to covered (got '$(printf '%s' "$W1C" | head -1)')" FAIL ;;
-  esac
+  W1C_BAD=""
+  if [ "$FAKE_CANONICAL" = "no" ]; then
+    # NON-CANONICAL temp root (macOS, where `/var` is itself a symlink). The target
+    # is written out as `/var/…` and resolves to `/private/var/…`, so the literal and
+    # resolved readings disagree and the answer must be `unknown`. Taking the resolved
+    # reading alone would answer `allowed` for a target the gate refuses when the
+    # literal spelling is the one written — a guess in the one direction this verdict
+    # may not guess in. The reason is asserted too, so a `null` arriving from some
+    # other cause cannot satisfy this arm.
+    case "$W1C" in
+      "WRITES   unknown"*) ;;
+      "WRITES   allowed"*) W1C_BAD="$W1C_BAD resolved-reading-taken-alone-and-rendered-allowed" ;;
+      *) W1C_BAD="$W1C_BAD symlinked-anchor-verdict-unexpected(got='$(printf '%s' "${W1C:-<empty>}" | head -1)')" ;;
+    esac
+    case "$W1C" in
+      *"literal and resolved spellings disagree"*) ;;
+      *) W1C_BAD="$W1C_BAD ambiguity-reason-not-named" ;;
+    esac
+    W1C_LABEL="W1c a symlinked worktree is reported as not determinable, and the dual reading is what detects it"
+  else
+    # CANONICAL temp root (ubuntu-latest, where the blocking job runs). Nothing in the
+    # TARGET's spelling resolves elsewhere, so both readings agree and the verdict
+    # turns entirely on the ANCHOR: the realpath maps `…/link-anchor` onto
+    # `…/real-anchor`, which contains the worktree. Drop the anchor-side realpath and
+    # the same fixture renders `denied here` — which is what makes this arm a bite on
+    # the host that would otherwise have skipped it.
+    case "$W1C" in
+      "WRITES   allowed"*) ;;
+      "WRITES   denied here"*) W1C_BAD="$W1C_BAD anchor-not-canonicalized-so-its-own-worktree-reads-as-outside" ;;
+      *) W1C_BAD="$W1C_BAD symlinked-anchor-verdict-unexpected(got='$(printf '%s' "${W1C:-<empty>}" | head -1)')" ;;
+    esac
+    W1C_LABEL="W1c a symlinked anchor is resolved before the comparison, so its own worktree reads as contained"
+  fi
+  if [ -z "$W1C_BAD" ]; then
+    check "$W1C_LABEL" PASS
+  else
+    check "W1c symlinked anchor:$W1C_BAD" FAIL
+  fi
 fi
 
 W_DENIED="$(ZENSU_PROJECT_ROOT="$FAKE/work/somewhere-else" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
@@ -1973,6 +2025,431 @@ if [ -z "$W19_BAD" ]; then
 else
   check "W19 third-party store hazards:$W19_BAD" FAIL
 fi
+
+# W20 — the TARGET operand of the comparison, which round 1 admitted on truthiness
+# alone while gating the caller channel with `path.isAbsolute`. `r.wt` comes from
+# another session's transcript `cwd`, so a relative spelling is reachable input; it
+# then reached `path.resolve` inside the canonicalizer and was resolved against THIS
+# process's cwd — the derivation `writeAnchor`'s own header forbids, one call further
+# down than the structural pin (W3b) can see. Run from a cwd that CONTAINS the
+# fixture, the unfixed code answers `allowed` for a worktree the gate was never asked
+# about, which is the one verdict the design says it never gives.
+#
+# Asserted on `covered`, not on the render: the render would also have to be read
+# through `writes_block`, and the field is what a `--json` consumer acts on.
+W20_SID=aa20aa20-0000-0000-0000-000000000020
+W20_REL='work/wt-relative-2020'
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W20_SID" "$W20_REL" 2>/dev/null
+W20_BAD=""
+# `pwd -P` for the anchor, and the command runs from the same directory: on macOS a
+# `mktemp -d` root is spelled /var/... by the caller and /private/var/... by the
+# kernel, so an unrealpathed anchor would never coincide with `path.resolve`'s output
+# and the arm would pass for a reason unrelated to its contract — the trap W11's
+# comment already records having paid for once.
+W20_JSON="$(cd "$FAKE" && ZENSU_PROJECT_ROOT="$(pwd -P)" HOME="$FAKE" node "$TRAIL_MJS" show "$W20_SID" --all --no-git --json 2>/dev/null \
+  | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{const w=JSON.parse(s).writes;process.stdout.write(`${w.covered}/${w.targetRoot}`)}catch{process.stdout.write("PARSE_ERROR")}})')"
+case "$W20_JSON" in
+  "null/$W20_REL") ;;
+  PARSE_ERROR|"") W20_BAD="$W20_BAD relative-target-fixture-unreadable(got='$W20_JSON')" ;;
+  "true/"*) W20_BAD="$W20_BAD relative-target-resolved-against-process-cwd-and-rendered-allowed(got='$W20_JSON')" ;;
+  *) W20_BAD="$W20_BAD relative-target-verdict-unexpected(got='$W20_JSON')" ;;
+esac
+# The reason must NAME the cause. A relative target and an unset channel are two
+# different repairs, so a shared "the ordinary case" sentence would send an operator
+# who set the variable correctly to look at the variable.
+W20_WHY="$(cd "$FAKE" && ZENSU_PROJECT_ROOT="$(pwd -P)" HOME="$FAKE" node "$TRAIL_MJS" show "$W20_SID" --all --no-git 2>/dev/null | writes_block)"
+case "$W20_WHY" in
+  *"not an absolute path"*) ;;
+  *) W20_BAD="$W20_BAD relative-target-reason-not-named(got='$(printf '%s' "${W20_WHY:-<empty>}" | head -1)')" ;;
+esac
+if [ -z "$W20_BAD" ]; then
+  check "W20 a relative recorded worktree is never resolved against this process's cwd, and its reason names itself" PASS
+else
+  check "W20 relative target operand:$W20_BAD" FAIL
+fi
+
+# W23 — the shared control class must cover the zero-advance and bidi block. It did
+# not: `CONTROL_RUN` enumerated C0/C1 plus U+2028/2029, while `ZERO_WIDTH` — defined
+# in the same file for `instanceId` — strips exactly `\p{Cf}\p{Mn}\p{Me}`. Those
+# characters reach the `WORKTREE` row, which flow 3 of the skill declares the
+# AUTHORITATIVE comparison a reader performs by eye, and both persisted briefs. A
+# directional override reorders the rest of the line as displayed, so the check the
+# feature elevates above its own verdict is defeated by a path the target chose.
+W23_BAD=""
+# U+202E RIGHT-TO-LEFT OVERRIDE and U+2069 POP DIRECTIONAL ISOLATE: both are \p{Cf},
+# both were outside the shipped class, and neither is a separator on any host.
+W23_RLO="$(printf '\342\200\256')"
+W23_PDI="$(printf '\342\201\251')"
+W23_SID=aa23aa23-0000-0000-0000-000000000023
+W23_WT="$FAKE/work/w23${W23_RLO}wt${W23_PDI}dir"
+if mkdir -p "$W23_WT" 2>/dev/null; then
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W23_SID" "$W23_WT" 2>/dev/null
+  W23_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W23_SID" --all --no-git 2>/dev/null)"
+  case "$W23_OUT" in
+    *"$W23_RLO"*) W23_BAD="$W23_BAD directional-override-survived-into-show" ;;
+  esac
+  case "$W23_OUT" in
+    *"$W23_PDI"*) W23_BAD="$W23_BAD isolate-survived-into-show" ;;
+  esac
+  # Premise: the row must actually be there, or an empty render satisfies both arms.
+  case "$W23_OUT" in
+    *"WORKTREE"*) ;;
+    *) W23_BAD="$W23_BAD fixture-not-rendered(no-worktree-row)" ;;
+  esac
+  # And the persisted brief, which a DIFFERENT instance opens with no way to re-run.
+  W23_BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" takeover "$W23_SID" --all --no-git 2>/dev/null)"
+  case "$W23_BRIEF" in
+    *"$W23_RLO"*|*"$W23_PDI"*) W23_BAD="$W23_BAD format-character-survived-into-the-persisted-brief" ;;
+  esac
+  # Control: the class must not have become a blanket stripper. An ordinary path
+  # component still has to arrive intact, or the arms above would pass by erasing
+  # everything.
+  case "$W23_OUT" in
+    *"work/w23"*) ;;
+    *) W23_BAD="$W23_BAD control-ordinary-path-text-did-not-survive" ;;
+  esac
+  # FIDELITY control, and the one that was missing: the arms above are satisfied by a
+  # class that strips too much, and an ASCII-only control cannot see it. Round 2 first
+  # widened this class with `\p{Mn}\p{Me}` — ordinary COMBINING MARKS, which is the
+  # normal on-disk (NFD) spelling of any accented name on macOS. That rewrote
+  # `…/Café/wt` to `…/Cafe /wt`, a directory that does not exist, and `briefShellArg`
+  # builds the four runnable `cd` lines from the same class while its own header fixes
+  # the contract as byte-exact. A combining mark neither reorders nor hides a line, so
+  # it buys no display safety and costs only exactness; the bound belongs to `\p{Cf}`,
+  # whose members are what actually reorder or vanish.
+  W23_NFD_SID=aa23aa23-0000-0000-0000-0000000000fd
+  W23_NFD_NAME="$(printf 'cafe\314\201')"
+  W23_NFD_WT="$FAKE/work/$W23_NFD_NAME/wt"
+  if mkdir -p "$W23_NFD_WT" 2>/dev/null; then
+    HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W23_NFD_SID" "$W23_NFD_WT" 2>/dev/null
+    W23_NFD_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" show "$W23_NFD_SID" --all --no-git 2>/dev/null)"
+    case "$W23_NFD_OUT" in
+      *"$W23_NFD_NAME"*) ;;
+      *) W23_BAD="$W23_BAD combining-mark-stripped-from-the-worktree-row" ;;
+    esac
+    # The runnable operand is the load-bearing half: a display row a reader misreads is
+    # bad, a `cd` line that cannot work is worse, and the brief is persisted for a
+    # session that cannot re-run the command.
+    W23_NFD_BRIEF="$(HOME="$FAKE" node "$TRAIL_MJS" takeover "$W23_NFD_SID" --all --no-git 2>/dev/null)"
+    case "$W23_NFD_BRIEF" in
+      *"$W23_NFD_NAME"*) ;;
+      *) W23_BAD="$W23_BAD combining-mark-stripped-from-the-runnable-brief" ;;
+    esac
+    # Premise: the fixture must have rendered at all, or both arms pass on empty output.
+    case "$W23_NFD_OUT" in
+      *"WORKTREE"*) ;;
+      *) W23_BAD="$W23_BAD nfd-fixture-not-rendered" ;;
+    esac
+  else
+    skip "W23 combining-mark fidelity (this host refused an NFD directory name)"
+  fi
+  if [ -z "$W23_BAD" ]; then
+    check "W23 the shared control class strips the zero-advance and bidi block from every renderer and both briefs" PASS
+  else
+    check "W23 control class coverage:$W23_BAD" FAIL
+  fi
+else
+  # Names BOTH halves, for the reason already recorded at W19b's outer skip: the
+  # combining-mark fidelity arm is nested under this guard, so a wording that mentions
+  # only the bidi/zero-width bound understates what a skipping host lost — and the NFD
+  # arm is the one that caught the round-1 over-strip.
+  skip "W23 bidi/zero-width path bounding, and with it the nested combining-mark fidelity arm (this host refused the crafted directory name)"
+fi
+
+# W24 — two renderer-bound values round 1 left half-done. Structural by design: both
+# are about which HELPER a call site uses, and a behavioral probe would only re-test
+# the helper. (a) `r.live.pid` was the one live-registry field on the STATUS row left
+# raw while its two siblings were bounded in the same change; its value is another
+# process's JSON, so a newline there fabricates a line directly above the verdict a
+# reader acts on, and two of its carriers are persisted briefs. (b) the 8-character
+# session-id prefix had two spellings — `instanceId(x, 8)` in one column and
+# `flatPath(x).slice(0, 8)` in four others — and correlating those rows is the only
+# thing the prefix is for.
+W24_BAD=""
+# (a) BEHAVIORAL, and fixed at the SOURCE rather than at fourteen render sites: a
+# record whose pid is not a positive integer is not a live-process record, so
+# `liveRegistry` coerces once and drops it. That is what makes every carrier safe,
+# including the two persisted briefs, without asking a future author to remember a
+# roster. `process.kill` accepts a numeric STRING, which is why the old truthiness
+# filter passed a decorated spelling straight through.
+W24_PID_DIR="$FAKE/.claude/sessions"
+mkdir -p "$W24_PID_DIR" 2>/dev/null
+W24_PID_SID=aa24aa24-0000-0000-0000-000000000024
+HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [dir, sid] = process.argv.slice(1);
+fs.writeFileSync(path.join(dir, `${sid}.json`), JSON.stringify({
+  sessionId: sid,
+  pid: `${process.pid}\nWRITES   allowed — forged by a registry record`,
+  startedAt: Date.now() - 60000,
+  entrypoint: "cli",
+  name: "w24"
+}));
+' "$W24_PID_DIR" "$W24_PID_SID" 2>/dev/null
+# `instances`, NOT `list`. The first spelling drove `list`, which builds its rows
+# exclusively from `*.jsonl` transcripts — this file says so itself at the W8b block —
+# so a registry-only fixture could never reach a row and BOTH arms passed structurally,
+# with or without the coercion they were meant to test. `cmdInstances` is the one
+# command that reads the registry store directly, which is what makes this a bite.
+W24_RC=0
+W24_OUT="$(HOME="$FAKE" node "$TRAIL_MJS" instances 2>/dev/null)" || W24_RC=$?
+[ "$W24_RC" = "0" ] || W24_BAD="$W24_BAD hostile-pid-record-crashed-instances(rc=$W24_RC)"
+case "$W24_OUT" in
+  *"forged by a registry record"*) W24_BAD="$W24_BAD hostile-pid-fabricated-a-line" ;;
+esac
+# The absence arm above is NOT the bite, and saying so is the point of this comment.
+# Measured against a mirror with the coercion removed: the decorated spelling is not a
+# number, so `process.kill` throws on it and the record is dropped as not-alive — with
+# OR without the coercion, no row is ever rendered. An earlier spelling of this block
+# rested entirely on that absence and therefore passed identically in both trees.
+#
+# What the coercion actually CHANGES is the accounting: the record is now recognised as
+# malformed and COUNTED, so the survey discloses that it could not see it. The mutated
+# mirror emits no such note. That makes this arm the discriminating one, and it doubles
+# as the liveness control the first spelling tried to get from a header line — the
+# earlier `*"INSTANCE"*` match was satisfied by `DESKTOP INSTANCES INVOLVED: 0`, which
+# `cmdInstances` prints before any row exists and therefore on empty output too.
+case "$W24_OUT" in
+  *"record(s) unreadable and skipped"*) ;;
+  *) W24_BAD="$W24_BAD malformed-pid-record-not-counted-as-skipped(got='$(printf '%s' "${W24_OUT:-<empty>}" | tail -1)')" ;;
+esac
+# Premise: the planted file must exist, or every arm above tests nothing.
+[ -f "$W24_PID_DIR/$W24_PID_SID.json" ] || W24_BAD="$W24_BAD pid-fixture-was-not-planted"
+# (b) STRUCTURAL, and labelled as such: the session-id prefix must have ONE spelling.
+# Correlating a `list` row with an `instances` row is the only thing an 8-character
+# prefix is for, and round 1 left `instanceId(x, 8)` in one column against
+# `flatPath(x).slice(0, 8)` in four others — which agree for a UUID and diverge for
+# any id carrying a format character, and the id is an unvalidated filename stem.
+[ "$(grep -c 'sessionId)\.slice(0, 8)' "$TRAIL_MJS" 2>/dev/null || true)" = "0" ] \
+  || W24_BAD="$W24_BAD session-id-prefix-still-has-a-second-spelling"
+# Control: the pattern must match the spelling it is meant to catch, or the arm above
+# passes by matching nothing. `grep -c` prints its count AND exits 1 on zero, so the
+# `|| true` is what keeps this a count rather than two concatenated zeroes.
+W24_CTRL="$FAKE/w24-control.txt"
+printf '%s\n' 'q flatPath(r.sessionId).slice(0, 8) e' > "$W24_CTRL"
+grep -q 'sessionId)\.slice(0, 8)' "$W24_CTRL" || W24_BAD="$W24_BAD control-pattern-inert"
+if [ -z "$W24_BAD" ]; then
+  check "W24 the live pid and the session-id prefix each render through one bounded helper" PASS
+else
+  check "W24 renderer-bound values:$W24_BAD" FAIL
+fi
+
+# W25 — the deny head asserted a containment relation nothing measured. Off the weak
+# channel it read "the anchor the gate compares lies inside it", which requires
+# ZENSU_PROJECT_ROOT to be contained in CLAUDE_PROJECT_DIR — true for a session that
+# started where its record was minted, and NOT true after a resume from elsewhere,
+# which `claude-session-control-v1.js` explicitly anticipates ("may report a
+# descendant or external detached-worktree cwd"). The verdict stays conservative
+# either way; the SENTENCE was the defect.
+W25_BAD=""
+W25_WEAK="$(env -u ZENSU_PROJECT_ROOT CLAUDE_PROJECT_DIR="$FAKE/work/elsewhere" HOME="$FAKE" node "$TRAIL_MJS" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+case "$W25_WEAK" in
+  "WRITES   denied here"*) ;;
+  *) W25_BAD="$W25_BAD weak-channel-deny-not-reached(got='$(printf '%s' "${W25_WEAK:-<empty>}" | head -1)')" ;;
+esac
+case "$W25_WEAK" in
+  *"lies inside it"*) W25_BAD="$W25_BAD head-still-asserts-an-unmeasured-containment-relation" ;;
+esac
+# It must still give the reader a DIRECTION. Removing the invented justification
+# without replacing it would trade a false claim for a line nobody can act on, and the
+# round-1 review's own steelman of "render no verdict at all" is what that would slide
+# into. The replacement attributes the reading and names the check to run instead.
+case "$W25_WEAK" in
+  *"strong hint"*) ;;
+  *) W25_BAD="$W25_BAD head-gives-no-actionable-direction" ;;
+esac
+case "$W25_WEAK" in
+  *"WORKTREE row"*) ;;
+  *) W25_BAD="$W25_BAD head-does-not-name-the-authoritative-check" ;;
+esac
+if [ -z "$W25_BAD" ]; then
+  check "W25 the weak-channel deny attributes its reading instead of asserting a relation it never measured" PASS
+else
+  check "W25 deny head attribution:$W25_BAD" FAIL
+fi
+
+
+# W21 — the copy must canonicalize the two operands the way the GATE does, which is
+# NOT symmetrically. The parser's own header (line 35) states it: "Only the comparison
+# roots are canonicalized, once, via `canonical()`" — a write target goes through
+# `resolveFrom`, which is `stripSlash(path.resolve(...))` with no realpath at all.
+# Round 1 realpathed BOTH sides, so a target that EXISTS through a symlink resolved
+# into the root's namespace and reported `allowed`, while the gate compares the
+# realpathed root against the target's LITERAL spelling and denies. That is a false
+# allow — the direction the design says it never takes.
+#
+# Note this is not the fix the round-1 review proposed (it suggested comparing both
+# sides lexically whenever either fails to resolve). That would have left this case
+# untouched, because here BOTH sides resolve; the divergence is not resolvability, it
+# is that the gate never realpaths a target.
+W21_BAD=""
+W21_REAL="$FAKE/w21-real"
+W21_ALIAS="$FAKE/w21-alias"
+mkdir -p "$W21_REAL/wt" 2>/dev/null
+# `ln -s` exiting 0 is not evidence of a symlink — Git Bash satisfies it with a copy
+# native Node does not follow, and the two directories then genuinely differ, which
+# makes DENY correct and the arm vacuous. Confirm through the same primitive the
+# production canonicalizer uses, exactly as W1c does.
+ln -s "$W21_REAL" "$W21_ALIAS" 2>/dev/null
+W21_LINKED="$(HOME="$FAKE" node -e 'const fs=require("node:fs");try{process.stdout.write(fs.realpathSync.native(process.argv[1])===fs.realpathSync.native(process.argv[2])?"yes":"no")}catch{process.stdout.write("no")}' "$W21_ALIAS" "$W21_REAL" 2>/dev/null)"
+if [ "$W21_LINKED" != "yes" ]; then
+  skip "W21 symlinked-target canonicalization (this host did not produce a real symlink)"
+else
+  W21_SID=aa21aa21-0000-0000-0000-000000000021
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W21_SID" "$W21_ALIAS/wt" 2>/dev/null
+  # Anchor: the REAL spelling, which exists, so it realpaths to itself.
+  # Target: the ALIAS spelling, which also exists — through the link. Realpathing it
+  # lands it inside the anchor; not realpathing it does not, and the gate is the
+  # second one.
+  W21_OUT="$(ZENSU_PROJECT_ROOT="$W21_REAL" HOME="$FAKE" node "$TRAIL_MJS" show "$W21_SID" --all --no-git 2>/dev/null | writes_block)"
+  case "$W21_OUT" in
+    "WRITES   unknown"*) ;;
+    "WRITES   allowed"*) W21_BAD="$W21_BAD symlinked-target-realpathed-into-the-anchor-and-rendered-allowed" ;;
+    *) W21_BAD="$W21_BAD symlinked-target-verdict-unexpected(got='$(printf '%s' "${W21_OUT:-<empty>}" | head -1)')" ;;
+  esac
+  # Control, so `unknown` above is a DISCRIMINATION and not this anchor refusing
+  # everything. A worktree that does not exist has one spelling only, so both readings
+  # agree and the ordinary verdict is reached — here a clear `denied here`, because the
+  # path is a sibling of the anchor rather than inside it. It also fences the arm the
+  # other way: if the ambiguity branch ever swallowed the determinate cases, this would
+  # report `unknown` too.
+  W21_CTRL_SID=aa21aa21-0000-0000-0000-0000000000c1
+  HOME="$FAKE" node -e '
+const fs = require("node:fs"), path = require("node:path");
+const [home, sid, wt] = process.argv.slice(1);
+const dir = path.join(home, ".claude", "projects", wt.replace(/[^A-Za-z0-9]/g, "-"));
+fs.mkdirSync(dir, { recursive: true });
+const iso = new Date(Date.now() - 3600000).toISOString();
+fs.writeFileSync(path.join(dir, `${sid}.jsonl`), [
+  JSON.stringify({ type:"user", message:{role:"user",content:"start"}, cwd:wt, gitBranch:"fixture", isSidechain:false, timestamp:iso }),
+  JSON.stringify({ type:"assistant", message:{role:"assistant",content:[{type:"text",text:"done"}],stop_reason:"end_turn"}, cwd:wt, isSidechain:false, timestamp:iso })
+].join("\n") + "\n");
+' "$FAKE" "$W21_CTRL_SID" "$FAKE/w21-elsewhere/wt" 2>/dev/null
+  W21_CTRL="$(ZENSU_PROJECT_ROOT="$W21_REAL" HOME="$FAKE" node "$TRAIL_MJS" show "$W21_CTRL_SID" --all --no-git 2>/dev/null | writes_block)"
+  case "$W21_CTRL" in
+    "WRITES   denied here"*) ;;
+    *) W21_BAD="$W21_BAD control-determinate-case-did-not-reach-a-verdict(got='$(printf '%s' "${W21_CTRL:-<empty>}" | head -1)')" ;;
+  esac
+  if [ -z "$W21_BAD" ]; then
+    check "W21 a target reachable only through a symlink is reported as not determinable, while a single-spelling target still reaches a verdict" PASS
+  else
+    check "W21 operand canonicalization:$W21_BAD" FAIL
+  fi
+fi
+
+
+# W22 — the GATE SEAM, which this change made load-bearing and which nothing pinned.
+# `trail.mjs` no longer re-encodes the gate's containment rule: it requires
+# `bash-source-write-parse.js` and CALLS `within`, and takes `msysToDrive` from the
+# same module so the Windows drive namespace the gate normalizes arrives with it.
+# Three things can break that silently — the parser stops exporting either symbol,
+# the require specifier stops resolving from the shipped location, or a private copy
+# of the drive rule reappears here — and none of them changes a verdict on a POSIX
+# host, so no behavioral fixture can see them.
+#
+# The fourth arm is the one that IS behavioral: a FAILED load must degrade to
+# `rejected:gate-unavailable`, never abort the command. `writeAnchor` has no local
+# fallback by design, so the failure mode without this arm is a skill script that
+# exits non-zero on a plugin tree whose lib directory moved.
+W22_BAD=""
+W22_PARSER="$PLUGIN_DIR/hooks/lib/bash-source-write-parse.js"
+if [ ! -f "$W22_PARSER" ]; then
+  W22_BAD="$W22_BAD parser-module-not-found"
+else
+  W22_EXPORTS="$(awk '/^  module\.exports = \{/{f=1} f{print} f&&/^  \};/{exit}' "$W22_PARSER")"
+  printf '%s\n' "$W22_EXPORTS" | grep -qE '^[[:space:]]*within,' || W22_BAD="$W22_BAD parser-no-longer-exports-within"
+  printf '%s\n' "$W22_EXPORTS" | grep -qE '^[[:space:]]*msysToDrive,' || W22_BAD="$W22_BAD parser-no-longer-exports-msysToDrive"
+fi
+# The canonicalizers must USE the shared rule rather than resolving raw.
+W22_LEXDIR="$(awk '/^function lexicalDir\(/{f=1} f{print} f&&/^}/{exit}' "$TRAIL_MJS")"
+if [ -z "$W22_LEXDIR" ]; then
+  W22_BAD="$W22_BAD lexicalDir-body-not-extractable"
+else
+  printf '%s\n' "$W22_LEXDIR" | grep -qF 'msysToDrive' || W22_BAD="$W22_BAD lexicalDir-does-not-use-the-gate-drive-rule"
+fi
+# ...and the containment predicate must be the GATE's, not a local one.
+W22_CONT="$(awk '/^function containment\(/{f=1} f{print} f&&/^}/{exit}' "$TRAIL_MJS")"
+if [ -z "$W22_CONT" ]; then
+  W22_BAD="$W22_BAD containment-body-not-extractable"
+else
+  printf '%s\n' "$W22_CONT" | grep -qF 'GATE.within' || W22_BAD="$W22_BAD containment-does-not-call-the-gate-predicate"
+fi
+# No private drive rule may reappear: the whole point of the seam is that there is
+# exactly one spelling of it, in the parser.
+[ "$(grep -c '(\[A-Za-z\])' "$TRAIL_MJS" 2>/dev/null || true)" = "0" ] \
+  || W22_BAD="$W22_BAD a-private-msys-drive-rule-reappeared"
+# The specifier must resolve from the SHIPPED location, not merely be spelled.
+W22_RESOLVED="$(HOME="$FAKE" node -e '
+const path = require("node:path"), fs = require("node:fs");
+const here = path.dirname(process.argv[1]);
+const target = path.join(here, "..", "..", "..", "hooks", "lib", "bash-source-write-parse.js");
+process.stdout.write(fs.existsSync(target) ? target : "MISSING:" + target);
+' "$TRAIL_MJS" 2>/dev/null)"
+case "$W22_RESOLVED" in
+  MISSING:*|"") W22_BAD="$W22_BAD gate-specifier-does-not-resolve($W22_RESOLVED)" ;;
+esac
+# BEHAVIORAL: an unloadable gate degrades, and says which channel failed.
+W22_MUT="$FAKE/trail-w22-nogate.mjs"
+sed 's#bash-source-write-parse.js#bash-source-write-parse-absent-on-purpose.js#' "$TRAIL_MJS" > "$W22_MUT" 2>/dev/null
+if ! grep -qF 'bash-source-write-parse-absent-on-purpose.js' "$W22_MUT" 2>/dev/null; then
+  W22_BAD="$W22_BAD bite-mutation-did-not-apply(require-spelling-moved)"
+else
+  W22_DEGRADED="$(ZENSU_PROJECT_ROOT="$WT_A" HOME="$FAKE" node "$W22_MUT" show "$SID_A" --all --no-git 2>/dev/null | writes_block)"
+  case "$W22_DEGRADED" in
+    "WRITES   unknown"*) ;;
+    "WRITES   allowed"*) W22_BAD="$W22_BAD absent-gate-still-answered-allowed" ;;
+    *) W22_BAD="$W22_BAD absent-gate-aborted-the-command(got='$(printf '%s' "${W22_DEGRADED:-<empty>}" | head -1)')" ;;
+  esac
+  W22_SRC="$(ZENSU_PROJECT_ROOT="$WT_A" HOME="$FAKE" node "$W22_MUT" show "$SID_A" --all --no-git --json 2>/dev/null \
+    | HOME="$FAKE" node -e 'let s="";process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{try{process.stdout.write(String(JSON.parse(s).writes.source))}catch{process.stdout.write("PARSE_ERROR")}})' 2>/dev/null)"
+  [ "$W22_SRC" = "rejected:gate-unavailable" ] || W22_BAD="$W22_BAD absent-gate-not-reported-as-its-own-cause(got='$W22_SRC')"
+fi
+if [ -z "$W22_BAD" ]; then
+  check "W22 the containment predicate and the drive rule come from the gate module, and its absence degrades to unknown" PASS
+else
+  check "W22 gate seam:$W22_BAD" FAIL
+fi
+
 
 # V-clock — the budget stated at the fixture block, asserted. Runs LAST, so it
 # reports the state every preceding V check actually saw (the reading itself is

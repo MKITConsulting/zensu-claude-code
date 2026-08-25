@@ -1025,11 +1025,16 @@ same wrapped invocation is gated by one Bash gate and not its sibling.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and the same
 predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
-`skills/session-trail/scripts/trail.mjs` (`writeAnchor`, the only copy OUTSIDE
-`hooks/lib`, and the only one a user reads as a verdict rather than as a deny) and
 `hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
 native-path validator), with an UNANCHORED `startsWith("..")` variant in
-`finding-verify-v1.js` that has the `..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
+`finding-verify-v1.js` that has the `..bak` defect this gate fixed.
+`skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and is the one
+consumer that proves the seam works: `within` is now defined at MODULE scope here
+and EXPORTED, and that file requires this parser and CALLS it, so the only copy a
+user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
+export, the specifier and the degrade-on-load-failure behaviour. Removing either
+`within` or `msysToDrive` from the export list therefore breaks a shipped skill,
+not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
 against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the

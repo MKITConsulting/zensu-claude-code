@@ -1262,6 +1262,47 @@ else
   check "T29b raw-brief-carrier pattern:$RAW_CTL_BAD — T29's negative arm is inert" FAIL
 fi
 
+# T31 — the `--json` cause contract. `writeAnchor` gained a CLOSED `reasonCode` set
+# because the only branchable field before it, `source`, separates just two of the
+# seven ways `covered` can be null — so SKILL.md was sending a machine consumer to
+# free-text prose it would have had to substring-match. The prose is still there and
+# still the thing a person reads; what must stay true is that the CODE set is the one
+# a consumer branches on, and that every value the script can emit is documented.
+#
+# The roster is derived from the SCRIPT, not restated here: a new cause added to
+# `writeAnchor` without a matching line in SKILL.md fails this check without anyone
+# having to remember to edit it. That is the failure this file keeps paying for.
+T31_BAD=""
+# Every quoted literal on a line that mentions `reasonCode`, whatever shape the
+# expression takes — a bare value, a ternary, or a nested one. Keying on a single
+# spelling found three of the seven and made the loop below nearly vacuous.
+T31_CODES="$(grep -F 'reasonCode' "$TRAIL_MJS" | grep -oE "'[a-z][a-z-]+'" | tr -d "'" | sort -u)"
+T31_N="$(printf '%s\n' "$T31_CODES" | grep -c . || true)"
+if [ "${T31_N:-0}" -lt 5 ]; then
+  T31_BAD="$T31_BAD reasonCode-set-not-extractable(found=${T31_N:-0})"
+else
+  for c in $T31_CODES; do
+    grep -qF "\`$c\`" "$SKILL_MD" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
+  done
+fi
+# The branchable field must be NAMED as such, and the prose field marked as not one.
+grep -qF 'Branch on `writes.reasonCode`' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
+grep -qF 'do not match on it' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
+# The fail-safe reading, which is the one a consumer gets wrong by writing the
+# natural `=== false`.
+grep -qF 'Treat `null` as denied' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
+# `sourceTrusted` exists so the soundness downgrade stops being keyed on a display
+# label at two independent sites; a consumer needs to know which way it reads.
+grep -qF 'writes.sourceTrusted' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
+# Control: the extraction must find the codes it is meant to check, or the loop
+# above passes by iterating over nothing.
+case "$T31_CODES" in *weak-channel*) ;; *) T31_BAD="$T31_BAD extraction-missed-a-known-code" ;; esac
+if [ -z "$T31_BAD" ]; then
+  check "T31 every reasonCode the script emits is documented, and SKILL.md names the branchable field and the fail-safe reading" PASS
+else
+  check "T31 json cause contract:$T31_BAD" FAIL
+fi
+
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"
 [ "$FAIL" -eq 0 ]

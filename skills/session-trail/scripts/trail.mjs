@@ -153,6 +153,50 @@ function canonicalPair(a, b) {
   return bothReal ? [trimDir(realA), trimDir(realB)] : [trimDir(absA), trimDir(absB)];
 }
 
+// The LEXICAL spelling of one path: resolved and normalized, never realpathed.
+// It is the operand shape the gate uses for a write target — its header states
+// the asymmetry at line 35, "Only the comparison roots are canonicalized, once,
+// via `canonical()`" — so an absolute token is compared in the spelling it was
+// written in. The base a relative operand resolves against is canonicalized only
+// where it is SEEDED FROM THE PAYLOAD CWD (parser :703); an in-command `cd`
+// re-seeds it lexically (parser :1005 -> `abspath` -> `resolveFrom`, no
+// `realpathSync` anywhere). Say it that narrowly: the resolved reading below
+// models a writer whose SHELL cwd is already inside the target across separate
+// Bash calls, not a `cd` in the same command.
+function lexicalDir(p) {
+  return trimDir(path.resolve(GATE ? GATE.msysToDrive(String(p), IS_WINDOWS) : String(p)));
+}
+
+// Containment, asked BOTH ways, because the gate's answer depends on how the
+// writer reaches the directory and this process cannot know which they will do.
+// When the target's literal and resolved spellings differ, the two readings give
+// OPPOSITE answers and picking either one is a guess:
+//
+//   - the RESOLVED reading alone answers `allowed` for a target the gate refuses
+//     when the literal spelling is the one written. That is the narrowing this
+//     function's predecessor disclosed and kept; it is the one direction this
+//     verdict may not be wrong in, so it is now removed rather than documented.
+//   - the LITERAL reading alone answers `denied here` for a worktree the gate
+//     allows the moment the reader `cd`s into it — on macOS that is every fixture
+//     under `$TMPDIR`, since `/var` is itself a symlink.
+//
+// So both are computed and a DISAGREEMENT is reported as not-determinable.
+// `GATE.within` is CALLED for each, never re-encoded, so the predicate stays the
+// gate's own; only the operand shape differs between the two readings.
+// Returns `true` / `false` / `null`.
+// The anchor comes from the JOINT pair, which is what keeps this consistent with
+// `canonicalPair`'s all-or-nothing rule: when either side cannot be realpathed
+// both operands stay lexical, the two readings below coincide, and the answer is
+// definite. The dual reading therefore engages exactly where both paths exist and
+// the target's spelling actually resolves elsewhere.
+function containment(callerRoot, targetRoot) {
+  if (!GATE) return null;
+  const [anchor, targetCanon] = canonicalPair(callerRoot, targetRoot);
+  const literal = GATE.within(anchor, lexicalDir(targetRoot));
+  const resolved = GATE.within(anchor, targetCanon);
+  return literal === resolved ? literal : null;
+}
+
 // The Bash source-write gate compares every write target against the session's
 // IMMUTABLE Session Control project root — hooks/lib/claude-hook-session-v1.js
 // exports it as ZENSU_PROJECT_ROOT and hooks/pre-bash-source-write-gate.sh hands
@@ -175,19 +219,23 @@ function canonicalPair(a, b) {
 // drift, and the MSYS drive normalization the gate applies to the same
 // comparison (`msysToDrive`) arrives with it rather than being omitted.
 //
-// Three narrowings, stated rather than hidden. Rule (C) also exempts a target
-// under a temp root (`isTemp`), so a worktree in `/tmp` is writable while this
-// reports it covered=false. Only that FIRST one errs toward warning, which is the
-// safe direction for a line whose remedy is "start a session over there". The
-// other two err toward `allowed`, and that is why the split is written down.
-// Rule (A) can still deny an in-anchor raw shell overwrite of tracked source,
+// TWO narrowings, stated rather than hidden, and they do NOT share a direction.
+// Rule (C) also exempts a target under a temp root (`isTemp`), so a worktree in
+// `/tmp` is writable while this reports it covered=false. That one errs toward
+// WARNING, which is the safe direction for a line whose remedy is "start a session
+// over there". The second errs toward `allowed`, which is why it is written down:
+// rule (A) can still deny an in-anchor raw shell overwrite of tracked source,
 // which this never reports — and it fires on an IN-ANCHOR target, precisely where
-// this answers `allowed`. The third is the same direction:
-// it canonicalizes BOTH sides through `realpathSync`, while the gate realpaths only
-// its comparison roots and resolves a `cd` operand LEXICALLY. A target whose
-// literal spelling escapes the anchor but whose realpath lands inside therefore
-// reads covered=true here and denies at the gate. Reporting it is the honest
-// remedy; matching it would mean giving up symlink tolerance everywhere else.
+// this answers `allowed`.
+//
+// A THIRD narrowing used to sit here and is GONE rather than merely unlikely.
+// Canonicalizing both sides through `realpathSync` answered covered=true for a
+// target whose literal spelling escapes the anchor but whose realpath lands
+// inside — a confident `allowed` for a write the gate refuses, in the one
+// direction this verdict may not be wrong in. `containment` now computes the
+// literal and the resolved reading and reports a DISAGREEMENT as
+// not-determinable, so symlink tolerance is kept everywhere the two agree and
+// given up only where they cannot both be right.
 //
 // The caller root is read ONLY from the environment. It is deliberately not
 // derived from `process.cwd()`: the gate's anchor is the SessionStart cwd, so a
@@ -248,12 +296,18 @@ function writeAnchor(targetWt) {
   // and they call for opposite actions: `unknown` means nothing was set, while
   // `rejected` means the operator set something the comparison cannot use. Both
   // still yield `covered: null` — the distinction is provenance, not verdict.
+  // TRUST is carried as DATA, not inferred from the display label. It used to be a
+  // hardcoded `=== 'env:CLAUDE_PROJECT_DIR'` comparison at the soundness downgrade
+  // and a second one at the deny-head attribution, with nothing holding the pair
+  // together: adding a third weak channel meant remembering two independent edits,
+  // and the failure direction at the downgrade is the false `allowed` this feature
+  // may never produce. Renaming a label was already pinned; ADDING one was not.
   const candidates = [
-    ['env:ZENSU_PROJECT_ROOT', process.env.ZENSU_PROJECT_ROOT],
-    ['env:CLAUDE_PROJECT_DIR', process.env.CLAUDE_PROJECT_DIR]
+    { label: 'env:ZENSU_PROJECT_ROOT', value: process.env.ZENSU_PROJECT_ROOT, trusted: true },
+    { label: 'env:CLAUDE_PROJECT_DIR', value: process.env.CLAUDE_PROJECT_DIR, trusted: false }
   ];
-  const present = ([, v]) => Boolean(v) && String(v).trim() !== '';
-  const fromEnv = candidates.find(([, v]) => present([, v]) && path.isAbsolute(String(v)));
+  const present = (c) => Boolean(c.value) && String(c.value).trim() !== '';
+  const fromEnv = candidates.find((c) => present(c) && path.isAbsolute(String(c.value)));
   // KNOWN LIMIT, stated rather than implied: `rejected` reaches the reader only when
   // NO channel resolved, because `source` is its single consumer and a winner takes
   // precedence there. So `ZENSU_PROJECT_ROOT` set to a relative path while an
@@ -261,20 +315,61 @@ function writeAnchor(targetWt) {
   // case, and the operator is not told the authoritative variable they set was
   // refused. Surfacing it needs a second return field and a render line; that is a
   // shape change, and `W11_REL_FALLBACK` pins the current answer.
-  const rejected = candidates.find((c) => present(c) && !path.isAbsolute(String(c[1])));
-  const callerRoot = fromEnv ? String(fromEnv[1]) : null;
-  const source = fromEnv ? fromEnv[0] : (rejected ? `rejected:${rejected[0]}` : 'unknown');
+  const rejected = candidates.find((c) => present(c) && !path.isAbsolute(String(c.value)));
+  const callerRoot = fromEnv ? String(fromEnv.value) : null;
+  const source = fromEnv ? fromEnv.label : (rejected ? `rejected:${rejected.label}` : 'unknown');
   // Absolute-only on the TARGET side too — see the header for why, and note that
   // the rationale has to live THERE: W3b greps this body for the name of the
   // rejected derivation, so spelling it here trips the pin that proves it absent.
   const targetRoot = (targetWt && path.isAbsolute(String(targetWt))) ? String(targetWt) : null;
-  if (!callerRoot || !targetRoot) return { callerRoot, targetRoot: targetWt || null, covered: null, source };
+  // The REASON is decided HERE, beside the measurement that produced it, and both
+  // halves are returned. `reasonCode` is the BRANCHABLE one — a closed set — and
+  // `reason` is the human sentence the rendered line reuses. Sending a machine
+  // consumer to free-text prose would make it substring-match a sentence this
+  // renderer is free to reword, which is the `source`-as-grammar problem one level
+  // up and strictly worse, since `source` at least has a closed, pinned domain.
+  const rejectedChannel = rejected ? String(rejected.label).replace(/^env:/, '') : null;
+  if (!callerRoot) {
+    return {
+      callerRoot,
+      targetRoot: targetWt || null,
+      covered: null,
+      source,
+      sourceTrusted: null,
+      reasonCode: rejectedChannel ? 'channel-not-absolute' : 'no-channel',
+      reason: rejectedChannel
+        ? `${rejectedChannel} is set but is not an absolute path, so it cannot anchor the comparison`
+        : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case',
+    };
+  }
+  if (!targetRoot) {
+    return {
+      callerRoot,
+      targetRoot: targetWt || null,
+      covered: null,
+      source,
+      sourceTrusted: fromEnv.trusted,
+      reasonCode: targetWt ? 'target-not-absolute' : 'target-absent',
+      reason: targetWt
+        ? 'the target session\'s recorded worktree is not an absolute path, so it cannot anchor the comparison either'
+        : 'the target session has no recorded worktree',
+    };
+  }
   // No local fallback when the gate module did not load. A hand-rolled copy here
   // is exactly what this seam removed, and answering off a weaker rule than the
   // gate's would be a confident verdict measured with the wrong instrument.
-  if (!GATE) return { callerRoot, targetRoot, covered: null, source: 'rejected:gate-unavailable' };
-  const [callerCanon, targetCanon] = canonicalPair(callerRoot, targetRoot);
-  const contained = GATE.within(callerCanon, targetCanon);
+  if (!GATE) {
+    return {
+      callerRoot,
+      targetRoot,
+      covered: null,
+      source: 'rejected:gate-unavailable',
+      sourceTrusted: fromEnv.trusted,
+      reasonCode: 'gate-unavailable',
+      reason: 'the source-write gate module could not be loaded, so its own containment predicate was never asked',
+    };
+  }
+  const contained = containment(callerRoot, targetRoot);
   // The two channels are NOT equally authoritative, and only one direction of the
   // weaker one is sound. `claude-hook-session-v1.js` reads CLAUDE_PROJECT_DIR only
   // as the last resort when no Session Control record exists — its own header says
@@ -288,8 +383,17 @@ function writeAnchor(targetWt) {
   // remove a false one. The downgrade travels in `covered`, not only in the render,
   // so a `--json` consumer reading that field alone is not misled either; `source`
   // and `callerRoot` still report what was measured, which keeps it auditable.
-  const covered = (contained && source === 'env:CLAUDE_PROJECT_DIR') ? null : contained;
-  return { callerRoot, targetRoot, covered, source };
+  // `contained` is already `null` when the two readings disagreed; this downgrade
+  // only ever discards a `true`, so the two null causes compose without either
+  // masking the other.
+  const covered = (contained === true && !fromEnv.trusted) ? null : contained;
+  const reason = covered !== null
+    ? null
+    : contained === null
+      ? 'the target worktree\'s literal and resolved spellings disagree — a symlink in its path, or a case or short-name difference on this filesystem — so it is inside this anchor when reached by cd and outside it when written out, and the gate compares the anchor resolved against the path as written'
+      : 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing';
+  const reasonCode = covered !== null ? null : contained === null ? 'ambiguous-spelling' : 'weak-channel';
+  return { callerRoot, targetRoot, covered, source, sourceTrusted: fromEnv.trusted, reasonCode, reason };
 }
 
 // Rendered as its own block rather than folded into the TAKEOVER advice, because
@@ -301,57 +405,34 @@ function writeAnchor(targetWt) {
 // otherwise EXACT because SKILL.md flow 3 tells the reader to compare this root
 // against the WORKTREE line above it.
 function writesLines(w) {
-  // `allowed` carries its own caveat, because the header above enumerates three
-  // narrowings and TWO of them err in exactly this direction: rule (A) can still
-  // refuse an in-anchor raw shell overwrite of tracked source, and this helper
-  // realpaths BOTH sides while the gate realpaths only its comparison roots and
-  // resolves a `cd` operand lexically. Leaving this branch as one bare sentence
-  // applied the design's fail-safe to the `null` case and dropped it on the only
-  // case that can send a reader confidently into a deny.
+  // `allowed` carries its own caveat, because the header above enumerates two
+  // narrowings and ONE of them errs in exactly this direction: rule (A) can still
+  // refuse an in-anchor raw shell overwrite of tracked source. (The realpath
+  // asymmetry was a second one until `containment` started answering `null` on a
+  // disagreement; it is gone, not merely unlikely.) Leaving this branch as one bare
+  // sentence applied the design's fail-safe to the `null` case and dropped it on
+  // the only case that can send a reader confidently into a deny.
   if (w.covered === true) {
     return [
       'WRITES   allowed — the target worktree is inside this session\'s anchor.',
       '         Necessary, not sufficient: rule (A) can still refuse a raw shell',
-      '         overwrite of tracked source, and a spelling that reaches the anchor',
-      '         only through a symlink is judged outside by the gate\'s own test.'
+      '         overwrite of tracked source inside the anchor, and this line answers',
+      '         only the containment question the gate asks first.'
     ];
   }
   const target = flatPath(w.targetRoot) || '(unknown)';
-  // Name the reason rather than echoing `source`, which is the literal string
-  // "unknown" in the case this branch exists for — "was not measured (unknown)"
-  // tells a reader nothing they can act on. The reason is computed INSIDE the
-  // branch that renders it, so the head and the reason cannot disagree.
+  // The reason is READ, not re-derived. `writeAnchor` decides it beside the
+  // measurement that produced it and returns it as `w.reason`, so the head and the
+  // reason cannot disagree — which the previous spelling only claimed. That one
+  // rebuilt the whole ladder here from `source` alone, and `source` separates only
+  // two of the seven null causes, so a `null` from one cause could be explained by
+  // a sentence describing another. `w.reasonCode` is the branchable half for a
+  // `--json` consumer; this renderer wants the sentence.
   //
-  // Each arm keys on the condition that actually produced the null, never on a
-  // proxy for it: an earlier spelling keyed the missing-target arm on `callerRoot`
-  // being truthy, which stopped being equivalent the moment a second way to reach
-  // null existed. The arms in order: no recorded worktree (defensive only —
-  // `buildIndex` skips a row with no cwd and falls back to it otherwise, so `r.wt`
-  // is never falsy and no behavioral fixture can reach it; do not write one), then
-  // the weak channel, then the ordinary no-channel case. The weak-channel arm MUST
-  // name the variable: a reader who exported it deserves to learn why a value that
-  // was present did not settle the question, instead of reading this as the plain
-  // "nothing was set" answer.
-  // One literal for both the test and the slice. Testing `rejected:` while slicing
-  // `rejected:env:` works only while every channel label starts `env:`; a future
-  // `rejected:file:X` would satisfy the guard and then lose four characters of its
-  // own name, naming a variable that does not exist.
-  const REJECTED_PREFIX = 'rejected:env:';
-  // Bounded at its definition even though `source` is minted from a closed set of
-  // module literals. It reaches a rendered line, and the roster that scans this
-  // function has to account for every carrier here — accounting for it as "safe by
-  // provenance" would be one more claim to keep true across a change to
-  // `writeAnchor`; one `flatPath` call is cheaper than that promise.
-  const rejectedChannel = String(w.source || '').startsWith(REJECTED_PREFIX)
-    ? flatPath(String(w.source).slice(REJECTED_PREFIX.length))
-    : null;
-  const why = !w.targetRoot
-    ? 'the target session has no recorded worktree'
-    : rejectedChannel
-      ? `${rejectedChannel} is set but is not an absolute path, so it cannot anchor the comparison`
-      : w.source === 'env:CLAUDE_PROJECT_DIR'
-        ? 'CLAUDE_PROJECT_DIR is this host\'s wider project directory, not the immutable root the gate compares, so containment in it settles nothing'
-        : 'no ZENSU_PROJECT_ROOT or CLAUDE_PROJECT_DIR in this process — the ordinary case';
+  // The fallback exists because this renderer must not depend on a caller having
+  // gone through `writeAnchor`: an older payload, or a future second producer,
+  // would otherwise interpolate `undefined` into a disclosure line.
+  const why = flatPath(w.reason) || 'the anchor comparison did not produce a reason';
   // The deny head must not call a CLAUDE_PROJECT_DIR value "this session's anchor":
   // `writeAnchor` disclaims exactly that two dozen lines above, and this line is a
   // disclosure surface SKILL.md points the reader at.
@@ -369,10 +450,18 @@ function writesLines(w) {
   // concluding: a strong hint measured off the weaker channel, not a verdict about
   // a containment relation the code never took.
   const head = w.covered === false
-    ? (w.source === 'env:CLAUDE_PROJECT_DIR'
-      ? `WRITES   denied here (hint) — this session's CLAUDE_PROJECT_DIR is ${flatPath(w.callerRoot)}, which does not contain that worktree. That is not the immutable root the gate compares, so treat this as a strong hint rather than a verdict.`
+    ? (w.sourceTrusted === false
+      ? `WRITES   denied here (hint) — measured against CLAUDE_PROJECT_DIR (${flatPath(w.callerRoot)}), which does not contain that worktree. That is not the immutable root the gate compares, and nothing here established how the two relate, so treat this as a strong hint and check the WORKTREE row against your own working directory.`
       : `WRITES   denied here — this session is anchored to ${flatPath(w.callerRoot)}, which does not contain that worktree.`)
-    : `WRITES   unknown — this session's anchor was not measured (${why}); assume denied and check yourself.`;
+    // "the anchor was not measured" was true for exactly ONE of the seven null
+    // causes — the one where neither channel resolved. In the others the anchor
+    // resolved fine and it is the COMPARISON that could not be settled: no recorded
+    // worktree, a relative one, two spellings that disagree, a channel whose `true`
+    // may not be believed, or a gate module that did not load. Naming the anchor as
+    // the missing piece sent a reader to check an environment variable that was
+    // already correct. `${why}` carries the actual cause; the head states only what
+    // holds in every branch.
+    : `WRITES   unknown — containment could not be established (${why}); assume denied and check yourself.`;
   return [
     head,
     `         Bash git and source writes into ${target} are refused by the Zensu`,
@@ -612,8 +701,18 @@ function sessionTag(value) {
 }
 
 function instanceId(value, width) {
-  return flatPath(value)
-    .replace(ZERO_WIDTH, '')
+  // ORDER is load-bearing because `CONTROL_RUN` carries `\p{Cf}`: strip the
+  // zero-advance class from the RAW value FIRST. Run the other way round,
+  // `flatPath` matches those code points before the strip can and leaves a SPACE
+  // where the strip was meant to leave nothing — the substitution then CONSUMES a
+  // column of the fixed width and shifts real characters out of the prefix, so
+  // `a<ZWSP>bcdefgh` renders `a bcdefg` instead of `abcdefgh` and how much of the
+  // real id survives depends on how many invisible characters it carried.
+  //
+  // It does NOT make two ids that differ only by a zero-advance character
+  // distinct — both orders collapse those (measured), and the class header below
+  // accepts that trade deliberately.
+  return flatPath(String(value == null ? '' : value).replace(ZERO_WIDTH, ''))
     .replace(H_SPACE_RUN, ' ')
     .replace(/\*{2,}/g, (m) => m.split('').join(' '))
     .slice(0, width);
@@ -633,21 +732,58 @@ function appTag(app) {
   return `${app.archived ? '[ARCHIVED] ' : ''}inst ${instanceId(app.instance, 8)}`;
 }
 
+// MEMOIZED, exactly as `ccdIndex` is, and for a reason `ccdIndex` never had to
+// state: `SKIPPED` is a module-scope counter this function increments, so a second
+// walk of the same directory counts the same unreadable file twice. `cmdShow`
+// reaches `buildIndex` twice — once through `resolve` and once through `siblings`
+// — and `buildIndex` calls this unconditionally, so one corrupt registry record
+// would render `NOTE 2 record(s) unreadable` in the plain-text path while
+// `show --json`, emitted BEFORE `siblings` runs, reported `"skipped": 1` for the
+// identical machine state. Two carriers of one command disagreeing about a number
+// the skill documents is worse than the number being large.
+let LIVE_CACHE = null;
+
 function liveRegistry() {
+  if (LIVE_CACHE) return LIVE_CACHE;
   const map = new Map();
+  LIVE_CACHE = map;
   if (!dirExists(SESSIONS)) return map;
   let regFiles;
   try { regFiles = fs.readdirSync(SESSIONS); } catch { SKIPPED += 1; return map; }
   for (const f of regFiles) {
     if (!f.endsWith('.json')) continue;
     let o;
-    try { o = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8')); } catch { continue; }
-    if (!o || !o.sessionId || !o.pid) continue;
+    // COUNTED, not swallowed. SKILL.md promises that every command prints a NOTE
+    // naming how many records were skipped — so a corrupt registry file that
+    // silently drops a LIVE session is exactly the state that promise exists to
+    // make visible, and it is indistinguishable from an idle machine without it.
+    try { o = JSON.parse(fs.readFileSync(path.join(SESSIONS, f), 'utf8')); } catch { SKIPPED += 1; continue; }
+    // Identity first, pid SECOND and under ONE rule. Testing `!o.pid` here and a
+    // bad pid further down split the accounting: `pid: 0`, `pid: ""` and
+    // `pid: false` were dropped in silence while `pid: "abc"` and `pid: -1` were
+    // counted, though a falsy pid is exactly as malformed as a non-numeric one.
+    if (!o || !o.sessionId) continue;
+    // Normalize the pid HERE rather than bounding its fourteen render sites. It is
+    // another process's JSON, its type was never constrained, and `process.kill`
+    // accepts a numeric STRING — so a padded or decorated spelling survived the
+    // only filter and then reached a STATUS row, two brief bullets and half a dozen
+    // verdict reasons raw, where a line break fabricates a line directly above the
+    // verdict a reader acts on.
+    //
+    // The TYPE is checked before the coercion, and that is not pedantry: `Number`
+    // is total, so `true` becomes 1 and `[7]` becomes 7 — both integers, both > 0,
+    // both admitted. A record spelling its pid as a boolean would then be probed
+    // against init and, on any host that answers EPERM there, rendered as a LIVE
+    // session that does not exist. Only a number or a string can be a pid spelling.
+    const raw = o.pid;
+    const pid = (typeof raw === 'number' || typeof raw === 'string') ? Number(raw) : NaN;
+    if (!Number.isInteger(pid) || pid <= 0) { SKIPPED += 1; continue; }
     let alive = false;
-    try { process.kill(o.pid, 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
+    try { process.kill(pid, 0); alive = true; } catch (e) { alive = e && e.code === 'EPERM'; }
     if (!alive) continue;
+    const rec = { ...o, pid };
     const prev = map.get(o.sessionId);
-    if (!prev || (o.startedAt || 0) > (prev.startedAt || 0)) map.set(o.sessionId, o);
+    if (!prev || (rec.startedAt || 0) > (prev.startedAt || 0)) map.set(o.sessionId, rec);
   }
   return map;
 }
@@ -1567,7 +1703,7 @@ function cmdShow(opts) {
   else if (r.stopCause) print(`NOTE     hit ${r.stopCause.error} at ${(r.stopCause.at || '').slice(0, 16)} but recovered (${r.stopCause.laterTurns} turns after, last ${(r.stopCause.resumedUntil || '').slice(0, 16)})`);
   if (r.truncated) print('NOTE     transcript is large — head+tail only, middle not scanned');
   const sib = siblings(opts, r);
-  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${flatPath(s.sessionId).slice(0, 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
+  if (sib.length) print(`SIBLINGS ${sib.map((s) => `${instanceId(String(s.sessionId), 8)}(${statusOf(s)})`).join(' ')}  — same worktree, other sessions`);
   print('');
   print(`TAKEOVER ${v.level} — ${v.reason}`);
   for (const advice of (ADVICE[v.level] || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
