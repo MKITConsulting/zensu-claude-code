@@ -210,10 +210,14 @@ fix() { # <sessionId> <pid> <idleMin> <lastKind> <queueMode>
 # The desktop app's own record, the only source of the archived flag. Written for
 # a LIVE pid on purpose: the archived branch has to be shown to outrank the
 # live-process branch, which is the whole reason it sits first.
-archive() { # <sessionId>
+archive() { # <sessionId> [isArchived=true]
+  # The FLAG is a parameter, because `archived === false` and `archived === null`
+  # are different inputs to the worktree advice and only a written record can
+  # produce the first: absence yields null, which the advice must never render as
+  # "not archived".
   local dir="$FAKE/Library/Application Support/Claude/claude-code-sessions/inst-0001/ws-0001"
   mkdir -p "$dir"
-  printf '{"cliSessionId":"%s","isArchived":true,"title":"archived fixture","model":"opus","effort":"high","permissionMode":"default"}\n' "$1" \
+  printf '{"cliSessionId":"%s","isArchived":%s,"title":"archived fixture","model":"opus","effort":"high","permissionMode":"default"}\n' "$1" "${2:-true}" \
     > "$dir/local_$1.json"
 }
 
@@ -1043,9 +1047,14 @@ done
 # it does not, the extraction is reading something other than the payload field and
 # says so here rather than reading as coverage.
 W7B_MUT="$FAKE/trail-w7b-mutated.mjs"
-sed 's/takeover: tv, writes: writeAnchor(r\.wt), skipped: SKIPPED }/takeover: tv, skipped: SKIPPED }/' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
-if grep -qF 'writes: writeAnchor(r.wt), skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null \
-  || ! grep -qF 'takeover: tv, skipped: SKIPPED }' "$W7B_MUT" 2>/dev/null; then
+# The mutation removes the `writes` KEY, not a key-plus-neighbour spelling. Keying
+# on the adjacency `writes: …, skipped: SKIPPED }` made this arm report
+# `payload-spelling-moved` the moment any other field was added to the same
+# literal — a true statement about the spelling, but it retires the bite for a
+# change that has nothing to do with `writes`.
+sed 's/writes: writeAnchor(r\.wt), //' "$TRAIL_MJS" > "$W7B_MUT" 2>/dev/null
+if grep -qF 'writes: writeAnchor(r.wt),' "$W7B_MUT" 2>/dev/null \
+  || ! grep -qF 'takeover: tv,' "$W7B_MUT" 2>/dev/null; then
   W7B_BAD="$W7B_BAD bite-mutation-did-not-apply(payload-spelling-moved)"
 else
   W7B_MUTOUT="$(HOME="$FAKE" node "$W7B_MUT" takeover "$SID_A" --all --json 2>/dev/null \
@@ -2461,6 +2470,113 @@ if [ -n "$CLOCK_IDLE" ] && [ "$CLOCK_IDLE" != "ABSENT" ] && [ "$CLOCK_IDLE" != "
   check "V-clock the 5-minute fixtures stayed inside their ~10-minute wall-clock budget (idleMin=$CLOCK_IDLE of 15)" PASS
 else
   check "V-clock FIXTURE CLOCK BUDGET LAPSED (idleMin=${CLOCK_IDLE}, threshold 15) — any BUSY expectation that failed above failed because the suite ran too long, NOT because the verdict regressed" FAIL
+fi
+
+# ── WT8 — the worktree rule, bound to the branch that emits it ─────────────────
+# `worktreeAdvice` decides WHERE to continue another session's work. It is a
+# product of THREE hoisted decisions over TWO directory legs, and the pins in the
+# sibling skill suite are source greps: inverting `if (!r.cwdExists)` satisfies
+# every one of them. Only an executed render can tell the legs apart, so each case
+# asserts a present clause AND the ABSENCE of a sibling leg's clause — a
+# presence-only check passes on a function that returns every branch at once.
+#
+# The builder derives each fixture's cwd from the session id's FIRST EIGHT
+# characters, so every id below must differ inside that prefix or two of them
+# share one directory and `mkcwd` for the earlier silently satisfies `cwdExists`
+# for the later — which is exactly the discrimination the gone-leg cases exist to
+# make.
+mkcwd() { mkdir -p "$FAKE/work/wt-${1:0:8}"; }
+wt_advice() { field "$1" worktreeAdvice; }
+wt_case() { # <label> <sessionId> <expected-substring> <forbidden-substring>
+  local label="$1" sid="$2" want="$3" nope="$4" got
+  got="$(wt_advice "$sid")"
+  if [ -z "$got" ] || [ "$got" = "ABSENT" ] || [ "$got" = "PARSE_ERROR" ]; then
+    check "$label (no worktreeAdvice on the JSON carrier: ${got:-<empty>})" FAIL
+  elif [ -z "$want" ] || [ -z "$nope" ]; then
+    check "$label (malformed case: an empty expectation matches everything)" FAIL
+  elif ! printf '%s' "$got" | grep -qF -- "$want"; then
+    check "$label (missing '$want')" FAIL
+  elif printf '%s' "$got" | grep -qF -- "$nope"; then
+    check "$label (leaked a sibling branch's text: '$nope')" FAIL
+  else
+    check "$label" PASS
+  fi
+}
+
+WT8_UNREAD=c1000000-0000-0000-0000-000000000001
+WT8_ADOPT=c2000000-0000-0000-0000-000000000002
+WT8_ADOPT_GONE=c3000000-0000-0000-0000-000000000003
+WT8_ALIVE=c4000000-0000-0000-0000-000000000004
+WT8_FALSE=c5000000-0000-0000-0000-000000000005
+WT8_GONE_UNREAD=c6000000-0000-0000-0000-000000000006
+WT8_GONE_ALIVE=c7000000-0000-0000-0000-000000000007
+WT8_GONE_FALSE=c8000000-0000-0000-0000-000000000008
+
+# Present leg. Asserts the UNREADABLE lead specifically, not the tail both leads
+# share: 'Take your own on a NEW branch' is emitted by the `archived === false`
+# arm too, so keying on it would pass with the two arms swapped.
+fix "$WT8_UNREAD" "$DEAD_PID" 60 end_turn none
+mkcwd "$WT8_UNREAD"
+wt_case "WT8a a session with no desktop record is told the archive state could not be read, not that it is unarchived" \
+  "$WT8_UNREAD" 'The archive state could not be read (' 'Never continue in a worktree that still belongs'
+
+fix "$WT8_ADOPT" "$DEAD_PID" 60 end_turn none
+mkcwd "$WT8_ADOPT"
+archive "$WT8_ADOPT"
+wt_case "WT8b an archived session whose directory survived is advised to adopt it in place" \
+  "$WT8_ADOPT" 'Adopt it in place' 'Take your own'
+
+fix "$WT8_ALIVE" "$LIVE_PID" 60 end_turn none
+mkcwd "$WT8_ALIVE"
+archive "$WT8_ALIVE"
+wt_case "WT8d an archived session whose pid is still alive is NOT advised to adopt its worktree" \
+  "$WT8_ALIVE" 'still registered and alive' 'Adopt it in place'
+
+fix "$WT8_FALSE" "$DEAD_PID" 60 end_turn none
+mkcwd "$WT8_FALSE"
+archive "$WT8_FALSE" false
+wt_case "WT8e a record that says NOT archived gets the definite rule, not the unreadable hedge" \
+  "$WT8_FALSE" 'Never continue in a worktree that still belongs' 'could not be read'
+
+# Gone leg. No mkcwd: absence of the directory is the whole point.
+fix "$WT8_ADOPT_GONE" "$DEAD_PID" 60 end_turn none
+archive "$WT8_ADOPT_GONE"
+wt_case "WT8c an archived, dead session whose directory is gone is told to restore it" \
+  "$WT8_ADOPT_GONE" 'Restore it with' 'Adopt it in place'
+
+fix "$WT8_GONE_UNREAD" "$DEAD_PID" 60 end_turn none
+wt_case "WT8f a directory-gone session that is not known-archived takes its own path, not a restore" \
+  "$WT8_GONE_UNREAD" 'Take your own path instead' 'Restore it with'
+wt_case "WT8f2 that same session is not told it is unarchived when no record exists" \
+  "$WT8_GONE_UNREAD" 'could not be read' 'This session is not archived'
+
+fix "$WT8_GONE_ALIVE" "$LIVE_PID" 60 end_turn none
+archive "$WT8_GONE_ALIVE"
+wt_case "WT8i an archived session whose pid is alive AND whose directory is gone is not told to restore" \
+  "$WT8_GONE_ALIVE" 'still registered and alive' 'Restore it with'
+# The gone leg's reason travels with its own lead. A shared trailing sentence was
+# FALSE in this arm: the record says archived and a pid is alive, so the archive
+# demonstrably HAS run, and the hazard is that process acting on the path.
+wt_case "WT8i2 the archived-and-alive gone leg does not claim the archive has not run yet" \
+  "$WT8_GONE_ALIVE" 'still registered and alive' 'an archive that has not run yet'
+
+fix "$WT8_GONE_FALSE" "$DEAD_PID" 60 end_turn none
+archive "$WT8_GONE_FALSE" false
+wt_case "WT8j a record saying NOT archived, directory gone, gets the definite wording rather than the hedge" \
+  "$WT8_GONE_FALSE" 'This session is not archived' 'could not be read'
+
+# The prefix premise, DERIVED from the declarations rather than hand-listed: a
+# hand list cannot detect its own omission, and the floor would then restate the
+# list's own length.
+WT8_PREFIXES="$(grep -oE '^WT8_[A-Z_]+=[0-9a-f]{8}-' "$0" | sed 's/^WT8_[A-Z_]*=//; s/-$//' | cut -c1-8)"
+WT8_N="$(printf '%s\n' "$WT8_PREFIXES" | grep -c .)"
+WT8_UNIQ="$(printf '%s\n' "$WT8_PREFIXES" | sort -u | grep -c .)"
+if [ "${WT8_N:-0}" -lt 2 ]; then
+  check "WT8-ids the derived id roster is empty or degenerate (found $WT8_N), so the collision check is vacuous" FAIL
+elif [ "$WT8_N" != "$WT8_UNIQ" ]; then
+  check "WT8-ids two fixture ids share an 8-char prefix ($WT8_N ids, $WT8_UNIQ distinct) — they share one cwd and the gone-leg cases stop discriminating" FAIL
+else
+  check "WT8-ids all $WT8_N worktree-advice fixture ids hold distinct 8-char prefixes, so no two share a cwd" PASS
 fi
 
 report

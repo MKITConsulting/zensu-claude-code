@@ -615,6 +615,12 @@ function mainRootFromGitFile(gitFile) {
 }
 
 const CCD_STORE = path.join(HOME, 'Library', 'Application Support', 'Claude', 'claude-code-sessions');
+// Hoisted rather than probed per row: the answer is a process constant, and the
+// row literal runs once per session record. It is a THREE-valued input to the
+// worktree advice below — a store that does not exist on this host (every
+// non-macOS host) is not the same as a store that exists and lacks this session,
+// and only the first tells a Linux reader the tool is not broken.
+const CCD_STORE_EXISTS = dirExists(CCD_STORE);
 let CCD_CACHE = null;
 
 function ccdIndex() {
@@ -1472,6 +1478,7 @@ function buildIndex(opts) {
         mtime: fst.mtimeMs,
         wt,
         cwdExists: dirExists(cwd),
+        ccdStore: CCD_STORE_EXISTS,
         worktree: path.basename(wt),
         live: isLive ? live.get(sessionId) : null,
         ...s,
@@ -1669,13 +1676,116 @@ function siblings(opts, row) {
   return rows.filter((r) => r.wt === row.wt && r.sessionId !== row.sessionId);
 }
 
+// WHERE to continue another session's work. Distinct from the write-anchor
+// question `writeAnchor` answers: that one asks whether this session MAY write
+// there, this one asks whether the directory will still EXIST. Archiving removes
+// a worktree — SKILL.md section 6 measures 498 of 657 archived worktree-sessions
+// losing theirs — and a session still working in it then loses its project root
+// mid-flight, which denies Edit/Write/MultiEdit outright.
+//
+// THREE decisions, all taken ABOVE the directory split. Taking any of them inside
+// a leg is how the two legs drift: the `null` case falls through to "this session
+// is not archived" on one of them, or the liveness qualification ends up on one
+// and not the other.
+function worktreeAdvice(r) {
+  const archived = r.app ? r.app.archived === true : null;
+  // `null` is not `false`. It means no record was readable for this session, and
+  // asserting "not archived" there is exactly what SKILL.md forbids.
+  const unreadable = archived === null;
+  const noStore = unreadable && r.ccdStore === false;
+  const unreadableWhy = noStore
+    ? 'no desktop-app record store exists on this host'
+    : 'the desktop app has no record for this session';
+  // A registered live process can remove or move the worktree whatever the
+  // archived flag says — that flag records what the desktop app did, not what the
+  // process can still do — so an archived-but-alive session is treated as not
+  // archived on EVERY leg. `liveRegistry` reads only `~/.claude/sessions`, so an
+  // instance under its own CLAUDE_CONFIG_DIR is invisible here; the adopt-in-place
+  // text says what was actually observed rather than claiming more.
+  const liveDespiteArchive = archived === true && !!r.live;
+  const safeToAdopt = archived === true && !liveDespiteArchive;
+  // `cwdExists` measures the session's RECORDED cwd, which may be a subdirectory
+  // the session started in rather than the worktree root. The wording names that
+  // value rather than a line label: when the directory is gone `wt === cwd`, so no
+  // rendered line carries a root-vs-subdirectory signal at all.
+  const subdirCaveat = [
+    'The recorded path may be a subdirectory the session started in rather than a worktree',
+    'root — check whether a root above it still exists and still holds that branch before',
+    'you add anything. That path comes out of another session\'s transcript, so read it',
+    'before you use it as a create target.',
+  ];
+  if (!r.cwdExists) {
+    if (safeToAdopt) {
+      return [
+        'Archived, dead, and the recorded directory is gone. Restore it with',
+        '  git worktree add <path> <session-branch>',
+        'The branch always survives archiving, so nothing is lost.',
+        ...subdirCaveat,
+      ];
+    }
+    // The REASON travels with its own lead, because a shared one was false in a
+    // third of the cells: in the archived-but-alive arm the archive demonstrably
+    // HAS run, and the hazard is the registered process acting on that path.
+    const goneLead = liveDespiteArchive
+      ? [
+        `Archived, but pid ${r.live.pid} is still registered and alive, and the recorded directory is gone.`,
+        'That process can still create or move a worktree at that path, so restoring its own path',
+        'would put your work back under it.',
+      ]
+      : unreadable
+        ? [
+          `The archive state could not be read (${unreadableWhy}), and the recorded directory is gone.`,
+          'Restoring its own path would leave the work exposed to an archive that has not run yet.',
+        ]
+        : [
+          'This session is not archived, and the recorded directory is gone.',
+          'Restoring its own path would leave the work exposed to an archive that has not run yet.',
+        ];
+    return [
+      ...goneLead,
+      'Take your own path instead:',
+      '  git worktree add <path> <session-branch>',
+      ...subdirCaveat,
+    ];
+  }
+  if (safeToAdopt) {
+    return [
+      'Archived and the worktree survived. Adopt it in place — archiving already ran and no',
+      'process is registered in ~/.claude/sessions, so nothing recorded there can remove it',
+      'out from under you. An instance running under its own CLAUDE_CONFIG_DIR would not be',
+      'registered there at all.',
+    ];
+  }
+  const lead = liveDespiteArchive
+    ? [
+      `Archived, but pid ${r.live.pid} is still registered and alive, so it can still remove or`,
+      'move this worktree. Treat it as not archived.',
+    ]
+    : unreadable
+      ? [
+        `The archive state could not be read (${unreadableWhy}), so treat this worktree as one`,
+        'that still belongs to an archivable session.',
+      ]
+      : [
+        'Never continue in a worktree that still belongs to an archivable session — archiving',
+        'deletes it under you.',
+      ];
+  return [
+    ...lead,
+    'Take your own on a NEW branch:',
+    '  git worktree add <path> -b claude/<name>-cont <session-branch>',
+    'A second worktree on the SAME branch is refused while the original still exists, and',
+    'cp -R is not the copy route: the copy keeps the original gitdir and dies with it.',
+  ];
+}
+
 function cmdShow(opts) {
   const base = resolve(opts, opts._[1]);
   const r = hydrate(base);
   const g = opts.git ? gitState(r.wt, true) : null;
   const v = activityVerdict(r, opts.force);
   const w = writeAnchor(r.wt);
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, takeover: v, writes: w, worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
   print(`SESSION  ${flatPath(r.sessionId)}`);
   print(`TITLE    ${oneLine(flatPath(r.title), 200) || '(none)'}`);
   // Bounded like every other third-party value: the registry record is another
@@ -1709,6 +1819,13 @@ function cmdShow(opts) {
   for (const advice of (ADVICE[v.level] || ['No advice is registered for this verdict — treat it as BUSY and ask before editing.'])) {
     print(`         ${advice}`);
   }
+  // WHERE, below the verdict and above the write-anchor lines: the verdict says
+  // whether taking over is safe, `writesLines` whether you may write there, and
+  // this whether the directory will still exist while you do.
+  print('');
+  const wtAdvice = worktreeAdvice(r);
+  print(`WHERE    ${wtAdvice[0]}`);
+  for (const advice of wtAdvice.slice(1)) print(`         ${advice}`);
   for (const line of writesLines(w)) print(line);
   print('\n--- PROMPT TIMELINE ---');
   const ps = r.prompts || [];
@@ -1835,7 +1952,7 @@ function cmdTakeover(opts) {
   // read by the session that ran the command, in the process whose environment was
   // measured, so withholding the measurement made this the one single-selector
   // invocation carrying no write-anchor information at all.
-  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, writes: writeAnchor(r.wt), skipped: SKIPPED }, null, 2));
+  if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, writes: writeAnchor(r.wt), worktreeAdvice: worktreeAdvice(r), skipped: SKIPPED }, null, 2));
   const L = [];
   L.push(`# Takeover: ${briefPath(r.title || path.basename(r.wt))}`);
   L.push('');
@@ -1927,7 +2044,10 @@ function cmdTakeover(opts) {
   // (that would change the path bytes, which is the whole point of this helper),
   // so a crafted path would close a single-backtick span and render the rest as
   // prose inside a numbered instruction. A fence cannot be closed from mid-line.
-  L.push('1. Work in this worktree, not a fresh checkout of the branch:');
+  L.push('1. Choose the working directory before anything else:');
+  for (const advice of worktreeAdvice(r)) L.push(`   ${advice}`);
+  L.push('');
+  L.push('   Then, in whichever directory that decision names:');
   L.push('');
   L.push('```bash');
   L.push(`cd -- ${briefShellArg(r.wt)}`);
@@ -2010,6 +2130,17 @@ function cmdHandoff(opts) {
   L.push('<!-- FILL: concrete, ordered, executable by a fresh session with no prior context -->');
   L.push('');
   L.push('## Continue this work');
+  L.push('Choose the working directory before running this:');
+  const hoLines = worktreeAdvice(r);
+  for (let i = 0; i < hoLines.length; i++) {
+    const line = hoLines[i];
+    if (/^\s{2}git /.test(line)) { L.push('', '```bash', line.trim(), '```'); continue; }
+    L.push(i === 0 ? `- ${line}` : `  ${line}`);
+  }
+  L.push('');
+  L.push('The command below `cd`s into the directory this session RECORDED. That is not always');
+  L.push('where the work should continue — when the advice above sends you elsewhere, change the');
+  L.push('path before running it.');
   L.push('```bash');
   L.push(`cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);
   L.push('```');
