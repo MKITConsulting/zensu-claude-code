@@ -2525,6 +2525,16 @@ mkcwd "$WT8_ADOPT"
 archive "$WT8_ADOPT"
 wt_case "WT8b an archived session whose directory survived is advised to adopt it in place" \
   "$WT8_ADOPT" 'Adopt it in place' 'Take your own'
+# The adopt row must not over-claim. `liveRegistry` reads `~/.claude/sessions`, whose
+# entries are SESSIONS — the desktop app that performs archiving is not one of them, so
+# "nothing recorded there can remove it" is a true statement about a registry that by
+# construction cannot list the agent that removes worktrees. Section 6 measures the
+# counter-example: the 159 survivors of 657 were overwhelmingly DIRTY, which is what
+# `git worktree remove` refuses on — so an archived-and-surviving directory is close to
+# by construction one archiving already tried to delete. A takeover's first act is to
+# commit, which removes exactly that protection.
+wt_case "WT8b2 the adopt row states what was observed rather than promising nothing can remove it" \
+  "$WT8_ADOPT" 'archiving already ran once and this directory survived' 'nothing recorded there can remove it'
 
 fix "$WT8_ALIVE" "$LIVE_PID" 60 end_turn none
 mkcwd "$WT8_ALIVE"
@@ -2543,6 +2553,13 @@ fix "$WT8_ADOPT_GONE" "$DEAD_PID" 60 end_turn none
 archive "$WT8_ADOPT_GONE"
 wt_case "WT8c an archived, dead session whose directory is gone is told to restore it" \
   "$WT8_ADOPT_GONE" 'Restore it with' 'Adopt it in place'
+# The gone leg tells the reader to run `git worktree add <path> <session-branch>` with
+# no `-b`. That is a CLAIM that the branch is free, and it carries no measurement while
+# the opposite claim in the same rule does. If git refuses, the advice must not
+# dead-end: the two obvious moves from there are `--force` and `git checkout`, and the
+# second is what this very rule forbids.
+wt_case "WT8c2 the restore row names what to do when git refuses the branch" \
+  "$WT8_ADOPT_GONE" 'already checked out' 'Adopt it in place'
 
 fix "$WT8_GONE_UNREAD" "$DEAD_PID" 60 end_turn none
 wt_case "WT8f a directory-gone session that is not known-archived takes its own path, not a restore" \

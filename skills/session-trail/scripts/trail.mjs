@@ -1719,7 +1719,10 @@ function worktreeAdvice(r) {
       return [
         'Archived, dead, and the recorded directory is gone. Restore it with',
         '  git worktree add <path> <session-branch>',
-        'The branch always survives archiving, so nothing is lost.',
+        'The branch always survives archiving, so nothing is lost. If git answers that the',
+        'branch is already checked out somewhere, the worktree you were told is gone is a',
+        'SUBDIRECTORY of a root that still exists — find that root and work there. Do not',
+        'reach for --force, and do not git checkout it elsewhere: that is what this rule forbids.',
         ...subdirCaveat,
       ];
     }
@@ -1749,11 +1752,21 @@ function worktreeAdvice(r) {
     ];
   }
   if (safeToAdopt) {
+    // States what was OBSERVED. The earlier wording promised that nothing recorded in
+    // `~/.claude/sessions` can remove this worktree — true of that registry, and
+    // beside the point: its entries are sessions, and the desktop app that performs
+    // archiving is not one of them, so the reassurance rested on a registry that by
+    // construction cannot list the agent that does the removing. Section 6 measures
+    // the counter-example: of 657 archived worktree-sessions, the 159 survivors were
+    // overwhelmingly DIRTY, which is exactly what `git worktree remove` refuses on.
+    // So an archived directory that is still here is close to by construction one
+    // archiving already tried to delete — and a takeover's first act is to commit,
+    // which removes the very condition that saved it.
     return [
-      'Archived and the worktree survived. Adopt it in place — archiving already ran and no',
-      'process is registered in ~/.claude/sessions, so nothing recorded there can remove it',
-      'out from under you. An instance running under its own CLAUDE_CONFIG_DIR would not be',
-      'registered there at all.',
+      'Adopt it in place — archiving already ran once and this directory survived. One caveat',
+      'worth a look first: a surviving worktree is usually a DIRTY one, because that is what',
+      '`git worktree remove` refuses on. Run `git status` here before you commit; committing',
+      'removes the very condition that kept this directory alive.',
     ];
   }
   const lead = liveDespiteArchive
