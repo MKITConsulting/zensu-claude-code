@@ -1928,10 +1928,12 @@ L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
 # rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
 # findPlanDocs/nearestRepoRoot take it as a filesystem path, Set/toLowerCase build
 # a match structure, and ===/!==/typeof/.length compare it.
-L61_OK='(oneLine|showId|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+L61_OK='(oneLine|flatPath|briefPath|briefShellArg|writeAnchor|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
 # The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
 # raw interpolation on one of those four lines stays visible.
-L61_RAW="$(sed -e 's/cd \${[^}]*}//g' "$L61_SRC" | grep -nE "$L61_PAT" | grep -vE "$L61_OK" || true)"
+# Comment lines are excluded: they describe the rule rather than render anything,
+# and prose naming `r.wt` was being reported as an unbounded render of it.
+L61_RAW="$(sed -e 's/cd \${[^}]*}//g' "$L61_SRC" | grep -nE "$L61_PAT" | grep -vE '^[0-9]+:[[:space:]]*//' | grep -vE "$L61_OK" || true)"
 if [ -z "$L61_RAW" ]; then
   check "L61 every r.wt/cwd/worktree/branch/title reference is wrapped, consumed by an allowlisted callee, or the documented cd exemption" PASS
 else
@@ -1962,18 +1964,33 @@ rm -f "$L61_CTRL"
 # And the exemption filter must not be inert: if the shell-command class ever stops
 # matching, L61 would silently start reporting a clean tree for a reason unrelated
 # to the property it names.
-L61_CD="$(grep -cF 'cd ${' "$L61_SRC" || true)"
-[ "$L61_CD" -ge 1 ] && check "L61b-control the exempted shell-command class is present, so the filter is not inert ($L61_CD lines)" PASS || check "L61b-control the exempted shell-command class was not found, so the exemption filter is inert" FAIL
-if grep -qF 'assembled without shell quoting' "$PLUGIN_DIR/skills/session-trail/SKILL.md"; then
-  check "L61c the shell-command exemption is documented where the user is told to run it" PASS
+# The exemption this filter used to carry was for an UNQUOTED `cd ${...}`, and that
+# spelling no longer exists: every runnable line routes its path through
+# `briefShellArg`, which single-quotes. So the check is now that the fix is in place
+# rather than that the hazard is exempted -- a scan for the old class would report a
+# clean tree for a reason unrelated to the property it names.
+L61_SHELLARG="$(grep -cF 'briefShellArg(' "$L61_SRC" || true)"
+if [ "$L61_SHELLARG" -ge 4 ] && ! grep -qF 'cd ${' "$L61_SRC"; then
+  check "L61b every runnable line quotes its path through briefShellArg, and no unquoted cd remains ($L61_SHELLARG sites)" PASS
 else
-  check "L61c the shell-command exemption is documented in SKILL.md" FAIL
+  check "L61b runnable-line quoting (briefShellArg sites=$L61_SHELLARG, must be >= 4; unquoted cd must be absent)" FAIL
 fi
 # The file_path extractor binds at its SOURCE, so all three of its renderers are
 # covered by one site rather than three chances to miss one.
 ETF_BODY="$(awk '/^function extractTouchedFiles\(/{f=1} f{print} f&&/^\}/{exit}' "$L61_SRC")"
 [ -n "$ETF_BODY" ] && check "L61a-control the extractTouchedFiles body was actually extracted" PASS || check "L61a-control the extractTouchedFiles body was not found, so the scan below is vacuous" FAIL
-case "$ETF_BODY" in *"boundText("*) check "L61a the transcript file_path values are bounded where they are extracted" PASS ;; *) check "L61a the transcript file_path values are bounded at the source" FAIL ;; esac
+case "$ETF_BODY" in
+  *"boundText("*) check "L61a the file_path extractor binds early, which breaks rel() against the raw worktree" FAIL ;;
+  *) check "L61a the file_path extractor leaves the raw path for rel(), and the renderers bind it" PASS ;;
+esac
+# The other half of that rule: all three renderers must bind, or removing the early
+# bound would leave the value unbounded rather than bound later.
+ETF_RENDER="$(grep -cE '(flatPath|briefPath)\(rel\(t\.path, r\.wt\)\)' "$L61_SRC" || true)"
+if [ "$ETF_RENDER" -ge 3 ]; then
+  check "L61a-render every touched-file row binds after rel(), not before it ($ETF_RENDER sites)" PASS
+else
+  check "L61a-render a touched-file row renders rel() unbound ($ETF_RENDER of 3 sites)" FAIL
+fi
 
 # Every L61_OK alternative must still EXEMPT something, mirroring L61b-control for
 # the cd class. The suite already states the argument for that control -- if the
@@ -1983,7 +2000,7 @@ case "$ETF_BODY" in *"boundText("*) check "L61a the transcript file_path values 
 # suppress a line, never surface one, so it must report itself rather than widen
 # the filter silently. Fails, never skips, on zero.
 L61_STALE=""
-for alt in 'oneLine' 'showId' 'rel\(' 'path\.' 'gitState' 'gitDiffText' 'findPlanDocs' 'nearestRepoRoot' 'new Set\(' '===' '!==' '\.toLowerCase' 'const r ' 'r\.cwd !== r\.wt'; do
+for alt in 'oneLine' 'flatPath' 'briefPath' 'briefShellArg' 'writeAnchor' 'rel\(' 'path\.' 'gitState' 'gitDiffText' 'findPlanDocs' 'nearestRepoRoot' 'new Set\(' '===' '!==' '\.toLowerCase' 'const r ' 'r\.cwd !== r\.wt'; do
   if [ "$(grep -cE "$L61_PAT" "$L61_SRC" 2>/dev/null || echo 0)" = "0" ]; then break; fi
   HITS="$(grep -E "$L61_PAT" "$L61_SRC" | grep -cE "$alt" || true)"
   [ "$HITS" = "0" ] && L61_STALE="$L61_STALE $alt"
@@ -2016,7 +2033,7 @@ fs.writeFileSync(path.join(process.argv[1], "planted.json"), JSON.stringify({
 }));
 ' "$CFG/sessions" "$LIVE_PID" "$SELF_CWD"
 OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" instances --all)"
-case "$OUT" in *"[31mPWNE"*) check "L62-control the planted row rendered with the ESC stripped and its visible bytes kept" PASS ;; *) check "L62-control the planted row rendered" FAIL ;; esac
+case "$OUT" in *"[31mPWN"*) check "L62-control the planted row rendered with the ESC stripped and its visible bytes kept" PASS ;; *) check "L62-control the planted row rendered" FAIL ;; esac
 case "$OUT" in *"$ESC"*) check "L62 an escape byte planted in a registry session id does not reach the terminal" FAIL ;; *) check "L62 an escape byte planted in a registry session id does not reach the terminal" PASS ;; esac
 rm -f "$CFG/sessions/planted.json"
 reset_ledger

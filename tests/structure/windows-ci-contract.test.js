@@ -13,6 +13,7 @@ const manifest = readJson('tests/profiles/windows-ci.v1.json');
 const catalog = readJson('tests/profiles/windows-ci-command-catalog.v1.json');
 const legacyCanary = readJson('tests/profiles/windows-legacy-canary.v1.json');
 const nativeStructureInventory = readJson('tests/profiles/windows-native-structure.v1.json');
+const localOnlyProfile = readJson('tests/profiles/promptfoo-local-only.v1.json');
 const workflow = YAML.parse(
   fs.readFileSync(path.join(root, '.github', 'workflows', 'ci.yml'), 'utf8'),
 );
@@ -29,8 +30,8 @@ const expectedProfiles = [
   'windows-shard-6',
   'windows-shard-7',
 ];
-const expectedCommandCount = 42;
-const expectedCommandDigest = '1e491665f75744d78eb61232955a5f75c9e483145dc036de5d5fd2a217951970';
+const expectedCommandCount = 43;
+const expectedCommandDigest = '759e33875689db60325a145b8357f592c9d2f0fe2418883b651d2673a4eea2df';
 
 function allSuites() {
   return Object.values(manifest.profiles).flatMap((profile) => profile.suites);
@@ -88,10 +89,21 @@ test('every structure test with a native Windows marker is audited and covered o
   for (const relative of required) {
     assert.equal(paths.filter((candidate) => candidate === relative).length, 1, relative);
   }
+  const ciStructureTests = new Set(localOnlyProfile.ciStructureTests || []);
   for (const entry of nativeStructureInventory.excluded) {
     assert.equal(typeof entry.reason, 'string', entry.path);
     assert.ok(entry.reason.length >= 20, entry.path);
     assert.equal(paths.includes(entry.path), false, entry.path);
+    // The load-bearing half of an exclusion that keeps its coverage elsewhere. A
+    // reason may only CLAIM `ciStructureTests` membership if the suite is really
+    // in that array — otherwise the entry reads as "still covered weekly" while
+    // the suite runs on no Windows host at all, which is a silent coverage drop
+    // wearing the words of a deliberate scope decision. Keyed on the claim, not
+    // on every entry: an exclusion is free to say the suite is unsupported there.
+    if (/ciStructureTests/.test(entry.reason)) {
+      assert.ok(ciStructureTests.has(path.basename(entry.path)),
+        `${entry.path} claims ciStructureTests membership but is not in that array`);
+    }
   }
 });
 

@@ -320,6 +320,29 @@ The version/ref invariant above is machine-enforced: the gate runs `tests/run-al
 
 If marketplace version or source `ref` ever lags `plugin.json` (for example, a hand bump forgot one field), fix both in the release PR before any tag is created or any user-side `claude plugin install <name>@<name>` attempt.
 
+## Windows Budget for `best-solution-first`
+
+The suite cap was raised 300000 -> 600000, matching its siblings, but **the cap is
+not the ceiling that binds** and the measurement says which one is. On the last
+green run `windows-shard-4` completed in **1591 s** against its `profileTimeoutMs`
+of 1800000 — roughly **209 s of headroom for the whole shard**. A suite never
+receives its configured `timeoutMs`; it receives the shard's remaining budget, so
+raising this number buys nothing while the shard is that close to its own ceiling.
+
+The suite is spawn-dominated — nearly every check spawns a `bash` plus a `node`,
+it builds five fixture plugin trees, and it now also drives
+`tests/structure/rule-block-v1.test.js` as its B0 driver — and `windows-shard-4`
+also carries `plan-payload-path-transport`, which this file records at a measured
+714 s. Growth here therefore has to be paid for by moving a suite OFF that shard,
+not by raising a number. If the shard starts reporting an abort, the tail of
+whichever suite ran last went unverified regardless of how many checks passed
+before it.
+
+The suite-level wall clock on Windows is still **unmeasured**; only the shard is.
+The note lives here because `tests/run-profile.js`'s `SUITE_KEYS` throws on any key
+outside `{id, runner, path, args, timeoutMs}`, so a `note` field in the manifest is
+a CI-wide outage rather than documentation.
+
 ## Runtime Lineage (`version_type` is load-bearing)
 
 A plugin update that lands while a session is running leaves the Session Control
@@ -343,8 +366,10 @@ against the executing runtime. The axis:
 
 **While the plugin is at major `0`, MINOR is therefore the breaking axis.** A
 breaking change costs a `minor` release and a non-breaking feature is a `patch`.
-Anything below forces the breaking bump, because a running session would
-otherwise be served by a runtime that cannot read what it wrote:
+The list below is signed: entries are breaking unless the entry says otherwise.
+A breaking one forces the bump because a running session would otherwise be
+served by a runtime that cannot read what it wrote; the two marked NOT are
+carve-outs kept here so a releaser meets them where they will look:
 
 - the context record or workflow-state **schema** (`SCHEMA_VERSION`, any field
   added, removed or retyped);
@@ -352,6 +377,39 @@ otherwise be served by a runtime that cannot read what it wrote:
   `deferredReviewCancellation`, and every other validator that rejects an
   unknown or missing key rather than ignoring it;
 - **removing or renaming a registered hook, or changing a hook's matcher**;
+  **adding** one is NOT in this list and is a `patch`. **Provenance, because it
+  matters here:** this exemption and the config-key one below were WRITTEN BY the
+  change that needed them — the release that added the best-solution-first hook and
+  its `bestSolutionFirst` key. A commit amending the policy that classifies it is
+  the shape that deserves a second reader, so it got one: the exemption was
+  challenged in review and survived on the argument below, not on the author's own
+  say-so. Anyone widening either exemption should expect the same standard. The
+  argument has two halves
+  and the second is the load-bearing one. First, `runtimeLineageCompatible`
+  compares version tuples only and never inspects the hook inventory, an older
+  harness never loads a hook its own `hooks.json` does not declare, and the new
+  hook is invoked from the tree that declares it. Second — and this is the part a
+  reader will otherwise miss — adding a file DOES change the runtime digest, since
+  `manifestRuntimeEntries` folds `hooks` and `docs` in wholesale; what keeps an
+  in-flight bind alive is that `readContextInternal` measures the **recorded**
+  root, and the upgraded case re-measures the executing tree against the caller's
+  claim rather than against the record. Do not over-bump defensively; do
+  re-derive this if the added hook writes session state, participates in a strict
+  key set, **or can DENY**. The third disqualifier is the one an earlier wording
+  left out, and it is the one that matters: a hook that can refuse a tool call
+  changes the capability set of every session an older runtime is still serving,
+  which is exactly what makes a matcher change breaking in the bullet above. A new
+  `PreToolUse` entry on the existing `Bash` matcher returning
+  `permissionDecision: deny` writes no session state and touches no strict key
+  set, so it passed both original tests while being as breaking as anything in
+  this list. The test is CAPABILITY, not storage: an ADVISORY hook — one whose
+  only output is `additionalContext` — is the exempt shape, and that is what the
+  two hooks this exemption was written for are;
+- **adding a permissively-read config key** is likewise NOT in this list and is
+  a `patch`, for a reason unrelated to the hook inventory: `zensu_hook_enabled` tests only
+  `j.hooks[key] === false`, so an older runtime ignores a key it does not know
+  rather than failing on it. A key read by a STRICT validator is the opposite
+  case and belongs under the strict-key-set bullet above;
 - the **attestation shape**, which is itself a schema two versions must agree
   on. A change to it has to ship in the release that *introduces* the policy it
   serves, never one release later.
@@ -967,7 +1025,89 @@ enumerated there. The parser header must NAME every accepted gap — W192 matche
 gap's distinguishing clause, not a bare keyword. Both pins also require the "not a
 security boundary" framing to survive. `docs/gates.md` §"Source-Write Gate", the
 hook-reference row and the `bashWriteGate` config row in `docs/configuration.md` point at
-the tables rather than listing them, for the same reason; they are not pinned.
+the tables rather than listing them, for the same reason; their VERB CONTENT is not
+pinned. THREE needles in `docs/gates.md` §"Source-Write Gate" ARE pinned, by T29 in
+`tests/structure/test-session-trail-skill.sh` — `cross-worktree takeover`,
+`session-trail` and `does **not** cover a nested worktree`. The last IS the
+containment claim, so rewording it fails the suite. That file is no longer wholly
+unpinned; see the section below.
+
+**The gate's ANCHOR contract is restated in SIX carriers outside the parser, and
+nothing pins them against it.** `writeAnchor` / `writesLines` / `writeAnchorCaution`
+in `skills/session-trail/scripts/trail.mjs`, flow 3 and the Limits bullet in
+`skills/session-trail/SKILL.md`, and the cross-worktree paragraph in
+`docs/gates.md` §"Source-Write Gate". They do NOT carry the same content, and the
+difference is what decides where an edit is owed. All of them state the CONTAINMENT
+rule.
+
+**The two env channels are NOT equally authoritative, and only one direction of the
+weaker one is sound.** `claude-hook-session-v1.js` reads `CLAUDE_PROJECT_DIR` solely
+as the last resort when no Session Control record exists — its own header says "The
+mutable payload cwd is never a project authority" — while the record's `projectRoot`
+is what it exports as `ZENSU_PROJECT_ROOT`, and that is the value the gate compares.
+For a session started in a subdirectory the ambient variable is therefore the WIDER
+root. `writeAnchor` downgrades `covered` to `null` when containment was measured off
+that channel, and leaves `covered: false` alone: containment in a wider root does not
+imply containment in the narrower one, but NON-containment does. The downgrade travels
+in the field rather than only in the render, so a `--json` consumer is not misled
+either, and `source`/`callerRoot` still report what was measured. A channel is also
+usable only when ABSOLUTE (a relative value would reach `path.resolve` inside
+`canonicalDir` and be resolved against the process cwd — the derivation `W3b` exists
+to forbid, one call further down than `W3b` can see) and the winning value is compared
+VERBATIM (`.trim()` decides presence only; a trailing space is legal in a POSIX
+directory name and the gate receives the untrimmed value). `W10`/`W11` pin all
+four. The environment variables are named by `writeAnchor`'s header,
+`writesLines`'
+emitted text and SKILL.md flow 3. The rule letters are named by `writeAnchor`'s
+header (A, B and C), `writesLines` (A, B and C), flow 3 (A, B and C) and `docs/gates.md`
+(C only). `writeAnchorCaution` names neither — deliberately, because it is persisted
+into a brief a stranger reads. The Limits bullet withholds only those two things: it
+restates the asymmetry IN FULL, naming both Edit-matcher hook filenames, the
+capability gate and its main-principal exemption, and the containment definition,
+then points at flow 3 for the routing rule. Do not describe it as an index entry —
+an earlier wording here did, and `T30` in `test-session-trail-skill.sh` now fails on
+that claim for as long as the bullet really carries the hook roster. A change to
+`within()`, to how `project_root` is minted (`claude-session-control-v1.js`
+`projectRoot: eventCwd`), or to which hook exports `ZENSU_PROJECT_ROOT` leaves all
+six wrong with both session-trail suites green — they drive `trail.mjs` against its
+own definition and grep the prose for literals. `writeAnchor` no longer holds a hand-copy of
+`within`: the parser now defines it at MODULE scope and EXPORTS it, and
+`trail.mjs` requires the parser and CALLS it, so the containment rule has one
+implementation and the two cannot drift. (The parser always had an export surface
+— `detectChannels`, `gitTargets`, `msysToDrive` and the frozen tables, consumed by
+`tests/structure/git-repo-escape.test.js`; what it did not export was `within`
+itself. An earlier wording here said the parser "exports nothing", which read as
+the former and was false.) The same require supplies `msysToDrive`, so the
+comparison is now in the gate's namespace on Windows too. A FAILED load is
+reported as `rejected:gate-unavailable` and yields `covered: null` — there is
+deliberately no local fallback copy, because answering off a weaker rule than the
+gate's is exactly what taking the seam removed. What remains this feature's OWN
+encoding is the canonicalization: `canonicalPair` feeds both operands through
+`msysToDrive` + `path.resolve` + `realpathSync.native` and applies `TRAILING_SEP`
+(platform-selected, guarded by `path.parse(p).root === p`), which is NOT the
+gate's `stripSlash` but a DIFFERENT rule — forward-slash-only and unguarded there.
+A change to the gate's own canonicalization still has no recorded re-check site;
+treat `canonicalPair` as the one remaining place where this feature encodes what
+it believes the gate does. It canonicalizes both sides TOGETHER: one
+`realpathSync` failure drops BOTH back to the lexical spelling, because
+canonicalizing per operand put them in different namespaces whenever exactly one
+path existed — the `!! MISSING` worktree case, where a symlinked anchor compared
+as an escape from its own nested worktree. Do not
+trust an ordinal here — an earlier wording said "sixth" and was already wrong,
+because `hooks/lib/zensu-tdd-phase.sh` carries a further semantically equivalent spelling
+inside a `node -e`. Read the enumeration below, not a count. THREE
+narrowings are deliberate and stated at the copy, and they do NOT share a direction:
+only rule (C)'s `isTemp` carve-out errs toward WARNING. The other two err toward
+`allowed`: rule (A) fires on an IN-ANCHOR target — a raw shell overwrite of tracked
+source — which is exactly where this answers `allowed`, and the third realpaths BOTH
+sides while the gate realpaths only its roots and resolves a `cd` operand
+lexically. That asymmetry is the property to re-check before letting the
+hand-copy
+drift. `writeAnchor`'s measured verdict never leaves `show`'s stdout and
+`show --json`; what reaches a `~/.claude/handoffs/` brief is `writeAnchorCaution`'s
+STATIC containment sentence, deliberately unmeasured because a brief is read by a
+session it was not measured against. A correction to that WORDING does not reach
+files already written.
 
 The `worktree`/`remove|move` literals appear three times — the `GIT_READONLY_FORMS`
 entry, the `paths` guard in `gitTargets`, and the `addressed` substitution in
@@ -1092,9 +1232,17 @@ paragraph above.) `WRAP` — the transparent-wrapper set rule (C)'s
 same wrapped invocation is gated by one Bash gate and not its sibling.
 `within()` is a hand-copy of `isInside` in
 `hooks/lib/reviewer-capability-v1.js`, held in lockstep only by W3b — and the same
-predicate exists in `session-control-core-v1.js` and `review-evidence-lease-v1.js`,
-with an UNANCHORED `startsWith("..")` variant in `finding-verify-v1.js` that has the
-`..bak` defect this gate fixed. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
+predicate exists in `session-control-core-v1.js`, `review-evidence-lease-v1.js` and
+`hooks/lib/zensu-tdd-phase.sh` (an inline `const within` inside its `node -e`
+native-path validator), with an UNANCHORED `startsWith("..")` variant in
+`finding-verify-v1.js` that has the `..bak` defect this gate fixed.
+`skills/session-trail/scripts/trail.mjs` is NO LONGER on that list and is the one
+consumer that proves the seam works: `within` is now defined at MODULE scope here
+and EXPORTED, and that file requires this parser and CALLS it, so the only copy a
+user ever read as a VERDICT rather than as a deny is gone. Its `W22` pins the
+export, the specifier and the degrade-on-load-failure behaviour. Removing either
+`within` or `msysToDrive` from the export list therefore breaks a shipped skill,
+not just a test — which is the cost that buys the single implementation. Unlike `within()`↔`isInside`, `WRAP` is NOT pinned
 against its `pre-bash-zensu-gate.sh` copy — check that one by hand. And
 `skills/pr-team-review` Phase E depends on `worktree remove` being judged on the tree
 it destroys rather than on the addressed repository — narrow that carve-out and the
@@ -1837,6 +1985,121 @@ the doctor row — is re-decided per host. `scanTranscript(path, options)` takes
   good. The row it would have rendered was already suppressed by the same TTL, so
   the sweep changes which files exist, never which findings are reported.
 
+## Marker-Block Carriers (`session-start-evidence-discipline.sh` + `user-prompt-best-solution-first.sh`)
+
+Two hooks inject a rule read at run time from a one-line marker block under `docs/`. They share
+ONE hardened reader, ONE `MAX_FILE` and ONE `MAX_BLOCK`, and they are NOT interchangeable:
+
+- `session-start-evidence-discipline.sh` — SessionStart + SubagentStart, block in
+  `docs/evidence-discipline.md`, **no opt-out flag**. Nothing silences it.
+- `user-prompt-best-solution-first.sh` — UserPromptSubmit + SubagentStart, block in
+  `docs/best-solution-first.md`, opt-out `hooks.bestSolutionFirst`. It additionally loads
+  `zensu-config.sh`, which is its only extra refusal path.
+
+**A THIRD consumer reads the same block, and it must never grow its own parser.**
+`ruleCarrierRows` in `hooks/lib/zensu-doctor-report.js` is the operator's only signal that a
+carrier stopped injecting: build-time pins govern this repository's copy, never an installed
+tree, and every run-time refusal but the plugin-root mismatch is silent. It `require`s
+`rule-block-v1.js` LAZILY and guarded, exactly as `reviewerDenialRows` does — a load fault costs
+that row, not the whole report — and a hand-copied marker parse there would report on bytes the
+hook would have refused. `RULE_CARRIERS` re-encodes the two `doc` paths and both marker pairs, so
+a renamed rule file or a reworded marker lands here as well as in the hook. `RULE_REASON_TEXT`
+re-encodes the module's `REASONS` values: one added there and not here renders as unrecognized
+rather than as health, which is the safe direction and is deliberate. `P5a`-`P5h` in
+`tests/structure/test-doctor.sh` pin that all four states — intact, suppressed by flag, refused,
+and not-checked — render DIFFERENTLY from one another; a row that rendered unconditionally would
+reinstate the silence it exists to remove. That suite's green fixture copies the real module and
+both real docs rather than stubbing them, so it cannot go green against a parser nothing ships.
+
+**`MAX_BLOCK` is declared twice, hand-copied once more, and bound by three checks.** The two
+declarations are the hooks; the one hand copy is `tests/structure/test-best-solution-first.sh`
+(a suite variable, bound by B2h). Do not spell the number anywhere else — name the constant.
+The prose copy in `docs/architecture.md` was removed for exactly that reason. H4e in
+`test-evidence-discipline.sh` (which reads the value out of the SIBLING file rather than
+hand-copying it, and therefore fails if that file is renamed — deliberate: the alternative is a
+third copy of the number), B2h in `test-best-solution-first.sh`, and the cross-carrier equality
+in `test-windows-portability-guards.sh`. `MAX_FILE` is bound only by that last one, because both
+per-file pins grep its declaration without the value.
+
+**The cross-carrier comparison extracts a RANGE and its boundaries are load-bearing.** It strips
+full-line comments, then selects from `const pre = fs.lstatSync(rulePath);` to the enforcement
+`block.length > MAX_BLOCK`, so it covers the hardened reader, the marker-position parse and the
+bound's use. Two properties keep it from going vacuous, and both were learned by probe:
+
+1. **The end address is a substring match**, so a trailing `// … block.length > MAX_BLOCK …` on a
+   code line survives the full-line strip and truncates the range. Added to BOTH carriers it kept
+   the bodies equal and satisfied a bare `grep` for the needle, with both enforcements deleted and
+   the suite fully green. The probe and its numbers live in the comment above the check; do not
+   re-author them here. What closes it: the extracted body's LAST LINE must be the enforcement
+   statement, and each literal must occur exactly ONCE per carrier — the count is what removes
+   the class rather than the probed spellings, and it also covers a shadowing redeclaration
+   between `const rulePath` and `const pre`, which is inside the hook's `try` block.
+2. **Comment TEXT inside the range is deliberately not compared.** That is what lets the two
+   carriers carry differently-worded notes on the shared constant; it also means a one-sided edit
+   to an in-range comment no longer fails the check. Stated, not accidental.
+
+**The refusal set is prose in EIGHT places and forks easily** — one shared reader, eight
+restatements, and no test pins the wording. It is a hand sweep, so the roster is the control:
+
+- `hooks/session-start-evidence-discipline.sh` (header)
+- `hooks/user-prompt-best-solution-first.sh` (header)
+- `docs/architecture.md` §Evidence Discipline
+- `docs/architecture.md` §Best Solution First
+- `docs/evidence-discipline.md`
+- `docs/best-solution-first.md`
+- `docs/configuration.md` — the evidence-discipline hook row
+- `docs/configuration.md` — the best-solution-first hook row
+
+The shape: an unknown event, a malformed payload, and a rule file that is absent, symlinked,
+swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or
+malformed — plus a missing `node`, and for the sibling its config
+library. Every one exits `0` silently. The only branch that REPORTS a cause is a mismatched inherited
+`CLAUDE_PLUGIN_ROOT`, which exits `2` on stderr; the plugin-root RESOLUTION failure a line above
+it also exits `2` but prints nothing, so it is neither silent-zero nor operator-visible. A site that names only the file ceiling sends an operator
+whose rule silently stopped injecting to check the file size and conclude the hook is broken. The
+count above drifted once already (it read SEVEN while listing eight), which is exactly how a site
+gets missed.
+
+**A review ceiling, not a ratio.** Each suite carries a `REVIEW_CEILING` below the `MAX_BLOCK`
+fail-safe so the next clause is argued rather than absorbed. The criterion is ABSOLUTE headroom,
+identical on both carriers, never a preserved percentage: ratio parity hands the larger slack to
+whichever block is bigger and self-erodes as the block grows.
+
+**`REVIEW_HEADROOM` is enforced ONE-SIDEDLY, in the suite that owns the ceiling.** Each owning
+suite asserts that its remaining slack — `REVIEW_CEILING` minus the measured block — never
+EXCEEDS the declared headroom, and the cross-carrier arm compares the two declared headrooms so
+they cannot drift apart. Both earlier shapes were wrong and are recorded so neither is retried:
+deriving the ceiling from the live block over-constrained it (with both ceilings fixed it reduces
+to a constraint on the two rule TEXTS' length difference that no file states, and a
+one-character edit turned the guards suite red at 88 against 89), while comparing two inert
+literals constrained nothing at all (raising one ceiling from 900 to 1000 left every check green
+while the realized headroom became 189 against 89 — measured, both times). One-sided and
+per-suite is what avoids both: block growth only shrinks the slack and stays green, and a
+unilateral ceiling raise fails in the suite where the edit was made. Accepted consequence: a
+block that shrinks far below its ceiling also trips it, which is correct — a ceiling that has
+drifted away from its text has stopped being a tripwire.
+
+Provenance of the number, stated because the comments call it "roughly one clause": 89 is the
+remainder of the evidence carrier's pre-existing round ceiling (900 minus 811), retained rather
+than re-derived, and the sibling moved from 1800 to 1741 to match it. It admits the shorter
+sentences of these blocks and not the longer ones. That is a defensible policy but it is not a
+measurement of a clause; re-deriving it from the two blocks' actual sentence lengths is open.
+
+Both suites measure through `node`, not `${#var}`: bash counts bytes under `LC_ALL=C` and code
+points otherwise, while the hooks compare `String.length` — UTF-16 code units — and both blocks
+carry non-ASCII characters. `test-evidence-discipline.sh` passes identically under `LC_ALL=C`,
+which is the claim tested rather than asserted.
+
+`test-evidence-discipline.sh` C6 pins the one measured figure in `docs/architecture.md` — the emitted
+character length — against a value it derives. C5 works the other way for the carrier population: it
+FORBIDS restating the total as a literal and requires the prose to name `EXPECTED_AGENTS` and
+`EXPECTED_SKILLS` instead, because a numeral there goes stale on every new skill. Both directions were
+learned the hard way — C5 first pinned the numeral, and the count moved from 32 to 33 in a merge before
+this branch even landed. Stated so the sentence is not read as covering the pair: the SIBLING's figures in
+the same document — its emitted length and the per-turn total derived from it — are NOT pinned. The suite is absent from `tests/profiles/windows-ci.v1.json`, so it never runs on
+the Windows PR shard; it IS in `ciStructureTests`, which the weekly Windows Safety structure
+shards execute.
+
 ## Gate-Disable Prefixes (`ZENSU_*=off`) and `test-gauntlet-loop-skill.sh` G12
 
 **Introducing a new `ZENSU_<NAME>=off` escape means editing a skill test in the same
@@ -2105,6 +2368,31 @@ been refused for its STAMP and would have kept asserting `MALFORMED` while never
 reaching the guard it is named for. Its fixture carries a real instant now. When a
 validator moves, re-read every case that asserts the same refusal reason for a
 different cause.
+
+**There is ONE display-bound family, and it is `flatPath`/`instanceId`/`sessionTag`/
+`briefPath`.** Two grew independently — this line added a `showId(...).slice(0, 8)`
+pair while the write-anchor work added the family above — and both were solving
+"bound the value a reader retypes as a selector". They are not equivalent, which is
+why the merge picked rather than kept both. Measured on the losing one:
+`showId(x).slice(0, 8)` renders a zero-advance character as a SPACE, so
+`a<ZWSP>bcdefgh` comes out `"a bcdefg"` — seven real characters in an eight-column
+field — and an ESC byte comes out `"abc [31m"`. `instanceId` strips the zero-advance
+class FIRST and the ordering is the whole point. `showId` is gone and its thirteen
+call sites render through `sessionTag`, so a `list` row and an `instances` row still
+name the same prefix, which is the only thing an 8-character id is for.
+`test-session-trail-skill.sh` T22c pins the call-site floor and T22c-a pins that a raw
+slice does not come back.
+
+**`extractTouchedFiles` must NOT bound the path, and the reason is ORDERING rather
+than trust.** Every renderer strips the worktree prefix with `rel(t.path, r.wt)`, a
+string comparison against the RAW `r.wt`; a path bounded at extraction no longer
+shares that prefix, so `rel` returns the absolute path and the row renders whole. It
+was measured doing worse than that: with a worktree carrying a newline the briefs
+emitted no `## Files the session touched` rows at all, and `test-session-trail-verdict.sh`
+W8 is what caught it. All three renderers bound the value themselves — `flatPath` in
+`show`, `briefPath` in both briefs — so the early bound was redundant as well as wrong.
+The general rule: bind AFTER the last comparison that uses the raw spelling, never
+before it.
 
 **Deferrals this ledger carries, each accepted rather than overlooked:**
 

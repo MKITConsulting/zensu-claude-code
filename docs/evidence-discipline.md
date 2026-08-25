@@ -12,9 +12,15 @@ spawns.
 It lives under `docs/` deliberately: `manifestRuntimeEntries` in
 `hooks/lib/session-control-core-v1.js` folds `hooks`, `agents`, `skills`, `docs` and
 `templates` into the Session Control runtime digest, so this file is tamper-evident within a
-session exactly like the three carriers that quote it. A top-level `rules/` directory would
-not be covered, which would leave the declared source of truth the one normative surface an
-installed-plugin modification could change undetected.
+session exactly like the three carriers that quote it. Be precise about the limit: the digest
+measures the **recorded** plugin root, while the hook reads from the **executing** one, and
+`servesRecordedRuntime` deliberately lets a compatible sibling install serve a record it did
+not mint. Across a mid-session upgrade the injected bytes therefore come from a tree no
+in-session digest measured. What binds this text across that case is
+`tests/structure/test-evidence-discipline.sh`, which pins the block's own phrases at build
+time and requires every agent and every skill to carry it verbatim. A top-level `rules/`
+directory would not be covered, which would leave the declared source of truth the one
+normative surface an installed-plugin modification could change undetected.
 
 ## The rules
 
@@ -59,8 +65,10 @@ Three carriers, deliberately redundant, because each one alone has a hole:
    run time rather than carrying its own copy, so the hook can never drift from the canonical
    text. It reads no configuration and has no opt-out flag, so a project that disables the
    banner, the reminders, or the routers still receives it. It fails silent — a malformed
-   payload, an unknown event, a missing `node`, or an unreadable block exits `0` with no
-   output, so it can never block a prompt or a subagent spawn.
+   payload, an unknown event, a missing `node`, or a rule file that is absent, symlinked,
+   swapped between the pre-check and the open, oversized in FILE or in BLOCK, short-read, or
+   malformed exits `0` with no output, so it never blocks a prompt or a subagent spawn. The one
+   loud branch is a mismatched inherited `CLAUDE_PLUGIN_ROOT`, which refuses with exit `2`.
 2. **`agents/*.md`** carry the block in the agent prompt, so a spawned reviewer holds the
    rule even where hook context is advisory.
 3. **`skills/*/SKILL.md`** carry the block in the skill body, so an invoked workflow holds

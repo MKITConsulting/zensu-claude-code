@@ -22,10 +22,15 @@ set -u
 # C2 across every skill; T13 here only asserts the marker pair is present, so a
 # missing block fails close to the skill it belongs to as well.
 #
-# Every negative check (T7/T8/T11/T15 — the ones that PASS by finding nothing)
-# is paired with a control fixture that it MUST match, so a pattern that stops
-# matching fails the suite instead of degrading into an unconditional PASS. The
-# pattern is borrowed from test-evidence-discipline.sh, which fences its own
+# Every negative check — the ones that PASS by finding nothing — is paired with a
+# control fixture it MUST match, so a pattern that stops matching fails the suite
+# instead of degrading into an unconditional PASS. T7/T8/T11/T15/T23 keep their
+# controls in the T0 fixture block; the later arms (T26's escape literal, T26c,
+# T28's ordinal, T29's raw-carrier scan) carry theirs as paired `*b` checks
+# alongside, which report their own failure line rather than folding into T0's.
+# T29b additionally asserts the pattern in BOTH directions, because that scan had
+# already gone inert once against a template literal it could not cross.
+# The pattern is borrowed from test-evidence-discipline.sh, which fences its own
 # predicate the same way.
 
 PLUGIN_DIR="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -207,7 +212,7 @@ else
   check "T6 SKILL.md has the namespaced H1 '# /zensu:session-trail'" FAIL
 fi
 
-# ── Control fixtures for the four negative checks ───────────────────────────
+# ── Control fixtures for the T0-block negative checks ───────────────────────
 # A one-line control only proves the branch it happens to hit. These fixtures
 # are DERIVED from the patterns — one control line per alternation branch — so a
 # typo or a lost `|` anywhere in a multi-branch regex fails here instead of
@@ -742,32 +747,40 @@ fi
 # The count is over SITES, not lines: three of these lines carry two renderings
 # each, so `grep -c` reported 12 for a population of 15 and either member of those
 # three pairs stayed deletable. `grep -o | wc -l` counts what the label claims.
-# The instances row now renders through showId(), a DISPLAY bound added because the
-# live registry validates only truthiness and an escape byte in a planted id reached
-# the terminal. That does not reintroduce the ellipsis hazard this check exists for,
-# and the reason is measured rather than assumed: showId bounds at 128 and the render
-# slices to 8, so the ellipsis can only ever appear at position 127 and never inside
-# the prefix. Verified for an ordinary uuid and for a 400-character id -- the 8-byte
-# prefix is byte-identical to the raw one in both. The oneLine ABSENCE below is
-# unchanged and still forbids binding an id directly, which WOULD put U+2026 inside a
-# rendered prefix; showId is the one indirection allowed, and L62 in the lineage suite
-# drives the property it protects.
+# The bound is `sessionTag`, and it is the ONLY spelling. Two families of display
+# bound existed in this tree at once: a `showId(...).slice(0, 8)` pair added here and
+# `instanceId`/`sessionTag` added on main, both solving "bound the value a reader
+# retypes as a selector". Measured before they were unified, `showId(x).slice(0, 8)`
+# rendered a zero-width space as a SPACE — `a<ZWSP>bcdefgh` came out `"a bcdefg"`,
+# seven real characters in an eight-column field — and an ESC byte came out
+# `"abc [31m"`. `sessionTag` strips the zero-advance class FIRST and is what every
+# renderer now calls, so a `list` row and an `instances` row still name the same
+# prefix, which is the only thing an 8-character id is for.
+#
+# Both directions are pinned. A raw slice must not come back (that is the defect), and
+# the call-site count is a floor at the CURRENT population, so deleting any single
+# bound fails rather than being absorbed. The `oneLine` absence is unchanged: binding
+# an id through it would put U+2026 inside a rendered prefix.
 SID_ONELINE="$(grep -cE 'oneLine\([^)]*[sS]essionId' "$TRAIL_MJS" || true)"
 SID_SLICE="$(grep -oE '[sS]essionId\)?\.slice\(0, 8\)' "$TRAIL_MJS" | wc -l | tr -d ' ')"
-SID_INSTANCES=0
-grep -qF '${showId(s.sessionId).slice(0, 8)}' "$TRAIL_MJS" && SID_INSTANCES=1
-SID_SHOWID="$(grep -oF 'showId(' "$TRAIL_MJS" | wc -l | tr -d ' ')"
-# One more than the call sites: the definition itself matches. The floor is the
-# CURRENT count, so deleting any single call fails rather than being absorbed.
-if [ "$SID_SHOWID" -ge 9 ]; then
-  check "T22c every session-id render keeps its display bound ($SID_SHOWID showId sites incl. the definition)" PASS
+SID_TAG="$(grep -oF 'sessionTag(' "$TRAIL_MJS" | wc -l | tr -d ' ')"
+if [ "$SID_TAG" -ge 18 ]; then
+  check "T22c every session-id render goes through sessionTag ($SID_TAG sites incl. the definition)" PASS
 else
-  check "T22c a session-id display bound was removed (showId sites=$SID_SHOWID, must be >= 9)" FAIL
+  check "T22c a session-id display bound was removed (sessionTag sites=$SID_TAG, must be >= 18)" FAIL
 fi
-if [ "$SID_ONELINE" = "0" ] && [ "$SID_SLICE" -ge 15 ] && [ "$SID_INSTANCES" = "1" ]; then
-  check "T22b every short session id is rendered by a bare slice, and the instances row by name ($SID_SLICE sites)" PASS
+if [ "$SID_SLICE" = "0" ]; then
+  check "T22c-a no session id is clipped by a raw slice, which drops a column to a zero-width character" PASS
 else
-  check "T22b session id rendering: $SID_ONELINE via oneLine (must be 0), $SID_SLICE via slice (must be >= 15), instances row named=$SID_INSTANCES (must be 1)" FAIL
+  check "T22c-a a raw session-id slice came back ($SID_SLICE site(s))" FAIL
+fi
+# The remaining half of the old T22b, which counted raw slices as the DESIRED state
+# and is now covered in the opposite direction by T22c-a: binding an id through
+# `oneLine` would put U+2026 inside a rendered prefix, so the id must never reach it.
+if [ "$SID_ONELINE" = "0" ]; then
+  check "T22b no session id is rendered through oneLine, whose clip puts an ellipsis inside the prefix" PASS
+else
+  check "T22b a session id is rendered through oneLine ($SID_ONELINE site(s), must be 0)" FAIL
 fi
 # The count must reach the user on EVERY command, not just `list`: each command
 # path can increment it. Pinned two ways — the note is emitted from flush(), and
@@ -947,70 +960,712 @@ else
   check "T25 --force authorization channel:$FORCE_MISS" FAIL
 fi
 
-# T26 — the persisted field list, which is a PRIVACY claim, not a description.
+# ── T26-T30 — the write-anchor routing rule and its carriers ────────────────
+# The skill tells a takeover to work in the target worktree, and the Bash
+# source-write gate refuses to commit there: the session's project root is minted
+# at SessionStart and nothing re-anchors it. Editing and testing still succeed,
+# because no Edit-matcher hook compares a path against that root — so the failure
+# surfaces only at `git commit`, after the work is done. These pins hold the
+# disclosure and the route in the file, since prose is the entire fix.
+
+# flow_of <heading> — one '### ' sub-section of Workflows, so a flow-3 pin cannot
+# be satisfied by the same words appearing in a sibling flow. Same purpose as
+# section_of above, one level down.
+flow_of() {
+  awk -v h="$1" 'index($0,h)==1{f=1;next} /^###? /{f=0} f' "$SKILL_MD"
+}
+
+# One spelling per needle, consumed by BOTH the negative arm and its control —
+# the idiom HOME_SKILL_PATH/BARE_COMMAND_REF already establish in this file. Two
+# independent literals let a narrowed arm keep a control that fences the old one.
+ESCAPE_LITERAL='ZENSU_BASH_WRITE_GATE'
+ORDINAL_NEEDLE='Flow 3 step'
+
+FLOW3="$(flow_of '### 3. Take over')"
+ANCHOR_MISS=""
+[ -n "$FLOW3" ] || ANCHOR_MISS="$ANCHOR_MISS [flow-3-heading-not-found]"
+printf '%s\n' "$FLOW3" | grep -qF 'anchored to that worktree' || ANCHOR_MISS="$ANCHOR_MISS [route-rule-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'immutable project root' || ANCHOR_MISS="$ANCHOR_MISS [anchor-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'commit incapable' || ANCHOR_MISS="$ANCHOR_MISS [capability-split-not-stated]"
+# The boundary test. Stating it as equality is the defect this arm exists to
+# catch: the gate uses containment, so a nested `.claude/worktrees/*` worktree is
+# writable, and prose that says otherwise sends the reader to open a session they
+# do not need.
+printf '%s\n' "$FLOW3" | grep -qF 'containment, not equality' || ANCHOR_MISS="$ANCHOR_MISS [boundary-test-not-stated]"
+printf '%s\n' "$FLOW3" | grep -qF '.claude/worktrees/' || ANCHOR_MISS="$ANCHOR_MISS [nested-layout-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'rule (C)' || ANCHOR_MISS="$ANCHOR_MISS [rule-c-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'rule (B)' || ANCHOR_MISS="$ANCHOR_MISS [rule-b-not-named]"
+# The escape hatch the deny advertises is refused by the host, so a reader told
+# only "there is a prefix" is sent down a route that does not exist.
+printf '%s\n' "$FLOW3" | grep -qF 'Auto-Mode classifier' || ANCHOR_MISS="$ANCHOR_MISS [classifier-caveat-missing]"
+# Derived from THIS step's own sentence, not from the bare command names: both
+# `claude --resume` and `handoff brief` already occur in step 2, so needling them
+# alone cannot detect deletion of the routing sentence this change added.
+printf '%s\n' "$FLOW3" | grep -qF 'Routes that do work' || ANCHOR_MISS="$ANCHOR_MISS [routing-sentence-missing]"
+# The SPELLING the script actually prints.
+printf '%s\n' "$FLOW3" | grep -qF 'cd -- <cwd> && claude --resume <id>' || ANCHOR_MISS="$ANCHOR_MISS [terminal-route-missing]"
+# The CORRECTED claim, and it is the opposite of what an earlier revision of this
+# pin held in place. A `--resume` re-anchors nothing: `FRESH_SESSION_SOURCES` is
+# {startup, clear, fork}, so a resume reuses the target session's own immutable
+# record and the cd operand cannot change the anchor. Needling `WORKTREE` alone
+# was satisfied by the old, wrong sentence that told the reader to cd there for a
+# resume, so CI held incorrect routing advice in place. Pin the mechanism by name
+# and pin the fresh-source case that the cd advice actually belongs to.
+printf '%s\n' "$FLOW3" | grep -qF 're-anchors nothing' || ANCHOR_MISS="$ANCHOR_MISS [resume-reanchor-claim-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'FRESH_SESSION_SOURCES' || ANCHOR_MISS="$ANCHOR_MISS [fresh-source-mechanism-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF -- '--fork-session' || ANCHOR_MISS="$ANCHOR_MISS [fork-case-not-named]"
+printf '%s\n' "$FLOW3" | grep -qF 'WORKTREE' || ANCHOR_MISS="$ANCHOR_MISS [cwd-vs-worktree-distinction-missing]"
+printf '%s\n' "$FLOW3" | grep -qF 'handoff brief (flow 4)' || ANCHOR_MISS="$ANCHOR_MISS [desktop-route-missing]"
+# The escape literal belongs in docs/gates.md only — a shipped prefix teaches the
+# hatch. Control: T26b below must match this same pattern.
+printf '%s\n' "$FLOW3" | grep -qF "$ESCAPE_LITERAL" && ANCHOR_MISS="$ANCHOR_MISS [escape-literal-shipped-in-skill]"
+if [ -z "$ANCHOR_MISS" ]; then
+  check "T26 flow 3 carries the routing rule, the containment test, both gate rules, the classifier caveat and both routes, without shipping the escape literal" PASS
+else
+  check "T26 flow 3 write-anchor rule:$ANCHOR_MISS" FAIL
+fi
+
+# The negative arm above passes by finding nothing, so it gets a control fixture
+# it MUST match, the way every other negative check in this file does.
+ESCAPE_LITERAL_CONTROL='   **Do not plan around it.** An inline `ZENSU_BASH_WRITE_GATE=off` prefix is refused.'
+if printf '%s\n' "$ESCAPE_LITERAL_CONTROL" | grep -qF "$ESCAPE_LITERAL"; then
+  check "T26b the escape-literal pattern bites its control fixture" PASS
+else
+  check "T26b the escape-literal pattern no longer matches its control fixture — T26's negative arm is inert" FAIL
+fi
+# The whole file, not just flow 3: the Limits bullet carried the literal too.
+if grep -qF "$ESCAPE_LITERAL" "$SKILL_MD"; then
+  check "T26c no escape literal survives anywhere in SKILL.md" FAIL
+else
+  check "T26c no escape literal survives anywhere in SKILL.md" PASS
+fi
+
+# T27 — the script's own line is a CONVENIENCE with a stated caveat, not the
+# authority. Neither env channel normally reaches a subprocess a session spawns,
+# so the line normally reports `unknown — assume denied`; it is never derived from
+# the script's own cwd.
+WRITES_MISS=""
+# The label and the three verdict words are DERIVED from the renderer, not
+# hardcoded here: with both sides pinned as independent literals a rename in the
+# script plus a matching fixup in the W checks re-greens everything while this
+# paragraph goes stale — the drift T24 established this idiom to catch.
+#
+# What the paragraph must SAY has changed once already: an earlier build derived
+# the caller root from the git toplevel of its own cwd, and the doc described that.
+# The shipped reader is env-only — no channel means `unknown — assume denied`,
+# never a cwd guess — which is what W3/W3b pin and what the caveat arm below
+# requires the prose to state.
+# Derived from the RENDERER'S BODY, not from one branch's return spelling. The
+# earlier form matched the literal `  if (w.covered === true) return ['...`, so it
+# pinned the SHAPE of that branch rather than the label: giving `allowed` its
+# necessary-not-sufficient caveat turned the one-liner into a block and the
+# derivation went empty, failing this check on a change that strengthened the
+# render. Anchoring on the body means any branch whose first rendered token is the
+# label supplies it.
+WRITES_LABEL="$(sed -n '/^function writesLines(/,/^}/p' "$TRAIL_MJS" | sed -n "s/.*['\`]\([A-Z][A-Z]*\)   [a-z].*/\1/p" | head -1)"
+# Both quote styles: the `allowed` head is a plain string, the other two are
+# template literals. Matching only one style silently derives a single verb and
+# the loop below then pins a third of the vocabulary.
+WRITES_VERBS="$(sed -n "s/.*[\`']${WRITES_LABEL:-WRITES}   \([a-z]*\).*/\1/p" "$TRAIL_MJS" | sort -u | tr '\n' ' ')"
+WRITES_VERB_COUNT="$(printf '%s\n' $WRITES_VERBS | grep -c .)"
+# One implementation of the verb arm, so T27 and its T27b control cannot diverge.
+#
+# ANCHORED to the line carrying the label, not matched anywhere in flow 3. The
+# unanchored form searched ~35 lines of prose that already use the same English
+# words for a different purpose — flow 3 describes containment with "a worktree
+# *inside* the anchor is writable" and "is the blocked case" — so renaming the
+# renderer's `allowed` to `writable`, or `denied here` to `blocked here`, left two
+# of three arms green against a paragraph documenting neither. T27b is the control
+# that holds this anchoring in place.
+writes_verb_documented() { # <verb>
+  printf '%s\n' "$FLOW3" | grep -F "$WRITES_LABEL" | grep -qF "$1"
+}
+if [ -z "$WRITES_LABEL" ]; then
+  WRITES_MISS="$WRITES_MISS [label-not-derivable-from-renderer]"
+elif [ "$WRITES_VERB_COUNT" -lt 3 ]; then
+  # The renderer has three verdict states; deriving fewer means the extraction
+  # broke, not that the vocabulary shrank. Fail rather than pin a subset.
+  WRITES_MISS="$WRITES_MISS [only-$WRITES_VERB_COUNT-verdict-words-derivable: $WRITES_VERBS]"
+else
+  printf '%s\n' "$FLOW3" | grep -qF "$WRITES_LABEL" || WRITES_MISS="$WRITES_MISS [label-$WRITES_LABEL-undocumented]"
+  for verb in $WRITES_VERBS; do
+    writes_verb_documented "$verb" || WRITES_MISS="$WRITES_MISS [verdict-word-$verb-undocumented]"
+  done
+fi
+printf '%s\n' "$FLOW3" | grep -qF 'ZENSU_PROJECT_ROOT' || WRITES_MISS="$WRITES_MISS [measurement-caveat-missing]"
+# The caveat must name what the line is NOT derived from, or a reader takes an
+# `unknown` for a tool failure rather than the ordinary state.
+printf '%s\n' "$FLOW3" | grep -qF 'not derived from the script' || WRITES_MISS="$WRITES_MISS [cwd-independence-not-stated]"
+printf '%s\n' "$FLOW3" | grep -qF 'writes.covered' || WRITES_MISS="$WRITES_MISS [json-carrier-fields-undocumented]"
+if [ -z "$WRITES_MISS" ]; then
+  check "T27 flow 3 documents the derived WRITES vocabulary (${WRITES_VERBS}), its measurement caveat and the JSON carrier" PASS
+else
+  check "T27 WRITES line documentation:$WRITES_MISS" FAIL
+fi
+
+# T27b — control for T27's verb arms, and the reason they needed one. The arms
+# derive their words from the renderer (right) and then matched them anywhere in
+# flow 3 (wrong): ~35 lines of prose that already use the same English vocabulary
+# for a DIFFERENT purpose. Flow 3 says "a worktree *inside* the anchor is writable"
+# and "is the blocked case" while describing containment, so renaming the
+# renderer's `allowed` to `writable` or `denied here` to `blocked here` left two of
+# three arms green against a paragraph that documents neither.
+#
+# The probe must be a word flow 3 REALLY uses, or the control is inert — but it
+# must not be a word the PIN then requires flow 3 to keep. Requiring the literals
+# `writable` and `blocked` made incidental prose contractual: the natural remedy
+# for the hazard this control documents is to reword flow 3 so it stops using them,
+# and that remedy failed the test. So the probe set is DISCOVERED from flow 3 at
+# run time out of a candidate list, and only the words actually present are used.
+# An empty intersection is still a failure — a control with nothing to control
+# proves nothing — but WHICH word carries it is flow 3's business, not the pin's.
+T27B_BAD=""
+T27B_PROBES=""
+for candidate in writable blocked writeable refused permitted allowed-here denied-there; do
+  printf '%s\n' "$FLOW3" | grep -qF "$candidate" && T27B_PROBES="$T27B_PROBES $candidate"
+done
+if [ -z "$T27B_PROBES" ]; then
+  T27B_BAD="$T27B_BAD [no-candidate-word-present-in-flow3-control-inert]"
+fi
+for probe in $T27B_PROBES; do
+  writes_verb_documented "$probe" \
+    && T27B_BAD="$T27B_BAD [$probe-accepted-as-a-documented-verdict-word]"
+done
+if [ -z "$T27B_BAD" ]; then
+  check "T27b a word flow 3 uses for another purpose does not satisfy T27's verdict-word arm" PASS
+else
+  check "T27b verdict-word arm anchoring:$T27B_BAD" FAIL
+fi
+
+# T30 — the maintainer contract must describe the carrier it enumerates. CLAUDE.md's
+# six-carrier paragraph justified `writeAnchorCaution` and the Limits bullet naming
+# neither the rule letters nor the env variables by calling the bullet "a one-line
+# index entry". The shipped bullet is not one: it restates both Edit-matcher hook
+# filenames, the capability gate and its main-principal exemption, the containment
+# definition and the classifier caveat. Being wrong about a carrier is worse than
+# the duplication it describes, because the next reader trusts the enumeration over
+# the file.
+#
+# Tied to the SHIPPED content rather than asserted as a bare literal ban: the claim
+# is only false while the bullet really does carry the hook roster, so the premise
+# arm fails loudly if that stops being true and the pin turns into a stale rule.
+CLAUDE_MD="$PLUGIN_DIR/CLAUDE.md"
+T30_BAD=""
+if [ ! -f "$CLAUDE_MD" ]; then
+  T30_BAD="$T30_BAD claude-md-not-found"
+else
+  LIMITS_BULLET="$(section_of '## Limits of what this can know' | grep -aF 'but not commit it' | head -1)"
+  [ -n "$LIMITS_BULLET" ] || T30_BAD="$T30_BAD limits-bullet-not-located"
+  case "$LIMITS_BULLET" in
+    *pre-edit-tdd-reminder.sh*) ;;
+    *) T30_BAD="$T30_BAD premise-lapsed-bullet-no-longer-names-the-hook-roster" ;;
+  esac
+  # Needled on the RULE, not on one spelling of it: "an index entry", "a single-line
+  # index entry" and "an index bullet" all violate it while none contains the
+  # original literal. Anchored on the COPULA (`is a…`), which is what makes a
+  # sentence a description — CLAUDE.md's own prohibition reads "Do not describe it
+  # AS an index entry", and an `as`-anchored or article-only pattern flags that
+  # sentence too, which is exactly what T30b caught on the first spelling.
+  if [ -z "$T30_BAD" ] && grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' "$CLAUDE_MD"; then
+    T30_BAD="$T30_BAD claude-md-describes-a-multi-clause-bullet-as-an-index-entry"
+  fi
+fi
+if [ -z "$T30_BAD" ]; then
+  check "T30 CLAUDE.md's carrier description matches the Limits bullet that ships" PASS
+else
+  check "T30 carrier description accuracy:$T30_BAD" FAIL
+fi
+
+# T30b — the control T30's negative arm needs, and the one every other negative arm
+# in this file already has. T30 passes by finding NOTHING, so a reworded rule or a
+# broken pattern turns it into an unconditional PASS with no signal. Each control
+# string is a phrasing the rule forbids; the pattern must match all of them, and
+# must spare the compliant sentence CLAUDE.md actually ships.
+T30B_BAD=""
+for probe in "the bullet is a one-line index entry" "it is an index entry" "that row is a single-line index bullet"; do
+  printf '%s\n' "$probe" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
+    || T30B_BAD="$T30B_BAD [missed:$probe]"
+done
+# The second anti-probe deliberately CONTAINS the word `index`: one that does not
+# cannot discriminate, because no pattern ending in `index (entry|bullet)` could ever
+# match it. An earlier spelling used a sentence with no `index` token at all.
+for anti in "Do not describe it as an index entry" "the enumeration must not call it an index entry"; do
+  printf '%s\n' "$anti" | grep -qaE 'is an?( [a-z-]+)? index (entry|bullet)' \
+    && T30B_BAD="$T30B_BAD [flagged-compliant-sentence:$anti]"
+done
+if [ -z "$T30B_BAD" ]; then
+  check "T30b the carrier-description pattern matches every phrasing probed here and spares the shipped one" PASS
+else
+  check "T30b carrier-description pattern:$T30B_BAD" FAIL
+fi
+
+# T28 — the Limits bullet. The asymmetry is the part that gets rediscovered: a
+# maintainer who reads only "the gate blocks foreign worktrees" would expect the
+# edits to fail too, and they do not.
+LIMITS_SECTION="$(section_of '## Limits of what this can know')"
+LIMITS_MISS=""
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'but not commit it' || LIMITS_MISS="$LIMITS_MISS [asymmetry-bullet-missing]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-edit-tdd-reminder.sh' || LIMITS_MISS="$LIMITS_MISS [edit-hook-not-named]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'pre-write-secret-scan.sh' || LIMITS_MISS="$LIMITS_MISS [secret-scan-hook-not-named]"
+# The roster is only complete WITH the principal. A third hook on the `.*` matcher
+# does compare against the immutable root and exempts the main principal alone, so
+# an unqualified "no hook checks the root" is false for a subagent — the roster
+# omission this repo's CLAUDE.md records as having been missed twice already.
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'main thread' || LIMITS_MISS="$LIMITS_MISS [principal-not-qualified]"
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'capability gate' || LIMITS_MISS="$LIMITS_MISS [capability-gate-not-named]"
+# Containment, not equality — same defect as T26's arm, in the carrier a reader
+# reaches from the other direction.
+printf '%s\n' "$LIMITS_SECTION" | grep -qF 'not contained by' || LIMITS_MISS="$LIMITS_MISS [boundary-test-not-stated]"
+# An ordinal pointer is unstable: inserting this very step renumbered the one
+# that followed it.
+printf '%s\n' "$LIMITS_SECTION" | grep -qF "$ORDINAL_NEEDLE" && LIMITS_MISS="$LIMITS_MISS [unstable-ordinal-pointer]"
+if [ -z "$LIMITS_MISS" ]; then
+  check "T28 Limits records the asymmetry with the principal qualified, the full hook roster and the containment test" PASS
+else
+  check "T28 Limits asymmetry bullet:$LIMITS_MISS" FAIL
+fi
+
+# Control for T28's negative arm, matching the T0 convention.
+ORDINAL_CONTROL='- ... Flow 3 step 3 carries the routing rule.'
+if printf '%s\n' "$ORDINAL_CONTROL" | grep -qF "$ORDINAL_NEEDLE"; then
+  check "T28b the unstable-ordinal pattern bites its control fixture" PASS
+else
+  check "T28b the unstable-ordinal pattern no longer matches its control fixture — T28's negative arm is inert" FAIL
+fi
+
+# T29 — the caution in the two BRIEFS, and in docs/gates.md.
+#
+# The brief's sentence is static where `show`'s line is measured, and that is
+# deliberate: a brief is written by one session for a DIFFERENT one to open, so a
+# verdict measured against the writer's anchor would be reported to a reader it
+# was never about. Pinned as ONE definition with TWO call sites, so a renderer
+# that stops emitting it fails here rather than going quiet.
+#
+# The gates.md half is pinned from this suite because nothing else pins it: the
+# claim is session-trail's routing rule, it just happens to live in the gate doc
+# where a reader hits the deny.
+GATES_MD="$PLUGIN_DIR/docs/gates.md"
+CAUTION_MISS=""
+# Counted against COMMENT-STRIPPED source, the way T23 does it: an emission-shaped
+# line inside a comment is not an emission, and commenting both call sites out
+# would otherwise leave this pin green with the caution gone from both briefs.
+CAUTION_TOTAL="$(printf '%s\n' "$TRAIL_CODE" | grep -c 'writeAnchorCaution(')"
+CAUTION_DEF="$(printf '%s\n' "$TRAIL_CODE" | grep -c '^function writeAnchorCaution(')"
+CAUTION_USES="$(printf '%s\n' "$TRAIL_CODE" | grep -c 'L.push(writeAnchorCaution(')"
+[ "$CAUTION_DEF" = "1" ] || CAUTION_MISS="$CAUTION_MISS [caution-definitions=$CAUTION_DEF]"
+[ "$CAUTION_USES" = "2" ] || CAUTION_MISS="$CAUTION_MISS [brief-renderers-emitting-it=$CAUTION_USES, expected takeover and handoff]"
+# Reconciled against the total, the way T25 reconciles its verdict call sites: a
+# third occurrence in some other spelling is invisible to a def+use count alone.
+[ "$((CAUTION_TOTAL - CAUTION_DEF))" = "$CAUTION_USES" ] \
+  || CAUTION_MISS="$CAUTION_MISS [unaccounted-occurrences total=$CAUTION_TOTAL def=$CAUTION_DEF uses=$CAUTION_USES]"
+printf '%s\n' "$TRAIL_CODE" | grep -qF 'can edit files there but cannot commit' || CAUTION_MISS="$CAUTION_MISS [caution-text-missing]"
+# The persisted sentence must state CONTAINMENT: it outlives any later correction,
+# because a brief already written to ~/.claude/handoffs/ is never re-measured.
+printf '%s\n' "$TRAIL_CODE" | grep -qF 'does not CONTAIN' || CAUTION_MISS="$CAUTION_MISS [caution-states-equality-not-containment]"
+# And it must BOUND its transcript-derived path — the brief is persisted and read
+# by an instance that need not have this skill loaded.
+printf '%s\n' "$TRAIL_CODE" | grep -A3 '^function writeAnchorCaution(' | grep -qF 'briefPath(wt)' || CAUTION_MISS="$CAUTION_MISS [caution-path-unbounded]"
+# Both raw-carrier scans are keyed on an EMITTER (`L.push(` / `print(`), so a
+# line-BUILDER that returns strings for someone else to emit is invisible to them.
+# `writesLines` is exactly that shape, and its emitting line carries no `${...}`
+# for the extraction to reach. Same bespoke treatment `writeAnchorCaution` gets.
+WRITES_LINES_BODY="$(printf '%s\n' "$TRAIL_CODE" | sed -n '/^function writesLines(/,/^}/p')"
+[ -n "$WRITES_LINES_BODY" ] || CAUTION_MISS="$CAUTION_MISS [writesLines-body-not-extracted]"
+for root in targetRoot callerRoot; do
+  printf '%s\n' "$WRITES_LINES_BODY" | grep -qF "flatPath(w.${root})" \
+    || CAUTION_MISS="$CAUTION_MISS [writesLines-${root}-unbounded]"
+done
+# ABSENCE, not presence. The loop above asserts two KNOWN names are bounded; a
+# third interpolation added later is bounded by nothing and seen by nothing —
+# neither raw-carrier scan reaches this function, and `grep -A24` silently stopped
+# at a fixed offset the function has already outgrown. Scan the whole extracted
+# body for any `${...}` carrying a value and require each to route through a
+# bound. `target`, `why` and `head` are locals this function computed from values
+# already bounded above, so they are named as the accepted exceptions rather than
+# left to a wildcard.
+# The wrapper alternation is spelled HERE and not taken from `$PRINT_WRAPPED`:
+# that variable is defined ~120 lines below this block, so an unquoted reference
+# expanded to the empty string and `grep -Ev ""` matched every line — the scan
+# filtered out everything it was meant to inspect and reported zero unbounded
+# carriers against a body that had one. It is asserted non-empty for the same
+# reason, and the assertion is what makes a future rename fail loudly.
+WRITES_LINES_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|sessionTag\(|livePid\('
+[ -n "$WRITES_LINES_WRAPPED" ] || CAUTION_MISS="$CAUTION_MISS [writesLines-wrapper-pattern-empty]"
+WRITES_LINES_RAW="$(printf '%s\n' "$WRITES_LINES_BODY" | grep -oE '\$\{[^{}]*\}' \
+  | grep -Ev "$WRITES_LINES_WRAPPED" \
+  | grep -Ev '^\$\{(target|why|head|queueNote|rejectedChannel)\}$' || true)"
+WRITES_LINES_RAW_N="$(printf '%s\n' "$WRITES_LINES_RAW" | grep -c . || true)"
+[ "${WRITES_LINES_RAW_N:-0}" = "0" ] \
+  || CAUTION_MISS="$CAUTION_MISS [writesLines-unbounded-carriers=$WRITES_LINES_RAW_N: $(printf '%s\n' "$WRITES_LINES_RAW" | head -2 | tr '\n' ' ')]"
+# And the shared bound is real: `briefPath` must clip, neutralize backticks, and
+# strip the control class, or routing through it buys nothing. Pinned at the
+# definition because every brief path carrier now depends on it.
+#
+# The clip is needled as `oneLine(` plus the 200 budget rather than as the whole
+# call `oneLine(p, 200)`. That earlier spelling pinned the ARGUMENT, not the
+# property: wrapping the argument to add the control strip changed it to
+# `oneLine(String(p …).replace(CONTROL_RUN, " "), 200)`, and the pin then failed on
+# a change that STRENGTHENED the bound it exists to protect. The contract is
+# "clips at 200", which is what these two arms now say.
+# ONE pattern, not two independent needles. Matched separately within the same
+# 3-line window, `oneLine(` and `, 200)` are both satisfied by
+# `oneLine(x, 40).slice(0, 200)` — a body whose clip budget is 40. Binding them
+# into a single expression asserts the budget belongs to the `oneLine` call, while
+# `.*` still allows the argument to be wrapped (which it now is, by CONTROL_RUN).
+printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qE 'oneLine\(.*, 200\)' || CAUTION_MISS="$CAUTION_MISS [briefPath-does-not-clip-at-200]"
+# `.*` is unrestricted and crosses the closing paren, so the arm above still matches
+# `oneLine(x, 40).slice(0, 200)` — same-line adjacency, not budget binding. A second
+# `.slice(` in the body is what that re-clip would look like, and there is no
+# legitimate reason for one here.
+printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF '.slice(' && CAUTION_MISS="$CAUTION_MISS [briefPath-re-clips-after-oneLine]"
+# Control for that arm, which passes by finding nothing: the needle must match a body
+# that DOES re-clip, and the extracted window must be non-empty. Without both, a typo
+# in the needle or a `briefPath` grown past the -A2 window reads as compliance.
+printf '%s\n' "  return oneLine(x, 40).slice(0, 200);" | grep -qF '.slice(' \
+  || CAUTION_MISS="$CAUTION_MISS [re-clip-needle-inert]"
+[ -n "$(printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(')" ] \
+  || CAUTION_MISS="$CAUTION_MISS [briefPath-window-empty]"
+printf '%s\n' "$TRAIL_CODE" | grep -A2 '^function briefPath(' | grep -qF 'replace(/`/g' || CAUTION_MISS="$CAUTION_MISS [briefPath-does-not-neutralize-backticks]"
+# `flatPath` and `briefShellArg` must strip the SAME line-break class. They drifted
+# once: `briefShellArg` justified a narrower class by the markdown fence alone, and
+# then gained two plain-text callers where the narrower class leaves a `\v`/`\f`
+# able to split a runnable line on screen. Derived from `flatPath`, not hardcoded.
+# The class is now a single named const, which is the strongest form of this pin:
+# all three helpers cannot drift because they share one definition. Assert the const
+# exists, that EVERY one of them references it, and that it still covers LF — an earlier
+# spelling excluded TAB by writing two ranges and silently dropped LF out of the
+# class with it, un-doing the whole bound.
+# Match the whole regex LITERAL rather than a bare character class: the class is a
+# non-capturing alternation now (an enumerated range OR `\p{Cf}`) and carries the
+# `u` flag the property escape requires, so a `\[[^]]*\]` shape stopped matching
+# and the arm reported the const as missing while it sat two lines away.
+CONTROL_CLASS="$(printf '%s\n' "$TRAIL_CODE" | sed -n 's/^const CONTROL_RUN = \(\/.*\/gu\{0,1\}\);$/\1/p' | head -1)"
+if [ -z "$CONTROL_CLASS" ]; then
+  CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-const-not-found]"
+else
+  case "$CONTROL_CLASS" in *'u000a'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-LF($CONTROL_CLASS)]" ;; esac
+  # The zero-advance / bidi FORMAT block. An enumerated C0/C1 class does not cover
+  # U+202A-U+202E, U+2066-U+2069, U+200B-U+200F or U+FEFF, every one of which
+  # reorders or hides part of a path on the line SKILL.md makes authoritative.
+  # `\p{Cf}` is the shape that covers them; `instanceId` already used it, and the
+  # PLAIN-TEXT bound did not.
+  case "$CONTROL_CLASS" in *'p{Cf}'*) ;; *) CAUTION_MISS="$CAUTION_MISS [CONTROL_RUN-does-not-cover-the-format-block($CONTROL_CLASS)]" ;; esac
+  # `briefPath` belongs here too, and its absence was the defect: it bounded with
+  # `oneLine` alone, whose `/\s+/` misses ESC/C0/DEL/C1 — so the PERSISTED carrier
+  # was the only one of the three not covered by the shared class.
+  for helper in flatPath briefShellArg briefPath; do
+    printf '%s\n' "$TRAIL_CODE" | grep -A2 "^function ${helper}(" | grep -qF 'CONTROL_RUN' \
+      || CAUTION_MISS="$CAUTION_MISS [${helper}-does-not-use-CONTROL_RUN]"
+  done
+fi
+# No transcript-derived PATH-SHAPED value may reach a brief renderer's markdown
+# un-wrapped. STATED GAP, not an oversight: the verbatim free-text carriers —
+# prompt bodies, assistant tails, the compaction summary, task descriptions and the
+# raw diff bodies — go through `clip()`, which preserves interior newlines by
+# design, and `SKILL.md`'s fence-breaker bullet is where that is documented. This
+# roster covers the identifier-shaped values only.
+# The caution being safe while a sibling line leaks is the exact state W8 caught,
+# twice: first the `- worktree:` bullets, then the `- branch:` and touched-file
+# rows. The alternation is the roster of values that come out of ANOTHER session's
+# records — its transcript, its `~/.claude/sessions/` registry entry, or the
+# desktop store. (It already contains `r.app.instance`, which is desktop-store
+# derived, so "transcript" alone never described the class.) A NEW one has to be
+# added here, because nothing derives it.
+#
+# `grep -E` deliberately, matching every other alternation in this file — a BRE
+# `\|` is a GNU extension and would silently count zero on a POSIX grep, turning
+# this negative check into an unconditional pass.
+# Each `${...}` is extracted and judged on its OWN, not by scanning the line: a
+# brief line is a template literal containing ESCAPED backticks, so a pattern
+# anchored on `L.push(` + a no-backtick class stops at the first `\`` and silently
+# matches nothing. That spelling passed while the `- branch:` bullet was provably
+# unbounded, which is why the control below asserts the pattern in BOTH directions.
+# The trailing class after each name is a hand-rolled word boundary: `\b` is a GNU
+# extension, and without it `r.cwd` also matches the innocuous `r.cwdExists`.
+# `r.title` and the three `r.app` config fields joined this roster with the same
+# argument the others carry: they come from the SAME third-party stores — another
+# session's registry and the desktop app's `local_*.json` — as `r.app.instance`,
+# which sits one line away from them in `cmdShow` and was already listed.
+# The `s.` spellings are the SAME fields from the SAME store, rendered by
+# `cmdInstances` under a different binding — an `r.`-anchored roster could not see
+# them, which is how three unbounded carriers survived a round that hardened their
+# `cmdShow` twins one line apart.
+BRIEF_TAINTED='(r\.(wt|cwd|sessionId|transcript|branch|title)|r\.app\.(instance|model|effort|permissionMode)|r\.live\.(entrypoint|name)|s\.(sessionId|entrypoint|name|cwd)|[pa]\.at|r\.compaction\.at|t\.(id|status|subject)|rel\(t\.path|p\.path|t\.path)([^A-Za-z0-9_]|$)'
+# `oneLine(` and `basename(` are deliberately NOT here: neither swaps a backtick,
+# so exempting them would certify a carrier that still closes a code span — the
+# very property this check asserts two paragraphs above. Nothing in the tree
+# relies on them; every tainted brief carrier routes through one of the two.
+BRIEF_WRAPPED='briefPath\(|briefShellArg\('
+# A RUNNABLE `cd` operand is a different class: `briefPath` clips (a shorter path
+# `cd` still accepts) and leaves `$( )`, `;`, `&&`, `|` live. Enforced structurally
+# so the boundary lives in the code rather than only in a comment.
+# Keyed on the RUNNABLE VERBS, not on `cd` alone: the handoff line carries a second
+# operand after `claude --resume`, and an earlier spelling of this scan extracted
+# only the `cd` span, so swapping that operand back to `briefPath` regressed with
+# both suites green.
+CD_CARRIER_RE='(cd (--)? ?|claude --resume )\$\{[^{}]*\}'
+# BOTH emitters: `printResume` emits its two runnable lines through `print(`, so a
+# scan restricted to `L.push(` could not see the exact pair the shell-quoting
+# CRITICAL was about — reverting them to `flatPath` would have re-landed green.
+bad_cd_carriers() {
+  grep -E 'L\.push\(|print\(' | grep -oE "$CD_CARRIER_RE" | grep -Ev 'briefShellArg\(' || true
+}
+raw_brief_carriers() { # stdin: source; prints each offending interpolation
+  grep -F 'L.push(' | grep -oE '\$\{[^{}]*\}' | grep -E "$BRIEF_TAINTED" | grep -Ev "$BRIEF_WRAPPED" || true
+}
+RAW_BRIEF_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | grep -c . || true)"
+# The PLAIN-TEXT half, keyed on `print(` exactly as the brief half is keyed on
+# `L.push(`. Without it the boundary lived only in `flatPath`'s header comment, so
+# a renderer added later was invisible to every check — which is how the same leak
+# survived four rounds. `flatPath` is the compliant wrapper here (a plain-text path
+# is compared, not clipped); `briefPath`/`oneLine` also remove a line break.
+# `oneLine\(` is NOT a compliant wrapper here, and admitting it was the structural
+# cause of two separate leaks. This roster is the only check that scans plain-text
+# print carriers for an unbounded third-party value, and `oneLine` collapses
+# `/\s+/` ONLY — JS `\s` excludes ESC, the rest of C0, DEL and C1, which is the
+# class that can overwrite a row the reader already trusted. While `oneLine(` sat
+# in this alternation, every carrier still using it was invisible here: the BRANCH
+# row and the STATUS/CONFIG rows both passed for that reason alone, one line below
+# an OWNER row that had been moved to `flatPath` precisely because of this class.
+# The plain-text bound is `flatPath` (or `briefPath`/`briefShellArg` for a brief);
+# `oneLine` remains correct for prose, which this roster does not cover.
+# `oneLine\(flatPath\(` IS compliant, and the composition is the right one for a
+# PROSE column: `flatPath` removes the control class, then `oneLine` collapses
+# whitespace and clips with an ellipsis. Bare `flatPath(x).slice(0, n)` is correct
+# for an identifier the reader must COMPARE, where collapsing spaces would alter
+# the spelling; for a title or a task line the collapse is what makes the column
+# readable. Both spellings are accepted; a bare `oneLine(` is not.
+# `sessionTag(` and `livePid(` are compliant wrappers, not exemptions: `sessionTag`
+# is `instanceId(..., 8)` under one name — the single spelling of the 8-character
+# session-id prefix all three renderers share — and `livePid` emits a positive
+# integer or the literal `?`, never a third-party string.
+PRINT_WRAPPED='flatPath\(|briefPath\(|briefShellArg\(|statusOf\(|ago\(|instanceId\(|sessionTag\(|livePid\(|oneLine\(flatPath\('
+raw_print_carriers() {
+  grep -F 'print(' | grep -oE '\$\{[^{}]*\}' | grep -E "$BRIEF_TAINTED" | grep -Ev "$PRINT_WRAPPED" || true
+}
+RAW_PRINT_PATHS="$(printf '%s\n' "$TRAIL_CODE" | raw_print_carriers | grep -c . || true)"
+[ "$RAW_PRINT_PATHS" = "0" ] || CAUTION_MISS="$CAUTION_MISS [unbounded-plain-text-carriers=$RAW_PRINT_PATHS: $(printf '%s\n' "$TRAIL_CODE" | raw_print_carriers | head -2 | tr '\n' ' ')]"
+BAD_CD="$(printf '%s\n' "$TRAIL_CODE" | bad_cd_carriers | grep -c . || true)"
+[ "$BAD_CD" = "0" ] || CAUTION_MISS="$CAUTION_MISS [cd-operand-not-shell-quoted=$BAD_CD: $(printf '%s\n' "$TRAIL_CODE" | bad_cd_carriers | head -1)]"
+[ "$RAW_BRIEF_PATHS" = "0" ] || CAUTION_MISS="$CAUTION_MISS [unbounded-brief-carriers=$RAW_BRIEF_PATHS: $(printf '%s\n' "$TRAIL_CODE" | raw_brief_carriers | head -2 | tr '\n' ' ')]"
+if [ ! -f "$GATES_MD" ]; then
+  CAUTION_MISS="$CAUTION_MISS [docs/gates.md-missing]"
+else
+  # Scoped to the section the paragraph was added to, matching this suite's own
+  # `section_of` rule: a whole-file grep would let an unrelated `session-trail`
+  # mention elsewhere in the gate doc satisfy the routing pin.
+  GATES_SECTION="$(awk '$0=="## Source-Write Gate"{f=1;next} /^## /{f=0} f' "$GATES_MD")"
+  [ -n "$GATES_SECTION" ] || CAUTION_MISS="$CAUTION_MISS [gates-doc-source-write-section-not-found]"
+  printf '%s\n' "$GATES_SECTION" | grep -qF 'cross-worktree takeover' || CAUTION_MISS="$CAUTION_MISS [gates-doc-does-not-name-the-legitimate-hit]"
+  printf '%s\n' "$GATES_SECTION" | grep -qF 'session-trail' || CAUTION_MISS="$CAUTION_MISS [gates-doc-does-not-route-to-the-skill]"
+  printf '%s\n' "$GATES_SECTION" | grep -qF 'does **not** cover a nested worktree' || CAUTION_MISS="$CAUTION_MISS [gates-doc-states-equality-not-containment]"
+fi
+# One POSITIVE control per alternation branch added since the original roster, plus
+# one SHARED wrapped-carrier control — not a two-way pair per branch, because the
+# negative direction cannot be made branch-specific: `${flatPath(` satisfies
+# `PRINT_WRAPPED` before the probe name is ever consulted. The CD block below is
+# genuinely per-branch-per-direction and says so; this one is not, and saying it was
+# is the stale-summary failure this file keeps paying for. Both scans pass by finding
+# NOTHING, so a typo in any branch silently stops covering its carriers — which the
+# roster's own comment records as having already happened once.
+# Routed through `raw_print_carriers`, the same scan the production check uses, so
+# these exercise the emitter keying and the `${...}` extraction rather than a
+# hand-rolled copy of the pattern — the shape this file records having been burned by
+# before. Positive arm per branch (the branch must claim its own carrier); the
+# wrapped-carrier arm is hoisted OUT of the loop, because `${flatPath(` satisfies
+# `PRINT_WRAPPED` without ever reaching the probe name, so running it per branch was
+# one assertion repeated four times rather than four assertions.
+for branch_probe in 's.entrypoint' 'p.at' 'r.compaction.at' 't.subject'; do
+  [ "$(printf '%s\n' "  print(\`\${$branch_probe}\`);" | raw_print_carriers | grep -c .)" = "1" ] \
+    || CAUTION_MISS="$CAUTION_MISS [roster-branch-inert:$branch_probe]"
+done
+[ "$(printf '%s\n' "  print(\`\${flatPath(s.entrypoint)}\`);" | raw_print_carriers | grep -c .)" = "0" ] \
+  || CAUTION_MISS="$CAUTION_MISS [roster-flags-a-bounded-carrier]"
+
+if [ -z "$CAUTION_MISS" ]; then
+  check "T29 both briefs carry the bounded containment caution from one accounted-for definition, and docs/gates.md routes the legitimate rule-(C) hit here" PASS
+else
+  check "T29 write-anchor caution carriers:$CAUTION_MISS" FAIL
+fi
+
+# Control for T29's raw-carrier arm, which passes by finding nothing. Both halves
+# are exercised: the pattern must MATCH an unwrapped carrier and must NOT match a
+# wrapped one, or "zero findings" would be indistinguishable from a broken regex.
+RAW_CARRIER_CONTROL='  L.push(`- worktree: ${r.wt}`);'
+RAW_CARRIER_ANTICONTROL='  L.push(`- worktree: ${briefPath(r.wt)}`);'
+RAW_CTL_BAD=""
+[ "$(printf '%s\n' "$RAW_CARRIER_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD does-not-match-an-unwrapped-carrier"
+[ "$(printf '%s\n' "$RAW_CARRIER_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD flags-a-wrapped-carrier"
+# The cd-class pattern gets the same two-way treatment, plus a NESTED pair: the
+# extraction judges each `${...}` alone and `[^{}]*` cannot span an inner one, so a
+# roster name hiding in the OUTER text of a nested interpolation would be invisible.
+# ONE control per alternation branch per direction — four cases. A single pair
+# exercises each direction on a DIFFERENT branch, so dropping one alternative from
+# `CD_CARRIER_RE` leaves both green: the positive still matches via the surviving
+# branch, and the negative still yields zero because nothing matches at all.
+CD_CONTROL_CD='  L.push(`cd -- ${briefPath(r.wt)}`);'
+CD_CONTROL_RESUME='  L.push(`claude --resume ${briefPath(r.sessionId)}`);'
+CD_ANTICONTROL_CD='  L.push(`cd -- ${briefShellArg(r.wt)}`);'
+CD_ANTICONTROL_RESUME='  L.push(`claude --resume ${briefShellArg(r.sessionId)}`);'
+CD_CONTROL_PRINT='  print(`  cd -- ${flatPath(r.cwd)} && claude --resume ${flatPath(r.sessionId)}`);'
+CD_ANTICONTROL_PRINT='  print(`  cd -- ${briefShellArg(r.cwd)} && claude --resume ${briefShellArg(r.sessionId)}`);'
+[ "$(printf '%s\n' "$CD_CONTROL_PRINT" | bad_cd_carriers | grep -c . || true)" -ge 1 ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD print-emitter-runnable-operand-not-seen"
+[ "$(printf '%s\n' "$CD_ANTICONTROL_PRINT" | bad_cd_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD print-emitter-quoted-operand-flagged"
+[ "$(printf '%s\n' "$CD_CONTROL_CD" | bad_cd_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD cd-branch-misses-an-unquoted-operand"
+[ "$(printf '%s\n' "$CD_CONTROL_RESUME" | bad_cd_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD resume-branch-misses-an-unquoted-operand"
+[ "$(printf '%s\n' "$CD_ANTICONTROL_CD" | bad_cd_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD cd-branch-flags-a-quoted-operand"
+[ "$(printf '%s\n' "$CD_ANTICONTROL_RESUME" | bad_cd_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD resume-branch-flags-a-quoted-operand"
+# The nested case is a STATED GAP, pinned as such rather than as coverage. The
+# extraction judges each `${...}` alone and `[^{}]*` cannot span an inner one, so a
+# roster name in the OUTER text of a nested interpolation yields ZERO matches. An
+# earlier control asserted `>= 1` against a line whose FLAT sibling matched, which
+# proved nothing about the nested half. Asserting the real behaviour means a future
+# widening of the extraction fails here and gets re-decided deliberately.
+NESTED_GAP='  L.push(`- x: ${r.wt ? `a ${z}` : ""}`);'
+[ "$(printf '%s\n' "$NESTED_GAP" | raw_brief_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD nested-outer-text-now-seen-update-the-stated-gap"
+# A weaker wrapper must NOT be accepted: `oneLine` clips but never neutralizes a
+# backtick, so an `oneLine`-wrapped carrier inside a code span is still a leak.
+# `r.app.instance` has no incidental cover: unlike `r.title`, its interpolation
+# carries no other roster name, so the scan could not see it unwrapped.
+APP_INSTANCE_CONTROL='  L.push(`- owning desktop instance: ${r.app.instance}`);'
+APP_INSTANCE_ANTICONTROL='  L.push(`- owning desktop instance: ${briefPath(r.app.instance)}`);'
+[ "$(printf '%s\n' "$APP_INSTANCE_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-carrier-not-seen"
+[ "$(printf '%s\n' "$APP_INSTANCE_ANTICONTROL" | raw_brief_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD app-instance-wrapped-carrier-flagged"
+# Two-direction control for the plain-text scan, same convention as the brief one.
+PRINT_CONTROL='  print(`WORKTREE ${r.wt}`);'
+PRINT_ANTICONTROL='  print(`WORKTREE ${flatPath(r.wt)}`);'
+[ "$(printf '%s\n' "$PRINT_CONTROL" | raw_print_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD print-scan-misses-an-unwrapped-carrier"
+[ "$(printf '%s\n' "$PRINT_ANTICONTROL" | raw_print_carriers | grep -c . || true)" = "0" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD print-scan-flags-a-wrapped-carrier"
+WEAK_WRAP_CONTROL='  L.push(`- worktree: ${oneLine(r.wt, 200)}`);'
+[ "$(printf '%s\n' "$WEAK_WRAP_CONTROL" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD weaker-wrapper-accepted-as-compliant"
+NESTED_FLAT='  L.push(`- x: ${r.wt} ${r.live ? `pid ${r.live.pid}` : ""}`);'
+[ "$(printf '%s\n' "$NESTED_FLAT" | raw_brief_carriers | grep -c . || true)" = "1" ] \
+  || RAW_CTL_BAD="$RAW_CTL_BAD flat-carrier-beside-a-nested-one-not-seen"
+if [ -z "$RAW_CTL_BAD" ]; then
+  check "T29b both scans bite and spare a control per alternation branch, and the nested-outer-text gap is pinned as a gap" PASS
+else
+  check "T29b raw-brief-carrier pattern:$RAW_CTL_BAD — T29's negative arm is inert" FAIL
+fi
+
+# T31 — the `--json` cause contract. `writeAnchor` gained a CLOSED `reasonCode` set
+# because the only branchable field before it, `source`, separates just two of the
+# seven ways `covered` can be null — so SKILL.md was sending a machine consumer to
+# free-text prose it would have had to substring-match. The prose is still there and
+# still the thing a person reads; what must stay true is that the CODE set is the one
+# a consumer branches on, and that every value the script can emit is documented.
+#
+# The roster is derived from the SCRIPT, not restated here: a new cause added to
+# `writeAnchor` without a matching line in SKILL.md fails this check without anyone
+# having to remember to edit it. That is the failure this file keeps paying for.
+T31_BAD=""
+# Every quoted literal on a line that mentions `reasonCode`, whatever shape the
+# expression takes — a bare value, a ternary, or a nested one. Keying on a single
+# spelling found three of the seven and made the loop below nearly vacuous.
+T31_CODES="$(grep -F 'reasonCode' "$TRAIL_MJS" | grep -oE "'[a-z][a-z-]+'" | tr -d "'" | sort -u)"
+T31_N="$(printf '%s\n' "$T31_CODES" | grep -c . || true)"
+if [ "${T31_N:-0}" -lt 5 ]; then
+  T31_BAD="$T31_BAD reasonCode-set-not-extractable(found=${T31_N:-0})"
+else
+  for c in $T31_CODES; do
+    grep -qF "\`$c\`" "$SKILL_MD" || T31_BAD="$T31_BAD undocumented-reasonCode($c)"
+  done
+fi
+# The branchable field must be NAMED as such, and the prose field marked as not one.
+grep -qF 'Branch on `writes.reasonCode`' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-name-the-branchable-field"
+grep -qF 'do not match on it' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-warn-against-matching-the-prose"
+# The fail-safe reading, which is the one a consumer gets wrong by writing the
+# natural `=== false`.
+grep -qF 'Treat `null` as denied' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-state-the-fail-safe-reading"
+# `sourceTrusted` exists so the soundness downgrade stops being keyed on a display
+# label at two independent sites; a consumer needs to know which way it reads.
+grep -qF 'writes.sourceTrusted' "$SKILL_MD" || T31_BAD="$T31_BAD skill-does-not-document-sourceTrusted"
+# Control: the extraction must find the codes it is meant to check, or the loop
+# above passes by iterating over nothing.
+case "$T31_CODES" in *weak-channel*) ;; *) T31_BAD="$T31_BAD extraction-missed-a-known-code" ;; esac
+if [ -z "$T31_BAD" ]; then
+  check "T31 every reasonCode the script emits is documented, and SKILL.md names the branchable field and the fail-safe reading" PASS
+else
+  check "T31 json cause contract:$T31_BAD" FAIL
+fi
+
+# T32 — the persisted field list, which is a PRIVACY claim, not a description.
 # A reader decides whether a takeover from a confidential worktree is acceptable
 # by reading it. Two endpoint fields were dropped from the record; a doc that
 # still lists them overstates the exposure, and one that lists too few would
 # understate it -- so both directions are pinned. The claims live in three
 # separate paragraphs (the durable-carrier note and the two --json disclosures),
 # and it is the disclosure paragraphs that a reader reaches first.
-T26_MISS=""
+T32_MISS=""
 # Scoped to the lines that describe the LEDGER. The data-sources table above
 # legitimately documents `cwd` and `title` as fields of the live registry, the
 # transcript and the desktop record -- a file-wide negative would fail on three
 # correct rows and force them to be reworded to satisfy a check about a different
 # file entirely.
 LEDGER_CLAIMS="$(grep -E 'edge|ledger|lineage --json' "$SKILL_MD" | grep -vE '^\| `<config root>/(sessions|projects)|^\| `~/Library')"
-printf '%s' "$LEDGER_CLAIMS" | grep -qE '`cwd`|absolute .?cwd.?' && T26_MISS="$T26_MISS [cwd-still-listed]"
-printf '%s' "$LEDGER_CLAIMS" | grep -qE '`title`|session title' && T26_MISS="$T26_MISS [title-still-listed]"
-printf '%s' "$LEDGER_CLAIMS" | grep -q 'sessionId`, `accountUuid`, `appPid`, `pid`, `worktree` and `branch`' || T26_MISS="$T26_MISS [current-field-list-absent]"
-[ -n "$LEDGER_CLAIMS" ] && check "T26-control the ledger claim lines were actually extracted" PASS || check "T26-control no ledger claim lines were found, so the scan below is vacuous" FAIL
+printf '%s' "$LEDGER_CLAIMS" | grep -qE '`cwd`|absolute .?cwd.?' && T32_MISS="$T32_MISS [cwd-still-listed]"
+printf '%s' "$LEDGER_CLAIMS" | grep -qE '`title`|session title' && T32_MISS="$T32_MISS [title-still-listed]"
+printf '%s' "$LEDGER_CLAIMS" | grep -q 'sessionId`, `accountUuid`, `appPid`, `pid`, `worktree` and `branch`' || T32_MISS="$T32_MISS [current-field-list-absent]"
+[ -n "$LEDGER_CLAIMS" ] && check "T32-control the ledger claim lines were actually extracted" PASS || check "T32-control no ledger claim lines were found, so the scan below is vacuous" FAIL
 # And that each needle can bite: extraction proves awk found lines, never that the
 # patterns discriminate. Planted through the same greps the scan uses.
-T26_CTRL="$(printf 'an edge stores the `cwd` and the session title of both endpoints\n')"
-printf '%s' "$T26_CTRL" | grep -qE '`cwd`|absolute .?cwd.?' && T26_CWD=YES || T26_CWD=NO
-printf '%s' "$T26_CTRL" | grep -qE '`title`|session title' && T26_TITLE=YES || T26_TITLE=NO
-{ [ "$T26_CWD" = YES ] && [ "$T26_TITLE" = YES ]; } && check "T26-control both removed-field needles bite a planted claim" PASS || check "T26-control the removed-field needles matched nothing (cwd=$T26_CWD title=$T26_TITLE), so T26 is vacuous" FAIL
-if [ -z "$T26_MISS" ]; then
-  check "T26 SKILL.md names the fields an edge actually persists, and no longer names the two that were removed" PASS
+T32_CTRL="$(printf 'an edge stores the `cwd` and the session title of both endpoints\n')"
+printf '%s' "$T32_CTRL" | grep -qE '`cwd`|absolute .?cwd.?' && T32_CWD=YES || T32_CWD=NO
+printf '%s' "$T32_CTRL" | grep -qE '`title`|session title' && T32_TITLE=YES || T32_TITLE=NO
+{ [ "$T32_CWD" = YES ] && [ "$T32_TITLE" = YES ]; } && check "T32-control both removed-field needles bite a planted claim" PASS || check "T32-control the removed-field needles matched nothing (cwd=$T32_CWD title=$T32_TITLE), so T32 is vacuous" FAIL
+if [ -z "$T32_MISS" ]; then
+  check "T32 SKILL.md names the fields an edge actually persists, and no longer names the two that were removed" PASS
 else
-  check "T26 SKILL.md persisted-field list:$T26_MISS" FAIL
+  check "T32 SKILL.md persisted-field list:$T32_MISS" FAIL
 fi
 
-# T27 — a store that can be written but never emptied is a different promise from
+# T33 — a store that can be written but never emptied is a different promise from
 # one that can. Both halves are documented, because the removal path is what makes
 # the permanence claim survivable.
-T27_MISS=""
-grep -q 'lineage --forget' "$SKILL_MD" || T27_MISS="$T27_MISS [forget-undocumented]"
-grep -q 'label --remove' "$SKILL_MD" || T27_MISS="$T27_MISS [label-remove-undocumented]"
+T33_MISS=""
+grep -q 'lineage --forget' "$SKILL_MD" || T33_MISS="$T33_MISS [forget-undocumented]"
+grep -q 'label --remove' "$SKILL_MD" || T33_MISS="$T33_MISS [label-remove-undocumented]"
 # The ORDERED vocabulary, not the bare word. `grep -q 'confidence'` was satisfied
 # by the term appearing anywhere in a 239-line file, so the paragraph could lose a
 # tier or the order and stay green -- and the paragraph it nominally guards is
 # exactly the one a review found contradicted by the code.
-grep -qF '`confirmed` > `provisional` > `inferred`' "$SKILL_MD" || T27_MISS="$T27_MISS [tier-order-undocumented]"
+grep -qF '`confirmed` > `provisional` > `inferred`' "$SKILL_MD" || T33_MISS="$T33_MISS [tier-order-undocumented]"
 for tier in confirmed provisional inferred; do
-  grep -qF "\`$tier\`" "$SKILL_MD" || T27_MISS="$T27_MISS [tier-$tier-undocumented]"
+  grep -qF "\`$tier\`" "$SKILL_MD" || T33_MISS="$T33_MISS [tier-$tier-undocumented]"
 done
-if [ -z "$T27_MISS" ]; then
-  check "T27 SKILL.md documents the removal path and the confidence tier" PASS
+if [ -z "$T33_MISS" ]; then
+  check "T33 SKILL.md documents the removal path and the confidence tier" PASS
 else
-  check "T27 SKILL.md new verbs and flags:$T27_MISS" FAIL
+  check "T33 SKILL.md new verbs and flags:$T33_MISS" FAIL
 fi
 
-# T28 — the ledger write is not visible to any Write-tool hook, and the flow that
+# T34 — the ledger write is not visible to any Write-tool hook, and the flow that
 # performs it must say so where the decision is taken, not only in a Safety
 # section the reader may reach afterwards.
-T28_MISS=""
+T34_MISS=""
 FLOW3="$(awk '/^### 3\. Take over/{f=1;next} /^### /{f=0} f' "$SKILL_MD")"
-printf '%s' "$FLOW3" | grep -q 'no Write-tool hook' || T28_MISS="$T28_MISS [flow3-ungated-write]"
-printf '%s' "$FLOW3" | grep -q -- '--no-record' || T28_MISS="$T28_MISS [flow3-opt-out]"
-grep -q 'confidential' "$SKILL_MD" || T28_MISS="$T28_MISS [confidential-worktree]"
-if [ -z "$T28_MISS" ]; then
-  check "T28 the take-over flow states the ungated write and its opt-out where the decision is made" PASS
+printf '%s' "$FLOW3" | grep -q 'no Write-tool hook' || T34_MISS="$T34_MISS [flow3-ungated-write]"
+printf '%s' "$FLOW3" | grep -q -- '--no-record' || T34_MISS="$T34_MISS [flow3-opt-out]"
+grep -q 'confidential' "$SKILL_MD" || T34_MISS="$T34_MISS [confidential-worktree]"
+if [ -z "$T34_MISS" ]; then
+  check "T34 the take-over flow states the ungated write and its opt-out where the decision is made" PASS
 else
-  check "T28 take-over flow disclosure:$T28_MISS" FAIL
+  check "T34 take-over flow disclosure:$T34_MISS" FAIL
 fi
-[ -n "$FLOW3" ] && check "T28-control the take-over flow section was actually extracted" PASS || check "T28-control the take-over flow section was not found, so the scan above is vacuous" FAIL
+[ -n "$FLOW3" ] && check "T34-control the take-over flow section was actually extracted" PASS || check "T34-control the take-over flow section was not found, so the scan above is vacuous" FAIL
 
 echo "----"
 echo "test-session-trail-skill: $PASS PASS / $FAIL FAIL / $SKIP SKIP"

@@ -291,7 +291,7 @@
       <p>Rule (B) of the write gate denies every Bash write outside the root. The edit gate only
       classifies a path as <code>state</code>, <code>zensu</code> or <code>other</code> and does not
       confine it. The topology is half blocked.</p>
-      <p class="src">bash-source-write-parse.js:808 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
+      <p class="src">bash-source-write-parse.js:817 · hooks/pre-edit-tdd-reminder.sh:137-164</p>
     </div>
     <div class="card">
       <span class="tag bad">Silent pass</span>
@@ -421,7 +421,7 @@
           <th scope="row"><strong>Write gate</strong><span class="tag flat inline">stage 2</span></th>
           <td><code>within(projectRoot, p)</code> becomes “inside any declared root”, in rule (B)
           and rule (C).</td>
-          <td class="where mono">bash-source-write-parse.js:808<br>bash-source-write-parse.js:854</td>
+          <td class="where mono">bash-source-write-parse.js:817<br>bash-source-write-parse.js:863</td>
         </tr>
         <tr>
           <th scope="row"><strong>Terminus</strong><span class="tag flat inline">stage 2</span></th>
@@ -573,7 +573,7 @@
       anchor is clean while the changed files sit in the satellites, so a takeover brief would claim
       no uncommitted changes for a session with a dirty tree in two other repositories — the same
       silent green as section 2, relocated into the handover path.</p>
-      <p class="src">trail.mjs:769</p>
+      <p class="src">trail.mjs:1254</p>
     </div>
     <div class="card">
       <span class="tag warn">Discovery</span>
@@ -589,7 +589,7 @@
       <h3>Already correct today</h3>
       <p>The printed continuation line <code>cd ${r.cwd} &amp;&amp; claude --resume …</code> lands in
       the anchor. That is exactly the right place and needs no change.</p>
-      <p class="src">trail.mjs:1067</p>
+      <p class="src">trail.mjs:1610</p>
     </div>
   </div>
 

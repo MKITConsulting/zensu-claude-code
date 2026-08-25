@@ -5,7 +5,7 @@
 # Zensu Plugin for Claude Code
 
 [![License: FSL-1.1-Apache-2.0](https://img.shields.io/badge/License-FSL--1.1--Apache--2.0-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.18.2-green.svg)](CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.19.0-green.svg)](CHANGELOG.md)
 
 **Turn an idea into a reviewed pull request — without babysitting the agent.**
 
@@ -211,6 +211,7 @@ supported.
 | [Operations](docs/operations.md) | Upgrade path, platform support, troubleshooting |
 | [TDD workflow](docs/tdd-manager-workflow.md) | The full per-step reference for the implementation workflow |
 | [Evidence discipline](docs/evidence-discipline.md) | The one rule underneath everything else |
+| [Best solution first](docs/best-solution-first.md) | Why the best long-term option must be in every choice you are offered, and first |
 
 ## Contributing
 

@@ -105,6 +105,28 @@ is covered by (C) when it escapes the session root. Like the CLI gate this is a
 `ZENSU_BASH_WRITE_GATE=off` (or `ZENSU_MCP_GATE=off`) prefix, or disable it via `hooks.bashWriteGate:false`.
 `tests/structure/test-bash-source-write-gate.sh` pins the behavior.
 
+**The expected *legitimate* hit of rule (C) is a cross-worktree takeover.** A session that continues
+work started in a worktree its own anchor does **not contain** (see `/zensu:session-trail`) can edit
+files and run tests there — on the main thread no Edit-matcher hook compares a path against the
+project root, and the all-tool capability gate that does compare exempts the main principal — but its
+first `git add`/`git commit` denies, because the session root is minted at SessionStart and nothing
+re-anchors it. Containment is the test, so this does **not** cover a nested worktree: with
+`git worktree add .claude/worktrees/<name>` every worktree sits inside the main checkout and a session
+anchored there commits in all of them. The blocked shapes are a sibling worktree, another repository,
+and the main checkout addressed from inside a worktree. The route is a session whose own anchor
+contains that worktree — `cd -- <cwd> && claude --resume <id>` as `show` prints it, or the handoff
+brief opened by an instance already running there — not the escape prefix above: the host's
+permission layer commonly refuses an inline `ZENSU_BASH_WRITE_GATE=off` as well.
+
+A plain `--resume` **re-anchors nothing**, and that is why the route works rather than a caveat
+against it: `FRESH_SESSION_SOURCES` in `hooks/lib/claude-session-control-v1.js` is
+`{startup, clear, fork}`, so a `resume` reuses the immutable record the target session was minted
+with and inherits **that session's** anchor whatever directory you `cd` to first. The `cd` operand
+decides the anchor only for a **fresh** source — `--fork-session`, or a session whose record was
+pruned — and there it matters: compare the `WORKTREE` and `CWD` rows and start in `WORKTREE` if they
+differ, or the forked session anchors *inside* the worktree and still cannot commit at its root.
+Flow 3 of `skills/session-trail/SKILL.md` carries the routing rule and is the authority.
+
 ## Secret Scan
 
 A third PreToolUse gate (`pre-write-secret-scan.sh`) inspects **what** is about to be written,

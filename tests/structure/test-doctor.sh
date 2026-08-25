@@ -232,6 +232,16 @@ printf '{"plugins":[{"name":"zensu","version":"1.2.3"}]}\n' > "$SBOX/plug/.claud
 printf '{"hooks":{"PreToolUse":[{"hooks":[{"command":"${CLAUDE_PLUGIN_ROOT}/hooks/a.sh","args":["${CLAUDE_PLUGIN_ROOT}/hooks/ghost.sh"]}]}]}}\n' > "$SBOX/plug/hooks/hooks.json"
 printf '#!/bin/bash\n' > "$SBOX/plug/hooks/a.sh"
 printf '{"hooks":{"reviewJudge":true,"secretScan":false}}\n' > "$SBOX/good-cfg.json"
+# The rule-carrier row reports on plugin DATA, so a green fixture has to carry that
+# data or the row correctly reports it missing and P1e stops being all-green. The
+# real module and the real docs are copied rather than stubbed: the row's whole point
+# is that it uses the same reader the hooks use, and a stub would let this suite go
+# green against a parser nothing ships. The module lives under hooks/lib and ends in
+# .js, so the wiring row — which reads hooks/*.sh — does not see it as unwired.
+mkdir -p "$SBOX/plug/hooks/lib" "$SBOX/plug/docs"
+cp "$PLUGIN_DIR/hooks/lib/rule-block-v1.js" "$SBOX/plug/hooks/lib/rule-block-v1.js"
+cp "$PLUGIN_DIR/docs/best-solution-first.md" "$SBOX/plug/docs/best-solution-first.md"
+cp "$PLUGIN_DIR/docs/evidence-discipline.md" "$SBOX/plug/docs/evidence-discipline.md"
 
 OUT="$(run_report "$SBOX/plug" "$SBOX/good-cfg.json" "$STATE_PROJECT")"; RC=$?
 [ "$RC" -eq 0 ] && check "P1a report exits 0 on the green fixture" PASS || check "P1a report exits 0 (rc=$RC)" FAIL
@@ -2409,6 +2419,71 @@ UNK="$(ZDOC_FORGE_PROVIDER= ZDOC_FORGE_EDITION= ZDOC_FORGE_CLI= ZDOC_FORGE_STATE
   ZENSU_VCS_REMOTE= ZENSU_VCS_TEST=1 ZENSU_VCS_FAKE_AUTH=ready \
   bash "$HELPER" 2>/dev/null)"
 case "$UNK" in *'no GitHub/GitLab remote detected'*) check "P4f wrapper no-remote -> neutral hint (real driver, offline)" PASS ;; *) check "P4f wrapper no-remote neutral (got: $UNK)" FAIL ;; esac
+
+# --- rule-carrier health ---------------------------------------------------
+# The row exists because both carriers fail SILENT: an absent, symlinked, oversized
+# or malformed rule file exits 0 with no output, no suite runs on an installed tree,
+# and the `hooks wiring` row goes green because it only looks at the script. Every
+# case below therefore has to DISCRIMINATE — a row that renders unconditionally would
+# reintroduce the silence it was added to remove.
+case "$OUT" in *'rule carriers: best-solution-first block is intact'*'rule carriers: evidence-discipline block is intact'*)
+  check "P5a both carriers report intact on the green fixture" PASS ;;
+  *) check "P5a intact rows missing from the green fixture" FAIL ;; esac
+
+RC_BROKEN="$SBOX/plug-broken"
+cp -R "$SBOX/plug" "$RC_BROKEN"
+node -e '
+  const fs = require("fs");
+  const p = process.argv[1];
+  const L = fs.readFileSync(p, "utf8").split("\n");
+  const i = L.indexOf("<!-- zensu:best-solution-first -->");
+  if (i < 0) process.exit(1);
+  L.splice(i + 2, 0, "a re-wrapped paragraph");
+  fs.writeFileSync(p, L.join("\n"));
+' "$RC_BROKEN/docs/best-solution-first.md" 2>/dev/null \
+  && RC_BROKEN_OUT="$(run_report "$RC_BROKEN" "$SBOX/good-cfg.json" "$STATE_PROJECT")" \
+  || RC_BROKEN_OUT="fixture-failed"
+case "$RC_BROKEN_OUT" in *'best-solution-first is NOT injecting'*'not carry the block as exactly one line'*)
+  check "P5b a re-wrapped block is reported, naming the file and the shape fault" PASS ;;
+  *) check "P5b re-wrapped block not reported (got: $RC_BROKEN_OUT)" FAIL ;; esac
+case "$RC_BROKEN_OUT" in *'evidence-discipline block is intact'*)
+  check "P5c the sibling carrier is judged independently" PASS ;;
+  *) check "P5c one broken carrier suppressed the other" FAIL ;; esac
+
+RC_GONE="$SBOX/plug-gone"
+cp -R "$SBOX/plug" "$RC_GONE"
+rm -f "$RC_GONE/docs/evidence-discipline.md"
+case "$(run_report "$RC_GONE" "$SBOX/good-cfg.json" "$STATE_PROJECT")" in
+  *'evidence-discipline is NOT injecting'*'absent or unreadable'*)
+  check "P5d an absent rule file is reported, not silently tolerated" PASS ;;
+  *) check "P5d absent rule file not reported" FAIL ;; esac
+
+# The flag state is the one fault an operator caused on purpose, so it must read as a
+# WARNING about a live choice rather than as damage — and the block length proves the
+# row still inspected the data instead of short-circuiting on the flag.
+RC_OFFCFG="$SBOX/cfg-bsf-off.json"
+printf '{"hooks":{"bestSolutionFirst":false}}\n' > "$RC_OFFCFG"
+RC_OFF_OUT="$(run_report "$SBOX/plug" "$RC_OFFCFG" "$STATE_PROJECT")"
+case "$RC_OFF_OUT" in *'best-solution-first block is intact'*'hooks.bestSolutionFirst is false'*)
+  check "P5e a switched-off carrier is distinguished from a broken one" PASS ;;
+  *) check "P5e switched-off carrier row (got: $RC_OFF_OUT)" FAIL ;; esac
+case "$RC_OFF_OUT" in *'evidence-discipline block is intact'*)
+  check "P5f the unswitchable carrier carries no flag clause" PASS ;;
+  *) check "P5f unswitchable carrier row changed under a foreign flag" FAIL ;; esac
+
+# A missing module must SAY the check did not run. Falling silent here would be the
+# same defect one level up: an operator reading a clean report would conclude the
+# carriers are healthy when nothing looked at them.
+RC_NOMOD="$SBOX/plug-nomod"
+cp -R "$SBOX/plug" "$RC_NOMOD"
+rm -f "$RC_NOMOD/hooks/lib/rule-block-v1.js"
+RC_NOMOD_OUT="$(run_report "$RC_NOMOD" "$SBOX/good-cfg.json" "$STATE_PROJECT")"
+case "$RC_NOMOD_OUT" in *'rule-block-v1.js could not be loaded'*'was NOT checked'*)
+  check "P5g a missing reader module reports an unchecked carrier rather than silence" PASS ;;
+  *) check "P5g missing reader module (got: $RC_NOMOD_OUT)" FAIL ;; esac
+case "$RC_NOMOD_OUT" in *'block is intact'*)
+  check "P5h a missing module wrongly still claimed a carrier was intact" FAIL ;;
+  *) check "P5h a missing module claims nothing about carrier health" PASS ;; esac
 
 rm -rf "$SBOX"
 echo "----"
