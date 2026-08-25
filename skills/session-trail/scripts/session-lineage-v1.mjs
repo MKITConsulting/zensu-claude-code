@@ -743,7 +743,14 @@ export function walkChain(sessionId, source, maxHops = 64) {
 // term. Deriving the array back out of a map was the alternative and is rejected:
 // flattening groups edges by source key, and the DISCOVERY ORDER of roots is the
 // order chains render in.
-export function chainRoots(edges) {
+// Returns the roots AND the walk it already performed for each one. The walks were
+// computed here to decide coverage and then thrown away, so every caller re-walked
+// the same edges from the same roots — each chain traversed twice. The wasted pass
+// is the small half. The shape is the half that bites: the root DECISION and the
+// RENDERED chain were independent traversals of the same data, so a change to
+// `walkChain`'s branch preference could make them disagree about which chain a root
+// even has, with nothing in either function able to notice.
+export function chainWalks(edges) {
   const byFrom = indexBySource(edges);
   const targets = new Set(edges.map((e) => e.to.sessionId));
   const roots = [];
@@ -758,19 +765,28 @@ export function chainRoots(edges) {
       roots.push(e.from.sessionId);
     }
   }
+  const walks = new Map();
   const covered = new Set();
-  for (const r of roots) {
-    covered.add(r);
-    for (const l of walkChain(r, byFrom).links) covered.add(l.to.sessionId);
-  }
+  const take = (root) => {
+    covered.add(root);
+    const walk = walkChain(root, byFrom);
+    walks.set(root, walk);
+    for (const l of walk.links) covered.add(l.to.sessionId);
+  };
+  for (const r of roots) take(r);
   for (const e of edges) {
     if (!covered.has(e.from.sessionId)) {
       roots.push(e.from.sessionId);
-      covered.add(e.from.sessionId);
-      for (const l of walkChain(e.from.sessionId, byFrom).links) covered.add(l.to.sessionId);
+      take(e.from.sessionId);
     }
   }
-  return roots;
+  return { roots, walks };
+}
+
+// `chainRoots` keeps the name and the array shape for callers that only need the
+// decision; `chainWalks` is what a caller uses instead of re-walking.
+export function chainRoots(edges) {
+  return chainWalks(edges).roots;
 }
 
 // Two namespaces, tagged, because the keys are different kinds of thing: an

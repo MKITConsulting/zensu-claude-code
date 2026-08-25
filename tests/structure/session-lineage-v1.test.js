@@ -887,6 +887,35 @@ test('the walk takes ONE source of successors, never a pair that can disagree', 
     'root discovery is unchanged');
 });
 
+test('the root decision and the rendered chain are ONE traversal, not two', () => {
+  // `chainRoots` walked every root to decide coverage and threw the walk away, so
+  // both renderers re-walked the same edges from the same roots. The wasted pass is
+  // the small half; the shape is the half that bites, because the DECISION and the
+  // RENDERED chain were independent traversals of the same data and nothing in
+  // either could notice them disagreeing.
+  const edges = [edge('a', 'b', at(1)), edge('b', 'c', at(2)), edge('x', 'y', at(3))];
+  const { roots, walks } = mod.chainWalks(edges);
+  assert.deepEqual(roots, ['a', 'x'], 'root discovery is unchanged');
+  // Every root carries a walk. The renderers destructure `walks.get(root)` directly,
+  // so a root without one is a TypeError mid-render rather than a missing chain.
+  for (const r of roots) assert.ok(walks.get(r), `root ${r} must carry the walk it was decided by`);
+  assert.deepEqual([...walks.keys()].sort(), [...roots].sort(),
+    'the map holds exactly the roots, so a stale entry cannot render as a chain');
+  for (const r of roots) {
+    assert.deepEqual(walks.get(r).links.map((l) => l.to.sessionId),
+      mod.walkChain(r, edges).links.map((l) => l.to.sessionId),
+      'the returned walk is the walk a caller would have repeated');
+  }
+  // A cycle yields no roots in the first pass, so every promoted root must also
+  // carry a walk — that arm builds its roots in a different loop.
+  const cyc = [edge('p', 'q', at(1)), edge('q', 'p', at(2))];
+  const cw = mod.chainWalks(cyc);
+  assert.ok(cw.roots.length > 0, 'a cycle still renders as something rather than as silence');
+  for (const r of cw.roots) assert.ok(cw.walks.get(r), 'a promoted root carries its walk too');
+  // And the array-only reduction keeps working for callers that only need it.
+  assert.deepEqual(mod.chainRoots(edges), roots);
+});
+
 test('the record cap bounds the WORK, not only the count', () => {
   // MAX_EDGE_RECORDS caps how many records are read; it did not cap what is done
   // with them. `chainRoots` tested root membership with a linear `includes` inside

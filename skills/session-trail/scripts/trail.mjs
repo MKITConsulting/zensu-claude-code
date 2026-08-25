@@ -7,9 +7,9 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import {
   ledgerPaths, writeEdge, readEdges, dedupeEdges,
-  makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainRoots,
+  makeEndpoint, buildEdge as buildLedgerEdge, walkChain, chainWalks,
   readLabels as readLabelsFile, updateLabels, emptyLabels, boundLabel,
-  removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc, indexBySource,
+  removeEdgeFiles, otherSchemaLedgers, MAX_EDGE_RECORDS, byRecordedAtAsc,
   isSafeHostSessionId, EDGE_REFUSALS, boundText,
 } from './session-lineage-v1.mjs';
 
@@ -368,10 +368,16 @@ function processTable() {
   try {
     if (process.platform === 'win32') {
       // An absolute root only: a relative %SystemRoot% would make the interpreter
-      // path relative to the process cwd, which is the repository directory.
+      // path relative to the process cwd, which is the repository directory. Absolute
+      // is a SHAPE test and not a trust test, so the resolved interpreter is stat'd
+      // before it is spawned — `D:\\evil` is absolute too, and this process's
+      // environment is set by whatever launched it.
       const sysRoot = process.env.SystemRoot;
       const root = sysRoot && path.isAbsolute(sysRoot) ? sysRoot : 'C:\\Windows';
       const shell = path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+      let shellStat;
+      try { shellStat = fs.lstatSync(shell); } catch { return PROC_TABLE; }
+      if (!shellStat.isFile()) return PROC_TABLE;
       out = execFileSync(shell, ['-NoProfile', '-NonInteractive', '-Command',
         // The CreationDate is rendered explicitly, in UTC and under the invariant
         // culture. `"$($_.CreationDate)"` follows the ambient culture, so changing
@@ -379,7 +385,22 @@ function processTable() {
         // every window label — the POSIX branch pins LC_ALL/TZ for the same reason
         // and the token's own comment leans on that pin.
         "Get-CimInstance Win32_Process | ForEach-Object { \"$($_.ProcessId)`t$($_.ParentProcessId)`t$($_.CreationDate.ToUniversalTime().ToString('yyyyMMddHHmmss',[Globalization.CultureInfo]::InvariantCulture))`t$($_.Name)\" }"],
-      { encoding: 'utf8', timeout: 8000, stdio: ['ignore', 'pipe', 'ignore'] });
+      { encoding: 'utf8',
+        timeout: 8000,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        // The environment is pinned here for the same reason it is pinned on the POSIX
+        // arm below, and one reason more: `-NoProfile` does not cover module resolution,
+        // so `Get-CimInstance` is auto-loaded from whatever `PSModulePath` names. An
+        // inherited entry pointing at a writable directory holding a `CimCmdlets` module
+        // is loaded by the real powershell.exe. Degrading here costs only the
+        // window-grouping route, which every caller already treats as optional.
+        env: {
+          SystemRoot: root,
+          PSModulePath: path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+          PATHEXT: '.COM;.EXE;.BAT;.CMD',
+          TEMP: process.env.TEMP || path.join(root, 'Temp'),
+          TMP: process.env.TMP || path.join(root, 'Temp'),
+        } });
     } else {
       // Absolute path and a pinned environment, as hooks/lib/session-control-core-v1.js
       // does for the same probe: the argument vector is a fixed literal, so the only
@@ -2608,13 +2629,14 @@ function cmdLineage(opts) {
   }
 
   if (opts.json) {
-    // One index for the whole render's WALKS: without it the walk re-indexed the
-    // entire edge set once per root, which was the quadratic term. chainRoots builds
-    // its own — it owns root discovery, which needs the edge order, and taking both
-    // an array and an index let the two disagree about which ledger was walked.
-    const idx = indexBySource(scoped);
-    const chains = chainRoots(scoped).map((root) => {
-      const w = walkChain(root, idx);
+    // The walk `chainWalks` already performed to decide the roots, reused rather
+    // than repeated. It owns the index too — it needs the edge ORDER for root
+    // discovery, and taking both an array and a prebuilt index let the two disagree
+    // about which ledger was walked. Re-walking here was not only the wasted pass:
+    // it made the root decision and the rendered chain two independent traversals.
+    const { roots: chainRootIds, walks: chainWalkById } = chainWalks(scoped);
+    const chains = chainRootIds.map((root) => {
+      const w = chainWalkById.get(root);
       // Both bounds travel with the chain. The --where rendering carries them and
       // this one dropped them, so the reset flow (adopt A>B, then adopt B>A) and a
       // chain past the hop bound both rendered here as complete.
@@ -2651,9 +2673,9 @@ function cmdLineage(opts) {
     print(`Past ones can be reconstructed as GUESSES: node ${scriptPath()} lineage --backfill`);
     return;
   }
-  const idx = indexBySource(scoped);
-  for (const root of chainRoots(scoped)) {
-    const { links, forks, truncated: walkTruncated, revisited } = walkChain(root, idx);
+  const { roots: textRootIds, walks: textWalkById } = chainWalks(scoped);
+  for (const root of textRootIds) {
+    const { links, forks, truncated: walkTruncated, revisited } = textWalkById.get(root);
     if (!links.length) continue;
     const wt = links[0].to.worktree || links[0].from.worktree;
     print(`CHAIN  ${links[0].repo && links[0].repo.name ? links[0].repo.name : '(unknown repo)'}${wt ? `   ${path.basename(wt)}` : ''}`);

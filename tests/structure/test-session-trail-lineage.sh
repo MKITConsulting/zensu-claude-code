@@ -2001,6 +2001,60 @@ case "$(jq_field "$OUT" appPid)" in null) check "L63c a Claude ancestor beyond t
 OUT="$(probe 'not json')"
 case "$(jq_field "$OUT" error)" in ABSENT|null) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" FAIL ;; *) check "L63d-control malformed probe input is refused, so the seam cannot fall back to the live table" PASS ;; esac
 
+# -- L64 -- the process probe spawns nothing it has not pinned -------------
+# Neither arm of `processTable` is reachable from a test on the other platform, so
+# the discipline is scanned rather than executed. It is scanned as a RULE over the
+# function body, not as two named sites: a third arm added later is covered without
+# editing this check. The POSIX arm pins PATH/LC_ALL/LANG/TZ; the Windows arm must
+# pin its own environment for one reason more -- `-NoProfile` does not cover module
+# resolution, so `Get-CimInstance` is auto-loaded from whatever `PSModulePath` names,
+# and an inherited entry naming a writable directory that holds a `CimCmdlets` module
+# is loaded by the real powershell.exe.
+PROBE_FN="$(awk '/^function processTable\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$TRAIL_MJS")"
+PROBE_SPAWNS="$(printf '%s\n' "$PROBE_FN" | grep -c 'execFileSync(' || true)"
+PROBE_PINNED="$(printf '%s\n' "$PROBE_FN" | grep -c 'env: {' || true)"
+if [ "$PROBE_SPAWNS" -ge 2 ] && [ "$PROBE_SPAWNS" = "$PROBE_PINNED" ]; then
+  check "L64 every spawn in the process probe carries a pinned environment ($PROBE_PINNED/$PROBE_SPAWNS)" PASS
+else
+  check "L64 every spawn in the process probe carries a pinned environment (spawns=$PROBE_SPAWNS pinned=$PROBE_PINNED)" FAIL
+fi
+# Control: the same expression measured against a copy whose Windows pin is gone. A
+# scan that still reports agreement there is inert and would stay green through the
+# exact defect it names. The Windows pin is the one `env: {` alone on its line.
+L64_CTRL="$(mktemp -t zensu-l64-XXXXXX)"
+sed 's/^        env: {$/        unpinned: {/' "$TRAIL_MJS" > "$L64_CTRL"
+CTRL_FN="$(awk '/^function processTable\(\) \{/{f=1} f{print} f&&/^\}$/{exit}' "$L64_CTRL")"
+CTRL_SPAWNS="$(printf '%s\n' "$CTRL_FN" | grep -c 'execFileSync(' || true)"
+CTRL_PINNED="$(printf '%s\n' "$CTRL_FN" | grep -c 'env: {' || true)"
+rm -f "$L64_CTRL"
+if [ "$CTRL_SPAWNS" -ge 2 ] && [ "$CTRL_SPAWNS" != "$CTRL_PINNED" ]; then
+  check "L64-control an unpinned spawn is detected, so L64 is not inert (spawns=$CTRL_SPAWNS pinned=$CTRL_PINNED)" PASS
+else
+  check "L64-control an unpinned spawn is detected (spawns=$CTRL_SPAWNS pinned=$CTRL_PINNED)" FAIL
+fi
+# `%SystemRoot%` being absolute is a SHAPE test, never a trust test: `D:\evil` is
+# absolute too, and this process's environment is set by whatever launched it. The
+# resolved interpreter is therefore stat'd BEFORE it is spawned, and a non-file
+# degrades to the empty table rather than executing. Order is the whole property --
+# a stat after the spawn would read the same in a diff and prove nothing.
+PROBE_STAT_AT="$(printf '%s\n' "$PROBE_FN" | grep -n 'fs\.lstatSync(shell)' | head -1 | cut -d: -f1)"
+PROBE_SPAWN_AT="$(printf '%s\n' "$PROBE_FN" | grep -n 'execFileSync(shell' | head -1 | cut -d: -f1)"
+if [ -n "$PROBE_STAT_AT" ] && [ -n "$PROBE_SPAWN_AT" ] && [ "$PROBE_STAT_AT" -lt "$PROBE_SPAWN_AT" ] \
+  && printf '%s\n' "$PROBE_FN" | grep -q 'shellStat\.isFile()'; then
+  check "L64a the Windows interpreter is stat'd before it is spawned, and a non-file degrades" PASS
+else
+  check "L64a the Windows interpreter is stat'd before it is spawned (stat@$PROBE_STAT_AT spawn@$PROBE_SPAWN_AT)" FAIL
+fi
+# And the module path is DERIVED from the same resolved root rather than inherited --
+# pinning an environment that copies the caller's PSModulePath through would satisfy
+# L64 while leaving the load channel open.
+if printf '%s\n' "$PROBE_FN" | grep -q "PSModulePath: path.join(root," \
+  && ! printf '%s\n' "$PROBE_FN" | grep -q 'PSModulePath: process\.env'; then
+  check "L64b PSModulePath is derived from the resolved root, never inherited" PASS
+else
+  check "L64b PSModulePath is derived from the resolved root, never inherited" FAIL
+fi
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added
