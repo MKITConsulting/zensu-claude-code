@@ -141,21 +141,51 @@ test('the hop bound is reported when it bites', () => {
 });
 
 test('an oversized or non-regular ledger entry is refused, not read', () => {
+  // BOTH halves of the name, because `readBoundedFile` guards them separately and
+  // the oversized fixture alone left `!st.isFile()` untested — a one-line deletion
+  // this case would have stayed green through. That guard is what stops a directory
+  // or a FIFO named `<n>.json`, planted in a machine-wide session-writable
+  // directory, from being opened at all.
   const root = tmp();
   const p = mod.ledgerPaths(root);
   mod.writeEdge(p.edges, edge('a', 'b', '1'), 1, root);
   fs.writeFileSync(path.join(p.edges, '2-oversize.json'), 'x'.repeat(300 * 1024));
+  fs.mkdirSync(path.join(p.edges, '3-directory.json'));
+  let planted = 2;
+  if (process.platform !== 'win32') {
+    try {
+      execFileSync('mkfifo', [path.join(p.edges, '4-fifo.json')], { stdio: 'ignore' });
+      planted = 3;
+    } catch { /* no mkfifo on this host */ }
+  }
   const out = mod.readEdges(p.edges);
   assert.equal(out.edges.length, 1, 'the good record still reads');
-  assert.equal(out.refused.length, 1, 'the oversized one is refused, not parsed');
+  assert.equal(out.refused.length, planted, 'every non-record entry is refused, not parsed');
+  // The non-regular ones carry the DISTINCT reason, not the generic one: the remedy
+  // for "something else is sitting on this name" is not the remedy for a bad read,
+  // and collapsing them would let the guard be replaced by the size check alone.
+  const byName = new Map(out.refused.map((r) => [r.file, r.reason]));
+  assert.equal(byName.get('3-directory.json'), mod.EDGE_REFUSALS.NOT_A_FILE);
+  if (planted === 3) assert.equal(byName.get('4-fifo.json'), mod.EDGE_REFUSALS.NOT_A_FILE);
   fs.rmSync(root, { recursive: true, force: true });
 });
 
 test('labels land by rename, so a concurrent reader never sees a half-written file', () => {
+  // The rename is OBSERVED, not inferred. Reading the value back and finding no
+  // stray `.tmp` both hold for the plain truncating write this replaced: the value
+  // reads back either way, and no temp survives because none was ever created. What
+  // discriminates is the INODE — a rename publishes a new one over the name, while a
+  // truncating write keeps the old one — so the file is written twice and the two
+  // identities are compared.
   const root = tmp();
   const p = mod.ledgerPaths(root);
   mod.writeLabels(p.labels, { ...mod.emptyLabels(), accounts: { a: 'One' } }, root);
   assert.equal(mod.readLabels(p.labels).labels.accounts.a, 'One');
+  const first = fs.statSync(p.labels);
+  mod.writeLabels(p.labels, { ...mod.emptyLabels(), accounts: { a: 'Two' } }, root);
+  const second = fs.statSync(p.labels);
+  assert.equal(mod.readLabels(p.labels).labels.accounts.a, 'Two', 'the second write is the one that reads back');
+  assert.notEqual(second.ino, first.ino, 'the second write published a NEW inode, i.e. it landed by rename');
   const strays = fs.readdirSync(path.dirname(p.labels)).filter((n) => n.endsWith('.tmp'));
   assert.deepEqual(strays, [], 'no temp file is left behind');
   fs.rmSync(root, { recursive: true, force: true });
