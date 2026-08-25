@@ -114,12 +114,33 @@ function isNonEmptyString(v) {
   return typeof v === 'string' && v.trim() !== '';
 }
 
+// Exactly the spelling `new Date().toISOString()` produces, re-checked through
+// `Date.parse` so a rolled-over calendar date is refused rather than silently
+// meaning a different day. The SHAPE matters as much as the validity, and that is
+// the half `Number.isFinite(Date.parse(...))` alone could not carry: only a
+// fixed-width UTC instant makes code-unit order chronological, which is the property
+// every comparison in this file rests on. Measured before this landed, with the
+// finiteness check as the only guard: `"July 4, 2026"` parsed, sorted ABOVE every
+// real stamp, and was actually EARLIER; `"9999"` — the very value the ordering
+// comment above names as the motivating defect — was still accepted and outranked
+// every record for as long as the append-only store kept it; and
+// `"2026-02-31T00:00:00.000Z"` was accepted as a February date meaning 3 March.
+const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+export function isIsoInstant(value) {
+  if (typeof value !== 'string' || !ISO_INSTANT.test(value)) return false;
+  const t = Date.parse(value);
+  return Number.isFinite(t) && new Date(t).toISOString() === value;
+}
+
 // ONE comparison rule for `recordedAt`, used at every site that orders records.
 // There were two: a raw `>` picked the dedupe survivor while `localeCompare` sorted
 // the list beside it. `localeCompare` also resolves the host locale, so the order of
 // a machine-wide ledger depended on the reader's ICU build — and the values are
 // fixed-width UTC ISO stamps, whose code-unit order already IS their chronological
 // order. A collator is both the wrong tool and roughly two orders of magnitude slower.
+// That premise is ENFORCED rather than assumed: `isIsoInstant` is what refuses any
+// other spelling at classification, and without it this comparison silently ranked
+// `"July 4, 2026"` above every real stamp.
 function recordedAtKey(e) {
   return String((e && e.recordedAt) || '');
 }
@@ -581,7 +602,7 @@ export function classifyEdge(raw) {
   // An unparseable stamp sorts by code unit, so "9999" outranked every ISO value
   // for as long as the append-only store kept it.
   const recordedAt = boundText(raw.recordedAt);
-  if (recordedAt === null || !Number.isFinite(Date.parse(recordedAt))) {
+  if (!isIsoInstant(recordedAt)) {
     return { ok: false, reason: EDGE_REFUSALS.MALFORMED };
   }
   return {

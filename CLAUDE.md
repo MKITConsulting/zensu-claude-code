@@ -2081,6 +2081,31 @@ for handovers the machine still held as measurements, one directory away. It doe
 READ those records, and closing that still means dropping the derived segment or
 teaching `readEdges` to enumerate siblings.
 
+**`recordedAt` is judged by SHAPE, not by parseability, and the two are not close.**
+It is the sole ordering key at four sites — the dedupe survivor, the branch `walkChain`
+prefers, the `--where` answer and the rendered order — and every one of them ranks it
+as a plain string, which is only chronological for the fixed-width UTC spelling
+`toISOString()` produces. The guard was `Number.isFinite(Date.parse(...))`, which
+judges VALIDITY. Measured against it: `"July 4, 2026"` parsed, sorted ABOVE every real
+stamp and was actually earlier; `"9999"` — the value the ordering comment itself names
+as the motivating defect — was still accepted; `"2026-02-31T00:00:00.000Z"` was
+accepted as a February date meaning 3 March. The store is append-only and machine-wide,
+so one such record wins every ordering decision permanently. `isIsoInstant` is the one
+predicate, and the ordering comment beside `recordedAtKey` now points at it rather than
+asserting the shape it depends on. All three writers already produce that spelling
+(`nowStamp()` and the backfill's `new Date(mtime).toISOString()`), so the tightening
+refuses nothing this tree writes — a fourth writer that does not is refused at READ
+time, which loses the record rather than mis-ordering the ledger. Ported from the
+parallel working copy, whose `isIsoInstant` this is.
+
+**A tightened field validator can make a neighbouring test vacuous, and one nearly
+did.** The unit fixtures passed bare ordinals (`'1'`, `'2'`) as `recordedAt`, which is
+what made them readable; once the shape is enforced, the NUL-session-id case would have
+been refused for its STAMP and would have kept asserting `MALFORMED` while never
+reaching the guard it is named for. Its fixture carries a real instant now. When a
+validator moves, re-read every case that asserts the same refusal reason for a
+different cause.
+
 **Deferrals this ledger carries, each accepted rather than overlooked:**
 
 - **The confidence tier is not authenticated.** `confirmed` is a field in a JSON file

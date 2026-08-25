@@ -28,6 +28,11 @@ const edge = (from, to, at) => ({
   recordedAt: at,
   recordedBy: 'adopt',
 });
+// Fixed-width UTC, because that is the only shape `isIsoInstant` accepts and the only
+// one whose code-unit order is chronological. The bare ordinals these fixtures used to
+// pass were readable but not records: they parsed, so nothing refused them, and they
+// sorted by code unit against real stamps.
+const at = (n) => `2026-01-0${n}T00:00:00.000Z`;
 
 test('the directory segment is derived from the schema constant, not hand-written', () => {
   const p = mod.ledgerPaths('/cfg');
@@ -102,12 +107,12 @@ test('a symlinked ledger path is refused rather than followed', { skip: process.
 });
 
 test('the chain walk terminates on a cycle and reports the fork it did not take', () => {
-  const cyc = [edge('a', 'b', '1'), edge('b', 'a', '2')];
+  const cyc = [edge('a', 'b', at(1)), edge('b', 'a', at(2))];
   const w = mod.walkChain('a', cyc);
   assert.ok(w.links.length < 64, 'the seen set, not the hop bound, is what stops it');
   assert.equal(mod.chainRoots(cyc).length >= 1, true, 'a cycle still yields a root, never silence beside a non-zero count');
 
-  const fork = [edge('a', 'b', '1'), edge('a', 'c', '2')];
+  const fork = [edge('a', 'b', at(1)), edge('a', 'c', at(2))];
   const f = mod.walkChain('a', fork);
   assert.equal(f.links[0].to.sessionId, 'c', 'the LATEST branch is the one "where is this now" wants');
   assert.equal(f.forks.length, 1);
@@ -115,10 +120,10 @@ test('the chain walk terminates on a cycle and reports the fork it did not take'
 });
 
 test('counts collapse per session pair, keeping the newest record', () => {
-  const dup = [edge('a', 'b', '1'), edge('a', 'b', '2'), edge('a', 'c', '3')];
+  const dup = [edge('a', 'b', at(1)), edge('a', 'b', at(2)), edge('a', 'c', at(3))];
   const out = mod.dedupeEdges(dup);
   assert.equal(out.length, 2);
-  assert.equal(out.find((e) => e.to.sessionId === 'b').recordedAt, '2');
+  assert.equal(out.find((e) => e.to.sessionId === 'b').recordedAt, at(2));
 });
 
 test('labels keep two namespaces and are bounded', () => {
@@ -135,7 +140,7 @@ test('labels keep two namespaces and are bounded', () => {
 });
 
 test('the hop bound is reported when it bites', () => {
-  const chain = [edge('a', 'b', '1'), edge('b', 'c', '2'), edge('c', 'd', '3')];
+  const chain = [edge('a', 'b', at(1)), edge('b', 'c', at(2)), edge('c', 'd', at(3))];
   assert.equal(mod.walkChain('a', chain, 2).truncated, true);
   assert.equal(mod.walkChain('a', chain).truncated, false);
 });
@@ -148,7 +153,7 @@ test('an oversized or non-regular ledger entry is refused, not read', () => {
   // directory, from being opened at all.
   const root = tmp();
   const p = mod.ledgerPaths(root);
-  mod.writeEdge(p.edges, edge('a', 'b', '1'), 1, root);
+  mod.writeEdge(p.edges, edge('a', 'b', at(1)), 1, root);
   fs.writeFileSync(path.join(p.edges, '2-oversize.json'), 'x'.repeat(300 * 1024));
   fs.mkdirSync(path.join(p.edges, '3-directory.json'));
   let planted = 2;
@@ -221,8 +226,8 @@ test('record file names carry no character Windows forbids', () => {
 test('an edge record is created exclusively and never overwrites a sibling', () => {
   const root = tmp();
   const p = mod.ledgerPaths(root);
-  const a = mod.writeEdge(p.edges, edge('a', 'b', '1'), 1, root);
-  const b = mod.writeEdge(p.edges, edge('a', 'c', '2'), 1, root);
+  const a = mod.writeEdge(p.edges, edge('a', 'b', at(1)), 1, root);
+  const b = mod.writeEdge(p.edges, edge('a', 'c', at(2)), 1, root);
   assert.notEqual(a, b);
   assert.equal(mod.readEdges(p.edges).edges.length, 2);
   if (process.platform !== 'win32') {
@@ -256,17 +261,43 @@ test('the ceiling bounds the lstat walk, so an ancestor symlink ABOVE it is not 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('recordedAt is judged by SHAPE, because the ordering is a string compare', () => {
+  // Every comparison in the module ranks `recordedAt` by code unit, which is only
+  // chronological for the fixed-width UTC spelling `toISOString()` produces. The guard
+  // was `Number.isFinite(Date.parse(...))`, which judges VALIDITY and not shape.
+  // Measured against that guard before this landed, all three were accepted:
+  //   "July 4, 2026"             parses, sorts ABOVE every real stamp, is EARLIER
+  //   "9999"                     the very value the ordering comment names as the
+  //                              motivating defect -- still accepted, still outranks
+  //                              every record for as long as the store keeps it
+  //   "2026-02-31T00:00:00.000Z" accepted as a February date meaning 3 March
+  // The store is append-only and machine-wide, so one such record wins the dedupe
+  // survivor, the branch the walk prefers and the `--where` answer, permanently.
+  const withStamp = (stamp) => ({ ...edge('a', 'b', at(1)), recordedAt: stamp });
+  for (const bad of ['July 4, 2026', '9999', '2026-02-31T00:00:00.000Z', '2026-08-25T12:00:00Z', '']) {
+    const r = mod.classifyEdge(withStamp(bad));
+    assert.equal(r.ok, false, `${JSON.stringify(bad)} must be refused`);
+    assert.equal(r.reason, mod.EDGE_REFUSALS.MALFORMED);
+  }
+  // The predicate itself, so the refusals above cannot be satisfied by a guard that
+  // rejects everything, and so the accepted spelling is stated once.
+  assert.equal(mod.isIsoInstant('2026-08-25T12:00:00.000Z'), true);
+  assert.equal(mod.isIsoInstant(new Date().toISOString()), true,
+    'the shape every writer in this tree produces must be the shape the reader accepts');
+  assert.equal(mod.classifyEdge(edge('a', 'b', at(1))).ok, true);
+});
+
 test('a NUL-only session id is refused, because trim() and boundText disagree about empty', () => {
   // trim() strips WhiteSpace and LineTerminator only, so "\u0000" survives the raw
   // guard; boundText replaces the whole Cc/Cf class and yields null. Judging the raw
   // half alone shipped an edge whose sessionId was null into every renderer.
-  const raw = JSON.parse('{"schemaVersion":1,"from":{"sessionId":"\\u0000"},"to":{"sessionId":"b"},"repo":{"name":"r","root":"/r"},"reason":"manual","inferred":false,"recordedAt":"1","recordedBy":"adopt"}');
+  const raw = JSON.parse('{"schemaVersion":1,"from":{"sessionId":"\\u0000"},"to":{"sessionId":"b"},"repo":{"name":"r","root":"/r"},"reason":"manual","inferred":false,"recordedAt":"2026-01-01T00:00:00.000Z","recordedBy":"adopt"}');
   const r = mod.classifyEdge(raw);
   assert.equal(r.ok, false);
   assert.equal(r.reason, mod.EDGE_REFUSALS.MALFORMED);
   // The positive control: an ordinary id still classifies, so the guard did not
   // simply start refusing everything.
-  assert.equal(mod.classifyEdge(edge('a', 'b', '1')).ok, true);
+  assert.equal(mod.classifyEdge(edge('a', 'b', at(1))).ok, true);
 });
 
 // --- S1: the confidence tier, and that it DECIDES rather than merely displays ---
@@ -388,8 +419,6 @@ test('a concurrent label update is merged, not silently lost', () => {
 });
 
 // --- S7: the walk says WHY it stopped, and does not call a cut chain complete ---
-
-const at = (n) => `2026-01-0${n}T00:00:00.000Z`;
 
 test('a chain that returns to an earlier session is reported as revisited', () => {
   // The documented reset flow produces exactly this: adopt records A>B, then after
