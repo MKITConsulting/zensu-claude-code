@@ -26,6 +26,8 @@ CORE="$ROOT/hooks/lib/session-control-core-v1.js"
 BINDER="$ROOT/hooks/lib/claude-hook-session-v1.js"
 AUTOPILOT_STATE="$ROOT/hooks/lib/zensu-autopilot-state.sh"
 PLAN_PAYLOAD="$ROOT/hooks/lib/plan-payload-v1.js"
+BEST_SOLUTION_HOOK="$ROOT/hooks/user-prompt-best-solution-first.sh"
+EVIDENCE_DISCIPLINE_HOOK="$ROOT/hooks/session-start-evidence-discipline.sh"
 # The superseded-lease sweep is the SECOND requireable module carrying the hardened
 # open, and it belongs in this inventory for the reason stated beside the plan-payload
 # entry: every count pin here is per-file and therefore blind to a NEW file that
@@ -47,8 +49,29 @@ CORE_SNAPSHOT_BLOCK="$(awk '
 ' "$CORE")"
 AUTOPILOT_STATE_CONCURRENCY_BLOCK="$(sed -n '/^CONCURRENT_OK=true$/,/^BEFORE_WRONG_BUDGET=/p' "$AUTOPILOT_STATE_TEST")"
 AUTOPILOT_STATE_WORKSPACE_BLOCK="$(sed -n '/^CONC_PROJECT=/,/^CONC_REFUSAL_OK=true$/p' "$AUTOPILOT_STATE_TEST")"
+# A suite file that ends up containing a spliced copy of its own prologue re-executes this
+# line, resetting the counters — the summary then reports only the checks after the last reset
+# and looks entirely plausible. That is not hypothetical: it happened during this change (a
+# JS `$`-pattern replacement spliced ~485 lines of a suite into itself, and the file still
+# reported its normal total). An expected-total pin would not have caught it; a re-entry guard
+# does, and costs nothing per added check. It detects a splice that INCLUDES these lines, which
+# is the whole-prologue shape; a splice starting strictly below them is not covered.
+if [ -n "${ZENSU_SUITE_PROLOGUE_ENTERED:-}" ]; then
+  printf 'prologue re-entered — this suite file is corrupt\n' >&2
+  exit 1
+fi
+ZENSU_SUITE_PROLOGUE_ENTERED=1
 PASS=0; FAIL=0
+# Arity is checked because a label that word-splits is not a cosmetic defect: check() reads
+# position 2 unconditionally, so an over-supplied call whose second word happens to read PASS
+# scores a FAILING check as a success. That happened in this change — an unquoted expansion in
+# a FAIL label — and was fixed at its call site. This makes the class unrepeatable instead of
+# re-swept by hand.
 check() {
+  if [ "$#" -ne 2 ]; then
+    printf '  FAIL  check() called with %s arguments, expected 2 — a label word-split: %s\n' "$#" "${1:-}"
+    FAIL=$((FAIL + 1)); return 0
+  fi
   if [ "$2" = PASS ]; then printf '  PASS  %s\n' "$1"; PASS=$((PASS + 1));
   else printf '  FAIL  %s\n' "$1"; FAIL=$((FAIL + 1)); fi
 }
@@ -457,6 +480,85 @@ if [ "$(grep -cF 'process.platform !== "win32" && Number.isInteger(fs.constants.
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" PASS
 else
   check "plan-payload reader omits unsupported O_NOFOLLOW on Windows" FAIL
+fi
+
+# The rule-block reader is the third file carrying a hardened open, and it is now
+# ONE file rather than two carriers to be compared. It is enrolled here for the
+# reason stated above: every count pin in this suite is per-file, so a NEW file
+# carrying a secure open is invisible until it is named.
+#
+# What used to sit here was a ~115-line cross-carrier equality apparatus —
+# extract both embedded readers, strip indentation, compare bodies, compare
+# MAX_FILE, compare MAX_BLOCK, count declarations on each side. Every line of it
+# existed because the reader was hand-copied into two hooks, and all it could ever
+# prove was that the two copies agreed with each other, never that either was
+# right. The copies are gone; the apparatus goes with them. What replaces it is
+# the property that made it necessary: exactly one owner, and no carrier holding a
+# reader of its own.
+#
+# The open deliberately omits the plan-payload reference's `nlink !== 1` clause —
+# the path is fixed under the executing plugin root rather than payload-named, so
+# a hard link is not a way to reach a file the symlink check refuses, and refusing
+# one would silently disable the rule on any install that materializes files by
+# hard link. That omission is pinned as a negative so it cannot be reintroduced.
+RULE_BLOCK_LIB="$ROOT/hooks/lib/rule-block-v1.js"
+RB_CARRIER_READERS=""
+for carrier in "$BEST_SOLUTION_HOOK" "$EVIDENCE_DISCIPLINE_HOOK"; do
+  # A carrier that reopens the rule file itself, or redeclares either bound, has
+  # forked the reader again. Both are the shape this consolidation removed.
+  grep -qF 'fs.openSync(rulePath' "$carrier" && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):open"
+  grep -qE '(MAX_BLOCK|MAX_FILE)[[:space:]]*=[[:space:]]*[0-9]' "$carrier" \
+    && RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):bound"
+  grep -qF 'readRuleBlock' "$carrier" || RB_CARRIER_READERS="$RB_CARRIER_READERS $(basename "$carrier"):not-wired"
+done
+if [ -f "$RULE_BLOCK_LIB" ] \
+  && [ "$(grep -cF "process.platform !== 'win32' && Number.isInteger(fs.constants.O_NOFOLLOW)" "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'Number.isInteger(fs.constants.O_NONBLOCK) ? fs.constants.O_NONBLOCK : 0' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cF 'fs.openSync(rulePath, fs.constants.O_RDONLY | platformNoFollow() | platformNonBlock())' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && grep -qF 'post.dev !== pre.dev || post.ino !== pre.ino' "$RULE_BLOCK_LIB" \
+  && [ "$(grep -cE '^const MAX_BLOCK = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && [ "$(grep -cE '^const MAX_FILE = [0-9]+;$' "$RULE_BLOCK_LIB")" -eq 1 ] \
+  && ! grep -qF '| (fs.constants.O_NOFOLLOW || 0)' "$RULE_BLOCK_LIB" \
+  && ! grep -qF 'fs.constants.O_NOFOLLOW || 0' "$RULE_BLOCK_LIB" \
+  && ! grep -v '^[[:space:]]*//' "$RULE_BLOCK_LIB" | grep -qF 'nlink' \
+  && [ -z "$RB_CARRIER_READERS" ]; then
+  check "the rule-block reader is one owner with a Windows-safe flag, and neither carrier forked it" PASS
+else
+  check "rule-block reader ownership broken:${RB_CARRIER_READERS:- (owner check failed)}" FAIL
+fi
+
+# The review ceilings are the second thing the two carriers must keep in step. What must match is
+# the intended HEADROOM, and it is compared as a DECLARED CONSTANT in each suite — deliberately
+# NOT as ceiling-minus-live-block. That earlier shape reduced algebraically to a constraint on the
+# two prose documents' length difference that no file states: a one-character edit to either rule
+# text, well inside its own ceiling, turned this suite red while the owning suite correctly
+# accepted it. Measured, not assumed — 88 against 89 on a single added character. A ceiling is a
+# budget the block may grow into; pinning it to the block would make that budget unreachable.
+# The fail-safe now has one source, so it is read from the owner rather than from
+# each carrier — which is what the two BSF_/EVD_ variables used to do, and what the
+# consolidation above removed.
+RB_MAX_BLOCK_N="$(sed -n 's/^const MAX_BLOCK = \([0-9]*\);$/\1/p' "$RULE_BLOCK_LIB" | head -1)"
+suite_const() { sed -n "s/^$2=\([0-9]*\).*/\1/p" "$1" | head -1; }
+suite_const_n() { grep -c "^$2=" "$1"; }
+HDR_BSF_SUITE="$ROOT/tests/structure/test-best-solution-first.sh"
+HDR_EVD_SUITE="$ROOT/tests/structure/test-evidence-discipline.sh"
+HDR_BSF_H="$(suite_const "$HDR_BSF_SUITE" REVIEW_HEADROOM)"
+HDR_EVD_H="$(suite_const "$HDR_EVD_SUITE" REVIEW_HEADROOM)"
+HDR_BSF_C="$(suite_const "$HDR_BSF_SUITE" REVIEW_CEILING)"
+HDR_EVD_C="$(suite_const "$HDR_EVD_SUITE" REVIEW_CEILING)"
+HDR_N="$(( $(suite_const_n "$HDR_BSF_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_HEADROOM) + $(suite_const_n "$HDR_BSF_SUITE" REVIEW_CEILING) + $(suite_const_n "$HDR_EVD_SUITE" REVIEW_CEILING) ))"
+if [ -z "$HDR_BSF_H" ] || [ -z "$HDR_EVD_H" ] || [ -z "$HDR_BSF_C" ] || [ -z "$HDR_EVD_C" ]; then
+  check "a review-ceiling constant could not be resolved (headroom bsf=${HDR_BSF_H:-none} evd=${HDR_EVD_H:-none}; ceiling bsf=${HDR_BSF_C:-none} evd=${HDR_EVD_C:-none})" FAIL
+elif [ "$HDR_N" -ne 4 ]; then
+  check "the review-ceiling constants are not declared exactly once each (4 expected, $HDR_N found) — head -1 would read a decoy while the suite uses the last assignment" FAIL
+elif [ "$HDR_BSF_H" != "$HDR_EVD_H" ]; then
+  check "the declared review headroom differs (bsf=$HDR_BSF_H evd=$HDR_EVD_H) — the criterion is absolute headroom, identical on both carriers, not a ratio" FAIL
+elif [ -z "$RB_MAX_BLOCK_N" ]; then
+  check "the shared reader's MAX_BLOCK is not a bare integer (${RB_MAX_BLOCK_N:-none}) — the ceiling comparison cannot run, and an unguarded -ge would fall through to PASS" FAIL
+elif [ "$HDR_BSF_C" -ge "$RB_MAX_BLOCK_N" ] || [ "$HDR_EVD_C" -ge "$RB_MAX_BLOCK_N" ]; then
+  check "a review ceiling is not below the shared MAX_BLOCK fail-safe (bsf $HDR_BSF_C, evd $HDR_EVD_C, fail-safe $RB_MAX_BLOCK_N) — the tripwire would be inert" FAIL
+else
+  check "both suites declare the same review headroom ($HDR_BSF_H chars) below the shared MAX_BLOCK fail-safe" PASS
 fi
 
 # The doctor renderer carries THREE opens, and they differ on purpose — which is the

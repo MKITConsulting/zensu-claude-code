@@ -211,6 +211,13 @@
       "profileTimeoutMs": 1800000,
       "suites": [
         {
+          "id": "best-solution-first",
+          "runner": "bash",
+          "path": "tests/structure/test-best-solution-first.sh",
+          "args": [],
+          "timeoutMs": 600000
+        },
+        {
           "id": "deferred-claim-adoption",
           "runner": "bash",
           "path": "tests/structure/test-deferred-review-claim.sh",
