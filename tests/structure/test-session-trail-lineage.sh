@@ -1829,6 +1829,22 @@ fi
 rm -rf "$ALT_REAL" "$ALT_LINK"
 reset_ledger
 
+# -- L60 -- the migration signal must reach BOTH --where carriers -----------
+# L50 drives the TEXT carrier only, so the machine carrier could answer
+# `found: false` on a store whose schema moved with nothing to tell that apart from
+# "never handed over" — while the text path printed the whole "That is a MIGRATION,
+# not an empty history" paragraph. The listing JSON already carried the field; its
+# --where sibling did not. Same one-owner-both-carriers rule, one code path over.
+reset_ledger
+mkdir -p "$CFG/zensu/session-lineage/v0/edges" "$CFG/zensu/session-lineage/v1/edges"
+printf '{"schemaVersion":1,"from":{"sessionId":"%s"},"to":{"sessionId":"%s"},"recordedAt":"2026-01-01T00:00:00.000Z"}' "$SID_A" "$SID_B" \
+  > "$CFG/zensu/session-lineage/v0/edges/1000000001-aaaaaaaa.json"
+OUT="$(trail "$STORE" "$SID_C" "$LIVE_PID" lineage --where "$SID_A" --all --json)"
+case "$(jq_field "$OUT" found)" in false) check "L60-control the --where JSON carrier reports not-found on a migrated store" PASS ;; *) check "L60-control the --where JSON carrier reports not-found (found=$(jq_field "$OUT" found))" FAIL ;; esac
+case "$(jq_field "$OUT" otherSchemaLedgers)" in ABSENT|PARSE_ERROR) check "L60 the --where machine carrier distinguishes a migration from an absent handover (got $(jq_field "$OUT" otherSchemaLedgers))" FAIL ;; '[]') check "L60 the --where machine carrier carries the migration signal (empty on a store that HAS one)" FAIL ;; *) check "L60 the --where machine carrier distinguishes a migration from an absent handover" PASS ;; esac
+rm -rf "$CFG/zensu/session-lineage/v0"
+reset_ledger
+
 # -- L28/L29 -- the suite's own isolation, scanned rather than assumed ------
 # `--config-dir` already outranks CLAUDE_CONFIG_DIR in resolveRoots, so the unset
 # is belt, not the mechanism -- and belt that nothing pins rots. A check added

@@ -2004,7 +2004,12 @@ a symlinked `~/.claude` is the ordinary shape under a dotfile manager, so the wr
 kept landing records while every read answered `ESYMLINK` and the only retraction channel
 refused forever. **All four readers of this store take the ceiling** — `readEdges`,
 `removeEdgeFiles`, `readLabels` and `otherSchemaLedgers` — because each one's WRITER
-already refuses that tree, and a reader that did not made read and write disagree.
+already refuses that tree, and a reader that did not made read and write disagree. **Every
+INTERNAL caller must thread it too**, which this sentence once implied and did not check:
+`updateLabels` held the ceiling, passed it to `writeLabels` and omitted it from its own
+`readLabels`, so the two halves of one read-modify-write disagreed about the same tree.
+`readLabels`' guard is CONDITIONAL — with no ceiling it makes no ancestor check at all,
+unlike `readEdges`, which still makes the leaf check — so an omission there is silent.
 `session-lineage-v1.test.js` pins the write side, the read side, the delete side and the
 discriminating case that a component BELOW a symlinked ceiling is still refused;
 `test-session-trail-lineage.sh` L59a/L59b drive the same root end to end.

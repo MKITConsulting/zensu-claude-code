@@ -522,6 +522,27 @@ test('readLabels refuses a symlinked ancestor, as its own writer already does', 
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('updateLabels threads its ceiling into its own read, not only into the write', { skip: process.platform === 'win32' }, () => {
+  // It held `stopAt`, passed it to writeLabels and omitted it from readLabels. Since
+  // readLabels' guard is conditional, that omission performed NO ancestor check — so
+  // the read half of one read-modify-write resolved through a symlinked `v1/` that
+  // its own write half refuses. The planted document must never reach `mutate`.
+  const root = tmp();
+  const p2 = mod.ledgerPaths(root);
+  fs.mkdirSync(path.dirname(path.dirname(p2.labels)), { recursive: true });
+  const elsewhere = path.join(root, 'elsewhere');
+  fs.mkdirSync(elsewhere);
+  fs.writeFileSync(path.join(elsewhere, 'labels.json'), JSON.stringify({ schemaVersion: 1, accounts: { planted: 'x' }, windows: {} }));
+  fs.symlinkSync(elsewhere, path.dirname(p2.labels));
+  let sawPlanted = false;
+  assert.throws(() => mod.updateLabels(p2.labels, (cur) => {
+    if (Object.prototype.hasOwnProperty.call(cur.accounts, 'planted')) sawPlanted = true;
+    return cur;
+  }, root), 'the write half already refused this tree; the read half must not reach it either');
+  assert.equal(sawPlanted, false, 'nothing from outside the ceiling reaches the mutator');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('otherSchemaLedgers refuses a symlinked base rather than enumerating through it', { skip: process.platform === 'win32' }, () => {
   // It readdirSync's <root>/zensu/session-lineage with no guard, and readdirSync
   // follows a symlinked final component. Read-only, but it renders a path and a

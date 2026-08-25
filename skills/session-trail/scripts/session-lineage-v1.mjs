@@ -835,7 +835,12 @@ export function writeLabels(labelsFile, labels, stopAt = null) {
 export function updateLabels(labelsFile, mutate, stopAt = null, attempts = 5) {
   for (let i = 0; i < attempts; i += 1) {
     const before = labelsFingerprint(labelsFile);
-    const current = readLabels(labelsFile);
+    // The ceiling this function already holds. readLabels' guard is CONDITIONAL, so
+    // omitting it here performed no ancestor check at all — and readBoundedFile's
+    // O_NOFOLLOW covers the final component only, which is the exact gap the walk
+    // exists to close. The write half below was already bounded, so the two halves
+    // of one read-modify-write disagreed about the same tree.
+    const current = readLabels(labelsFile, stopAt);
     if (current.unreadable) throw new Error(`refusing to overwrite an unreadable labels file: ${labelsFile}`);
     if (current.schemaMismatch) throw new Error(`refusing to overwrite a labels file from another schema: ${labelsFile}`);
     const next = mutate(current.labels);

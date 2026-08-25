@@ -1462,7 +1462,7 @@ function cmdList(opts) {
     // an authorization here would show one session's approval against every busy
     // row in scope. A survey reports what was measured.
     const owner = r.live ? `pid ${r.live.pid} ${r.takeover.measuredLevel}` : '';
-    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${r.worktree}`);
+    print(`${statusOf(r).padEnd(4)}  ${r.sessionId.slice(0, 8)}  ${ago(r.mtime).padStart(8)} ago  ${oneLine(r.worktree, 120)}`);
     print(`      ${gitPart}   ${pr}   ${owner}${r.app ? `   ${appTag(r.app)}` : ''}`);
     print(`      "${oneLine(r.title || r.lastPrompt || '(untitled)', 96)}"`);
     if (!r.cwdExists) print(`      !! worktree directory missing: ${oneLine(r.cwd, 200)}`);
@@ -1522,12 +1522,12 @@ function cmdInstances(opts) {
   if (led.schemaNewer) print('!  the ledger holds records from a NEWER schema than this build reads — the lineage below is incomplete.');
   print('');
   for (const [root, list] of [...groups.entries()].sort()) {
-    print(`${root}  (${list.length})`);
+    print(`${oneLine(root, 200)}  (${list.length})`);
     for (const s of list) {
       const wt = typeof s.cwd !== 'string' || s.cwd === '' ? '(cwd not recorded)'
         : s.cwd === root ? '(main checkout)' : path.relative(root, s.cwd);
       const app = ccdIndex().get(s.sessionId) || null;
-      print(`  ${String(s.pid).padStart(6)}  ${String(s.sessionId).slice(0, 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${wt}`);
+      print(`  ${String(s.pid).padStart(6)}  ${String(s.sessionId).slice(0, 8)}  ${(oneLine(s.entrypoint, 40) || '?').padEnd(15)}  ${ago(s.startedAt).padStart(8)} old  ${oneLine(wt, 200)}`);
       print(`          "${oneLine(s.name, 92)}"${app ? `   ${appTag(app)}` : ''}`);
       for (const l of lineageOf(s.sessionId)) print(`          ${l}`);
     }
@@ -1605,8 +1605,8 @@ function cmdShow(opts) {
     print(`OWNER    account ${r.app.accountUuid || '(not resolvable)'}${r.app.accountUuid ? ` (${accountLabel(r.app.accountUuid)})` : ''}${r.app.archived ? '   **ARCHIVED** (process stopped, worktree may have been cleaned up)' : ''}`);
     print(`CONFIG   model ${oneLine(r.app.model, 40) || '?'}   effort ${oneLine(r.app.effort, 40) || '?'}   permissions ${oneLine(r.app.permissionMode, 40) || '?'}`);
   }
-  print(`WORKTREE ${r.wt}${r.cwdExists ? '' : '   !! MISSING'}`);
-  if (r.cwd !== r.wt) print(`CWD      ${r.cwd}   (session started in a subdirectory)`);
+  print(`WORKTREE ${oneLine(r.wt, 200)}${r.cwdExists ? '' : '   !! MISSING'}`);
+  if (r.cwd !== r.wt) print(`CWD      ${oneLine(r.cwd, 200)}   (session started in a subdirectory)`);
   print(`BRANCH   ${oneLine((g && g.branch) || r.branch, 120) || '?'}`);
   print(`LAST     ${ago(r.mtime)} ago   transcript ${r.transcript}`);
   if (r.pr) print(`PR       #${r.pr.number}  ${r.pr.url}`);
@@ -1737,7 +1737,7 @@ function cmdTakeover(opts) {
   const lineage = recordTakeoverEdge(opts, r);
   if (opts.json) return print(JSON.stringify({ ...r, git: g, diff: d, target, takeover: tv, lineage, skipped: SKIPPED }, null, 2));
   const L = [];
-  L.push(`# Takeover: ${r.title || path.basename(r.wt)}`);
+  L.push(`# Takeover: ${oneLine(r.title || path.basename(r.wt), 120) || '(untitled)'}`);
   L.push('');
   L.push('> Reconstructed from the source session\'s transcript on disk. That session contributed nothing to this document and did not need to be running.');
   L.push('');
@@ -1749,7 +1749,7 @@ function cmdTakeover(opts) {
     L.push(`- an authorization was recorded at ${new Date().toISOString()} by passing \`--force\` to the command that generated this file. It is bounded to that moment and to whoever gave it — this brief cannot carry it forward, so re-measure and take the go/no-go again before editing.`);
   }
   L.push(`- worktree: \`${oneLine(r.wt, 200)}\`${r.cwdExists ? '' : '  **MISSING**'}`);
-  L.push(`- branch: \`${(g && g.branch) || r.branch || '?'}\``);
+  L.push(`- branch: \`${oneLine((g && g.branch) || r.branch, 120) || '?'}\``);
   L.push(`- last activity: ${new Date(r.mtime).toISOString()} (${ago(r.mtime)} ago)`);
   if (r.pr) L.push(`- pull request: [#${r.pr.number}](${r.pr.url})`);
   if (r.stopCause && r.stopCause.final) {
@@ -2551,7 +2551,7 @@ function cmdLineage(opts) {
       process.exit(2);
     }
     if (!match.length) {
-      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
+      if (opts.json) return print(JSON.stringify({ query: opts.where, found: false, otherSchemaLedgers: (led.edges.length || led.directoryError) ? [] : otherSchemaLedgers(CONFIG_ROOT), ledgerTruncated: led.truncated, ledgerError: led.directoryError, schemaNewer: led.schemaNewer, skipped: SKIPPED }, null, 2));
       // The same migration check the listing path takes. Without it this sibling
       // branch kept offering the reconstruction on a store the schema had moved out
       // from under — the exact offer the listing path stopped making, surviving one
@@ -2628,7 +2628,10 @@ function cmdLineage(opts) {
   // individually while its neighbours parse, so a non-empty listing was rendered
   // with no hint that this build cannot read part of the store — the generic
   // skipped NOTE names no cause and no remedy.
-  if (led.schemaNewer) print('! the ledger also holds records written by a NEWER schema than this build can read — update the plugin.\n');
+  // Gated on a NON-empty result: below the split, renderLedgerFault owns the same
+  // sentence for the empty arm, and printing both made that one branch say it twice
+  // — the "one owner" rule failing in the direction of noise rather than silence.
+  if (scoped.length && led.schemaNewer) print('! the ledger also holds records written by a NEWER schema than this build can read — update the plugin.\n');
   if (!scoped.length) {
     if (renderLedgerFault(led)) return;
     // A schema move leaves every existing record under the PREVIOUS `v<n>/`
