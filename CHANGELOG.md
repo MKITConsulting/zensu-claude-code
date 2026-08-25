@@ -144,6 +144,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rule**: no persisted shape moved. It errs in the safe direction — an over-cautious bump
   costs a lineage break, it never ships a compatibility claim the code cannot honour.
 
+## [0.19.0] - 2026-08-25
+
+### Added
+
+- **session-trail**: Disclose the write anchor and route a commit-producing takeover (#259)
+- **hooks**: Remind every process to offer the best long-term solution first (#238)
+- **pilot**: Standard Acceptance Criteria table in every plugin-opened PR body (#265)
+- **doctor**: Report reviewer-spawn permission exposure before a chain wedges (#253)
+- **autopilot**: Scope durable runs per owner session and per workspace (#256)
+- **pr-team-review**: Broaden the security persona trigger to content signals (#260)
+- **skills**: Add the gauntlet-loop adversarial refinement skill (#249)
+- **gates**: Refuse completion when the plan carries no Requirements table (#254)
+
+### Changed
+
+- **multi-repo**: Answer open question 7 against the shipped occupancy predicate (#264)
+- **multi-repo**: Specify anchor-plus-code-roots chains (#258)
+
+### Fixed
+
+- **session-control**: Stop judging adoption on the caller's project dir (#252)
+- **pr-fix-findings**: Close the mid-run stop channel in standalone runs (#263)
+- **chain-enforcer**: Pin the host-refused reviewer spawn against a real capture (#261)
+- **bypass-ledger**: Close the disclosure gaps and own the read ladder once (#257)
+
 ## [0.18.2] - 2026-08-19
 
 ### Added
