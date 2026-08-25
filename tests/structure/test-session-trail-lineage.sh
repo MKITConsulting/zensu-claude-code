@@ -1872,7 +1872,7 @@ L61_PAT='\br\.(wt|cwd|worktree|branch|title)\b'
 # rel/path.* take it as a prefix base, dirExists/worktreeRoot/gitState/gitDiffText/
 # findPlanDocs/nearestRepoRoot take it as a filesystem path, Set/toLowerCase build
 # a match structure, and ===/!==/typeof/.length compare it.
-L61_OK='(oneLine|boundText|showId|rel\(|path\.|dirExists|worktreeRoot|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|new Set\(|===|!==|\?\?|typeof|\.length|\.toLowerCase|const r |r\.cwd !== r\.wt)'
+L61_OK='(oneLine|showId|rel\(|path\.|gitState|gitDiffText|findPlanDocs|nearestRepoRoot|new Set\(|===|!==|\.toLowerCase|const r |r\.cwd !== r\.wt)'
 # The `cd ${...}` exemption removes the exempted TOKEN, never the line, so a second
 # raw interpolation on one of those four lines stays visible.
 L61_RAW="$(sed -e 's/cd \${[^}]*}//g' "$L61_SRC" | grep -nE "$L61_PAT" | grep -vE "$L61_OK" || true)"
@@ -1918,6 +1918,25 @@ fi
 ETF_BODY="$(awk '/^function extractTouchedFiles\(/{f=1} f{print} f&&/^\}/{exit}' "$L61_SRC")"
 [ -n "$ETF_BODY" ] && check "L61a-control the extractTouchedFiles body was actually extracted" PASS || check "L61a-control the extractTouchedFiles body was not found, so the scan below is vacuous" FAIL
 case "$ETF_BODY" in *"boundText("*) check "L61a the transcript file_path values are bounded where they are extracted" PASS ;; *) check "L61a the transcript file_path values are bounded at the source" FAIL ;; esac
+
+# Every L61_OK alternative must still EXEMPT something, mirroring L61b-control for
+# the cd class. The suite already states the argument for that control -- if the
+# exempted class stops matching, the scan reports a clean tree for a reason
+# unrelated to the property it names -- and the same argument applies here and was
+# not applied. An entry that goes inert is pure blind spot: it can only ever
+# suppress a line, never surface one, so it must report itself rather than widen
+# the filter silently. Fails, never skips, on zero.
+L61_STALE=""
+for alt in 'oneLine' 'showId' 'rel\(' 'path\.' 'gitState' 'gitDiffText' 'findPlanDocs' 'nearestRepoRoot' 'new Set\(' '===' '!==' '\.toLowerCase' 'const r ' 'r\.cwd !== r\.wt'; do
+  if [ "$(grep -cE "$L61_PAT" "$L61_SRC" 2>/dev/null || echo 0)" = "0" ]; then break; fi
+  HITS="$(grep -E "$L61_PAT" "$L61_SRC" | grep -cE "$alt" || true)"
+  [ "$HITS" = "0" ] && L61_STALE="$L61_STALE $alt"
+done
+if [ -z "$L61_STALE" ]; then
+  check "L61d every wrapper-allowlist entry still exempts at least one line, so none is a silent blind spot" PASS
+else
+  check "L61d wrapper-allowlist entries exempt nothing and are pure blind spot:$L61_STALE — drop them or narrow L61_OK" FAIL
+fi
 
 # -- L62 -- the display bound on the session id, pinned by BEHAVIOUR -----------
 # The showId() bound was pinned by nothing: its only occurrence anywhere in tests/

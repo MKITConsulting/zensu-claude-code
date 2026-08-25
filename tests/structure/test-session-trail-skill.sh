@@ -756,6 +756,14 @@ SID_ONELINE="$(grep -cE 'oneLine\([^)]*[sS]essionId' "$TRAIL_MJS" || true)"
 SID_SLICE="$(grep -oE '[sS]essionId\)?\.slice\(0, 8\)' "$TRAIL_MJS" | wc -l | tr -d ' ')"
 SID_INSTANCES=0
 grep -qF '${showId(s.sessionId).slice(0, 8)}' "$TRAIL_MJS" && SID_INSTANCES=1
+SID_SHOWID="$(grep -oF 'showId(' "$TRAIL_MJS" | wc -l | tr -d ' ')"
+# One more than the call sites: the definition itself matches. The floor is the
+# CURRENT count, so deleting any single call fails rather than being absorbed.
+if [ "$SID_SHOWID" -ge 9 ]; then
+  check "T22c every session-id render keeps its display bound ($SID_SHOWID showId sites incl. the definition)" PASS
+else
+  check "T22c a session-id display bound was removed (showId sites=$SID_SHOWID, must be >= 9)" FAIL
+fi
 if [ "$SID_ONELINE" = "0" ] && [ "$SID_SLICE" -ge 15 ] && [ "$SID_INSTANCES" = "1" ]; then
   check "T22b every short session id is rendered by a bare slice, and the instances row by name ($SID_SLICE sites)" PASS
 else
