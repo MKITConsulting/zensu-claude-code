@@ -256,6 +256,38 @@ zensu_session_incompatible_runtime_model() {
   ) 2>/dev/null
 }
 
+# The THIRD fact of the incompatible-lineage state, asked separately so the
+# version pair above stays two TAB-separated fields — five callers read the
+# executing half as `${V##*$'\t'}`, so a third field there would silently
+# redirect all five. Returns 0 and PRINTS the recorded project root only when the
+# lineage is incompatible AND that root is gone; 1 for every other state,
+# including a plain incompatible lineage whose root still exists.
+#
+# Model-side only, deliberately: /zensu:doctor is the sole consumer, because it
+# is the only caller that renders both facts in one row. Every gate needs the
+# remedy, which the version pair already carries.
+zensu_session_incompatible_orphaned_root_model() {
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "${CLAUDE_CODE_SESSION_ID:-}" ] || return 1
+  [ -n "${CLAUDE_PLUGIN_DATA:-}" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "$CLAUDE_PLUGIN_DATA")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+      CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+      node ./claude-hook-session-v1.js model-orphaned-incompatible-root
+  ) 2>/dev/null
+}
+
 # Returns 0 ONLY when this PreToolUse payload is one of the two recognized Bash
 # calls: the read-only /zensu:doctor diagnostic, or /zensu:adopt-session. This is
 # NOT a relaxable-state predicate and does not belong beside the two above: those
@@ -460,4 +492,5 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
+  zensu_session_incompatible_orphaned_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

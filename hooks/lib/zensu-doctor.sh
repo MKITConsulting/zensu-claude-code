@@ -151,11 +151,13 @@ fi
 # cannot bind points the user here, so reproduce that exact binding attempt.
 # It needs the two inputs the model-side path needs; without them this stays
 # `unknown` and the renderer prints nothing rather than a guess.
-# Injectable alongside ZDOC_BINDING, and empty for every verdict except
-# orphaned-project-root, which is the only one that has a path to report.
+# Injectable alongside ZDOC_BINDING, and empty for every verdict except the two
+# that have a path to report: orphaned-project-root and
+# orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
-# Same contract for the version pair: empty for every verdict except
-# incompatible-runtime, the only one that has two versions to name.
+# Same contract for the version pair: empty for every verdict except the two that
+# have versions to name — incompatible-runtime and
+# orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
 ZDOC_BINDING_VERSIONS=""
@@ -216,6 +218,25 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         ZDOC_BINDING=incompatible-runtime
         ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_VERSIONS%%$'\t'*}"
         ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_VERSIONS##*$'\t'}"
+        # THIRD narrow question, asked ONLY once the lineage break is
+        # established, and never on its own. The orphan question above already
+        # answered no for this session — it re-applies servesRecordedRuntime,
+        # which an incompatible lineage fails — so a record that is BOTH orphaned
+        # and lineage-incompatible would otherwise be reported as a plain lineage
+        # break and the user would never learn their project root is gone. That
+        # matters after the repair as much as before it: adoption succeeds in this
+        # state and leaves the session orphaned, where Edit and Write still deny.
+        # No shape guard here, matching the orphan branch above: the printed path
+        # comes from readOrphanedProjectRootContext, which rejects control
+        # characters and a non-absolute value before it returns.
+        ZDOC_BINDING_PROJECT_ROOT="$(
+          # shellcheck disable=SC1090
+          source "$DIR/zensu-session.sh" >/dev/null 2>&1 \
+            && zensu_session_incompatible_orphaned_root_model
+        )" || ZDOC_BINDING_PROJECT_ROOT=""
+        if [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
+          ZDOC_BINDING=orphaned-project-root+incompatible-runtime
+        fi
       else
         ZDOC_BINDING=unbound
       fi

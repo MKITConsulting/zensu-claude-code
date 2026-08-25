@@ -200,7 +200,7 @@ const shouldRepairInPlace = (verdict, confirmed) =>
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. Its recorded project root may be gone, that installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. Adoption cannot tell these apart, and in this state /zensu:doctor cannot name the directory either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. A recorded project root that is merely GONE is no longer one of these — that state is adoptable — so the disagreement here is one of the others. Adoption cannot tell them apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -278,8 +278,19 @@ function main() {
     process.stdout.write("Zensu session adoption — ADOPTABLE\n\n");
     process.stdout.write("  record minted by : " + safe(verdict.recorded) + "\n");
     process.stdout.write("  executing        : " + safe(verdict.executing) + "\n");
-    process.stdout.write("  project          : " + safe(verdict.context.project_root) + "\n\n");
+    process.stdout.write("  project          : " + safe(verdict.context.project_root)
+      + (verdict.orphanedProjectRoot ? "  (GONE)" : "") + "\n\n");
     process.stdout.write("The record is intact and this installation can take it over in place.\n");
+    // Stated BEFORE the user confirms, not only after: an adoption that leaves
+    // Edit and Write denied is not the rescue an unqualified "adoptable" implies,
+    // and finding that out afterwards reads as a failed repair.
+    if (verdict.orphanedProjectRoot) {
+      process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree took\n");
+      process.stdout.write("the workflow state with it. Adoption still applies and is worth doing: it clears\n");
+      process.stdout.write("the lineage break, so Bash and the read-only diagnostics work again. It does NOT\n");
+      process.stdout.write("restore writes — Edit and Write stay denied while the anchor is missing. To write\n");
+      process.stdout.write("again, re-create exactly that directory or start a fresh Claude Code session.\n");
+    }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
   }
@@ -300,12 +311,25 @@ function main() {
   // The anchor the session is bound to from here on. It is carried from the
   // record, never from where this command was invoked, and naming it is the one
   // place the user learns which project that actually is.
-  process.stdout.write("  project          : " + safe(adopted.projectRoot) + "\n");
+  process.stdout.write("  project          : " + safe(adopted.projectRoot)
+    + (adopted.orphanedProjectRoot ? "  (GONE)" : "") + "\n");
   process.stdout.write("  superseded record: " + safe(adopted.supersededFile) + "\n");
   process.stdout.write("  provenance       : " + safe(adopted.provenance) + "\n");
   process.stdout.write("  leases set aside : " + leases.discarded + "\n");
   process.stdout.write("  leases stuck     : " + leases.failed.length + "\n\n");
-  process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  if (adopted.orphanedProjectRoot) {
+    // Never the unqualified "bound again" line for this shape. The lineage break
+    // is gone, but the anchor is still a directory that does not exist, which is
+    // the ordinary orphaned-project-root state: reads and diagnostics run, writes
+    // do not. Saying otherwise would send the user straight into a deny.
+    process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
+    process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
+    process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work, while Edit and\n");
+    process.stdout.write("Write stay denied. Re-create exactly that directory, or start a fresh Claude Code\n");
+    process.stdout.write("session, to write again.\n");
+  } else {
+    process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
+  }
   if (adopted.provenance === "no-workflow-document") {
     process.stdout.write("\nNOTE: this session had no workflow document, so there was nothing to record the\n");
     process.stdout.write("takeover in. That is a normal state, not a fault.\n");

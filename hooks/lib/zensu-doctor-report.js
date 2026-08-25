@@ -1468,6 +1468,23 @@ function bindingLine() {
           ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
           : '')
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+    // BOTH disagreements at once, and the row exists because each of the two
+    // above answers "not me" for it: the orphan probe re-applies
+    // servesRecordedRuntime, which an incompatible lineage fails, and the lineage
+    // probe used to read strictly and throw on the absent root. The combination
+    // therefore fell through to `unbound`, whose line is false here in the same
+    // way it is false one row up. It is adoptable — the workflow document died
+    // with the worktree, so there is no persisted shape left to disagree about —
+    // but adoption leaves the session ORPHANED rather than fully bound, so the
+    // row states that limit instead of promising a full rescue.
+    case 'orphaned-project-root+incompatible-runtime':
+      return line(BAD, 'binding: this session\'s Session Control record is readable, but BOTH the recorded project root'
+        + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + env.ZDOC_BINDING_PROJECT_ROOT + ')' : '')
+        + ' is gone and the running Zensu installation declares an incompatible lineage'
+        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+          ? ' (record minted by ' + env.ZDOC_BINDING_RECORDED_VERSION + ', executing ' + env.ZDOC_BINDING_EXECUTING_VERSION + ')'
+          : '')
+        + ' — a deleted or recycled worktree took the workflow state with it while a plugin update landed, so stateful Zensu tools fail closed; run /zensu:adopt-session, then /zensu:adopt-session --confirm to let the running installation take the record over. That unblocks Bash and this diagnostic, but Edit and Write stay denied afterwards because the recorded project root is still gone — re-create exactly that directory, or start a fresh Claude Code session, to write again');
     case 'unavailable':
       return line(BAD, 'binding: hooks/lib/zensu-session.sh is missing or symlinked — Session Control cannot bind');
     default:
