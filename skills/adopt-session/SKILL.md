@@ -40,9 +40,19 @@ binding: this session's Session Control record is intact, but the running Zensu
 installation declares an incompatible lineage (record minted by X, executing Y)
 ```
 
-If the doctor row instead says the session has **no** record, or that the
-recorded **project root** no longer exists, this skill does not apply — those are
-different states with different remedies, and it will refuse.
+It also names the combined state, and that one IS in scope:
+
+```
+binding: this session's Session Control record is readable, but BOTH the recorded
+project root (…) is gone and the running Zensu installation declares an
+incompatible lineage (record minted by X, executing Y)
+```
+
+If the doctor row instead says the session has **no** record, or names ONLY a
+recorded **project root** that no longer exists with no lineage break beside it,
+this skill does not apply — those are different states with different remedies,
+and it will refuse (the second as `already-served`, because that runtime already
+serves the record).
 
 ## Do NOT Use For
 
@@ -52,8 +62,11 @@ different states with different remedies, and it will refuse.
   session binds normally and is still the right caller; run the `--confirm` form and
   it re-runs the sweep as an idempotent repair. For any other failure, that is
   `/zensu:doctor`.
-- Clearing a review chain or granting a budget. The chain state survives adoption
-  untouched and is enforced again on the very next Stop.
+- Clearing a review chain or granting a budget. While the recorded project root
+  still exists the chain state survives adoption untouched and is enforced again
+  on the very next Stop. When that root is GONE there is no chain state left to
+  clear — the workflow document lived under it and died with it, so no later Stop
+  enforces that chain either; adoption changes neither fact.
 - Any bind failure other than the declared-incompatible lineage — the refusal
   table in Phase 1 below names each one and its own remedy.
 

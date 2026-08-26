@@ -337,6 +337,19 @@ classifier will refuse a spawn, not only when the whole table is green.
   persisted shape really did change and a fresh session is the only way forward.
   Adoption re-binds the session from the next tool call onward — do NOT tell the
   user to restart after a successful one.
+- **❌ binding: this session's Session Control record is readable, but BOTH the
+  recorded project root … is gone and the running Zensu installation declares an
+  incompatible lineage** → both of the two rows above at once, and it is its own
+  row because each of those two answers "not me" for it. It prints the dead path
+  AND both declared versions. Never report it as a missing record. It IS
+  repairable in place and `/zensu:adopt-session` applies — that is the difference
+  from the plain orphaned row, which the running installation already serves and
+  which adoption refuses as `already-served`. State the limit whenever you offer
+  the repair: adoption clears the LINEAGE break, so Bash and this diagnostic work
+  again, while `Edit` and `Write` stay denied until that exact directory is
+  re-created, because the anchor is still missing. The workflow document lived
+  under that directory and is gone with it, so no chain state survives and no
+  later `Stop` enforces it — do not tell the user their review chain resumes.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares

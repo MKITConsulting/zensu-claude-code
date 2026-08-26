@@ -499,18 +499,25 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-// `options.allowMissingProjectRoot` waives the SAME single check its namesake
-// waives in validateContext — whether the project root still exists — and
-// re-applies that function's shape half in its place, so the only difference
-// between the two paths is the existence test. It exists for ONE caller,
-// adoptContext, re-minting a record whose recorded worktree was deleted: there
-// is nothing to realpath, and refusing would leave that session wedged with no
-// write channel to repair itself. The emitted record shape is unchanged — the
-// value carried through is the one the previous record already held, which was
-// canonicalized when that record was minted.
-function buildContext(options) {
+// The existence waiver is a SECOND PARAMETER, never a key of `options`, and that
+// is load-bearing rather than stylistic: `registerContext` forwards its caller's
+// whole options object into this function (`buildContext({ ...options, … })`),
+// so a waiver carried inside it could ride that spread into a FRESH record mint
+// — a path with no absence proof at all. Exactly the shape validateContext
+// already uses for its namesake, and for the same reason.
+//
+// It waives the SAME single check validateContext waives — whether the project
+// root still exists — and re-applies that function's shape half in its place, so
+// the only difference between the two paths is the existence test. It exists for
+// ONE caller, adoptContext, re-minting a record whose recorded worktree was
+// deleted: there is nothing to realpath, and refusing would leave that session
+// wedged with no write channel to repair itself. The emitted record shape is
+// unchanged — the value carried through is the one the previous record already
+// held, which was canonicalized when that record was minted.
+function buildContext(options, buildOptions) {
   const host = requireHost(options.host);
-  const projectRoot = options.allowMissingProjectRoot
+  const allowMissingProjectRoot = Boolean(buildOptions && buildOptions.allowMissingProjectRoot);
+  const projectRoot = allowMissingProjectRoot
     ? requireAbsentDirectoryPath(options.projectRoot, 'project root')
     : canonicalDirectory(options.projectRoot, 'project root');
   const { pluginRoot, manifest } = pluginMetadata(options.pluginRoot, host);
@@ -554,8 +561,8 @@ function buildContext(options) {
 // caller is readOrphanedProjectRootContext, which separately PROVES the path is
 // absent — waiving the check does not mean the field is unvalidated, because
 // the requireText loop below still rejects a missing, blank, or unsafe value.
-// buildContext takes an option of the SAME NAME for the adoption re-mint; it is
-// a different function's option and does not reach this one.
+// buildContext takes a waiver of the SAME NAME for the adoption re-mint, also as
+// a separate parameter and for the same reason; the two never reach each other.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
@@ -1537,8 +1544,9 @@ function adoptableRecord(options) {
   // the mutable payload cwd is never a project authority. It also made this repair
   // unreachable in the state it exists for: a fork whose cwd was a worktree records
   // that worktree while the harness still reports the origin repo. The full account,
-  // including why a record whose project root is GONE is still refused as
-  // `record-unreadable`, is in `docs/session-control.md` under "Unbindable
+  // including why a record whose project root is GONE is ADMITTED at condition 1
+  // above while every other disagreement still refuses as `record-unreadable`,
+  // is in `docs/session-control.md` under "Unbindable
   // sessions".
   //
   // Condition 3 — nothing to adopt when this runtime already serves the record.
@@ -1635,6 +1643,7 @@ function adoptContext(options) {
       pluginRoot: executingPluginRoot,
       pluginData,
       createdAt: verdict.context.created_at,
+    }, {
       // Taken from the verdict, never re-derived from the filesystem. When it is
       // set the anchor is a directory that no longer exists, so buildContext
       // waives the existence check and keeps the recorded spelling; the new
@@ -1644,6 +1653,10 @@ function adoptContext(options) {
       // below is guarded by the workflow document's own existsSync, which is
       // false for a root that is gone, so mutateWorkflowState — which mkdirs
       // every missing component — is never reached.
+      //
+      // The SECOND argument, never a key of the object above: that object is the
+      // shape registerContext spreads a caller's options into, and this waiver
+      // must not be reachable from there.
       allowMissingProjectRoot: verdict.orphanedProjectRoot,
     });
     // Set aside, never overwrite. "The record is immutable" stays literally true:

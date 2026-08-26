@@ -193,14 +193,20 @@ zensu_session_orphaned_project_root_model() {
   ) 2>/dev/null
 }
 
-# Returns 0 ONLY when a Session Control record is intact in every respect and the
-# SOLE disagreement is that the executing runtime declares an incompatible
-# lineage — what a plugin update landing mid-session produces. It is NOT a
-# relaxable state and does not belong to the pair above: a workflow document is
-# still reachable here, so relaxing a write gate for it would waive a live
-# guarantee rather than a dead one. It exists so the doctor row, the Stop release
-# and the deny text can NAME the cause instead of falling through to "no record",
-# which is false and sends the user hunting for a record that is sitting intact.
+# Returns 0 when a Session Control record READS and the disagreement is that the
+# executing runtime declares an incompatible lineage — what a plugin update
+# landing mid-session produces — with or WITHOUT a vanished project root. It is
+# NOT a relaxable state in either half, and does not belong to the pair above,
+# but the two halves are unrelaxed for different reasons: with the recorded root
+# still present a workflow document is reachable, so relaxing a write gate would
+# waive a live guarantee rather than a dead one; with that root gone the document
+# died with it, and what stands in for the guarantee is that the state has a real
+# in-place repair (adoption) rather than a silent waiver. A caller that says
+# anything about the workflow document must ask the third fact separately —
+# zensu_session_incompatible_orphaned_root below — and branch on it. It exists so
+# the doctor row, the Stop release and the deny text can NAME the cause instead
+# of falling through to "no record", which is false and sends the user hunting
+# for a record that is sitting intact.
 # The decision lives in claude-hook-session-v1.js so every caller shares exactly
 # one implementation.
 #
@@ -263,9 +269,35 @@ zensu_session_incompatible_runtime_model() {
 # lineage is incompatible AND that root is gone; 1 for every other state,
 # including a plain incompatible lineage whose root still exists.
 #
-# Model-side only, deliberately: /zensu:doctor is the sole consumer, because it
-# is the only caller that renders both facts in one row. Every gate needs the
-# remedy, which the version pair already carries.
+# The same stdout warning the two wrappers above carry applies here: inside a
+# PreToolUse gate stdout is the hook's JSON decision channel, so a caller that
+# wants the predicate alone MUST discard stdout explicitly.
+zensu_session_incompatible_orphaned_root() {
+  local payload="${1:-}"
+  local lib_dir binder plugin_root native_plugin_root native_plugin_data
+  local msys_env_exclusions
+  [ -n "$payload" ] || return 1
+  command -v node >/dev/null 2>&1 || return 1
+  lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  plugin_root="$(cd "$lib_dir/../.." && pwd -P)" || return 1
+  binder="$lib_dir/claude-hook-session-v1.js"
+  [ -f "$binder" ] && [ ! -L "$binder" ] || return 1
+  native_plugin_root="$(bash "$lib_dir/zensu-host-path.sh" "$plugin_root")" || return 1
+  native_plugin_data="$(bash "$lib_dir/zensu-host-path.sh" "${CLAUDE_PLUGIN_DATA:-}")" || return 1
+  msys_env_exclusions="$(zensu_msys_env_exclusions CLAUDE_PLUGIN_ROOT CLAUDE_PLUGIN_DATA)" \
+    || return 1
+  (
+    cd -P -- "$lib_dir" || exit 1
+    printf '%s' "$payload" \
+      | MSYS2_ENV_CONV_EXCL="$msys_env_exclusions" \
+        CLAUDE_PLUGIN_ROOT="$native_plugin_root" CLAUDE_PLUGIN_DATA="$native_plugin_data" \
+        node ./claude-hook-session-v1.js orphaned-incompatible-root
+  ) 2>/dev/null
+}
+
+# The model-side twin of the predicate above, for /zensu:doctor: same question
+# and same printed path, but no hook payload exists there, so the session id
+# comes from CLAUDE_CODE_SESSION_ID.
 zensu_session_incompatible_orphaned_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
@@ -399,7 +431,7 @@ zensu_emit_hook_session_deny() {
     # session — the contradiction this scope exists to remove.
     [[ "$recorded" =~ $ZENSU_SAFE_VERSION_RE ]] || recorded="(unreadable)"
     [[ "$executing" =~ $ZENSU_SAFE_VERSION_RE ]] || executing="(unreadable)"
-    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
+    printf '{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"deny","permissionDecisionReason":"Blocked: this session'"'"'s Session Control record is intact, and the only disagreement is that the running Zensu installation declares an incompatible lineage — the record was minted by %s and %s is executing. While the plugin is at major 0 the minor is the breaking axis, so a plugin update that landed mid-session stops serving the record and every stateful tool fails closed. The record is NOT damaged and NOT missing. Run /zensu:adopt-session to check whether this session can be adopted by the running installation in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case. If it refuses, the persisted shapes really did change and a fresh Claude Code session is the only way forward."}}\n' \
       "$recorded" "$executing"
     return
   fi
@@ -492,5 +524,5 @@ export -f zensu_bind_hook_session zensu_bind_model_session zensu_emit_hook_sessi
   zensu_session_unregistered \
   zensu_session_orphaned_project_root zensu_session_orphaned_project_root_model \
   zensu_session_incompatible_runtime zensu_session_incompatible_runtime_model \
-  zensu_session_incompatible_orphaned_root_model \
+  zensu_session_incompatible_orphaned_root zensu_session_incompatible_orphaned_root_model \
   zensu_session_key zensu_resolve_session_id zensu_resolve_project_dir 2>/dev/null || true

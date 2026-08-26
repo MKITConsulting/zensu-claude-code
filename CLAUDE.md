@@ -488,8 +488,8 @@ included this comparison. It also put the module back in step with itself:
 `resolveHookSession` answers `projectRoot: context.project_root` under "The mutable
 payload cwd is never a project authority", and this was the one place a
 caller-supplied directory outranked the record. A record whose project root is GONE
-is still refused, as `record-unreadable` — `validateContext` canonicalizes it at
-condition 1. Consequently `zensu-session-adopt.sh` no longer requires
+is ADMITTED at condition 1 — see the paragraph below, which states that rule and its
+bound once. Consequently `zensu-session-adopt.sh` no longer requires
 `CLAUDE_PROJECT_DIR`; it used to render it through `zensu-host-path.sh`, which
 rejects a non-directory, so an unset or deleted value exited before printing any
 report. The recognizer still ACCEPTS the assignment — the diagnostic reads it and the
@@ -572,15 +572,27 @@ state is reported by the predicate every deny site already consults — which is
 all five the `incompatible-runtime` scope, whose text names `/zensu:adopt-session`,
 instead of the generic "start a fresh session" that would now contradict the doctor. Its
 `recorded<TAB>executing` line stays TWO fields for the reason the wire-format bullet below
-gives; the third fact travels on a model-side-only mode,
-`model-orphaned-incompatible-root`, whose sole consumer is `/zensu:doctor`'s fourth
-binding row (`orphaned-project-root+incompatible-runtime`, set in `zensu-doctor.sh` and
-rendered in `zensu-doctor-report.js`). Do NOT relax `resolveOrphanedProjectRoot` to accept
+gives; the third fact travels on its own mode pair, `orphaned-incompatible-root` and
+`model-orphaned-incompatible-root`. Do NOT relax `resolveOrphanedProjectRoot` to accept
 an incompatible lineage instead: that would let an incompatible runtime SERVE a session
 with no user decision and no provenance, which is what the lineage rule exists to prevent.
 Re-anchoring the record to a live directory was also considered and refused — a session
 may delete its own root, so a caller-named anchor would become a cross-project write
 escape.
+
+**Widening that predicate changed what FOUR message surfaces mean, and that is the part
+to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
+two states that disagree about the one fact those surfaces assert: whether the workflow
+document still exists. Anything that speaks about it must ask the third fact and branch —
+`hooks/stop-chain-enforcer.sh` does, and its two releases say opposite things on purpose
+(deferral when the root is present, "GONE with it, and no later Stop will enforce this
+chain" when it is not). The other three carry an unconditional clause instead, which is
+true in both halves: the deny scope in `zensu-session.sh`, the doctor row, and
+`skills/adopt-session/SKILL.md`. The rule this feature states about itself — what the
+repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
+surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
+first draft of this change shipped all four speaking the pre-change contract and the
+review caught it.
 
 **Three re-encodings move with this.** Their coverage is stated once, in the
 store-layout bullet below, and nowhere else — a ledger that contradicts itself about
