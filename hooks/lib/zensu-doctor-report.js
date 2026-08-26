@@ -1494,7 +1494,12 @@ function safeDisplay(value) {
   try {
     return require('./zensu-safe-display-v1.js').safeDisplayValue(text);
   } catch (e) {
-    return '';
+    // NOT the empty string, and not the raw value either. Empty made the ternaries
+    // drop the parenthetical silently — but `stop-chain-enforcer.sh` and the shell
+    // deny scope both tell the user "/zensu:doctor names the directory", and neither
+    // is conditional on this module loading. Silently omitting it leaves those two
+    // surfaces asserting something this row stopped delivering. Say why instead.
+    return text === '' ? '' : '(not rendered — the display-safety module could not be loaded)';
   }
 }
 

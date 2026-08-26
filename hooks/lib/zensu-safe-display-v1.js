@@ -72,7 +72,13 @@ const safeDisplayValue = (value) => {
     // the two-space run and the colon intact — the exact forgery the fast-path guard
     // exists to stop, arriving through the branch meant to be the safer one. Single
     // spaces survive, so an ordinary quoted path stays readable.
-    .replace(SPACE_RUN, (run) => '\\u0020'.repeat(run.length));
+    .replace(SPACE_RUN, (run) => '\\u0020'.repeat(run.length))
+    // The PAIR_SEPARATOR invariant applies to BOTH branches, for the same reason the
+    // DOUBLE_SPACE one does. JSON.stringify escapes neither a space nor a colon, so a
+    // value that failed SAFE_DISPLAY for an UNRELATED reason kept its ` : ` intact and
+    // arrived quoted but still able to read as a further row. The two halves of one
+    // guard were resting on different arguments; now they rest on the same one.
+    .replace(/ : /g, ' \\u003a ');
 };
 
 // SAFE_DISPLAY is read BY NAME by tests/structure/session-adopt-report-v1.test.js,

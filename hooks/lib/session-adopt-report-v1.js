@@ -194,7 +194,7 @@ const shouldRepairInPlace = (verdict, confirmed) =>
 // the misleading doctor row left them.
 const REMEDY = {
   [core.ADOPTION_REFUSALS.RECORD_UNREADABLE]:
-    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. A recorded project root that is merely GONE is no longer one of these — that state is adoptable — so the disagreement here is one of the others. Adoption cannot tell them apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
+    "The record could not be re-verified against the installation that minted it. That installation may have been pruned from the plugin cache, the record may have been altered, or a persisted schema really did change in this release. A recorded project root that is merely GONE is no longer one of these — that state is adoptable — so the disagreement here is one of the others — or there is no record for this session at all, which lands on this same reason. Adoption cannot tell them apart, and in this state /zensu:doctor cannot name the cause either. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.PLUGIN_DATA]:
     "The record belongs to a different plugin-data store — typically a development checkout against an installed plugin, or the reverse. That boundary is never relaxed. Start a fresh Claude Code session.",
   [core.ADOPTION_REFUSALS.ALREADY_SERVED]:
@@ -371,6 +371,12 @@ function main() {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }
+  // The SAME verdict must produce the same exit code on both branches. The repair
+  // branch has set `process.exitCode = repairExitCode(...)` since it was written, on
+  // the stated principle that a refused or partial sweep is a failure; this branch
+  // called the same sweep, rendered the same warnings and exited 0. A caller
+  // scripting either path got two different answers for one outcome.
+  process.exitCode = repairExitCode(leases);
   reportLeaseWarnings(leases);
 }
 
