@@ -3145,8 +3145,11 @@ DOCTOR_PAIR_ROW="$(grep -F 'binding:' "$DOCTOR_PAIR_OUT" 2>/dev/null || true)"
 # produces is the pair rendered as a JSON string — the opening quote sits immediately
 # after the `(` — and what a rule without the guard produces is the bare path there.
 if printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'BOTH the recorded project root' \
-    && printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF '("/tmp/gone provenance : recorded")' \
-    && ! printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF '(/tmp/gone provenance : recorded)'; then
+    `# The pair separator is ESCAPED, not merely quoted: the guard now applies on both` \
+    `# branches, so ' : ' leaves as '\u003a'. Quoting alone was the earlier assertion` \
+    `# and it stopped discriminating once the escaping branch learned the same rule.` \
+    && printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF '("/tmp/gone provenance \u003a recorded")' \
+    && ! printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'provenance : recorded'; then
   check "AC-C21d the binding row quotes a project root that could forge a label/value pair" PASS
 else
   check "AC-C21d the binding row quotes a project root that could forge a label/value pair" FAIL

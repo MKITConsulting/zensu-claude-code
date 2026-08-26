@@ -371,12 +371,16 @@ function main() {
     process.stdout.write("\nWARNING: the adoption succeeded but its provenance entry could not be written.\n");
     process.stdout.write("The takeover is real and unrecorded in the workflow history; report this rather than repeating it.\n");
   }
-  // The SAME verdict must produce the same exit code on both branches. The repair
-  // branch has set `process.exitCode = repairExitCode(...)` since it was written, on
-  // the stated principle that a refused or partial sweep is a failure; this branch
-  // called the same sweep, rendered the same warnings and exited 0. A caller
-  // scripting either path got two different answers for one outcome.
-  process.exitCode = repairExitCode(leases);
+  // DELIBERATELY no `process.exitCode` here, and the asymmetry with the repair branch
+  // is the point rather than an oversight. There the sweep IS the whole operation, so
+  // a refused or partial sweep is the operation failing and exit 1 says so. Here the
+  // record was re-minted successfully and the sweep is secondary: exiting non-zero
+  // would tell a caller the ADOPTION failed, which is false and is the more damaging
+  // wrong answer of the two. The warnings below carry the sweep's verdict in full.
+  //
+  // Recorded because a review round proposed unifying the two, the unified version was
+  // written, and AC-C12 caught it: that row requires this command to exit 0 while its
+  // destination refusal is named — it is the pin that encodes this distinction.
   reportLeaseWarnings(leases);
 }
 
