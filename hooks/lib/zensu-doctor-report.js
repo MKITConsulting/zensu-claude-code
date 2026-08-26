@@ -1451,30 +1451,42 @@ function truncatedList(rows) {
 //
 // Required LAZILY and guarded, exactly as reviewerDenialRows and ruleCarrierRows
 // require theirs: a load fault must cost this row's polish, never the whole report.
-// A PLAIN require of a dependency-free leaf module, at top level and with no
-// fallback copy — both of which are deliberate reversals.
+// A guarded LAZY require, and the fallback DROPS the value rather than folding it
+// with a second copy of the rule. Three decisions, each of which was made the other
+// way first.
 //
-// It used to be a guarded LAZY require of `session-adopt-report-v1.js`, which is a
-// feature command's report module carrying five module-scope requires of its own
-// (the session-control core, the lease sweep, the hook binder). That put a
-// four-file load chain behind one string fold, inside the one tool whose entire
-// job is to still speak when the installation is damaged — and the guard's
-// fallback was a SECOND, narrower spelling of the rule, so the two could drift
-// with nothing comparing them. `hooks/lib/zensu-safe-display-v1.js` requires
-// nothing at all and sits in this directory, so it is exactly as reachable as this
-// file is: a load failure there is not a degraded row, it is a broken tree. The
-// lazy-plus-guarded pattern this file uses for `ruleCarrierRows` and
-// `reviewerDenialRows` is for modules with dependencies of their own, and is not
-// the right shape here.
+// WHERE the rule lives: `hooks/lib/zensu-safe-display-v1.js`, a leaf that requires
+// nothing at all. It used to live in `session-adopt-report-v1.js` — a feature
+// command's report module carrying five module-scope requires of its own — so this
+// renderer reached one string fold through a four-file load chain, inside the one
+// tool whose entire job is to still speak when the installation is damaged.
+//
+// WHY it stays LAZY and GUARDED rather than a top-level require: this module had NO
+// hard sibling require, and that is a property, not an accident. `test-doctor.sh`
+// P1mf builds a plugin root carrying exactly the core and this file, to prove a
+// missing `chain-recovery-v1.js` degrades to a warning instead of killing the
+// report — a top-level require made this file unloadable in that tree and turned
+// one degraded row into no report at all. Same reasoning as `ruleCarrierRows` and
+// `reviewerDenialRows` two blocks down.
+//
+// WHY the fallback prints no value: the previous guard fell back to a SECOND,
+// narrower spelling of the fold, so one rule had two implementations with nothing
+// comparing them. Re-authoring it here is what the extraction exists to stop. With
+// the rule unavailable, the honest move is the one `zensu-doctor.sh` already makes
+// for a version pair that fails its shape guard: drop the value and keep the row.
+// Losing the path is a worse message; rendering it unfolded is a wrong one.
 //
 // The FULL rule, not the narrow fold. The binding line is prose, but it sits in a
 // report built out of `label : value` rows that the doctor skill tells the model to
 // print verbatim, so the pair-forgery guard is exactly as load-bearing here as in
 // the adoption report.
-var safeDisplayRules = require('./zensu-safe-display-v1.js');
-
 function safeDisplay(value) {
-  return safeDisplayRules.safeDisplayValue(String(value == null ? '' : value));
+  var text = String(value == null ? '' : value);
+  try {
+    return require('./zensu-safe-display-v1.js').safeDisplayValue(text);
+  } catch (e) {
+    return '(unrenderable)';
+  }
 }
 
 function bindingLine() {

@@ -686,14 +686,22 @@ the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` jo
 the core half**, and it is the one entry a port is likeliest to skip because it looks
 cosmetic: it owns `safeDisplayValue` (the `label : value` pair-forgery guard plus the
 positive letter/number/mark allowlist) and `foldDisplayHiders`, it requires NOTHING —
-not even a node builtin — and BOTH report renderers now require it at top level with
-no fallback copy. The rule lived inside `session-adopt-report-v1.js`, a feature
-command's module with five requires of its own, and the doctor reached for it through
-a guarded lazy require with a second, narrower spelling behind the guard: a display
-rule in two implementations, with a four-file load chain behind it, inside the one
-tool whose job is to speak in a damaged installation. A port that takes the doctor
-renderer without this module gets a `MODULE_NOT_FOUND` at load; a port that
-re-authors the fold gets the two-implementation class straight back.
+not even a node builtin — and both report renderers consume it. The rule
+lived inside `session-adopt-report-v1.js`, a feature command's module with five
+requires of its own, and the doctor reached for it through a guarded lazy require
+with a second, narrower spelling behind the guard: a display rule in two
+implementations, with a four-file load chain behind it, inside the one tool whose job
+is to speak in a damaged installation. **The two consumers require it DIFFERENTLY,
+and that asymmetry is load-bearing.** The adoption report takes it at top level; the
+doctor renderer keeps its require LAZY and GUARDED, because that file deliberately
+has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
+exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
+degrades to one warning row rather than killing the report, and a top-level require
+made the renderer unloadable in that tree. Its fallback prints `(unrenderable)`
+rather than re-authoring the fold: dropping the value is the move `zensu-doctor.sh`
+already makes for a version pair that fails its shape guard, and it is what keeps the
+two-implementation class from coming straight back. A port that re-authors the fold
+gets that class anyway.
 `discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
