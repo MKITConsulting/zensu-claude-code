@@ -2962,27 +2962,33 @@ else
   check "AC-C18 after the adoption the doctor reports the plain orphaned state (fixture unavailable)" FAIL
 fi
 
-# AC-C19 — the Stop hook's THREE-arm ladder, pinned at SOURCE. The middle arm is
-# the state-neutral message, and it is not behaviourally reachable from the hook:
-# both probes call the same module, so a fault that makes the third-fact probe
-# unavailable also makes the lineage probe fail and the branch is never entered.
-# That leaves it deletable — or givable either sibling's wording — with every
-# behavioural row green, which is exactly the shape rounds 1 and 2 shipped twice.
-# Pin the ladder instead: three arms, and the middle one carrying neither
-# sibling's load-bearing literal.
+# AC-C19 — the Stop hook's THREE-arm ladder and the doctor's status capture,
+# pinned at SOURCE. WORKING TREE, not HEAD: both paths are read from $ROOT.
+# The Stop hook's middle arm is not behaviourally reachable — both probes call
+# the same module, so a fault that makes the third-fact probe unavailable also
+# makes the lineage probe fail and the branch is never entered. That leaves it
+# deletable, or givable either sibling's wording, with every behavioural row
+# green, which is the shape this change shipped twice. Anchor each count to a
+# line that actually EMITS the message, so a quoted mention in a comment cannot
+# satisfy the pin.
 STOP_LADDER="$ROOT/hooks/stop-chain-enforcer.sh"
-STOP_ARM_GONE="$(grep -c 'this is not a deferral' "$STOP_LADDER" 2>/dev/null || printf 0)"
-STOP_ARM_NEUTRAL="$(grep -c 'nothing is claimed about the workflow document either way' "$STOP_LADDER" 2>/dev/null || printf 0)"
-STOP_ARM_DEFER="$(grep -c 'The workflow document itself SURVIVES' "$STOP_LADDER" 2>/dev/null || printf 0)"
-STOP_NEUTRAL_LINE="$(grep -n 'nothing is claimed about the workflow document either way' "$STOP_LADDER" 2>/dev/null | head -1 | cut -d: -f1)"
-STOP_NEUTRAL_TEXT="$([ -n "$STOP_NEUTRAL_LINE" ] && sed -n "${STOP_NEUTRAL_LINE}p" "$STOP_LADDER" || printf '')"
-if [ "$STOP_ARM_GONE" -eq 1 ] && [ "$STOP_ARM_NEUTRAL" -eq 1 ] && [ "$STOP_ARM_DEFER" -eq 1 ] \
+stop_arm_count() {
+  grep -c "^ *echo \"zensu chain-enforcer: releasing Stop.*$1" "$STOP_LADDER" 2>/dev/null || true
+}
+STOP_ARM_GONE="$(stop_arm_count 'this is not a deferral')"
+STOP_ARM_NEUTRAL="$(stop_arm_count 'nothing is claimed about the workflow document either way')"
+STOP_ARM_DEFER="$(stop_arm_count 'The workflow document itself SURVIVES')"
+STOP_NEUTRAL_TEXT="$(grep "^ *echo \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
+DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
+if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
-    && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER"; then
-  check "AC-C19 the Stop ladder has three arms and the state-neutral one borrows neither sibling's claim" PASS
+    && grep -qF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' "$STOP_LADDER" \
+    && grep -qF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' "$DOCTOR_LADDER" \
+    && grep -qF 'ZDOC_BINDING_ROOT_UNKNOWN' "$DOCTOR_LADDER"; then
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction" PASS
 else
-  check "AC-C19 the Stop ladder has three arms and the state-neutral one borrows neither sibling's claim (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER)" FAIL
+  check "AC-C19 the Stop ladder has three emitted arms, the neutral one borrows neither sibling's claim, and the doctor exports the same distinction (gone=$STOP_ARM_GONE neutral=$STOP_ARM_NEUTRAL defer=$STOP_ARM_DEFER)" FAIL
 fi
 
 # AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
@@ -2990,7 +2996,7 @@ fi
 # the one surface still offering the repair without the limit. Driven through the
 # gate itself rather than grepped, so a reworded clause fails here and not only in
 # a source pin.
-CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
+CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="${LIVE_ROOT_SESSION:-}" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
     hook_event_name: process.env.EVENT,
     session_id: process.env.SESSION,
@@ -3013,11 +3019,13 @@ CAPABILITY_REASON="$(OUT_FILE="$CAPABILITY_OUT" node -e '
     process.stdout.write(JSON.parse(raw).hookSpecificOutput?.permissionDecisionReason || "");
   } catch (_e) { process.stdout.write(""); }
 ' 2>/dev/null)" || CAPABILITY_REASON=""
-if printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
+CAPABILITY_DECISION="$(gate_decision_from "$SYNTHETIC_BREAKING_ROOT" pre-reviewer-capability-gate.sh "$CAPABILITY_EDIT_PAYLOAD")"
+if [ "$CAPABILITY_DECISION" = deny ] \
+    && printf '%s' "$CAPABILITY_REASON" | grep -qF 'declares an incompatible lineage' \
     && printf '%s' "$CAPABILITY_REASON" | grep -qF 'Edit and Write stay denied afterwards until that exact directory is re-created'; then
-  check "AC-C20 the capability gate names the Edit/Write limit alongside the repair" PASS
+  check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair" PASS
 else
-  check "AC-C20 the capability gate names the Edit/Write limit alongside the repair" FAIL
+  check "AC-C20 the capability gate DENIES and names the Edit/Write limit alongside the repair (decision=${CAPABILITY_DECISION:-unset})" FAIL
   printf '%s' "$CAPABILITY_REASON" | head -c 300
 fi
 

@@ -1496,7 +1496,16 @@ function bindingLine() {
         + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
           ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
           : '')
-        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm');
+        + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
+        // The limit belongs on THIS row too, not only on the combined one. The row
+        // is reachable for a session whose recorded project root is also gone —
+        // the doctor falls back to it whenever the third-fact probe cannot answer
+        // — and offering the repair without saying what it does not buy is what
+        // this change's own rule calls a defect. Worded conditionally so it stays
+        // true in the ordinary case, where the root really is still there.
+        + (env.ZDOC_BINDING_ROOT_UNKNOWN
+          ? '. Whether the recorded project root still exists could not be determined here; if it is gone, the adoption clears the lineage break while Edit and Write stay denied until that exact directory is re-created'
+          : ''));
     // BOTH disagreements at once, and the row exists because each of the two
     // above answers "not me" for it: the orphan probe re-applies
     // servesRecordedRuntime, which an incompatible lineage fails, and the lineage

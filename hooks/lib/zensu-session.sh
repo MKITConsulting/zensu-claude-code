@@ -168,10 +168,13 @@ zensu_session_orphaned_project_root() {
   ) 2>/dev/null
 }
 
-# The model-side twin of the predicate above, for /zensu:doctor: same question,
-# same printed path and the SAME three statuses (0 with the path, 3 for a live
-# recorded root, 1 for an unavailable answer), but no hook payload exists there,
-# so the session id comes from CLAUDE_CODE_SESSION_ID.
+# The model-side twin of the predicate above, for /zensu:doctor: same question
+# and same printed path — TWO statuses, 0 with the path and 1 for everything
+# else, exactly as its hook-payload sibling — but no hook payload exists there,
+# so the session id comes from CLAUDE_CODE_SESSION_ID. Do not give this pair a
+# third status by copying the incompatible-orphaned pair's contract onto it: they
+# back different argv modes, and a consumer that branched on `-ne 3` here would
+# read every unavailable answer as a live recorded root.
 zensu_session_orphaned_project_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions
@@ -299,9 +302,12 @@ zensu_session_incompatible_orphaned_root() {
   ) 2>/dev/null
 }
 
-# The model-side twin of the predicate above, for /zensu:doctor: same question
-# and same printed path, but no hook payload exists there, so the session id
-# comes from CLAUDE_CODE_SESSION_ID.
+# The model-side twin of the predicate above, for /zensu:doctor: same question,
+# same printed path and the SAME THREE statuses — 0 with the dead path, 3 for a
+# recorded root that positively still exists, 1 for an unavailable answer — but no
+# hook payload exists there, so the session id comes from CLAUDE_CODE_SESSION_ID.
+# The third status is what lets /zensu:doctor tell a negative from a failure; the
+# plain orphan pair above has only two and must not be branched on the same way.
 zensu_session_incompatible_orphaned_root_model() {
   local lib_dir binder plugin_root native_plugin_root native_plugin_data
   local msys_env_exclusions

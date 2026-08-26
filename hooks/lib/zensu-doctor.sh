@@ -160,6 +160,10 @@ ZDOC_BINDING_PROJECT_ROOT="${ZDOC_BINDING_PROJECT_ROOT:-}"
 # orphaned-project-root+incompatible-runtime.
 ZDOC_BINDING_RECORDED_VERSION="${ZDOC_BINDING_RECORDED_VERSION:-}"
 ZDOC_BINDING_EXECUTING_VERSION="${ZDOC_BINDING_EXECUTING_VERSION:-}"
+# Set only on the incompatible-runtime verdict, and only when the third-fact
+# probe could not answer at all. It is the difference between "the recorded root
+# is still there" and "nobody could tell", which the row must not blur.
+ZDOC_BINDING_ROOT_UNKNOWN="${ZDOC_BINDING_ROOT_UNKNOWN:-}"
 ZDOC_BINDING_VERSIONS=""
 if [ -z "${ZDOC_BINDING:-}" ]; then
   if [ -z "${CLAUDE_CODE_SESSION_ID:-}" ] || [ -z "${CLAUDE_PLUGIN_DATA:-}" ]; then
@@ -241,18 +245,18 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
         fi
         if [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 0 ] && [ -n "$ZDOC_BINDING_PROJECT_ROOT" ]; then
           ZDOC_BINDING=orphaned-project-root+incompatible-runtime
-        elif [ "$ZDOC_ORPHAN_ROOT_STATUS" -ne 3 ]; then
-          # The probe could not answer, so the plain lineage row's remedy would
-          # be making a promise this check did not establish. Status 3 is the one
-          # answer that positively says the recorded root is still there; every
-          # other non-zero is an unavailable answer, and the row must not read as
-          # if the root were confirmed present. The renderer carries the
-          # conditional Edit/Write clause for exactly this reason, so the plain
-          # row stays correct here — but the reason is recorded rather than left
-          # to be re-derived, because reading only the VALUE and never the STATUS
-          # is the collapse the Stop hook's own comment forbids.
-          ZDOC_BINDING=incompatible-runtime
         fi
+        # WHY the status is captured at all, given both remaining arms render the
+        # same verdict: it is what makes the claim CHECKABLE. Status 3 positively
+        # says the recorded root is still there; every other non-zero says the
+        # question could not be answered. The plain `incompatible-runtime` row
+        # therefore has to be true in BOTH cases, which is why its body carries
+        # the conditional Edit/Write clause rather than an unqualified repair
+        # offer — an earlier revision of this block claimed the renderer already
+        # did that and it did not. Export the distinction so the row can say so,
+        # and so a future arm cannot be added that silently assumes a negative.
+        ZDOC_BINDING_ROOT_UNKNOWN=""
+        [ "$ZDOC_ORPHAN_ROOT_STATUS" -eq 3 ] || ZDOC_BINDING_ROOT_UNKNOWN=1
       else
         ZDOC_BINDING=unbound
       fi
@@ -261,7 +265,8 @@ if [ -z "${ZDOC_BINDING:-}" ]; then
 fi
 
 export ZDOC_ZENSU ZDOC_NODE ZDOC_PLAYWRIGHT ZDOC_BINDING ZDOC_BINDING_PROJECT_ROOT \
-  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION
+  ZDOC_BINDING_RECORDED_VERSION ZDOC_BINDING_EXECUTING_VERSION \
+  ZDOC_BINDING_ROOT_UNKNOWN
 
 if ! command -v node >/dev/null 2>&1; then
   printf 'Zensu doctor — read-only setup diagnostics\n\n  %s  node: not found on PATH — cannot run the JSON/config/state checks\n' '⚠️'

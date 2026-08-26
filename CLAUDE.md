@@ -580,7 +580,7 @@ Re-anchoring the record to a live directory was also considered and refused — 
 may delete its own root, so a caller-named anchor would become a cross-project write
 escape.
 
-**Widening that predicate changed what FOUR message surfaces mean, and that is the part
+**Widening that predicate changed what the message surfaces enumerated below mean — FIVE entries, six if both doctor rows are counted separately, and that is the part
 to re-check on every later edit.** `zensu_session_incompatible_runtime` is now true for
 two states that disagree about the one fact those surfaces assert: whether the workflow
 document still exists. Anything that speaks about it must ask the third fact and branch —
@@ -597,7 +597,7 @@ doctor is in BOTH lists deliberately — it branches to pick a row, and the row 
 to still carries the clause, because the probe can fail. The rule this feature states about itself — what the
 repair does not buy is stated wherever it is offered — is what those clauses satisfy; a
 surface that offers `/zensu:adopt-session` without them is a defect, not a nicety. The
-first draft of this change shipped all four speaking the pre-change contract and the
+first draft of this change shipped all of the four that then existed speaking the pre-change contract and the
 review caught it.
 
 **Three re-encodings move with this.** Their coverage is stated once, in the
@@ -611,7 +611,7 @@ version-shape rule are unchecked:
   `pre-bash-source-write-gate.sh` / `pre-write-secret-scan.sh` share one spelling).
   Every parser reads `${V##*$'\t'}` for the executing half, which takes the LAST
   field: adding a third field silently redirects all five rather than failing.
-- the version-shape rule, spelled twice for two different hazards —
+- the version-shape rule, spelled THREE times for three different hazards —
   `ADOPTION_SAFE_VERSION_RE` (a version reaches a FILENAME) and
   `ZENSU_SAFE_VERSION_RE` (a version reaches a JSON string, and now also the
   doctor report). Identical alternation, deliberate hand-copy; keep them in step.
@@ -729,6 +729,14 @@ row is removed, and the two hand-copy pins this enumeration used to name were
 themselves deleted when the seam was taken. Getting that set wrong is its own hazard, in the
 opposite direction: a reader who believes an uncommitted constant is invisible will
 misread a pin that in fact grades it immediately. Commit first, then measure.
+
+**The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
+measurement is one sample — and that sample is now two generations stale.** The
+vanished-project-root work took the suite from 91 rows to 107, adding four armed
+sessions, a Stop invocation, a capability-gate drive and three tampered record
+copies, each of which spawns `node` or `bash`. No Windows wall clock was taken
+after any of it. Re-measure on the next green Windows run and replace the figure
+below together with its provenance sentence; do not budget against it meanwhile.
 
 **The Windows timeout for `test-versioned-plugin-upgrade.sh` is MEASURED, and the
 measurement is one sample.** `windows-shard-2` logged
