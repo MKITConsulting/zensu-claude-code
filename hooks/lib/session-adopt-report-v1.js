@@ -17,7 +17,6 @@
 
 const fs = require("node:fs");
 const safeDisplay = require("./zensu-safe-display-v1.js");
-const path = require("node:path");
 const core = require("./session-control-core-v1.js");
 // The superseded-lease sweep. It is NOT part of adoptContext any more: requiring the
 // lease owner from the core is a require cycle, so the sweep moved into its own
@@ -272,11 +271,12 @@ function main() {
     if (verdict.orphanedProjectRoot) {
       process.stdout.write("\nThe recorded project root no longer exists — a deleted or recycled worktree left\n");
       process.stdout.write("the workflow state unreachable from this record. Adoption still applies and is\n");
-      process.stdout.write("worth doing: it clears the lineage break, so Bash and the read-only diagnostics\n");
-      process.stdout.write("work again. It does NOT restore writes — Edit and Write stay denied while the\n");
-      process.stdout.write("anchor is missing. To write again, re-create exactly that directory or start a\n");
-      process.stdout.write("fresh Claude Code session. If it was moved rather than deleted, its state still\n");
-      process.stdout.write("exists there.\n");
+      process.stdout.write("worth doing: it clears the lineage break, so READ-ONLY Bash and the read-only\n");
+      process.stdout.write("diagnostics work again. It does NOT restore writes — Edit, Write and any Bash\n");
+      process.stdout.write("command that writes stay denied while the anchor is missing, because a write\n");
+      process.stdout.write("cannot be attributed to a project that is not there. To write again, re-create\n");
+      process.stdout.write("exactly that directory or start a fresh Claude Code session. If it was moved\n");
+      process.stdout.write("rather than deleted, its state still exists there.\n");
     }
     process.stdout.write("Nothing has been changed. Run the same command with --confirm to adopt.\n");
     return;
@@ -311,9 +311,10 @@ function main() {
     // do not. Saying otherwise would send the user straight into a deny.
     process.stdout.write("This session's lineage break is repaired from the next tool call onward — no restart\n");
     process.stdout.write("is needed. The recorded project root is still gone, so the session is now in the\n");
-    process.stdout.write("orphaned-project-root state: Bash and the read-only diagnostics work, while Edit and\n");
-    process.stdout.write("Write stay denied. Re-create exactly that directory, or start a fresh Claude Code\n");
-    process.stdout.write("session, to write again.\n");
+    process.stdout.write("orphaned-project-root state: READ-ONLY Bash and the read-only diagnostics work,\n");
+    process.stdout.write("while Edit, Write and any Bash command that writes stay denied — a write cannot\n");
+    process.stdout.write("be attributed to a project that is not there. Re-create exactly that directory,\n");
+    process.stdout.write("or start a fresh Claude Code session, to write again.\n");
   } else {
     process.stdout.write("This session is bound again from the next tool call onward — no restart is needed.\n");
   }

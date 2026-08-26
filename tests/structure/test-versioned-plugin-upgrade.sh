@@ -1025,10 +1025,10 @@ fi
 # guard condition and returning the text unchanged left the suite green.
 REPORT_UNIT="$ROOT/tests/structure/session-adopt-report-v1.test.js"
 if [ -f "$REPORT_UNIT" ] && node --test "$REPORT_UNIT" >"$TMP/report-unit.out" 2>&1 \
-  && unit_cases_registered_floor "$TMP/report-unit.out" 20; then
+  && unit_cases_registered_floor "$TMP/report-unit.out" 21; then
   check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), driven from here)" PASS
 else
-  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 20 registered — driven from here)" FAIL
+  check "the adoption report unit suite passes ($(unit_cases_report "$TMP/report-unit.out"), want >= 21 registered — driven from here)" FAIL
   grep -E "^not ok|^# (fail|pass|tests) |Error|expected:|actual:|operator:" \
     "$TMP/report-unit.out" 2>/dev/null | head -40
 fi
@@ -2576,6 +2576,13 @@ GONE_RECORD="$SHARED_DATA/session-control/v1/records/$GONE_KEY.json"
 # rows at all, not even the PASS/FAIL summary, and a fixture failure would read as
 # a truncated run rather than as the interpretable report that arm exists to give.
 GONE_DOCTOR_HOME="$TMP/gone-doctor-home"; mkdir -p "$GONE_DOCTOR_HOME"
+# Hoisted for the SAME reason, and it is the same trap in its other form. AC-C20 far
+# below reads this name; guarding the read with `${...:-}` would avoid the `set -u`
+# abort but silently grade an EMPTY session id, so a fixture failure would surface as
+# an ordinary FAIL with no "(fixture unavailable)" label — the diagnosis the else arm
+# exists to give. Hoisting keeps both properties: no abort, and the label still means
+# something.
+LIVE_ROOT_SESSION='versioned-upgrade-live-project-root'
 if printf '%s' "$GONE_START" \
     | CLAUDE_PLUGIN_ROOT="$SYNTHETIC_CANDIDATE_ROOT" CLAUDE_PLUGIN_DATA="$SHARED_DATA" \
       CLAUDE_PROJECT_DIR="$GONE_PROJECT" \
@@ -2761,7 +2768,6 @@ if printf '%s' "$GONE_START" \
   # adopted that one, so by the time this row runs it binds normally and the
   # doctor renders the healthy row — which would fail this check for a reason
   # that has nothing to do with the probe.
-  LIVE_ROOT_SESSION='versioned-upgrade-live-project-root'
   LIVE_ROOT_START="$(EVENT=SessionStart SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
     process.stdout.write(JSON.stringify({
       hook_event_name: process.env.EVENT,
@@ -3002,7 +3008,7 @@ stop_arm_count() {
 }
 STOP_ARM_GONE="$(stop_arm_count 'this is not a deferral')"
 STOP_ARM_NEUTRAL="$(stop_arm_count 'nothing is claimed about the workflow document either way')"
-STOP_ARM_DEFER="$(stop_arm_count 'The workflow document itself SURVIVES')"
+STOP_ARM_DEFER="$(stop_arm_count 'The recorded project root still EXISTS')"
 STOP_NEUTRAL_TEXT="$(grep "^ *echo \"zensu chain-enforcer: releasing Stop.*nothing is claimed about the workflow document either way" "$STOP_LADDER" 2>/dev/null | head -1)"
 DOCTOR_LADDER="$ROOT/hooks/lib/zensu-doctor.sh"
 # Anchored the same way the Stop arms are. A bare substring match was satisfied by
@@ -3030,7 +3036,7 @@ DOCTOR_UNKNOWN_SETS="$(code_only "$DOCTOR_LADDER" | grep -cE '\|\| *ZDOC_BINDING
 STOP_NEUTRAL_GUARD="$(code_only "$STOP_LADDER" | grep -cF 'INCOMPATIBLE_ROOT_STATUS" -ne 3' || true)"
 DOCTOR_POSITIVE_GUARD="$(code_only "$DOCTOR_LADDER" | grep -cF 'ZDOC_ORPHAN_ROOT_STATUS" -eq 3' || true)"
 if [ "$STOP_ARM_GONE" = 1 ] && [ "$STOP_ARM_NEUTRAL" = 1 ] && [ "$STOP_ARM_DEFER" = 1 ] \
-    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The workflow document itself SURVIVES' \
+    && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'The recorded project root still EXISTS' \
     && ! printf '%s' "$STOP_NEUTRAL_TEXT" | grep -qF 'this is not a deferral' \
     && [ "$STOP_NEUTRAL_GUARD" = 1 ] \
     && [ "$DOCTOR_POSITIVE_GUARD" = 1 ] \
@@ -3109,12 +3115,36 @@ else
   grep -F 'binding:' "$DOCTOR_FOLD_OUT" 2>/dev/null | head -c 300
 fi
 
+# AC-C21d — the PAIR-FORGERY half of the same rule, which AC-C21c cannot reach.
+# Folding bidi characters is the weaker property: several plausible rules do it.
+# What makes safeDisplayValue the RIGHT rule here is that it also refuses a value
+# carrying a ` : ` sequence or a double space, because this report is built out of
+# `label : value` rows the doctor skill tells the model to print verbatim and the
+# recorded project root is minted from the SessionStart cwd — whoever names the
+# directory controls this substring. Without this row the pair guard had zero
+# coverage on the doctor side; it was pinned only for the adoption report.
+DOCTOR_PAIR_OUT="$TMP/adopt-doctor-pair.out"
+env ZDOC_BINDING=orphaned-project-root+incompatible-runtime \
+  ZDOC_BINDING_PROJECT_ROOT='/tmp/gone provenance : recorded' \
+  ZDOC_BINDING_RECORDED_VERSION=0.17.0 ZDOC_BINDING_EXECUTING_VERSION=0.18.0 \
+  CLAUDE_PLUGIN_DATA="$SHARED_DATA" CLAUDE_PROJECT_DIR="$PROJECT" HOME="$GONE_DOCTOR_HOME" \
+  bash "$SYNTHETIC_BREAKING_ROOT/hooks/lib/zensu-doctor.sh" >"$DOCTOR_PAIR_OUT" 2>/dev/null
+DOCTOR_PAIR_ROW="$(grep -F 'binding:' "$DOCTOR_PAIR_OUT" 2>/dev/null || true)"
+if printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'BOTH the recorded project root' \
+    && ! printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF 'provenance : recorded' \
+    && printf '%s' "$DOCTOR_PAIR_ROW" | grep -qF '"/tmp/gone provenance'; then
+  check "AC-C21d the binding row quotes a project root that could forge a label/value pair" PASS
+else
+  check "AC-C21d the binding row quotes a project root that could forge a label/value pair" FAIL
+  printf '%s' "$DOCTOR_PAIR_ROW" | head -c 300
+fi
+
 # AC-C20 — the capability gate's Edit/Write clause. That gate is on the `.*`
 # matcher, so a non-Bash tool in the lineage state lands there, and its deny was
 # the one surface still offering the repair without the limit. Driven through the
 # gate itself rather than grepped, so a reworded clause fails here and not only in
 # a source pin.
-CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="${LIVE_ROOT_SESSION:-}" CWD="$PROJECT" node -e '
+CAPABILITY_EDIT_PAYLOAD="$(EVENT=PreToolUse SESSION="$LIVE_ROOT_SESSION" CWD="$PROJECT" node -e '
   process.stdout.write(JSON.stringify({
     hook_event_name: process.env.EVENT,
     session_id: process.env.SESSION,

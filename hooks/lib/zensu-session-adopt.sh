@@ -106,6 +106,24 @@ LEASE="$DIR/review-evidence-lease-v1.js"
   exit 1
 }
 
+# The display-safety rules. Newest member of this command's load graph — the report
+# requires it at TOP LEVEL, and node's require FOLLOWS symlinks — and it is the one
+# module that decides what every value in the report is allowed to look like before
+# it reaches a terminal and the model's context. Unguarded, a link planted at this
+# name substitutes the fold for the whole report: the project line the user reads to
+# decide whether to take the record over is exactly what it renders. Same reasoning
+# as the lease guard above, one module further along.
+#
+# Known and NOT closed here: `claude-path-v1.js` reaches this command transitively
+# (through the binder and the lease owner) and carries no guard of its own, so this
+# list is still incomplete. Stated rather than implied — adding this entry narrows
+# the gap, it does not close it.
+SAFE_DISPLAY_LIB="$DIR/zensu-safe-display-v1.js"
+[ -f "$SAFE_DISPLAY_LIB" ] && [ ! -L "$SAFE_DISPLAY_LIB" ] || {
+  printf '%s\n' 'zensu:adopt-session: the display-safety module is missing or symlinked; repair the Zensu plugin installation' >&2
+  exit 1
+}
+
 CONFIRM=0
 case "${1:-}" in
   '') ;;

@@ -108,6 +108,26 @@ test('S5 the safe class is expressed by Unicode property, not an ASCII range', (
   assert.ok(report().SAFE_DISPLAY.unicode, 'the u flag is what makes those properties mean anything');
 });
 
+test('S5 the display rule has exactly ONE owner', () => {
+  // IDENTITY, not equality. The extraction's whole purpose was to leave one
+  // implementation of the fold; reading the re-export can only tell you the value is
+  // shaped right, not that it came from the leaf — a private copy re-introduced in
+  // either consumer would satisfy every other case in this file. `===` on the regex
+  // OBJECT is what a copy cannot satisfy.
+  const leaf = require(path.join(LIB, 'zensu-safe-display-v1.js'));
+  assert.strictEqual(report().SAFE_DISPLAY, leaf.SAFE_DISPLAY,
+    'the report must re-export the leaf rule, never a private copy');
+  assert.strictEqual(report().safe, leaf.safeDisplayValue,
+    'safe() must BE the leaf function, not a wrapper around a second rule');
+
+  // The doctor renderer is the other consumer, and it is not requirable here (it
+  // ends in process.exit). Pin at source that it carries no second spelling of the
+  // rule: no Unicode-property class and no bidi range of its own.
+  const doctor = fs.readFileSync(path.join(LIB, 'zensu-doctor-report.js'), 'utf8');
+  assert.equal(/\\p\{L\}/.test(doctor), false, 'the doctor must not re-author the allowlist');
+  assert.equal(/\\u202a/.test(doctor), false, 'the doctor must not re-author the bidi fold');
+});
+
 // ── Finding #17: the same-line label forgery ────────────────────────────────
 
 test('S5 a " : " separator inside a value forces the quoted rendering', () => {

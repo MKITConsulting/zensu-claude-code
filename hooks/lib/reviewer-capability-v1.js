@@ -499,19 +499,31 @@ function main() {
     // therefore stated the same way the shell scope states it, as a conditional
     // clause true in both halves. Offering the repair without it is the defect,
     // not the nicety; this branch shipped without it for one round.
-    // MAIN only, and that guard is not cosmetic. `/zensu:adopt-session --confirm`
-    // WRITES the immutable record, and `zensu_doctor_allowed` conjoins
-    // `zensu_hook_is_main_principal` — so a reviewer, an evidence worker or any
-    // neutral child that reached this catch would be handed a remedy every gate
-    // refuses it. Deny text is model-read content: pointing a read-only principal
-    // at a privileged write is the shape this repo treats as a defect, not a
-    // nicety. Everything else keeps the generic revalidation deny below, which is
-    // what those principals received before this branch existed.
-    const lineage = principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN
-      ? hookSession.resolveIncompatibleRuntime(payload)
-      : null;
+    // The CAUSE is for everyone; only the REMEDY is MAIN-only. Two separate
+    // decisions, and collapsing them was a real regression this branch shipped for
+    // one review round.
+    //
+    // The remedy half: `/zensu:adopt-session --confirm` WRITES the immutable record,
+    // and `zensu_doctor_allowed` conjoins `zensu_hook_is_main_principal` — so a
+    // reviewer, an evidence worker or any neutral child that reached this catch
+    // would be handed a command every gate refuses it. Deny text is model-read
+    // content: pointing a read-only principal at a privileged write is the shape
+    // this repo treats as a defect, not a nicety.
+    //
+    // The cause half: withholding the diagnosis TOO dropped a non-main principal
+    // back to `immutable context revalidation failed`, which names neither the
+    // lineage break nor either version — a cause-free deny in the one bind failure
+    // that has a name and an in-place repair. `safeVersion` already renders the
+    // pair safely for any principal, so there was never a reason to hide it. A
+    // constrained child is told what happened and who can fix it.
+    const lineage = hookSession.resolveIncompatibleRuntime(payload);
     if (lineage) {
-      deny(`this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing. Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit and Write stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+      const cause = `this session's Session Control record is readable, and the running Zensu installation declares an incompatible lineage — the record was minted by ${safeVersion(lineage.recorded)} and ${safeVersion(lineage.executing)} is executing.`;
+      if (principals.classifyPreToolPayload(payload) === principals.PRINCIPALS.MAIN) {
+        deny(`${cause} Run /zensu:adopt-session to check whether this installation can take the record over in place, and /zensu:adopt-session --confirm to do it; both stay reachable in this state. If the recorded project root is ALSO gone — a deleted or recycled worktree — the adoption still clears the lineage break, but Edit, Write and any Bash command that writes stay denied afterwards until that exact directory is re-created; /zensu:doctor names the path when that is the case.`);
+        return;
+      }
+      deny(`${cause} The repair writes the immutable record and is reserved for the main thread, so it is not available here — report this to the main thread rather than retrying.`);
       return;
     }
     deny(`immutable context revalidation failed: ${error.message}`);

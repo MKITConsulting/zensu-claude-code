@@ -65,10 +65,11 @@ serves the record).
   it re-runs the sweep as an idempotent repair. For any other failure, that is
   `/zensu:doctor`.
 - Clearing a review chain or granting a budget. While the recorded project root
-  still exists the chain state survives adoption untouched and is enforced again
-  on the very next Stop. When that root is GONE there is no chain state left to
-  clear — the workflow document lived under it and died with it, so no later Stop
-  enforces that chain either; adoption changes neither fact.
+  still exists the chain state stays reachable across adoption and is enforced
+  again on the very next Stop. When that root is GONE the workflow document lived
+  under it and is not reachable from this record, so no later Stop can enforce
+  that chain while the directory is missing; adoption changes neither fact. If it
+  was moved rather than deleted, its state still exists there.
 - Any bind failure other than the declared-incompatible lineage — the refusal
   table in Phase 1 below names each one and its own remedy.
 
@@ -130,9 +131,9 @@ alongside the lineage break, and every other one still answers
 lived under that root and died with it.
 
 The limit: adoption repairs the LINEAGE, not the anchor. The adopted session lands
-in the ordinary orphaned-project-root state, so Bash and the read-only diagnostics
-work again while `Edit` and `Write` stay denied until that directory is
-re-created. The report says so before and after `--confirm`; repeat it rather than
+in the ordinary orphaned-project-root state, so READ-ONLY Bash and the read-only
+diagnostics work again while `Edit`, `Write` and any Bash command that WRITES stay
+denied until that directory is re-created. The report says so before and after `--confirm`; repeat it rather than
 announcing an unqualified success, or the user walks straight into a deny they
 were just told was fixed. The adoption never re-creates the deleted directory.
 

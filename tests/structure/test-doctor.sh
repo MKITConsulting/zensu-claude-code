@@ -392,6 +392,31 @@ case "$OUT_NOMOD" in
   *)
     check "P1mf a missing chain module degrades to a warning (got: $OUT_NOMOD)" FAIL ;;
 esac
+# P1mg — the SAME minimal root, now driven with a binding value, which is the only
+# way to reach the display fold's load-failure branch. $NOCHAIN carries the core and
+# the renderer but not zensu-safe-display-v1.js, so safeDisplay's guarded require
+# throws and it returns the empty string. The contract that branch states is "drop the
+# value and keep the row": the row must still name the state, must NOT print the path,
+# and must NOT render an empty or placeholder parenthetical — the ternaries test the
+# FOLDED result precisely so the whole parenthetical disappears. P1mf above proves the
+# renderer still LOADS without its sibling; it sets no ZDOC_BINDING, so bindingLine()
+# returns undefined and the fold is never called. Without this row the branch has no
+# executed case anywhere.
+OUT_NOFOLD="$(ZENSU_DOCTOR_PLUGIN_DIR="$NOCHAIN" ZENSU_CONFIG="$SBOX/good-cfg.json" CLAUDE_PROJECT_DIR="$CAS_PROJECT" \
+  ZDOC_BINDING=orphaned-project-root ZDOC_BINDING_PROJECT_ROOT=/tmp/zensu-nofold-probe \
+  node "$NOCHAIN/hooks/lib/zensu-doctor-report.js" 2>&1)"
+NOFOLD_RC=$?
+NOFOLD_ROW="$(printf '%s' "$OUT_NOFOLD" | grep -F 'binding:' || true)"
+if printf '%s' "$NOFOLD_ROW" | grep -qF 'recorded project root' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '/tmp/zensu-nofold-probe' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF '()' \
+    && ! printf '%s' "$NOFOLD_ROW" | grep -qF 'unrenderable' \
+    && [ "$NOFOLD_RC" -eq 0 ]; then
+  check "P1mg an unloadable display-fold module drops the value and keeps the row" PASS
+else
+  check "P1mg an unloadable display-fold module drops the value and keeps the row (rc=$NOFOLD_RC)" FAIL
+  printf '%s' "$NOFOLD_ROW" | head -c 300
+fi
 
 node -e '
   const fs=require("fs"), p=process.argv[1], j=JSON.parse(fs.readFileSync(p,"utf8"));

@@ -14,31 +14,23 @@
 // — depend on a four-file load chain to fold one string. A leaf module gives one
 // rule one owner and shrinks the chain that can fail to a file with no dependencies.
 //
-// TWO exports because there are genuinely TWO rules, and conflating them was part of
-// the original defect:
+// ONE rule, `safeDisplayValue`, and deliberately only one. It adds the pair-forgery
+// guard (a two-space run, or a ` : ` sequence, would let the value fake a further row
+// beneath the one it sits on) on top of a positive letter/number/mark allowlist. Both
+// callers need it: the adoption report and the doctor report each render
+// `label : value` rows the model is told to read verbatim, and the doctor's binding
+// line is prose sitting in a report made of such pairs, where a forged pair is exactly
+// as convincing.
 //
-//   safeDisplayValue — the FULL rule, and the one BOTH shipped callers use. It adds
-//     the pair-forgery guard (a two-space run, or a ` : ` sequence, would let the
-//     value fake a further row beneath the one it sits on) on top of a positive
-//     letter/number/mark allowlist. Both the adoption report and the doctor report
-//     render `label : value` rows the model is told to read verbatim, so both need
-//     it — the doctor's binding line is prose, but it sits in a report whose other
-//     rows are pairs, and a forged pair there is exactly as convincing.
-//
-//   foldDisplayHiders — the NARROW rule, and STRICTLY WEAKER. It removes only the
-//     characters that can hide or reorder the rest of a line and leaves everything
-//     else readable. It is NOT a substitute for the rule above; it exists because
-//     the doctor renderer previously carried this fold as a private fallback copy,
-//     and naming it here is what keeps it from being re-authored a third time.
-//
-// Do not reach for the narrow rule to avoid JSON-quoting an ugly path. Losing
-// readability is a worse message; losing the pair guard is a wrong one.
-
-// Bidi overrides and isolates (\p{Cf}) plus the line and paragraph separators
-// (\p{Zl}/\p{Zp}). These are the characters that can HIDE the rest of a line.
-const DISPLAY_HIDERS = new RegExp('[\\u202a-\\u202e\\u2066-\\u2069\\u2028\\u2029]', 'g');
-
-const foldDisplayHiders = (value) => String(value == null ? '' : value).replace(DISPLAY_HIDERS, '?');
+// A SECOND, narrower export lived here for one review round — `foldDisplayHiders`,
+// which removed only the bidi and line-separator characters. It was written for the
+// doctor's load-failure fallback, that fallback was then changed to drop the value
+// instead of folding it, and the export was left behind with no consumer and no
+// executed case anywhere while this file is named in CLAUDE.md as a core-half port
+// obligation. Four review seats found it independently. It is gone: an exported rule
+// that is strictly weaker than the real one, unexercised, and reachable by a future
+// caller who mistakes it for the fold is worse than no export at all. If a narrow
+// fold is ever genuinely needed, add it WITH its consumer and its case, in one change.
 
 // The alphabet is deliberately WIDE — \p{L}\p{N}\p{M} rather than ASCII — so an
 // ordinary non-ASCII home directory renders as itself instead of as an escape soup,
@@ -74,13 +66,14 @@ const safeDisplayValue = (value) => {
     .replace(SPACE_RUN, (run) => '\\u0020'.repeat(run.length));
 };
 
-// DOUBLE_SPACE and NON_ASCII are exported for the same reason SAFE_DISPLAY is:
-// tests/structure/session-adopt-report-v1.test.js pins all three by name through the
-// adoption report's own export surface, and that surface now re-exports them from
-// here. They are internals of safeDisplayValue, not a second public rule.
+// SAFE_DISPLAY is read BY NAME by tests/structure/session-adopt-report-v1.test.js,
+// through the adoption report's re-export surface, which is why it is public.
+// DOUBLE_SPACE and NON_ASCII are exported only to KEEP that re-export surface intact —
+// the report's export list carried them before the rule moved here, and removing them
+// would be an unrelated break. They are internals of safeDisplayValue, not public
+// rules, and no test reads either of them: an earlier version of this comment claimed
+// the suite "pins all three by name", which was false for two of the three.
 module.exports = {
-  DISPLAY_HIDERS,
-  foldDisplayHiders,
   SAFE_DISPLAY,
   DOUBLE_SPACE,
   NON_ASCII,

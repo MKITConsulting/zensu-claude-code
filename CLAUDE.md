@@ -596,8 +596,15 @@ own comment states: "not reachable", never "gone". It shipped once as "is GONE w
 that then closed by admitting a move leaves the state intact. The enforcement half must
 also stay BOUNDED to while the directory is missing, which is what makes it true: re-create
 the root and a later bind takes the deferral arm instead. The same standard governs every
-mirror of it — `docs/session-control.md`, both doctor rows, and the adoption report's
-pre-confirm paragraph and its no-workflow-document NOTE. That third arm exists because the channel answers on three statuses — 0 with the
+mirror of it — `docs/session-control.md`, both doctor rows, the adoption report's
+pre-confirm paragraph and its no-workflow-document NOTE, and the two SKILL files
+(`skills/doctor/SKILL.md`, `skills/adopt-session/SKILL.md`). The skills were left off
+this list when it was first written and both promptly shipped the forbidden spelling,
+which is the whole argument for naming them here rather than trusting a sweep. **It
+governs the POSITIVE half too**, and that was missed the same way: the deferral arm
+claimed the workflow document "SURVIVES and is unchanged" on a probe that established
+only that the anchor RESOLVED — nothing on that path opens the document — so it is
+now worded as reachability, not as contents. That third arm exists because the channel answers on three statuses — 0 with the
 path, 3 for a live recorded root, 1 for an unavailable answer — and a caller that reads only
 truthiness collapses the last two, which is precisely how a surface comes to assert a
 workflow document that is gone. The first attempt at this fix contained that collapse. The others carry an unconditional clause instead, which is true in
@@ -665,7 +672,7 @@ version-shape rule are unchecked:
   — the adoption ENTRY POINT calls it after the record swap — so a port that takes
   only the core delta gets an adoption that never sweeps and leaves every superseded
   lease wedging the store. What the move bought: the function is exported and driven
-  by `tests/structure/session-control-lease-sweep.test.js`, so its refusal arms cost
+  by `tests/structure/review-evidence-sweep-v1.test.js`, so its refusal arms cost
   a temp directory each instead of a full synthetic install plus a session
   lifecycle, and three return shapes the shell layer could not reach are ordinary
   cases.
@@ -684,9 +691,15 @@ enumerated core half has `adoptContext` passing a second argument to a `buildCon
 ignores it, so `canonicalDirectory` runs on an absent path and adoption THROWS in exactly
 the state the feature was written for. **`hooks/lib/zensu-safe-display-v1.js` joins
 the core half**, and it is the one entry a port is likeliest to skip because it looks
-cosmetic: it owns `safeDisplayValue` (the `label : value` pair-forgery guard plus the
-positive letter/number/mark allowlist) and `foldDisplayHiders`, it requires NOTHING —
-not even a node builtin — and both report renderers consume it. The rule
+cosmetic: it owns `safeDisplayValue` — the `label : value` pair-forgery guard plus the
+positive letter/number/mark allowlist — it requires NOTHING, not even a node builtin,
+and both report renderers consume it. **ONE rule, deliberately.** A second, narrower
+`foldDisplayHiders` shipped here for one review round: it was written for the doctor's
+load-failure fallback, that fallback was then changed to DROP the value instead of
+folding it, and the export survived with no consumer and no executed case while this
+paragraph named the file a port obligation. Four review seats found it independently.
+A port that re-adds a weaker sibling rule re-creates exactly the two-implementation
+class the extraction removed. The rule
 lived inside `session-adopt-report-v1.js`, a feature command's module with five
 requires of its own, and the doctor reached for it through a guarded lazy require
 with a second, narrower spelling behind the guard: a display rule in two
@@ -697,11 +710,15 @@ doctor renderer keeps its require LAZY and GUARDED, because that file deliberate
 has no hard sibling require — `test-doctor.sh` P1mf builds a plugin root carrying
 exactly the core and that renderer, to prove a missing `chain-recovery-v1.js`
 degrades to one warning row rather than killing the report, and a top-level require
-made the renderer unloadable in that tree. Its fallback prints `(unrenderable)`
-rather than re-authoring the fold: dropping the value is the move `zensu-doctor.sh`
-already makes for a version pair that fails its shape guard, and it is what keeps the
-two-implementation class from coming straight back. A port that re-authors the fold
-gets that class anyway.
+made the renderer unloadable in that tree. Its fallback returns the EMPTY STRING
+rather than re-authoring the fold, and **every call site tests the FOLDED result**, so
+the whole parenthetical disappears — dropping the value is the move `zensu-doctor.sh`
+already makes for a version pair that fails its shape guard. That coupling is the part
+to keep: the fallback returned a non-empty `(unrenderable)` for one round while the
+call sites still tested the RAW environment variable, and the row rendered
+`… no longer exists ((unrenderable)) — …`, doubled parens and all, which is the
+opposite of what its own comment promised. A port that re-authors the fold, or that
+guards on the raw value, gets one of those two defects back.
 `discardSupersededLeases` is NO LONGER
 among them — it moved to `hooks/lib/review-evidence-sweep-v1.js` and is the EIGHTH
 host obligation enumerated below. Note that
@@ -723,9 +740,10 @@ superseded lease wedging the store — and NINTH the third-fact channel: the
 `orphaned-incompatible-root` / `model-orphaned-incompatible-root` argv pair, both
 shell wrappers, and the THREE-way exit status those wrappers carry, without which a
 port gets a Stop hook telling a user whose worktree is gone that their chain state
-survived. That ninth entry sat in the prose ABOVE this enumeration for one release
-while the count still read EIGHT, which is the failure this file records elsewhere
-about its own rosters: a port works from the list, not from the paragraph, so an
+survived. That ninth entry sat in the prose ABOVE this enumeration for one review
+round on this branch while the count still read EIGHT — it was never released that
+way, and saying otherwise would overstate the history — which is the failure this
+file records elsewhere about its own rosters: a port works from the list, not from the paragraph, so an
 obligation named only in prose is an obligation that gets skipped. A port that
 copies only the script gets a TypeError rendered as the wrong refusal.
 `zensu-codex`, `zensu-kiro` and `zensu-antigravity` were NOT included in this change.

@@ -350,11 +350,14 @@ classifier will refuse a spawn, not only when the whole table is green.
   repairable in place and `/zensu:adopt-session` applies — that is the difference
   from the plain orphaned row, which the running installation already serves and
   which adoption refuses as `already-served`. State the limit whenever you offer
-  the repair: adoption clears the LINEAGE break, so Bash and this diagnostic work
-  again, while `Edit` and `Write` stay denied until that exact directory is
-  re-created, because the anchor is still missing. The workflow document lived
-  under that directory and is gone with it, so no chain state survives and no
-  later `Stop` enforces it — do not tell the user their review chain resumes.
+  the repair: adoption clears the LINEAGE break, so READ-ONLY Bash and this
+  diagnostic work again, while `Edit`, `Write` and any Bash command that WRITES
+  stay denied until that exact directory is re-created — a write cannot be
+  attributed to a project that is not there. The workflow document lived under
+  that directory and is not reachable from this record, so no chain state is
+  reachable and no later `Stop` can enforce it while that directory is missing —
+  do not tell the user their review chain resumes. If it was moved rather than
+  deleted, re-creating exactly that directory restores it.
   **The converse also has no row, and it matters for a trust question.** Because
   the rule compares declared versions and never content, a *bound* session's
   enforcing runtime may be a different installation that merely shares

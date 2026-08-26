@@ -1469,14 +1469,23 @@ function truncatedList(rows) {
 // one degraded row into no report at all. Same reasoning as `ruleCarrierRows` and
 // `reviewerDenialRows` two blocks down.
 //
-// WHY the fallback prints no value: the previous guard fell back to a SECOND,
-// narrower spelling of the fold, so one rule had two implementations with nothing
-// comparing them. Re-authoring it here is what the extraction exists to stop. With
-// the rule unavailable, the honest move is the one `zensu-doctor.sh` already makes
-// for a version pair that fails its shape guard: drop the value and keep the row.
+// WHY the fallback returns the EMPTY STRING: the previous guard fell back to a
+// SECOND, narrower spelling of the fold, so one rule had two implementations with
+// nothing comparing them. Re-authoring it here is what the extraction exists to stop.
+// With the rule unavailable, the honest move is the one `zensu-doctor.sh` already
+// makes for a version pair that fails its shape guard — it emits a bare `printf
+// '\t'`, the value arrives empty, and the ternary omits the whole parenthetical.
 // Losing the path is a worse message; rendering it unfolded is a wrong one.
 //
-// The FULL rule, not the narrow fold. The binding line is prose, but it sits in a
+// It returned the literal `(unrenderable)` for one review round, which did NOT do
+// what this comment said: the call sites tested the RAW env var, so the parenthetical
+// still fired and the row rendered `... no longer exists ((unrenderable)) — ...`,
+// doubled parens and all, replacing the row's only actionable datum with a
+// placeholder that reads as if the PATH were unreadable rather than the fold
+// unavailable. Every call site now tests the FOLDED result, which is what makes
+// "drop the value and keep the row" true rather than merely intended.
+//
+// The FULL rule, not a narrow fold. The binding line is prose, but it sits in a
 // report built out of `label : value` rows that the doctor skill tells the model to
 // print verbatim, so the pair-forgery guard is exactly as load-bearing here as in
 // the adoption report.
@@ -1485,7 +1494,7 @@ function safeDisplay(value) {
   try {
     return require('./zensu-safe-display-v1.js').safeDisplayValue(text);
   } catch (e) {
-    return '(unrenderable)';
+    return '';
   }
 }
 
@@ -1501,7 +1510,7 @@ function bindingLine() {
     // line above would send them looking for a record that is right there.
     case 'orphaned-project-root':
       return line(BAD, 'binding: the project root recorded for this session no longer exists'
-        + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
+        + (safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
         + ' — a deleted or recycled worktree left the workflow state unreachable from this record, so stateful Zensu tools fail closed while this read-only diagnostic still runs; re-create exactly that directory to resume, or start a fresh Claude Code session. If it was moved rather than deleted, its state still exists there');
     // The record is INTACT and only the runtime serving it declares an
     // incompatible lineage — a plugin update that landed mid-session. Before this
@@ -1512,7 +1521,7 @@ function bindingLine() {
     // this is the only binding row whose remedy repairs the session in place.
     case 'incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is intact, but the running Zensu installation declares an incompatible lineage'
-        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+        + (safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) && safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION)
           ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
           : '')
         + ' — while the plugin is at major 0 the minor is the breaking axis, so stateful Zensu tools fail closed; run /zensu:adopt-session to see whether this session can be adopted in place, then /zensu:adopt-session --confirm'
@@ -1543,9 +1552,9 @@ function bindingLine() {
     // row states that limit instead of promising a full rescue.
     case 'orphaned-project-root+incompatible-runtime':
       return line(BAD, 'binding: this session\'s Session Control record is readable, but BOTH the recorded project root'
-        + (env.ZDOC_BINDING_PROJECT_ROOT ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
+        + (safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) ? ' (' + safeDisplay(env.ZDOC_BINDING_PROJECT_ROOT) + ')' : '')
         + ' is gone and the running Zensu installation declares an incompatible lineage'
-        + (env.ZDOC_BINDING_RECORDED_VERSION && env.ZDOC_BINDING_EXECUTING_VERSION
+        + (safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) && safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION)
           ? ' (record minted by ' + safeDisplay(env.ZDOC_BINDING_RECORDED_VERSION) + ', executing ' + safeDisplay(env.ZDOC_BINDING_EXECUTING_VERSION) + ')'
           : '')
         // OFFERED, never promised — the same hedge the row above carries and for
