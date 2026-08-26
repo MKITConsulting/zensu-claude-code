@@ -554,6 +554,8 @@ function buildContext(options) {
 // caller is readOrphanedProjectRootContext, which separately PROVES the path is
 // absent — waiving the check does not mean the field is unvalidated, because
 // the requireText loop below still rejects a missing, blank, or unsafe value.
+// buildContext takes an option of the SAME NAME for the adoption re-mint; it is
+// a different function's option and does not reach this one.
 function validateContext(context, expectedHost, options) {
   const allowMissingProjectRoot = Boolean(options && options.allowMissingProjectRoot);
   if (!context || typeof context !== 'object' || Array.isArray(context)) {
