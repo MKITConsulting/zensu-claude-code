@@ -1197,6 +1197,9 @@ test('a competing write that lands while the replacement is being staged is stil
   const p = mod.ledgerPaths(root);
   mod.writeLabels(p.labels, mod.emptyLabels(), root);
   let interfered = false;
+  // The injected stage does its OWN staging rather than delegating to the module's:
+  // the three writers are module-private on purpose, so a test that reached for a part
+  // would be asserting against a surface no production caller has.
   const stage = (labelsFile, labels, stopAt) => {
     if (!interfered) {
       interfered = true;
@@ -1204,7 +1207,9 @@ test('a competing write that lands while the replacement is being staged is stil
       theirs.accounts.other = 'Theirs';
       mod.writeLabels(labelsFile, theirs, stopAt);
     }
-    return mod.stageLabels(labelsFile, labels, stopAt);
+    const tmp = path.join(path.dirname(labelsFile), `.labels-test-${process.pid}.tmp`);
+    fs.writeFileSync(tmp, `${JSON.stringify(labels, null, 2)}\n`, { flag: 'w', mode: 0o600 });
+    return tmp;
   };
   const out = mod.updateLabels(p.labels, (l) => {
     const next = mod.normalizeLabels(l);

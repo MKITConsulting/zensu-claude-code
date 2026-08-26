@@ -223,9 +223,26 @@ export function otherSchemaLedgers(configRoot) {
       if (vs.isSymbolicLink() || !vs.isDirectory()) continue;
       const es = fs.lstatSync(edges);
       if (es.isSymbolicLink() || !es.isDirectory()) continue;
-      records = fs.readdirSync(edges).filter((f) => f.endsWith('.json') && !f.startsWith('.'));
+      // STREAMED, not materialized. This enumeration used to build an array holding
+      // every name in a directory the comment above calls writable by every session on
+      // the machine — and it now runs on every `lineage` invocation rather than only on
+      // an empty store, because the disclosure it feeds must not decay. `opendirSync`
+      // walks the same entries in constant memory. The COUNT is deliberately still the
+      // true one: the note beside `records` argues that a bounded number rendered as a
+      // complete one is the failure to avoid, and streaming keeps that argument intact
+      // while removing the allocation it did not need.
+      const dir = fs.opendirSync(edges);
+      records = 0;
+      try {
+        for (let ent = dir.readSync(); ent !== null; ent = dir.readSync()) {
+          const f = ent.name;
+          if (f.endsWith('.json') && !f.startsWith('.')) records += 1;
+        }
+      } finally {
+        try { dir.closeSync(); } catch { /* the count is what matters */ }
+      }
     } catch { continue; }
-    if (!records.length) continue;
+    if (!records) continue;
     out.push({
       version,
       dir: edges,
@@ -233,8 +250,8 @@ export function otherSchemaLedgers(configRoot) {
       // while the enumeration above was unbounded, so it constrained nothing and
       // rendered a bounded answer as a complete one. `readEdges` reports its own
       // cap the same way, and for the reason stated there.
-      records: records.length,
-      truncated: records.length > MAX_EDGE_RECORDS,
+      records,
+      truncated: records > MAX_EDGE_RECORDS,
       // Named rather than inferred by the caller: "older" means this build can be
       // taught to read it, "newer" means it cannot and the plugin is behind.
       relation: version < LEDGER_SCHEMA_VERSION ? 'older' : 'newer',
@@ -948,9 +965,16 @@ export function normalizeLabels(raw) {
 // discipline the edge records were given: two concurrent labels lost one
 // silently, and a crash mid-write left JSON that the reader swallows into "no
 // labels at all".
-// Split in two so the CHECKED window can be the rename alone. Everything expensive —
+// Split in three so the CHECKED window can be the rename alone. Everything expensive —
 // the directory walk and the whole temp write — happens in `stageLabels`, outside it.
-export function stageLabels(labelsFile, labels, stopAt = null) {
+//
+// None of the three is exported. `stageLabels` derives its temp path from `labelsFile`,
+// so within this module no caller can name the rename source or the unlink target,
+// which is the confinement the single `writeLabels` had by construction; exporting them
+// would hand out an unconfined rename and an unconfined unlink with both operands
+// caller-supplied. `writeLabels` remains the composed public writer, and `updateLabels`'
+// `stage` seam is what the unit layer injects instead of reaching for a part.
+function stageLabels(labelsFile, labels, stopAt = null) {
   // The base directory, not a reconstructed edges path: `ledgerPaths` owns the
   // layout, and writing a label used to create `edges/` as a side effect.
   ensureLedgerDir(path.dirname(labelsFile), stopAt);
@@ -959,12 +983,8 @@ export function stageLabels(labelsFile, labels, stopAt = null) {
   return tmp;
 }
 
-// NOT exported, either of them. `stageLabels` derives its temp path from `labelsFile`,
-// so within this module no caller can name the rename source or the unlink target —
-// which is the confinement the single `writeLabels` had by construction. Exporting them
-// would hand out an unconfined rename and an unconfined unlink with both operands
-// caller-supplied, and `removeEdgeFiles`, the module's other destructive verb, spends
-// three checks to avoid exactly that.
+// `removeEdgeFiles`, the module's other destructive verb, spends three checks to avoid
+// handing out an unconfined unlink; these two avoid it by staying private instead.
 function discardStagedLabels(tmp) {
   try { fs.unlinkSync(tmp); } catch { /* whatever brought us here is the real error */ }
 }
