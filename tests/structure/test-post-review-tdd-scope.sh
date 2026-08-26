@@ -502,6 +502,24 @@ else
   check "S16 unqualified terminus is rejected after a ticket was consumed" FAIL
 fi
 
+# S17 — the convergence full-suite instruction, in BOTH CLOSE_PASS directive strings.
+# Phase 5 checkpoints are SCOPED, so this branch is where the verdict for the tree that
+# ships is measured. The skill states the rule, but CLOSE_PASS is what the model actually
+# RECEIVES at convergence, and with `hooks.selfReview:false` no self-review stage follows
+# to re-measure — so the selfReview-OFF arm is the one that must not be dropped. Both
+# arms pinned: the skill-side rule can survive while the carrier that delivers it does not.
+# Needles are SINGLE-quoted: these contain backticks, and a double-quoted needle would be
+# command-substituted away by bash and pin nothing (that exact defect shipped once here).
+CLOSE_PASS_HITS="$(grep -cF -- 're-run the FULL test suite over the current tree in the FOREGROUND' "$HOOK" 2>/dev/null || echo 0)"
+if [ "$CLOSE_PASS_HITS" -eq 2 ] \
+  && grep -qF -- 'this convergence branch is where the verdict for the tree that ships is measured' "$HOOK" \
+  && grep -qF -- 'NO self-review stage follows in this configuration' "$HOOK" \
+  && grep -qF -- '| scope: full' "$HOOK"; then
+  check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction" PASS
+else
+  check "S17 both CLOSE_PASS arms carry the convergence full-suite instruction (hits: $CLOSE_PASS_HITS)" FAIL
+fi
+
 echo "----"
 echo "test-post-review-tdd-scope: $PASS PASS / $FAIL FAIL"
 [ "$FAIL" -eq 0 ]

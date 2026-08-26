@@ -359,3 +359,60 @@ test('END-TO-END: a run whose only witness entry is the logging printf reports a
     assert.ok(!r.out.some((l) => l.startsWith('verified')));
   });
 });
+
+// ── The trailing ` | scope:` CHECKPOINT/AUDIT segment ────────────────────────
+// skills/tdd/SKILL.md:341 mandates that the scope be named AFTER the closing quote and
+// forbids a `"` anywhere in the segment, and it states two properties of THIS library
+// as its reason. A prose pin over that sentence guards the sentence, not the property.
+// These cases guard the property, per this suite's own rule that a check belongs where
+// the behaviour is enforced.
+
+test('a quote-free trailing | scope: segment reaches neither cmd nor result', () => {
+  const line =
+    'S3 CHECKPOINT — cmd="npm test" exit=0 result="PASS"'
+    + ' | scope: 3 suites over tests/structure/test-tdd-state-corruption-fail-closed.sh';
+  const claims = lib.parseClaims(line);
+  assert.strictEqual(claims.length, 1);
+  assert.strictEqual(claims[0].cmd, 'npm test');
+  // The discriminator is the `fail-closed` inside the scope path: had the segment
+  // leaked into result, isGreen would reject it and the contradiction branch would
+  // never arm. Asserting the exact verdict proves the parse stopped at the quote.
+  assert.strictEqual(claims[0].result, 'PASS');
+});
+
+test('a quote-free scope segment keeps EVIDENCE CONTRADICTION armed', () => {
+  withTemp((dir) => {
+    const log = path.join(dir, 'run.log');
+    const witness = path.join(dir, 'witness.log');
+    fs.writeFileSync(
+      log,
+      'S3 CHECKPOINT — cmd="npm test" exit=0 result="PASS"'
+        + ' | scope: 2 suites over src/a.ts, tests/structure/test-tdd-state-corruption-fail-closed.sh\n'
+    );
+    fs.writeFileSync(witness, witnessLine('npm test', '3 failed, 1 passed', false, '') + '\n');
+    const r = lib.run(['--log', log, '--witness', witness]);
+    assert.ok(r.out.some((l) => l.startsWith('EVIDENCE CONTRADICTION')));
+  });
+});
+
+test('a QUOTED path in the scope segment disarms the contradiction check', () => {
+  // The failure mode the no-quote rule exists to prevent, pinned so the rule keeps a
+  // reason. extractQuoted finds the closing quote with lastIndexOf('"'), so a quoted
+  // path folds the whole segment into result, and isGreen then rejects it on the
+  // `fail` token inside `fail-closed` — leaving the claim uncontradictable.
+  withTemp((dir) => {
+    const log = path.join(dir, 'run.log');
+    const witness = path.join(dir, 'witness.log');
+    fs.writeFileSync(
+      log,
+      'S3 CHECKPOINT — cmd="npm test" exit=0 result="PASS"'
+        + ' | scope: 1 suite over "tests/structure/test-tdd-state-corruption-fail-closed.sh"\n'
+    );
+    fs.writeFileSync(witness, witnessLine('npm test', '3 failed, 1 passed', false, '') + '\n');
+    const r = lib.run(['--log', log, '--witness', witness]);
+    assert.ok(!r.out.some((l) => l.startsWith('EVIDENCE CONTRADICTION')));
+    // Positive control: without it, a regression that stopped parsing the claim at all
+    // would also satisfy the assertion above while testing nothing.
+    assert.ok(r.out.some((l) => l.startsWith('verified')));
+  });
+});

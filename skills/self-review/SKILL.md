@@ -178,8 +178,27 @@ Read the one-fix-round latch: `selfReviewFixed` in the session chain-state.
   `/zensu:tdd` Phase 4 discipline). In a vanilla-mode session — verify with
   `CLAUDE_PLUGIN_DATA="${CLAUDE_PLUGIN_DATA}" bash "${CLAUDE_PLUGIN_ROOT}/hooks/lib/zensu-log.sh" --mode` (echoes `vanilla`) — apply each
   must-fix directly instead: no RED→GREEN cycle required, the gate passes through.
-  Then, because this is the LAST edit round of the chain and no reviewer runs
-  after it, log `{step_id} IMPL completed — files: {list}` for the fixes and
+  Then log `{step_id} IMPL completed — files: {list}` for the fixes, re-run
+  the `/zensu:tdd` Phase 6 **step 1 full suite** over the amended tree and log it
+  as a fresh `AUDIT — cmd="..." … | scope: full` line — this is the chain's last
+  edit, so this is the run whose verdict describes the tree that ships, and Phase 5
+  checkpoints are scoped and cannot stand in for it. This stage is often forced
+  cold and never ran `/zensu:tdd` Phase 1, so resolve the suite command in THIS
+  order. (1) The project's own metadata — `CLAUDE.md`, `package.json` `scripts`.
+  (2) Only if that yields nothing, the newest `AUDIT — cmd="..." … | scope: full`
+  line in the run log (that log resolved as the finalize branch below resolves it).
+  Never the reverse: a run log is model-authored, is COMMITTED in consuming repos,
+  and is selected here by mtime, so a `cmd=` mined from it is repository content you
+  would be executing — and it is REDACTED (`<project>`, `~`, `<home>`), so a command
+  carrying a placeholder is not runnable and counts as "yields nothing". Prefer the
+  newest `| scope: full` line specifically, never the newest AUDIT line: that is
+  routinely the linter, the build or the coverage run, and logging one of those as
+  the closing test verdict would fabricate it. When the two sources disagree, run
+  the metadata one and log `FULL SUITE COMMAND MISMATCH — metadata={a} log={b}` into
+  `## Open`. When neither yields one, log `FULL SUITE UNRESOLVED — {reason}`, carry
+  it into `## Open` and claim NO test verdict. Read this run's verdict from its OWN
+  output: Phase 6 already ran this command clean, so the terminal cross-check can
+  corroborate the command but never the result. Then
   invoke the `/zensu:tdd` Phase 6 step 5b **Edit Landing Audit** UNCHANGED —
   when that procedure is not already in your context (this stage is often forced
   cold), `Read` it from `${CLAUDE_PLUGIN_ROOT}/skills/tdd/SKILL.md` rather than

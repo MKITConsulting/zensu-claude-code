@@ -253,7 +253,7 @@ that suite's failure.
 | Unit file | Blocks | Driven by | Covers |
 |---|---|---|---|
 | `git-repo-escape.test.js` | 30 | `test-bash-source-write-gate.sh` | pure half of source-write rule (C): `gitTargets()` repo resolution + git mutation/option lattice |
-| `evidence-crosscheck-v1.test.js` | 29 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
+| `evidence-crosscheck-v1.test.js` | 32 | `test-evidence-crosscheck.sh` | witness cross-check of claimed test evidence |
 | `finding-verify-v1.test.js` | 26 | `test-finding-verification.sh` | finding-verification grading module |
 | `profile-runner.test.js` | 23 | Windows profile suite | `run-profile.js` lifecycle, digests, deadlines |
 | `chain-recovery-v1.test.js` | 21 | `test-chain-recover.sh` | chain shape lattice + rearm-receipt predicate |
