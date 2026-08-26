@@ -146,6 +146,44 @@ errors **fail open** with a stderr note. Bypass with `ZENSU_SECRET_SCAN=off` (en
 for Bash); disable via `hooks.secretScan:false`.
 `tests/structure/test-secret-scan-gate.sh` pins the behavior.
 
+## Reviewer-Spawn Grant
+
+The one entry in this file that **opens** rather than closes. `pre-agent-reviewer-allow.sh` is a
+PreToolUse hook on the `Agent|Task` matcher that returns `permissionDecision: "allow"` for Zensu's
+own capability-confined reviewer subagents, which short-circuits the host permission pipeline
+**before** the auto-mode classifier is consulted.
+
+It exists because a classifier refusal is invisible to every other mechanism here. The spawn never
+executes, so no PreToolUse or PostToolUse hook observes it, and the Stop chain-enforcer repeats an
+instruction that cannot succeed until its cap releases the guard.
+`hooks/lib/reviewer-spawn-denial-v1.js` diagnoses that state after the fact; this hook prevents it.
+
+- **It can only grant or stay silent.** It never emits deny or ask, and every failure path is a
+  silent `exit 0` — the opposite of the fail-closed direction the gates above take. A non-zero exit
+  from a PreToolUse hook blocks the tool call, so a fail-closed grant hook would break every Agent
+  spawn in the session, including the reviewer it exists to admit.
+- **Four conditions, all required.** The main principal; a bound Session Control record;
+  `hooks.reviewerSpawnAutoAllow` not set to exactly `false`; and membership in the confined set.
+- **The set is derived, never spelled.** It is `claude-principal-v1.js`'s `REVIEWER_TYPES` plus
+  `EVIDENCE_WORKER_TYPES` — the same classifier `SubagentStart` uses to inject
+  `reviewer-readonly-v1` — restricted to the plugin-scoped `zensu:` names. Each is confined to
+  `Read`/`Grep`/`Glob` by its agent frontmatter, so granting the SPAWN grants the child nothing:
+  its own tool calls are permission-checked separately. Bare names (`code-reviewer`, …) are
+  **excluded** because a project may define a same-named agent with `tools: Bash`.
+- **The grant covers the CALL, not only the identity.** Only `tool_name` and
+  `tool_input.subagent_type` are examined; every other input field travels unexamined,
+  including `prompt` and `isolation: "worktree"` — and that last one is a host-performed
+  filesystem action caused by the spawn itself, so it sits outside the `Read`/`Grep`/`Glob`
+  confinement the frontmatter provides. Read that confinement as bounding what the CHILD may
+  do, never as bounding the call.
+- **Three host limits bound it**, and none is a defect to be fixed by widening the grant: a
+  `permissions.deny` or `permissions.ask` rule still overrides it; another hook on the same matcher
+  returning deny or ask outranks it (the host ranks deny > ask > allow); and an SDK session
+  supplying `canUseTool` forces the full pipeline.
+- **It is disclosed in both states.** The SessionStart banner names the grant while it is on, and a
+  `/zensu:doctor` row reports it either way — that row is not silenceable by the flag. A capability
+  the plugin hands itself is exactly the thing that must not be quiet.
+
 ## TDD Phase Gate
 
 Unlike prompt-based TDD ("please write tests first"), the `/zensu:tdd` workflow **structurally prevents** violations via a PreToolUse FSM gate on Edit/Write/MultiEdit:

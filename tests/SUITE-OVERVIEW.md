@@ -13,8 +13,8 @@ not by this file.** `run-all.sh` compares that manifest against the actual direc
 listing before any suite runs and refuses to execute at all when they disagree — so a
 new suite file and its manifest entry must land in the same commit, or every mode,
 including both release jobs, aborts rather than skipping one suite. §1 and §2 below are
-reconciled to that manifest (143 = 136 + 7), **and §3 is too**: its eleven CI group headers
-sum to 136, the twelfth (local-only) adds 7, and every one of the 143 manifest suites appears
+reconciled to that manifest (144 = 137 + 7), **and §3 is too**: its eleven CI group headers
+sum to 137, the twelfth (local-only) adds 7, and every one of the 144 manifest suites appears
 in exactly one group. §7's profile table was re-derived from
 `tests/profiles/windows-ci.v1.json` rather than described, so its seven shard ids and their
 membership are the JSON's own, and the entry total is **42**.
@@ -41,9 +41,9 @@ is ever measured for the suite.
 
 | Layer | Count | Runs where |
 |---|---|---|
-| `tests/structure/test-*.sh` (deterministic shell) | **143** — 136 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
-| *(reconciliation)* | a `--ci` run reports **136 structure suites + 5 offline evals = 141 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 143 − 136 gap | — |
-| `tests/structure/*.test.js` (`node --test` units) | **23 files** | invoked *by* parent `.sh` suites |
+| `tests/structure/test-*.sh` (deterministic shell) | **144** — 137 CI-blocking + 7 Promptfoo local-only | `run-all.sh` (all modes) |
+| *(reconciliation)* | a `--ci` run reports **137 structure suites + 5 offline evals = 142 executed**; the 7 Promptfoo local-only suites are skipped as `LOCAL` and never counted, which is the whole 144 − 137 gap | — |
+| `tests/structure/*.test.js` (`node --test` units) | **24 files** | invoked *by* parent `.sh` suites |
 | Offline eval suites (`ciOfflineSuites`) | **5** | `run-all.sh` |
 | Live `claude --print` E2E suites | **7** | `run-all.sh --live` / `--self-check` |
 | Windows contract profiles | **7** (`windows-shard-1`…`-7`, 42 suite entries) | `ci.yml` matrix, `run-profile.js` |
@@ -54,8 +54,8 @@ is ever measured for the suite.
 
 | Mode | Selects | API cost |
 |---|---|---|
-| *(no arg)* | all 143 structure suites + 5 offline evals | none |
-| `--ci` | 135 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
+| *(no arg)* | all 144 structure suites + 5 offline evals | none |
+| `--ci` | 137 CI structure suites (7 Promptfoo ones skipped as `LOCAL`) + 5 offline evals with `ciArgs` | none |
 | `--self-check` | deterministic + the 7 live suites' skeleton mode | none |
 | `--live` | deterministic + 7 live suites with fixture setup | **yes** |
 
@@ -110,7 +110,7 @@ unreadable marker forces nothing), the two preconditions `--tdd-complete` refuse
 the edit-landing receipt and the plan's `## Requirements` table that `/zensu:converge`
 anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 
-### Review chain & findings (26)
+### Review chain & findings (27)
 `chain-recover` · `chain-terminus-zero-change-gate` · `deferred-review-claim` ·
 `deferred-review-fallback` · `evidence-crosscheck` · `finding-verification` ·
 `pending-review-ttl` ·
@@ -118,7 +118,7 @@ anchors on — and the 5-agent review fan-out wiring in `skills/tdd/SKILL.md`.
 `post-review-self-review-handoff` · `post-review-tdd-scope` · `reset-review-limit-skill` ·
 `reset-review-limit-transaction` · `review-aspect-agent` · `review-judge` ·
 `review-personas` · `review-worker-evidence-lease` · `reviewer-capability-gate` ·
-`reviewer-readonly-v1` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
+`reviewer-readonly-v1` · `reviewer-spawn-allow` · `self-review-flags` · `self-review-markers` · `self-review-skill` ·
 `stop-enforcer-escapes` · `stop-enforcer-self-review-routing` ·
 `stop-enforcer-subagent-noop` · `stop-session-binding-recovery`
 
@@ -245,7 +245,7 @@ each other on counts, terminology, navigation and the specification's BLOCKED st
 Structure gates for the Promptfoo harnesses. GitHub Actions never invokes the Promptfoo
 binary; these guard the local harness contract.
 
-## 4. `node --test` unit suites (23 files)
+## 4. `node --test` unit suites (24 files)
 
 Not run standalone — each is driven by a parent shell suite, so a JS failure surfaces as
 that suite's failure.
@@ -272,6 +272,12 @@ that suite's failure.
 | `windows-profile-contract.test.js` | 4 | Windows profiles | profile contract |
 | `process-supervisor.test.js` | 3 | wrapper / profile suites | bounded supervisor + process-tree teardown |
 | `owned-process.test.js` | 2 | `test-claude-promptfoo-wrapper.sh` | owned-process lifecycle |
+| `reviewer-spawn-allow-v1.test.js` | 18 | `test-reviewer-spawn-allow.sh` | the reviewer-spawn grant's derived agent set, its silence on every non-grant path, and the one-definition scan |
+
+Three further files — `review-evidence-sweep-v1.test.js`, `rule-block-v1.test.js` and
+`session-adopt-report-v1.test.js` — exist on disk without a row here. That drift predates
+the reviewer-spawn grant and is recorded rather than silently absorbed; the counts above
+are derived from the real directory listing, so they include those three.
 
 Plus `tests/session-control/session-control-core-v1.test.js` — the Session Control core
 unit suite, reached via `tests/session-control/run.sh`, which is invoked **only** by the
@@ -320,7 +326,9 @@ assert, `# ` = comment.
 than described — the previous five-profile layout (`windows-reset-session`,
 `windows-leases-routing`, `windows-native-state`, `windows-installed-core`,
 `windows-native-branches`) no longer exists under any of those names, and only its total
-of 40 survived the reshard, and this branch's new suite takes it to 41.
+of 40 survived the reshard; the table above re-derives the current total from the JSON as 42.
+The reviewer-spawn-allow suite is deliberately NOT among them — see CLAUDE.md §"Reviewer-Spawn
+Grant", known gaps.
 `tests/structure/windows-ci-contract.test.js` pins exactly these seven keys and the
 42-entry total, so a shard renamed there and not here is drift this table cannot catch
 on its own:

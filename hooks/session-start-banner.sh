@@ -52,6 +52,15 @@ else
   echo "zensu: Flow — track features → implement (vanilla mode, TDD discipline off via hooks.tddImplementation=false) → review chain → dashboard."
   echo "zensu: Tip — use Claude Code Plan mode for code changes; on approval Zensu asks whether to run the /zensu:tdd workflow (vanilla implementation + review chain). Run it and the evidence audits + review chain are enforced; decline and you implement directly."
 fi
+# Guarded on the two files that actually produce the grant, not on the flag alone: with the
+# hook or its decision module absent the hook declines every spawn, and a banner asserting a
+# capability that is not in force is exactly the state the doctor's broken-installation row
+# exists to name. The flag uses the fail-CLOSED reader for the same reason the hook does.
+if [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/pre-agent-reviewer-allow.sh" ] \
+  && [ -f "${CLAUDE_PLUGIN_ROOT}/hooks/lib/reviewer-spawn-allow-v1.js" ] \
+  && zensu_hook_enabled_strict reviewerSpawnAutoAllow; then
+  echo "zensu: Reviewer spawns — this plugin is configured to admit its own read-only reviewer subagents (Read/Grep/Glob only) itself, so the host permission layer is not asked for them. This line checks the flag and the two files; /zensu:doctor is the authoritative check and additionally verifies the hook's registration and that its decision module loads. Turn off: hooks.reviewerSpawnAutoAllow=false in ~/.zensu/config.json."
+fi
 echo "zensu: Skills — /zensu:bootstrap · /zensu:ghost-scan · /zensu:pilot · /zensu:implement · /zensu:tdd · /zensu:security-review · /zensu:pulse · /zensu:zensu-help (Q&A)."
 if command -v zensu >/dev/null 2>&1; then
   echo "zensu: CLI ready ($(command -v zensu)) — Zensu skills drive it. On an auth error run: zensu auth login."

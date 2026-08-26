@@ -21,6 +21,7 @@
     "secretScan": true,
     "reviewJudge": true,
     "findingVerification": true,
+    "reviewerSpawnAutoAllow": true,
     "pendingReviewTtlHours": 6
   },
   "context": {
